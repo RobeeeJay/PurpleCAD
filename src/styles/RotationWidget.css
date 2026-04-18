@@ -8,6 +8,10 @@
   padding: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   transition: background-color 0.3s ease, border-color 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 
 html[data-theme="light"] .rotation-widget {
@@ -18,4 +22,28 @@ html[data-theme="light"] .rotation-widget {
 .rotation-canvas {
   display: block;
   border-radius: 2px;
+}
+
+.home-button {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 14px;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  min-width: 32px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-button:hover {
+  background-color: var(--bg-hover);
+}
+
+html[data-theme="light"] .home-button {
+  border-color: var(--border-color-light);
 }

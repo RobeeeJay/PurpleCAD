@@ -8,6 +8,10 @@ const Toolbar = () => {
   const theme = useStore((state) => state.theme)
   const renderMode = useStore((state) => state.renderMode)
   const setRenderMode = useStore((state) => state.setRenderMode)
+  const projectionMode = useStore((state) => state.projectionMode)
+  const toggleProjectionMode = useStore((state) => state.toggleProjectionMode)
+  const widgetVisible = useStore((state) => state.widgetVisible)
+  const toggleWidgetVisibility = useStore((state) => state.toggleWidgetVisibility)
   let nextId = 3
 
   const createItem = (type, name) => {
@@ -179,6 +183,35 @@ const Toolbar = () => {
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="currentColor" stroke="currentColor" strokeWidth="0" />
               </svg>
             )}
+          </button>
+          <button
+            className={`toolbar-btn ${projectionMode === 'isometric' ? 'active' : ''}`}
+            title={`Switch to ${projectionMode === 'perspective' ? 'isometric' : 'perspective'} projection`}
+            onClick={toggleProjectionMode}
+          >
+            {projectionMode === 'perspective' ? (
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="none" stroke="currentColor" strokeWidth="2" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <path d="M3 7l9-4 9 4v10l-9 4-9-4V7z" fill="none" stroke="currentColor" strokeWidth="2" />
+                <path d="M12 3v18" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+                <path d="M7 8l10 4.5M7 12l10-1" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+              </svg>
+            )}
+          </button>
+          <button
+            className={`toolbar-btn ${widgetVisible ? 'active' : ''}`}
+            title={`${widgetVisible ? 'Hide' : 'Show'} orientation widget`}
+            onClick={toggleWidgetVisibility}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" 
+                    fill={widgetVisible ? "currentColor" : "none"} 
+                    stroke="currentColor" 
+                    strokeWidth="2" />
+            </svg>
           </button>
         </div>
       </div>

@@ -16,6 +16,8 @@ export const useStore = create((set) => ({
   hoveredId: null,
   theme: getSystemTheme(),
   renderMode: 'shaded',
+  projectionMode: 'perspective', // 'perspective' or 'isometric'
+  widgetVisible: true, // orientation widget visibility
   
   addItem: (item) => set((state) => ({
     items: [...state.items, item]
@@ -26,6 +28,12 @@ export const useStore = create((set) => ({
   setHoveredId: (id) => set({ hoveredId: id }),
   
   setRenderMode: (mode) => set({ renderMode: mode }),
+  
+  setProjectionMode: (mode) => set({ projectionMode: mode }),
+  
+  toggleProjectionMode: () => set((state) => ({
+    projectionMode: state.projectionMode === 'perspective' ? 'isometric' : 'perspective'
+  })),
   
   deleteItem: (id) => set((state) => ({
     items: state.items.filter((item) => item.id !== id)
@@ -39,5 +47,9 @@ export const useStore = create((set) => ({
   
   toggleTheme: () => set((state) => ({
     theme: state.theme === 'light' ? 'dark' : 'light'
+  })),
+  
+  toggleWidgetVisibility: () => set((state) => ({
+    widgetVisible: !state.widgetVisible
   })),
 }))
