@@ -11,6 +11,8 @@ const Viewport = () => {
   const rendererRef = useRef(null)
   const objectsRef = useRef({})
   const originalMaterialsRef = useRef({})
+  const planeRef = useRef(null)
+  const targetRef = useRef(new THREE.Vector3(0, 0, 0))
   const raycasterRef = useRef(new THREE.Raycaster())
   const mouseRef = useRef(new THREE.Vector2())
   const cameraControlsRef = useRef({
@@ -36,11 +38,11 @@ const Viewport = () => {
     controls.targetRotationY = targetRotY
 
     // Update camera position based on new rotation
-    const distance = camera.position.length()
-    camera.position.x = Math.sin(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance
-    camera.position.y = Math.sin(controls.targetRotationX) * distance
-    camera.position.z = Math.cos(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance
-    camera.lookAt(0, 0, 0)
+    const distance = camera.position.distanceTo(targetRef.current)
+    camera.position.x = targetRef.current.x + Math.sin(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance
+    camera.position.y = targetRef.current.y + Math.sin(controls.targetRotationX) * distance
+    camera.position.z = targetRef.current.z + Math.cos(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance
+    camera.lookAt(targetRef.current)
 
     // Update rotation state for widget
     setRotationState({ x: controls.targetRotationX, y: controls.targetRotationY })
@@ -53,6 +55,8 @@ const Viewport = () => {
   const theme = useStore((state) => state.theme)
   const hoveredId = useStore((state) => state.hoveredId)
   const setHoveredId = useStore((state) => state.setHoveredId)
+  const selectedId = useStore((state) => state.selectedId)
+  const selectItem = useStore((state) => state.selectItem)
   const renderMode = useStore((state) => state.renderMode)
   const projectionMode = useStore((state) => state.projectionMode)
   const widgetVisible = useStore((state) => state.widgetVisible)
@@ -71,6 +75,9 @@ const Viewport = () => {
       positionX: 10,
       positionY: 10,
       positionZ: 10,
+      targetX: 0,
+      targetY: 0,
+      targetZ: 0,
       rotationX: 0,
       rotationY: 0
     }
@@ -84,6 +91,9 @@ const Viewport = () => {
         positionX: cameraRef.current.position.x,
         positionY: cameraRef.current.position.y,
         positionZ: cameraRef.current.position.z,
+        targetX: targetRef.current.x,
+        targetY: targetRef.current.y,
+        targetZ: targetRef.current.z,
         rotationX: cameraControlsRef.current.targetRotationX,
         rotationY: cameraControlsRef.current.targetRotationY
       }
@@ -110,6 +120,9 @@ const Viewport = () => {
     const frustumSize = 20
 
     let camera
+    const savedTarget = new THREE.Vector3(savedState.targetX, savedState.targetY, savedState.targetZ)
+    targetRef.current.copy(savedTarget)
+
     if (projectionMode === 'isometric') {
       camera = new THREE.OrthographicCamera(
         -frustumSize * aspect / 2,
@@ -119,20 +132,12 @@ const Viewport = () => {
         0.1,
         1000
       )
-      const distance = Math.max(10, Math.sqrt(
-        savedState.positionX * savedState.positionX +
-        savedState.positionY * savedState.positionY +
-        savedState.positionZ * savedState.positionZ
-      ))
-      const x = Math.sin(savedState.rotationY) * Math.cos(savedState.rotationX) * distance
-      const y = Math.sin(savedState.rotationX) * distance
-      const z = Math.cos(savedState.rotationY) * Math.cos(savedState.rotationX) * distance
-      camera.position.set(x, y, z)
-      camera.lookAt(0, 0, 0)
+      camera.position.set(savedState.positionX, savedState.positionY, savedState.positionZ)
+      camera.lookAt(targetRef.current)
     } else {
       camera = new THREE.PerspectiveCamera(35, aspect, 0.1, 1000)
       camera.position.set(savedState.positionX, savedState.positionY, savedState.positionZ)
-      camera.lookAt(0, 0, 0)
+      camera.lookAt(targetRef.current)
     }
     cameraRef.current = camera
     scene.add(camera)
@@ -143,7 +148,7 @@ const Viewport = () => {
     controls.targetRotationY = savedState.rotationY
 
     // Initialize rotation state for widget
-    setRotationState({ x: savedState.rotationX, y: savedState.rotationY })
+    setRotationState({ x: controls.targetRotationX, y: controls.targetRotationY })
 
     // Renderer setup
     const renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -188,6 +193,7 @@ const Viewport = () => {
     plane.rotation.x = -Math.PI / 2
     plane.receiveShadow = true
     scene.add(plane)
+    planeRef.current = plane
 
     // Handle window resize
     const handleResize = () => {
@@ -205,8 +211,29 @@ const Viewport = () => {
     // Mouse controls and raycasting
     const onMouseDown = (e) => {
       if (e.button === 0) {
-        // Left mouse button - rotate
-        controls.isRotating = true
+        // Left mouse button - check what was clicked
+        const rect = renderer.domElement.getBoundingClientRect()
+        const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+        const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+        
+        raycasterRef.current.setFromCamera({ x, y }, cameraRef.current)
+        
+        // Check if we hit the plane
+        let hitPlane = false
+        if (planeRef.current) {
+          const planeIntersects = raycasterRef.current.intersectObject(planeRef.current)
+          if (planeIntersects.length > 0) {
+            hitPlane = true
+          }
+        }
+        
+        // Only start rotating if we didn't click on the plane
+        //if (!hitPlane) {
+          controls.isRotating = true
+        //}
+        
+        controls.mouseDownX = e.clientX
+        controls.mouseDownY = e.clientY
       } else if (e.button === 2) {
         // Right mouse button - pan
         controls.isPanning = true
@@ -229,11 +256,11 @@ const Viewport = () => {
 
         controls.targetRotationX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, controls.targetRotationX))
 
-        const distance = currentCamera.position.length()
-        currentCamera.position.x = Math.sin(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance
-        currentCamera.position.y = Math.sin(controls.targetRotationX) * distance
-        currentCamera.position.z = Math.cos(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance
-        currentCamera.lookAt(0, 0, 0)
+        const distance = currentCamera.position.distanceTo(targetRef.current)
+        currentCamera.position.x = targetRef.current.x + Math.sin(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance
+        currentCamera.position.y = targetRef.current.y + Math.sin(controls.targetRotationX) * distance
+        currentCamera.position.z = targetRef.current.z + Math.cos(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance
+        currentCamera.lookAt(targetRef.current)
 
         setRotationState({ x: controls.targetRotationX, y: controls.targetRotationY })
       } else if (controls.isPanning) {
@@ -245,9 +272,11 @@ const Viewport = () => {
         right.cross(upVector).normalize()
         const moveRight = right.multiplyScalar(-deltaX * panSpeed)
         const moveUp = upVector.clone().multiplyScalar(deltaY * panSpeed)
+        const panOffset = moveRight.add(moveUp)
 
-        currentCamera.position.add(moveRight)
-        currentCamera.position.add(moveUp)
+        currentCamera.position.add(panOffset)
+        targetRef.current.add(panOffset)
+        currentCamera.lookAt(targetRef.current)
       } else {
         const rect = renderer.domElement.getBoundingClientRect()
         mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
@@ -275,9 +304,40 @@ const Viewport = () => {
       controls.mouseY = e.clientY
     }
 
-    const onMouseUp = () => {
+    const onMouseUp = (e) => {
       controls.isRotating = false
       controls.isPanning = false
+      
+      // Detect if this was a click (minimal mouse movement)
+      const dx = e.clientX - controls.mouseDownX
+      const dy = e.clientY - controls.mouseDownY
+      const clickThreshold = 5
+      
+      if (Math.hypot(dx, dy) < clickThreshold) {
+        // This was a click, handle selection
+        const currentCamera = cameraRef.current
+        if (currentCamera) {
+          const rect = renderer.domElement.getBoundingClientRect()
+          const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+          const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+          
+          raycasterRef.current.setFromCamera({ x, y }, currentCamera)
+          const meshArray = Object.values(objectsRef.current)
+          const intersects = raycasterRef.current.intersectObjects(meshArray, false)
+          
+          if (intersects.length > 0) {
+            const clickedObject = intersects[0].object
+            const itemId = clickedObject.userData?.itemId
+            if (itemId) {
+              selectItem(itemId)
+            }
+          } else {
+            // Clicked on background - deselect
+            selectItem(null)
+          }
+        }
+      }
+      
       saveCameraState()
     }
 
@@ -287,12 +347,17 @@ const Viewport = () => {
       if (!currentCamera) return
 
       const zoomSpeed = 0.1
-      const direction = currentCamera.position.clone().normalize()
-      const distance = currentCamera.position.length()
+      const currentPos = currentCamera.position
+      const distance = currentPos.distanceTo(targetRef.current)
       const newDistance = Math.max(2, Math.min(100, distance + e.deltaY * zoomSpeed))
-
-      currentCamera.position.copy(direction.multiplyScalar(newDistance))
-      currentCamera.lookAt(0, 0, 0)
+      
+      // Preserve the current direction, only change distance
+      if (distance > 0) {
+        const direction = new THREE.Vector3().subVectors(currentPos, targetRef.current).normalize()
+        currentCamera.position.copy(targetRef.current).add(direction.multiplyScalar(newDistance))
+      }
+      
+      currentCamera.lookAt(targetRef.current)
       saveCameraState()
     }
 
@@ -353,16 +418,16 @@ const Viewport = () => {
         0.1,
         1000
       )
-      const distance = Math.max(10, currentPosition.length())
-      const x = Math.sin(currentRotY) * Math.cos(currentRotX) * distance
-      const y = Math.sin(currentRotX) * distance
-      const z = Math.cos(currentRotY) * Math.cos(currentRotX) * distance
+      const distance = Math.max(10, currentPosition.distanceTo(targetRef.current))
+      const x = targetRef.current.x + Math.sin(currentRotY) * Math.cos(currentRotX) * distance
+      const y = targetRef.current.y + Math.sin(currentRotX) * distance
+      const z = targetRef.current.z + Math.cos(currentRotY) * Math.cos(currentRotX) * distance
       newCamera.position.set(x, y, z)
-      newCamera.lookAt(0, 0, 0)
+      newCamera.lookAt(targetRef.current)
     } else {
       newCamera = new THREE.PerspectiveCamera(30, aspect, 0.1, 1000)
       newCamera.position.copy(currentPosition)
-      newCamera.lookAt(0, 0, 0)
+      newCamera.lookAt(targetRef.current)
     }
 
     // Transfer lights from old camera to new camera
@@ -459,19 +524,25 @@ const Viewport = () => {
   // Update hover highlighting
   useEffect(() => {
     Object.entries(objectsRef.current).forEach(([itemId, mesh]) => {
-      const isHovered = hoveredId === parseInt(itemId)
+      const id = parseInt(itemId)
+      const isSelected = selectedId === id
+      const isHovered = hoveredId === id
       
-      if (isHovered) {
-        // Apply highlight
+      if (isSelected) {
+        // Selected - brighter emissive color
+        mesh.material.emissive.setHex(0x006666)
+        mesh.material.needsUpdate = true
+      } else if (isHovered) {
+        // Hovered but not selected - dimmer emissive color
         mesh.material.emissive.setHex(0x444444)
         mesh.material.needsUpdate = true
       } else {
-        // Restore original color
+        // Not selected or hovered - no emissive
         mesh.material.emissive.setHex(0x000000)
         mesh.material.needsUpdate = true
       }
     })
-  }, [hoveredId])
+  }, [hoveredId, selectedId])
 
   // Update render mode
   useEffect(() => {
