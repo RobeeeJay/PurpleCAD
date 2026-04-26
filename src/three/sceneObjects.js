@@ -19,19 +19,22 @@ export const HANDLE_CONFIGS = [
 export function getObjectDimensions(itemType, uniformScale) {
   const s = uniformScale || 1;
   switch (itemType) {
-    case "cube":   return { w: 2 * s, h: 2 * s, d: 2 * s };
-    case "sphere": return { w: 3 * s, h: 3 * s, d: 3 * s };
-    case "sketch": return { w: 3 * s, h: 3 * s, d: 0.05 };
-    default:       return { w: 2 * s, h: 2 * s, d: 2 * s };
+    case "cube":     return { w: 2 * s, h: 2 * s, d: 2 * s };
+    case "sphere":   return { w: 3 * s, h: 3 * s, d: 3 * s };
+    case "cylinder": return { w: 2 * s, h: 2 * s, d: 2 * s };
+    case "torus":    return { w: 2.8 * s, h: 0.8 * s, d: 2.8 * s };
+    case "sketch":   return { w: 3 * s, h: 3 * s, d: 0.05 };
+    default:         return { w: 2 * s, h: 2 * s, d: 2 * s };
   }
 }
 
 export function getObjectExtent(itemType, uniformScale) {
   const s = uniformScale || 1;
   switch (itemType) {
-    case "sphere": return 1.5 * s;
-    case "sketch": return 1.5 * s;
-    default:       return 1.0 * s;
+    case "sphere":   return 1.5 * s;
+    case "torus":    return 1.4 * s;
+    case "sketch":   return 1.5 * s;
+    default:         return 1.0 * s;
   }
 }
 
@@ -189,9 +192,11 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
   items.forEach((item) => {
     let geometry;
     switch (item.type) {
-      case "cube":   geometry = new THREE.BoxGeometry(2, 2, 2); break;
-      case "sphere": geometry = new THREE.BoxGeometry(3, 3, 3); break;
-      case "sketch": geometry = new THREE.PlaneGeometry(3, 3); break;
+      case "cube":     geometry = new THREE.BoxGeometry(2, 2, 2); break;
+      case "sphere":   geometry = new THREE.BoxGeometry(3, 3, 3); break;
+      case "cylinder": geometry = new THREE.BoxGeometry(2, 2, 2); break;
+      case "torus":    geometry = new THREE.BoxGeometry(3, 1.2, 3); break;
+      case "sketch":   geometry = new THREE.PlaneGeometry(3, 3); break;
       case "csg": {
         if (!item.geometryData) return;
         const { positions, normals, indices } = item.geometryData;
@@ -211,6 +216,10 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
     mesh.castShadow = item.type !== "sketch";
     mesh.receiveShadow = item.type !== "sketch";
     mesh.userData.itemId = item.id;
+    if (["sphere", "cylinder", "torus"].includes(item.type)) {
+      mesh.userData.hullGeometry = geometry;
+      mesh.userData.shaderMat = material;
+    }
 
     const p = item.position;
     mesh.position.set(p ? p.x : 0, p ? p.y : 2, p ? p.z : 0);
@@ -230,13 +239,61 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
         if (!raycaster.ray.intersectSphere(sphere, target)) return;
         const dist = raycaster.ray.origin.distanceTo(target);
         if (dist < raycaster.near || dist > raycaster.far) return;
-        intersects.push({
-          distance: dist,
-          point: target.clone(),
-          face: { normal: target.clone().sub(worldCenter).normalize() },
-          faceIndex: 0,
-          object: mesh,
-        });
+        intersects.push({ distance: dist, point: target.clone(), face: { normal: target.clone().sub(worldCenter).normalize() }, faceIndex: 0, object: mesh });
+      };
+    } else if (item.type === "cylinder") {
+      mesh.raycast = (raycaster, intersects) => {
+        const wc = new THREE.Vector3(); mesh.getWorldPosition(wc);
+        const ws = new THREE.Vector3(); mesh.getWorldScale(ws);
+        const radius = 1.0 * ws.x;
+        const halfH  = 1.0 * ws.y;
+        const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.quaternion).normalize();
+        const ray = raycaster.ray;
+        const oc  = new THREE.Vector3().subVectors(ray.origin, wc);
+        const da  = ray.direction.dot(axis);
+        const oca = oc.dot(axis);
+        const A = 1.0 - da * da;
+        const B = 2.0 * (ray.direction.dot(oc) - da * oca);
+        const C = oc.dot(oc) - oca * oca - radius * radius;
+        let tHit = Infinity, nHit = null;
+        if (Math.abs(A) > 1e-6) {
+          const disc = B * B - 4 * A * C;
+          if (disc >= 0) {
+            const sq = Math.sqrt(disc);
+            for (const t of [(-B - sq) / (2 * A), (-B + sq) / (2 * A)]) {
+              if (t > raycaster.near && t < tHit) {
+                const p = ray.origin.clone().addScaledVector(ray.direction, t);
+                const y = p.clone().sub(wc).dot(axis);
+                if (Math.abs(y) <= halfH) { tHit = t; nHit = p.clone().sub(wc).addScaledVector(axis, -y).normalize(); }
+              }
+            }
+          }
+        }
+        if (Math.abs(da) > 1e-6) {
+          for (const sign of [1, -1]) {
+            const t = (sign * halfH - oca) / da;
+            if (t > raycaster.near && t < tHit) {
+              const p = ray.origin.clone().addScaledVector(ray.direction, t);
+              if (p.clone().sub(wc).addScaledVector(axis, -sign * halfH).lengthSq() <= radius * radius) {
+                tHit = t; nHit = axis.clone().multiplyScalar(sign);
+              }
+            }
+          }
+        }
+        if (tHit === Infinity || tHit > raycaster.far) return;
+        intersects.push({ distance: tHit, point: ray.origin.clone().addScaledVector(ray.direction, tHit), face: { normal: nHit || axis }, faceIndex: 0, object: mesh });
+      };
+    } else if (item.type === "torus") {
+      mesh.raycast = (raycaster, intersects) => {
+        const wc = new THREE.Vector3(); mesh.getWorldPosition(wc);
+        const ws = new THREE.Vector3(); mesh.getWorldScale(ws);
+        const outerR = (1.0 + 0.4) * ws.x;
+        const sphere = new THREE.Sphere(wc, outerR);
+        const target = new THREE.Vector3();
+        if (!raycaster.ray.intersectSphere(sphere, target)) return;
+        const dist = raycaster.ray.origin.distanceTo(target);
+        if (dist < raycaster.near || dist > raycaster.far) return;
+        intersects.push({ distance: dist, point: target.clone(), face: { normal: target.clone().sub(wc).normalize() }, faceIndex: 0, object: mesh });
       };
     } else if (item.type !== "sketch") {
       mesh.add(new THREE.LineSegments(
@@ -392,7 +449,15 @@ export function applyRenderMode(renderMode, ctx) {
     Object.values(objectsRef.current).forEach((mesh) => {
       const itemData = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
       if (itemData?.type === "sketch") { mesh.visible = false; return; }
-      if (itemData?.type === "sphere") return;
+      if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
+        if (mesh.userData.hullGeometry && mesh.geometry !== mesh.userData.hullGeometry) {
+          mesh.geometry.dispose(); mesh.geometry = mesh.userData.hullGeometry;
+        }
+        if (mesh.userData.shaderMat && mesh.material !== mesh.userData.shaderMat) {
+          mesh.material.dispose(); mesh.material = mesh.userData.shaderMat;
+        }
+        return;
+      }
       const orig = originalMaterialsRef.current[mesh.userData.itemId];
       const col = orig ? orig.color.clone() : new THREE.Color(0xe0e0e0);
       if (mesh.material) mesh.material.dispose();
@@ -421,7 +486,26 @@ export function applyRenderMode(renderMode, ctx) {
     Object.values(objectsRef.current).forEach((mesh) => {
       const itemData = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
       if (itemData?.type === "sketch") { mesh.visible = true; return; }
-      if (itemData?.type === "sphere") return;
+      if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
+        if (renderMode === "wireframe") {
+          let wfGeo;
+          if (itemData.type === "sphere") wfGeo = new THREE.SphereGeometry(1.5, 16, 12);
+          else if (itemData.type === "cylinder") wfGeo = new THREE.CylinderGeometry(1, 1, 2, 16);
+          else wfGeo = new THREE.TorusGeometry(1.0, 0.4, 12, 24);
+          if (mesh.geometry !== mesh.userData.hullGeometry) mesh.geometry.dispose();
+          mesh.geometry = wfGeo;
+          if (mesh.material !== mesh.userData.shaderMat) mesh.material.dispose();
+          mesh.material = new THREE.MeshBasicMaterial({ color: 0xaaaaaa, wireframe: true });
+        } else {
+          if (mesh.userData.hullGeometry && mesh.geometry !== mesh.userData.hullGeometry) {
+            mesh.geometry.dispose(); mesh.geometry = mesh.userData.hullGeometry;
+          }
+          if (mesh.userData.shaderMat && mesh.material !== mesh.userData.shaderMat) {
+            mesh.material.dispose(); mesh.material = mesh.userData.shaderMat;
+          }
+        }
+        return;
+      }
       const orig = originalMaterialsRef.current[mesh.userData.itemId];
       const col = orig ? orig.color.clone() : new THREE.Color(0xe0e0e0);
       if (mesh.material) mesh.material.dispose();

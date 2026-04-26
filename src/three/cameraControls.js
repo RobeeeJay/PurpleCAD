@@ -177,16 +177,40 @@ export function attachCameraControls(ctx) {
   const clearEdgeHighlight = () => clearHL(edgeHighlightRef);
   const clearPointHighlight = () => clearHL(pointHighlightRef);
 
+  const primitiveGeoForHighlight = (type) => {
+    if (type === "sphere") return new THREE.SphereGeometry(1.53, 20, 16);
+    if (type === "cylinder") return new THREE.CylinderGeometry(1.015, 1.015, 2.03, 24);
+    if (type === "torus") {
+      // THREE.TorusGeometry ring is in XY plane; our torus shader ring is in XZ plane.
+      // Rotate -90° around X to align.
+      const geo = new THREE.TorusGeometry(1.01, 0.42, 16, 32);
+      geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+      return geo;
+    }
+    return null;
+  };
+
   const applyFaceHighlight = (hit, color) => {
     const hitMesh = hit.object;
     const hitNormal = hit.face.normal;
-    const geo = hitMesh.geometry;
-    const posAttr = geo.getAttribute("position");
-    const indexAttr = geo.index;
+    const itemData = itemsRef.current.find((i) => i.id === hitMesh.userData.itemId);
+    const primitiveType = ["sphere", "cylinder", "torus"].includes(itemData?.type) ? itemData.type : null;
+
+    const workGeo = primitiveType ? primitiveGeoForHighlight(primitiveType) : hitMesh.geometry;
+    const posAttr = workGeo.getAttribute("position");
+    const indexAttr = workGeo.index;
     const triCount = indexAttr ? indexAttr.count / 3 : posAttr.count / 3;
     const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
     const triNormal = new THREE.Vector3();
     const matchVerts = [];
+
+    // For primitives, convert world-space hit normal to local space for region matching
+    let localNormal = hitNormal;
+    if (primitiveType) {
+      const invMatrix = new THREE.Matrix4().copy(hitMesh.matrixWorld).invert();
+      localNormal = hitNormal.clone().transformDirection(invMatrix).normalize();
+    }
+
     for (let i = 0; i < triCount; i++) {
       let a, b, c;
       if (indexAttr) {
@@ -199,16 +223,30 @@ export function attachCameraControls(ctx) {
         new THREE.Vector3().subVectors(vB, vA),
         new THREE.Vector3().subVectors(vC, vA),
       ).normalize();
-      if (Math.abs(triNormal.dot(hitNormal)) > 0.999)
+      if (primitiveType === "cylinder") {
+        // Separate top cap / bottom cap / side by local normal Y component
+        const topHit = localNormal.y > 0.9, botHit = localNormal.y < -0.9;
+        const isTop = triNormal.y > 0.9, isBot = triNormal.y < -0.9, isSide = Math.abs(triNormal.y) < 0.1;
+        if ((topHit && isTop) || (botHit && isBot) || (!topHit && !botHit && isSide))
+          matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+      } else if (primitiveType) {
+        // Sphere / torus: entire surface is one face region
         matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+      } else {
+        if (Math.abs(triNormal.dot(localNormal)) > 0.999)
+          matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+      }
     }
+    if (primitiveType) workGeo.dispose();
+
     clearFaceHighlight();
     if (matchVerts.length > 0) {
       const hlGeo = new THREE.BufferGeometry();
       hlGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(matchVerts), 3));
       const hlMat = new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: 0.5, depthTest: true,
-        side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+        color, transparent: true, opacity: 0.5,
+        depthTest: primitiveType ? false : true,
+        side: THREE.DoubleSide, polygonOffset: !primitiveType, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
       });
       const hlMesh = new THREE.Mesh(hlGeo, hlMat);
       hlMesh.position.copy(hitMesh.position);
@@ -231,7 +269,11 @@ export function attachCameraControls(ctx) {
     clearEdgeHighlight();
     const hitMesh = hit.object;
     const localHit = hitMesh.worldToLocal(hit.point.clone());
-    const edgesGeo = new THREE.EdgesGeometry(hitMesh.geometry);
+    const itemData = itemsRef.current.find((i) => i.id === hitMesh.userData.itemId);
+    const primitiveType = ["sphere", "cylinder", "torus"].includes(itemData?.type) ? itemData.type : null;
+    const srcGeo = primitiveType ? primitiveGeoForHighlight(primitiveType) : hitMesh.geometry;
+    const edgesGeo = new THREE.EdgesGeometry(srcGeo);
+    if (primitiveType) srcGeo.dispose();
     const posAttr = edgesGeo.getAttribute("position");
     let minDist = Infinity, bestA = null, bestB = null;
     for (let i = 0; i < posAttr.count; i += 2) {

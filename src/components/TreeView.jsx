@@ -60,6 +60,8 @@ const TreeViewItem = ({ node, depth, items, dragState, onDragStart, onDragOver, 
       case "sketch": return "📋";
       case "cube": return "📦";
       case "sphere": return "⚪";
+      case "cylinder": return "🥫";
+      case "torus": return "🍩";
       default: return "📄";
     }
   };

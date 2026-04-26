@@ -53,6 +53,8 @@ const Toolbar = () => {
     switch (item.type) {
       case "cube": return new THREE.BoxGeometry(2, 2, 2);
       case "sphere": return new THREE.SphereGeometry(1.5, 32, 32);
+      case "cylinder": return new THREE.CylinderGeometry(1, 1, 2, 32);
+      case "torus": return new THREE.TorusGeometry(1.0, 0.4, 16, 32);
       case "csg": {
         if (!item.geometryData) return null;
         const { positions, normals, indices } = item.geometryData;
@@ -172,6 +174,12 @@ const Toolbar = () => {
         case "sphere":
           geometry = new THREE.SphereGeometry(1.5, 32, 32);
           break;
+        case "cylinder":
+          geometry = new THREE.CylinderGeometry(1, 1, 2, 32);
+          break;
+        case "torus":
+          geometry = new THREE.TorusGeometry(1.0, 0.4, 16, 32);
+          break;
         case "sketch":
           geometry = new THREE.PlaneGeometry(3, 3);
           break;
@@ -242,6 +250,12 @@ const Toolbar = () => {
           break;
         case "sphere":
           geometry = new THREE.SphereGeometry(1.5, 32, 32);
+          break;
+        case "cylinder":
+          geometry = new THREE.CylinderGeometry(1, 1, 2, 32);
+          break;
+        case "torus":
+          geometry = new THREE.TorusGeometry(1.0, 0.4, 16, 32);
           break;
         case "sketch":
           geometry = new THREE.PlaneGeometry(3, 3);
@@ -613,6 +627,28 @@ const Toolbar = () => {
                 strokeWidth="1"
                 opacity="0.5"
               />
+            </svg>
+          </button>
+          <button
+            className="toolbar-btn"
+            title="Cylinder"
+            onClick={() => createItem("cylinder")}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <ellipse cx="12" cy="6" rx="7" ry="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+              <ellipse cx="12" cy="18" rx="7" ry="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+              <line x1="5" y1="6" x2="5" y2="18" stroke="currentColor" strokeWidth="2" />
+              <line x1="19" y1="6" x2="19" y2="18" stroke="currentColor" strokeWidth="2" />
+            </svg>
+          </button>
+          <button
+            className="toolbar-btn"
+            title="Torus"
+            onClick={() => createItem("torus")}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <ellipse cx="12" cy="12" rx="9" ry="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
+              <ellipse cx="12" cy="12" rx="4" ry="2" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
             </svg>
           </button>
         </div>

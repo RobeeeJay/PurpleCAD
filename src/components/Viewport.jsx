@@ -288,32 +288,22 @@ const Viewport = () => {
   // ── Rebuild scene objects ─────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!sceneRef.current) return;
+    if (!sceneRef.current || !rendererRef.current) return;
     buildSceneObjects(items, sceneRef.current, objectsRef, originalMaterialsRef);
-
-    if (renderMode === "smooth" && rendererRef.current) {
-      if (!envTextureRef.current) {
-        const pmremGen = new THREE.PMREMGenerator(rendererRef.current);
-        pmremGen.compileEquirectangularShader();
-        const roomEnv = new RoomEnvironment();
-        envTextureRef.current = pmremGen.fromScene(roomEnv).texture;
-        pmremGen.dispose();
-        roomEnv.dispose();
-      }
-      sceneRef.current.environment = envTextureRef.current;
-      Object.values(objectsRef.current).forEach((mesh) => {
-        const itemData = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
-        if (itemData?.type === "sketch") return;
-        const orig = originalMaterialsRef.current[mesh.userData.itemId];
-        const col = orig ? orig.color.clone() : new THREE.Color(0xe0e0e0);
-        if (mesh.material) mesh.material.dispose();
-        mesh.material = new THREE.MeshPhysicalMaterial({
-          color: col, metalness: 0.15, roughness: 0.3,
-          clearcoat: 1.0, clearcoatRoughness: 0.1, envMapIntensity: 1.2,
-        });
-        mesh.children.forEach((child) => { child.visible = false; });
-      });
-    }
+    applyRenderMode(renderMode, {
+      scene: sceneRef.current,
+      renderer: rendererRef.current,
+      cameraRef,
+      objectsRef,
+      originalMaterialsRef,
+      itemsRef,
+      axisGroupRef,
+      planeRef,
+      sketchPlacementPlanesRef,
+      composerRef,
+      envTextureRef,
+      sketchModeRef,
+    });
   }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Transform handles + bounding box ─────────────────────────────────────
