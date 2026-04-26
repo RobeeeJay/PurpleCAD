@@ -1,259 +1,308 @@
-import React, { useRef, useEffect, useCallback } from 'react'
-import '../styles/RotationWidget.css'
+import React, { useRef, useEffect, useCallback } from "react";
+import * as THREE from "three";
+import "../styles/RotationWidget.css";
+
+const FACE_CONFIGS = [
+  { label: "Right",  rotX: 0,            rotY: Math.PI / 2,  color: "#aa2222", hover: "#cc4444", pos: [ 1, 0, 0], rx: 0,             ry: Math.PI / 2  },
+  { label: "Left",   rotX: 0,            rotY: -Math.PI / 2, color: "#7a1a1a", hover: "#aa3333", pos: [-1, 0, 0], rx: 0,             ry: -Math.PI / 2 },
+  { label: "Top",    rotX: Math.PI / 2,  rotY: 0,            color: "#1a4daa", hover: "#3366cc", pos: [0,  1, 0], rx: -Math.PI / 2,  ry: 0            },
+  { label: "Bottom", rotX: -Math.PI / 2, rotY: 0,            color: "#13387a", hover: "#2255aa", pos: [0, -1, 0], rx: Math.PI / 2,   ry: 0            },
+  { label: "Front",  rotX: 0,            rotY: 0,            color: "#1a7a2a", hover: "#33aa44", pos: [0, 0,  1], rx: 0,             ry: 0            },
+  { label: "Back",   rotX: 0,            rotY: Math.PI,      color: "#135520", hover: "#228833", pos: [0, 0, -1], rx: 0,             ry: Math.PI      },
+];
+
+// 12 edges: type indicates which axis the edge runs along; sa/sb/sc are ±1 signs
+const EDGE_DATA = [
+  // Z-edges (between ±X and ±Y faces)
+  { type: "z", sa:  1, sb:  1, dir: [ 1,  1, 0] },
+  { type: "z", sa: -1, sb:  1, dir: [-1,  1, 0] },
+  { type: "z", sa:  1, sb: -1, dir: [ 1, -1, 0] },
+  { type: "z", sa: -1, sb: -1, dir: [-1, -1, 0] },
+  // Y-edges (between ±X and ±Z faces)
+  { type: "y", sa:  1, sc:  1, dir: [ 1, 0,  1] },
+  { type: "y", sa: -1, sc:  1, dir: [-1, 0,  1] },
+  { type: "y", sa:  1, sc: -1, dir: [ 1, 0, -1] },
+  { type: "y", sa: -1, sc: -1, dir: [-1, 0, -1] },
+  // X-edges (between ±Y and ±Z faces)
+  { type: "x", sb:  1, sc:  1, dir: [0,  1,  1] },
+  { type: "x", sb: -1, sc:  1, dir: [0, -1,  1] },
+  { type: "x", sb:  1, sc: -1, dir: [0,  1, -1] },
+  { type: "x", sb: -1, sc: -1, dir: [0, -1, -1] },
+];
+
+const CORNER_DATA = [
+  [ 1,  1,  1], [ 1,  1, -1], [ 1, -1,  1], [ 1, -1, -1],
+  [-1,  1,  1], [-1,  1, -1], [-1, -1,  1], [-1, -1, -1],
+];
+
+// Parse "#rrggbb" → [r, g, b], blend N hex colors, return THREE.js hex number
+const parseRGB = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+};
+const blendHex = (...hexColors) => {
+  const cs = hexColors.map(parseRGB);
+  const avg = [0, 1, 2].map((i) => Math.round(cs.reduce((s, c) => s + c[i], 0) / cs.length));
+  return (avg[0] << 16) | (avg[1] << 8) | avg[2];
+};
+
+// Which FACE_CONFIGS indices border each edge / corner
+const edgeFaceIndices = (cfg) => {
+  if (cfg.type === "z") return [cfg.sa > 0 ? 0 : 1, cfg.sb > 0 ? 2 : 3];
+  if (cfg.type === "y") return [cfg.sa > 0 ? 0 : 1, cfg.sc > 0 ? 4 : 5];
+  return [cfg.sb > 0 ? 2 : 3, cfg.sc > 0 ? 4 : 5];
+};
+const cornerFaceIndices = ([a, b, c]) => [
+  a > 0 ? 0 : 1,
+  b > 0 ? 2 : 3,
+  c > 0 ? 4 : 5,
+];
+
+const dirToAngles = (dx, dy, dz) => {
+  const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  return {
+    rotX: Math.asin(Math.max(-1, Math.min(1, dy / len))),
+    rotY: Math.atan2(dx / len, dz / len),
+  };
+};
+
+const makeFaceCanvas = (label, bgColor) => {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = "rgba(0,0,0,0.4)";
+  ctx.lineWidth = 5;
+  ctx.strokeRect(2.5, 2.5, size - 5, size - 5);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 18px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, size / 2, size / 2);
+  return new THREE.CanvasTexture(canvas);
+};
 
 const RotationWidget = ({ rotationState, onOrientationChange }) => {
-  const canvasRef = useRef(null)
-
-  // Cube size and position
-  const cubeSize = 3
-  const center = 50
-
-  // Define cube vertices (8 corners)
-  const cubeVertices = [
-    [-cubeSize, -cubeSize, -cubeSize], // 0: back-bottom-left
-    [cubeSize, -cubeSize, -cubeSize],  // 1: back-bottom-right
-    [cubeSize, cubeSize, -cubeSize],   // 2: back-top-right
-    [-cubeSize, cubeSize, -cubeSize],  // 3: back-top-left
-    [-cubeSize, -cubeSize, cubeSize],  // 4: front-bottom-left
-    [cubeSize, -cubeSize, cubeSize],   // 5: front-bottom-right
-    [cubeSize, cubeSize, cubeSize],    // 6: front-top-right
-    [-cubeSize, cubeSize, cubeSize]    // 7: front-top-left
-  ]
-
-  // Define cube faces (each face is 4 vertices, counter-clockwise when viewed from outside)
-  const cubeFaces = [
-    { vertices: [0, 1, 2, 3], normal: [0, 0, -1], color: '#4ECDC4', axis: 'Z-', name: 'Back' },     // back face (Z-)
-    { vertices: [4, 5, 6, 7], normal: [0, 0, 1], color: '#4ECDC4', axis: 'Z+', name: 'Front' },     // front face (Z+)
-    { vertices: [0, 1, 5, 4], normal: [0, -1, 0], color: '#51CF66', axis: 'Y-', name: 'Bottom' },   // bottom face (Y-)
-    { vertices: [3, 2, 6, 7], normal: [0, 1, 0], color: '#51CF66', axis: 'Y+', name: 'Top' },       // top face (Y+)
-    { vertices: [0, 3, 7, 4], normal: [-1, 0, 0], color: '#FF6B6B', axis: 'X-', name: 'Left' },     // left face (X-)
-    { vertices: [1, 2, 6, 5], normal: [1, 0, 0], color: '#FF6B6B', axis: 'X+', name: 'Right' }      // right face (X+)
-  ]
-
-  // Define corner orientations (combinations of two axes)
-  const cornerOrientations = [
-    { name: 'X+Y+Z', rotX: Math.PI/4, rotY: Math.PI/4 },     // Front-top-right
-    { name: 'X+Y-Z', rotX: Math.PI/4, rotY: 3*Math.PI/4 },   // Back-top-right  
-    { name: 'X-Y+Z', rotX: -Math.PI/4, rotY: Math.PI/4 },    // Front-bottom-right
-    { name: 'X-Y-Z', rotX: -Math.PI/4, rotY: 3*Math.PI/4 },  // Back-bottom-right
-    { name: '-X+Y+Z', rotX: Math.PI/4, rotY: -Math.PI/4 },   // Front-top-left
-    { name: '-X+Y-Z', rotX: Math.PI/4, rotY: -3*Math.PI/4 }, // Back-top-left
-    { name: '-X-Y+Z', rotX: -Math.PI/4, rotY: -Math.PI/4 },  // Front-bottom-left
-    { name: '-X-Y-Z', rotX: -Math.PI/4, rotY: -3*Math.PI/4 } // Back-bottom-left
-  ]
-
-  // Helper function to project 3D point to 2D using isometric projection
-  const project3D = useCallback((x, y, z, rotX, rotY) => {
-    // Apply camera rotations to the point
-    // rotX is elevation (pitch), rotY is azimuth (yaw) - same as viewport
-    
-    let px = x
-    let py = y
-    let pz = z
-    
-    // Rotate around Y axis (azimuth)
-    const cosY = Math.cos(rotY)
-    const sinY = Math.sin(rotY)
-    const x1 = px * cosY - pz * sinY
-    const z1 = px * sinY + pz * cosY
-    
-    // Rotate around X axis (elevation)  
-    const cosX = Math.cos(rotX)
-    const sinX = Math.sin(rotX)
-    const y1 = py * cosX - z1 * sinX
-    const z2 = py * sinX + z1 * cosX
-    
-    // Simple isometric projection
-    // Project 3D to 2D using standard isometric angles
-    const scale = 7
-    const isoX = (x1 - z2) * scale * 0.866  // cos(30°)
-    const isoY = (y1 + (x1 + z2) * 0.5) * scale * 0.866
-    
-    return {
-      x: center + isoX,
-      y: center - isoY,
-      z: z2 // Keep Z for depth sorting
-    }
-  }, [center])
-
-  // Check if point is inside polygon
-  const pointInPolygon = (point, polygon) => {
-    let inside = false
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      if (((polygon[i].y > point.y) !== (polygon[j].y > point.y)) &&
-          (point.x < (polygon[j].x - polygon[i].x) * (point.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
-        inside = !inside
-      }
-    }
-    return inside
-  }
-
-  // Handle canvas click for faces and corners
-  const handleCanvasClick = useCallback((event) => {
-    if (!canvasRef.current || !onOrientationChange) return
-
-    const rect = canvasRef.current.getBoundingClientRect()
-    const clickX = event.clientX - rect.left
-    const clickY = event.clientY - rect.top
-    const rotX = rotationState?.x ?? 0
-    const rotY = rotationState?.y ?? 0
-
-    const projectedVertices = cubeVertices.map(([x, y, z]) => project3D(x, y, z, rotX, rotY))
-
-    const sortedFaces = cubeFaces
-      .map(face => ({
-        ...face,
-        avgZ: face.vertices.reduce((sum, index) => sum + projectedVertices[index].z, 0) / 4
-      }))
-      .sort((a, b) => b.avgZ - a.avgZ)
-
-    for (const face of sortedFaces) {
-      const facePoints = face.vertices.map(index => projectedVertices[index])
-      if (pointInPolygon({ x: clickX, y: clickY }, facePoints)) {
-        let targetRotX = 0
-        let targetRotY = 0
-
-        switch (face.axis) {
-          case 'X+':
-            targetRotX = 0
-            targetRotY = Math.PI / 2  // 90° azimuth (right)
-            break
-          case 'X-':
-            targetRotX = 0
-            targetRotY = -Math.PI / 2  // -90° azimuth (left)
-            break
-          case 'Y+':
-            targetRotX = Math.PI / 2  // 90° elevation (top)
-            targetRotY = 0
-            break
-          case 'Y-':
-            targetRotX = -Math.PI / 2  // -90° elevation (bottom)
-            targetRotY = 0
-            break
-          case 'Z+':
-            targetRotX = 0
-            targetRotY = 0  // Front view
-            break
-          case 'Z-':
-            targetRotX = 0
-            targetRotY = Math.PI  // 180° azimuth (back)
-            break
-          default:
-            targetRotX = 0
-            targetRotY = 0
-        }
-
-        onOrientationChange(targetRotX, targetRotY)
-        return
-      }
-    }
-
-    const cornerSize = 10
-    for (let i = 0; i < cubeVertices.length; i++) {
-      const vertex = projectedVertices[i]
-      const distance = Math.hypot(clickX - vertex.x, clickY - vertex.y)
-      if (distance < cornerSize) {
-        const orientation = cornerOrientations[i]
-        onOrientationChange(orientation.rotX, orientation.rotY)
-        return
-      }
-    }
-  }, [rotationState, onOrientationChange, project3D, cubeVertices, cubeFaces, cornerOrientations])
-
-  // Handle home button click
-  const handleHomeClick = useCallback(() => {
-    if (onOrientationChange) {
-      onOrientationChange(0, 0) // Default isometric view
-    }
-  }, [onOrientationChange])
+  const mountRef = useRef(null);
+  const threeRef = useRef({});
+  const hoveredRef = useRef(null);
 
   useEffect(() => {
-    if (!canvasRef.current || !rotationState) return
+    const el = mountRef.current;
+    if (!el) return;
+    const SIZE = 120;
+    const H = 0.85;
+    const C = 0.22;
+    const F = H - C;
 
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    const size = 100
-    canvas.width = size
-    canvas.height = size
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(SIZE, SIZE);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    el.appendChild(renderer.domElement);
 
-    const rotX = rotationState.x
-    const rotY = rotationState.y
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1.6, 1.6, 1.6, -1.6, 0.1, 100);
+    camera.position.set(0, 0, 5);
+    camera.lookAt(0, 0, 0);
 
-    // Clear canvas
-    ctx.clearRect(0, 0, size, size)
+    const group = new THREE.Group();
+    scene.add(group);
 
-    // Draw background
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)'
-    ctx.fillRect(0, 0, size, size)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'
-    ctx.lineWidth = 1
-    ctx.strokeRect(0, 0, size, size)
+    // ── Face materials ────────────────────────────────────────────────────────
+    const faceMats = FACE_CONFIGS.map((f) => {
+      const mat = new THREE.MeshBasicMaterial({ map: makeFaceCanvas(f.label, f.color) });
+      mat.userData.normalTex = mat.map;
+      mat.userData.hoverTex = makeFaceCanvas(f.label, f.hover);
+      return mat;
+    });
 
-    // Project all vertices
-    const projectedVertices = cubeVertices.map(([x, y, z]) => project3D(x, y, z, rotX, rotY))
+    // ── Face planes (6) ───────────────────────────────────────────────────────
+    const faceMeshes = FACE_CONFIGS.map((f, i) => {
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2 * F, 2 * F), faceMats[i]);
+      mesh.position.set(f.pos[0] * H, f.pos[1] * H, f.pos[2] * H);
+      mesh.rotation.x = f.rx;
+      mesh.rotation.y = f.ry;
+      mesh.userData = { rotX: f.rotX, rotY: f.rotY };
+      group.add(mesh);
+      return mesh;
+    });
 
-    // Sort faces by depth (back to front)
-    const sortedFaces = cubeFaces
-      .map(face => ({
-        ...face,
-        avgZ: face.vertices.reduce((sum, i) => sum + projectedVertices[i].z, 0) / 4
-      }))
-      .sort((a, b) => a.avgZ - b.avgZ)
-
-    // Draw faces
-    sortedFaces.forEach(face => {
-      const facePoints = face.vertices.map(i => projectedVertices[i])
-
-      // Draw face
-      ctx.fillStyle = face.color + '40' // Semi-transparent
-      ctx.strokeStyle = face.color
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(facePoints[0].x, facePoints[0].y)
-      for (let i = 1; i < facePoints.length; i++) {
-        ctx.lineTo(facePoints[i].x, facePoints[i].y)
+    // ── Edge quads (12) ───────────────────────────────────────────────────────
+    const edgeMeshes = EDGE_DATA.map((cfg) => {
+      const { rotX, rotY } = dirToAngles(...cfg.dir);
+      let v;
+      if (cfg.type === "z") {
+        const { sa, sb } = cfg;
+        v = [
+          [sa * H, sb * F, -F],
+          [sa * F, sb * H, -F],
+          [sa * F, sb * H,  F],
+          [sa * H, sb * F,  F],
+        ];
+      } else if (cfg.type === "y") {
+        const { sa, sc } = cfg;
+        v = [
+          [sa * H, -F, sc * F],
+          [sa * F, -F, sc * H],
+          [sa * F,  F, sc * H],
+          [sa * H,  F, sc * F],
+        ];
+      } else {
+        const { sb, sc } = cfg;
+        v = [
+          [-F, sb * H, sc * F],
+          [-F, sb * F, sc * H],
+          [ F, sb * F, sc * H],
+          [ F, sb * H, sc * F],
+        ];
       }
-      ctx.closePath()
-      ctx.fill()
-      ctx.stroke()
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(
+        new Float32Array([
+          ...v[0], ...v[1], ...v[2],
+          ...v[0], ...v[2], ...v[3],
+        ]), 3,
+      ));
+      geo.computeVertexNormals();
+      const fi = edgeFaceIndices(cfg);
+      const baseColor = blendHex(...fi.map((i) => FACE_CONFIGS[i].color));
+      const hoverColor = blendHex(...fi.map((i) => FACE_CONFIGS[i].hover));
+      const mat = new THREE.MeshBasicMaterial({ color: baseColor, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.userData = { rotX, rotY, baseColor, hoverColor };
+      group.add(mesh);
+      return mesh;
+    });
 
-      // Draw face label
-      const centerX = facePoints.reduce((sum, p) => sum + p.x, 0) / 4
-      const centerY = facePoints.reduce((sum, p) => sum + p.y, 0) / 4
-      ctx.fillStyle = face.color
-      ctx.font = 'bold 10px Arial'
-      ctx.textAlign = 'center'
-      ctx.fillText(face.axis, centerX, centerY + 3)
-    })
+    // ── Corner triangles (8) ──────────────────────────────────────────────────
+    const cornerMeshes = CORNER_DATA.map(([a, b, c]) => {
+      const { rotX, rotY } = dirToAngles(a, b, c);
+      const Pa = [a * H, b * F, c * F];
+      const Pb = [a * F, b * H, c * F];
+      const Pc = [a * F, b * F, c * H];
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(
+        new Float32Array([...Pa, ...Pb, ...Pc]), 3,
+      ));
+      geo.computeVertexNormals();
+      const fi = cornerFaceIndices([a, b, c]);
+      const baseColor = blendHex(...fi.map((i) => FACE_CONFIGS[i].color));
+      const hoverColor = blendHex(...fi.map((i) => FACE_CONFIGS[i].hover));
+      const mat = new THREE.MeshBasicMaterial({ color: baseColor, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.userData = { rotX, rotY, baseColor, hoverColor };
+      group.add(mesh);
+      return mesh;
+    });
 
-    // Draw corner indicators (small circles)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
-    projectedVertices.forEach(vertex => {
-      ctx.beginPath()
-      ctx.arc(vertex.x, vertex.y, 3, 0, Math.PI * 2)
-      ctx.fill()
-    })
+    const allPieces = [...faceMeshes, ...edgeMeshes, ...cornerMeshes];
+    const renderScene = () => renderer.render(scene, camera);
 
-  }, [rotationState, project3D, cubeVertices, cubeFaces])
+    // ── Hover helpers ─────────────────────────────────────────────────────────
+    const clearHover = () => {
+      const prev = hoveredRef.current;
+      if (!prev) return;
+      const mat = prev.material;
+      if (mat.userData.normalTex) {
+        mat.map = mat.userData.normalTex;
+        mat.needsUpdate = true;
+      } else {
+        mat.color.setHex(prev.userData.baseColor);
+      }
+      hoveredRef.current = null;
+    };
+
+    const applyHover = (mesh) => {
+      const mat = mesh.material;
+      if (mat.userData.normalTex) {
+        mat.map = mat.userData.hoverTex;
+        mat.needsUpdate = true;
+      } else {
+        mat.color.setHex(mesh.userData.hoverColor);
+      }
+      hoveredRef.current = mesh;
+    };
+
+    const onMouseMove = (e) => {
+      const rect = el.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera({ x, y }, camera);
+      const hits = raycaster.intersectObjects(allPieces);
+      const newMesh = hits.length > 0 ? hits[0].object : null;
+
+      if (newMesh !== hoveredRef.current) {
+        clearHover();
+        if (newMesh) applyHover(newMesh);
+        renderScene();
+      }
+    };
+
+    const onMouseLeave = () => {
+      if (hoveredRef.current) {
+        clearHover();
+        renderScene();
+      }
+    };
+
+    el.addEventListener("mousemove", onMouseMove);
+    el.addEventListener("mouseleave", onMouseLeave);
+
+    threeRef.current = { renderer, scene, camera, group, allPieces, renderScene };
+    renderScene();
+
+    return () => {
+      el.removeEventListener("mousemove", onMouseMove);
+      el.removeEventListener("mouseleave", onMouseLeave);
+      el.removeChild(renderer.domElement);
+      renderer.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    const { group, renderScene } = threeRef.current;
+    if (!renderScene || !group || !rotationState) return;
+    group.quaternion.copy(rotationState).invert();
+    renderScene();
+  }, [rotationState]);
+
+  const handleClick = useCallback(
+    (e) => {
+      const { camera, allPieces } = threeRef.current;
+      if (!camera || !allPieces) return;
+      const rect = mountRef.current.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera({ x, y }, camera);
+      const hits = raycaster.intersectObjects(allPieces);
+      if (!hits.length) return;
+      const { rotX, rotY } = hits[0].object.userData;
+      onOrientationChange?.(rotX, rotY);
+    },
+    [onOrientationChange],
+  );
+
+  const handleHome = useCallback(() => {
+    onOrientationChange?.(Math.asin(Math.sqrt(1 / 3)), Math.PI / 4);
+  }, [onOrientationChange]);
 
   return (
     <div className="rotation-widget">
-      <canvas
-        ref={canvasRef}
-        className="rotation-canvas"
-        title="Click faces or corners to change view orientation"
-        onClick={handleCanvasClick}
-        style={{ cursor: 'pointer' }}
+      <div
+        ref={mountRef}
+        className="orientation-cube-mount"
+        onClick={handleClick}
       />
-      <button
-        className="home-button"
-        onClick={handleHomeClick}
-        title="Reset to default view"
-      >
-        🏠
+      <button className="home-button" onClick={handleHome} title="Reset view">
+        ⌂
       </button>
     </div>
-  )
-}
+  );
+};
 
-export default RotationWidget
+export default RotationWidget;

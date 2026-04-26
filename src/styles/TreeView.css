@@ -5,6 +5,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  flex: 1;
+  min-height: 80px;
   transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
@@ -58,6 +60,15 @@
   filter: brightness(1.1);
 }
 
+.tree-item.secondary-selected {
+  background-color: rgba(136, 20, 40, 0.35);
+  color: #ffaaaa;
+}
+
+.tree-item.secondary-selected.hovered {
+  background-color: rgba(136, 20, 40, 0.5);
+}
+
 .expand-btn {
   width: 20px;
   height: 20px;
@@ -96,7 +107,19 @@
   text-overflow: ellipsis;
 }
 
-.delete-btn {
+.tree-rename-input {
+  flex: 1;
+  font-size: 13px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--selected-bg);
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+  min-width: 0;
+}
+
+.tree-action-btn {
   width: 20px;
   height: 20px;
   padding: 0;
@@ -104,7 +127,7 @@
   border: none;
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -113,8 +136,20 @@
   transition: opacity 0.2s ease, color 0.2s ease;
 }
 
-.tree-item:hover .delete-btn {
+.tree-item:hover .tree-action-btn {
   opacity: 1;
+}
+
+.tree-action-btn.always-visible {
+  opacity: 1;
+}
+
+.tree-item.hidden-item {
+  opacity: 0.45;
+}
+
+.rename-btn:hover {
+  color: var(--text-primary);
 }
 
 .delete-btn:hover {
@@ -153,4 +188,24 @@ html[data-theme="light"] .tree-view-content::-webkit-scrollbar-thumb {
 
 html[data-theme="light"] .tree-view-content::-webkit-scrollbar-thumb:hover {
   background: #bbbbbb;
+}
+
+.tree-item.dragging {
+  opacity: 0.4;
+}
+
+.tree-item.drop-target {
+  background-color: rgba(91, 141, 232, 0.45);
+  outline: 1px dashed rgba(91, 141, 232, 0.8);
+  outline-offset: -1px;
+}
+
+.tree-root-drop-zone {
+  min-height: 32px;
+  flex: 1;
+}
+
+.tree-root-drop-zone.active {
+  background-color: rgba(91, 141, 232, 0.15);
+  border-top: 2px dashed rgba(91, 141, 232, 0.6);
 }
