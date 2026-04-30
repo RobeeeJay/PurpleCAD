@@ -66,3 +66,37 @@
   white-space: nowrap;
   border: 1px solid rgba(136, 170, 255, 0.4);
 }
+
+.sketch-distance-input-overlay {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 30, 0.92);
+  color: #ffee88;
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 221, 68, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  z-index: 20;
+}
+
+.sketch-distance-input-overlay input {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 221, 68, 0.6);
+  color: #ffee88;
+  font-size: 13px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  width: 80px;
+  outline: none;
+}
+
+.sketch-distance-input-overlay input:focus {
+  border-color: rgba(255, 221, 68, 0.9);
+  background: rgba(255, 255, 255, 0.15);
+}

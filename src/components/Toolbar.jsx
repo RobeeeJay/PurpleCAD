@@ -27,6 +27,69 @@ const Toolbar = () => {
   const loadDocument = useStore((state) => state.loadDocument);
   const selectedIds = useStore((state) => state.selectedIds);
   const setItemsHidden = useStore((state) => state.setItemsHidden);
+  const activeSketchTool = useStore((state) => state.activeSketchTool);
+  const setActiveSketchTool = useStore((state) => state.setActiveSketchTool);
+  const sketchConstraintMode = useStore((state) => state.sketchConstraintMode);
+  const setSketchConstraintMode = useStore((state) => state.setSketchConstraintMode);
+  const setSketchConstraintFirstPoint = useStore((state) => state.setSketchConstraintFirstPoint);
+  const setSketchDistanceInput = useStore((state) => state.setSketchDistanceInput);
+  const selectedSketchElement = useStore((state) => state.selectedSketchElement);
+  const sketchModifyMode = useStore((state) => state.sketchModifyMode);
+  const setSketchModifyMode = useStore((state) => state.setSketchModifyMode);
+  const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
+  const setExtrudeSelectMode = useStore((state) => state.setExtrudeSelectMode);
+  const setExtrudeRetargetId = useStore((state) => state.setExtrudeRetargetId);
+  const applySketchHVConstraint = useStore((state) => state.applySketchHVConstraint);
+  const constraintsVisible = useStore((state) => state.constraintsVisible);
+  const toggleConstraintsVisible = useStore((state) => state.toggleConstraintsVisible);
+  const sketchMultiSelectedIndices = useStore((state) => state.sketchMultiSelectedIndices);
+  const toggleSketchShapesDashed = useStore((state) => state.toggleSketchShapesDashed);
+
+  const selectedId = useStore((state) => state.selectedId);
+  const isSketchMode = !!(selectedId && items.find((i) => i.id === selectedId)?.type === "sketch");
+
+  const handleCoincidentConstraint = () => {
+    if (sketchConstraintMode === "coincident") {
+      setSketchConstraintMode(null);
+      setSketchConstraintFirstPoint(null);
+    } else {
+      setSketchConstraintMode("coincident");
+      setSketchDistanceInput(null);
+      if (selectedSketchElement?.type === "point") {
+        setSketchConstraintFirstPoint({ shapeIdx: selectedSketchElement.shapeIdx, pointKey: selectedSketchElement.pointKey });
+      }
+    }
+  };
+
+  const handleDistanceConstraint = () => {
+    if (sketchConstraintMode === "distance") {
+      setSketchConstraintMode(null);
+      setSketchConstraintFirstPoint(null);
+      setSketchDistanceInput(null);
+    } else {
+      setSketchConstraintMode("distance");
+      setSketchConstraintFirstPoint(null);
+      setSketchDistanceInput(null);
+    }
+  };
+
+  const handleToggleDashed = () => {
+    const indices = sketchMultiSelectedIndices.length > 0
+      ? sketchMultiSelectedIndices
+      : selectedSketchElement?.type === "line"
+      ? [selectedSketchElement.shapeIdx]
+      : [];
+    if (indices.length > 0) toggleSketchShapesDashed(selectedId, indices);
+  };
+
+  const SKETCH_TOOLS = [
+    { id: "rect",    label: "Rectangle", icon: <svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="6" width="18" height="12" fill="none" stroke="currentColor" strokeWidth="2" /></svg> },
+    { id: "circle",  label: "Circle",    icon: <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" /></svg> },
+    { id: "ellipse", label: "Ellipse",   icon: <svg viewBox="0 0 24 24" width="20" height="20"><ellipse cx="12" cy="12" rx="10" ry="6" fill="none" stroke="currentColor" strokeWidth="2" /></svg> },
+    { id: "line",    label: "Line",      icon: <svg viewBox="0 0 24 24" width="20" height="20"><line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg> },
+    { id: "arc",     label: "Arc",       icon: <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 20 Q12 2 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg> },
+    { id: "bezier",  label: "Bezier",    icon: <svg viewBox="0 0 24 24" width="20" height="20"><path d="M3 20 C6 4 18 4 21 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /><circle cx="3" cy="20" r="2" fill="currentColor" /><circle cx="6" cy="4" r="1.5" fill="currentColor" opacity="0.6" /><circle cx="18" cy="4" r="1.5" fill="currentColor" opacity="0.6" /><circle cx="21" cy="20" r="2" fill="currentColor" /></svg> },
+  ];
 
   const fileInputRef = useRef(null);
 
@@ -84,6 +147,10 @@ const Toolbar = () => {
       for (const item of selectedItems) {
         const geo = buildItemGeometry(item);
         if (!geo) continue;
+        if (!geo.getAttribute("uv")) {
+          const count = geo.getAttribute("position").count;
+          geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+        }
         const brush = new Brush(geo, sharedMat);
         const p = item.position || { x: 0, y: 2, z: 0 };
         const s = item.scale ? item.scale.x : 1;
@@ -107,6 +174,15 @@ const Toolbar = () => {
       const normAttr = result.geometry.getAttribute("normal");
       const idxAttr = result.geometry.index;
 
+      // Compute bounding-box centre and re-centre geometry so local origin = centre of mass
+      const bbox = new THREE.Box3().setFromBufferAttribute(posAttr);
+      const centre = new THREE.Vector3();
+      bbox.getCenter(centre);
+      for (let i = 0; i < posAttr.count; i++) {
+        posAttr.setXYZ(i, posAttr.getX(i) - centre.x, posAttr.getY(i) - centre.y, posAttr.getZ(i) - centre.z);
+      }
+      posAttr.needsUpdate = true;
+
       const geometryData = {
         positions: Array.from(posAttr.array),
         normals: normAttr ? Array.from(normAttr.array) : null,
@@ -126,7 +202,7 @@ const Toolbar = () => {
         name: `${opLabel} ${id}`,
         type: "csg",
         children: [],
-        position: { x: 0, y: 0, z: 0 },
+        position: { x: centre.x, y: centre.y, z: centre.z },
         scale: { x: 1, y: 1, z: 1 },
         rotation: { x: 0, y: 0, z: 0 },
         geometryData,
@@ -552,107 +628,146 @@ const Toolbar = () => {
         </div>
       </div>
 
-      {/* Create Section */}
+      {/* Create / Draw Section */}
       <div className="toolbar-section">
-        <div className="toolbar-label">Create</div>
+        <div className="toolbar-label">{isSketchMode ? "Draw" : "Create"}</div>
         <div className="toolbar-buttons">
-          <button
-            className="toolbar-btn"
-            title="Sketch Plane"
-            onClick={() => setSketchPlacementMode(true)}
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <rect
-                x="3"
-                y="3"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <line
-                x1="3"
-                y1="12"
-                x2="21"
-                y2="12"
-                stroke="currentColor"
-                strokeWidth="1"
-              />
-              <line
-                x1="12"
-                y1="3"
-                x2="12"
-                y2="21"
-                stroke="currentColor"
-                strokeWidth="1"
-              />
-            </svg>
-          </button>
-          <button
-            className="toolbar-btn"
-            title="Cube"
-            onClick={() => createItem("cube")}
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <path
-                d="M3 5v12h18V5M3 5l9-4 9 4m0 12l-9 4-9-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-            </svg>
-          </button>
-          <button
-            className="toolbar-btn"
-            title="Sphere"
-            onClick={() => createItem("sphere")}
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <ellipse
-                cx="12"
-                cy="12"
-                rx="3"
-                ry="9"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1"
-                opacity="0.5"
-              />
-            </svg>
-          </button>
-          <button
-            className="toolbar-btn"
-            title="Cylinder"
-            onClick={() => createItem("cylinder")}
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <ellipse cx="12" cy="6" rx="7" ry="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
-              <ellipse cx="12" cy="18" rx="7" ry="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
-              <line x1="5" y1="6" x2="5" y2="18" stroke="currentColor" strokeWidth="2" />
-              <line x1="19" y1="6" x2="19" y2="18" stroke="currentColor" strokeWidth="2" />
-            </svg>
-          </button>
-          <button
-            className="toolbar-btn"
-            title="Torus"
-            onClick={() => createItem("torus")}
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <ellipse cx="12" cy="12" rx="9" ry="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
-              <ellipse cx="12" cy="12" rx="4" ry="2" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
-            </svg>
-          </button>
+          {isSketchMode ? (
+            SKETCH_TOOLS.map((tool) => (
+              <button
+                key={tool.id}
+                className={`toolbar-btn ${activeSketchTool === tool.id ? "active" : ""}`}
+                title={tool.label}
+                onClick={() => setActiveSketchTool(activeSketchTool === tool.id ? null : tool.id)}
+              >
+                {tool.icon}
+              </button>
+            ))
+          ) : (
+            <>
+              <button
+                className="toolbar-btn"
+                title="Sketch Plane"
+                onClick={() => setSketchPlacementMode(true)}
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <rect x="3" y="3" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="1" />
+                  <line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" strokeWidth="1" />
+                </svg>
+              </button>
+              <button className="toolbar-btn" title="Cube" onClick={() => createItem("cube")}>
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <path d="M3 5v12h18V5M3 5l9-4 9 4m0 12l-9 4-9-4" fill="none" stroke="currentColor" strokeWidth="2" />
+                </svg>
+              </button>
+              <button className="toolbar-btn" title="Sphere" onClick={() => createItem("sphere")}>
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <ellipse cx="12" cy="12" rx="3" ry="9" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+                </svg>
+              </button>
+              <button className="toolbar-btn" title="Cylinder" onClick={() => createItem("cylinder")}>
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <ellipse cx="12" cy="6" rx="7" ry="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <ellipse cx="12" cy="18" rx="7" ry="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <line x1="5" y1="6" x2="5" y2="18" stroke="currentColor" strokeWidth="2" />
+                  <line x1="19" y1="6" x2="19" y2="18" stroke="currentColor" strokeWidth="2" />
+                </svg>
+              </button>
+              <button className="toolbar-btn" title="Torus" onClick={() => createItem("torus")}>
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <ellipse cx="12" cy="12" rx="9" ry="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <ellipse cx="12" cy="12" rx="4" ry="2" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
+                </svg>
+              </button>
+              <button
+                className={`toolbar-btn ${extrudeSelectMode ? "active" : ""}`}
+                title="Extrude — click an enclosed sketch region or flat face"
+                onClick={() => setExtrudeSelectMode(extrudeSelectMode ? null : "profile")}
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <rect x="4" y="14" width="16" height="6" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <polygon points="4,14 8,8 20,8 20,14" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.7" />
+                  <line x1="12" y1="8" x2="12" y2="3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <polyline points="9,5 12,2 15,5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Modify Section — sketch mode only */}
+      {isSketchMode && (
+        <div className="toolbar-section">
+          <div className="toolbar-label">Modify</div>
+          <div className="toolbar-buttons">
+            <button
+              className={`toolbar-btn ${sketchModifyMode === "chamfer" ? "active" : ""}`}
+              title="Chamfer — trim two connected lines and join with a straight edge"
+              onClick={() => setSketchModifyMode(sketchModifyMode === "chamfer" ? null : "chamfer")}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <polyline points="4,20 4,8 14,8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                <line x1="4" y1="8" x2="14" y2="20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <circle cx="4" cy="8" r="2" fill="currentColor" />
+              </svg>
+            </button>
+            <button
+              className={`toolbar-btn ${sketchModifyMode === "bevel" ? "active" : ""}`}
+              title="Bevel — trim two connected lines and join with a smooth arc"
+              onClick={() => setSketchModifyMode(sketchModifyMode === "bevel" ? null : "bevel")}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <polyline points="4,20 4,8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                <line x1="14" y1="8" x2="20" y2="8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M4,8 Q4,8 14,8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M4,20 L4,10 Q4,8 6,8 L14,8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                <circle cx="4" cy="10" r="1.5" fill="currentColor" opacity="0.5" />
+              </svg>
+            </button>
+            <button
+              className="toolbar-btn"
+              title="Toggle Dashed — dashed lines constrain geometry but don't form closed regions or extrusions"
+              disabled={sketchMultiSelectedIndices.length === 0 && selectedSketchElement?.type !== "line"}
+              onClick={handleToggleDashed}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="4 3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Extrude retarget — visible when an extrude object is selected */}
+      {!isSketchMode && items.find((i) => i.id === selectedId)?.type === "extrude" && (
+        <div className="toolbar-section">
+          <div className="toolbar-label">Extrude</div>
+          <div className="toolbar-buttons">
+            <button
+              className={`toolbar-btn ${extrudeSelectMode === "profile" ? "active" : ""}`}
+              title="Retarget Profile — pick a new face or sketch region to extrude from"
+              onClick={() => {
+                setExtrudeRetargetId(selectedId);
+                setExtrudeSelectMode("profile");
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <rect x="3" y="14" width="12" height="7" rx="1" fill="none" stroke="currentColor" strokeWidth="2" />
+                <polygon points="3,14 6,9 18,9 18,14" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
+                <circle cx="19" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <line x1="19" y1="2" x2="19" y2="1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <line x1="19" y1="8" x2="19" y2="9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <line x1="16" y1="5" x2="15" y2="5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <line x1="22" y1="5" x2="23" y2="5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <circle cx="19" cy="5" r="1" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Combine Section */}
       <div className="toolbar-section">
@@ -710,63 +825,71 @@ const Toolbar = () => {
       <div className="toolbar-section">
         <div className="toolbar-label">Constrain</div>
         <div className="toolbar-buttons">
-          <button className="toolbar-btn" title="Horizontal">
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <line
-                x1="4"
-                y1="12"
-                x2="20"
-                y2="12"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <circle cx="4" cy="12" r="2" fill="currentColor" />
-              <circle cx="20" cy="12" r="2" fill="currentColor" />
-            </svg>
-          </button>
-          <button className="toolbar-btn" title="Vertical">
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <line
-                x1="12"
-                y1="4"
-                x2="12"
-                y2="20"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <circle cx="12" cy="4" r="2" fill="currentColor" />
-              <circle cx="12" cy="20" r="2" fill="currentColor" />
-            </svg>
-          </button>
-          <button className="toolbar-btn" title="Perpendicular">
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <line
-                x1="4"
-                y1="12"
-                x2="12"
-                y2="12"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <line
-                x1="12"
-                y1="12"
-                x2="12"
-                y2="20"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <rect
-                x="10"
-                y="10"
-                width="4"
-                height="4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1"
-              />
-            </svg>
-          </button>
+          {isSketchMode && (<>
+            <button
+              className={`toolbar-btn ${sketchConstraintMode === "coincident" ? "active" : ""}`}
+              title="Coincident — make two points share the same position"
+              onClick={handleCoincidentConstraint}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" strokeWidth="2" />
+                <circle cx="12" cy="12" r="2" fill="currentColor" />
+                <line x1="12" y1="2" x2="12" y2="7" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 1" />
+                <line x1="12" y1="17" x2="12" y2="22" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 1" />
+              </svg>
+            </button>
+            <button
+              className={`toolbar-btn ${sketchConstraintMode === "distance" ? "active" : ""}`}
+              title="Distance — set a fixed distance between two points"
+              onClick={handleDistanceConstraint}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2" />
+                <line x1="4" y1="8" x2="4" y2="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <line x1="20" y1="8" x2="20" y2="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <text x="12" y="10" textAnchor="middle" fontSize="6" fill="currentColor" fontFamily="sans-serif">d</text>
+              </svg>
+            </button>
+            <button
+              className="toolbar-btn"
+              title="Horizontal — force the selected line to be horizontal"
+              disabled={selectedSketchElement?.type !== "line"}
+              onClick={() => {
+                if (selectedSketchElement?.type === "line")
+                  applySketchHVConstraint(selectedId, selectedSketchElement.shapeIdx, "horizontal");
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" strokeWidth="2" />
+                <circle cx="4" cy="12" r="2" fill="currentColor" />
+                <circle cx="20" cy="12" r="2" fill="currentColor" />
+              </svg>
+            </button>
+            <button
+              className="toolbar-btn"
+              title="Vertical — force the selected line to be vertical"
+              disabled={selectedSketchElement?.type !== "line"}
+              onClick={() => {
+                if (selectedSketchElement?.type === "line")
+                  applySketchHVConstraint(selectedId, selectedSketchElement.shapeIdx, "vertical");
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" strokeWidth="2" />
+                <circle cx="12" cy="4" r="2" fill="currentColor" />
+                <circle cx="12" cy="20" r="2" fill="currentColor" />
+              </svg>
+            </button>
+          </>)}
+          {!isSketchMode && (
+            <button className="toolbar-btn" title="Perpendicular">
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <line x1="4" y1="12" x2="12" y2="12" stroke="currentColor" strokeWidth="2" />
+                <line x1="12" y1="12" x2="12" y2="20" stroke="currentColor" strokeWidth="2" />
+                <rect x="10" y="10" width="4" height="4" fill="none" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -967,6 +1090,16 @@ const Toolbar = () => {
                 stroke="currentColor"
                 strokeWidth="2"
               />
+            </svg>
+          </button>
+          <button
+            className={`toolbar-btn ${constraintsVisible ? "active" : ""}`}
+            title={`${constraintsVisible ? "Hide" : "Show"} constraint icons`}
+            onClick={toggleConstraintsVisible}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <path d="M12 3L21 12L12 21L3 12Z" fill="none" stroke="currentColor" strokeWidth="2" />
+              {!constraintsVisible && <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
             </svg>
           </button>
           <button

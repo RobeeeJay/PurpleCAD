@@ -11,6 +11,8 @@ function App() {
   const theme = useStore((state) => state.theme);
   const undo = useStore((state) => state.undo);
   const redo = useStore((state) => state.redo);
+  const undoSketch = useStore((state) => state.undoSketch);
+  const redoSketch = useStore((state) => state.redoSketch);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -22,20 +24,24 @@ function App() {
       const ctrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
       const tag = document.activeElement && document.activeElement.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (ctrlOrCmd && e.key === "z" && e.shiftKey) {
-        e.preventDefault();
-        redo();
-      } else if (ctrlOrCmd && e.key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-      } else if (!isMac && e.ctrlKey && e.key === "y") {
-        e.preventDefault();
-        redo();
+      const isUndoKey = ctrlOrCmd && e.key === "z" && !e.shiftKey;
+      const isRedoKey = (ctrlOrCmd && e.key === "z" && e.shiftKey) || (!isMac && e.ctrlKey && e.key === "y");
+      if (!isUndoKey && !isRedoKey) return;
+      e.preventDefault();
+      // Redirect to per-sketch undo/redo when a sketch is open
+      const { selectedId: selId, items: its } = useStore.getState();
+      const isSketch = selId != null && its.find((i) => i.id === selId)?.type === "sketch";
+      if (isSketch) {
+        if (isUndoKey) undoSketch(selId);
+        else redoSketch(selId);
+      } else {
+        if (isUndoKey) undo();
+        else redo();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [undo, redo]);
+  }, [undo, redo, undoSketch, redoSketch]);
 
   return (
     <div className="app-container">

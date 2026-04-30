@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
-import SketchToolPanel from "./SketchToolPanel";
 import "../styles/TreeView.css";
 
 const buildTree = (items) => {
@@ -200,9 +199,6 @@ const TreeView = ({ items }) => {
   const selectedId = useStore((s) => s.selectedId);
   const [dragState, setDragState] = useState({ draggingId: null, dropTargetId: null });
 
-  const selectedItem = items.find((i) => i.id === selectedId);
-  const isSketchSelected = selectedItem?.type === "sketch";
-
   const roots = buildTree(items);
 
   const handleDragStart = (e, id) => {
@@ -259,15 +255,6 @@ const TreeView = ({ items }) => {
   const handleDragEnd = () => {
     setDragState({ draggingId: null, dropTargetId: null });
   };
-
-  if (isSketchSelected) {
-    return (
-      <div className="tree-view">
-        <div className="tree-view-header">Objects</div>
-        <SketchToolPanel sketchItem={selectedItem} />
-      </div>
-    );
-  }
 
   return (
     <div className="tree-view" onDragEnd={handleDragEnd}>

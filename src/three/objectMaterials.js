@@ -200,7 +200,7 @@ export function createMaterial(item, color) {
   });
   if (item.type === "sketch") {
     return new THREE.MeshStandardMaterial({
-      color: 0x88aaff,
+      color: 0xcccccc,
       transparent: true,
       opacity: 0.18,
       side: THREE.DoubleSide,

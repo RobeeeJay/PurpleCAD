@@ -5,7 +5,7 @@ import "../styles/Viewport.css";
 import { useStore } from "../store";
 import { createScene, createCamera, createRenderer, createLights, createGrid, createAxisGroup, createOrbitIndicator, setupResize } from "../three/sceneSetup.js";
 import { updateEmissive } from "../three/objectMaterials.js";
-import { buildSceneObjects, buildTransformHandles, buildSketchShapesGroup, applyRenderMode, makeMeasureLabel, MM_PER_UNIT, placeDimLabels } from "../three/sceneObjects.js";
+import { buildSceneObjects, buildTransformHandles, buildSketchShapesGroup, buildAllSketchShapesGroup, buildExtrudeSelectGroup, applyRenderMode, makeMeasureLabel, MM_PER_UNIT, placeDimLabels, getShapePoint, moveShapePoint } from "../three/sceneObjects.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { loadCameraState, saveCameraState, attachCameraControls } from "../three/cameraControls.js";
 
@@ -44,12 +44,18 @@ const Viewport = () => {
   const cameraAnimRef = useRef(null);
   const sketchPlacementModeRef = useRef(false);
   const sketchPlacementPlanesRef = useRef([]);
+  const extrudeSelectModeRef = useRef(null);
+  const extrudeSelectGroupRef = useRef(null);
   const sketchDrawRef = useRef(null);
   const sketchShapesGroupRef = useRef(null);
+  const allSketchGroupRef = useRef(null);
+  const sketchGhostGroupRef = useRef(null);
   const dimHintRef = useRef(null);
+  const propagateConstraintsRef = useRef(null);
 
   const [rotationState, setRotationState] = React.useState(null);
   const [sketchDrawPhase, setSketchDrawPhase] = React.useState(null);
+  const [sketchMode, setSketchMode] = React.useState(false);
 
   const selectedIdRef = useRef(null);
   const selectedIdsRef = useRef([]);
@@ -69,7 +75,13 @@ const Viewport = () => {
   const axisVisible = useStore((state) => state.axisVisible);
   const cameraResetTrigger = useStore((state) => state.cameraResetTrigger);
   const sketchPlacementMode = useStore((state) => state.sketchPlacementMode);
+  const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
   const activeSketchTool = useStore((state) => state.activeSketchTool);
+  const sketchConstraintMode = useStore((state) => state.sketchConstraintMode);
+  const sketchConstraintFirstPoint = useStore((state) => state.sketchConstraintFirstPoint);
+  const sketchModifyMode = useStore((state) => state.sketchModifyMode);
+  const sketchDistanceInput = useStore((state) => state.sketchDistanceInput);
+  const constraintsVisible = useStore((state) => state.constraintsVisible);
 
   const _selItem = items.find((i) => i.id === selectedId);
   const isInSketchMode = _selItem != null && _selItem.type === "sketch";
@@ -79,6 +91,7 @@ const Viewport = () => {
   itemsRef.current = items;
   sketchPlacementModeRef.current = sketchPlacementMode;
   activeSketchToolRef.current = activeSketchTool;
+  extrudeSelectModeRef.current = extrudeSelectMode;
 
   const handleOrientationChange = useCallback((targetRotX, targetRotY) => {
     if (!cameraRef.current || !cameraControlsRef.current) return;
@@ -88,7 +101,7 @@ const Viewport = () => {
     const endPos = new THREE.Vector3(
       targetRef.current.x + Math.sin(targetRotY) * Math.cos(targetRotX) * distance,
       targetRef.current.y + Math.sin(targetRotX) * distance,
-      targetRef.current.z + Math.cos(targetRotY) * Math.cos(targetRotX) * distance,
+      targetRef.current.z + Math.cos(targetRotY) * Math.cos(targetRotX) * distance
     );
     cameraAnimRef.current = {
       startPos: camera.position.clone(),
@@ -154,8 +167,10 @@ const Viewport = () => {
       activeSketchToolRef, selectedIdRef, selectedIdsRef, dimHintRef,
       cameraAnimRef, savedCameraStateRef, planeRef, axisGroupRef,
       sketchGridGroupRef, sketchShapesGroupRef,
+      extrudeSelectGroupRef, extrudeSelectModeRef,
       orbitIndicator, gridMaterial, composerRef,
       setRotationState, setHoveredId, selectItem, setSketchDrawPhase,
+      propagateConstraintsRef,
     });
 
     return () => {
@@ -190,13 +205,14 @@ const Viewport = () => {
         sketchGridGroupRef.current = null;
       }
       sketchModeRef.current = false;
+      setSketchMode(false);
       if (containerRef.current) containerRef.current.removeChild(renderer.domElement);
       renderer.dispose();
     };
   }, [theme, setHoveredId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (axisGroupRef.current) axisGroupRef.current.visible = axisVisible;
+    if (axisGroupRef.current) axisGroupRef.current.visible = axisVisible && !sketchModeRef.current;
   }, [axisVisible]);
 
   // ── Projection mode switch ────────────────────────────────────────────────
@@ -215,13 +231,13 @@ const Viewport = () => {
     if (projectionMode === "isometric") {
       newCamera = new THREE.OrthographicCamera(
         (-frustumSize * aspect) / 2, (frustumSize * aspect) / 2,
-        frustumSize / 2, -frustumSize / 2, 0.1, 1000,
+        frustumSize / 2, -frustumSize / 2, 0.1, 1000
       );
       const distance = Math.max(10, currentPosition.distanceTo(targetRef.current));
       newCamera.position.set(
         targetRef.current.x + Math.sin(currentRotY) * Math.cos(currentRotX) * distance,
         targetRef.current.y + Math.sin(currentRotX) * distance,
-        targetRef.current.z + Math.cos(currentRotY) * Math.cos(currentRotX) * distance,
+        targetRef.current.z + Math.cos(currentRotY) * Math.cos(currentRotX) * distance
       );
     } else {
       newCamera = new THREE.PerspectiveCamera(30, aspect, 0.1, 1000);
@@ -234,7 +250,7 @@ const Viewport = () => {
     sceneRef.current.remove(currentCamera);
     sceneRef.current.add(newCamera);
     cameraRef.current = newCamera;
-    if (composerRef.current?.passes.length > 0) composerRef.current.passes[0].camera = newCamera;
+    if (composerRef.current && composerRef.current.passes.length > 0) composerRef.current.passes[0].camera = newCamera;
     renderer.clear();
     renderer.render(sceneRef.current, newCamera);
   }, [projectionMode]);
@@ -275,7 +291,7 @@ const Viewport = () => {
     ].forEach(({ name, rx, ry, rz, color }) => {
       const mesh = new THREE.Mesh(
         new THREE.PlaneGeometry(SIZE, SIZE),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false })
       );
       mesh.position.copy(center);
       mesh.rotation.set(rx, ry, rz);
@@ -368,7 +384,7 @@ const Viewport = () => {
     if (!sceneRef.current) return;
     const scene = sceneRef.current;
     const selectedItem = items.find((i) => i.id === selectedId);
-    const isSketch = selectedItem?.type === "sketch";
+    const isSketch = selectedItem && selectedItem.type === "sketch";
 
     const clearSketchGrid = () => {
       if (sketchGridGroupRef.current) {
@@ -384,6 +400,7 @@ const Viewport = () => {
     if (!isSketch) {
       if (sketchModeRef.current) {
         sketchModeRef.current = false;
+        setSketchMode(false);
         if (sketchDrawRef.current) {
           sketchDrawRef.current.previewObjects.forEach((obj) => {
             scene.remove(obj);
@@ -403,13 +420,32 @@ const Viewport = () => {
           });
           sketchShapesGroupRef.current = null;
         }
+        if (sketchGhostGroupRef.current) {
+          scene.remove(sketchGhostGroupRef.current);
+          sketchGhostGroupRef.current.traverse((obj) => {
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) obj.material.dispose();
+          });
+          sketchGhostGroupRef.current = null;
+        }
         if (axisGroupRef.current) axisGroupRef.current.visible = useStore.getState().axisVisible;
         if (planeRef.current) planeRef.current.visible = true;
-        Object.values(objectsRef.current).forEach((m) => {
-          m.visible = true;
-          m.material.transparent = false;
-          m.material.opacity = 1.0;
-          m.material.needsUpdate = true;
+        // Rebuild scene objects so any sketch-dependent geometry (e.g. extrudes)
+        // picks up the latest sketch shapes before becoming visible again.
+        buildSceneObjects(itemsRef.current, scene, objectsRef, originalMaterialsRef);
+        applyRenderMode(useStore.getState().renderMode, {
+          scene,
+          renderer: rendererRef.current,
+          cameraRef,
+          objectsRef,
+          originalMaterialsRef,
+          itemsRef,
+          axisGroupRef,
+          planeRef,
+          sketchPlacementPlanesRef,
+          composerRef,
+          envTextureRef,
+          sketchModeRef,
         });
         clearSketchGrid();
         const saved = savedCameraStateRef.current;
@@ -452,7 +488,49 @@ const Viewport = () => {
         };
       }
       sketchModeRef.current = true;
+      setSketchMode(true);
       if (axisGroupRef.current) axisGroupRef.current.visible = false;
+      if (mesh) mesh.visible = false;
+
+      // Project all non-sketch scene objects onto the sketch plane as faint reference lines
+      scene.updateMatrixWorld();
+      const planeNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(mesh.quaternion).normalize();
+      const planeOrigin = mesh.position.clone();
+      const projectVertex = (v) =>
+        v.clone().addScaledVector(planeNormal, -planeNormal.dot(v.clone().sub(planeOrigin)));
+      const ghostMat = new THREE.LineBasicMaterial({ color: 0x7799bb, transparent: true, opacity: 0.18, depthTest: false });
+      const ghostGroup = new THREE.Group();
+      items.forEach((item) => {
+        if (item.type === "sketch" || item.visible === false) return;
+        const m = objectsRef.current[item.id];
+        if (!m) return;
+        const isPrim = ["sphere", "cylinder", "torus"].includes(item.type);
+        let srcGeo;
+        if (item.type === "sphere")   srcGeo = new THREE.SphereGeometry(1.5, 12, 8);
+        else if (item.type === "cylinder") srcGeo = new THREE.CylinderGeometry(1, 1, 2, 12);
+        else if (item.type === "torus")    srcGeo = new THREE.TorusGeometry(1.0, 0.4, 6, 12);
+        else srcGeo = m.geometry;
+        const edgesGeo = new THREE.EdgesGeometry(srcGeo);
+        if (isPrim) srcGeo.dispose();
+        const posAttr = edgesGeo.getAttribute("position");
+        const pts = [];
+        for (let i = 0; i < posAttr.count; i++) {
+          const v = new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(m.matrixWorld);
+          pts.push(projectVertex(v).addScaledVector(planeNormal, 0.003));
+        }
+        edgesGeo.dispose();
+        if (pts.length < 2) return;
+        const ghost = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), ghostMat);
+        ghost.frustumCulled = false;
+        ghost.renderOrder = 998;
+        ghostGroup.add(ghost);
+      });
+      if (ghostGroup.children.length > 0) {
+        scene.add(ghostGroup);
+        sketchGhostGroupRef.current = ghostGroup;
+      } else {
+        ghostMat.dispose();
+      }
     }
 
     const worldNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(mesh.quaternion).normalize();
@@ -480,30 +558,47 @@ const Viewport = () => {
     }
 
     if (planeRef.current) planeRef.current.visible = false;
-    Object.entries(objectsRef.current).forEach(([idStr, m]) => {
-      if (parseInt(idStr) === selectedId) {
-        m.visible = true; m.material.transparent = true; m.material.opacity = 0.12; m.material.needsUpdate = true;
-      } else {
-        m.visible = false;
-      }
-    });
+    Object.values(objectsRef.current).forEach((m) => { m.visible = false; });
 
     clearSketchGrid();
+    const GRID_HALF = 25;
     const gridGroup = new THREE.Group();
-    const GRID_HALF = 5;
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x445566, transparent: true, opacity: 0.55 });
+    gridGroup.frustumCulled = false;
+
+    // Minor grid (repositioned each frame to follow camera)
+    const minorGridGroup = new THREE.Group();
+    minorGridGroup.frustumCulled = false;
+    const makeGridLine = (a, b) => {
+      const l = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([a, b]),
+        new THREE.LineBasicMaterial({ color: 0x445566, transparent: true, opacity: 0.45, depthTest: false })
+      );
+      l.frustumCulled = false;
+      l.renderOrder = 990;
+      return l;
+    };
     for (let i = -GRID_HALF; i <= GRID_HALF; i++) {
       if (i === 0) continue;
-      gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(i, -GRID_HALF, 0), new THREE.Vector3(i, GRID_HALF, 0)]), lineMat.clone()));
-      gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-GRID_HALF, i, 0), new THREE.Vector3(GRID_HALF, i, 0)]), lineMat.clone()));
+      minorGridGroup.add(makeGridLine(new THREE.Vector3(i, -GRID_HALF, 0), new THREE.Vector3(i, GRID_HALF, 0)));
+      minorGridGroup.add(makeGridLine(new THREE.Vector3(-GRID_HALF, i, 0), new THREE.Vector3(GRID_HALF, i, 0)));
     }
-    gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-GRID_HALF, 0, 0), new THREE.Vector3(GRID_HALF, 0, 0)]), new THREE.LineBasicMaterial({ color: 0xff4444 })));
-    gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -GRID_HALF, 0), new THREE.Vector3(0, GRID_HALF, 0)]), new THREE.LineBasicMaterial({ color: 0x4488ff })));
-    for (let i = -GRID_HALF; i <= GRID_HALF; i++) {
-      if (i === 0) continue;
-      const xLbl = makeMeasureLabel(`${i * MM_PER_UNIT}`, "#ff6666"); xLbl.position.set(i, -0.42, 0.01); gridGroup.add(xLbl);
-      const yLbl = makeMeasureLabel(`${i * MM_PER_UNIT}`, "#6699ff"); yLbl.position.set(-0.58, i, 0.01); gridGroup.add(yLbl);
-    }
+    gridGroup.add(minorGridGroup);
+    gridGroup.userData.minorGrid = minorGridGroup;
+
+    // Axis lines — long enough to always cross the screen
+    const AXIS_HALF = 500;
+    const makeAxis = (a, b, col) => {
+      const l = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([a, b]),
+        new THREE.LineBasicMaterial({ color: col, depthTest: false })
+      );
+      l.frustumCulled = false;
+      l.renderOrder = 991;
+      return l;
+    };
+    gridGroup.add(makeAxis(new THREE.Vector3(-AXIS_HALF, 0, 0), new THREE.Vector3(AXIS_HALF, 0, 0), 0xff4444));
+    gridGroup.add(makeAxis(new THREE.Vector3(0, -AXIS_HALF, 0), new THREE.Vector3(0, AXIS_HALF, 0), 0x4488ff));
+
     gridGroup.position.copy(mesh.position);
     gridGroup.quaternion.copy(mesh.quaternion);
     scene.add(gridGroup);
@@ -523,9 +618,54 @@ const Viewport = () => {
       });
       sketchShapesGroupRef.current = null;
     }
-    const group = buildSketchShapesGroup(selectedId, items, objectsRef);
-    if (group) { scene.add(group); sketchShapesGroupRef.current = group; }
-  }, [selectedId, items]);
+    const group = buildSketchShapesGroup(selectedId, items, objectsRef, rendererRef.current, constraintsVisible);
+    if (group) {
+      if (renderMode === "smooth") group.visible = false;
+      scene.add(group);
+      sketchShapesGroupRef.current = group;
+    }
+  }, [selectedId, items, constraintsVisible]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Object-view sketch construction lines ────────────────────────────────
+
+  useEffect(() => {
+    if (!sceneRef.current || !rendererRef.current) return;
+    const scene = sceneRef.current;
+    if (allSketchGroupRef.current) {
+      scene.remove(allSketchGroupRef.current);
+      allSketchGroupRef.current.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
+      allSketchGroupRef.current = null;
+    }
+    if (sketchMode) return;
+    const group = buildAllSketchShapesGroup(items, objectsRef, rendererRef.current);
+    if (group) {
+      if (renderMode === "smooth") group.visible = false;
+      scene.add(group);
+      allSketchGroupRef.current = group;
+    }
+  }, [items, sketchMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Extrude profile selection fills ──────────────────────────────────────
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (extrudeSelectGroupRef.current) {
+      scene.remove(extrudeSelectGroupRef.current);
+      extrudeSelectGroupRef.current.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
+      extrudeSelectGroupRef.current = null;
+    }
+    if (extrudeSelectMode === "profile") {
+      const group = buildExtrudeSelectGroup(items, objectsRef);
+      if (group) { scene.add(group); extrudeSelectGroupRef.current = group; }
+    }
+  }, [extrudeSelectMode, items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Emissive highlight ────────────────────────────────────────────────────
 
@@ -551,6 +691,9 @@ const Viewport = () => {
       envTextureRef,
       sketchModeRef,
     });
+    const isSmooth = renderMode === "smooth";
+    if (allSketchGroupRef.current) allSketchGroupRef.current.visible = !isSmooth;
+    if (sketchShapesGroupRef.current) sketchShapesGroupRef.current.visible = !isSmooth;
   }, [renderMode]);
 
   return (
@@ -565,8 +708,119 @@ const Viewport = () => {
           Click an axis plane or object face to place the sketch · Esc to cancel
         </div>
       )}
+      {extrudeSelectMode === "profile" && (
+        <div className="sketch-placement-hint">
+          Click an enclosed sketch region or flat object face · Esc to cancel
+        </div>
+      )}
+      {extrudeSelectMode === "depth" && (
+        <div className="sketch-placement-hint">
+          Move mouse to set depth · Click to confirm · Esc to cancel
+        </div>
+      )}
       {activeSketchTool && sketchDrawPhase !== "second" && (
         <div className="sketch-placement-hint">Click to set the start point</div>
+      )}
+      {sketchMode && sketchConstraintMode === "coincident" && (
+        <div className="sketch-placement-hint">
+          {sketchConstraintFirstPoint ? "Select second point · Esc to cancel" : "Select a point · Esc to cancel"}
+        </div>
+      )}
+      {sketchMode && sketchConstraintMode === "distance" && !sketchDistanceInput && (
+        <div className="sketch-placement-hint">
+          {sketchConstraintFirstPoint ? "Select second point · Esc to cancel" : "Click a line to set its length, or click two points · Esc to cancel"}
+        </div>
+      )}
+      {sketchMode && sketchDistanceInput && (
+        <div className="sketch-distance-input-overlay">
+          <span>{sketchDistanceInput.constraintIdx != null ? "Edit distance (mm):" : "Distance (mm):"}</span>
+          <input
+            type="number"
+            step="0.1"
+            min="0.01"
+            autoFocus
+            defaultValue={(sketchDistanceInput.defaultDistance * MM_PER_UNIT).toFixed(2)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") {
+                const mm = parseFloat(e.target.value);
+                if (!isNaN(mm) && mm > 0) {
+                  const { shapeAIdx, pointA, shapeBIdx, pointB, constraintIdx } = sketchDistanceInput;
+                  const d = mm / MM_PER_UNIT;
+                  if (constraintIdx != null) {
+                    useStore.getState().updateSketchConstraintDistance(selectedId, constraintIdx, d);
+                  } else {
+                    useStore.getState().addSketchConstraints(selectedId, [{
+                      type: "distance", shapeAIdx, pointA, shapeBIdx, pointB, distance: d,
+                    }]);
+                  }
+                  // Enforce the new/changed distance immediately.
+                  // Key: use B (the shape being moved) as the primary, not A.
+                  // Using A as primary causes the coincident BFS to mark B as "updated"
+                  // before the distance enforcement pass runs, which makes it skip.
+                  itemsRef.current = useStore.getState().items;
+                  if (propagateConstraintsRef.current) {
+                    const freshItem = itemsRef.current.find((i) => i.id === selectedId);
+                    if (freshItem) {
+                      if (shapeAIdx === shapeBIdx) {
+                        // Same shape: line-length — keep pointA end fixed, slide pointB end.
+                        const shape = freshItem.shapes[shapeAIdx];
+                        if (shape) {
+                          const pA = getShapePoint(shape, pointA);
+                          const pB = getShapePoint(shape, pointB);
+                          if (pA && pB) {
+                            const ddx = pB.x - pA.x, ddy = pB.y - pA.y;
+                            const curLen = Math.hypot(ddx, ddy);
+                            if (curLen > 1e-10) {
+                              const newEnd = { x: pA.x + ddx / curLen * d, y: pA.y + ddy / curLen * d };
+                              const newShape = moveShapePoint(shape, pointB, newEnd);
+                              if (newShape) {
+                                const propagated = propagateConstraintsRef.current(selectedId, shapeAIdx, newShape, pointB);
+                                if (propagated.size > 1) useStore.getState().updateSketchShapes(selectedId, propagated);
+                                else useStore.getState().updateSketchShape(selectedId, shapeAIdx, newShape);
+                              }
+                            }
+                          }
+                        }
+                      } else {
+                        // Two shapes: keep A fixed, move B's constrained point to distance d from A.
+                        const sA = freshItem.shapes[shapeAIdx];
+                        const sB = freshItem.shapes[shapeBIdx];
+                        if (sA && sB) {
+                          const pA = getShapePoint(sA, pointA);
+                          const pB = getShapePoint(sB, pointB);
+                          if (pA && pB) {
+                            const ddx = pB.x - pA.x, ddy = pB.y - pA.y;
+                            const curDist = Math.hypot(ddx, ddy);
+                            if (curDist > 1e-10) {
+                              const newPt = { x: pA.x + ddx / curDist * d, y: pA.y + ddy / curDist * d };
+                              const newSB = moveShapePoint(sB, pointB, newPt);
+                              if (newSB) {
+                                const propagated = propagateConstraintsRef.current(selectedId, shapeBIdx, newSB, pointB);
+                                if (propagated.size > 1) useStore.getState().updateSketchShapes(selectedId, propagated);
+                                else useStore.getState().updateSketchShape(selectedId, shapeBIdx, newSB);
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                useStore.getState().setSketchDistanceInput(null);
+                useStore.getState().setSketchConstraintMode(null);
+              } else if (e.key === "Escape") {
+                useStore.getState().setSketchDistanceInput(null);
+                useStore.getState().setSketchConstraintMode(null);
+              }
+            }}
+          />
+        </div>
+      )}
+      {sketchMode && sketchModifyMode && (
+        <div className="sketch-placement-hint">
+          {sketchModifyMode === "chamfer" ? "Click a corner between two lines to chamfer" : "Click a corner between two lines to bevel"} · Esc to cancel
+        </div>
       )}
       <div ref={dimHintRef} className="sketch-dim-overlay" style={{ display: "none" }} />
       {isInSketchMode && (
@@ -579,7 +833,11 @@ const Viewport = () => {
         </button>
       )}
       {widgetVisible && (
-        <RotationWidget rotationState={rotationState} onOrientationChange={handleOrientationChange} />
+        <RotationWidget
+          rotationState={rotationState}
+          onOrientationChange={sketchMode ? null : handleOrientationChange}
+          style={sketchMode ? { pointerEvents: "none", opacity: 0.35 } : undefined}
+        />
       )}
     </div>
   );

@@ -1,8 +1,12 @@
 import * as THREE from "three";
+import { Line2 } from "three/addons/lines/Line2.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { useStore } from "../store";
 import {
   getObjectDimensions, getObjectExtent, redrawDimSprite, placeDimLabels,
   buildSketchShape, getSketchShapePoints, sketchDimText, MM_PER_UNIT,
+  getSnapPoints, getShapeLength, moveShapePoint, getShapePoint,
 } from "./sceneObjects.js";
 
 export function loadCameraState() {
@@ -74,9 +78,11 @@ export function attachCameraControls(ctx) {
     sketchModeRef, sketchDrawRef, sketchPlacementModeRef, sketchPlacementPlanesRef,
     activeSketchToolRef, selectedIdRef, selectedIdsRef, dimHintRef,
     cameraAnimRef, savedCameraStateRef, planeRef, axisGroupRef,
+    sketchGridGroupRef, sketchShapesGroupRef,
+    extrudeSelectGroupRef, extrudeSelectModeRef,
     orbitIndicator, gridMaterial, composerRef,
     setRotationState, setHoveredId, selectItem, setSketchDrawPhase,
-    sceneRef,
+    sceneRef, propagateConstraintsRef,
   } = ctx;
 
   const controls = cameraControlsRef.current;
@@ -112,53 +118,1931 @@ export function attachCameraControls(ctx) {
     }
   };
 
-  const updateSketchPreview = (screenX, screenY) => {
-    const draw = sketchDrawRef.current;
-    if (!draw) return;
+  // ── Snap helpers ──────────────────────────────────────────────────────────
+  let currentSnapIndicator = null;
+  const clearSnapIndicator = () => {
+    if (currentSnapIndicator) {
+      scene.remove(currentSnapIndicator);
+      currentSnapIndicator.geometry.dispose();
+      currentSnapIndicator.material.dispose();
+      currentSnapIndicator = null;
+    }
+  };
+
+  const showSnapIndicator = (snapLocal, sketchMesh) => {
+    clearSnapIndicator();
+    const SNAP_R = 0.18;
+    const toW = (x, y) => {
+      const v = new THREE.Vector3(x, y, 0.006);
+      v.applyQuaternion(sketchMesh.quaternion);
+      v.add(sketchMesh.position);
+      return v;
+    };
+    const circlePts = Array.from({ length: 17 }, (_, i) => {
+      const a = (i / 16) * Math.PI * 2;
+      return toW(snapLocal.x + Math.cos(a) * SNAP_R, snapLocal.y + Math.sin(a) * SNAP_R);
+    });
+    const geo = new THREE.BufferGeometry().setFromPoints(circlePts);
+    const mat = new THREE.LineBasicMaterial({ color: 0xffdd00, depthTest: false });
+    currentSnapIndicator = new THREE.Line(geo, mat);
+    currentSnapIndicator.renderOrder = 1005;
+    scene.add(currentSnapIndicator);
+  };
+
+  const findSnap = (screenX, screenY, shapes, sketchMesh, thresholdPx = 14) => {
+    if (!shapes || shapes.length === 0) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const snapPts = getSnapPoints(shapes);
+    let best = null;
+    let bestDist = thresholdPx;
+    for (const pt of snapPts) {
+      const world = new THREE.Vector3(pt.x, pt.y, 0.003);
+      world.applyQuaternion(sketchMesh.quaternion);
+      world.add(sketchMesh.position);
+      const ndc = world.clone().project(cameraRef.current);
+      const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
+      const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+      const dist = Math.hypot(screenX - sx, screenY - sy);
+      if (dist < bestDist) { bestDist = dist; best = pt; }
+    }
+    return best;
+  };
+
+  const makePreviewLine2 = (pts, color = 0x88ccff, opacity = 0.75) => {
+    if (pts.length < 2) return null;
+    const geo = new LineGeometry();
+    geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
+    const mat = new LineMaterial({
+      color, linewidth: 1.5, transparent: true, opacity, depthTest: false,
+      resolution: renderer.getSize(new THREE.Vector2()),
+    });
+    const line = new Line2(geo, mat);
+    line.computeLineDistances();
+    line.renderOrder = 1002;
+    return line;
+  };
+
+  const pointInPolygon2D = (pt, polygon) => {
+    const { x, y } = pt;
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x, yi = polygon[i].y;
+      const xj = polygon[j].x, yj = polygon[j].y;
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+        inside = !inside;
+    }
+    return inside;
+  };
+
+  const clearHoverFills = () => {
+    const g = sketchShapesGroupRef?.current;
+    if (g) g.children.forEach((c) => { if (c.userData.isRegionFill) c.visible = false; });
+  };
+
+  const updateHoverFills = (screenX, screenY) => {
+    const g = sketchShapesGroupRef?.current;
+    if (!g) return;
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!sketchMesh) { clearHoverFills(); return; }
+    const localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
+    if (!localPt) { clearHoverFills(); return; }
+    // First pass: determine which fill is the best match (highest renderOrder that contains pt)
+    let bestFill = null;
+    for (const c of g.children) {
+      if (!c.userData.isRegionFill) continue;
+      const inOuter = pointInPolygon2D(localPt, c.userData.polygon2D);
+      const inHole = (c.userData.holes2D || []).some((h) => pointInPolygon2D(localPt, h));
+      if (inOuter && !inHole) {
+        if (!bestFill || (c.renderOrder ?? 0) > (bestFill.renderOrder ?? 0)) bestFill = c;
+      }
+    }
+    // Second pass: show only the best match
+    g.children.forEach((c) => {
+      if (!c.userData.isRegionFill) return;
+      c.visible = c === bestFill;
+    });
+  };
+
+  // ── Sketch element hover highlights ──────────────────────────────────────
+  let hoveredSketchLine = null;
+  let hoveredSketchLineOrigColor = null;
+
+  const clearHoverLineHighlight = () => {
+    if (hoveredSketchLine) {
+      hoveredSketchLine.material.color.setHex(hoveredSketchLineOrigColor ?? 0x88aaff);
+      hoveredSketchLine = null;
+      hoveredSketchLineOrigColor = null;
+    }
+  };
+
+  // ── Constraint icon hover highlights ─────────────────────────────────────
+  let hoveredConstraintLines = []; // [{ lineObj, origColor }]
+
+  const clearConstraintHoverHighlight = () => {
+    hoveredConstraintLines.forEach(({ lineObj, origColor }) => {
+      if (lineObj.material && lineObj.material.color) lineObj.material.color.setHex(origColor);
+    });
+    hoveredConstraintLines = [];
+  };
+
+  const applyConstraintHoverHighlight = (shapeIndices, color) => {
+    clearConstraintHoverHighlight();
+    clearHoverLineHighlight();
+    const g = sketchShapesGroupRef?.current;
+    if (!g) return;
+    shapeIndices.forEach((idx) => {
+      const lineObj = g.children.find((c) => c.userData.shapeIdx === idx && c.material && c.material.color);
+      if (!lineObj) return;
+      hoveredConstraintLines.push({ lineObj, origColor: lineObj.material.color.getHex() });
+      lineObj.material.color.setHex(color);
+    });
+  };
+
+  const applyHoverLineHighlight = (lineObj) => {
+    if (hoveredSketchLine === lineObj) return;
+    clearHoverLineHighlight();
+    hoveredSketchLineOrigColor = lineObj.material.color.getHex();
+    lineObj.material.color.setHex(0xbbddff);
+    hoveredSketchLine = lineObj;
+  };
+
+  let currentHoverPointIndicator = null;
+  const clearHoverPointIndicator = () => {
+    if (currentHoverPointIndicator) {
+      scene.remove(currentHoverPointIndicator);
+      currentHoverPointIndicator.geometry.dispose();
+      currentHoverPointIndicator.material.dispose();
+      currentHoverPointIndicator = null;
+    }
+  };
+
+  const showHoverPointIndicator = (snapPt, sketchMesh) => {
+    clearHoverPointIndicator();
+    const R = 0.22;
+    const toW = (x, y) => {
+      const v = new THREE.Vector3(x, y, 0.007);
+      v.applyQuaternion(sketchMesh.quaternion);
+      v.add(sketchMesh.position);
+      return v;
+    };
+    const pts = Array.from({ length: 17 }, (_, i) => {
+      const a = (i / 16) * Math.PI * 2;
+      return toW(snapPt.x + Math.cos(a) * R, snapPt.y + Math.sin(a) * R);
+    });
+    const mat = new THREE.LineBasicMaterial({ color: 0x00ddff, depthTest: false });
+    currentHoverPointIndicator = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
+    currentHoverPointIndicator.renderOrder = 1006;
+    scene.add(currentHoverPointIndicator);
+  };
+
+  const updateSketchHover = (screenX, screenY) => {
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!sketchMesh) {
+      clearHoverLineHighlight(); clearHoverPointIndicator(); clearConstraintHoverHighlight();
+      renderer.domElement.style.cursor = "";
+      return;
+    }
+
+    // ── Constraint icon hover (screen-space distance check) ──────────────────
+    const CONSTRAINT_HIT_PX = 14;
+    const sketchGroup = sketchShapesGroupRef?.current;
+    if (sketchGroup) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      for (const cObj of sketchGroup.children) {
+        if (!cObj.userData.isConstraint) continue;
+        const lp = cObj.userData.constraintIconLocalPos;
+        if (!lp) continue;
+        const worldPt = new THREE.Vector3(lp.x, lp.y, 0.005)
+          .applyQuaternion(sketchMesh.quaternion)
+          .add(sketchMesh.position);
+        const ndc = worldPt.clone().project(cameraRef.current);
+        const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
+        const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+        if (Math.hypot(screenX - sx, screenY - sy) < CONSTRAINT_HIT_PX) {
+          applyConstraintHoverHighlight(
+            cObj.userData.constraintShapeIndices,
+            cObj.userData.constraintColor,
+          );
+          clearHoverPointIndicator();
+          renderer.domElement.style.cursor = "default";
+          return;
+        }
+      }
+    }
+    clearConstraintHoverHighlight();
+
+    // ── Point hover takes priority over line hover ────────────────────────────
+    const snap = findSnap(screenX, screenY, selItem?.shapes || [], sketchMesh);
+    if (snap) {
+      showHoverPointIndicator(snap, sketchMesh);
+      clearHoverLineHighlight();
+      renderer.domElement.style.cursor = "grab";
+      return;
+    }
+    clearHoverPointIndicator();
+
+    // ── Line hover ────────────────────────────────────────────────────────────
+    if (sketchGroup) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+      const lineObjs = sketchGroup.children.filter((c) => c.userData.shapeIdx != null);
+      const hits = hitTestSketchLines(ray, lineObjs);
+      if (hits.length > 0) {
+        applyHoverLineHighlight(hits[0].object);
+        renderer.domElement.style.cursor = "grab";
+        return;
+      }
+    }
+    clearHoverLineHighlight();
+    renderer.domElement.style.cursor = "";
+  };
+
+  const clearAllSketchHover = () => {
+    clearHoverLineHighlight();
+    clearHoverPointIndicator();
+    clearConstraintHoverHighlight();
+    renderer.domElement.style.cursor = "";
+  };
+
+  // Hit-test sketch Line2 objects with a wider click target than the visual linewidth.
+  const SKETCH_HIT_PX = 12;
+  const hitTestSketchLines = (ray, lineObjs) => {
+    lineObjs.forEach((l) => { l.userData._lw = l.material.linewidth; l.material.linewidth = SKETCH_HIT_PX; });
+    const hits = ray.intersectObjects(lineObjs, false);
+    lineObjs.forEach((l) => { l.material.linewidth = l.userData._lw; delete l.userData._lw; });
+    return hits;
+  };
+
+  // ── Sketch element selection + coincident constraints ─────────────────────
+  let sketchSelectionOverlay = null;
+  let coincidentFirstOverlay = null;
+  let multiSelectedIndices = [];
+  let multiSelectOverlays = [];
+  let marqueeStartScreen = null;
+  let marqueeActive = false;
+  let marqueeRectObj = null;
+  let lastClickTime = 0;
+  let lastClickX = 0;
+  let lastClickY = 0;
+  let sketchClipboard = null; // { shapes: [...], constraints: [...] }
+
+  const clearSketchSelectionOverlay = () => {
+    if (sketchSelectionOverlay) {
+      scene.remove(sketchSelectionOverlay);
+      if (sketchSelectionOverlay.geometry) sketchSelectionOverlay.geometry.dispose();
+      if (sketchSelectionOverlay.material) sketchSelectionOverlay.material.dispose();
+      sketchSelectionOverlay = null;
+    }
+  };
+
+  const clearCoincidentFirstOverlay = () => {
+    if (coincidentFirstOverlay) {
+      scene.remove(coincidentFirstOverlay);
+      coincidentFirstOverlay.geometry.dispose();
+      coincidentFirstOverlay.material.dispose();
+      coincidentFirstOverlay = null;
+    }
+  };
+
+  const makeRingOverlay = (localPt, sketchMesh, color, R = 0.25, zOff = 0.009) => {
+    const toW = (x, y) => {
+      const v = new THREE.Vector3(x, y, zOff);
+      v.applyQuaternion(sketchMesh.quaternion);
+      v.add(sketchMesh.position);
+      return v;
+    };
+    const pts = Array.from({ length: 17 }, (_, i) => {
+      const a = (i / 16) * Math.PI * 2;
+      return toW(localPt.x + Math.cos(a) * R, localPt.y + Math.sin(a) * R);
+    });
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false }));
+    line.renderOrder = 1007;
+    return line;
+  };
+
+  const sketchSelectPoint = (snap, sketchMesh) => {
+    clearSketchSelectionOverlay();
+    sketchSelectionOverlay = makeRingOverlay({ x: snap.x, y: snap.y }, sketchMesh, 0x00ff88);
+    scene.add(sketchSelectionOverlay);
+    useStore.getState().setSelectedSketchElement({ type: "point", shapeIdx: snap.shapeIdx, pointKey: snap.pointKey });
+  };
+
+  const sketchSelectLine = (shapeIdx, shape, sketchMesh) => {
+    clearSketchSelectionOverlay();
+    const pts = getSketchShapePoints(shape, sketchMesh);
+    if (pts.length >= 2) {
+      const geo = new LineGeometry();
+      geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
+      const mat = new LineMaterial({ color: 0x00ff88, linewidth: 2.5, depthTest: false, resolution: renderer.getSize(new THREE.Vector2()) });
+      sketchSelectionOverlay = new Line2(geo, mat);
+      sketchSelectionOverlay.computeLineDistances();
+      sketchSelectionOverlay.renderOrder = 1005;
+      scene.add(sketchSelectionOverlay);
+    }
+    useStore.getState().setSelectedSketchElement({ type: "line", shapeIdx });
+  };
+
+  const clearMarqueeRect = () => {
+    if (marqueeRectObj) {
+      scene.remove(marqueeRectObj);
+      marqueeRectObj.geometry.dispose();
+      marqueeRectObj.material.dispose();
+      marqueeRectObj = null;
+    }
+  };
+
+  const clearMultiSelectOverlays = () => {
+    useStore.getState().setSketchMultiSelectedIndices([]);
+    multiSelectOverlays.forEach((o) => {
+      scene.remove(o);
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+    multiSelectOverlays = [];
+  };
+
+  const showMultiSelectOverlays = (indices) => {
+    clearMultiSelectOverlays();
+    useStore.getState().setSketchMultiSelectedIndices([...indices]);
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const shapes = selItem.shapes || [];
+    indices.forEach((idx) => {
+      const shape = shapes[idx];
+      if (!shape) return;
+      const pts = getSketchShapePoints(shape, sketchMesh);
+      if (pts.length < 2) return;
+      const geo = new LineGeometry();
+      geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
+      const mat = new LineMaterial({ color: 0x44aaff, linewidth: 2.5, depthTest: false, resolution: renderer.getSize(new THREE.Vector2()) });
+      const line = new Line2(geo, mat);
+      line.computeLineDistances();
+      line.renderOrder = 1005;
+      scene.add(line);
+      multiSelectOverlays.push(line);
+    });
+  };
+
+  const updateMarquee = (screenX, screenY) => {
+    clearMarqueeRect();
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh || !marqueeStartScreen) return;
+    const p1 = screenToSketchLocal(marqueeStartScreen.x, marqueeStartScreen.y, sketchMesh);
+    const p2 = screenToSketchLocal(screenX, screenY, sketchMesh);
+    if (!p1 || !p2) return;
+    const toW = (lx, ly) => {
+      const v = new THREE.Vector3(lx, ly, 0.008);
+      v.applyQuaternion(sketchMesh.quaternion);
+      v.add(sketchMesh.position);
+      return v;
+    };
+    const corners = [toW(p1.x, p1.y), toW(p2.x, p1.y), toW(p2.x, p2.y), toW(p1.x, p2.y), toW(p1.x, p1.y)];
+    const geo = new THREE.BufferGeometry().setFromPoints(corners);
+    const mat = new THREE.LineBasicMaterial({ color: 0x88aaff, depthTest: false, transparent: true, opacity: 0.8 });
+    marqueeRectObj = new THREE.Line(geo, mat);
+    marqueeRectObj.renderOrder = 1010;
+    scene.add(marqueeRectObj);
+    // Find shapes with any endpoint inside the marquee bounds
+    const minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x);
+    const minY = Math.min(p1.y, p2.y), maxY = Math.max(p1.y, p2.y);
+    const shapes = selItem.shapes || [];
+    const inRect = new Set();
+    getSnapPoints(shapes).forEach((pt) => {
+      if (pt.x >= minX && pt.x <= maxX && pt.y >= minY && pt.y <= maxY) inRect.add(pt.shapeIdx);
+    });
+    multiSelectedIndices = [...inRect];
+    showMultiSelectOverlays(multiSelectedIndices);
+  };
+
+  const clearSketchSelection = () => {
+    clearSketchSelectionOverlay();
+    useStore.getState().setSelectedSketchElement(null);
+    clearMultiSelectOverlays();
+    multiSelectedIndices = [];
+  };
+
+  // Whenever sketch shapes are mutated (any store items change while in sketch
+  // mode), the selection overlay drawn at the old position becomes a ghost.
+  // Clear it so the user sees the updated geometry without stale highlights.
+  const unsubItems = useStore.subscribe(
+    (state) => state.items,
+    () => {
+      if (!sketchModeRef.current) return;
+      if (sketchSelectionOverlay) clearSketchSelectionOverlay();
+      if (multiSelectOverlays.length > 0) { clearMultiSelectOverlays(); multiSelectedIndices = []; }
+      clearConstraintHoverHighlight();
+    },
+  );
+
+  // BFS over coincident constraints to collect all shape indices reachable from startIdx
+  const collectConnectedShapes = (startIdx, shapes, constraints) => {
+    const visited = new Set([startIdx]);
+    const queue = [startIdx];
+    while (queue.length > 0) {
+      const idx = queue.shift();
+      for (const c of constraints) {
+        if (c.type !== "coincident") continue;
+        let other = -1;
+        if (c.shapeAIdx === idx && !visited.has(c.shapeBIdx)) other = c.shapeBIdx;
+        else if (c.shapeBIdx === idx && !visited.has(c.shapeAIdx)) other = c.shapeAIdx;
+        if (other >= 0 && shapes[other]) { visited.add(other); queue.push(other); }
+      }
+    }
+    return [...visited];
+  };
+
+  const trySelectSketchElement = (screenX, screenY) => {
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const shapes = selItem.shapes || [];
+    // Point hit first
+    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+    if (snap) {
+      sketchSelectPoint(snap, sketchMesh);
+      if (dimHintRef.current) dimHintRef.current.style.display = "none";
+      return;
+    }
+    // Line hit
+    const sketchGroup = sketchShapesGroupRef?.current;
+    if (sketchGroup) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+      const lineObjs = sketchGroup.children.filter((c) => c.userData.shapeIdx != null);
+      const hits = hitTestSketchLines(ray, lineObjs);
+      if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+        const shapeIdx = hits[0].object.userData.shapeIdx;
+        const shape = shapes[shapeIdx];
+        if (shape) {
+          sketchSelectLine(shapeIdx, shape, sketchMesh);
+          const len = getShapeLength(shape);
+          if (len !== null && dimHintRef.current) {
+            const rect2 = renderer.domElement.getBoundingClientRect();
+            dimHintRef.current.textContent = `${len.toFixed(1)} mm`;
+            dimHintRef.current.style.display = "block";
+            dimHintRef.current.style.left = `${screenX - rect2.left + 16}px`;
+            dimHintRef.current.style.top = `${screenY - rect2.top - 10}px`;
+          }
+          return;
+        }
+      }
+    }
+    // Region-fill click: select all boundary shapes that form the hovered area
+    const localForFill = screenToSketchLocal(screenX, screenY, sketchMesh);
+    const sketchGroup2 = sketchShapesGroupRef?.current;
+    if (localForFill && sketchGroup2) {
+      // Sort fills so higher renderOrder (inner fills) are checked first
+      const fillMeshes = sketchGroup2.children
+        .filter((c) => c.userData.isRegionFill)
+        .sort((a, b) => (b.renderOrder ?? 0) - (a.renderOrder ?? 0));
+      for (const fill of fillMeshes) {
+        const inOuter = pointInPolygon2D(localForFill, fill.userData.polygon2D);
+        const inHole = (fill.userData.holes2D || []).some((h) => pointInPolygon2D(localForFill, h));
+        if (inOuter && !inHole) {
+          const indices = fill.userData.shapeIndices || [];
+          if (indices.length > 0) {
+            multiSelectedIndices = indices;
+            showMultiSelectOverlays(indices);
+            clearSketchSelectionOverlay();
+            useStore.getState().setSelectedSketchElement(null);
+            if (dimHintRef.current) dimHintRef.current.style.display = "none";
+            return;
+          }
+        }
+      }
+    }
+    clearSketchSelection();
+    if (dimHintRef.current) dimHintRef.current.style.display = "none";
+  };
+
+  const handleDistanceConstraintClick = (screenX, screenY) => {
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const shapes = selItem.shapes || [];
+    const store = useStore.getState();
+    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+
+    if (!snap) {
+      // No snap point nearby — try a line hit-test for a line-length constraint
+      const sketchGroup = sketchShapesGroupRef?.current;
+      if (!sketchGroup) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+      const lineObjs = sketchGroup.children.filter((c) => c.userData.shapeIdx != null);
+      const hits = hitTestSketchLines(ray, lineObjs);
+      if (hits.length === 0 || hits[0].object.userData.shapeIdx == null) return;
+      const lineIdx = hits[0].object.userData.shapeIdx;
+      const shape = shapes[lineIdx];
+      if (!shape || shape.type !== "line") return;
+      const defaultDist = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1);
+      store.setSketchConstraintFirstPoint(null);
+      clearCoincidentFirstOverlay();
+      store.setSketchDistanceInput({
+        shapeAIdx: lineIdx, pointA: "start",
+        shapeBIdx: lineIdx, pointB: "end",
+        defaultDistance: defaultDist,
+      });
+      return;
+    }
+
+    const firstPt = store.sketchConstraintFirstPoint;
+    if (!firstPt) {
+      store.setSketchConstraintFirstPoint({ shapeIdx: snap.shapeIdx, pointKey: snap.pointKey });
+      clearCoincidentFirstOverlay();
+      coincidentFirstOverlay = makeRingOverlay({ x: snap.x, y: snap.y }, sketchMesh, 0xff8800);
+      scene.add(coincidentFirstOverlay);
+    } else {
+      if (firstPt.shapeIdx === snap.shapeIdx && firstPt.pointKey === snap.pointKey) return;
+      const firstShape = shapes[firstPt.shapeIdx];
+      const firstPos = firstShape ? getShapePoint(firstShape, firstPt.pointKey) : null;
+      const secondPos = { x: snap.x, y: snap.y };
+      if (firstPos) {
+        const defaultDist = Math.hypot(secondPos.x - firstPos.x, secondPos.y - firstPos.y);
+        store.setSketchDistanceInput({
+          shapeAIdx: firstPt.shapeIdx, pointA: firstPt.pointKey,
+          shapeBIdx: snap.shapeIdx,   pointB: snap.pointKey,
+          defaultDistance: defaultDist,
+        });
+        clearCoincidentFirstOverlay();
+        store.setSketchConstraintFirstPoint(null);
+      }
+    }
+  };
+
+  // Project a 2D point onto an infinite line through A→B. Returns the projected point.
+  const projectOntoLine = (pt, lineShape) => {
+    const ABx = lineShape.x2 - lineShape.x1, ABy = lineShape.y2 - lineShape.y1;
+    const len2 = ABx * ABx + ABy * ABy;
+    if (len2 < 1e-10) return { x: lineShape.x1, y: lineShape.y1 };
+    const t = ((pt.x - lineShape.x1) * ABx + (pt.y - lineShape.y1) * ABy) / len2;
+    return { x: lineShape.x1 + t * ABx, y: lineShape.y1 + t * ABy };
+  };
+
+  const handleCoincidentClick = (screenX, screenY) => {
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const shapes = selItem.shapes || [];
+    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+    const store = useStore.getState();
+    const firstPt = store.sketchConstraintFirstPoint;
+
+    if (!snap) {
+      // No nearby point — if a first point is already selected, try a line-body hit
+      // to create a point-on-line constraint.
+      if (!firstPt) return;
+      const sketchGroup = sketchShapesGroupRef?.current;
+      if (!sketchGroup) return;
+      const ray = makeRay(screenX, screenY);
+      const lineObjs = sketchGroup.children.filter((c) => c.userData.shapeIdx != null);
+      const hits = hitTestSketchLines(ray, lineObjs);
+      if (hits.length === 0 || hits[0].object.userData.shapeIdx == null) return;
+      const lineIdx = hits[0].object.userData.shapeIdx;
+      const lineShape = shapes[lineIdx];
+      if (!lineShape || lineShape.type !== "line") return;
+      const ptShape = shapes[firstPt.shapeIdx];
+      const ptPos = ptShape ? getShapePoint(ptShape, firstPt.pointKey) : null;
+      if (!ptPos) return;
+      // Project the point onto the line and commit
+      const projected = projectOntoLine(ptPos, lineShape);
+      const newPtShape = moveShapePoint(ptShape, firstPt.pointKey, projected);
+      if (newPtShape) {
+        const propagated = propagateConstraints(selectedIdRef.current, firstPt.shapeIdx, newPtShape, firstPt.pointKey);
+        if (propagated.size > 1) store.updateSketchShapes(selectedIdRef.current, propagated);
+        else store.updateSketchShape(selectedIdRef.current, firstPt.shapeIdx, newPtShape);
+      }
+      store.addSketchConstraints(selectedIdRef.current, [{
+        type: "onLine", pointShapeIdx: firstPt.shapeIdx, pointKey: firstPt.pointKey, lineShapeIdx: lineIdx,
+      }]);
+      store.setSketchConstraintMode(null);
+      store.setSketchConstraintFirstPoint(null);
+      clearCoincidentFirstOverlay();
+      clearSketchSelection();
+      return;
+    }
+
+    if (!firstPt) {
+      store.setSketchConstraintFirstPoint({ shapeIdx: snap.shapeIdx, pointKey: snap.pointKey });
+      clearCoincidentFirstOverlay();
+      coincidentFirstOverlay = makeRingOverlay({ x: snap.x, y: snap.y }, sketchMesh, 0xff8800);
+      scene.add(coincidentFirstOverlay);
+    } else {
+      if (firstPt.shapeIdx === snap.shapeIdx && firstPt.pointKey === snap.pointKey) return;
+      const firstShape = shapes[firstPt.shapeIdx];
+      const firstPos = firstShape ? getShapePoint(firstShape, firstPt.pointKey) : null;
+      if (firstPos) {
+        const secondShape = shapes[snap.shapeIdx];
+        const newSecondShape = secondShape ? moveShapePoint(secondShape, snap.pointKey, firstPos) : null;
+        let currentShapes = shapes; // shapes after propagation, for coincident scan
+        if (newSecondShape) {
+          const propagated = propagateConstraints(selectedIdRef.current, snap.shapeIdx, newSecondShape, snap.pointKey);
+          if (propagated.size > 1) store.updateSketchShapes(selectedIdRef.current, propagated);
+          else store.updateSketchShape(selectedIdRef.current, snap.shapeIdx, newSecondShape);
+          // Build updated snapshot so we can detect which points landed at firstPos
+          currentShapes = shapes.slice();
+          propagated.forEach((s, i) => { currentShapes[i] = s; });
+        }
+
+        // Primary constraint: A → B
+        const newConstraints = [{
+          type: "coincident",
+          shapeAIdx: firstPt.shapeIdx, pointA: firstPt.pointKey,
+          shapeBIdx: snap.shapeIdx,   pointB: snap.pointKey,
+        }];
+
+        // Auto-link every other point that is now sitting at firstPos (including
+        // those that arrived there because they were coincident with B and moved
+        // during propagation). This ensures a multi-line junction gets all of its
+        // constraints in one operation.
+        const EPS_COINCI = 1e-3;
+        const existingConstraints = selItem.constraints || [];
+        getSnapPoints(currentShapes).forEach((sp) => {
+          if (sp.shapeIdx === firstPt.shapeIdx && sp.pointKey === firstPt.pointKey) return; // A itself
+          if (sp.shapeIdx === snap.shapeIdx   && sp.pointKey === snap.pointKey)   return; // B (already primary)
+          const spPos = getShapePoint(currentShapes[sp.shapeIdx], sp.pointKey);
+          if (!spPos) return;
+          if (Math.hypot(spPos.x - firstPos.x, spPos.y - firstPos.y) > EPS_COINCI) return;
+          // Already linked to A?
+          const linked =
+            existingConstraints.some((c) =>
+              c.type === "coincident" && (
+                (c.shapeAIdx === firstPt.shapeIdx && c.pointA === firstPt.pointKey && c.shapeBIdx === sp.shapeIdx && c.pointB === sp.pointKey) ||
+                (c.shapeBIdx === firstPt.shapeIdx && c.pointB === firstPt.pointKey && c.shapeAIdx === sp.shapeIdx && c.pointA === sp.pointKey)
+              )
+            ) ||
+            newConstraints.some((c) =>
+              c.shapeAIdx === firstPt.shapeIdx && c.pointA === firstPt.pointKey &&
+              c.shapeBIdx === sp.shapeIdx      && c.pointB === sp.pointKey
+            );
+          if (!linked) {
+            newConstraints.push({
+              type: "coincident",
+              shapeAIdx: firstPt.shapeIdx, pointA: firstPt.pointKey,
+              shapeBIdx: sp.shapeIdx,      pointB: sp.pointKey,
+            });
+          }
+        });
+
+        store.addSketchConstraints(selectedIdRef.current, newConstraints);
+      }
+      store.setSketchConstraintMode(null);
+      store.setSketchConstraintFirstPoint(null);
+      clearCoincidentFirstOverlay();
+      clearSketchSelection();
+    }
+  };
+
+  // ── Chamfer / Bevel ──────────────────────────────────────────────────────
+  const MODIFY_DIST = 0.25;
+
+  let modifyPreviewObjs = [];
+  const clearModifyPreview = () => {
+    modifyPreviewObjs.forEach((o) => {
+      scene.remove(o);
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+    modifyPreviewObjs = [];
+  };
+
+  const findJunction = (snap, shapes, constraints) => {
+    for (const c of constraints) {
+      if (c.type !== "coincident") continue;
+      let aIdx, aKey, bIdx, bKey;
+      if (c.shapeAIdx === snap.shapeIdx && c.pointA === snap.pointKey) {
+        aIdx = c.shapeAIdx; aKey = c.pointA; bIdx = c.shapeBIdx; bKey = c.pointB;
+      } else if (c.shapeBIdx === snap.shapeIdx && c.pointB === snap.pointKey) {
+        aIdx = c.shapeBIdx; aKey = c.pointB; bIdx = c.shapeAIdx; bKey = c.pointA;
+      } else continue;
+      if (shapes[aIdx]?.type === "line" && shapes[bIdx]?.type === "line")
+        return { aIdx, aKey, bIdx, bKey, constraint: c };
+    }
+    return null;
+  };
+
+  const lineEndpoint = (shape, key) =>
+    key === "start" ? { x: shape.x1, y: shape.y1 } : { x: shape.x2, y: shape.y2 };
+
+  const norm2 = (v) => { const l = Math.hypot(v.x, v.y); return l < 1e-10 ? v : { x: v.x / l, y: v.y / l }; };
+
+  const computeModify = (shapes, junc, dist) => {
+    const { aIdx, aKey, bIdx, bKey } = junc;
+    const sA = shapes[aIdx], sB = shapes[bIdx];
+    const P = lineEndpoint(sA, aKey);
+    const otherA = aKey === "start" ? { x: sA.x2, y: sA.y2 } : { x: sA.x1, y: sA.y1 };
+    const otherB = bKey === "start" ? { x: sB.x2, y: sB.y2 } : { x: sB.x1, y: sB.y1 };
+    const uA = norm2({ x: otherA.x - P.x, y: otherA.y - P.y });
+    const uB = norm2({ x: otherB.x - P.x, y: otherB.y - P.y });
+    const trimA = { x: P.x + uA.x * dist, y: P.y + uA.y * dist };
+    const trimB = { x: P.x + uB.x * dist, y: P.y + uB.y * dist };
+    return { P, uA, uB, trimA, trimB, sA, sB, aIdx, aKey, bIdx, bKey };
+  };
+
+  const buildBevelArc = (P, uA, uB, trimA, trimB) => {
+    // Perpendicular at each trim point pointing inward
+    const toB = { x: trimB.x - trimA.x, y: trimB.y - trimA.y };
+    const pA1 = { x: -uA.y, y: uA.x }, pA2 = { x: uA.y, y: -uA.x };
+    const pA = (pA1.x * toB.x + pA1.y * toB.y > 0) ? pA1 : pA2;
+    const toA = { x: trimA.x - trimB.x, y: trimA.y - trimB.y };
+    const pB1 = { x: -uB.y, y: uB.x }, pB2 = { x: uB.y, y: -uB.x };
+    const pB = (pB1.x * toA.x + pB1.y * toA.y > 0) ? pB1 : pB2;
+    const dx = trimB.x - trimA.x, dy = trimB.y - trimA.y;
+    const denom = pA.x * pB.y - pA.y * pB.x;
+    if (Math.abs(denom) < 1e-10) return null;
+    const t = (dx * pB.y - dy * pB.x) / denom;
+    const cx = trimA.x + t * pA.x, cy = trimA.y + t * pA.y;
+    const r = Math.hypot(cx - trimA.x, cy - trimA.y);
+    const startAngle = Math.atan2(trimA.y - cy, trimA.x - cx);
+    const rawEnd = Math.atan2(trimB.y - cy, trimB.x - cx);
+    // Choose the arc that curves toward P (interior fillet)
+    const ccwSpan = ((rawEnd - startAngle) + 2 * Math.PI) % (2 * Math.PI);
+    const cwSpan = 2 * Math.PI - ccwSpan;
+    const midCW = startAngle - cwSpan / 2;
+    const midCCW = startAngle + ccwSpan / 2;
+    const dCW = Math.hypot(cx + r * Math.cos(midCW) - P.x, cy + r * Math.sin(midCW) - P.y);
+    const dCCW = Math.hypot(cx + r * Math.cos(midCCW) - P.x, cy + r * Math.sin(midCCW) - P.y);
+    const endAngle = dCW < dCCW ? startAngle - cwSpan : startAngle + ccwSpan;
+    return { type: "arc", cx, cy, r, startAngle, endAngle };
+  };
+
+  const applyModify = (screenX, screenY, mode) => {
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const shapes = selItem.shapes || [];
+    const constraints = selItem.constraints || [];
+    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+    if (!snap) return;
+    const junc = findJunction(snap, shapes, constraints);
+    if (!junc) return;
+    const m = computeModify(shapes, junc, MODIFY_DIST);
+    const newSA = moveShapePoint(m.sA, m.aKey, m.trimA);
+    const newSB = moveShapePoint(m.sB, m.bKey, m.trimB);
+    if (!newSA || !newSB) return;
+    // Propagate constraints from each trimmed line so anything attached to their
+    // far ends follows the trim.
+    const propA = propagateConstraints(selectedIdRef.current, m.aIdx, newSA, m.aKey);
+    const propB = propagateConstraints(selectedIdRef.current, m.bIdx, newSB, m.bKey);
+    const updates = new Map([...propA, ...propB]);
+    let newElement;
+    if (mode === "chamfer") {
+      newElement = { type: "line", x1: m.trimA.x, y1: m.trimA.y, x2: m.trimB.x, y2: m.trimB.y };
+    } else {
+      newElement = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
+      if (!newElement) {
+        newElement = { type: "line", x1: m.trimA.x, y1: m.trimA.y, x2: m.trimB.x, y2: m.trimB.y };
+      } else {
+        newElement.kind = "bevel";
+        newElement.bevelData = { aIdx: m.aIdx, aKey: m.aKey, bIdx: m.bIdx, bKey: m.bKey, dist: MODIFY_DIST };
+      }
+    }
+    const newIdx = shapes.length;
+    const newConstraints = [
+      { type: "coincident", shapeAIdx: newIdx, pointA: "start", shapeBIdx: m.aIdx, pointB: m.aKey },
+      { type: "coincident", shapeAIdx: newIdx, pointA: "end",   shapeBIdx: m.bIdx, pointB: m.bKey },
+    ];
+    const juncConstraint = junc.constraint;
+    useStore.getState().applySketchModify(
+      selectedIdRef.current, updates, newElement,
+      (c) => c === juncConstraint,
+      newConstraints,
+    );
+    clearModifyPreview();
+  };
+
+  const showModifyPreview = (screenX, screenY, mode) => {
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) { clearModifyPreview(); return; }
+    const shapes = selItem.shapes || [];
+    const constraints = selItem.constraints || [];
+    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+    if (!snap) { clearModifyPreview(); renderer.domElement.style.cursor = ""; return; }
+    const junc = findJunction(snap, shapes, constraints);
+    if (!junc) { clearModifyPreview(); renderer.domElement.style.cursor = "crosshair"; return; }
+    clearModifyPreview();
+    renderer.domElement.style.cursor = "pointer";
+    const m = computeModify(shapes, junc, MODIFY_DIST);
+    const toW = (lx, ly) => {
+      const v = new THREE.Vector3(lx, ly, 0.006);
+      v.applyQuaternion(sketchMesh.quaternion);
+      v.add(sketchMesh.position);
+      return v;
+    };
+    const previewMat = new THREE.LineBasicMaterial({ color: 0xffcc44, depthTest: false });
+    const addPreview = (pts) => {
+      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), previewMat);
+      l.renderOrder = 1008;
+      scene.add(l);
+      modifyPreviewObjs.push(l);
+    };
+    // Trimmed line A
+    const newSA = moveShapePoint(m.sA, m.aKey, m.trimA);
+    if (newSA) { const pts = getSketchShapePoints(newSA, sketchMesh); if (pts.length >= 2) addPreview(pts); }
+    // Trimmed line B
+    const newSB = moveShapePoint(m.sB, m.bKey, m.trimB);
+    if (newSB) { const pts = getSketchShapePoints(newSB, sketchMesh); if (pts.length >= 2) addPreview(pts); }
+    // New element
+    if (mode === "chamfer") {
+      addPreview([toW(m.trimA.x, m.trimA.y), toW(m.trimB.x, m.trimB.y)]);
+    } else {
+      const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
+      if (arc) {
+        const pts = getSketchShapePoints(arc, sketchMesh);
+        if (pts.length >= 2) addPreview(pts);
+      }
+    }
+  };
+
+  // ── Extrude profile selection ─────────────────────────────────────────────
+
+  let extrudePreviewMesh = null;
+  let extrudeProfileData = null;
+  let extrudeDepthOriginV3 = null;
+  let extrudeNormalV3 = null;
+
+  const clearExtrudePreview = () => {
+    if (extrudePreviewMesh) {
+      scene.remove(extrudePreviewMesh);
+      extrudePreviewMesh.geometry.dispose();
+      extrudePreviewMesh.material.dispose();
+      extrudePreviewMesh = null;
+    }
+  };
+
+  const buildExtrudePreviewMesh = (profile, depth) => {
+    clearExtrudePreview();
+    const poly = profile.polygon2D;
+    if (!poly || poly.length < 3) return;
+    const shape = new THREE.Shape(poly.map((p) => new THREE.Vector2(p.x, p.y)));
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.05, depth), bevelEnabled: false });
+    const mat = new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthTest: true });
+    extrudePreviewMesh = new THREE.Mesh(geo, mat);
+    const rot = profile.rotation;
+    extrudePreviewMesh.rotation.set(rot.x, rot.y, rot.z);
+    const pos = profile.position;
+    extrudePreviewMesh.position.set(pos.x, pos.y, pos.z);
+    extrudePreviewMesh.renderOrder = 10;
+    scene.add(extrudePreviewMesh);
+  };
+
+  const makeRay = (screenX, screenY) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    return ray;
+  };
+
+  const convexHull2D = (points) => {
+    if (points.length <= 3) return points;
+    let lo = 0;
+    for (let i = 1; i < points.length; i++) if (points[i].x < points[lo].x) lo = i;
+    const hull = [];
+    let p = lo, safety = 0;
+    do {
+      hull.push(points[p]);
+      let q = (p + 1) % points.length;
+      for (let i = 0; i < points.length; i++) {
+        const cross = (points[q].x - points[p].x) * (points[i].y - points[p].y) -
+                      (points[q].y - points[p].y) * (points[i].x - points[p].x);
+        if (cross > 0) q = i;
+      }
+      p = q;
+    } while (p !== lo && ++safety <= points.length + 2);
+    return hull;
+  };
+
+  const extractFaceProfile = (hit) => {
+    const hitMesh = hit.object;
+    const localNormal = hit.face.normal.clone();
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(hitMesh.matrixWorld);
+    const worldNormal = localNormal.clone().applyMatrix3(normalMatrix).normalize();
+
+    const posAttr = hitMesh.geometry.getAttribute("position");
+    const idxAttr = hitMesh.geometry.index;
+    const triCount = idxAttr ? idxAttr.count / 3 : posAttr.count / 3;
+    const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+    const seen = new Map();
+    for (let i = 0; i < triCount; i++) {
+      let a, b, c;
+      if (idxAttr) { a = idxAttr.getX(i*3); b = idxAttr.getX(i*3+1); c = idxAttr.getX(i*3+2); }
+      else { a = i*3; b = i*3+1; c = i*3+2; }
+      vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+      vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+      vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
+      const triNorm = new THREE.Vector3().crossVectors(
+        new THREE.Vector3().subVectors(vB, vA),
+        new THREE.Vector3().subVectors(vC, vA),
+      ).normalize();
+      if (triNorm.dot(localNormal) < 0.99) continue;
+      for (const v of [vA, vB, vC]) {
+        const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
+        if (!seen.has(key)) seen.set(key, v.clone().applyMatrix4(hitMesh.matrixWorld));
+      }
+    }
+    if (seen.size < 3) return null;
+
+    // Build face-local 2D coordinate system consistent with the rotation quaternion
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), worldNormal);
+    const euler = new THREE.Euler().setFromQuaternion(q);
+    const xLocal = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    const yLocal = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+
+    const origin = hit.point.clone();
+    const verts2D = [...seen.values()].map((v) => {
+      const rel = v.clone().sub(origin);
+      return { x: rel.dot(xLocal), y: rel.dot(yLocal) };
+    });
+    const polygon2D = convexHull2D(verts2D);
+    if (polygon2D.length < 3) return null;
+
+    return {
+      type: "face",
+      polygon2D,
+      position: { x: origin.x, y: origin.y, z: origin.z },
+      rotation: { x: euler.x, y: euler.y, z: euler.z },
+      normalWorld: { x: worldNormal.x, y: worldNormal.y, z: worldNormal.z },
+    };
+  };
+
+  const computeExtrudeDepth = (screenX, screenY) => {
+    if (!extrudeDepthOriginV3 || !extrudeNormalV3) return 1.0;
+    const ray = makeRay(screenX, screenY);
+    const camDir = new THREE.Vector3();
+    cameraRef.current.getWorldDirection(camDir);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir, extrudeDepthOriginV3);
+    const hit = new THREE.Vector3();
+    if (!ray.ray.intersectPlane(plane, hit)) return 1.0;
+    const depth = hit.sub(extrudeDepthOriginV3).dot(extrudeNormalV3);
+    return Math.max(0.05, depth);
+  };
+
+  const handleExtrudeHover = (screenX, screenY) => {
+    const fills = extrudeSelectGroupRef && extrudeSelectGroupRef.current ? extrudeSelectGroupRef.current.children : [];
+    fills.forEach((m) => { m.material.opacity = 0; });
+    const ray = makeRay(screenX, screenY);
+    // Check sketch fills first
+    if (fills.length > 0) {
+      const hits = ray.intersectObjects(fills, false);
+      if (hits.length > 0) {
+        hits[0].object.material.opacity = 0.3;
+        renderer.domElement.style.cursor = "pointer";
+        clearFaceHighlight();
+        return;
+      }
+    }
+    // Check solid object faces
+    const solids = Object.values(objectsRef.current).filter((m) => {
+      if (!m.visible) return false;
+      const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
+      return it && it.type !== "sketch" && it.type !== "extrude";
+    });
+    const solidHits = ray.intersectObjects(solids, false);
+    if (solidHits.length > 0) {
+      applyFaceHighlight(solidHits[0], 0x4488ff);
+      renderer.domElement.style.cursor = "pointer";
+      return;
+    }
+    clearFaceHighlight();
+    renderer.domElement.style.cursor = "crosshair";
+  };
+
+  const handleExtrudeProfileClick = (screenX, screenY) => {
+    const fills = extrudeSelectGroupRef && extrudeSelectGroupRef.current ? extrudeSelectGroupRef.current.children : [];
+    const ray = makeRay(screenX, screenY);
+    if (fills.length > 0) {
+      const hits = ray.intersectObjects(fills, false);
+      if (hits.length > 0) {
+        const profile = hits[0].object.userData.extrudeProfile;
+        extrudeProfileData = profile;
+        extrudeDepthOriginV3 = new THREE.Vector3(profile.position.x, profile.position.y, profile.position.z);
+        extrudeNormalV3 = new THREE.Vector3(profile.normalWorld.x, profile.normalWorld.y, profile.normalWorld.z);
+        const retargetItem = itemsRef.current.find((i) => i.id === useStore.getState().extrudeRetargetId);
+        buildExtrudePreviewMesh(profile, retargetItem?.depth ?? 1.0);
+        useStore.getState().setExtrudeSelectMode("depth");
+        renderer.domElement.style.cursor = "ns-resize";
+        return;
+      }
+    }
+    const solids = Object.values(objectsRef.current).filter((m) => {
+      if (!m.visible) return false;
+      const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
+      return it && it.type !== "sketch" && it.type !== "extrude";
+    });
+    const solidHits = ray.intersectObjects(solids, false);
+    if (solidHits.length > 0) {
+      const profile = extractFaceProfile(solidHits[0]);
+      if (profile) {
+        extrudeProfileData = profile;
+        extrudeDepthOriginV3 = new THREE.Vector3(profile.position.x, profile.position.y, profile.position.z);
+        extrudeNormalV3 = new THREE.Vector3(profile.normalWorld.x, profile.normalWorld.y, profile.normalWorld.z);
+        const retargetItem = itemsRef.current.find((i) => i.id === useStore.getState().extrudeRetargetId);
+        buildExtrudePreviewMesh(profile, retargetItem?.depth ?? 1.0);
+        useStore.getState().setExtrudeSelectMode("depth");
+        renderer.domElement.style.cursor = "ns-resize";
+      }
+    }
+  };
+
+  const handleExtrudeDepthMove = (screenX, screenY) => {
+    const depth = computeExtrudeDepth(screenX, screenY);
+    if (extrudeProfileData) buildExtrudePreviewMesh(extrudeProfileData, depth);
+  };
+
+  const finalizeExtrude = (screenX, screenY) => {
+    if (!extrudeProfileData) return;
+    const depth = Math.max(0.05, computeExtrudeDepth(screenX, screenY));
+    clearExtrudePreview();
+    const store = useStore.getState();
+    const retargetId = store.extrudeRetargetId;
+    if (retargetId != null) {
+      store.retargetExtrude(retargetId, extrudeProfileData, depth);
+      store.setExtrudeRetargetId(null);
+    } else {
+      let maxId = 0;
+      store.history.forEach((e) => {
+        if (e.instruction && e.instruction.type === "create" && e.instruction.item.id > maxId)
+          maxId = e.instruction.item.id;
+      });
+      store.addItem({
+        id: maxId + 1,
+        name: `Extrude ${maxId + 1}`,
+        type: "extrude",
+        children: [],
+        profile: extrudeProfileData,
+        depth,
+        position: extrudeProfileData.position,
+        rotation: extrudeProfileData.rotation,
+        scale: { x: 1, y: 1, z: 1 },
+      });
+    }
+    extrudeProfileData = null;
+    extrudeDepthOriginV3 = null;
+    extrudeNormalV3 = null;
+    store.setExtrudeSelectMode(null);
+    renderer.domElement.style.cursor = "";
+  };
+
+  const cancelExtrude = () => {
+    clearExtrudePreview();
+    extrudeProfileData = null;
+    extrudeDepthOriginV3 = null;
+    extrudeNormalV3 = null;
+    const fills = extrudeSelectGroupRef && extrudeSelectGroupRef.current ? extrudeSelectGroupRef.current.children : [];
+    fills.forEach((m) => { m.material.opacity = 0; });
+    clearFaceHighlight();
+    renderer.domElement.style.cursor = "";
+    const store = useStore.getState();
+    store.setExtrudeSelectMode(null);
+    store.setExtrudeRetargetId(null);
+  };
+
+  const trySelectSketchLine = (screenX, screenY) => {
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchGroup = sketchShapesGroupRef?.current;
+    if (!selItem || !sketchGroup) {
+      if (dimHintRef.current) dimHintRef.current.style.display = "none";
+      return;
+    }
+    const rect = renderer.domElement.getBoundingClientRect();
+    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    const lineObjs = sketchGroup.children.filter((c) => c.userData.shapeIdx != null);
+    const hits = ray.intersectObjects(lineObjs, false);
+    if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+      const shape = selItem.shapes?.[hits[0].object.userData.shapeIdx];
+      if (shape) {
+        const len = getShapeLength(shape);
+        if (len !== null && dimHintRef.current) {
+          dimHintRef.current.textContent = `${len.toFixed(1)} mm`;
+          dimHintRef.current.style.display = "block";
+          dimHintRef.current.style.left = `${screenX - rect.left + 16}px`;
+          dimHintRef.current.style.top = `${screenY - rect.top - 10}px`;
+        }
+      }
+    } else {
+      if (dimHintRef.current) dimHintRef.current.style.display = "none";
+    }
+  };
+
+  // ── Sketch element dragging ───────────────────────────────────────────────
+  let sketchDrag = null; // { kind:"point"|"shape", shapeIdx, pointKey?, sketchMesh, selItemId, anchorLocal, origShape }
+
+  let currentDragIndicator = null;
+  const clearDragIndicator = () => {
+    if (currentDragIndicator) {
+      scene.remove(currentDragIndicator);
+      currentDragIndicator.geometry.dispose();
+      currentDragIndicator.material.dispose();
+      currentDragIndicator = null;
+    }
+  };
+  const showDragIndicator = (localPt, sketchMesh) => {
+    clearDragIndicator();
+    const R = 0.18;
+    const toW = (x, y) => {
+      const v = new THREE.Vector3(x, y, 0.008);
+      v.applyQuaternion(sketchMesh.quaternion);
+      v.add(sketchMesh.position);
+      return v;
+    };
+    const circlePts = Array.from({ length: 17 }, (_, i) => {
+      const a = (i / 16) * Math.PI * 2;
+      return toW(localPt.x + Math.cos(a) * R, localPt.y + Math.sin(a) * R);
+    });
+    const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc, depthTest: false });
+    currentDragIndicator = new THREE.Line(new THREE.BufferGeometry().setFromPoints(circlePts), mat);
+    currentDragIndicator.renderOrder = 1006;
+    scene.add(currentDragIndicator);
+  };
+
+  const updateSketchLineGeo = (lineObj, newShape, sketchMesh) => {
+    const pts = getSketchShapePoints(newShape, sketchMesh);
+    if (pts.length < 2) return;
+    lineObj.geometry.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
+    lineObj.computeLineDistances();
+  };
+
+  const translateShape = (shape, dx, dy) => {
+    switch (shape.type) {
+      case "line":   return { ...shape, x1: shape.x1+dx, y1: shape.y1+dy, x2: shape.x2+dx, y2: shape.y2+dy };
+      case "rect":   return { ...shape, x1: shape.x1+dx, y1: shape.y1+dy, x2: shape.x2+dx, y2: shape.y2+dy };
+      case "circle": return { ...shape, cx: shape.cx+dx, cy: shape.cy+dy };
+      case "ellipse":return { ...shape, cx: shape.cx+dx, cy: shape.cy+dy };
+      case "arc":    return { ...shape, cx: shape.cx+dx, cy: shape.cy+dy };
+      case "bezier": return { ...shape,
+        p0: { x: shape.p0.x+dx, y: shape.p0.y+dy },
+        p1: { x: shape.p1.x+dx, y: shape.p1.y+dy },
+        p2: { x: shape.p2.x+dx, y: shape.p2.y+dy },
+        p3: { x: shape.p3.x+dx, y: shape.p3.y+dy },
+      };
+      default: return null;
+    }
+  };
+
+  // Enforce a horizontal or vertical constraint on a line after one of its
+  // endpoints was moved. movedKey = "start" | "end" | null (null = whole shape translated).
+  const applyHVEnforcement = (shape, movedKey, constraints, shapeIdx) => {
+    if (shape.type !== "line") return shape;
+    let result = shape;
+    for (const c of constraints) {
+      if (c.shapeIdx !== shapeIdx) continue;
+      if (c.type === "horizontal") {
+        const y = movedKey === "start" ? result.y1 : movedKey === "end" ? result.y2 : (result.y1 + result.y2) / 2;
+        result = { ...result, y1: y, y2: y };
+      } else if (c.type === "vertical") {
+        const x = movedKey === "start" ? result.x1 : movedKey === "end" ? result.x2 : (result.x1 + result.x2) / 2;
+        result = { ...result, x1: x, x2: x };
+      }
+    }
+    return result;
+  };
+
+  // primaryPointKey = the specific point key that was moved on the primary shape,
+  // or null when the whole shape was translated (shape drag). Used to enforce
+  // line-length distance constraints correctly.
+  // preSeeded: optional Map<shapeIdx, shape> of shapes already placed before the BFS starts
+  // (used for shape-body drag with a rigid group — all rigid shapes are pre-translated).
+  // All endpoints of pre-seeded shapes are marked placed so BFS won't override them.
+  const propagateConstraints = (selItemId, primaryIdx, primaryShape, primaryPointKey = null, preSeeded = null) => {
+    const selItem = itemsRef.current.find((i) => i.id === selItemId);
+    if (!selItem) return new Map([[primaryIdx, primaryShape]]);
+    const shapes = (selItem.shapes || []).slice();
+    const constraints = selItem.constraints || [];
+
+    // Apply pre-seeded shapes into working array first
+    if (preSeeded) {
+      for (const [idx, s] of preSeeded) shapes[idx] = s;
+    }
+    shapes[primaryIdx] = primaryShape;
+
+    const updated = preSeeded ? new Map(preSeeded) : new Map();
+    updated.set(primaryIdx, primaryShape);
+    const movedKeys = new Map([[primaryIdx, primaryPointKey]]); // null = whole-shape move
+
+    // Per-endpoint visited tracking for the H/V side-effect propagation.
+    // Using per-shape `updated` for side-effects is too coarse: placing bottom.start
+    // (via right's H/V side-effect) blocks placing bottom.end (via left's side-effect),
+    // breaking the bottom-left corner of a rectangle.  A "shape:key" string lets both
+    // endpoints of the same shape be placed independently.
+    const placedEP = new Set(); // "shapeIdx:pointKey"
+    const epKey = (idx, key) => `${idx}:${key}`;
+    // Seed all pre-seeded shapes (whole-shape moves — all endpoints locked).
+    if (preSeeded) {
+      for (const [idx] of preSeeded) {
+        for (const k of ["start","end","tl","tr","br","bl","center","p0","p1","p2","p3"])
+          placedEP.add(epKey(idx, k));
+      }
+    }
+    // Seed primary shape so side-effects never override the user's drag position.
+    if (primaryPointKey) {
+      placedEP.add(epKey(primaryIdx, primaryPointKey));
+    } else {
+      for (const k of ["start","end","tl","tr","br","bl","center","p0","p1","p2","p3"])
+        placedEP.add(epKey(primaryIdx, k));
+    }
+
+    // BFS starts from all pre-seeded shapes plus the primary
+    const queue = preSeeded
+      ? [primaryIdx, ...[...preSeeded.keys()].filter(k => k !== primaryIdx)]
+      : [primaryIdx];
+    while (queue.length > 0) {
+      const idx = queue.shift();
+      const cur = shapes[idx];
+      if (!cur) continue;
+      for (const c of constraints) {
+        if (c.type !== "coincident") continue;
+        let otherIdx, otherKey, thisKey;
+        // Guard per-endpoint, not per-shape: a shape whose first endpoint was placed
+        // by one source must still have its second endpoint placed by another source.
+        if (c.shapeAIdx === idx && !placedEP.has(epKey(c.shapeBIdx, c.pointB))) {
+          otherIdx = c.shapeBIdx; otherKey = c.pointB; thisKey = c.pointA;
+        } else if (c.shapeBIdx === idx && !placedEP.has(epKey(c.shapeAIdx, c.pointA))) {
+          otherIdx = c.shapeAIdx; otherKey = c.pointA; thisKey = c.pointB;
+        } else continue;
+        const pos = getShapePoint(cur, thisKey);
+        if (!pos) continue;
+        const base = shapes[otherIdx];
+        if (!base) continue;
+        let moved = moveShapePoint(base, otherKey, pos);
+        if (!moved) continue;
+        // Enforce H/V on the newly moved shape
+        const preHV = moved;
+        moved = applyHVEnforcement(moved, otherKey, constraints, otherIdx);
+        // Skip no-op placements: if the endpoint didn't actually move, don't mark it
+        // placed or add the shape to `updated`. Keeping it out of `updated` lets the
+        // distance-enforcement inner BFS still reach it when a later pass changes its
+        // source position (e.g. distance enforcement adjusting A.end after BFS placed
+        // B.start at the original A.end via a no-op coincident).
+        const oldPt = getShapePoint(base, otherKey);
+        const newPt = getShapePoint(moved, otherKey);
+        if (oldPt && newPt && Math.hypot(newPt.x - oldPt.x, newPt.y - oldPt.y) < 1e-8) continue;
+        shapes[otherIdx] = moved;
+        updated.set(otherIdx, moved);
+        movedKeys.set(otherIdx, otherKey);
+        placedEP.add(epKey(otherIdx, otherKey)); // mark specific endpoint as placed
+        queue.push(otherIdx); // always push — new endpoint may open new propagation paths
+        // If H/V enforcement also changed the OTHER endpoint (not otherKey), propagate from it.
+        // Use per-endpoint `placedEP` instead of per-shape `updated` so that a shape whose
+        // *other* endpoint was already placed by an earlier side-effect can still receive
+        // this update (e.g. both corners of the bottom edge of a rectangle).
+        if (moved.type === "line") {
+          const sideKey = otherKey === "start" ? "end" : "start";
+          const preSidePos = getShapePoint(preHV, sideKey);
+          const postSidePos = getShapePoint(moved, sideKey);
+          if (preSidePos && postSidePos && Math.hypot(preSidePos.x - postSidePos.x, preSidePos.y - postSidePos.y) > 1e-8) {
+            for (const sc of constraints) {
+              if (sc.type !== "coincident") continue;
+              let sOtherIdx, sOtherKey;
+              if (sc.shapeAIdx === otherIdx && sc.pointA === sideKey && !placedEP.has(epKey(sc.shapeBIdx, sc.pointB))) {
+                sOtherIdx = sc.shapeBIdx; sOtherKey = sc.pointB;
+              } else if (sc.shapeBIdx === otherIdx && sc.pointB === sideKey && !placedEP.has(epKey(sc.shapeAIdx, sc.pointA))) {
+                sOtherIdx = sc.shapeAIdx; sOtherKey = sc.pointA;
+              } else continue;
+              const sBase = shapes[sOtherIdx];
+              if (!sBase) continue;
+              let sMoved = moveShapePoint(sBase, sOtherKey, postSidePos);
+              if (!sMoved) continue;
+              sMoved = applyHVEnforcement(sMoved, sOtherKey, constraints, sOtherIdx);
+              const wasInUpdated = updated.has(sOtherIdx);
+              shapes[sOtherIdx] = sMoved;
+              updated.set(sOtherIdx, sMoved);
+              placedEP.add(epKey(sOtherIdx, sOtherKey));
+              if (!wasInUpdated) queue.push(sOtherIdx);
+            }
+          }
+        }
+      }
+    }
+    // Enforce onLine constraints: project the constrained point onto its target line.
+    for (const c of constraints) {
+      if (c.type !== "onLine") continue;
+      const lineUp = updated.has(c.lineShapeIdx), ptUp = updated.has(c.pointShapeIdx);
+      if (!lineUp && !ptUp) continue;
+      const lineShape = shapes[c.lineShapeIdx];
+      const ptShape  = shapes[c.pointShapeIdx];
+      if (!lineShape || lineShape.type !== "line" || !ptShape) continue;
+      const currentPt = getShapePoint(ptShape, c.pointKey);
+      if (!currentPt) continue;
+      const projected = projectOntoLine(currentPt, lineShape);
+      if (Math.hypot(projected.x - currentPt.x, projected.y - currentPt.y) < 1e-8) continue;
+      let newPtShape = moveShapePoint(ptShape, c.pointKey, projected);
+      if (!newPtShape) continue;
+      newPtShape = applyHVEnforcement(newPtShape, c.pointKey, constraints, c.pointShapeIdx);
+      shapes[c.pointShapeIdx] = newPtShape;
+      updated.set(c.pointShapeIdx, newPtShape);
+      // Propagate coincident from the repositioned point
+      const olq = [c.pointShapeIdx];
+      while (olq.length > 0) {
+        const oi = olq.shift();
+        const oc = shapes[oi];
+        if (!oc) continue;
+        for (const sc of constraints) {
+          if (sc.type !== "coincident") continue;
+          let oIdx, oKey, tKey;
+          if (sc.shapeAIdx === oi && !updated.has(sc.shapeBIdx)) {
+            oIdx = sc.shapeBIdx; oKey = sc.pointB; tKey = sc.pointA;
+          } else if (sc.shapeBIdx === oi && !updated.has(sc.shapeAIdx)) {
+            oIdx = sc.shapeAIdx; oKey = sc.pointA; tKey = sc.pointB;
+          } else continue;
+          const p2 = getShapePoint(oc, tKey);
+          if (!p2) continue;
+          const b2 = shapes[oIdx];
+          if (!b2) continue;
+          let m2 = moveShapePoint(b2, oKey, p2);
+          if (!m2) continue;
+          m2 = applyHVEnforcement(m2, oKey, constraints, oIdx);
+          shapes[oIdx] = m2;
+          updated.set(oIdx, m2);
+          olq.push(oIdx);
+        }
+      }
+    }
+
+    // Enforce distance constraints iteratively. Handles both point-to-point (two shapes)
+    // and line-length (same shape, shapeAIdx === shapeBIdx) variants.
+    for (let distPass = 0; distPass < 4; distPass++) {
+      let anyDistChange = false;
+      for (const c of constraints) {
+        if (c.type !== "distance") continue;
+        const { shapeAIdx: ai, pointA: pA, shapeBIdx: bi, pointB: pB, distance: d } = c;
+
+        // ── Same-shape: line-length constraint ──────────────────────────────
+        if (ai === bi) {
+          if (!updated.has(ai)) continue;
+          const movedKey = movedKeys.get(ai);
+          if (!movedKey) continue; // whole-shape translation, length is preserved
+          const shape = shapes[ai];
+          if (!shape) continue;
+          // The endpoint that was placed (movedKey) is the anchor; slide the other.
+          const adjustKey = movedKey === pA ? pB : pA;
+          const fixedPos   = getShapePoint(shape, movedKey);
+          const adjustPos  = getShapePoint(shape, adjustKey);
+          if (!fixedPos || !adjustPos) continue;
+          const ddx = adjustPos.x - fixedPos.x, ddy = adjustPos.y - fixedPos.y;
+          const curLen = Math.hypot(ddx, ddy);
+          if (curLen < 1e-10 || Math.abs(curLen - d) < 1e-8) continue;
+          const newAdjPos = { x: fixedPos.x + ddx / curLen * d, y: fixedPos.y + ddy / curLen * d };
+          let ns = moveShapePoint(shape, adjustKey, newAdjPos);
+          if (!ns) continue;
+          ns = applyHVEnforcement(ns, adjustKey, constraints, ai);
+          shapes[ai] = ns;
+          updated.set(ai, ns);
+          movedKeys.set(ai, movedKey); // keep original moved key
+          anyDistChange = true;
+          // propagate coincident from the adjusted endpoint
+          const dqL = [ai];
+          while (dqL.length > 0) {
+            const idx2 = dqL.shift();
+            const cur2 = shapes[idx2];
+            if (!cur2) continue;
+            for (const sc of constraints) {
+              if (sc.type !== "coincident") continue;
+              let oIdx, oKey, tKey;
+              if (sc.shapeAIdx === idx2 && !updated.has(sc.shapeBIdx)) {
+                oIdx = sc.shapeBIdx; oKey = sc.pointB; tKey = sc.pointA;
+              } else if (sc.shapeBIdx === idx2 && !updated.has(sc.shapeAIdx)) {
+                oIdx = sc.shapeAIdx; oKey = sc.pointA; tKey = sc.pointB;
+              } else { continue; }
+              const p2 = getShapePoint(cur2, tKey);
+              if (!p2) continue;
+              const b2 = shapes[oIdx];
+              if (!b2) continue;
+              let m2 = moveShapePoint(b2, oKey, p2);
+              if (!m2) continue;
+              m2 = applyHVEnforcement(m2, oKey, constraints, oIdx);
+              shapes[oIdx] = m2;
+              updated.set(oIdx, m2);
+              dqL.push(oIdx);
+            }
+          }
+          continue;
+        }
+
+        // ── Two-shape: point-to-point distance ──────────────────────────────
+        const aUp = updated.has(ai), bUp = updated.has(bi);
+        if (!aUp && !bUp) continue;
+        const sA = shapes[ai], sB = shapes[bi];
+        if (!sA || !sB) continue;
+        const posA = getShapePoint(sA, pA), posB = getShapePoint(sB, pB);
+        if (!posA || !posB) continue;
+        const dx = posB.x - posA.x, dy = posB.y - posA.y;
+        const curDist = Math.hypot(dx, dy);
+        if (curDist < 1e-10 || Math.abs(curDist - d) < 1e-8) continue;
+        let targetIdx, targetKey, newX, newY;
+        if (aUp && !bUp) {
+          targetIdx = bi; targetKey = pB;
+          newX = posA.x + dx / curDist * d; newY = posA.y + dy / curDist * d;
+        } else if (bUp && !aUp) {
+          targetIdx = ai; targetKey = pA;
+          newX = posB.x - dx / curDist * d; newY = posB.y - dy / curDist * d;
+        } else { continue; }
+        let dMoved = moveShapePoint(shapes[targetIdx], targetKey, { x: newX, y: newY });
+        if (!dMoved) continue;
+        dMoved = applyHVEnforcement(dMoved, targetKey, constraints, targetIdx);
+        shapes[targetIdx] = dMoved;
+        updated.set(targetIdx, dMoved);
+        anyDistChange = true;
+        // Re-propagate coincident constraints from the distance-placed point so
+        // shapes connected to it stay attached.
+        const dq = [targetIdx];
+        while (dq.length > 0) {
+          const idx2 = dq.shift();
+          const cur2 = shapes[idx2];
+          if (!cur2) continue;
+          for (const sc of constraints) {
+            if (sc.type !== "coincident") continue;
+            let oIdx, oKey, tKey;
+            if (sc.shapeAIdx === idx2 && !updated.has(sc.shapeBIdx)) {
+              oIdx = sc.shapeBIdx; oKey = sc.pointB; tKey = sc.pointA;
+            } else if (sc.shapeBIdx === idx2 && !updated.has(sc.shapeAIdx)) {
+              oIdx = sc.shapeAIdx; oKey = sc.pointA; tKey = sc.pointB;
+            } else { continue; }
+            const pos2 = getShapePoint(cur2, tKey);
+            if (!pos2) continue;
+            const base2 = shapes[oIdx];
+            if (!base2) continue;
+            let m2 = moveShapePoint(base2, oKey, pos2);
+            if (!m2) continue;
+            m2 = applyHVEnforcement(m2, oKey, constraints, oIdx);
+            shapes[oIdx] = m2;
+            updated.set(oIdx, m2);
+            dq.push(oIdx);
+          }
+        }
+      }
+      if (!anyDistChange) break;
+    }
+    // Recompute bevel arcs whose parent lines changed by extending them to find the virtual junction
+    for (let i = 0; i < shapes.length; i++) {
+      const shape = shapes[i];
+      if (!shape || shape.kind !== "bevel" || !shape.bevelData) continue;
+      const { aIdx, aKey, bIdx, bKey, dist: bDist } = shape.bevelData;
+      if (!updated.has(aIdx) && !updated.has(bIdx)) continue;
+      const sA2 = shapes[aIdx], sB2 = shapes[bIdx];
+      if (!sA2 || sA2.type !== "line" || !sB2 || sB2.type !== "line") continue;
+      // Extend the two trimmed lines to find their virtual junction (where they'd meet)
+      const aEnd   = aKey === "start" ? { x: sA2.x1, y: sA2.y1 } : { x: sA2.x2, y: sA2.y2 };
+      const aOther = aKey === "start" ? { x: sA2.x2, y: sA2.y2 } : { x: sA2.x1, y: sA2.y1 };
+      const bEnd   = bKey === "start" ? { x: sB2.x1, y: sB2.y1 } : { x: sB2.x2, y: sB2.y2 };
+      const bOther = bKey === "start" ? { x: sB2.x2, y: sB2.y2 } : { x: sB2.x1, y: sB2.y1 };
+      const dx1 = aEnd.x - aOther.x, dy1 = aEnd.y - aOther.y;
+      const dx2 = bEnd.x - bOther.x, dy2 = bEnd.y - bOther.y;
+      const denom = dx1 * dy2 - dy1 * dx2;
+      if (Math.abs(denom) < 1e-10) continue;
+      const tInter = ((bOther.x - aOther.x) * dy2 - (bOther.y - aOther.y) * dx2) / denom;
+      const P = { x: aOther.x + tInter * dx1, y: aOther.y + tInter * dy1 };
+      const uA = norm2({ x: aOther.x - P.x, y: aOther.y - P.y });
+      const uB = norm2({ x: bOther.x - P.x, y: bOther.y - P.y });
+      const newTrimA = { x: P.x + uA.x * bDist, y: P.y + uA.y * bDist };
+      const newTrimB = { x: P.x + uB.x * bDist, y: P.y + uB.y * bDist };
+      const newArc = buildBevelArc(P, uA, uB, newTrimA, newTrimB);
+      if (!newArc) continue;
+      newArc.kind = "bevel";
+      newArc.bevelData = shape.bevelData;
+      shapes[i] = newArc;
+      updated.set(i, newArc);
+      // Also update the trim endpoints on the parent lines
+      const newSA = moveShapePoint(sA2, aKey, newTrimA);
+      const newSB = moveShapePoint(sB2, bKey, newTrimB);
+      if (newSA) { shapes[aIdx] = newSA; updated.set(aIdx, newSA); }
+      if (newSB) { shapes[bIdx] = newSB; updated.set(bIdx, newSB); }
+    }
+    return updated;
+  };
+
+  // Expose propagateConstraints so Viewport can enforce constraints immediately
+  // after adding or editing them (outside a drag operation).
+  if (propagateConstraintsRef) propagateConstraintsRef.current = propagateConstraints;
+
+  const applySketchDragMove = (screenX, screenY, shiftKey) => {
+    if (!sketchDrag) return;
+    const { kind, sketchMesh, selItemId, anchorLocal } = sketchDrag;
+    const selItem = itemsRef.current.find((i) => i.id === selItemId);
+    if (!selItem) return;
+
+    let localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
+    if (!localPt) return;
+
+    // ── Multi-shape drag ───────────────────────────────────────────────────
+    if (kind === "multi") {
+      const { multiIndices, multiOrigShapes } = sketchDrag;
+      const dx = localPt.x - anchorLocal.x;
+      const dy = localPt.y - anchorLocal.y;
+      const pendingShapes = new Map();
+      multiIndices.forEach((idx, i) => {
+        const moved = translateShape(multiOrigShapes[i], dx, dy);
+        if (moved) pendingShapes.set(idx, moved);
+      });
+      sketchDrag.pendingShapes = pendingShapes;
+      const sketchGroup = sketchShapesGroupRef?.current;
+      if (sketchGroup) {
+        pendingShapes.forEach((shape, idx) => {
+          const lineObj = sketchGroup.children.find((c) => c.userData.shapeIdx === idx && c.geometry?.setPositions);
+          if (lineObj) updateSketchLineGeo(lineObj, shape, sketchMesh);
+        });
+      }
+      clearHoverFills();
+      return;
+    }
+
+    const { shapeIdx, pointKey, origShape } = sketchDrag;
+    if (!shiftKey) {
+      const others = selItem.shapes.filter((_, i) => i !== shapeIdx);
+      const snap = findSnap(screenX, screenY, others, sketchMesh);
+      if (snap) localPt = { x: snap.x, y: snap.y };
+    }
+
+    let newShape;
+    let draggedPointKey = null;
+    let preSeeded = null;
+    if (kind === "point") {
+      draggedPointKey = pointKey;
+      newShape = moveShapePoint(origShape, pointKey, localPt);
+      if (newShape) {
+        newShape = applyHVEnforcement(newShape, pointKey, selItem.constraints || [], shapeIdx);
+        showDragIndicator(localPt, sketchMesh);
+      }
+    } else {
+      const dx = localPt.x - anchorLocal.x;
+      const dy = localPt.y - anchorLocal.y;
+      newShape = translateShape(origShape, dx, dy);
+      if (newShape) {
+        const constraints = selItem.constraints || [];
+        const shapes = selItem.shapes;
+
+        // Shapes that must translate rigidly: the dragged shape, plus any
+        // coincident-connected shape that has a distance constraint (can't
+        // resize, so it must move as a unit). Propagates transitively.
+        const hasDistConst = (idx) =>
+          constraints.some(c => c.type === "distance" && (c.shapeAIdx === idx || c.shapeBIdx === idx));
+        const rigidSet = new Set([shapeIdx]);
+        const rigidQueue = [shapeIdx];
+        while (rigidQueue.length > 0) {
+          const cur = rigidQueue.shift();
+          for (const c of constraints) {
+            if (c.type !== "coincident") continue;
+            let other = null;
+            if (c.shapeAIdx === cur && !rigidSet.has(c.shapeBIdx)) other = c.shapeBIdx;
+            else if (c.shapeBIdx === cur && !rigidSet.has(c.shapeAIdx)) other = c.shapeAIdx;
+            if (other !== null && hasDistConst(other)) { rigidSet.add(other); rigidQueue.push(other); }
+          }
+        }
+
+        // Pre-translate all rigid shapes; propagateConstraints will use these
+        // as fixed starting state and handle all further constraint propagation.
+        preSeeded = new Map();
+        for (const idx of rigidSet) {
+          const moved = idx === shapeIdx ? newShape : translateShape(shapes[idx], dx, dy);
+          if (moved) preSeeded.set(idx, moved);
+        }
+      }
+    }
+    if (!newShape) return;
+
+    const propagated = propagateConstraints(selItemId, shapeIdx, newShape, draggedPointKey, preSeeded);
+    sketchDrag.pendingShape = newShape;
+    sketchDrag.propagatedShapes = propagated;
+
+    const sketchGroup = sketchShapesGroupRef?.current;
+    if (sketchGroup) {
+      propagated.forEach((constrainedShape, idx) => {
+        const lineObj = sketchGroup.children.find((c) => c.userData.shapeIdx === idx && c.geometry?.setPositions);
+        if (lineObj) updateSketchLineGeo(lineObj, constrainedShape, sketchMesh);
+      });
+    }
+    clearHoverFills();
+  };
+
+  const commitSketchDrag = () => {
+    const store = useStore.getState();
+    if (sketchDrag?.kind === "multi") {
+      if (sketchDrag.pendingShapes?.size > 0) {
+        const { selItemId, multiIndices, pendingShapes } = sketchDrag;
+        const selItem = itemsRef.current.find((i) => i.id === selItemId);
+        if (selItem) {
+          const multiSet = new Set(multiIndices);
+          const shapes = (selItem.shapes || []).slice();
+          pendingShapes.forEach((s, i) => { shapes[i] = s; });
+          const constraints = selItem.constraints || [];
+          const allUpdates = new Map(pendingShapes);
+          // Propagate to non-selected shapes connected via coincident constraints
+          for (const c of constraints) {
+            if (c.type !== "coincident") continue;
+            const aIn = multiSet.has(c.shapeAIdx), bIn = multiSet.has(c.shapeBIdx);
+            if (aIn === bIn) continue; // both inside group or both outside
+            const [inIdx, inKey, outIdx, outKey] = aIn
+              ? [c.shapeAIdx, c.pointA, c.shapeBIdx, c.pointB]
+              : [c.shapeBIdx, c.pointB, c.shapeAIdx, c.pointA];
+            if (allUpdates.has(outIdx)) continue;
+            const inPos = getShapePoint(shapes[inIdx], inKey);
+            if (!inPos || !shapes[outIdx]) continue;
+            let moved = moveShapePoint(shapes[outIdx], outKey, inPos);
+            if (!moved) continue;
+            moved = applyHVEnforcement(moved, outKey, constraints, outIdx);
+            allUpdates.set(outIdx, moved);
+          }
+          store.updateSketchShapes(selItemId, allUpdates);
+        } else {
+          store.updateSketchShapes(sketchDrag.selItemId, pendingShapes);
+        }
+      }
+      clearSketchSelectionOverlay();
+      clearCoincidentFirstOverlay();
+      return;
+    }
+    if (!sketchDrag?.pendingShape) return;
+    const { selItemId, shapeIdx, pendingShape, propagatedShapes } = sketchDrag;
+    if (propagatedShapes && propagatedShapes.size > 1) {
+      store.updateSketchShapes(selItemId, propagatedShapes);
+    } else {
+      store.updateSketchShape(selItemId, shapeIdx, pendingShape);
+    }
+    clearSketchSelectionOverlay();
+    clearCoincidentFirstOverlay();
+  };
+
+  const startSketchDrag = (screenX, screenY, shiftKey) => {
+    const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return false;
+    const shapes = selItem.shapes || [];
+    clearAllSketchHover();
+
+    // Point drag — check snap points first (higher priority, smaller target).
+    // Point drag always resets multi-selection since we're acting on one point.
+    if (!shiftKey) {
+      const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+      if (snap) {
+        clearMultiSelectOverlays();
+        multiSelectedIndices = [];
+        sketchDrag = {
+          kind: "point", shapeIdx: snap.shapeIdx, pointKey: snap.pointKey,
+          sketchMesh, selItemId: selItem.id,
+          anchorLocal: { x: snap.x, y: snap.y },
+          origShape: shapes[snap.shapeIdx],
+        };
+        renderer.domElement.style.cursor = "grabbing";
+        return true;
+      }
+    }
+
+    // Shape drag — hit-test Line2 objects
+    const sketchGroup = sketchShapesGroupRef?.current;
+    if (sketchGroup) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+      const lineObjs = sketchGroup.children.filter((c) => c.userData.shapeIdx != null);
+      const hits = hitTestSketchLines(ray, lineObjs);
+      if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+        const shapeIdx = hits[0].object.userData.shapeIdx;
+        const localAnchor = screenToSketchLocal(screenX, screenY, sketchMesh) || { x: 0, y: 0 };
+        // If the hit shape is part of a multi-selection, drag them all together
+        if (multiSelectedIndices.length > 1 && multiSelectedIndices.includes(shapeIdx)) {
+          sketchDrag = {
+            kind: "multi",
+            sketchMesh, selItemId: selItem.id,
+            anchorLocal: localAnchor,
+            multiIndices: [...multiSelectedIndices],
+            multiOrigShapes: multiSelectedIndices.map((i) => shapes[i]),
+          };
+        } else {
+          clearMultiSelectOverlays();
+          multiSelectedIndices = [];
+          sketchDrag = {
+            kind: "shape", shapeIdx,
+            sketchMesh, selItemId: selItem.id,
+            anchorLocal: localAnchor,
+            origShape: shapes[shapeIdx],
+          };
+        }
+        renderer.domElement.style.cursor = "grabbing";
+        return true;
+      }
+    }
+    clearMultiSelectOverlays();
+    multiSelectedIndices = [];
+    return false;
+  };
+
+  const updateSketchPreview = (screenX, screenY, shiftKey = false) => {
     const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!sketchMesh) return;
-    const cur = screenToSketchLocal(screenX, screenY, sketchMesh);
+
+    // Show snap indicator even before first click
+    const rawCur = screenToSketchLocal(screenX, screenY, sketchMesh);
+    if (!shiftKey && rawCur) {
+      const shapes = selItem?.shapes || [];
+      const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+      if (snap) showSnapIndicator(snap, sketchMesh);
+      else clearSnapIndicator();
+    } else {
+      clearSnapIndicator();
+    }
+
+    const draw = sketchDrawRef.current;
+    if (!draw) return;
+    const cur = rawCur;
     if (!cur) return;
+
+    // Resolve snapped cursor position
+    let effectiveCur = cur;
+    let activeSnap = null;
+    if (!shiftKey) {
+      const shapes = selItem?.shapes || [];
+      const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+      if (snap) { effectiveCur = { x: snap.x, y: snap.y }; activeSnap = snap; }
+    }
+    draw.currentSnap = activeSnap;
+
     clearSketchPreview();
-    const shape = buildSketchShape(draw.tool, draw.startLocal, cur);
+    clearHoverFills();
+
+    if (draw.tool === "bezier") {
+      const allPts = [...draw.points, effectiveCur];
+      const toWorld = (p) => {
+        const v = new THREE.Vector3(p.x, p.y, 0.003);
+        v.applyQuaternion(sketchMesh.quaternion);
+        v.add(sketchMesh.position);
+        return v;
+      };
+      // Control polygon
+      const ctrlWorldPts = allPts.map(toWorld);
+      const ctrlLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(ctrlWorldPts),
+        new THREE.LineBasicMaterial({ color: 0x556677, transparent: true, opacity: 0.4, depthTest: false }),
+      );
+      ctrlLine.renderOrder = 1001;
+      scene.add(ctrlLine);
+      draw.previewObjects.push(ctrlLine);
+      // Bezier curve preview once we have all 4 points
+      if (allPts.length >= 4) {
+        const [q0, q1, q2, q3] = allPts;
+        const curve = new THREE.CubicBezierCurve(
+          new THREE.Vector2(q0.x, q0.y), new THREE.Vector2(q1.x, q1.y),
+          new THREE.Vector2(q2.x, q2.y), new THREE.Vector2(q3.x, q3.y),
+        );
+        const curvePts = curve.getPoints(48).map(({ x, y }) => toWorld({ x, y }));
+        const curveLine = makePreviewLine2(curvePts);
+        if (curveLine) { scene.add(curveLine); draw.previewObjects.push(curveLine); }
+      }
+      if (dimHintRef.current) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const labels = ["Start", "Control 1", "Control 2", "End"];
+        dimHintRef.current.textContent = labels[Math.min(draw.points.length, 3)];
+        dimHintRef.current.style.display = "block";
+        dimHintRef.current.style.left = `${screenX - rect.left + 16}px`;
+        dimHintRef.current.style.top = `${screenY - rect.top - 10}px`;
+      }
+      return;
+    }
+
+    const shape = buildSketchShape(draw.tool, draw.startLocal, effectiveCur);
     if (shape) {
       const pts = getSketchShapePoints(shape, sketchMesh);
-      if (pts.length >= 2) {
-        const line = new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints(pts),
-          new THREE.LineBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.75, depthTest: false }),
-        );
-        line.renderOrder = 1002;
-        scene.add(line);
-        draw.previewObjects.push(line);
-      }
+      const line = makePreviewLine2(pts);
+      if (line) { scene.add(line); draw.previewObjects.push(line); }
     }
     if (dimHintRef.current) {
       const rect = renderer.domElement.getBoundingClientRect();
-      dimHintRef.current.textContent = sketchDimText(draw.tool, draw.startLocal, cur);
+      dimHintRef.current.textContent = sketchDimText(draw.tool, draw.startLocal, effectiveCur);
       dimHintRef.current.style.display = "block";
       dimHintRef.current.style.left = `${screenX - rect.left + 16}px`;
       dimHintRef.current.style.top = `${screenY - rect.top - 10}px`;
     }
   };
 
-  const handleSketchClick = (screenX, screenY) => {
+  const handleSketchClick = (screenX, screenY, shiftKey = false) => {
     const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!sketchMesh) return;
-    const localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
+    let localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
     if (!localPt) return;
+
+    const shapes = selItem?.shapes || [];
+    let clickSnap = null;
+    if (!shiftKey) {
+      clickSnap = findSnap(screenX, screenY, shapes, sketchMesh);
+      if (clickSnap) localPt = { x: clickSnap.x, y: clickSnap.y };
+    }
+
+    // Helper: build constraints from recorded snaps for a completed shape
+    const buildConstraints = (snaps, tool) => {
+      const newIdx = shapes.length;
+      return snaps.map((snap, i) => {
+        if (!snap) return null;
+        const pointKeys = tool === "bezier" ? ["p0", "p1", "p2", "p3"] : ["start", "end"];
+        return { type: "coincident", shapeAIdx: newIdx, pointA: pointKeys[i] ?? `p${i}`, shapeBIdx: snap.shapeIdx, pointB: snap.pointKey };
+      }).filter(Boolean);
+    };
+
     if (!sketchDrawRef.current) {
-      sketchDrawRef.current = { tool: activeSketchToolRef.current, startLocal: localPt, previewObjects: [] };
+      sketchDrawRef.current = { tool: activeSketchToolRef.current, startLocal: localPt, points: [localPt], snaps: [clickSnap], chainStartPoint: localPt, previewObjects: [] };
       setSketchDrawPhase("second");
-    } else {
-      const shape = buildSketchShape(sketchDrawRef.current.tool, sketchDrawRef.current.startLocal, localPt);
+    } else if (sketchDrawRef.current.tool === "bezier") {
+      const draw = sketchDrawRef.current;
+      draw.points.push(localPt);
+      draw.snaps.push(clickSnap);
+      if (draw.points.length === 4) {
+        const [p0, p1, p2, p3] = draw.points;
+        const constraints = buildConstraints(draw.snaps, "bezier");
+        clearSketchPreview();
+        clearSnapIndicator();
+        if (dimHintRef.current) dimHintRef.current.style.display = "none";
+        useStore.getState().addSketchShape(selectedIdRef.current, { type: "bezier", p0, p1, p2, p3 }, constraints);
+        const chainStart = draw.chainStartPoint;
+        const closesChain = clickSnap && chainStart &&
+          Math.hypot(p3.x - chainStart.x, p3.y - chainStart.y) < 0.01;
+        if (closesChain) {
+          sketchDrawRef.current = null;
+          setSketchDrawPhase("first");
+          useStore.getState().setActiveSketchTool(null);
+        } else {
+          const contSnap = draw.snaps[3] ?? { shapeIdx: shapes.length, pointKey: "p3", x: p3.x, y: p3.y };
+          sketchDrawRef.current = { tool: "bezier", startLocal: { x: p3.x, y: p3.y }, points: [{ x: p3.x, y: p3.y }], snaps: [contSnap], chainStartPoint: chainStart, previewObjects: [] };
+          setSketchDrawPhase("second");
+        }
+      }
+    } else if (sketchDrawRef.current.tool === "rect") {
+      const draw = sketchDrawRef.current;
+      draw.snaps.push(clickSnap);
+      const shape = buildSketchShape("rect", draw.startLocal, localPt);
       clearSketchPreview();
+      clearSnapIndicator();
       sketchDrawRef.current = null;
       setSketchDrawPhase("first");
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
-      if (shape) useStore.getState().addSketchShape(selectedIdRef.current, shape);
+      if (shape) {
+        const sx = shape.x1, sy = shape.y1, ex = shape.x2, ey = shape.y2;
+        const n = shapes.length;
+        useStore.getState().addSketchShapes(selectedIdRef.current, [
+          { type: "line", x1: sx, y1: sy, x2: ex, y2: sy },  // top — horizontal
+          { type: "line", x1: ex, y1: sy, x2: ex, y2: ey },  // right — vertical
+          { type: "line", x1: ex, y1: ey, x2: sx, y2: ey },  // bottom — horizontal
+          { type: "line", x1: sx, y1: ey, x2: sx, y2: sy },  // left — vertical
+        ], [
+          { type: "coincident", shapeAIdx: n,   pointA: "end", shapeBIdx: n+1, pointB: "start" },
+          { type: "coincident", shapeAIdx: n+1, pointA: "end", shapeBIdx: n+2, pointB: "start" },
+          { type: "coincident", shapeAIdx: n+2, pointA: "end", shapeBIdx: n+3, pointB: "start" },
+          { type: "coincident", shapeAIdx: n+3, pointA: "end", shapeBIdx: n,   pointB: "start" },
+          { type: "horizontal", shapeIdx: n   },
+          { type: "vertical",   shapeIdx: n+1 },
+          { type: "horizontal", shapeIdx: n+2 },
+          { type: "vertical",   shapeIdx: n+3 },
+        ]);
+      }
+      useStore.getState().setActiveSketchTool(null);
+    } else {
+      const draw = sketchDrawRef.current;
+      draw.snaps.push(clickSnap);
+      const shape = buildSketchShape(draw.tool, draw.startLocal, localPt);
+      const constraints = buildConstraints(draw.snaps, draw.tool);
+      clearSketchPreview();
+      clearSnapIndicator();
+      if (dimHintRef.current) dimHintRef.current.style.display = "none";
+      if (draw.tool === "line") {
+        if (shape) useStore.getState().addSketchShape(selectedIdRef.current, shape, constraints);
+        const chainStart = draw.chainStartPoint;
+        const closesChain = clickSnap && chainStart &&
+          Math.hypot(localPt.x - chainStart.x, localPt.y - chainStart.y) < 0.01;
+        if (closesChain) {
+          sketchDrawRef.current = null;
+          setSketchDrawPhase("first");
+          useStore.getState().setActiveSketchTool(null);
+        } else {
+          const contSnap = clickSnap ?? { shapeIdx: shapes.length, pointKey: "end", x: localPt.x, y: localPt.y };
+          sketchDrawRef.current = { tool: "line", startLocal: localPt, points: [localPt], snaps: [contSnap], chainStartPoint: chainStart, previewObjects: [] };
+          setSketchDrawPhase("second");
+        }
+      } else {
+        // circle, ellipse, arc: complete the shape and deselect the tool
+        sketchDrawRef.current = null;
+        setSketchDrawPhase("first");
+        if (shape) useStore.getState().addSketchShape(selectedIdRef.current, shape, constraints);
+        useStore.getState().setActiveSketchTool(null);
+      }
     }
   };
 
@@ -302,7 +2186,10 @@ export function attachCameraControls(ctx) {
     clearPointHighlight();
     const hitMesh = hit.object;
     const localHit = hitMesh.worldToLocal(hit.point.clone());
-    const posAttr = hitMesh.geometry.getAttribute("position");
+    const itemData = itemsRef.current.find((i) => i.id === hitMesh.userData.itemId);
+    const primitiveType = ["sphere", "cylinder", "torus"].includes(itemData?.type) ? itemData.type : null;
+    const srcGeo = primitiveType ? primitiveGeoForHighlight(primitiveType) : hitMesh.geometry;
+    const posAttr = srcGeo.getAttribute("position");
     let minDist = Infinity, bestV = null;
     const seen = new Set();
     for (let i = 0; i < posAttr.count; i++) {
@@ -313,6 +2200,7 @@ export function attachCameraControls(ctx) {
       const d = v.distanceTo(localHit);
       if (d < minDist) { minDist = d; bestV = v.clone(); }
     }
+    if (primitiveType) srcGeo.dispose();
     if (bestV) {
       bestV.applyMatrix4(hitMesh.matrixWorld);
       const hlMesh = new THREE.Mesh(
@@ -330,11 +2218,29 @@ export function attachCameraControls(ctx) {
 
   const onMouseDown = (e) => {
     if (e.button === 0) {
+      if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
+        controls.mouseDownX = e.clientX;
+        controls.mouseDownY = e.clientY;
+        return;
+      }
       if (sketchModeRef.current && activeSketchToolRef.current) {
         controls.mouseDownX = e.clientX;
         controls.mouseDownY = e.clientY;
         controls.mouseX = e.clientX;
         controls.mouseY = e.clientY;
+        return;
+      }
+      if (sketchModeRef.current && !activeSketchToolRef.current) {
+        controls.mouseDownX = e.clientX;
+        controls.mouseDownY = e.clientY;
+        if (!useStore.getState().sketchModifyMode) {
+          const didDrag = startSketchDrag(e.clientX, e.clientY, e.shiftKey);
+          if (!didDrag) {
+            clearMultiSelectOverlays();
+            multiSelectedIndices = [];
+            marqueeStartScreen = { x: e.clientX, y: e.clientY };
+          }
+        }
         return;
       }
 
@@ -423,12 +2329,50 @@ export function attachCameraControls(ctx) {
     const currentCamera = cameraRef.current;
     if (!currentCamera) return;
 
-    if (sketchModeRef.current && activeSketchToolRef.current) {
-      if (sketchDrawRef.current) updateSketchPreview(e.clientX, e.clientY);
+    if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
+      if (extrudeSelectModeRef.current === "profile") handleExtrudeHover(e.clientX, e.clientY);
+      else if (extrudeSelectModeRef.current === "depth") handleExtrudeDepthMove(e.clientX, e.clientY);
       controls.mouseX = e.clientX;
       controls.mouseY = e.clientY;
       return;
     }
+    if (sketchModeRef.current && activeSketchToolRef.current) {
+      clearAllSketchHover();
+      updateSketchPreview(e.clientX, e.clientY, e.shiftKey);
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return;
+    }
+    if (sketchModeRef.current && !activeSketchToolRef.current) {
+      if (sketchDrag) {
+        applySketchDragMove(e.clientX, e.clientY, e.shiftKey);
+      } else {
+        const modifyMode = useStore.getState().sketchModifyMode;
+        if (modifyMode) {
+          clearAllSketchHover();
+          showModifyPreview(e.clientX, e.clientY, modifyMode);
+        } else if (marqueeStartScreen) {
+          clearAllSketchHover();
+          clearModifyPreview();
+          const dx = e.clientX - marqueeStartScreen.x;
+          const dy = e.clientY - marqueeStartScreen.y;
+          if (Math.hypot(dx, dy) > 5) {
+            marqueeActive = true;
+            updateMarquee(e.clientX, e.clientY);
+          }
+        } else {
+          clearModifyPreview();
+          updateHoverFills(e.clientX, e.clientY);
+          updateSketchHover(e.clientX, e.clientY);
+        }
+      }
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return;
+    }
+    clearAllSketchHover();
+    clearSketchSelectionOverlay();
+    clearCoincidentFirstOverlay();
 
     if (handleDragRef.current) {
       const drag = handleDragRef.current;
@@ -552,10 +2496,126 @@ export function attachCameraControls(ctx) {
   };
 
   const onMouseUp = (e) => {
+    if (extrudeSelectModeRef && extrudeSelectModeRef.current && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) {
+        if (extrudeSelectModeRef.current === "profile") handleExtrudeProfileClick(e.clientX, e.clientY);
+        else if (extrudeSelectModeRef.current === "depth") finalizeExtrude(e.clientX, e.clientY);
+      }
+      return;
+    }
     if (sketchModeRef.current && activeSketchToolRef.current && e.button === 0) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
-      if (Math.hypot(dx, dy) < 5) handleSketchClick(e.clientX, e.clientY);
+      if (Math.hypot(dx, dy) < 5) handleSketchClick(e.clientX, e.clientY, e.shiftKey);
+      return;
+    }
+    if (sketchModeRef.current && !activeSketchToolRef.current && e.button === 0) {
+      if (marqueeActive) {
+        marqueeActive = false;
+        marqueeStartScreen = null;
+        clearMarqueeRect();
+        renderer.domElement.style.cursor = "";
+        return;
+      }
+      marqueeStartScreen = null;
+      const constraintMode = useStore.getState().sketchConstraintMode;
+      const doClick = (sx, sy, shift = false) => {
+        const modifyMode = useStore.getState().sketchModifyMode;
+        if (modifyMode) { applyModify(sx, sy, modifyMode); return; }
+        if (constraintMode === "coincident") { handleCoincidentClick(sx, sy); return; }
+        if (constraintMode === "distance") { handleDistanceConstraintClick(sx, sy); return; }
+
+        const now = Date.now();
+        const isDblClick = now - lastClickTime < 300 && Math.hypot(sx - lastClickX, sy - lastClickY) < 8;
+        lastClickTime = now; lastClickX = sx; lastClickY = sy;
+
+        if (isDblClick) {
+          // Check if double-clicking on a distance constraint icon to edit its value
+          const dblG = sketchShapesGroupRef?.current;
+          const dblSel = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+          const dblMesh = dblSel ? objectsRef.current[dblSel.id] : null;
+          if (dblG && dblMesh) {
+            const rect2 = renderer.domElement.getBoundingClientRect();
+            for (const cObj of dblG.children) {
+              if (!cObj.userData.isConstraint || cObj.userData.constraintType !== "distance") continue;
+              const lp = cObj.userData.constraintIconLocalPos;
+              if (!lp) continue;
+              const wp = new THREE.Vector3(lp.x, lp.y, 0.005).applyQuaternion(dblMesh.quaternion).add(dblMesh.position);
+              const ndc2 = wp.clone().project(cameraRef.current);
+              const cpx = ((ndc2.x + 1) / 2) * rect2.width + rect2.left;
+              const cpy = ((-ndc2.y + 1) / 2) * rect2.height + rect2.top;
+              if (Math.hypot(sx - cpx, sy - cpy) < 18) {
+                const c = (dblSel.constraints || [])[cObj.userData.constraintIdx];
+                if (c && c.type === "distance") {
+                  useStore.getState().setSketchDistanceInput({
+                    shapeAIdx: c.shapeAIdx, pointA: c.pointA,
+                    shapeBIdx: c.shapeBIdx, pointB: c.pointB,
+                    defaultDistance: c.distance,
+                    constraintIdx: cObj.userData.constraintIdx,
+                  });
+                  useStore.getState().setSketchConstraintMode("distance");
+                }
+                return;
+              }
+            }
+          }
+
+          // Otherwise select all lines reachable via coincident constraints
+          clearMultiSelectOverlays(); multiSelectedIndices = [];
+          const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+          const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+          const sketchGroup = sketchShapesGroupRef?.current;
+          if (selItem && sketchMesh && sketchGroup) {
+            const lineObjs = sketchGroup.children.filter((c) => c.userData.shapeIdx != null);
+            const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
+            if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+              const connected = collectConnectedShapes(
+                hits[0].object.userData.shapeIdx,
+                selItem.shapes || [],
+                selItem.constraints || [],
+              );
+              multiSelectedIndices = connected;
+              showMultiSelectOverlays(connected);
+            }
+          }
+          return;
+        }
+
+        if (shift) {
+          // Shift+click: toggle the hit line in/out of the multi-selection
+          const sketchGroup = sketchShapesGroupRef?.current;
+          if (!sketchGroup) return;
+          const lineObjs = sketchGroup.children.filter((c) => c.userData.shapeIdx != null);
+          const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
+          if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+            const hitIdx = hits[0].object.userData.shapeIdx;
+            multiSelectedIndices = multiSelectedIndices.includes(hitIdx)
+              ? multiSelectedIndices.filter((i) => i !== hitIdx)
+              : [...multiSelectedIndices, hitIdx];
+            showMultiSelectOverlays(multiSelectedIndices);
+          }
+          return;
+        }
+
+        // Normal click: clear multi-selection and do single-element select
+        clearMultiSelectOverlays();
+        multiSelectedIndices = [];
+        trySelectSketchElement(sx, sy);
+      };
+      if (sketchDrag) {
+        const wasDrag = !!sketchDrag.pendingShape;
+        if (wasDrag) commitSketchDrag();
+        sketchDrag = null;
+        clearDragIndicator();
+        renderer.domElement.style.cursor = "";
+        if (!wasDrag) doClick(e.clientX, e.clientY, e.shiftKey);
+        return;
+      }
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) doClick(e.clientX, e.clientY, e.shiftKey);
       return;
     }
 
@@ -659,6 +2719,8 @@ export function attachCameraControls(ctx) {
             const id = maxId + 1;
             useStore.getState().addItem({ id, name: `Sketch ${id}`, type: "sketch", children: [], position, scale: { x: 1, y: 1, z: 1 }, rotation });
             useStore.getState().setSketchPlacementMode(false);
+          } else {
+            useStore.getState().setSketchPlacementMode(false);
           }
         }
       }
@@ -699,6 +2761,24 @@ export function attachCameraControls(ctx) {
     e.preventDefault();
     const currentCamera = cameraRef.current;
     if (!currentCamera) return;
+
+    if (sketchModeRef.current && !(e.ctrlKey && isMac)) {
+      const forward = new THREE.Vector3(); currentCamera.getWorldDirection(forward);
+      const right = new THREE.Vector3().crossVectors(forward, currentCamera.up).normalize();
+      const rect = renderer.domElement.getBoundingClientRect();
+      const worldPerPx = currentCamera.isPerspectiveCamera
+        ? (2 * currentCamera.position.distanceTo(targetRef.current) * Math.tan((currentCamera.fov * Math.PI) / 360)) / rect.height
+        : (currentCamera.top - currentCamera.bottom) / rect.height;
+      const panSpeed = worldPerPx * 1.2;
+      const offset = new THREE.Vector3()
+        .addScaledVector(right, e.deltaX * panSpeed)
+        .addScaledVector(currentCamera.up, -e.deltaY * panSpeed);
+      currentCamera.position.add(offset);
+      targetRef.current.add(offset);
+      currentCamera.lookAt(targetRef.current);
+      save();
+      return;
+    }
 
     if (e.ctrlKey && isMac) {
       const scale = Math.exp(-e.deltaY * 0.04);
@@ -756,16 +2836,6 @@ export function attachCameraControls(ctx) {
       currentCamera.position.z = targetRef.current.z + Math.cos(controls.targetRotationY) * Math.cos(controls.targetRotationX) * distance;
       currentCamera.lookAt(targetRef.current);
       setRotationState(currentCamera.quaternion.clone());
-    } else if (sketchModeRef.current) {
-      const panSpeed = 0.05;
-      const forward = new THREE.Vector3(); currentCamera.getWorldDirection(forward);
-      const right = new THREE.Vector3().crossVectors(forward, currentCamera.up).normalize();
-      const offset = new THREE.Vector3()
-        .addScaledVector(right, e.deltaX * panSpeed)
-        .addScaledVector(currentCamera.up, -e.deltaY * panSpeed);
-      currentCamera.position.add(offset);
-      targetRef.current.add(offset);
-      currentCamera.lookAt(targetRef.current);
     } else {
       const rect = renderer.domElement.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
@@ -835,9 +2905,145 @@ export function attachCameraControls(ctx) {
     if (e.key === "Meta" || e.key === "Control") { clearHL(faceHighlightRef); clearHL(pointHighlightRef); }
     if (e.key === "Shift") { clearHL(edgeHighlightRef); clearHL(pointHighlightRef); }
   };
+  const cancelSketchDraw = () => {
+    clearSketchPreview();
+    clearSnapIndicator();
+    clearHoverFills();
+    sketchDrawRef.current = null;
+    setSketchDrawPhase("first");
+    if (dimHintRef.current) dimHintRef.current.style.display = "none";
+    if (sketchDrag) {
+      const sketchGroup = sketchShapesGroupRef?.current;
+      if (sketchDrag.kind === "multi") {
+        // Revert all shapes in the multi-drag back to their originals
+        if (sketchGroup) {
+          sketchDrag.multiIndices.forEach((idx, i) => {
+            const lineObj = sketchGroup.children.find((c) => c.userData.shapeIdx === idx && c.geometry?.setPositions);
+            if (lineObj) updateSketchLineGeo(lineObj, sketchDrag.multiOrigShapes[i], sketchDrag.sketchMesh);
+          });
+        }
+      } else if (sketchGroup && sketchDrag.origShape) {
+        const lineObj = sketchGroup.children.find((c) => c.userData.shapeIdx === sketchDrag.shapeIdx && c.geometry?.setPositions);
+        if (lineObj) updateSketchLineGeo(lineObj, sketchDrag.origShape, sketchDrag.sketchMesh);
+      }
+      sketchDrag = null;
+      clearDragIndicator();
+      renderer.domElement.style.cursor = "";
+    }
+  };
+
   const onKeyDown = (e) => {
-    if (e.key === "Escape" && sketchPlacementModeRef.current)
-      useStore.getState().setSketchPlacementMode(false);
+    const tag = e.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
+
+    if (sketchModeRef.current && (isMac ? e.metaKey : e.ctrlKey) && e.key === "c") {
+      const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+      if (!selItem) return;
+      const shapes = selItem.shapes || [];
+      const constraints = selItem.constraints || [];
+      const sel = useStore.getState().selectedSketchElement;
+      const indices = multiSelectedIndices.length > 0
+        ? [...multiSelectedIndices]
+        : (sel?.type === "line" ? [sel.shapeIdx] : []);
+      if (indices.length === 0) return;
+      e.preventDefault();
+      const indexSet = new Set(indices);
+      const idxMap = new Map(indices.map((origIdx, i) => [origIdx, i]));
+      sketchClipboard = {
+        shapes: indices.map((i) => shapes[i]).filter(Boolean),
+        constraints: constraints
+          .filter((c) => c.type === "coincident" && indexSet.has(c.shapeAIdx) && indexSet.has(c.shapeBIdx))
+          .map((c) => ({ ...c, shapeAIdx: idxMap.get(c.shapeAIdx), shapeBIdx: idxMap.get(c.shapeBIdx) })),
+      };
+      return;
+    }
+
+    if (sketchModeRef.current && (isMac ? e.metaKey : e.ctrlKey) && e.key === "v") {
+      if (!sketchClipboard) return;
+      const selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+      if (!selItem) return;
+      e.preventDefault();
+      const baseIdx = (selItem.shapes || []).length;
+      const PASTE_OFFSET = 0.5;
+      const newShapes = sketchClipboard.shapes.map((s) => translateShape(s, PASTE_OFFSET, PASTE_OFFSET)).filter(Boolean);
+      const newConstraints = sketchClipboard.constraints.map((c) => ({
+        ...c, shapeAIdx: c.shapeAIdx + baseIdx, shapeBIdx: c.shapeBIdx + baseIdx,
+      }));
+      useStore.getState().addSketchShapes(selectedIdRef.current, newShapes, newConstraints);
+      return;
+    }
+
+    if ((e.key === "Delete" || e.key === "Backspace") && sketchModeRef.current) {
+      const sel = useStore.getState().selectedSketchElement;
+      const toDelete = multiSelectedIndices.length > 0
+        ? [...multiSelectedIndices]
+        : (sel?.type === "line" ? [sel.shapeIdx] : null);
+      if (toDelete?.length > 0) {
+        e.preventDefault();
+        useStore.getState().deleteSketchShapes(selectedIdRef.current, toDelete);
+        clearMultiSelectOverlays();
+        multiSelectedIndices = [];
+        clearSketchSelection();
+      }
+      return;
+    }
+
+    if (e.key === "Escape") {
+      if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
+        cancelExtrude();
+        return;
+      }
+      if (sketchPlacementModeRef.current) {
+        useStore.getState().setSketchPlacementMode(false);
+        return;
+      }
+      if (sketchModeRef.current) {
+        const store = useStore.getState();
+        if (store.sketchModifyMode) {
+          store.setSketchModifyMode(null);
+          clearModifyPreview();
+          return;
+        }
+        if (store.sketchConstraintMode || store.sketchDistanceInput) {
+          store.setSketchConstraintMode(null);
+          store.setSketchConstraintFirstPoint(null);
+          store.setSketchDistanceInput(null);
+          clearCoincidentFirstOverlay();
+          return;
+        }
+        if (sketchDrawRef.current) {
+          cancelSketchDraw();
+        } else {
+          useStore.getState().setActiveSketchTool(null);
+          clearSketchSelection();
+          clearMarqueeRect();
+          marqueeStartScreen = null;
+          marqueeActive = false;
+        }
+        return;
+      }
+    }
+
+    if (sketchModeRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const store = useStore.getState();
+        const isActive = store.sketchConstraintMode === "distance";
+        store.setSketchConstraintMode(isActive ? null : "distance");
+        store.setSketchConstraintFirstPoint(null);
+        store.setSketchDistanceInput(null);
+        clearCoincidentFirstOverlay();
+        return;
+      }
+      const toolMap = { l: "line", r: "rect", a: "arc", b: "bezier" };
+      const tool = toolMap[e.key.toLowerCase()];
+      if (tool) {
+        e.preventDefault();
+        if (sketchDrawRef.current) cancelSketchDraw();
+        const current = useStore.getState().activeSketchTool;
+        useStore.getState().setActiveSketchTool(current === tool ? null : tool);
+      }
+    }
   };
 
   // ── Animate loop ───────────────────────────────────────────────────────────
@@ -858,6 +3064,16 @@ export function attachCameraControls(ctx) {
       if (t >= 1) {
         if (anim.onComplete) anim.onComplete();
         cameraAnimRef.current = null;
+      }
+    }
+
+    if (sketchModeRef.current && sketchGridGroupRef?.current) {
+      const minorGrid = sketchGridGroupRef.current.userData.minorGrid;
+      const sketchMesh = objectsRef.current[selectedIdRef.current];
+      if (minorGrid && sketchMesh) {
+        const inv = sketchMesh.quaternion.clone().invert();
+        const local = targetRef.current.clone().sub(sketchMesh.position).applyQuaternion(inv);
+        minorGrid.position.set(Math.round(local.x), Math.round(local.y), 0);
       }
     }
 
@@ -895,5 +3111,6 @@ export function attachCameraControls(ctx) {
     el.removeEventListener("touchend", onTouchEnd);
     document.removeEventListener("keyup", onModifierUp);
     document.removeEventListener("keydown", onKeyDown);
+    unsubItems();
   };
 }

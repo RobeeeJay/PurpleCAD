@@ -85,7 +85,7 @@ const makeFaceCanvas = (label, bgColor) => {
   return new THREE.CanvasTexture(canvas);
 };
 
-const RotationWidget = ({ rotationState, onOrientationChange }) => {
+const RotationWidget = ({ rotationState, onOrientationChange, style }) => {
   const mountRef = useRef(null);
   const threeRef = useRef({});
   const hoveredRef = useRef(null);
@@ -292,7 +292,7 @@ const RotationWidget = ({ rotationState, onOrientationChange }) => {
   }, [onOrientationChange]);
 
   return (
-    <div className="rotation-widget">
+    <div className="rotation-widget" style={style}>
       <div
         ref={mountRef}
         className="orientation-cube-mount"
