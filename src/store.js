@@ -187,6 +187,7 @@ export const useStore = create((set) => ({
   extrudeSelectMode: null, // null | "profile" | "depth"
   extrudeRetargetId: null, // id of the extrude being retargeted, or null
   constraintsVisible: true,
+  dimensionsVisible: true,
   sketchMultiSelectedIndices: [],
 
   history: persisted ? withOrphanFlags(persisted.history) : defaultHistory,
@@ -987,7 +988,32 @@ export const useStore = create((set) => ({
       return { items: updatedItems, history: withOrphanFlags(newHistory) };
     }),
 
+  deleteSketchConstraint: (sketchId, constraintIdx) =>
+    set((state) => {
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((item) => {
+        if (item.id !== sketchId) return item;
+        return Object.assign({}, item, {
+          constraints: (item.constraints || []).filter((_, i) => i !== constraintIdx),
+        });
+      });
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, { constraints: updatedItem?.constraints }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+    }),
+
   toggleConstraintsVisible: () => set((state) => ({ constraintsVisible: !state.constraintsVisible })),
+  toggleDimensionsVisible: () => set((state) => ({ dimensionsVisible: !state.dimensionsVisible })),
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
   toggleSketchShapesDashed: (sketchId, indices) =>

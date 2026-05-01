@@ -82,6 +82,7 @@ const Viewport = () => {
   const sketchModifyMode = useStore((state) => state.sketchModifyMode);
   const sketchDistanceInput = useStore((state) => state.sketchDistanceInput);
   const constraintsVisible = useStore((state) => state.constraintsVisible);
+  const dimensionsVisible = useStore((state) => state.dimensionsVisible);
 
   const _selItem = items.find((i) => i.id === selectedId);
   const isInSketchMode = _selItem != null && _selItem.type === "sketch";
@@ -618,13 +619,13 @@ const Viewport = () => {
       });
       sketchShapesGroupRef.current = null;
     }
-    const group = buildSketchShapesGroup(selectedId, items, objectsRef, rendererRef.current, constraintsVisible);
+    const group = buildSketchShapesGroup(selectedId, items, objectsRef, rendererRef.current, constraintsVisible, dimensionsVisible);
     if (group) {
       if (renderMode === "smooth") group.visible = false;
       scene.add(group);
       sketchShapesGroupRef.current = group;
     }
-  }, [selectedId, items, constraintsVisible]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedId, items, constraintsVisible, dimensionsVisible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Object-view sketch construction lines ────────────────────────────────
 

@@ -199,6 +199,7 @@ export function moveShapePoint(shape, pointKey, newPos) {
       break;
     case "circle":
       if (pointKey === "center") return { ...shape, cx: x, cy: y };
+      if (pointKey === "edge")   return { ...shape, r: Math.hypot(x - shape.cx, y - shape.cy) };
       break;
     case "ellipse":
       if (pointKey === "center") return { ...shape, cx: x, cy: y };
@@ -283,6 +284,8 @@ export function getShapePoint(shape, pointKey) {
       if (pointKey === "bl") return { x: shape.x1, y: shape.y2 };
       return null;
     case "circle":
+      if (pointKey === "edge") return { x: shape.cx + shape.r, y: shape.cy };
+      return { x: shape.cx, y: shape.cy };
     case "ellipse":
       return { x: shape.cx, y: shape.cy };
     case "arc":
@@ -804,7 +807,192 @@ export function buildExtrudeSelectGroup(items, objectsRef) {
 
 // ── Sketch shapes line group ─────────────────────────────────────────────────
 
-export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, showConstraints = true) {
+// Builds constraint icon THREE.js objects into `group`. All objects are tagged
+// with userData.isConstraintObj so they can be found and replaced during drag.
+function addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, showDimensions = true) {
+  const R = 0.14;
+  constraints.forEach((c, ci) => {
+    const tag = (obj, iconLocalPos, shapeIndices, color) => {
+      obj.userData.isConstraintObj = true;
+      obj.userData.isConstraint = true;
+      obj.userData.constraintIdx = ci;
+      obj.userData.constraintType = c.type;
+      obj.userData.constraintIconLocalPos = iconLocalPos;
+      obj.userData.constraintShapeIndices = shapeIndices;
+      obj.userData.constraintColor = color;
+    };
+    const addTagged = (obj) => {
+      obj.userData.isConstraintObj = true;
+      obj.userData.constraintIdx = ci;
+      obj.userData.constraintType = c.type;
+      group.add(obj);
+    };
+
+    if (c.type === "coincident") {
+      const shapeA = shapes[c.shapeAIdx];
+      if (!shapeA) return;
+      const pt = getShapePoint(shapeA, c.pointA);
+      if (!pt) return;
+      const cLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(pt.x,     pt.y + R, 0.005),
+          toWorld(pt.x + R, pt.y,     0.005),
+          toWorld(pt.x,     pt.y - R, 0.005),
+          toWorld(pt.x - R, pt.y,     0.005),
+          toWorld(pt.x,     pt.y + R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0xffaa00, depthTest: false }),
+      );
+      cLine.renderOrder = 1004;
+      tag(cLine, { x: pt.x, y: pt.y }, [c.shapeAIdx, c.shapeBIdx], 0xffaa00);
+      group.add(cLine);
+
+    } else if (c.type === "distance") {
+      if (!showDimensions) return;
+      const sA = shapes[c.shapeAIdx], sB = shapes[c.shapeBIdx];
+      if (!sA || !sB) return;
+      const isRadius = c.shapeAIdx === c.shapeBIdx && c.pointB === "edge" && sA.type === "circle";
+      const posA = getShapePoint(sA, c.pointA), posB = getShapePoint(sB, c.pointB);
+      if (!posA || !posB) return;
+      const wA = toWorld(posA.x, posA.y, 0.006), wB = toWorld(posB.x, posB.y, 0.006);
+      const dir = new THREE.Vector3().subVectors(wB, wA).normalize();
+      const perp = new THREE.Vector3(-dir.y, dir.x, 0).normalize().multiplyScalar(0.1);
+      const distShapes = c.shapeAIdx === c.shapeBIdx ? [c.shapeAIdx] : [c.shapeAIdx, c.shapeBIdx];
+      // For radius: extend line beyond circle edge; label sits outside the circle.
+      // For linear: standard midpoint label with ticks at both ends.
+      const wLineTo = isRadius ? wB.clone().addScaledVector(dir, 0.35) : wB;
+      const dimLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([wA, wLineTo]),
+        new THREE.LineBasicMaterial({ color: 0xffdd44, depthTest: false }),
+      );
+      dimLine.renderOrder = 1004;
+      const midLocal = { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 };
+      tag(dimLine, midLocal, distShapes, 0xffdd44);
+      group.add(dimLine);
+      // Tick marks: radius gets one at edge only; linear gets one at each endpoint.
+      const tickPts = isRadius ? [wB] : [wA, wB];
+      for (const pt of tickPts) {
+        const t = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([pt.clone().sub(perp), pt.clone().add(perp)]),
+          new THREE.LineBasicMaterial({ color: 0xffdd44, depthTest: false }),
+        );
+        t.renderOrder = 1004;
+        addTagged(t);
+      }
+      // Label position: radius → outside circle edge; linear → offset from midpoint.
+      const labelText = (isRadius ? "R " : "") + (c.distance * MM_PER_UNIT).toFixed(1) + "mm";
+      const canvas = document.createElement("canvas");
+      canvas.width = 160; canvas.height = 32;
+      const ctx2d = canvas.getContext("2d");
+      ctx2d.fillStyle = "rgba(40,30,0,0.85)";
+      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+      ctx2d.fillStyle = "#ffee88";
+      ctx2d.font = "bold 18px sans-serif";
+      ctx2d.textAlign = "center";
+      ctx2d.textBaseline = "middle";
+      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
+      const tex = new THREE.CanvasTexture(canvas);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+      sprite.scale.set(isRadius ? 0.85 : 0.7, 0.175, 1);
+      if (isRadius) {
+        sprite.position.copy(wLineTo.clone().addScaledVector(dir, 0.45));
+      } else {
+        const mid = new THREE.Vector3().addVectors(wA, wB).multiplyScalar(0.5);
+        sprite.position.copy(mid.clone().addScaledVector(perp, 3));
+      }
+      sprite.renderOrder = 1009;
+      addTagged(sprite);
+
+    } else if (c.type === "onLine") {
+      const lineShape = shapes[c.lineShapeIdx];
+      const ptShape   = shapes[c.pointShapeIdx];
+      if (!lineShape || lineShape.type !== "line" || !ptShape) return;
+      const pt = getShapePoint(ptShape, c.pointKey);
+      if (!pt) return;
+      const dx = lineShape.x2 - lineShape.x1, dy = lineShape.y2 - lineShape.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-10) return;
+      const nx = -dy / len * R, ny = dx / len * R;
+      const tLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(pt.x + nx, pt.y + ny, 0.005),
+          toWorld(pt.x - nx, pt.y - ny, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0x00aaff, depthTest: false }),
+      );
+      tLine.renderOrder = 1004;
+      tag(tLine, { x: pt.x, y: pt.y }, [c.pointShapeIdx, c.lineShapeIdx], 0x00aaff);
+      group.add(tLine);
+
+    } else if (c.type === "horizontal" || c.type === "vertical") {
+      const shape = shapes[c.shapeIdx];
+      if (!shape || shape.type !== "line") return;
+      const mx = (shape.x1 + shape.x2) / 2, my = (shape.y1 + shape.y2) / 2;
+      const cLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(mx,     my + R, 0.005),
+          toWorld(mx + R, my,     0.005),
+          toWorld(mx,     my - R, 0.005),
+          toWorld(mx - R, my,     0.005),
+          toWorld(mx,     my + R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0x00ddaa, depthTest: false }),
+      );
+      cLine.renderOrder = 1004;
+      tag(cLine, { x: mx, y: my }, [c.shapeIdx], 0x00ddaa);
+      group.add(cLine);
+    }
+  });
+}
+
+// Removes existing constraint icon objects from the group and rebuilds them
+// based on the provided current shapes (used during drag to keep icons live).
+export function rebuildConstraintIconsForDrag(group, constraints, shapes, sketchMesh, renderer, showDimensions = true) {
+  const toRemove = group.children.filter((c) => c.userData.isConstraintObj);
+  toRemove.forEach((obj) => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      if (obj.material.map) obj.material.map.dispose();
+      obj.material.dispose();
+    }
+    group.remove(obj);
+  });
+  if (!constraints.length) return;
+  const res = renderer
+    ? renderer.getSize(new THREE.Vector2())
+    : new THREE.Vector2(window.innerWidth, window.innerHeight);
+  const toWorld = (lx, ly, z = 0.003) => {
+    const v = new THREE.Vector3(lx, ly, z);
+    v.applyQuaternion(sketchMesh.quaternion);
+    v.add(sketchMesh.position);
+    return v;
+  };
+  addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, showDimensions);
+}
+
+// Removes the existing point-dots object from the group and rebuilds it from the
+// current drag-state shapes so endpoint dots track their lines during drag preview.
+export function rebuildPointDotsForDrag(group, shapes, sketchMesh) {
+  const old = group.children.filter((c) => c.userData.isPointDots);
+  old.forEach((d) => { if (d.geometry) d.geometry.dispose(); if (d.material) d.material.dispose(); group.remove(d); });
+  const toWorld = (lx, ly) => {
+    const v = new THREE.Vector3(lx, ly, 0.004);
+    v.applyQuaternion(sketchMesh.quaternion);
+    v.add(sketchMesh.position);
+    return v;
+  };
+  const pts = [];
+  shapes.forEach((shape) => getSnapPoints([shape]).forEach((sp) => pts.push(toWorld(sp.x, sp.y))));
+  if (pts.length === 0) return;
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.PointsMaterial({ color: 0xaabbff, size: 5, sizeAttenuation: false, depthTest: false });
+  const dots = new THREE.Points(geo, mat);
+  dots.renderOrder = 1003;
+  dots.userData.isPointDots = true;
+  group.add(dots);
+}
+
+export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, showConstraints = true, showDimensions = true) {
   const selItem = items.find((i) => i.id === selectedId);
   if (selItem?.type !== "sketch") return null;
   const sketchMesh = objectsRef.current[selectedId];
@@ -859,129 +1047,13 @@ export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, 
     const ptMat = new THREE.PointsMaterial({ color: 0xaabbff, size: 5, sizeAttenuation: false, depthTest: false });
     const dots = new THREE.Points(ptGeo, ptMat);
     dots.renderOrder = 1003;
+    dots.userData.isPointDots = true;
     group.add(dots);
   }
 
   // ── Constraint icons ──────────────────────────────────────────────────────
   const constraints = selItem.constraints || [];
-  if (showConstraints) constraints.forEach((c, ci) => {
-    const R = 0.14;
-    // Helper: tag the first visual object of a constraint so cameraControls can
-    // screen-space hit-test it and highlight connected lines on hover.
-    const tagConstraint = (obj, iconLocalPos, shapeIndices, color) => {
-      obj.userData.isConstraint = true;
-      obj.userData.constraintIdx = ci;
-      obj.userData.constraintType = c.type;
-      obj.userData.constraintIconLocalPos = iconLocalPos;
-      obj.userData.constraintShapeIndices = shapeIndices;
-      obj.userData.constraintColor = color;
-    };
-
-    if (c.type === "coincident") {
-      const shapeA = shapes[c.shapeAIdx];
-      if (!shapeA) return;
-      const pt = getShapePoint(shapeA, c.pointA);
-      if (!pt) return;
-      const dPts = [
-        toWorld(pt.x,     pt.y + R, 0.005),
-        toWorld(pt.x + R, pt.y,     0.005),
-        toWorld(pt.x,     pt.y - R, 0.005),
-        toWorld(pt.x - R, pt.y,     0.005),
-        toWorld(pt.x,     pt.y + R, 0.005),
-      ];
-      const cLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(dPts),
-        new THREE.LineBasicMaterial({ color: 0xffaa00, depthTest: false }),
-      );
-      cLine.renderOrder = 1004;
-      tagConstraint(cLine, { x: pt.x, y: pt.y }, [c.shapeAIdx, c.shapeBIdx], 0xffaa00);
-      group.add(cLine);
-    } else if (c.type === "distance") {
-      const sA = shapes[c.shapeAIdx], sB = shapes[c.shapeBIdx];
-      if (!sA || !sB) return;
-      const posA = getShapePoint(sA, c.pointA), posB = getShapePoint(sB, c.pointB);
-      if (!posA || !posB) return;
-      const wA = toWorld(posA.x, posA.y, 0.006), wB = toWorld(posB.x, posB.y, 0.006);
-      const dimLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([wA, wB]),
-        new THREE.LineBasicMaterial({ color: 0xffdd44, depthTest: false }),
-      );
-      dimLine.renderOrder = 1004;
-      const midLocal = { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 };
-      const distShapes = c.shapeAIdx === c.shapeBIdx ? [c.shapeAIdx] : [c.shapeAIdx, c.shapeBIdx];
-      tagConstraint(dimLine, midLocal, distShapes, 0xffdd44);
-      group.add(dimLine);
-      // Tick marks at each end
-      const dir = new THREE.Vector3().subVectors(wB, wA).normalize();
-      const perp = new THREE.Vector3(-dir.y, dir.x, 0).normalize().multiplyScalar(0.1);
-      for (const pt of [wA, wB]) {
-        const t = new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints([pt.clone().sub(perp), pt.clone().add(perp)]),
-          new THREE.LineBasicMaterial({ color: 0xffdd44, depthTest: false }),
-        );
-        t.renderOrder = 1004;
-        group.add(t);
-      }
-      // Label sprite at midpoint
-      const mid = new THREE.Vector3().addVectors(wA, wB).multiplyScalar(0.5);
-      const labelText = (c.distance * MM_PER_UNIT).toFixed(1) + "mm";
-      const canvas = document.createElement("canvas");
-      canvas.width = 128; canvas.height = 32;
-      const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = "rgba(40,30,0,0.85)";
-      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = "#ffee88";
-      ctx2d.font = "bold 18px sans-serif";
-      ctx2d.textAlign = "center";
-      ctx2d.textBaseline = "middle";
-      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-      const tex = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
-      sprite.scale.set(0.7, 0.175, 1);
-      sprite.position.copy(mid.clone().addScaledVector(perp, 3));
-      sprite.renderOrder = 1009;
-      group.add(sprite);
-    } else if (c.type === "onLine") {
-      const lineShape = shapes[c.lineShapeIdx];
-      const ptShape   = shapes[c.pointShapeIdx];
-      if (!lineShape || lineShape.type !== "line" || !ptShape) return;
-      const pt = getShapePoint(ptShape, c.pointKey);
-      if (!pt) return;
-      const dx = lineShape.x2 - lineShape.x1, dy = lineShape.y2 - lineShape.y1;
-      const len = Math.hypot(dx, dy);
-      if (len < 1e-10) return;
-      const nx = -dy / len * R, ny = dx / len * R;
-      const tLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([
-          toWorld(pt.x + nx, pt.y + ny, 0.005),
-          toWorld(pt.x - nx, pt.y - ny, 0.005),
-        ]),
-        new THREE.LineBasicMaterial({ color: 0x00aaff, depthTest: false }),
-      );
-      tLine.renderOrder = 1004;
-      tagConstraint(tLine, { x: pt.x, y: pt.y }, [c.pointShapeIdx, c.lineShapeIdx], 0x00aaff);
-      group.add(tLine);
-    } else if (c.type === "horizontal" || c.type === "vertical") {
-      const shape = shapes[c.shapeIdx];
-      if (!shape || shape.type !== "line") return;
-      const mx = (shape.x1 + shape.x2) / 2;
-      const my = (shape.y1 + shape.y2) / 2;
-      const dPts = [
-        toWorld(mx,     my + R, 0.005),
-        toWorld(mx + R, my,     0.005),
-        toWorld(mx,     my - R, 0.005),
-        toWorld(mx - R, my,     0.005),
-        toWorld(mx,     my + R, 0.005),
-      ];
-      const cLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(dPts),
-        new THREE.LineBasicMaterial({ color: 0x00ddaa, depthTest: false }),
-      );
-      cLine.renderOrder = 1004;
-      tagConstraint(cLine, { x: mx, y: my }, [c.shapeIdx], 0x00ddaa);
-      group.add(cLine);
-    }
-  });
+  if (showConstraints) addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, showDimensions);
 
   // ── Enclosed region fills (hole-aware, hidden until hover) ──────────────────
   const loopsWithShapes = findClosedLoopsWithShapes(shapes);

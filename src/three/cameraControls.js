@@ -7,6 +7,8 @@ import {
   getObjectDimensions, getObjectExtent, redrawDimSprite, placeDimLabels,
   buildSketchShape, getSketchShapePoints, sketchDimText, MM_PER_UNIT,
   getSnapPoints, getShapeLength, moveShapePoint, getShapePoint,
+  rebuildConstraintIconsForDrag,
+  rebuildPointDotsForDrag,
 } from "./sceneObjects.js";
 
 export function loadCameraState() {
@@ -238,6 +240,62 @@ export function attachCameraControls(ctx) {
 
   // ── Constraint icon hover highlights ─────────────────────────────────────
   let hoveredConstraintLines = []; // [{ lineObj, origColor }]
+  let selectedConstraintIdx = null;
+  let selectedConstraintLineRefs = []; // [{ lineObj, origColor }]
+
+  const constraintTypeColor = (type) =>
+    ({ coincident: 0xffaa00, distance: 0xffdd44, onLine: 0x00aaff, horizontal: 0x00ddaa, vertical: 0x00ddaa })[type] ?? 0xffffff;
+
+  const CONSTRAINT_SEL_COLOR = 0xff4444;
+
+  const clearConstraintSelection = () => {
+    selectedConstraintLineRefs.forEach(({ lineObj, origColor }) => {
+      if (lineObj.material?.color) lineObj.material.color.setHex(origColor);
+    });
+    selectedConstraintLineRefs = [];
+    if (selectedConstraintIdx !== null) {
+      const g = sketchShapesGroupRef?.current;
+      if (g) {
+        for (const o of g.children) {
+          if (o.userData.isConstraintObj && o.userData.constraintIdx === selectedConstraintIdx
+              && o.material?.color && !o.isSprite) {
+            o.material.color.setHex(constraintTypeColor(o.userData.constraintType));
+          }
+        }
+      }
+    }
+    selectedConstraintIdx = null;
+  };
+
+  const applyConstraintSelectionVisual = () => {
+    if (selectedConstraintIdx === null) return;
+    const g = sketchShapesGroupRef?.current;
+    if (!g) return;
+    for (const o of g.children) {
+      if (o.userData.isConstraintObj && o.userData.constraintIdx === selectedConstraintIdx
+          && o.material?.color && !o.isSprite) {
+        o.material.color.setHex(CONSTRAINT_SEL_COLOR);
+      }
+    }
+    const taggedObj = g.children.find(
+      (o) => o.userData.isConstraint && o.userData.constraintIdx === selectedConstraintIdx,
+    );
+    (taggedObj?.userData.constraintShapeIndices || []).forEach((idx) => {
+      const lineObj = g.children.find(
+        (o) => o.userData.shapeIdx === idx && !o.userData.isConstraintObj && o.material?.color,
+      );
+      if (!lineObj) return;
+      selectedConstraintLineRefs.push({ lineObj, origColor: lineObj.material.color.getHex() });
+      lineObj.material.color.setHex(CONSTRAINT_SEL_COLOR);
+    });
+  };
+
+  const selectConstraint = (constraintIdx) => {
+    if (selectedConstraintIdx === constraintIdx) { clearConstraintSelection(); return; }
+    clearConstraintSelection();
+    selectedConstraintIdx = constraintIdx;
+    applyConstraintSelectionVisual();
+  };
 
   const clearConstraintHoverHighlight = () => {
     hoveredConstraintLines.forEach(({ lineObj, origColor }) => {
@@ -538,6 +596,7 @@ export function attachCameraControls(ctx) {
       if (sketchSelectionOverlay) clearSketchSelectionOverlay();
       if (multiSelectOverlays.length > 0) { clearMultiSelectOverlays(); multiSelectedIndices = []; }
       clearConstraintHoverHighlight();
+      clearConstraintSelection();
     },
   );
 
@@ -647,15 +706,22 @@ export function attachCameraControls(ctx) {
       if (hits.length === 0 || hits[0].object.userData.shapeIdx == null) return;
       const lineIdx = hits[0].object.userData.shapeIdx;
       const shape = shapes[lineIdx];
-      if (!shape || shape.type !== "line") return;
-      const defaultDist = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1);
+      if (!shape) return;
       store.setSketchConstraintFirstPoint(null);
       clearCoincidentFirstOverlay();
-      store.setSketchDistanceInput({
-        shapeAIdx: lineIdx, pointA: "start",
-        shapeBIdx: lineIdx, pointB: "end",
-        defaultDistance: defaultDist,
-      });
+      if (shape.type === "circle") {
+        store.setSketchDistanceInput({
+          shapeAIdx: lineIdx, pointA: "center",
+          shapeBIdx: lineIdx, pointB: "edge",
+          defaultDistance: shape.r,
+        });
+      } else if (shape.type === "line") {
+        store.setSketchDistanceInput({
+          shapeAIdx: lineIdx, pointA: "start",
+          shapeBIdx: lineIdx, pointB: "end",
+          defaultDistance: Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1),
+        });
+      }
       return;
     }
 
@@ -1653,12 +1719,29 @@ export function attachCameraControls(ctx) {
         if (moved) pendingShapes.set(idx, moved);
       });
       sketchDrag.pendingShapes = pendingShapes;
+      // Propagate constraints from all moving shapes to adjacent shapes,
+      // using the same propagateConstraints path as single-shape drag.
+      let multiPrimIdx = multiIndices[0];
+      let multiPrimShape = pendingShapes.get(multiPrimIdx);
+      if (!multiPrimShape) {
+        for (const [i, s] of pendingShapes) { multiPrimIdx = i; multiPrimShape = s; break; }
+      }
+      let allMoved = pendingShapes;
+      if (multiPrimShape) {
+        allMoved = propagateConstraints(selItemId, multiPrimIdx, multiPrimShape, null, new Map(pendingShapes));
+      }
+      sketchDrag.multiPropagated = allMoved;
       const sketchGroup = sketchShapesGroupRef?.current;
       if (sketchGroup) {
-        pendingShapes.forEach((shape, idx) => {
+        allMoved.forEach((shape, idx) => {
           const lineObj = sketchGroup.children.find((c) => c.userData.shapeIdx === idx && c.geometry?.setPositions);
           if (lineObj) updateSketchLineGeo(lineObj, shape, sketchMesh);
         });
+        const tempShapes = (selItem.shapes || []).slice();
+        allMoved.forEach((s, i) => { tempShapes[i] = s; });
+        rebuildConstraintIconsForDrag(sketchGroup, selItem.constraints || [], tempShapes, sketchMesh, renderer, useStore.getState().dimensionsVisible);
+        rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
+        selectedConstraintLineRefs = []; applyConstraintSelectionVisual();
       }
       clearHoverFills();
       return;
@@ -1728,6 +1811,10 @@ export function attachCameraControls(ctx) {
         const lineObj = sketchGroup.children.find((c) => c.userData.shapeIdx === idx && c.geometry?.setPositions);
         if (lineObj) updateSketchLineGeo(lineObj, constrainedShape, sketchMesh);
       });
+      const tempShapes = (selItem.shapes || []).slice();
+      propagated.forEach((s, i) => { tempShapes[i] = s; });
+      rebuildConstraintIconsForDrag(sketchGroup, selItem.constraints || [], tempShapes, sketchMesh, renderer);
+      rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
     }
     clearHoverFills();
   };
@@ -1735,35 +1822,9 @@ export function attachCameraControls(ctx) {
   const commitSketchDrag = () => {
     const store = useStore.getState();
     if (sketchDrag?.kind === "multi") {
-      if (sketchDrag.pendingShapes?.size > 0) {
-        const { selItemId, multiIndices, pendingShapes } = sketchDrag;
-        const selItem = itemsRef.current.find((i) => i.id === selItemId);
-        if (selItem) {
-          const multiSet = new Set(multiIndices);
-          const shapes = (selItem.shapes || []).slice();
-          pendingShapes.forEach((s, i) => { shapes[i] = s; });
-          const constraints = selItem.constraints || [];
-          const allUpdates = new Map(pendingShapes);
-          // Propagate to non-selected shapes connected via coincident constraints
-          for (const c of constraints) {
-            if (c.type !== "coincident") continue;
-            const aIn = multiSet.has(c.shapeAIdx), bIn = multiSet.has(c.shapeBIdx);
-            if (aIn === bIn) continue; // both inside group or both outside
-            const [inIdx, inKey, outIdx, outKey] = aIn
-              ? [c.shapeAIdx, c.pointA, c.shapeBIdx, c.pointB]
-              : [c.shapeBIdx, c.pointB, c.shapeAIdx, c.pointA];
-            if (allUpdates.has(outIdx)) continue;
-            const inPos = getShapePoint(shapes[inIdx], inKey);
-            if (!inPos || !shapes[outIdx]) continue;
-            let moved = moveShapePoint(shapes[outIdx], outKey, inPos);
-            if (!moved) continue;
-            moved = applyHVEnforcement(moved, outKey, constraints, outIdx);
-            allUpdates.set(outIdx, moved);
-          }
-          store.updateSketchShapes(selItemId, allUpdates);
-        } else {
-          store.updateSketchShapes(sketchDrag.selItemId, pendingShapes);
-        }
+      const toSave = sketchDrag.multiPropagated ?? sketchDrag.pendingShapes;
+      if (toSave?.size > 0) {
+        store.updateSketchShapes(sketchDrag.selItemId, toSave);
       }
       clearSketchSelectionOverlay();
       clearCoincidentFirstOverlay();
@@ -1771,7 +1832,7 @@ export function attachCameraControls(ctx) {
     }
     if (!sketchDrag?.pendingShape) return;
     const { selItemId, shapeIdx, pendingShape, propagatedShapes } = sketchDrag;
-    if (propagatedShapes && propagatedShapes.size > 1) {
+    if (propagatedShapes && propagatedShapes.size > 0) {
       store.updateSketchShapes(selItemId, propagatedShapes);
     } else {
       store.updateSketchShape(selItemId, shapeIdx, pendingShape);
@@ -1788,18 +1849,29 @@ export function attachCameraControls(ctx) {
     clearAllSketchHover();
 
     // Point drag — check snap points first (higher priority, smaller target).
-    // Point drag always resets multi-selection since we're acting on one point.
     if (!shiftKey) {
       const snap = findSnap(screenX, screenY, shapes, sketchMesh);
       if (snap) {
-        clearMultiSelectOverlays();
-        multiSelectedIndices = [];
-        sketchDrag = {
-          kind: "point", shapeIdx: snap.shapeIdx, pointKey: snap.pointKey,
-          sketchMesh, selItemId: selItem.id,
-          anchorLocal: { x: snap.x, y: snap.y },
-          origShape: shapes[snap.shapeIdx],
-        };
+        // If the snapped shape is part of a multi-selection, drag them all together
+        // (the snap point acts as the anchor instead of a single-point drag).
+        if (multiSelectedIndices.length > 1 && multiSelectedIndices.includes(snap.shapeIdx)) {
+          sketchDrag = {
+            kind: "multi",
+            sketchMesh, selItemId: selItem.id,
+            anchorLocal: { x: snap.x, y: snap.y },
+            multiIndices: [...multiSelectedIndices],
+            multiOrigShapes: multiSelectedIndices.map((i) => shapes[i]),
+          };
+        } else {
+          clearMultiSelectOverlays();
+          multiSelectedIndices = [];
+          sketchDrag = {
+            kind: "point", shapeIdx: snap.shapeIdx, pointKey: snap.pointKey,
+            sketchMesh, selItemId: selItem.id,
+            anchorLocal: { x: snap.x, y: snap.y },
+            origShape: shapes[snap.shapeIdx],
+          };
+        }
         renderer.domElement.style.cursor = "grabbing";
         return true;
       }
@@ -2599,6 +2671,32 @@ export function attachCameraControls(ctx) {
           return;
         }
 
+        // Check for constraint icon click before doing normal element select
+        {
+          const cg = sketchShapesGroupRef?.current;
+          const cSelItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+          const cMesh = cSelItem ? objectsRef.current[cSelItem.id] : null;
+          if (cg && cMesh) {
+            const cRect = renderer.domElement.getBoundingClientRect();
+            for (const cObj of cg.children) {
+              if (!cObj.userData.isConstraint) continue;
+              const lp = cObj.userData.constraintIconLocalPos;
+              if (!lp) continue;
+              const wp = new THREE.Vector3(lp.x, lp.y, 0.005)
+                .applyQuaternion(cMesh.quaternion).add(cMesh.position);
+              const ndc = wp.clone().project(cameraRef.current);
+              const cpx = ((ndc.x + 1) / 2) * cRect.width + cRect.left;
+              const cpy = ((-ndc.y + 1) / 2) * cRect.height + cRect.top;
+              if (Math.hypot(sx - cpx, sy - cpy) < 14) {
+                clearMultiSelectOverlays(); multiSelectedIndices = [];
+                selectConstraint(cObj.userData.constraintIdx);
+                return;
+              }
+            }
+          }
+        }
+        clearConstraintSelection();
+
         // Normal click: clear multi-selection and do single-element select
         clearMultiSelectOverlays();
         multiSelectedIndices = [];
@@ -2974,6 +3072,12 @@ export function attachCameraControls(ctx) {
     }
 
     if ((e.key === "Delete" || e.key === "Backspace") && sketchModeRef.current) {
+      if (selectedConstraintIdx !== null) {
+        e.preventDefault();
+        useStore.getState().deleteSketchConstraint(selectedIdRef.current, selectedConstraintIdx);
+        clearConstraintSelection();
+        return;
+      }
       const sel = useStore.getState().selectedSketchElement;
       const toDelete = multiSelectedIndices.length > 0
         ? [...multiSelectedIndices]
@@ -2989,6 +3093,10 @@ export function attachCameraControls(ctx) {
     }
 
     if (e.key === "Escape") {
+      if (selectedConstraintIdx !== null) {
+        clearConstraintSelection();
+        return;
+      }
       if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
         cancelExtrude();
         return;

@@ -42,6 +42,8 @@ const Toolbar = () => {
   const applySketchHVConstraint = useStore((state) => state.applySketchHVConstraint);
   const constraintsVisible = useStore((state) => state.constraintsVisible);
   const toggleConstraintsVisible = useStore((state) => state.toggleConstraintsVisible);
+  const dimensionsVisible = useStore((state) => state.dimensionsVisible);
+  const toggleDimensionsVisible = useStore((state) => state.toggleDimensionsVisible);
   const sketchMultiSelectedIndices = useStore((state) => state.sketchMultiSelectedIndices);
   const toggleSketchShapesDashed = useStore((state) => state.toggleSketchShapesDashed);
 
@@ -1100,6 +1102,19 @@ const Toolbar = () => {
             <svg viewBox="0 0 24 24" width="20" height="20">
               <path d="M12 3L21 12L12 21L3 12Z" fill="none" stroke="currentColor" strokeWidth="2" />
               {!constraintsVisible && <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
+            </svg>
+          </button>
+          <button
+            className={`toolbar-btn ${dimensionsVisible ? "active" : ""}`}
+            title={`${dimensionsVisible ? "Hide" : "Show"} dimensions`}
+            onClick={toggleDimensionsVisible}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2" />
+              <line x1="3" y1="9" x2="3" y2="15" stroke="currentColor" strokeWidth="2" />
+              <line x1="21" y1="9" x2="21" y2="15" stroke="currentColor" strokeWidth="2" />
+              <text x="12" y="8" textAnchor="middle" fontSize="6" fill="currentColor" fontFamily="sans-serif" fontWeight="bold">mm</text>
+              {!dimensionsVisible && <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
             </svg>
           </button>
           <button
