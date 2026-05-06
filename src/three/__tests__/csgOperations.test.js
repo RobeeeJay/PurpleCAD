@@ -1,43 +1,91 @@
 // CSG tests use the REAL three.js and three-bvh-csg so that the boolean
 // geometry operations actually execute.  Only the Zustand store and the
 // THREE addons (which require a WebGL context) are mocked.
-import { describe, it, expect, vi } from 'vitest';
-import * as THREE from 'three';
-import { buildItemGeometry, buildBrushTransform, performCsg } from '../csgUtils.js';
+import { describe, it, expect, vi } from "vitest";
+import * as THREE from "three";
+import {
+  buildItemGeometry,
+  buildBrushTransform,
+  performCsg,
+} from "../csgUtils.js";
 
-vi.mock('../../store', () => ({ useStore: () => null }));
-vi.mock('three/addons/lines/Line2.js',                 () => ({ Line2:           class{ computeLineDistances(){} } }));
-vi.mock('three/addons/lines/LineMaterial.js',           () => ({ LineMaterial:    class{} }));
-vi.mock('three/addons/lines/LineGeometry.js',           () => ({ LineGeometry:    class{ setPositions(){} } }));
-vi.mock('three/addons/environments/RoomEnvironment.js', () => ({ RoomEnvironment: class{ dispose(){} } }));
-vi.mock('three/addons/postprocessing/EffectComposer.js',() => ({ EffectComposer:  class{ dispose(){} addPass(){} } }));
-vi.mock('three/addons/postprocessing/RenderPass.js',    () => ({ RenderPass:      class{} }));
-vi.mock('three/addons/postprocessing/UnrealBloomPass.js',()=> ({ UnrealBloomPass: class{} }));
-vi.mock('three/addons/postprocessing/OutputPass.js',    () => ({ OutputPass:      class{} }));
-vi.mock('../objectMaterials.js', () => ({ createMaterial: () => ({ dispose(){} }) }));
+vi.mock("../../store", () => ({ useStore: () => null }));
+vi.mock("three/addons/lines/Line2.js", () => ({
+  Line2: class {
+    computeLineDistances() {}
+  },
+}));
+vi.mock("three/addons/lines/LineMaterial.js", () => ({
+  LineMaterial: class {},
+}));
+vi.mock("three/addons/lines/LineGeometry.js", () => ({
+  LineGeometry: class {
+    setPositions() {}
+  },
+}));
+vi.mock("three/addons/environments/RoomEnvironment.js", () => ({
+  RoomEnvironment: class {
+    dispose() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({
+  EffectComposer: class {
+    dispose() {}
+    addPass() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/RenderPass.js", () => ({
+  RenderPass: class {},
+}));
+vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({
+  UnrealBloomPass: class {},
+}));
+vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
+  OutputPass: class {},
+}));
+vi.mock("../objectMaterials.js", () => ({
+  createMaterial: () => ({ dispose() {} }),
+}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const P = (x,y,z=0) => ({ x, y, z });
-const ROT = (x=0,y=0,z=0) => ({ x, y, z });
-const SCL = (s=1) => ({ x:s, y:s, z:s });
+const P = (x, y, z = 0) => ({ x, y, z });
+const ROT = (x = 0, y = 0, z = 0) => ({ x, y, z });
+const SCL = (s = 1) => ({ x: s, y: s, z: s });
 
-function mkCube(pos = P(0,0,0), scale = 1, rot = ROT()) {
-  return { type:'cube', position:pos, scale:SCL(scale), rotation:rot };
+function mkCube(pos = P(0, 0, 0), scale = 1, rot = ROT()) {
+  return { type: "cube", position: pos, scale: SCL(scale), rotation: rot };
 }
-function mkSphere(pos = P(0,0,0)) {
-  return { type:'sphere', position:pos, scale:SCL(1), rotation:ROT() };
+function mkSphere(pos = P(0, 0, 0)) {
+  return { type: "sphere", position: pos, scale: SCL(1), rotation: ROT() };
 }
 function mkCsgItem(result) {
-  return { type:'csg', position:result.position, scale:SCL(1), rotation:ROT(), geometryData:result.geometryData };
+  return {
+    type: "csg",
+    position: result.position,
+    scale: SCL(1),
+    rotation: ROT(),
+    geometryData: result.geometryData,
+  };
 }
-function mkExtrude(polygon2D, depth=1, pos=P(0,0,0), rot=ROT()) {
-  return { type:'extrude', depth, position:pos, rotation:rot, scale:SCL(1),
-           profile: { polygon2D, holes:[] } };
+function mkExtrude(polygon2D, depth = 1, pos = P(0, 0, 0), rot = ROT()) {
+  return {
+    type: "extrude",
+    depth,
+    position: pos,
+    rotation: rot,
+    scale: SCL(1),
+    profile: { polygon2D, holes: [] },
+  };
 }
 
-function rectPoly(x1,y1,x2,y2) {
-  return [{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}];
+function rectPoly(x1, y1, x2, y2) {
+  return [
+    { x: x1, y: y1 },
+    { x: x2, y: y1 },
+    { x: x2, y: y2 },
+    { x: x1, y: y2 },
+  ];
 }
 
 // Axis-aligned bounding box of the geometry's position attribute.
@@ -63,110 +111,141 @@ function bboxCentre(geometryData) {
 
 // ── 1. buildItemGeometry ──────────────────────────────────────────────────────
 
-describe('buildItemGeometry', () => {
-  it('cube returns a BoxGeometry (24 vertices)', () => {
+describe("buildItemGeometry", () => {
+  it("cube returns a BoxGeometry (24 vertices)", () => {
     const geo = buildItemGeometry(mkCube());
     expect(geo).toBeInstanceOf(THREE.BufferGeometry);
-    expect(geo.getAttribute('position').count).toBeGreaterThan(0);
+    expect(geo.getAttribute("position").count).toBeGreaterThan(0);
   });
 
-  it('sphere returns a SphereGeometry', () => {
+  it("sphere returns a SphereGeometry", () => {
     const geo = buildItemGeometry(mkSphere());
     expect(geo).toBeInstanceOf(THREE.BufferGeometry);
-    expect(geo.getAttribute('position').count).toBeGreaterThan(100);
+    expect(geo.getAttribute("position").count).toBeGreaterThan(100);
   });
 
-  it('cylinder returns a CylinderGeometry', () => {
-    const geo = buildItemGeometry({ type:'cylinder', position:P(0,0,0) });
+  it("cylinder returns a CylinderGeometry", () => {
+    const geo = buildItemGeometry({ type: "cylinder", position: P(0, 0, 0) });
     expect(geo).toBeInstanceOf(THREE.BufferGeometry);
-    expect(geo.getAttribute('position').count).toBeGreaterThan(0);
+    expect(geo.getAttribute("position").count).toBeGreaterThan(0);
   });
 
-  it('torus returns a TorusGeometry', () => {
-    const geo = buildItemGeometry({ type:'torus', position:P(0,0,0) });
+  it("torus returns a TorusGeometry", () => {
+    const geo = buildItemGeometry({ type: "torus", position: P(0, 0, 0) });
     expect(geo).toBeInstanceOf(THREE.BufferGeometry);
-    expect(geo.getAttribute('position').count).toBeGreaterThan(0);
+    expect(geo.getAttribute("position").count).toBeGreaterThan(0);
   });
 
-  it('csg item reconstructs geometry from stored positions', () => {
+  it("csg item reconstructs geometry from stored positions", () => {
     // A 2x2x2 cube serialised as a CSG item.
-    const src = new THREE.BoxGeometry(2,2,2);
-    const posArr = Array.from(src.getAttribute('position').array);
-    const item = { type:'csg', position:P(0,0,0), geometryData:{ positions:posArr, normals:null, indices:null } };
+    const src = new THREE.BoxGeometry(2, 2, 2);
+    const posArr = Array.from(src.getAttribute("position").array);
+    const item = {
+      type: "csg",
+      position: P(0, 0, 0),
+      geometryData: { positions: posArr, normals: null, indices: null },
+    };
     const geo = buildItemGeometry(item);
     expect(geo).toBeInstanceOf(THREE.BufferGeometry);
-    expect(geo.getAttribute('position').count).toBe(src.getAttribute('position').count);
+    expect(geo.getAttribute("position").count).toBe(
+      src.getAttribute("position").count,
+    );
   });
 
-  it('extrude builds ExtrudeGeometry from profile polygon', () => {
-    const poly = rectPoly(0,0,4,4);
-    const geo  = buildItemGeometry(mkExtrude(poly, 2));
+  it("extrude builds ExtrudeGeometry from profile polygon", () => {
+    const poly = rectPoly(0, 0, 4, 4);
+    const geo = buildItemGeometry(mkExtrude(poly, 2));
     expect(geo).toBeInstanceOf(THREE.BufferGeometry);
-    expect(geo.getAttribute('position').count).toBeGreaterThan(0);
+    expect(geo.getAttribute("position").count).toBeGreaterThan(0);
   });
 
-  it('extrude geometry is centred at the local origin (Z ∈ [-depth/2, depth/2])', () => {
-    const poly  = rectPoly(0,0,4,4);
+  it("extrude geometry is centred at the local origin (Z ∈ [-depth/2, depth/2])", () => {
+    const poly = rectPoly(0, 0, 4, 4);
     const depth = 2;
-    const geo   = buildItemGeometry(mkExtrude(poly, depth));
-    const bbox  = new THREE.Box3().setFromBufferAttribute(geo.getAttribute('position'));
-    expect(bbox.min.z).toBeCloseTo(-depth/2, 4);
-    expect(bbox.max.z).toBeCloseTo( depth/2, 4);
+    const geo = buildItemGeometry(mkExtrude(poly, depth));
+    const bbox = new THREE.Box3().setFromBufferAttribute(
+      geo.getAttribute("position"),
+    );
+    expect(bbox.min.z).toBeCloseTo(-depth / 2, 4);
+    expect(bbox.max.z).toBeCloseTo(depth / 2, 4);
     // XY centred at polygon centroid – which the geometry subtracts
-    const cx = new THREE.Vector3(); bbox.getCenter(cx);
+    const cx = new THREE.Vector3();
+    bbox.getCenter(cx);
     expect(Math.abs(cx.z)).toBeLessThan(0.01);
   });
 
-  it('returns null for sketch', () => {
-    expect(buildItemGeometry({ type:'sketch', position:P(0,0,0) })).toBeNull();
+  it("returns null for sketch", () => {
+    expect(
+      buildItemGeometry({ type: "sketch", position: P(0, 0, 0) }),
+    ).toBeNull();
   });
 
-  it('returns null for unknown type', () => {
-    expect(buildItemGeometry({ type:'unknown', position:P(0,0,0) })).toBeNull();
+  it("returns null for unknown type", () => {
+    expect(
+      buildItemGeometry({ type: "unknown", position: P(0, 0, 0) }),
+    ).toBeNull();
   });
 
-  it('returns null for extrude with missing polygon', () => {
-    expect(buildItemGeometry({ type:'extrude', depth:1, position:P(0,0,0), profile:{ polygon2D:null } })).toBeNull();
+  it("returns null for extrude with missing polygon", () => {
+    expect(
+      buildItemGeometry({
+        type: "extrude",
+        depth: 1,
+        position: P(0, 0, 0),
+        profile: { polygon2D: null },
+      }),
+    ).toBeNull();
   });
 });
 
 // ── 2. buildBrushTransform ────────────────────────────────────────────────────
 
-describe('buildBrushTransform', () => {
-  it('cube: position matches item.position', () => {
-    const t = buildBrushTransform(mkCube(P(3,4,5)));
-    expect(t.position).toEqual(P(3,4,5));
+describe("buildBrushTransform", () => {
+  it("cube: position matches item.position", () => {
+    const t = buildBrushTransform(mkCube(P(3, 4, 5)));
+    expect(t.position).toEqual(P(3, 4, 5));
   });
 
-  it('csg: position matches item.position', () => {
-    const item = { type:'csg', position:P(1,2,3), scale:SCL(1), rotation:ROT() };
+  it("csg: position matches item.position", () => {
+    const item = {
+      type: "csg",
+      position: P(1, 2, 3),
+      scale: SCL(1),
+      rotation: ROT(),
+    };
     const t = buildBrushTransform(item);
     expect(t.position.x).toBeCloseTo(1);
     expect(t.position.y).toBeCloseTo(2);
     expect(t.position.z).toBeCloseTo(3);
   });
 
-  it('extrude at origin: brush position = (centroid.x, centroid.y, depth/2)', () => {
-    const poly = rectPoly(0,0,4,4);  // centroid (2,2)
+  it("extrude at origin: brush position = (centroid.x, centroid.y, depth/2)", () => {
+    const poly = rectPoly(0, 0, 4, 4); // centroid (2,2)
     const depth = 2;
-    const t = buildBrushTransform(mkExtrude(poly, depth, P(0,0,0)));
+    const t = buildBrushTransform(mkExtrude(poly, depth, P(0, 0, 0)));
     expect(t.position.x).toBeCloseTo(2);
     expect(t.position.y).toBeCloseTo(2);
-    expect(t.position.z).toBeCloseTo(1);  // depth/2
+    expect(t.position.z).toBeCloseTo(1); // depth/2
   });
 
-  it('extrude at offset position: brush position = item.position + centroid offset', () => {
-    const poly = rectPoly(0,0,4,4);  // centroid (2,2)
+  it("extrude at offset position: brush position = item.position + centroid offset", () => {
+    const poly = rectPoly(0, 0, 4, 4); // centroid (2,2)
     const depth = 2;
-    const t = buildBrushTransform(mkExtrude(poly, depth, P(5,3,1)));
-    expect(t.position.x).toBeCloseTo(7);  // 5+2
-    expect(t.position.y).toBeCloseTo(5);  // 3+2
-    expect(t.position.z).toBeCloseTo(2);  // 1+1
+    const t = buildBrushTransform(mkExtrude(poly, depth, P(5, 3, 1)));
+    expect(t.position.x).toBeCloseTo(7); // 5+2
+    expect(t.position.y).toBeCloseTo(5); // 3+2
+    expect(t.position.z).toBeCloseTo(2); // 1+1
   });
 
-  it('extrude scale is preserved', () => {
-    const item = { type:'extrude', depth:1, position:P(0,0,0), scale:SCL(2), rotation:ROT(),
-                   profile:{ polygon2D:rectPoly(0,0,4,4), holes:[] } };
+  it("extrude scale is preserved", () => {
+    const item = {
+      type: "extrude",
+      depth: 1,
+      position: P(0, 0, 0),
+      scale: SCL(2),
+      rotation: ROT(),
+      profile: { polygon2D: rectPoly(0, 0, 4, 4), holes: [] },
+    };
     const t = buildBrushTransform(item);
     expect(t.scale).toBeCloseTo(2);
   });
@@ -174,58 +253,60 @@ describe('buildBrushTransform', () => {
 
 // ── 3. performCsg: null when < 2 solid geometries ────────────────────────────
 
-describe('performCsg: insufficient geometry', () => {
-  it('returns null when no items are provided', () => {
-    expect(performCsg([], 'union')).toBeNull();
+describe("performCsg: insufficient geometry", () => {
+  it("returns null when no items are provided", () => {
+    expect(performCsg([], "union")).toBeNull();
   });
 
-  it('returns null when only one item produces geometry', () => {
-    expect(performCsg([mkCube()], 'union')).toBeNull();
+  it("returns null when only one item produces geometry", () => {
+    expect(performCsg([mkCube()], "union")).toBeNull();
   });
 
-  it('returns null when all items are sketches (no solid geometry)', () => {
+  it("returns null when all items are sketches (no solid geometry)", () => {
     const sketches = [
-      { type:'sketch', position:P(0,0,0) },
-      { type:'sketch', position:P(1,0,0) },
+      { type: "sketch", position: P(0, 0, 0) },
+      { type: "sketch", position: P(1, 0, 0) },
     ];
-    expect(performCsg(sketches, 'union')).toBeNull();
+    expect(performCsg(sketches, "union")).toBeNull();
   });
 
-  it('returns null when one item is a cube and the other a sketch', () => {
-    expect(performCsg([mkCube(), { type:'sketch', position:P(0,0,0) }], 'union')).toBeNull();
+  it("returns null when one item is a cube and the other a sketch", () => {
+    expect(
+      performCsg([mkCube(), { type: "sketch", position: P(0, 0, 0) }], "union"),
+    ).toBeNull();
   });
 });
 
 // ── 4. performCsg: result structure ──────────────────────────────────────────
 
-describe('performCsg: result structure', () => {
-  const c1 = mkCube(P(0,0,0));
-  const c2 = mkCube(P(1,0,0));
+describe("performCsg: result structure", () => {
+  const c1 = mkCube(P(0, 0, 0));
+  const c2 = mkCube(P(1, 0, 0));
 
-  it('union returns an object with position and geometryData', () => {
-    const r = performCsg([c1, c2], 'union');
+  it("union returns an object with position and geometryData", () => {
+    const r = performCsg([c1, c2], "union");
     expect(r).not.toBeNull();
-    expect(r).toHaveProperty('position');
-    expect(r).toHaveProperty('geometryData');
-    expect(r.geometryData).toHaveProperty('positions');
+    expect(r).toHaveProperty("position");
+    expect(r).toHaveProperty("geometryData");
+    expect(r.geometryData).toHaveProperty("positions");
   });
 
-  it('result positions array is non-empty', () => {
-    const r = performCsg([c1, c2], 'union');
+  it("result positions array is non-empty", () => {
+    const r = performCsg([c1, c2], "union");
     expect(r.geometryData.positions.length).toBeGreaterThan(0);
     expect(r.geometryData.positions.length % 3).toBe(0); // multiples of 3 (xyz)
   });
 
-  it('result geometry is centred: bounding-box centre is at (0,0,0)', () => {
-    const r = performCsg([c1, c2], 'union');
+  it("result geometry is centred: bounding-box centre is at (0,0,0)", () => {
+    const r = performCsg([c1, c2], "union");
     const c = bboxCentre(r.geometryData);
     expect(c.x).toBeCloseTo(0, 3);
     expect(c.y).toBeCloseTo(0, 3);
     expect(c.z).toBeCloseTo(0, 3);
   });
 
-  it('result position is the world-space bounding-box centre', () => {
-    const r = performCsg([c1, c2], 'union');
+  it("result position is the world-space bounding-box centre", () => {
+    const r = performCsg([c1, c2], "union");
     // Two 2×2×2 cubes at x=0 and x=1 → union spans x ∈ [-1,2], centre at x=0.5
     expect(r.position.x).toBeCloseTo(0.5);
     expect(r.position.y).toBeCloseTo(0);
@@ -235,24 +316,25 @@ describe('performCsg: result structure', () => {
 
 // ── 5. performCsg: union, difference, intersection geometry ──────────────────
 
-describe('performCsg: boolean operation geometry', () => {
+describe("performCsg: boolean operation geometry", () => {
   // Two 2×2×2 cubes offset so they partially overlap.
-  const c1 = mkCube(P(0,0,0));
-  const c2 = mkCube(P(1,0,0));  // overlap is 1×2×2 = 4 units³
+  const c1 = mkCube(P(0, 0, 0));
+  const c2 = mkCube(P(1, 0, 0)); // overlap is 1×2×2 = 4 units³
 
-  it('union bounding box spans both cubes', () => {
-    const r = performCsg([c1, c2], 'union');
+  it("union bounding box spans both cubes", () => {
+    const r = performCsg([c1, c2], "union");
     const bbox = geoBBox(r.geometryData);
     // Centred result: world coords = result.position ± half-sizes.
     // Original world X: -1 to 2 (width 3). Centre at 0.5.
-    const size = new THREE.Vector3(); bbox.getSize(size);
-    expect(size.x).toBeCloseTo(3, 0);  // spans 3 units in X
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+    expect(size.x).toBeCloseTo(3, 0); // spans 3 units in X
     expect(size.y).toBeCloseTo(2, 0);
     expect(size.z).toBeCloseTo(2, 0);
   });
 
-  it('difference (c1 − c2) is smaller than c1 alone', () => {
-    const diff = performCsg([c1, c2], 'difference');
+  it("difference (c1 − c2) is smaller than c1 alone", () => {
+    const diff = performCsg([c1, c2], "difference");
     expect(diff).not.toBeNull();
     expect(diff.geometryData.positions.length).toBeGreaterThan(0);
     const diffVol = bboxVolume(geoBBox(diff.geometryData));
@@ -260,33 +342,34 @@ describe('performCsg: boolean operation geometry', () => {
     expect(diffVol).toBeLessThan(8);
   });
 
-  it('difference position is offset toward c1 (leftward from centre)', () => {
-    const diff = performCsg([c1, c2], 'difference');
+  it("difference position is offset toward c1 (leftward from centre)", () => {
+    const diff = performCsg([c1, c2], "difference");
     // c1 is at x=0 (spans -1 to 1). After removing the overlap with c2 (x>0.5),
     // the bbox centre shifts left.
     expect(diff.position.x).toBeLessThan(0.5);
   });
 
-  it('intersection of two overlapping cubes is non-empty', () => {
-    const r = performCsg([c1, c2], 'intersection');
+  it("intersection of two overlapping cubes is non-empty", () => {
+    const r = performCsg([c1, c2], "intersection");
     expect(r).not.toBeNull();
     expect(r.geometryData.positions.length).toBeGreaterThan(0);
   });
 
-  it('intersection bounding box is smaller than either input', () => {
-    const r = performCsg([c1, c2], 'intersection');
-    const size = new THREE.Vector3(); geoBBox(r.geometryData).getSize(size);
+  it("intersection bounding box is smaller than either input", () => {
+    const r = performCsg([c1, c2], "intersection");
+    const size = new THREE.Vector3();
+    geoBBox(r.geometryData).getSize(size);
     // Intersection is the 1×2×2 overlap slab; dimensions ≤ either cube.
     expect(size.x).toBeLessThanOrEqual(2 + 0.01);
     expect(size.y).toBeLessThanOrEqual(2 + 0.01);
     expect(size.z).toBeLessThanOrEqual(2 + 0.01);
   });
 
-  it('intersection of non-overlapping cubes returns empty or null geometry', () => {
+  it("intersection of non-overlapping cubes returns empty or null geometry", () => {
     // Cubes far apart — no intersection.
-    const far1 = mkCube(P(0,0,0));
-    const far2 = mkCube(P(10,0,0));
-    const r = performCsg([far1, far2], 'intersection');
+    const far1 = mkCube(P(0, 0, 0));
+    const far2 = mkCube(P(10, 0, 0));
+    const r = performCsg([far1, far2], "intersection");
     // Either returns null or an empty result (0 vertex triangles).
     if (r !== null) {
       expect(r.geometryData.positions.length).toBe(0);
@@ -296,24 +379,26 @@ describe('performCsg: boolean operation geometry', () => {
 
 // ── 6. performCsg: combining CSG results (re-combine) ────────────────────────
 
-describe('performCsg: chaining CSG results', () => {
-  it('union of two cubes can be further combined with a third cube', () => {
-    const c1 = mkCube(P(0,0,0));
-    const c2 = mkCube(P(1,0,0));
-    const r1 = performCsg([c1, c2], 'union');
+describe("performCsg: chaining CSG results", () => {
+  it("union of two cubes can be further combined with a third cube", () => {
+    const c1 = mkCube(P(0, 0, 0));
+    const c2 = mkCube(P(1, 0, 0));
+    const r1 = performCsg([c1, c2], "union");
     expect(r1).not.toBeNull();
 
     const csgItem = mkCsgItem(r1);
-    const c3 = mkCube(P(3,0,0));   // just touching / slightly apart
-    const r2 = performCsg([csgItem, c3], 'union');
+    const c3 = mkCube(P(3, 0, 0)); // just touching / slightly apart
+    const r2 = performCsg([csgItem, c3], "union");
     expect(r2).not.toBeNull();
-    expect(r2.geometryData.positions.length).toBeGreaterThan(r1.geometryData.positions.length * 0.5);
+    expect(r2.geometryData.positions.length).toBeGreaterThan(
+      r1.geometryData.positions.length * 0.5,
+    );
   });
 
-  it('result geometry remains centred after re-combining', () => {
-    const r1 = performCsg([mkCube(P(0,0,0)), mkCube(P(1,0,0))], 'union');
-    const r2 = performCsg([mkCsgItem(r1), mkCube(P(3,0,0))], 'union');
-    const c  = bboxCentre(r2.geometryData);
+  it("result geometry remains centred after re-combining", () => {
+    const r1 = performCsg([mkCube(P(0, 0, 0)), mkCube(P(1, 0, 0))], "union");
+    const r2 = performCsg([mkCsgItem(r1), mkCube(P(3, 0, 0))], "union");
+    const c = bboxCentre(r2.geometryData);
     expect(Math.abs(c.x)).toBeLessThan(0.01);
     expect(Math.abs(c.y)).toBeLessThan(0.01);
     expect(Math.abs(c.z)).toBeLessThan(0.01);
@@ -322,42 +407,43 @@ describe('performCsg: chaining CSG results', () => {
 
 // ── 7. performCsg: extruded objects ──────────────────────────────────────────
 
-describe('performCsg: extruded objects', () => {
+describe("performCsg: extruded objects", () => {
   // A 4×4 rectangle extruded 2 units.
-  const rectPrism = mkExtrude(rectPoly(0,0,4,4), 2, P(0,0,0));
+  const rectPrism = mkExtrude(rectPoly(0, 0, 4, 4), 2, P(0, 0, 0));
 
-  it('two extruded rectangles can be unioned', () => {
-    const e1 = mkExtrude(rectPoly(0,0,4,4), 2, P(0,0,0));
-    const e2 = mkExtrude(rectPoly(0,0,4,4), 2, P(2,0,0));
-    const r  = performCsg([e1, e2], 'union');
+  it("two extruded rectangles can be unioned", () => {
+    const e1 = mkExtrude(rectPoly(0, 0, 4, 4), 2, P(0, 0, 0));
+    const e2 = mkExtrude(rectPoly(0, 0, 4, 4), 2, P(2, 0, 0));
+    const r = performCsg([e1, e2], "union");
     expect(r).not.toBeNull();
     expect(r.geometryData.positions.length).toBeGreaterThan(0);
   });
 
-  it('union of two extruded rects has a wider bbox than either alone', () => {
-    const e1 = mkExtrude(rectPoly(0,0,4,4), 2, P(0,0,0));   // centroid (2,2,1)
-    const e2 = mkExtrude(rectPoly(0,0,4,4), 2, P(3,0,0));   // centroid (5,2,1)
-    const r  = performCsg([e1, e2], 'union');
-    const size = new THREE.Vector3(); geoBBox(r.geometryData).getSize(size);
+  it("union of two extruded rects has a wider bbox than either alone", () => {
+    const e1 = mkExtrude(rectPoly(0, 0, 4, 4), 2, P(0, 0, 0)); // centroid (2,2,1)
+    const e2 = mkExtrude(rectPoly(0, 0, 4, 4), 2, P(3, 0, 0)); // centroid (5,2,1)
+    const r = performCsg([e1, e2], "union");
+    const size = new THREE.Vector3();
+    geoBBox(r.geometryData).getSize(size);
     // e1 spans x: 0..4, e2 spans x: 3..7; union spans x: 0..7 (width 7)
     expect(size.x).toBeGreaterThan(4);
   });
 
-  it('extruded object can be combined with a cube', () => {
-    const e = mkExtrude(rectPoly(0,0,2,2), 2, P(0,0,0));
-    const c = mkCube(P(1,1,1));
-    const r = performCsg([e, c], 'union');
+  it("extruded object can be combined with a cube", () => {
+    const e = mkExtrude(rectPoly(0, 0, 2, 2), 2, P(0, 0, 0));
+    const c = mkCube(P(1, 1, 1));
+    const r = performCsg([e, c], "union");
     expect(r).not.toBeNull();
     expect(r.geometryData.positions.length).toBeGreaterThan(0);
   });
 
-  it('extrude brush position accounts for centroid offset so world position is correct', () => {
+  it("extrude brush position accounts for centroid offset so world position is correct", () => {
     // Extrude rect (0,0)→(4,4), depth=2, at item.position (0,0,0).
     // Centroid = (2,2), so brush should be at (2,2,1) in world space.
     // Union with a cube at (2,2,1) (same world centre) → result centred on (2,2,1).
-    const e = mkExtrude(rectPoly(0,0,4,4), 2, P(0,0,0));
-    const c = mkCube(P(2,2,1));
-    const r = performCsg([e, c], 'union');
+    const e = mkExtrude(rectPoly(0, 0, 4, 4), 2, P(0, 0, 0));
+    const c = mkCube(P(2, 2, 1));
+    const r = performCsg([e, c], "union");
     expect(r).not.toBeNull();
     // The bbox centre of the union should be near (2,2,1).
     expect(r.position.x).toBeCloseTo(2, 0);
@@ -371,107 +457,90 @@ describe('performCsg: extruded objects', () => {
 // item.position with the (already-centred) geometry.  The mesh must sit at
 // the same world location as the original solids.
 
-describe('performCsg: item.position is the correct world pivot', () => {
-  it('union of two cubes: item.position is the world-space bbox centre', () => {
-    const c1 = mkCube(P(0,0,0));
-    const c2 = mkCube(P(0,2,0));   // stacked in Y
-    const r  = performCsg([c1, c2], 'union');
+describe("performCsg: item.position is the correct world pivot", () => {
+  it("union of two cubes: item.position is the world-space bbox centre", () => {
+    const c1 = mkCube(P(0, 0, 0));
+    const c2 = mkCube(P(0, 2, 0)); // stacked in Y
+    const r = performCsg([c1, c2], "union");
     // World X: -1..1, Y: -1..3, Z: -1..1. Centre: (0,1,0).
     expect(r.position.x).toBeCloseTo(0);
     expect(r.position.y).toBeCloseTo(1);
     expect(r.position.z).toBeCloseTo(0);
   });
 
-  it('difference c1−c2: position centre is shifted toward the surviving part', () => {
-    const c1 = mkCube(P(0,0,0));
-    const c2 = mkCube(P(1,0,0));
-    const r  = performCsg([c1, c2], 'difference');
+  it("difference c1−c2: position centre is shifted toward the surviving part", () => {
+    const c1 = mkCube(P(0, 0, 0));
+    const c2 = mkCube(P(1, 0, 0));
+    const r = performCsg([c1, c2], "difference");
     // c1 minus the overlap: what remains is mostly the left part of c1.
     expect(r.position.x).toBeLessThan(0.5);
   });
 
-  it('moved cube: union position reflects actual world locations', () => {
-    const c1 = mkCube(P(5,5,0));
-    const c2 = mkCube(P(6,5,0));   // overlaps c1 (both 2×2×2, offset by 1)
-    const r  = performCsg([c1, c2], 'union');
+  it("moved cube: union position reflects actual world locations", () => {
+    const c1 = mkCube(P(5, 5, 0));
+    const c2 = mkCube(P(6, 5, 0)); // overlaps c1 (both 2×2×2, offset by 1)
+    const r = performCsg([c1, c2], "union");
     // c1 spans x [4,6], c2 spans x [5,7]; union spans [4,7], centre at 5.5.
     expect(r.position.x).toBeCloseTo(5.5, 0);
     expect(r.position.y).toBeCloseTo(5, 0);
   });
 });
 
-// ── 9. canCsg / target-selection logic ───────────────────────────────────────
-// These tests mirror the enabling and target-resolution logic in CombineSection
-// without importing the React component.  They verify that:
-//   • buttons are disabled when fewer than 2 eligible items exist in the scene
-//   • buttons are enabled when 2+ eligible items exist (regardless of selection)
-//   • the operation targets the explicit selection when ≥2 items are selected
-//   • the operation falls back to all visible items when < 2 are selected
+// ── 9. canCsg / selection logic (Boolean section) ────────────────────────────
+// Buttons are enabled only when 2+ non-sketch items are explicitly selected.
 
-describe('canCsg enable / target-selection logic', () => {
+describe("canCsg enable logic (Boolean section)", () => {
   // Replicate the logic from CombineSection
   function resolveTargets(items, selectedIds) {
-    const allEligible = items.filter(i => i.type !== 'sketch' && i.visible !== false);
     const selectedEligible = selectedIds
-      .map(id => items.find(i => i.id === id))
-      .filter(item => item && item.type !== 'sketch');
-    const canCsg = allEligible.length >= 2;
-    const targets = selectedEligible.length >= 2 ? selectedEligible : allEligible;
-    return { canCsg, targets };
+      .map((id) => items.find((i) => i.id === id))
+      .filter((item) => item && item.type !== "sketch");
+    const canCsg = selectedEligible.length >= 2;
+    return { canCsg, targets: selectedEligible };
   }
 
-  const cube1 = { id:1, type:'cube', position:P(0,0,0), scale:SCL(1), rotation:ROT(), visible:true };
-  const cube2 = { id:2, type:'cube', position:P(1,0,0), scale:SCL(1), rotation:ROT(), visible:true };
-  const cube3 = { id:3, type:'cube', position:P(2,0,0), scale:SCL(1), rotation:ROT(), visible:true };
-  const sketch = { id:4, type:'sketch', visible:true };
-  const hidden = { id:5, type:'cube', position:P(3,0,0), scale:SCL(1), rotation:ROT(), visible:false };
+  const cube1 = { id: 1, type: "cube", position: P(0, 0, 0), scale: SCL(1), rotation: ROT(), visible: true };
+  const cube2 = { id: 2, type: "cube", position: P(1, 0, 0), scale: SCL(1), rotation: ROT(), visible: true };
+  const cube3 = { id: 3, type: "cube", position: P(2, 0, 0), scale: SCL(1), rotation: ROT(), visible: true };
+  const sketch = { id: 4, type: "sketch", visible: true };
 
-  it('disabled when scene has < 2 eligible items', () => {
-    expect(resolveTargets([cube1], []).canCsg).toBe(false);
-    expect(resolveTargets([], []).canCsg).toBe(false);
-    expect(resolveTargets([sketch, cube1], []).canCsg).toBe(false);
+  it("disabled when nothing is selected", () => {
+    expect(resolveTargets([cube1, cube2], []).canCsg).toBe(false);
   });
 
-  it('enabled when 2+ non-sketch visible items exist (no selection needed)', () => {
-    expect(resolveTargets([cube1, cube2], []).canCsg).toBe(true);
-    expect(resolveTargets([cube1, cube2], [cube1.id]).canCsg).toBe(true);
+  it("disabled when only one non-sketch item is selected", () => {
+    expect(resolveTargets([cube1, cube2], [cube1.id]).canCsg).toBe(false);
   });
 
-  it('sketches are excluded from eligible count', () => {
-    expect(resolveTargets([sketch, sketch], []).canCsg).toBe(false);
-    expect(resolveTargets([cube1, sketch], []).canCsg).toBe(false);
+  it("disabled when only sketch items are selected", () => {
+    expect(resolveTargets([cube1, sketch], [sketch.id]).canCsg).toBe(false);
   });
 
-  it('hidden items are excluded from eligible count', () => {
-    // only 1 visible non-sketch item + 1 hidden → not enough
-    expect(resolveTargets([cube1, hidden], []).canCsg).toBe(false);
+  it("enabled when exactly 2 non-sketch items are selected", () => {
+    expect(resolveTargets([cube1, cube2], [cube1.id, cube2.id]).canCsg).toBe(true);
   });
 
-  it('falls back to all eligible when < 2 items are selected', () => {
-    const { targets } = resolveTargets([cube1, cube2, cube3], [cube1.id]);
-    expect(targets).toHaveLength(3);   // all three, not just the one selected
+  it("enabled when 3 non-sketch items are selected", () => {
+    expect(resolveTargets([cube1, cube2, cube3], [cube1.id, cube2.id, cube3.id]).canCsg).toBe(true);
   });
 
-  it('falls back to all eligible when nothing is selected', () => {
-    const { targets } = resolveTargets([cube1, cube2], []);
-    expect(targets).toHaveLength(2);
+  it("sketches are excluded from the selection count", () => {
+    expect(resolveTargets([cube1, sketch], [cube1.id, sketch.id]).canCsg).toBe(false);
   });
 
-  it('uses the explicit selection when ≥2 items are selected', () => {
+  it("targets are exactly the selected non-sketch items", () => {
     const { targets } = resolveTargets([cube1, cube2, cube3], [cube1.id, cube2.id]);
     expect(targets).toHaveLength(2);
-    expect(targets.map(t => t.id)).toEqual([cube1.id, cube2.id]);
+    expect(targets.map((t) => t.id)).toEqual([cube1.id, cube2.id]);
   });
 
-  it('selection of 3 items uses all 3 (not the fallback)', () => {
+  it("selecting 3 items targets all 3", () => {
     const { targets } = resolveTargets([cube1, cube2, cube3], [cube1.id, cube2.id, cube3.id]);
     expect(targets).toHaveLength(3);
   });
 
-  it('performCsg with all-items fallback produces a result', () => {
-    // Simulates clicking union with nothing explicitly selected.
-    const { targets } = resolveTargets([cube1, cube2], []);
-    const result = performCsg(targets, 'union');
+  it("performCsg with 2 selected items produces a result", () => {
+    const result = performCsg([cube1, cube2], "union");
     expect(result).not.toBeNull();
     expect(result.geometryData.positions.length).toBeGreaterThan(0);
   });

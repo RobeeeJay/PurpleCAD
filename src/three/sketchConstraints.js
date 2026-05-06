@@ -1,7 +1,19 @@
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
 
 // All valid endpoint key names across all sketch shape types.
-export const SHAPE_KEYS = ["start","end","tl","tr","br","bl","center","p0","p1","p2","p3"];
+export const SHAPE_KEYS = [
+  "start",
+  "end",
+  "tl",
+  "tr",
+  "br",
+  "bl",
+  "center",
+  "p0",
+  "p1",
+  "p2",
+  "p3",
+];
 
 // Enforce horizontal/vertical constraints on a line after one endpoint was moved.
 // movedKey is the endpoint that was placed ("start", "end", or null for whole-shape).
@@ -11,10 +23,20 @@ export function applyHVEnforcement(shape, movedKey, constraints, shapeIdx) {
   for (const c of constraints) {
     if (c.shapeIdx !== shapeIdx) continue;
     if (c.type === "horizontal") {
-      const y = movedKey === "start" ? result.y1 : movedKey === "end" ? result.y2 : (result.y1 + result.y2) / 2;
+      const y =
+        movedKey === "start"
+          ? result.y1
+          : movedKey === "end"
+            ? result.y2
+            : (result.y1 + result.y2) / 2;
       result = { ...result, y1: y, y2: y };
     } else if (c.type === "vertical") {
-      const x = movedKey === "start" ? result.x1 : movedKey === "end" ? result.x2 : (result.x1 + result.x2) / 2;
+      const x =
+        movedKey === "start"
+          ? result.x1
+          : movedKey === "end"
+            ? result.x2
+            : (result.x1 + result.x2) / 2;
       result = { ...result, x1: x, x2: x };
     }
   }
@@ -24,10 +46,17 @@ export function applyHVEnforcement(shape, movedKey, constraints, shapeIdx) {
 // Project a 2D point onto the line segment defined by a line shape.
 // t is clamped to [0,1] so the result always lies between the two endpoints.
 export function projectOntoLine(pt, lineShape) {
-  const ABx = lineShape.x2 - lineShape.x1, ABy = lineShape.y2 - lineShape.y1;
+  const ABx = lineShape.x2 - lineShape.x1,
+    ABy = lineShape.y2 - lineShape.y1;
   const len2 = ABx * ABx + ABy * ABy;
   if (len2 < 1e-10) return { x: lineShape.x1, y: lineShape.y1 };
-  const t = Math.max(0, Math.min(1, ((pt.x - lineShape.x1) * ABx + (pt.y - lineShape.y1) * ABy) / len2));
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((pt.x - lineShape.x1) * ABx + (pt.y - lineShape.y1) * ABy) / len2,
+    ),
+  );
   return { x: lineShape.x1 + t * ABx, y: lineShape.y1 + t * ABy };
 }
 
@@ -40,25 +69,35 @@ export function norm2(v) {
 // Build the arc geometry for a bevel/fillet between two trimmed lines.
 export function buildBevelArc(P, uA, uB, trimA, trimB) {
   const toB = { x: trimB.x - trimA.x, y: trimB.y - trimA.y };
-  const pA1 = { x: -uA.y, y: uA.x }, pA2 = { x: uA.y, y: -uA.x };
-  const pA = (pA1.x * toB.x + pA1.y * toB.y > 0) ? pA1 : pA2;
+  const pA1 = { x: -uA.y, y: uA.x },
+    pA2 = { x: uA.y, y: -uA.x };
+  const pA = pA1.x * toB.x + pA1.y * toB.y > 0 ? pA1 : pA2;
   const toA = { x: trimA.x - trimB.x, y: trimA.y - trimB.y };
-  const pB1 = { x: -uB.y, y: uB.x }, pB2 = { x: uB.y, y: -uB.x };
-  const pB = (pB1.x * toA.x + pB1.y * toA.y > 0) ? pB1 : pB2;
-  const dx = trimB.x - trimA.x, dy = trimB.y - trimA.y;
+  const pB1 = { x: -uB.y, y: uB.x },
+    pB2 = { x: uB.y, y: -uB.x };
+  const pB = pB1.x * toA.x + pB1.y * toA.y > 0 ? pB1 : pB2;
+  const dx = trimB.x - trimA.x,
+    dy = trimB.y - trimA.y;
   const denom = pA.x * pB.y - pA.y * pB.x;
   if (Math.abs(denom) < 1e-10) return null;
   const t = (dx * pB.y - dy * pB.x) / denom;
-  const cx = trimA.x + t * pA.x, cy = trimA.y + t * pA.y;
+  const cx = trimA.x + t * pA.x,
+    cy = trimA.y + t * pA.y;
   const r = Math.hypot(cx - trimA.x, cy - trimA.y);
   const startAngle = Math.atan2(trimA.y - cy, trimA.x - cx);
   const rawEnd = Math.atan2(trimB.y - cy, trimB.x - cx);
-  const ccwSpan = ((rawEnd - startAngle) + 2 * Math.PI) % (2 * Math.PI);
+  const ccwSpan = (rawEnd - startAngle + 2 * Math.PI) % (2 * Math.PI);
   const cwSpan = 2 * Math.PI - ccwSpan;
   const midCW = startAngle - cwSpan / 2;
   const midCCW = startAngle + ccwSpan / 2;
-  const dCW = Math.hypot(cx + r * Math.cos(midCW) - P.x, cy + r * Math.sin(midCW) - P.y);
-  const dCCW = Math.hypot(cx + r * Math.cos(midCCW) - P.x, cy + r * Math.sin(midCCW) - P.y);
+  const dCW = Math.hypot(
+    cx + r * Math.cos(midCW) - P.x,
+    cy + r * Math.sin(midCW) - P.y,
+  );
+  const dCCW = Math.hypot(
+    cx + r * Math.cos(midCCW) - P.x,
+    cy + r * Math.sin(midCCW) - P.y,
+  );
   const endAngle = dCW < dCCW ? startAngle - cwSpan : startAngle + ccwSpan;
   return { type: "arc", cx, cy, r, startAngle, endAngle };
 }
@@ -76,9 +115,13 @@ function propagateCoincidentFrom(startIdx, shapes, updated, constraints) {
       if (c.type !== "coincident") continue;
       let oIdx, oKey, tKey;
       if (c.shapeAIdx === idx && !updated.has(c.shapeBIdx)) {
-        oIdx = c.shapeBIdx; oKey = c.pointB; tKey = c.pointA;
+        oIdx = c.shapeBIdx;
+        oKey = c.pointB;
+        tKey = c.pointA;
       } else if (c.shapeBIdx === idx && !updated.has(c.shapeAIdx)) {
-        oIdx = c.shapeAIdx; oKey = c.pointA; tKey = c.pointB;
+        oIdx = c.shapeAIdx;
+        oKey = c.pointA;
+        tKey = c.pointB;
       } else continue;
       const pos = getShapePoint(cur, tKey);
       if (!pos) continue;
@@ -102,8 +145,12 @@ function propagateCoincidentFrom(startIdx, shapes, updated, constraints) {
 // preSeeded: Map<shapeIdx, shape> of shapes already translated before the BFS starts
 //   (used for shape-body drag with a rigid group).
 export function enforceConstraints(
-  inputShapes, constraints, primaryIdx, primaryShape,
-  primaryPointKey = null, preSeeded = null
+  inputShapes,
+  constraints,
+  primaryIdx,
+  primaryShape,
+  primaryPointKey = null,
+  preSeeded = null,
 ) {
   const shapes = inputShapes.slice();
 
@@ -138,7 +185,7 @@ export function enforceConstraints(
 
   // ── Main coincident BFS ──────────────────────────────────────────────────────
   const queue = preSeeded
-    ? [primaryIdx, ...[...preSeeded.keys()].filter(k => k !== primaryIdx)]
+    ? [primaryIdx, ...[...preSeeded.keys()].filter((k) => k !== primaryIdx)]
     : [primaryIdx];
   while (queue.length > 0) {
     const idx = queue.shift();
@@ -148,9 +195,16 @@ export function enforceConstraints(
       if (c.type !== "coincident") continue;
       let otherIdx, otherKey, thisKey;
       if (c.shapeAIdx === idx && !placedEP.has(epKey(c.shapeBIdx, c.pointB))) {
-        otherIdx = c.shapeBIdx; otherKey = c.pointB; thisKey = c.pointA;
-      } else if (c.shapeBIdx === idx && !placedEP.has(epKey(c.shapeAIdx, c.pointA))) {
-        otherIdx = c.shapeAIdx; otherKey = c.pointA; thisKey = c.pointB;
+        otherIdx = c.shapeBIdx;
+        otherKey = c.pointB;
+        thisKey = c.pointA;
+      } else if (
+        c.shapeBIdx === idx &&
+        !placedEP.has(epKey(c.shapeAIdx, c.pointA))
+      ) {
+        otherIdx = c.shapeAIdx;
+        otherKey = c.pointA;
+        thisKey = c.pointB;
       } else continue;
       const pos = getShapePoint(cur, thisKey);
       if (!pos) continue;
@@ -164,7 +218,12 @@ export function enforceConstraints(
       // move — keeping them reachable by the distance-enforcement inner BFS.
       const oldPt = getShapePoint(base, otherKey);
       const newPt = getShapePoint(moved, otherKey);
-      if (oldPt && newPt && Math.hypot(newPt.x - oldPt.x, newPt.y - oldPt.y) < 1e-8) continue;
+      if (
+        oldPt &&
+        newPt &&
+        Math.hypot(newPt.x - oldPt.x, newPt.y - oldPt.y) < 1e-8
+      )
+        continue;
       shapes[otherIdx] = moved;
       updated.set(otherIdx, moved);
       movedKeys.set(otherIdx, otherKey);
@@ -176,20 +235,42 @@ export function enforceConstraints(
         const sideKey = otherKey === "start" ? "end" : "start";
         const preSidePos = getShapePoint(preHV, sideKey);
         const postSidePos = getShapePoint(moved, sideKey);
-        if (preSidePos && postSidePos && Math.hypot(preSidePos.x - postSidePos.x, preSidePos.y - postSidePos.y) > 1e-8) {
+        if (
+          preSidePos &&
+          postSidePos &&
+          Math.hypot(
+            preSidePos.x - postSidePos.x,
+            preSidePos.y - postSidePos.y,
+          ) > 1e-8
+        ) {
           for (const sc of constraints) {
             if (sc.type !== "coincident") continue;
             let sOtherIdx, sOtherKey;
-            if (sc.shapeAIdx === otherIdx && sc.pointA === sideKey && !placedEP.has(epKey(sc.shapeBIdx, sc.pointB))) {
-              sOtherIdx = sc.shapeBIdx; sOtherKey = sc.pointB;
-            } else if (sc.shapeBIdx === otherIdx && sc.pointB === sideKey && !placedEP.has(epKey(sc.shapeAIdx, sc.pointA))) {
-              sOtherIdx = sc.shapeAIdx; sOtherKey = sc.pointA;
+            if (
+              sc.shapeAIdx === otherIdx &&
+              sc.pointA === sideKey &&
+              !placedEP.has(epKey(sc.shapeBIdx, sc.pointB))
+            ) {
+              sOtherIdx = sc.shapeBIdx;
+              sOtherKey = sc.pointB;
+            } else if (
+              sc.shapeBIdx === otherIdx &&
+              sc.pointB === sideKey &&
+              !placedEP.has(epKey(sc.shapeAIdx, sc.pointA))
+            ) {
+              sOtherIdx = sc.shapeAIdx;
+              sOtherKey = sc.pointA;
             } else continue;
             const sBase = shapes[sOtherIdx];
             if (!sBase) continue;
             let sMoved = moveShapePoint(sBase, sOtherKey, postSidePos);
             if (!sMoved) continue;
-            sMoved = applyHVEnforcement(sMoved, sOtherKey, constraints, sOtherIdx);
+            sMoved = applyHVEnforcement(
+              sMoved,
+              sOtherKey,
+              constraints,
+              sOtherIdx,
+            );
             const wasInUpdated = updated.has(sOtherIdx);
             shapes[sOtherIdx] = sMoved;
             updated.set(sOtherIdx, sMoved);
@@ -206,15 +287,21 @@ export function enforceConstraints(
     if (c.type !== "onLine") continue;
     if (!updated.has(c.lineShapeIdx) && !updated.has(c.pointShapeIdx)) continue;
     const lineShape = shapes[c.lineShapeIdx];
-    const ptShape   = shapes[c.pointShapeIdx];
+    const ptShape = shapes[c.pointShapeIdx];
     if (!lineShape || lineShape.type !== "line" || !ptShape) continue;
     const currentPt = getShapePoint(ptShape, c.pointKey);
     if (!currentPt) continue;
     const projected = projectOntoLine(currentPt, lineShape);
-    if (Math.hypot(projected.x - currentPt.x, projected.y - currentPt.y) < 1e-8) continue;
+    if (Math.hypot(projected.x - currentPt.x, projected.y - currentPt.y) < 1e-8)
+      continue;
     let newPtShape = moveShapePoint(ptShape, c.pointKey, projected);
     if (!newPtShape) continue;
-    newPtShape = applyHVEnforcement(newPtShape, c.pointKey, constraints, c.pointShapeIdx);
+    newPtShape = applyHVEnforcement(
+      newPtShape,
+      c.pointKey,
+      constraints,
+      c.pointShapeIdx,
+    );
     shapes[c.pointShapeIdx] = newPtShape;
     updated.set(c.pointShapeIdx, newPtShape);
     propagateCoincidentFrom(c.pointShapeIdx, shapes, updated, constraints);
@@ -225,7 +312,13 @@ export function enforceConstraints(
     let anyChange = false;
     for (const c of constraints) {
       if (c.type !== "distance") continue;
-      const { shapeAIdx: ai, pointA: pA, shapeBIdx: bi, pointB: pB, distance: d } = c;
+      const {
+        shapeAIdx: ai,
+        pointA: pA,
+        shapeBIdx: bi,
+        pointB: pB,
+        distance: d,
+      } = c;
 
       if (ai === bi) {
         // Same-shape: line-length or radius. The placed endpoint is the anchor;
@@ -236,17 +329,22 @@ export function enforceConstraints(
         const shape = shapes[ai];
         if (!shape) continue;
         const adjustKey = movedKey === pA ? pB : pA;
-        const fixedPos  = getShapePoint(shape, movedKey);
+        const fixedPos = getShapePoint(shape, movedKey);
         const adjustPos = getShapePoint(shape, adjustKey);
         if (!fixedPos || !adjustPos) continue;
-        const ddx = adjustPos.x - fixedPos.x, ddy = adjustPos.y - fixedPos.y;
+        const ddx = adjustPos.x - fixedPos.x,
+          ddy = adjustPos.y - fixedPos.y;
         const curLen = Math.hypot(ddx, ddy);
         if (curLen < 1e-10 || Math.abs(curLen - d) < 1e-8) continue;
-        const newAdjPos = { x: fixedPos.x + ddx / curLen * d, y: fixedPos.y + ddy / curLen * d };
+        const newAdjPos = {
+          x: fixedPos.x + (ddx / curLen) * d,
+          y: fixedPos.y + (ddy / curLen) * d,
+        };
         let ns = moveShapePoint(shape, adjustKey, newAdjPos);
         if (!ns) continue;
         // moveShapePoint(circle, 'center') doesn't update r, so set it explicitly.
-        if (ns.type === 'circle' && adjustKey === 'center') ns = { ...ns, r: d };
+        if (ns.type === "circle" && adjustKey === "center")
+          ns = { ...ns, r: d };
         ns = applyHVEnforcement(ns, adjustKey, constraints, ai);
         shapes[ai] = ns;
         updated.set(ai, ns);
@@ -256,25 +354,36 @@ export function enforceConstraints(
       } else {
         // Two-shape: point-to-point distance. Move whichever endpoint was not
         // the original source of movement (only one side updated → move the other).
-        const aUp = updated.has(ai), bUp = updated.has(bi);
+        const aUp = updated.has(ai),
+          bUp = updated.has(bi);
         if (!aUp && !bUp) continue;
         if (aUp && bUp) continue; // both moved — skip to avoid fighting
-        const sA = shapes[ai], sB = shapes[bi];
+        const sA = shapes[ai],
+          sB = shapes[bi];
         if (!sA || !sB) continue;
-        const posA = getShapePoint(sA, pA), posB = getShapePoint(sB, pB);
+        const posA = getShapePoint(sA, pA),
+          posB = getShapePoint(sB, pB);
         if (!posA || !posB) continue;
-        const dx = posB.x - posA.x, dy = posB.y - posA.y;
+        const dx = posB.x - posA.x,
+          dy = posB.y - posA.y;
         const curDist = Math.hypot(dx, dy);
         if (curDist < 1e-10 || Math.abs(curDist - d) < 1e-8) continue;
         let targetIdx, targetKey, newX, newY;
         if (aUp) {
-          targetIdx = bi; targetKey = pB;
-          newX = posA.x + dx / curDist * d; newY = posA.y + dy / curDist * d;
+          targetIdx = bi;
+          targetKey = pB;
+          newX = posA.x + (dx / curDist) * d;
+          newY = posA.y + (dy / curDist) * d;
         } else {
-          targetIdx = ai; targetKey = pA;
-          newX = posB.x - dx / curDist * d; newY = posB.y - dy / curDist * d;
+          targetIdx = ai;
+          targetKey = pA;
+          newX = posB.x - (dx / curDist) * d;
+          newY = posB.y - (dy / curDist) * d;
         }
-        let dMoved = moveShapePoint(shapes[targetIdx], targetKey, { x: newX, y: newY });
+        let dMoved = moveShapePoint(shapes[targetIdx], targetKey, {
+          x: newX,
+          y: newY,
+        });
         if (!dMoved) continue;
         dMoved = applyHVEnforcement(dMoved, targetKey, constraints, targetIdx);
         shapes[targetIdx] = dMoved;
@@ -292,17 +401,25 @@ export function enforceConstraints(
     if (!shape || shape.kind !== "bevel" || !shape.bevelData) continue;
     const { aIdx, aKey, bIdx, bKey, dist: bDist } = shape.bevelData;
     if (!updated.has(aIdx) && !updated.has(bIdx)) continue;
-    const sA2 = shapes[aIdx], sB2 = shapes[bIdx];
+    const sA2 = shapes[aIdx],
+      sB2 = shapes[bIdx];
     if (!sA2 || sA2.type !== "line" || !sB2 || sB2.type !== "line") continue;
-    const aEnd   = aKey === "start" ? { x: sA2.x1, y: sA2.y1 } : { x: sA2.x2, y: sA2.y2 };
-    const aOther = aKey === "start" ? { x: sA2.x2, y: sA2.y2 } : { x: sA2.x1, y: sA2.y1 };
-    const bEnd   = bKey === "start" ? { x: sB2.x1, y: sB2.y1 } : { x: sB2.x2, y: sB2.y2 };
-    const bOther = bKey === "start" ? { x: sB2.x2, y: sB2.y2 } : { x: sB2.x1, y: sB2.y1 };
-    const dx1 = aEnd.x - aOther.x, dy1 = aEnd.y - aOther.y;
-    const dx2 = bEnd.x - bOther.x, dy2 = bEnd.y - bOther.y;
+    const aEnd =
+      aKey === "start" ? { x: sA2.x1, y: sA2.y1 } : { x: sA2.x2, y: sA2.y2 };
+    const aOther =
+      aKey === "start" ? { x: sA2.x2, y: sA2.y2 } : { x: sA2.x1, y: sA2.y1 };
+    const bEnd =
+      bKey === "start" ? { x: sB2.x1, y: sB2.y1 } : { x: sB2.x2, y: sB2.y2 };
+    const bOther =
+      bKey === "start" ? { x: sB2.x2, y: sB2.y2 } : { x: sB2.x1, y: sB2.y1 };
+    const dx1 = aEnd.x - aOther.x,
+      dy1 = aEnd.y - aOther.y;
+    const dx2 = bEnd.x - bOther.x,
+      dy2 = bEnd.y - bOther.y;
     const denom = dx1 * dy2 - dy1 * dx2;
     if (Math.abs(denom) < 1e-10) continue;
-    const tInter = ((bOther.x - aOther.x) * dy2 - (bOther.y - aOther.y) * dx2) / denom;
+    const tInter =
+      ((bOther.x - aOther.x) * dy2 - (bOther.y - aOther.y) * dx2) / denom;
     const P = { x: aOther.x + tInter * dx1, y: aOther.y + tInter * dy1 };
     const uA = norm2({ x: aOther.x - P.x, y: aOther.y - P.y });
     const uB = norm2({ x: bOther.x - P.x, y: bOther.y - P.y });
@@ -316,8 +433,14 @@ export function enforceConstraints(
     updated.set(i, newArc);
     const newSA = moveShapePoint(sA2, aKey, newTrimA);
     const newSB = moveShapePoint(sB2, bKey, newTrimB);
-    if (newSA) { shapes[aIdx] = newSA; updated.set(aIdx, newSA); }
-    if (newSB) { shapes[bIdx] = newSB; updated.set(bIdx, newSB); }
+    if (newSA) {
+      shapes[aIdx] = newSA;
+      updated.set(aIdx, newSA);
+    }
+    if (newSB) {
+      shapes[bIdx] = newSB;
+      updated.set(bIdx, newSB);
+    }
   }
 
   return updated;

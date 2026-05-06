@@ -1,15 +1,25 @@
 import * as THREE from "three";
-import { Evaluator, Brush, ADDITION, SUBTRACTION, INTERSECTION } from "three-bvh-csg";
+import {
+  Evaluator,
+  Brush,
+  ADDITION,
+  SUBTRACTION,
+  INTERSECTION,
+} from "three-bvh-csg";
 import { polyCentroid } from "./sceneObjects.js";
 
 // Builds the THREE.BufferGeometry for a given item, or returns null if the
 // item type does not produce solid geometry (e.g. sketches).
 export function buildItemGeometry(item) {
   switch (item.type) {
-    case "cube":     return new THREE.BoxGeometry(2, 2, 2);
-    case "sphere":   return new THREE.SphereGeometry(1.5, 32, 32);
-    case "cylinder": return new THREE.CylinderGeometry(1, 1, 2, 32);
-    case "torus":    return new THREE.TorusGeometry(1.0, 0.4, 16, 32);
+    case "cube":
+      return new THREE.BoxGeometry(2, 2, 2);
+    case "sphere":
+      return new THREE.SphereGeometry(1.5, 32, 32);
+    case "cylinder":
+      return new THREE.CylinderGeometry(1, 1, 2, 32);
+    case "torus":
+      return new THREE.TorusGeometry(1.0, 0.4, 16, 32);
 
     case "extrude": {
       const poly = item.profile?.polygon2D;
@@ -17,11 +27,18 @@ export function buildItemGeometry(item) {
       const holes = item.profile.holes || [];
       const depth = item.depth ?? 1.0;
       const c = polyCentroid(poly);
-      const shape = new THREE.Shape(poly.map(p => new THREE.Vector2(p.x - c.x, p.y - c.y)));
-      holes.forEach(h =>
-        shape.holes.push(new THREE.Path(h.map(p => new THREE.Vector2(p.x - c.x, p.y - c.y))))
+      const shape = new THREE.Shape(
+        poly.map((p) => new THREE.Vector2(p.x - c.x, p.y - c.y)),
       );
-      const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+      holes.forEach((h) =>
+        shape.holes.push(
+          new THREE.Path(h.map((p) => new THREE.Vector2(p.x - c.x, p.y - c.y))),
+        ),
+      );
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth,
+        bevelEnabled: false,
+      });
       // Centre along the extrusion axis to match buildSceneObjects behaviour.
       geo.translate(0, 0, -depth / 2);
       return geo;
@@ -31,14 +48,23 @@ export function buildItemGeometry(item) {
       if (!item.geometryData) return null;
       const { positions, normals, indices } = item.geometryData;
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
-      if (normals) geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
-      if (indices) geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+      geo.setAttribute(
+        "position",
+        new THREE.BufferAttribute(new Float32Array(positions), 3),
+      );
+      if (normals)
+        geo.setAttribute(
+          "normal",
+          new THREE.BufferAttribute(new Float32Array(normals), 3),
+        );
+      if (indices)
+        geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
       if (!normals) geo.computeVertexNormals();
       return geo;
     }
 
-    default: return null;
+    default:
+      return null;
   }
 }
 
@@ -62,7 +88,11 @@ export function buildBrushTransform(item) {
     offset.applyEuler(new THREE.Euler(r.x || 0, r.y || 0, r.z || 0));
     const base = item.position || { x: 0, y: 0, z: 0 };
     return {
-      position: { x: base.x + offset.x, y: base.y + offset.y, z: base.z + offset.z },
+      position: {
+        x: base.x + offset.x,
+        y: base.y + offset.y,
+        z: base.z + offset.z,
+      },
       rotation: r,
       scale: s,
     };
@@ -82,9 +112,12 @@ export function performCsg(selectedItems, operation) {
   const evaluator = new Evaluator();
   const sharedMat = new THREE.MeshStandardMaterial();
 
-  const op = operation === "union"        ? ADDITION
-           : operation === "difference"   ? SUBTRACTION
-           :                               INTERSECTION;
+  const op =
+    operation === "union"
+      ? ADDITION
+      : operation === "difference"
+        ? SUBTRACTION
+        : INTERSECTION;
 
   // Collect brushes — skip items whose type doesn't produce solid geometry.
   const brushes = [];
@@ -94,7 +127,10 @@ export function performCsg(selectedItems, operation) {
 
     if (!geo.getAttribute("uv")) {
       const count = geo.getAttribute("position").count;
-      geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+      geo.setAttribute(
+        "uv",
+        new THREE.BufferAttribute(new Float32Array(count * 2), 2),
+      );
     }
 
     const brush = new Brush(geo, sharedMat);
@@ -119,9 +155,9 @@ export function performCsg(selectedItems, operation) {
     result = evaluator.evaluate(result, brushes[i], op);
   }
 
-  const posAttr  = result.geometry.getAttribute("position");
+  const posAttr = result.geometry.getAttribute("position");
   const normAttr = result.geometry.getAttribute("normal");
-  const idxAttr  = result.geometry.index;
+  const idxAttr = result.geometry.index;
 
   // Centre the result geometry around its bounding-box centre so that
   // item.position is the world-space pivot of the combined solid.
@@ -129,7 +165,12 @@ export function performCsg(selectedItems, operation) {
   const centre = new THREE.Vector3();
   bbox.getCenter(centre);
   for (let i = 0; i < posAttr.count; i++) {
-    posAttr.setXYZ(i, posAttr.getX(i) - centre.x, posAttr.getY(i) - centre.y, posAttr.getZ(i) - centre.z);
+    posAttr.setXYZ(
+      i,
+      posAttr.getX(i) - centre.x,
+      posAttr.getY(i) - centre.y,
+      posAttr.getZ(i) - centre.z,
+    );
   }
   posAttr.needsUpdate = true;
 
@@ -139,8 +180,8 @@ export function performCsg(selectedItems, operation) {
     position: { x: centre.x, y: centre.y, z: centre.z },
     geometryData: {
       positions: Array.from(posAttr.array),
-      normals:   normAttr ? Array.from(normAttr.array) : null,
-      indices:   idxAttr  ? Array.from(idxAttr.array)  : null,
+      normals: normAttr ? Array.from(normAttr.array) : null,
+      indices: idxAttr ? Array.from(idxAttr.array) : null,
     },
   };
 }
