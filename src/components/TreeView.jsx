@@ -4,7 +4,9 @@ import "../styles/TreeView.css";
 
 const buildTree = (items) => {
   const byId = {};
-  items.forEach((i) => { byId[i.id] = Object.assign({}, i, { _children: [] }); });
+  items.forEach((i) => {
+    byId[i.id] = Object.assign({}, i, { _children: [] });
+  });
   const roots = [];
   items.forEach((i) => {
     const node = byId[i.id];
@@ -32,7 +34,16 @@ const getDescendantIds = (itemId, items) => {
   return result;
 };
 
-const TreeViewItem = ({ node, depth, items, dragState, onDragStart, onDragOver, onDragLeave, onDrop }) => {
+const TreeViewItem = ({
+  node,
+  depth,
+  items,
+  dragState,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+}) => {
   const selectItem = useStore((s) => s.selectItem);
   const setHoveredId = useStore((s) => s.setHoveredId);
   const toggleItemExpanded = useStore((s) => s.toggleItemExpanded);
@@ -51,17 +62,24 @@ const TreeViewItem = ({ node, depth, items, dragState, onDragStart, onDragOver, 
   const isSketch = node.type === "sketch";
   const isDragging = dragState.draggingId === node.id;
   const isDropTarget = dragState.dropTargetId === node.id;
-  const isSecondarySelected = selectedId !== node.id && selectedIds.includes(node.id);
+  const isSecondarySelected =
+    selectedId !== node.id && selectedIds.includes(node.id);
   const isHidden = node.visible === false;
 
   const getIcon = (type) => {
     switch (type) {
-      case "sketch": return "📋";
-      case "cube": return "📦";
-      case "sphere": return "⚪";
-      case "cylinder": return "🥫";
-      case "torus": return "🍩";
-      default: return "📄";
+      case "sketch":
+        return "📋";
+      case "cube":
+        return "📦";
+      case "sphere":
+        return "⚪";
+      case "cylinder":
+        return "🥫";
+      case "torus":
+        return "🍩";
+      default:
+        return "📄";
     }
   };
 
@@ -100,7 +118,9 @@ const TreeViewItem = ({ node, depth, items, dragState, onDragStart, onDragOver, 
           isDragging ? "dragging" : "",
           isDropTarget ? "drop-target" : "",
           isHidden ? "hidden-item" : "",
-        ].filter(Boolean).join(" ")}
+        ]
+          .filter(Boolean)
+          .join(" ")}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         draggable={!isSketch && !editing}
         onDragStart={!isSketch ? (e) => onDragStart(e, node.id) : undefined}
@@ -113,7 +133,10 @@ const TreeViewItem = ({ node, depth, items, dragState, onDragStart, onDragOver, 
         {hasChildren ? (
           <button
             className="expand-btn"
-            onClick={(e) => { e.stopPropagation(); toggleItemExpanded(node.id); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleItemExpanded(node.id);
+            }}
           >
             {node.expanded ? "▼" : "▶"}
           </button>
@@ -144,22 +167,43 @@ const TreeViewItem = ({ node, depth, items, dragState, onDragStart, onDragOver, 
             <button
               className={`tree-action-btn visibility-btn ${isHidden ? "always-visible" : ""}`}
               title={isHidden ? "Show" : "Hide"}
-              onClick={(e) => { e.stopPropagation(); toggleItemVisibility(node.id); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleItemVisibility(node.id);
+              }}
             >
               {isHidden ? (
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                  <line x1="1" y1="1" x2="23" y2="23"/>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="12"
+                  height="12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
                 </svg>
               ) : (
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                  <circle cx="12" cy="12" r="3"/>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="12"
+                  height="12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
                 </svg>
               )}
             </button>
-            <button className="tree-action-btn rename-btn" title="Rename" onClick={startRename}>
+            <button
+              className="tree-action-btn rename-btn"
+              title="Rename"
+              onClick={startRename}
+            >
               ✎
             </button>
             <button
@@ -197,7 +241,10 @@ const TreeViewItem = ({ node, depth, items, dragState, onDragStart, onDragOver, 
 const TreeView = ({ items }) => {
   const reparentItem = useStore((s) => s.reparentItem);
   const selectedId = useStore((s) => s.selectedId);
-  const [dragState, setDragState] = useState({ draggingId: null, dropTargetId: null });
+  const [dragState, setDragState] = useState({
+    draggingId: null,
+    dropTargetId: null,
+  });
 
   const roots = buildTree(items);
 
@@ -205,7 +252,9 @@ const TreeView = ({ items }) => {
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", String(id));
     // Defer so the drag image captures the non-dragging state
-    requestAnimationFrame(() => setDragState((s) => ({ ...s, draggingId: id })));
+    requestAnimationFrame(() =>
+      setDragState((s) => ({ ...s, draggingId: id })),
+    );
   };
 
   const handleDragOver = (e, targetId) => {
@@ -276,7 +325,11 @@ const TreeView = ({ items }) => {
         <div
           className={`tree-root-drop-zone ${dragState.draggingId !== null && dragState.dropTargetId === "root" ? "active" : ""}`}
           onDragOver={handleRootDragOver}
-          onDragLeave={() => setDragState((s) => s.dropTargetId === "root" ? { ...s, dropTargetId: null } : s)}
+          onDragLeave={() =>
+            setDragState((s) =>
+              s.dropTargetId === "root" ? { ...s, dropTargetId: null } : s,
+            )
+          }
           onDrop={handleRootDrop}
         />
       </div>

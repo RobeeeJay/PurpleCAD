@@ -16,47 +16,69 @@ export const HANDLE_CONFIGS = [
   { type: "axisX", color: 0xff4444, dir: new THREE.Vector3(1, 0, 0) },
   { type: "axisY", color: 0x4488ff, dir: new THREE.Vector3(0, 1, 0) },
   { type: "axisZ", color: 0x44ff44, dir: new THREE.Vector3(0, 0, 1) },
-  { type: "scale", color: 0xffffff, dir: new THREE.Vector3(1, 1, 1).normalize() },
+  {
+    type: "scale",
+    color: 0xffffff,
+    dir: new THREE.Vector3(1, 1, 1).normalize(),
+  },
 ];
 
 export function getObjectDimensions(itemType, uniformScale) {
   const s = uniformScale || 1;
   switch (itemType) {
-    case "cube":     return { w: 2 * s, h: 2 * s, d: 2 * s };
-    case "sphere":   return { w: 3 * s, h: 3 * s, d: 3 * s };
-    case "cylinder": return { w: 2 * s, h: 2 * s, d: 2 * s };
-    case "torus":    return { w: 2.8 * s, h: 0.8 * s, d: 2.8 * s };
-    case "sketch":   return { w: 3 * s, h: 3 * s, d: 0.05 };
-    default:         return { w: 2 * s, h: 2 * s, d: 2 * s };
+    case "cube":
+      return { w: 2 * s, h: 2 * s, d: 2 * s };
+    case "sphere":
+      return { w: 3 * s, h: 3 * s, d: 3 * s };
+    case "cylinder":
+      return { w: 2 * s, h: 2 * s, d: 2 * s };
+    case "torus":
+      return { w: 2.8 * s, h: 0.8 * s, d: 2.8 * s };
+    case "sketch":
+      return { w: 3 * s, h: 3 * s, d: 0.05 };
+    default:
+      return { w: 2 * s, h: 2 * s, d: 2 * s };
   }
 }
 
 export function getObjectExtent(itemType, uniformScale) {
   const s = uniformScale || 1;
   switch (itemType) {
-    case "sphere":   return 1.5 * s;
-    case "torus":    return 1.4 * s;
-    case "sketch":   return 1.5 * s;
-    default:         return 1.0 * s;
+    case "sphere":
+      return 1.5 * s;
+    case "torus":
+      return 1.4 * s;
+    case "sketch":
+      return 1.5 * s;
+    default:
+      return 1.0 * s;
   }
 }
 
 export function makeDimSprite(text, cssColor) {
-  const W = 168, H = 52;
+  const W = 168,
+    H = 52;
   const canvas = document.createElement("canvas");
-  canvas.width = W; canvas.height = H;
+  canvas.width = W;
+  canvas.height = H;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = "rgba(12,12,12,0.85)";
   ctx.fillRect(3, 3, W - 6, H - 6);
-  ctx.strokeStyle = cssColor; ctx.lineWidth = 2.5;
+  ctx.strokeStyle = cssColor;
+  ctx.lineWidth = 2.5;
   ctx.strokeRect(3, 3, W - 6, H - 6);
   ctx.fillStyle = cssColor;
   ctx.font = "bold 26px monospace";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   ctx.fillText(text, W / 2, H / 2);
   const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    depthTest: false,
+    transparent: true,
+  });
   const sprite = new THREE.Sprite(mat);
   sprite.scale.set(1.5, 0.46, 1);
   sprite.renderOrder = 1000;
@@ -65,15 +87,18 @@ export function makeDimSprite(text, cssColor) {
 
 export function redrawDimSprite(dimObj, text, cssColor) {
   const { canvas, ctx, mat } = dimObj;
-  const W = canvas.width, H = canvas.height;
+  const W = canvas.width,
+    H = canvas.height;
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = "rgba(12,12,12,0.85)";
   ctx.fillRect(3, 3, W - 6, H - 6);
-  ctx.strokeStyle = cssColor; ctx.lineWidth = 2.5;
+  ctx.strokeStyle = cssColor;
+  ctx.lineWidth = 2.5;
   ctx.strokeRect(3, 3, W - 6, H - 6);
   ctx.fillStyle = cssColor;
   ctx.font = "bold 26px monospace";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   ctx.fillText(text, W / 2, H / 2);
   mat.map.needsUpdate = true;
 }
@@ -81,23 +106,32 @@ export function redrawDimSprite(dimObj, text, cssColor) {
 export function placeDimLabels(boundingBox, pos, dim) {
   const { labelX, labelY, labelZ } = boundingBox;
   const GAP = 0.75;
-  const hw = dim.w / 2, hh = dim.h / 2, hd = dim.d / 2;
+  const hw = dim.w / 2,
+    hh = dim.h / 2,
+    hd = dim.d / 2;
   labelX.sprite.position.set(pos.x, pos.y + hh + GAP, pos.z - hd);
   labelY.sprite.position.set(pos.x + hw + GAP, pos.y, pos.z - hd);
   labelZ.sprite.position.set(pos.x + hw + GAP, pos.y + hh + GAP, pos.z);
 }
 
 export function makeMeasureLabel(text, cssColor) {
-  const W = 120, H = 38;
+  const W = 120,
+    H = 38;
   const canvas = document.createElement("canvas");
-  canvas.width = W; canvas.height = H;
+  canvas.width = W;
+  canvas.height = H;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = cssColor;
   ctx.font = "bold 22px monospace";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   ctx.fillText(text, W / 2, H / 2);
-  const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false, transparent: true });
+  const mat = new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(canvas),
+    depthTest: false,
+    transparent: true,
+  });
   const sprite = new THREE.Sprite(mat);
   sprite.scale.set(0.8, 0.25, 1);
   sprite.renderOrder = 1001;
@@ -111,15 +145,45 @@ export function buildSketchShape(tool, start, current) {
   const dy = current.y - start.y;
   const r = Math.sqrt(dx * dx + dy * dy);
   switch (tool) {
-    case "rect":    return { type: "rect",    x1: start.x, y1: start.y, x2: current.x, y2: current.y };
-    case "circle":  return { type: "circle",  cx: start.x, cy: start.y, r };
-    case "ellipse": return { type: "ellipse", cx: start.x, cy: start.y, rx: Math.abs(dx), ry: Math.abs(dy) };
-    case "line":    return { type: "line",    x1: start.x, y1: start.y, x2: current.x, y2: current.y };
+    case "rect":
+      return {
+        type: "rect",
+        x1: start.x,
+        y1: start.y,
+        x2: current.x,
+        y2: current.y,
+      };
+    case "circle":
+      return { type: "circle", cx: start.x, cy: start.y, r };
+    case "ellipse":
+      return {
+        type: "ellipse",
+        cx: start.x,
+        cy: start.y,
+        rx: Math.abs(dx),
+        ry: Math.abs(dy),
+      };
+    case "line":
+      return {
+        type: "line",
+        x1: start.x,
+        y1: start.y,
+        x2: current.x,
+        y2: current.y,
+      };
     case "arc": {
       const startAngle = Math.atan2(dy, dx);
-      return { type: "arc", cx: start.x, cy: start.y, r, startAngle, endAngle: startAngle + Math.PI / 2 };
+      return {
+        type: "arc",
+        cx: start.x,
+        cy: start.y,
+        r,
+        startAngle,
+        endAngle: startAngle + Math.PI / 2,
+      };
     }
-    default: return null;
+    default:
+      return null;
   }
 }
 
@@ -133,7 +197,13 @@ export function getSketchShapePoints(shape, sketchMesh) {
   switch (shape.type) {
     case "rect": {
       const { x1, y1, x2, y2 } = shape;
-      return [toWorld(x1, y1), toWorld(x2, y1), toWorld(x2, y2), toWorld(x1, y2), toWorld(x1, y1)];
+      return [
+        toWorld(x1, y1),
+        toWorld(x2, y1),
+        toWorld(x2, y2),
+        toWorld(x1, y2),
+        toWorld(x1, y1),
+      ];
     }
     case "circle": {
       const { cx, cy, r } = shape;
@@ -161,12 +231,15 @@ export function getSketchShapePoints(shape, sketchMesh) {
     case "bezier": {
       const { p0, p1, p2, p3 } = shape;
       const curve = new THREE.CubicBezierCurve(
-        new THREE.Vector2(p0.x, p0.y), new THREE.Vector2(p1.x, p1.y),
-        new THREE.Vector2(p2.x, p2.y), new THREE.Vector2(p3.x, p3.y),
+        new THREE.Vector2(p0.x, p0.y),
+        new THREE.Vector2(p1.x, p1.y),
+        new THREE.Vector2(p2.x, p2.y),
+        new THREE.Vector2(p3.x, p3.y),
       );
       return curve.getPoints(48).map(({ x, y }) => toWorld(x, y));
     }
-    default: return [];
+    default:
+      return [];
   }
 }
 
@@ -177,10 +250,14 @@ export function sketchDimText(tool, start, current) {
   const W = Math.abs(dx) * MM_PER_UNIT;
   const H = Math.abs(dy) * MM_PER_UNIT;
   switch (tool) {
-    case "line":   return `${L.toFixed(1)} mm`;
-    case "arc":    return `r ${L.toFixed(1)} mm`;
-    case "circle": return `⌀ ${(L * 2).toFixed(1)} mm`;
-    default:       return `W ${W.toFixed(1)}  H ${H.toFixed(1)} mm`;
+    case "line":
+      return `${L.toFixed(1)} mm`;
+    case "arc":
+      return `r ${L.toFixed(1)} mm`;
+    case "circle":
+      return `⌀ ${(L * 2).toFixed(1)} mm`;
+    default:
+      return `W ${W.toFixed(1)}  H ${H.toFixed(1)} mm`;
   }
 }
 
@@ -189,7 +266,7 @@ export function moveShapePoint(shape, pointKey, newPos) {
   switch (shape.type) {
     case "line":
       if (pointKey === "start") return { ...shape, x1: x, y1: y };
-      if (pointKey === "end")   return { ...shape, x2: x, y2: y };
+      if (pointKey === "end") return { ...shape, x2: x, y2: y };
       break;
     case "rect":
       if (pointKey === "tl") return { ...shape, x1: x, y1: y };
@@ -199,7 +276,8 @@ export function moveShapePoint(shape, pointKey, newPos) {
       break;
     case "circle":
       if (pointKey === "center") return { ...shape, cx: x, cy: y };
-      if (pointKey === "edge")   return { ...shape, r: Math.hypot(x - shape.cx, y - shape.cy) };
+      if (pointKey === "edge")
+        return { ...shape, r: Math.hypot(x - shape.cx, y - shape.cy) };
       break;
     case "ellipse":
       if (pointKey === "center") return { ...shape, cx: x, cy: y };
@@ -220,18 +298,29 @@ export function moveShapePoint(shape, pointKey, newPos) {
       break;
     case "bezier": {
       if (pointKey === "p0") {
-        const dx = x - shape.p0.x, dy = y - shape.p0.y;
-        return { ...shape, p0: { x, y }, p1: { x: shape.p1.x + dx, y: shape.p1.y + dy } };
+        const dx = x - shape.p0.x,
+          dy = y - shape.p0.y;
+        return {
+          ...shape,
+          p0: { x, y },
+          p1: { x: shape.p1.x + dx, y: shape.p1.y + dy },
+        };
       }
       if (pointKey === "p3") {
-        const dx = x - shape.p3.x, dy = y - shape.p3.y;
-        return { ...shape, p3: { x, y }, p2: { x: shape.p2.x + dx, y: shape.p2.y + dy } };
+        const dx = x - shape.p3.x,
+          dy = y - shape.p3.y;
+        return {
+          ...shape,
+          p3: { x, y },
+          p2: { x: shape.p2.x + dx, y: shape.p2.y + dy },
+        };
       }
       if (pointKey === "p1") return { ...shape, p1: { x, y } };
       if (pointKey === "p2") return { ...shape, p2: { x, y } };
       break;
     }
-    default: break;
+    default:
+      break;
   }
   return null;
 }
@@ -258,8 +347,18 @@ export function getSnapPoints(shapes) {
         break;
       case "arc": {
         const { cx, cy, r, startAngle, endAngle } = shape;
-        pts.push({ x: cx + Math.cos(startAngle) * r, y: cy + Math.sin(startAngle) * r, shapeIdx, pointKey: "start" });
-        pts.push({ x: cx + Math.cos(endAngle) * r,   y: cy + Math.sin(endAngle) * r,   shapeIdx, pointKey: "end" });
+        pts.push({
+          x: cx + Math.cos(startAngle) * r,
+          y: cy + Math.sin(startAngle) * r,
+          shapeIdx,
+          pointKey: "start",
+        });
+        pts.push({
+          x: cx + Math.cos(endAngle) * r,
+          y: cy + Math.sin(endAngle) * r,
+          shapeIdx,
+          pointKey: "end",
+        });
         pts.push({ x: cx, y: cy, shapeIdx, pointKey: "center" });
         break;
       }
@@ -267,7 +366,8 @@ export function getSnapPoints(shapes) {
         pts.push({ x: shape.p0.x, y: shape.p0.y, shapeIdx, pointKey: "p0" });
         pts.push({ x: shape.p3.x, y: shape.p3.y, shapeIdx, pointKey: "p3" });
         break;
-      default: break;
+      default:
+        break;
     }
   });
   return pts;
@@ -276,7 +376,9 @@ export function getSnapPoints(shapes) {
 export function getShapePoint(shape, pointKey) {
   switch (shape.type) {
     case "line":
-      return pointKey === "start" ? { x: shape.x1, y: shape.y1 } : { x: shape.x2, y: shape.y2 };
+      return pointKey === "start"
+        ? { x: shape.x1, y: shape.y1 }
+        : { x: shape.x2, y: shape.y2 };
     case "rect":
       if (pointKey === "tl") return { x: shape.x1, y: shape.y1 };
       if (pointKey === "tr") return { x: shape.x2, y: shape.y1 };
@@ -290,50 +392,79 @@ export function getShapePoint(shape, pointKey) {
       return { x: shape.cx, y: shape.cy };
     case "arc":
       if (pointKey === "center") return { x: shape.cx, y: shape.cy };
-      if (pointKey === "start") return { x: shape.cx + Math.cos(shape.startAngle) * shape.r, y: shape.cy + Math.sin(shape.startAngle) * shape.r };
-      if (pointKey === "end")   return { x: shape.cx + Math.cos(shape.endAngle)   * shape.r, y: shape.cy + Math.sin(shape.endAngle)   * shape.r };
+      if (pointKey === "start")
+        return {
+          x: shape.cx + Math.cos(shape.startAngle) * shape.r,
+          y: shape.cy + Math.sin(shape.startAngle) * shape.r,
+        };
+      if (pointKey === "end")
+        return {
+          x: shape.cx + Math.cos(shape.endAngle) * shape.r,
+          y: shape.cy + Math.sin(shape.endAngle) * shape.r,
+        };
       return null;
     case "bezier":
       return shape[pointKey] ?? null;
-    default: return null;
+    default:
+      return null;
   }
 }
 
 export function getShapeLength(shape) {
   switch (shape.type) {
     case "line": {
-      const dx = shape.x2 - shape.x1, dy = shape.y2 - shape.y1;
+      const dx = shape.x2 - shape.x1,
+        dy = shape.y2 - shape.y1;
       return Math.sqrt(dx * dx + dy * dy) * MM_PER_UNIT;
     }
     case "arc":
-      return Math.abs(shape.endAngle - shape.startAngle) * shape.r * MM_PER_UNIT;
+      return (
+        Math.abs(shape.endAngle - shape.startAngle) * shape.r * MM_PER_UNIT
+      );
     case "circle":
       return 2 * Math.PI * shape.r * MM_PER_UNIT;
     case "ellipse": {
-      const a = shape.rx, b = shape.ry;
+      const a = shape.rx,
+        b = shape.ry;
       const h = ((a - b) * (a - b)) / ((a + b) * (a + b));
-      return Math.PI * (a + b) * (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h))) * MM_PER_UNIT;
+      return (
+        Math.PI *
+        (a + b) *
+        (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h))) *
+        MM_PER_UNIT
+      );
     }
     case "bezier": {
       const curve = new THREE.CubicBezierCurve(
-        new THREE.Vector2(shape.p0.x, shape.p0.y), new THREE.Vector2(shape.p1.x, shape.p1.y),
-        new THREE.Vector2(shape.p2.x, shape.p2.y), new THREE.Vector2(shape.p3.x, shape.p3.y),
+        new THREE.Vector2(shape.p0.x, shape.p0.y),
+        new THREE.Vector2(shape.p1.x, shape.p1.y),
+        new THREE.Vector2(shape.p2.x, shape.p2.y),
+        new THREE.Vector2(shape.p3.x, shape.p3.y),
       );
       const pts = curve.getPoints(32);
       let len = 0;
       for (let i = 1; i < pts.length; i++) {
-        const dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y;
+        const dx = pts[i].x - pts[i - 1].x,
+          dy = pts[i].y - pts[i - 1].y;
         len += Math.sqrt(dx * dx + dy * dy);
       }
       return len * MM_PER_UNIT;
     }
-    default: return null;
+    default:
+      return null;
   }
 }
 
 // ── Scene object building ─────────────────────────────────────────────────────
 
-export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef, curveSegments = 32, precision = null) {
+export function buildSceneObjects(
+  items,
+  scene,
+  objectsRef,
+  originalMaterialsRef,
+  curveSegments = 32,
+  precision = null,
+) {
   Object.values(objectsRef.current).forEach((mesh) => {
     scene.remove(mesh);
     mesh.geometry.dispose();
@@ -351,18 +482,38 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
     let geometry;
     let extrudeLocalOffset = null; // set by the extrude case; used for mesh positioning
     switch (item.type) {
-      case "cube":     geometry = new THREE.BoxGeometry(2, 2, 2); break;
-      case "sphere":   geometry = new THREE.BoxGeometry(3, 3, 3); break;
-      case "cylinder": geometry = new THREE.BoxGeometry(2, 2, 2); break;
-      case "torus":    geometry = new THREE.BoxGeometry(3, 1.2, 3); break;
-      case "sketch":   geometry = new THREE.PlaneGeometry(3, 3); break;
+      case "cube":
+        geometry = new THREE.BoxGeometry(2, 2, 2);
+        break;
+      case "sphere":
+        geometry = new THREE.BoxGeometry(3, 3, 3);
+        break;
+      case "cylinder":
+        geometry = new THREE.BoxGeometry(2, 2, 2);
+        break;
+      case "torus":
+        geometry = new THREE.BoxGeometry(3, 1.2, 3);
+        break;
+      case "sketch":
+        geometry = new THREE.PlaneGeometry(3, 3);
+        break;
       case "csg": {
         if (!item.geometryData) return;
         const { positions, normals, indices } = item.geometryData;
         geometry = new THREE.BufferGeometry();
-        geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
-        if (normals) geometry.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
-        if (indices) geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+        geometry.setAttribute(
+          "position",
+          new THREE.BufferAttribute(new Float32Array(positions), 3),
+        );
+        if (normals)
+          geometry.setAttribute(
+            "normal",
+            new THREE.BufferAttribute(new Float32Array(normals), 3),
+          );
+        if (indices)
+          geometry.setIndex(
+            new THREE.BufferAttribute(new Uint32Array(indices), 1),
+          );
         if (!normals) geometry.computeVertexNormals();
         break;
       }
@@ -375,14 +526,21 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
         if (profile.sketchId != null) {
           const sketchItem = items.find((si) => si.id === profile.sketchId);
           if (sketchItem && sketchItem.shapes && sketchItem.shapes.length > 0) {
-            const allLoops = findClosedLoops(sketchItem.shapes, curveSegments, precision);
+            const allLoops = findClosedLoops(
+              sketchItem.shapes,
+              curveSegments,
+              precision,
+            );
             const grouped = groupLoopsWithHoles(allLoops);
             if (grouped.length > 0) {
               // Search every entry in the hierarchy (roots and all descendants) so
               // that sub-regions like the part of a circle inside a rectangle can be
               // matched — those are children of a root, not roots themselves.
               const allEntries = [];
-              const collect = (e) => { allEntries.push(e); e.entries.forEach(collect); };
+              const collect = (e) => {
+                allEntries.push(e);
+                e.entries.forEach(collect);
+              };
               grouped.forEach(collect);
               const pc = profile.profileCentroid;
               // Use polyContainsPoint rather than nearest-centroid distance so
@@ -394,7 +552,9 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
               // many segments the arc is split into.
               let match = allEntries[0];
               if (pc) {
-                const containing = allEntries.filter(g => polyContainsPoint(g.polygon, pc));
+                const containing = allEntries.filter((g) =>
+                  polyContainsPoint(g.polygon, pc),
+                );
                 if (containing.length > 0) {
                   // Pick the polygon whose area is closest to the stored profile's
                   // area rather than the smallest one.  polyCentroid is biased by
@@ -412,14 +572,20 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
                 } else {
                   // Fall back to nearest centroid when nothing contains the
                   // stored point (e.g. sketch was heavily edited).
-                  match = allEntries.reduce((best, g) => {
-                    const c = polyCentroid(g.polygon);
-                    const d = Math.hypot(c.x - pc.x, c.y - pc.y);
-                    return d < best.d ? { g, d } : best;
-                  }, { g: allEntries[0], d: Infinity }).g;
+                  match = allEntries.reduce(
+                    (best, g) => {
+                      const c = polyCentroid(g.polygon);
+                      const d = Math.hypot(c.x - pc.x, c.y - pc.y);
+                      return d < best.d ? { g, d } : best;
+                    },
+                    { g: allEntries[0], d: Infinity },
+                  ).g;
                 }
               }
-              if (match.polygon.length >= 3) { poly = match.polygon; holePolys = match.holes.filter((h) => h.length >= 3); }
+              if (match.polygon.length >= 3) {
+                poly = match.polygon;
+                holePolys = match.holes.filter((h) => h.length >= 3);
+              }
             }
           }
         }
@@ -429,21 +595,43 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
         // Without this the mesh pivot stays at the sketch origin (often the
         // world origin), making rotation and scaling feel completely wrong.
         const profileCentroid2D = polyCentroid(poly);
-        const centeredPoly  = poly.map((p) => ({ x: p.x - profileCentroid2D.x, y: p.y - profileCentroid2D.y }));
-        const centeredHoles = holePolys.map((h) => h.map((p) => ({ x: p.x - profileCentroid2D.x, y: p.y - profileCentroid2D.y })));
-        const shape = new THREE.Shape(centeredPoly.map((p) => new THREE.Vector2(p.x, p.y)));
-        centeredHoles.forEach((hole) => shape.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y)))));
-        geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+        const centeredPoly = poly.map((p) => ({
+          x: p.x - profileCentroid2D.x,
+          y: p.y - profileCentroid2D.y,
+        }));
+        const centeredHoles = holePolys.map((h) =>
+          h.map((p) => ({
+            x: p.x - profileCentroid2D.x,
+            y: p.y - profileCentroid2D.y,
+          })),
+        );
+        const shape = new THREE.Shape(
+          centeredPoly.map((p) => new THREE.Vector2(p.x, p.y)),
+        );
+        centeredHoles.forEach((hole) =>
+          shape.holes.push(
+            new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))),
+          ),
+        );
+        geometry = new THREE.ExtrudeGeometry(shape, {
+          depth,
+          bevelEnabled: false,
+        });
         geometry.computeVertexNormals();
         // Also centre along the extrusion axis so the pivot is the volumetric
         // centre of the solid, not the base face.
         geometry.translate(0, 0, -depth / 2);
         // Record the local-space offset so we can compensate the mesh position
         // below (keeping the solid at the correct world location).
-        extrudeLocalOffset = new THREE.Vector3(profileCentroid2D.x, profileCentroid2D.y, depth / 2);
+        extrudeLocalOffset = new THREE.Vector3(
+          profileCentroid2D.x,
+          profileCentroid2D.y,
+          depth / 2,
+        );
         break;
       }
-      default: return;
+      default:
+        return;
     }
 
     const color = 0xe0e0e0;
@@ -457,7 +645,7 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
       mesh.userData.shaderMat = material;
     }
 
-    const p   = item.position;
+    const p = item.position;
     const rot = item.rotation;
     if (rot) mesh.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
     mesh.scale.setScalar(item.scale ? item.scale.x : 1);
@@ -467,7 +655,11 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
       // subtract it when committing position to the store.  Without this, every
       // drag commit would bake the offset into item.position and the next rebuild
       // would add it again, causing the object to drift by one extra offset each move.
-      mesh.userData.extrudeLocalOffset = { x: extrudeLocalOffset.x, y: extrudeLocalOffset.y, z: extrudeLocalOffset.z };
+      mesh.userData.extrudeLocalOffset = {
+        x: extrudeLocalOffset.x,
+        y: extrudeLocalOffset.y,
+        z: extrudeLocalOffset.z,
+      };
       // Rotate the local centroid offset into world space and add it to the
       // stored sketch position so the solid appears where the user drew it.
       extrudeLocalOffset.applyEuler(mesh.rotation);
@@ -492,23 +684,34 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
         if (!raycaster.ray.intersectSphere(sphere, target)) return;
         const dist = raycaster.ray.origin.distanceTo(target);
         if (dist < raycaster.near || dist > raycaster.far) return;
-        intersects.push({ distance: dist, point: target.clone(), face: { normal: target.clone().sub(worldCenter).normalize() }, faceIndex: 0, object: mesh });
+        intersects.push({
+          distance: dist,
+          point: target.clone(),
+          face: { normal: target.clone().sub(worldCenter).normalize() },
+          faceIndex: 0,
+          object: mesh,
+        });
       };
     } else if (item.type === "cylinder") {
       mesh.raycast = (raycaster, intersects) => {
-        const wc = new THREE.Vector3(); mesh.getWorldPosition(wc);
-        const ws = new THREE.Vector3(); mesh.getWorldScale(ws);
+        const wc = new THREE.Vector3();
+        mesh.getWorldPosition(wc);
+        const ws = new THREE.Vector3();
+        mesh.getWorldScale(ws);
         const radius = 1.0 * ws.x;
-        const halfH  = 1.0 * ws.y;
-        const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.quaternion).normalize();
+        const halfH = 1.0 * ws.y;
+        const axis = new THREE.Vector3(0, 1, 0)
+          .applyQuaternion(mesh.quaternion)
+          .normalize();
         const ray = raycaster.ray;
-        const oc  = new THREE.Vector3().subVectors(ray.origin, wc);
-        const da  = ray.direction.dot(axis);
+        const oc = new THREE.Vector3().subVectors(ray.origin, wc);
+        const da = ray.direction.dot(axis);
         const oca = oc.dot(axis);
         const A = 1.0 - da * da;
         const B = 2.0 * (ray.direction.dot(oc) - da * oca);
         const C = oc.dot(oc) - oca * oca - radius * radius;
-        let tHit = Infinity, nHit = null;
+        let tHit = Infinity,
+          nHit = null;
         if (Math.abs(A) > 1e-6) {
           const disc = B * B - 4 * A * C;
           if (disc >= 0) {
@@ -517,7 +720,14 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
               if (t > raycaster.near && t < tHit) {
                 const p = ray.origin.clone().addScaledVector(ray.direction, t);
                 const y = p.clone().sub(wc).dot(axis);
-                if (Math.abs(y) <= halfH) { tHit = t; nHit = p.clone().sub(wc).addScaledVector(axis, -y).normalize(); }
+                if (Math.abs(y) <= halfH) {
+                  tHit = t;
+                  nHit = p
+                    .clone()
+                    .sub(wc)
+                    .addScaledVector(axis, -y)
+                    .normalize();
+                }
               }
             }
           }
@@ -527,32 +737,56 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
             const t = (sign * halfH - oca) / da;
             if (t > raycaster.near && t < tHit) {
               const p = ray.origin.clone().addScaledVector(ray.direction, t);
-              if (p.clone().sub(wc).addScaledVector(axis, -sign * halfH).lengthSq() <= radius * radius) {
-                tHit = t; nHit = axis.clone().multiplyScalar(sign);
+              if (
+                p
+                  .clone()
+                  .sub(wc)
+                  .addScaledVector(axis, -sign * halfH)
+                  .lengthSq() <=
+                radius * radius
+              ) {
+                tHit = t;
+                nHit = axis.clone().multiplyScalar(sign);
               }
             }
           }
         }
         if (tHit === Infinity || tHit > raycaster.far) return;
-        intersects.push({ distance: tHit, point: ray.origin.clone().addScaledVector(ray.direction, tHit), face: { normal: nHit || axis }, faceIndex: 0, object: mesh });
+        intersects.push({
+          distance: tHit,
+          point: ray.origin.clone().addScaledVector(ray.direction, tHit),
+          face: { normal: nHit || axis },
+          faceIndex: 0,
+          object: mesh,
+        });
       };
     } else if (item.type === "torus") {
       mesh.raycast = (raycaster, intersects) => {
-        const wc = new THREE.Vector3(); mesh.getWorldPosition(wc);
-        const ws = new THREE.Vector3(); mesh.getWorldScale(ws);
+        const wc = new THREE.Vector3();
+        mesh.getWorldPosition(wc);
+        const ws = new THREE.Vector3();
+        mesh.getWorldScale(ws);
         const outerR = (1.0 + 0.4) * ws.x;
         const sphere = new THREE.Sphere(wc, outerR);
         const target = new THREE.Vector3();
         if (!raycaster.ray.intersectSphere(sphere, target)) return;
         const dist = raycaster.ray.origin.distanceTo(target);
         if (dist < raycaster.near || dist > raycaster.far) return;
-        intersects.push({ distance: dist, point: target.clone(), face: { normal: target.clone().sub(wc).normalize() }, faceIndex: 0, object: mesh });
+        intersects.push({
+          distance: dist,
+          point: target.clone(),
+          face: { normal: target.clone().sub(wc).normalize() },
+          faceIndex: 0,
+          object: mesh,
+        });
       };
     } else if (item.type !== "sketch") {
-      mesh.add(new THREE.LineSegments(
-        new THREE.EdgesGeometry(geometry),
-        new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 2 }),
-      ));
+      mesh.add(
+        new THREE.LineSegments(
+          new THREE.EdgesGeometry(geometry),
+          new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 2 }),
+        ),
+      );
     }
 
     mesh.visible = item.visible !== false;
@@ -590,12 +824,16 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
 
   const torusRadius = ext + 0.85;
   [
-    { type: "rotX", color: 0xff4444, rx: 0,            ry: Math.PI / 2, rz: 0 },
-    { type: "rotY", color: 0x4488ff, rx: Math.PI / 2,  ry: 0,           rz: 0 },
-    { type: "rotZ", color: 0x44ff44, rx: 0,            ry: 0,           rz: 0 },
+    { type: "rotX", color: 0xff4444, rx: 0, ry: Math.PI / 2, rz: 0 },
+    { type: "rotY", color: 0x4488ff, rx: Math.PI / 2, ry: 0, rz: 0 },
+    { type: "rotZ", color: 0x44ff44, rx: 0, ry: 0, rz: 0 },
   ].forEach(({ type, color, rx, ry, rz }) => {
     const geo = new THREE.TorusGeometry(torusRadius, 0.045, 6, 64);
-    const mat = new THREE.MeshBasicMaterial({ color, depthTest: false, side: THREE.DoubleSide });
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      depthTest: false,
+      side: THREE.DoubleSide,
+    });
     const torus = new THREE.Mesh(geo, mat);
     torus.renderOrder = 998;
     torus.userData.isHandle = true;
@@ -607,7 +845,12 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   const dim = getObjectDimensions(item.type, mesh.scale.x);
   const boxMesh = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
-    new THREE.LineBasicMaterial({ color: 0x88ccff, depthTest: false, transparent: true, opacity: 0.7 }),
+    new THREE.LineBasicMaterial({
+      color: 0x88ccff,
+      depthTest: false,
+      transparent: true,
+      opacity: 0.7,
+    }),
   );
   boxMesh.renderOrder = 998;
   boxMesh.scale.set(dim.w, dim.h, dim.d);
@@ -630,7 +873,10 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
 
 // ── Intersection helpers ──────────────────────────────────────────────────────
 
-function normalizeAngle(a) { a %= 2 * Math.PI; return a < 0 ? a + 2 * Math.PI : a; }
+function normalizeAngle(a) {
+  a %= 2 * Math.PI;
+  return a < 0 ? a + 2 * Math.PI : a;
+}
 
 function uniqueSortedNums(arr, eps) {
   const s = [...arr].sort((a, b) => a - b);
@@ -642,10 +888,12 @@ function uniqueSortedNums(arr, eps) {
 function lineCircleIntersect(line, circle) {
   const { x1, y1, x2, y2 } = line;
   const { cx, cy, r } = circle;
-  const dx = x2 - x1, dy = y2 - y1;
+  const dx = x2 - x1,
+    dy = y2 - y1;
   const a = dx * dx + dy * dy;
   if (a < 1e-12) return [];
-  const fx = x1 - cx, fy = y1 - cy;
+  const fx = x1 - cx,
+    fy = y1 - cy;
   const b = 2 * (fx * dx + fy * dy);
   const c = fx * fx + fy * fy - r * r;
   const disc = b * b - 4 * a * c;
@@ -653,9 +901,10 @@ function lineCircleIntersect(line, circle) {
   const sq = Math.sqrt(Math.max(0, disc));
   const EPS = 1e-6;
   return [(-b - sq) / (2 * a), (-b + sq) / (2 * a)]
-    .filter(t => t > EPS && t < 1 - EPS)
-    .map(t => {
-      const x = x1 + t * dx, y = y1 + t * dy;
+    .filter((t) => t > EPS && t < 1 - EPS)
+    .map((t) => {
+      const x = x1 + t * dx,
+        y = y1 + t * dy;
       return { t, x, y, angle: normalizeAngle(Math.atan2(y - cy, x - cx)) };
     });
 }
@@ -663,31 +912,44 @@ function lineCircleIntersect(line, circle) {
 // Intersection points of two circles.
 // Returns [{x, y, angle1, angle2}] — angles on each circle.
 function circleCircleIntersect(c1, c2) {
-  const dx = c2.cx - c1.cx, dy = c2.cy - c1.cy;
+  const dx = c2.cx - c1.cx,
+    dy = c2.cy - c1.cy;
   const d = Math.hypot(dx, dy);
-  if (d < 1e-10 || d > c1.r + c2.r + 1e-9 || d < Math.abs(c1.r - c2.r) - 1e-9) return [];
+  if (d < 1e-10 || d > c1.r + c2.r + 1e-9 || d < Math.abs(c1.r - c2.r) - 1e-9)
+    return [];
   const a = (d * d + c1.r * c1.r - c2.r * c2.r) / (2 * d);
   const h2 = c1.r * c1.r - a * a;
   if (h2 < 0) return [];
   const h = Math.sqrt(h2);
-  const px = c1.cx + a * dx / d, py = c1.cy + a * dy / d;
+  const px = c1.cx + (a * dx) / d,
+    py = c1.cy + (a * dy) / d;
   const pts = [];
   for (const sign of [1, -1]) {
-    const x = px + sign * h * dy / d, y = py - sign * h * dx / d;
-    pts.push({ x, y, angle1: normalizeAngle(Math.atan2(y - c1.cy, x - c1.cx)), angle2: normalizeAngle(Math.atan2(y - c2.cy, x - c2.cx)) });
+    const x = px + (sign * h * dy) / d,
+      y = py - (sign * h * dx) / d;
+    pts.push({
+      x,
+      y,
+      angle1: normalizeAngle(Math.atan2(y - c1.cy, x - c1.cx)),
+      angle2: normalizeAngle(Math.atan2(y - c2.cy, x - c2.cx)),
+    });
   }
   // De-duplicate tangent intersections
-  if (Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) < 1e-6) return [pts[0]];
+  if (Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) < 1e-6)
+    return [pts[0]];
   return pts;
 }
 
 // Intersection of two line segments at a point strictly interior to both.
 function lineCrossIntersect(li, lj) {
-  const dx1 = li.x2 - li.x1, dy1 = li.y2 - li.y1;
-  const dx2 = lj.x2 - lj.x1, dy2 = lj.y2 - lj.y1;
+  const dx1 = li.x2 - li.x1,
+    dy1 = li.y2 - li.y1;
+  const dx2 = lj.x2 - lj.x1,
+    dy2 = lj.y2 - lj.y1;
   const denom = dx1 * dy2 - dy1 * dx2;
   if (Math.abs(denom) < 1e-12) return null;
-  const gdx = lj.x1 - li.x1, gdy = lj.y1 - li.y1;
+  const gdx = lj.x1 - li.x1,
+    gdy = lj.y1 - li.y1;
   const ti = (gdx * dy2 - gdy * dx2) / denom;
   const tj = (gdx * dy1 - gdy * dx1) / denom;
   const EPS = 1e-6;
@@ -706,7 +968,10 @@ function arcSegsN(shape, arcAngle, curveSegments, precision) {
     if (r > 0) {
       const sUnits = precision / MM_PER_UNIT;
       const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
-      return Math.max(8, Math.min(65536, Math.ceil(arcAngle / (2 * halfTheta))));
+      return Math.max(
+        8,
+        Math.min(65536, Math.ceil(arcAngle / (2 * halfTheta))),
+      );
     }
   }
   return Math.round(curveSegments / 2);
@@ -715,11 +980,13 @@ function arcSegsN(shape, arcAngle, curveSegments, precision) {
 function sampleShapeForPoly(shape, startIsA, N = 16) {
   switch (shape.type) {
     case "line":
-      return startIsA ? [{ x: shape.x1, y: shape.y1 }] : [{ x: shape.x2, y: shape.y2 }];
+      return startIsA
+        ? [{ x: shape.x1, y: shape.y1 }]
+        : [{ x: shape.x2, y: shape.y2 }];
     case "arc": {
       const { cx, cy, r, startAngle, endAngle } = shape;
       const from = startIsA ? startAngle : endAngle;
-      const to   = startIsA ? endAngle   : startAngle;
+      const to = startIsA ? endAngle : startAngle;
       return Array.from({ length: N }, (_, i) => {
         const a = from + (i / N) * (to - from);
         return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
@@ -730,14 +997,24 @@ function sampleShapeForPoly(shape, startIsA, N = 16) {
         ? [shape.p0, shape.p1, shape.p2, shape.p3]
         : [shape.p3, shape.p2, shape.p1, shape.p0];
       return Array.from({ length: N }, (_, i) => {
-        const t = i / N, mt = 1 - t;
+        const t = i / N,
+          mt = 1 - t;
         return {
-          x: mt*mt*mt*q0.x + 3*mt*mt*t*q1.x + 3*mt*t*t*q2.x + t*t*t*q3.x,
-          y: mt*mt*mt*q0.y + 3*mt*mt*t*q1.y + 3*mt*t*t*q2.y + t*t*t*q3.y,
+          x:
+            mt * mt * mt * q0.x +
+            3 * mt * mt * t * q1.x +
+            3 * mt * t * t * q2.x +
+            t * t * t * q3.x,
+          y:
+            mt * mt * mt * q0.y +
+            3 * mt * mt * t * q1.y +
+            3 * mt * t * t * q2.y +
+            t * t * t * q3.y,
         };
       });
     }
-    default: return [];
+    default:
+      return [];
   }
 }
 
@@ -747,12 +1024,19 @@ function sampleShapeForPoly(shape, startIsA, N = 16) {
 // each other's boundaries, their intersection points are computed, each shape is split
 // at those points, and the DFS finds all minimal face regions of the resulting planar
 // graph — including the overlap region, the circle-outside-rect region, etc.
-export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision = null) {
+export function findClosedLoopsWithShapes(
+  shapes,
+  curveSegments = 32,
+  precision = null,
+) {
   const EPS = 1e-4;
 
   // ── Filter solid shapes ───────────────────────────────────────────────────
   const solidEntries = [];
-  shapes.forEach((s, i) => { if (!s.dashed && s.kind !== "bevel") solidEntries.push({ shape: s, origIdx: i }); });
+  shapes.forEach((s, i) => {
+    if (!s.dashed && s.kind !== "bevel")
+      solidEntries.push({ shape: s, origIdx: i });
+  });
 
   // ── Expand rects to 4 line segments so they participate in intersection ───
   // expandedEntries: { shape (line/arc/bezier/circle/ellipse), origIdx }
@@ -760,10 +1044,22 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
   solidEntries.forEach(({ shape, origIdx }) => {
     if (shape.type === "rect") {
       const { x1, y1, x2, y2 } = shape;
-      expandedEntries.push({ shape: { type:"line", x1, y1, x2, y2: y1 }, origIdx });
-      expandedEntries.push({ shape: { type:"line", x1: x2, y1, x2, y2 }, origIdx });
-      expandedEntries.push({ shape: { type:"line", x1: x2, y1: y2, x2: x1, y2 }, origIdx });
-      expandedEntries.push({ shape: { type:"line", x1, y1: y2, x2: x1, y2: y1 }, origIdx });
+      expandedEntries.push({
+        shape: { type: "line", x1, y1, x2, y2: y1 },
+        origIdx,
+      });
+      expandedEntries.push({
+        shape: { type: "line", x1: x2, y1, x2, y2 },
+        origIdx,
+      });
+      expandedEntries.push({
+        shape: { type: "line", x1: x2, y1: y2, x2: x1, y2 },
+        origIdx,
+      });
+      expandedEntries.push({
+        shape: { type: "line", x1, y1: y2, x2: x1, y2: y1 },
+        origIdx,
+      });
     } else {
       expandedEntries.push({ shape, origIdx });
     }
@@ -776,7 +1072,8 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
   for (let i = 0; i < expandedEntries.length; i++) {
     for (let j = i + 1; j < expandedEntries.length; j++) {
       if (expandedEntries[i].origIdx === expandedEntries[j].origIdx) continue; // same source shape
-      const si = expandedEntries[i].shape, sj = expandedEntries[j].shape;
+      const si = expandedEntries[i].shape,
+        sj = expandedEntries[j].shape;
 
       if (si.type === "line" && sj.type === "line") {
         const pt = lineCrossIntersect(si, sj);
@@ -787,17 +1084,37 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
       } else if (si.type === "line" && sj.type === "circle") {
         for (const pt of lineCircleIntersect(si, sj)) {
           splitPts[i].push({ value: pt.t, x: pt.x, y: pt.y });
-          splitPts[j].push({ value: pt.angle, x: pt.x, y: pt.y, isAngle: true });
+          splitPts[j].push({
+            value: pt.angle,
+            x: pt.x,
+            y: pt.y,
+            isAngle: true,
+          });
         }
       } else if (si.type === "circle" && sj.type === "line") {
         for (const pt of lineCircleIntersect(sj, si)) {
           splitPts[j].push({ value: pt.t, x: pt.x, y: pt.y });
-          splitPts[i].push({ value: pt.angle, x: pt.x, y: pt.y, isAngle: true });
+          splitPts[i].push({
+            value: pt.angle,
+            x: pt.x,
+            y: pt.y,
+            isAngle: true,
+          });
         }
       } else if (si.type === "circle" && sj.type === "circle") {
         for (const pt of circleCircleIntersect(si, sj)) {
-          splitPts[i].push({ value: pt.angle1, x: pt.x, y: pt.y, isAngle: true });
-          splitPts[j].push({ value: pt.angle2, x: pt.x, y: pt.y, isAngle: true });
+          splitPts[i].push({
+            value: pt.angle1,
+            x: pt.x,
+            y: pt.y,
+            isAngle: true,
+          });
+          splitPts[j].push({
+            value: pt.angle2,
+            x: pt.x,
+            y: pt.y,
+            isAngle: true,
+          });
         }
       }
     }
@@ -817,27 +1134,55 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
     }
 
     if (shape.type === "line") {
-      const ts = uniqueSortedNums(pts.map(p => p.value), EPS).filter(t => t > EPS && t < 1 - EPS);
-      if (ts.length === 0) { subEntries.push({ shape, origIdx }); continue; }
+      const ts = uniqueSortedNums(
+        pts.map((p) => p.value),
+        EPS,
+      ).filter((t) => t > EPS && t < 1 - EPS);
+      if (ts.length === 0) {
+        subEntries.push({ shape, origIdx });
+        continue;
+      }
       const bounds = [0, ...ts, 1];
       for (let k = 0; k < bounds.length - 1; k++) {
-        const t1 = bounds[k], t2 = bounds[k + 1];
-        subEntries.push({ shape: {
-          type: "line",
-          x1: shape.x1 + t1 * (shape.x2 - shape.x1), y1: shape.y1 + t1 * (shape.y2 - shape.y1),
-          x2: shape.x1 + t2 * (shape.x2 - shape.x1), y2: shape.y1 + t2 * (shape.y2 - shape.y1),
-        }, origIdx });
+        const t1 = bounds[k],
+          t2 = bounds[k + 1];
+        subEntries.push({
+          shape: {
+            type: "line",
+            x1: shape.x1 + t1 * (shape.x2 - shape.x1),
+            y1: shape.y1 + t1 * (shape.y2 - shape.y1),
+            x2: shape.x1 + t2 * (shape.x2 - shape.x1),
+            y2: shape.y1 + t2 * (shape.y2 - shape.y1),
+          },
+          origIdx,
+        });
       }
     } else if (shape.type === "circle") {
       const angEps = EPS / Math.max(shape.r, 0.01);
-      const rawAngles = uniqueSortedNums(pts.map(p => normalizeAngle(p.value)), angEps);
-      if (rawAngles.length < 2) { subEntries.push({ shape, origIdx }); continue; }
+      const rawAngles = uniqueSortedNums(
+        pts.map((p) => normalizeAngle(p.value)),
+        angEps,
+      );
+      if (rawAngles.length < 2) {
+        subEntries.push({ shape, origIdx });
+        continue;
+      }
       splitCircleOrigIdxs.add(origIdx);
       for (let k = 0; k < rawAngles.length; k++) {
         const startAngle = rawAngles[k];
         let endAngle = rawAngles[(k + 1) % rawAngles.length];
         if (endAngle <= startAngle) endAngle += 2 * Math.PI;
-        subEntries.push({ shape: { type:"arc", cx:shape.cx, cy:shape.cy, r:shape.r, startAngle, endAngle }, origIdx });
+        subEntries.push({
+          shape: {
+            type: "arc",
+            cx: shape.cx,
+            cy: shape.cy,
+            r: shape.r,
+            startAngle,
+            endAngle,
+          },
+          origIdx,
+        });
       }
     } else {
       subEntries.push({ shape, origIdx });
@@ -859,11 +1204,20 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
       return { a: getNode(shape.x1, shape.y1), b: getNode(shape.x2, shape.y2) };
     if (shape.type === "arc")
       return {
-        a: getNode(shape.cx + Math.cos(shape.startAngle) * shape.r, shape.cy + Math.sin(shape.startAngle) * shape.r),
-        b: getNode(shape.cx + Math.cos(shape.endAngle)   * shape.r, shape.cy + Math.sin(shape.endAngle)   * shape.r),
+        a: getNode(
+          shape.cx + Math.cos(shape.startAngle) * shape.r,
+          shape.cy + Math.sin(shape.startAngle) * shape.r,
+        ),
+        b: getNode(
+          shape.cx + Math.cos(shape.endAngle) * shape.r,
+          shape.cy + Math.sin(shape.endAngle) * shape.r,
+        ),
       };
     if (shape.type === "bezier")
-      return { a: getNode(shape.p0.x, shape.p0.y), b: getNode(shape.p3.x, shape.p3.y) };
+      return {
+        a: getNode(shape.p0.x, shape.p0.y),
+        b: getNode(shape.p3.x, shape.p3.y),
+      };
     return null;
   });
 
@@ -899,19 +1253,40 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
     const N2 = Math.max(sn0.a, sn0.b);
     for (let i = 0; i < edges.length; i++) {
       for (let j = i + 1; j < edges.length; j++) {
-        const si1 = edges[i], si2 = edges[j];
+        const si1 = edges[i],
+          si2 = edges[j];
         const cycleKey = `${Math.min(si1, si2)},${Math.max(si1, si2)}`;
         if (cycleKeys.has(cycleKey)) continue;
         cycleKeys.add(cycleKey);
-        const sn1 = shapeNodes[si1], sn2 = shapeNodes[si2];
-        const sh1 = subEntries[si1].shape, sh2 = subEntries[si2].shape;
-        const ang1 = sh1.type === "arc" ? Math.abs(sh1.endAngle - sh1.startAngle) : Math.PI;
-        const ang2 = sh2.type === "arc" ? Math.abs(sh2.endAngle - sh2.startAngle) : Math.PI;
+        const sn1 = shapeNodes[si1],
+          sn2 = shapeNodes[si2];
+        const sh1 = subEntries[si1].shape,
+          sh2 = subEntries[si2].shape;
+        const ang1 =
+          sh1.type === "arc"
+            ? Math.abs(sh1.endAngle - sh1.startAngle)
+            : Math.PI;
+        const ang2 =
+          sh2.type === "arc"
+            ? Math.abs(sh2.endAngle - sh2.startAngle)
+            : Math.PI;
         const poly = [];
         const idxSet = new Set();
-        poly.push(...sampleShapeForPoly(sh1, sn1.a === N1, arcSegsN(sh1, ang1, curveSegments, precision)));
+        poly.push(
+          ...sampleShapeForPoly(
+            sh1,
+            sn1.a === N1,
+            arcSegsN(sh1, ang1, curveSegments, precision),
+          ),
+        );
         idxSet.add(subEntries[si1].origIdx);
-        poly.push(...sampleShapeForPoly(sh2, sn2.a === N2, arcSegsN(sh2, ang2, curveSegments, precision)));
+        poly.push(
+          ...sampleShapeForPoly(
+            sh2,
+            sn2.a === N2,
+            arcSegsN(sh2, ang2, curveSegments, precision),
+          ),
+        );
         idxSet.add(subEntries[si2].origIdx);
         results.push({ polygon: poly, shapeIndices: [...idxSet] });
       }
@@ -927,15 +1302,23 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
   const cycles = [];
   const dfs = (start, cur, path, visited) => {
     if (path.length > 24) return;
-    for (const { si, otherNode } of (adj[cur] || [])) {
+    for (const { si, otherNode } of adj[cur] || []) {
       if (path.some((e) => e.si === si)) continue;
       if (otherNode === start && path.length >= 2) {
         const key = [...path.map((e) => e.si), si].sort().join(",");
-        if (!cycleKeys.has(key)) { cycleKeys.add(key); cycles.push([...path, { si, fromNode: cur, toNode: otherNode }]); }
+        if (!cycleKeys.has(key)) {
+          cycleKeys.add(key);
+          cycles.push([...path, { si, fromNode: cur, toNode: otherNode }]);
+        }
         continue;
       }
       if (visited.has(otherNode)) continue;
-      dfs(start, otherNode, [...path, { si, fromNode: cur, toNode: otherNode }], new Set([...visited, otherNode]));
+      dfs(
+        start,
+        otherNode,
+        [...path, { si, fromNode: cur, toNode: otherNode }],
+        new Set([...visited, otherNode]),
+      );
     }
   };
   Object.keys(adj).forEach((n) => {
@@ -949,8 +1332,15 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
     for (const edge of path) {
       const sn = shapeNodes[edge.si];
       const sh = subEntries[edge.si].shape;
-      const arcAngle = sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI;
-      poly.push(...sampleShapeForPoly(sh, sn.a === edge.fromNode, arcSegsN(sh, arcAngle, curveSegments, precision)));
+      const arcAngle =
+        sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI;
+      poly.push(
+        ...sampleShapeForPoly(
+          sh,
+          sn.a === edge.fromNode,
+          arcSegsN(sh, arcAngle, curveSegments, precision),
+        ),
+      );
       idxSet.add(subEntries[edge.si].origIdx);
     }
     results.push({ polygon: poly, shapeIndices: [...idxSet] });
@@ -959,24 +1349,37 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
   // ── Direct loops for self-closing shapes that were NOT split ──────────────
   solidEntries.forEach(({ shape, origIdx }) => {
     if (shape.type === "circle" && !splitCircleOrigIdxs.has(origIdx)) {
-      const segs = precision != null
-        ? arcSegsN(shape, 2 * Math.PI, curveSegments, precision)
-        : curveSegments;
+      const segs =
+        precision != null
+          ? arcSegsN(shape, 2 * Math.PI, curveSegments, precision)
+          : curveSegments;
       results.push({
         polygon: Array.from({ length: segs }, (_, i) => {
           const a = (i / segs) * Math.PI * 2;
-          return { x: shape.cx + Math.cos(a) * shape.r, y: shape.cy + Math.sin(a) * shape.r };
+          return {
+            x: shape.cx + Math.cos(a) * shape.r,
+            y: shape.cy + Math.sin(a) * shape.r,
+          };
         }),
         shapeIndices: [origIdx],
       });
     } else if (shape.type === "ellipse") {
-      const segs = precision != null
-        ? arcSegsN({ r: Math.max(shape.rx, shape.ry) }, 2 * Math.PI, curveSegments, precision)
-        : curveSegments;
+      const segs =
+        precision != null
+          ? arcSegsN(
+              { r: Math.max(shape.rx, shape.ry) },
+              2 * Math.PI,
+              curveSegments,
+              precision,
+            )
+          : curveSegments;
       results.push({
         polygon: Array.from({ length: segs }, (_, i) => {
           const a = (i / segs) * Math.PI * 2;
-          return { x: shape.cx + Math.cos(a) * shape.rx, y: shape.cy + Math.sin(a) * shape.ry };
+          return {
+            x: shape.cx + Math.cos(a) * shape.rx,
+            y: shape.cy + Math.sin(a) * shape.ry,
+          };
         }),
         shapeIndices: [origIdx],
       });
@@ -988,13 +1391,20 @@ export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision 
 }
 
 export function findClosedLoops(shapes, curveSegments = 32, precision = null) {
-  return findClosedLoopsWithShapes(shapes, curveSegments, precision).map((l) => l.polygon);
+  return findClosedLoopsWithShapes(shapes, curveSegments, precision).map(
+    (l) => l.polygon,
+  );
 }
 
 // ── Object-view sketch lines (all sketches, lines only) ──────────────────────
 
 export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
-  const sketchItems = items.filter((item) => item.type === "sketch" && item.shapes?.length > 0 && item.visible !== false);
+  const sketchItems = items.filter(
+    (item) =>
+      item.type === "sketch" &&
+      item.shapes?.length > 0 &&
+      item.visible !== false,
+  );
   if (sketchItems.length === 0) return null;
 
   const group = new THREE.Group();
@@ -1011,7 +1421,15 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
       if (pts.length < 2) return;
       const geo = new LineGeometry();
       geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
-      const mat = new LineMaterial({ color: shape.dashed ? 0x6688cc : 0x88aaff, linewidth: 1.5, depthTest: false, resolution: res, dashed: !!shape.dashed, dashSize: shape.dashed ? 0.1 : 0, gapSize: shape.dashed ? 0.06 : 0 });
+      const mat = new LineMaterial({
+        color: shape.dashed ? 0x6688cc : 0x88aaff,
+        linewidth: 1.5,
+        depthTest: false,
+        resolution: res,
+        dashed: !!shape.dashed,
+        dashSize: shape.dashed ? 0.1 : 0,
+        gapSize: shape.dashed ? 0.06 : 0,
+      });
       const line = new Line2(geo, mat);
       line.computeLineDistances();
       line.renderOrder = 1001;
@@ -1027,8 +1445,14 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
 export function polyContainsPoint(poly, pt) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
-    if ((yi > pt.y) !== (yj > pt.y) && pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi)
+    const xi = poly[i].x,
+      yi = poly[i].y,
+      xj = poly[j].x,
+      yj = poly[j].y;
+    if (
+      yi > pt.y !== yj > pt.y &&
+      pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi
+    )
       inside = !inside;
   }
   return inside;
@@ -1061,7 +1485,7 @@ export function polyArea(poly) {
 // inside a rectangle — both centroids are at the same point).
 export function groupLoopsWithHoles(loops) {
   if (loops.length === 0) return [];
-  const areas     = loops.map(polyArea);
+  const areas = loops.map(polyArea);
   const centroids = loops.map(polyCentroid);
 
   // A loop is only a valid parent when the child is FULLY contained — i.e. every
@@ -1079,70 +1503,105 @@ export function groupLoopsWithHoles(loops) {
     const parent = loops[parentIdx];
     const pc = polyCentroid(parent);
     const EPS = 1e-4;
-    return loops[childIdx].every(pt => {
+    return loops[childIdx].every((pt) => {
       if (polyContainsPoint(parent, pt)) return true;
-      const nudged = { x: pt.x + (pc.x - pt.x) * EPS, y: pt.y + (pc.y - pt.y) * EPS };
+      const nudged = {
+        x: pt.x + (pc.x - pt.x) * EPS,
+        y: pt.y + (pc.y - pt.y) * EPS,
+      };
       return polyContainsPoint(parent, nudged);
     });
   };
 
   // For each loop: find the direct parent = smallest-area loop that contains its centroid.
   const parents = loops.map((_, idx) => {
-    let best = -1, bestArea = Infinity;
+    let best = -1,
+      bestArea = Infinity;
     for (let j = 0; j < loops.length; j++) {
       if (j === idx) continue;
-      if (areas[j] > areas[idx]
-          && polyContainsPoint(loops[j], centroids[idx])
-          && isFullyContained(idx, j)
-          && areas[j] < bestArea) {
-        best = j; bestArea = areas[j];
+      if (
+        areas[j] > areas[idx] &&
+        polyContainsPoint(loops[j], centroids[idx]) &&
+        isFullyContained(idx, j) &&
+        areas[j] < bestArea
+      ) {
+        best = j;
+        bestArea = areas[j];
       }
     }
     return best;
   });
 
   const childIdxs = loops.map(() => /** @type {number[]} */ ([]));
-  parents.forEach((p, i) => { if (p !== -1) childIdxs[p].push(i); });
+  parents.forEach((p, i) => {
+    if (p !== -1) childIdxs[p].push(i);
+  });
 
   const buildEntry = (idx) => ({
     polygon: loops[idx],
-    holes:   childIdxs[idx].map(j => loops[j]),
-    entries: childIdxs[idx].map(j => buildEntry(j)),
+    holes: childIdxs[idx].map((j) => loops[j]),
+    entries: childIdxs[idx].map((j) => buildEntry(j)),
   });
 
-  return loops.map((_, i) => parents[i] === -1 ? buildEntry(i) : null).filter(Boolean);
+  return loops
+    .map((_, i) => (parents[i] === -1 ? buildEntry(i) : null))
+    .filter(Boolean);
 }
 
 // ── Extrude profile selection fills (one fill mesh per closed sketch loop) ───
 
-export function buildExtrudeSelectGroup(items, objectsRef, curveSegments = 32, precision = null) {
-  const sketchItems = items.filter((i) => i.type === "sketch" && i.shapes?.length > 0 && i.visible !== false);
+export function buildExtrudeSelectGroup(
+  items,
+  objectsRef,
+  curveSegments = 32,
+  precision = null,
+) {
+  const sketchItems = items.filter(
+    (i) => i.type === "sketch" && i.shapes?.length > 0 && i.visible !== false,
+  );
   if (sketchItems.length === 0) return null;
   const group = new THREE.Group();
   sketchItems.forEach((item) => {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
-    const allLoops = findClosedLoops(item.shapes || [], curveSegments, precision);
-    const grouped  = groupLoopsWithHoles(allLoops);
-    const euler    = new THREE.Euler().setFromQuaternion(sketchMesh.quaternion);
-    const normal   = new THREE.Vector3(0, 0, 1).applyQuaternion(sketchMesh.quaternion);
-    const pos      = sketchMesh.position;
+    const allLoops = findClosedLoops(
+      item.shapes || [],
+      curveSegments,
+      precision,
+    );
+    const grouped = groupLoopsWithHoles(allLoops);
+    const euler = new THREE.Euler().setFromQuaternion(sketchMesh.quaternion);
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+      sketchMesh.quaternion,
+    );
+    const pos = sketchMesh.position;
     const addProfile = ({ polygon, holes, entries }) => {
       if (polygon.length < 3) return;
-      const shape = new THREE.Shape(polygon.map((p) => new THREE.Vector2(p.x, p.y)));
+      const shape = new THREE.Shape(
+        polygon.map((p) => new THREE.Vector2(p.x, p.y)),
+      );
       holes.forEach((hole) => {
         if (hole.length >= 3)
-          shape.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))));
+          shape.holes.push(
+            new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))),
+          );
       });
       const fill = new THREE.Mesh(
         new THREE.ShapeGeometry(shape),
-        new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthTest: false }),
+        new THREE.MeshBasicMaterial({
+          color: 0x4488ff,
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          depthTest: false,
+        }),
       );
       fill.position.copy(pos).addScaledVector(normal, 0.005);
       fill.quaternion.copy(sketchMesh.quaternion);
       fill.renderOrder = 995;
       fill.userData.extrudeProfile = {
-        type: "sketchLoop", sketchId: item.id,
+        type: "sketchLoop",
+        sketchId: item.id,
         profileCentroid: polyCentroid(polygon),
         polygon2D: polygon,
         holes: holes.filter((h) => h.length >= 3),
@@ -1162,7 +1621,14 @@ export function buildExtrudeSelectGroup(items, objectsRef, curveSegments = 32, p
 
 // Builds constraint icon THREE.js objects into `group`. All objects are tagged
 // with userData.isConstraintObj so they can be found and replaced during drag.
-function addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, showDimensions = true) {
+function addConstraintIconsToGroup(
+  group,
+  constraints,
+  shapes,
+  toWorld,
+  res,
+  showDimensions = true,
+) {
   const R = 0.14;
   constraints.forEach((c, ci) => {
     const tag = (obj, iconLocalPos, shapeIndices, color) => {
@@ -1188,29 +1654,39 @@ function addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, sho
       if (!pt) return;
       const cLine = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
-          toWorld(pt.x,     pt.y + R, 0.005),
-          toWorld(pt.x + R, pt.y,     0.005),
-          toWorld(pt.x,     pt.y - R, 0.005),
-          toWorld(pt.x - R, pt.y,     0.005),
-          toWorld(pt.x,     pt.y + R, 0.005),
+          toWorld(pt.x, pt.y + R, 0.005),
+          toWorld(pt.x + R, pt.y, 0.005),
+          toWorld(pt.x, pt.y - R, 0.005),
+          toWorld(pt.x - R, pt.y, 0.005),
+          toWorld(pt.x, pt.y + R, 0.005),
         ]),
         new THREE.LineBasicMaterial({ color: 0xffaa00, depthTest: false }),
       );
       cLine.renderOrder = 1004;
       tag(cLine, { x: pt.x, y: pt.y }, [c.shapeAIdx, c.shapeBIdx], 0xffaa00);
       group.add(cLine);
-
     } else if (c.type === "distance") {
       if (!showDimensions) return;
-      const sA = shapes[c.shapeAIdx], sB = shapes[c.shapeBIdx];
+      const sA = shapes[c.shapeAIdx],
+        sB = shapes[c.shapeBIdx];
       if (!sA || !sB) return;
-      const isRadius = c.shapeAIdx === c.shapeBIdx && c.pointB === "edge" && sA.type === "circle";
-      const posA = getShapePoint(sA, c.pointA), posB = getShapePoint(sB, c.pointB);
+      const isRadius =
+        c.shapeAIdx === c.shapeBIdx &&
+        c.pointB === "edge" &&
+        sA.type === "circle";
+      const posA = getShapePoint(sA, c.pointA),
+        posB = getShapePoint(sB, c.pointB);
       if (!posA || !posB) return;
-      const wA = toWorld(posA.x, posA.y, 0.006), wB = toWorld(posB.x, posB.y, 0.006);
+      const wA = toWorld(posA.x, posA.y, 0.006),
+        wB = toWorld(posB.x, posB.y, 0.006);
       const dir = new THREE.Vector3().subVectors(wB, wA).normalize();
-      const perp = new THREE.Vector3(-dir.y, dir.x, 0).normalize().multiplyScalar(0.1);
-      const distShapes = c.shapeAIdx === c.shapeBIdx ? [c.shapeAIdx] : [c.shapeAIdx, c.shapeBIdx];
+      const perp = new THREE.Vector3(-dir.y, dir.x, 0)
+        .normalize()
+        .multiplyScalar(0.1);
+      const distShapes =
+        c.shapeAIdx === c.shapeBIdx
+          ? [c.shapeAIdx]
+          : [c.shapeAIdx, c.shapeBIdx];
       // For radius: extend line beyond circle edge; label sits outside the circle.
       // For linear: standard midpoint label with ticks at both ends.
       const wLineTo = isRadius ? wB.clone().addScaledVector(dir, 0.35) : wB;
@@ -1226,16 +1702,21 @@ function addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, sho
       const tickPts = isRadius ? [wB] : [wA, wB];
       for (const pt of tickPts) {
         const t = new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints([pt.clone().sub(perp), pt.clone().add(perp)]),
+          new THREE.BufferGeometry().setFromPoints([
+            pt.clone().sub(perp),
+            pt.clone().add(perp),
+          ]),
           new THREE.LineBasicMaterial({ color: 0xffdd44, depthTest: false }),
         );
         t.renderOrder = 1004;
         addTagged(t);
       }
       // Label position: radius → outside circle edge; linear → offset from midpoint.
-      const labelText = (isRadius ? "R " : "") + (c.distance * MM_PER_UNIT).toFixed(1) + "mm";
+      const labelText =
+        (isRadius ? "R " : "") + (c.distance * MM_PER_UNIT).toFixed(1) + "mm";
       const canvas = document.createElement("canvas");
-      canvas.width = 160; canvas.height = 32;
+      canvas.width = 160;
+      canvas.height = 32;
       const ctx2d = canvas.getContext("2d");
       ctx2d.fillStyle = "rgba(40,30,0,0.85)";
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
@@ -1245,7 +1726,9 @@ function addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, sho
       ctx2d.textBaseline = "middle";
       ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
       const tex = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: tex, depthTest: false }),
+      );
       sprite.scale.set(isRadius ? 0.85 : 0.7, 0.175, 1);
       if (isRadius) {
         sprite.position.copy(wLineTo.clone().addScaledVector(dir, 0.45));
@@ -1255,17 +1738,18 @@ function addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, sho
       }
       sprite.renderOrder = 1009;
       addTagged(sprite);
-
     } else if (c.type === "onLine") {
       const lineShape = shapes[c.lineShapeIdx];
-      const ptShape   = shapes[c.pointShapeIdx];
+      const ptShape = shapes[c.pointShapeIdx];
       if (!lineShape || lineShape.type !== "line" || !ptShape) return;
       const pt = getShapePoint(ptShape, c.pointKey);
       if (!pt) return;
-      const dx = lineShape.x2 - lineShape.x1, dy = lineShape.y2 - lineShape.y1;
+      const dx = lineShape.x2 - lineShape.x1,
+        dy = lineShape.y2 - lineShape.y1;
       const len = Math.hypot(dx, dy);
       if (len < 1e-10) return;
-      const nx = -dy / len * R, ny = dx / len * R;
+      const nx = (-dy / len) * R,
+        ny = (dx / len) * R;
       const tLine = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
           toWorld(pt.x + nx, pt.y + ny, 0.005),
@@ -1274,20 +1758,25 @@ function addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, sho
         new THREE.LineBasicMaterial({ color: 0x00aaff, depthTest: false }),
       );
       tLine.renderOrder = 1004;
-      tag(tLine, { x: pt.x, y: pt.y }, [c.pointShapeIdx, c.lineShapeIdx], 0x00aaff);
+      tag(
+        tLine,
+        { x: pt.x, y: pt.y },
+        [c.pointShapeIdx, c.lineShapeIdx],
+        0x00aaff,
+      );
       group.add(tLine);
-
     } else if (c.type === "horizontal" || c.type === "vertical") {
       const shape = shapes[c.shapeIdx];
       if (!shape || shape.type !== "line") return;
-      const mx = (shape.x1 + shape.x2) / 2, my = (shape.y1 + shape.y2) / 2;
+      const mx = (shape.x1 + shape.x2) / 2,
+        my = (shape.y1 + shape.y2) / 2;
       const cLine = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
-          toWorld(mx,     my + R, 0.005),
-          toWorld(mx + R, my,     0.005),
-          toWorld(mx,     my - R, 0.005),
-          toWorld(mx - R, my,     0.005),
-          toWorld(mx,     my + R, 0.005),
+          toWorld(mx, my + R, 0.005),
+          toWorld(mx + R, my, 0.005),
+          toWorld(mx, my - R, 0.005),
+          toWorld(mx - R, my, 0.005),
+          toWorld(mx, my + R, 0.005),
         ]),
         new THREE.LineBasicMaterial({ color: 0x00ddaa, depthTest: false }),
       );
@@ -1300,7 +1789,14 @@ function addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, sho
 
 // Removes existing constraint icon objects from the group and rebuilds them
 // based on the provided current shapes (used during drag to keep icons live).
-export function rebuildConstraintIconsForDrag(group, constraints, shapes, sketchMesh, renderer, showDimensions = true) {
+export function rebuildConstraintIconsForDrag(
+  group,
+  constraints,
+  shapes,
+  sketchMesh,
+  renderer,
+  showDimensions = true,
+) {
   const toRemove = group.children.filter((c) => c.userData.isConstraintObj);
   toRemove.forEach((obj) => {
     if (obj.geometry) obj.geometry.dispose();
@@ -1320,18 +1816,29 @@ export function rebuildConstraintIconsForDrag(group, constraints, shapes, sketch
     v.add(sketchMesh.position);
     return v;
   };
-  addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, showDimensions);
+  addConstraintIconsToGroup(
+    group,
+    constraints,
+    shapes,
+    toWorld,
+    res,
+    showDimensions,
+  );
 }
 
 // Update endpoint dots to track dragged shapes. Reuses the existing THREE.Points object
 // and updates positions in-place when the count hasn't changed (the common drag case),
 // avoiding per-frame geometry allocation and material creation.
 export function rebuildPointDotsForDrag(group, shapes, sketchMesh) {
-  const toWorld = (lx, ly) => new THREE.Vector3(lx, ly, 0.004)
-    .applyQuaternion(sketchMesh.quaternion).add(sketchMesh.position);
+  const toWorld = (lx, ly) =>
+    new THREE.Vector3(lx, ly, 0.004)
+      .applyQuaternion(sketchMesh.quaternion)
+      .add(sketchMesh.position);
 
   const pts = [];
-  shapes.forEach((shape) => getSnapPoints([shape]).forEach((sp) => pts.push(toWorld(sp.x, sp.y))));
+  shapes.forEach((shape) =>
+    getSnapPoints([shape]).forEach((sp) => pts.push(toWorld(sp.x, sp.y))),
+  );
 
   const existing = group.children.find((c) => c.userData.isPointDots);
   if (existing && existing.geometry.attributes.position?.count === pts.length) {
@@ -1342,17 +1849,35 @@ export function rebuildPointDotsForDrag(group, shapes, sketchMesh) {
   }
 
   // Count changed or no existing object — rebuild.
-  if (existing) { existing.geometry.dispose(); existing.material.dispose(); group.remove(existing); }
+  if (existing) {
+    existing.geometry.dispose();
+    existing.material.dispose();
+    group.remove(existing);
+  }
   if (pts.length === 0) return;
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
-  const mat = new THREE.PointsMaterial({ color: 0xaabbff, size: 5, sizeAttenuation: false, depthTest: false });
+  const mat = new THREE.PointsMaterial({
+    color: 0xaabbff,
+    size: 5,
+    sizeAttenuation: false,
+    depthTest: false,
+  });
   const dots = new THREE.Points(geo, mat);
   dots.renderOrder = 1003;
   dots.userData.isPointDots = true;
   group.add(dots);
 }
 
-export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, showConstraints = true, showDimensions = true, curveSegments = 32, precision = null) {
+export function buildSketchShapesGroup(
+  selectedId,
+  items,
+  objectsRef,
+  renderer,
+  showConstraints = true,
+  showDimensions = true,
+  curveSegments = 32,
+  precision = null,
+) {
   const selItem = items.find((i) => i.id === selectedId);
   if (selItem?.type !== "sketch") return null;
   const sketchMesh = objectsRef.current[selectedId];
@@ -1361,7 +1886,9 @@ export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, 
   if (shapes.length === 0) return null;
 
   const group = new THREE.Group();
-  const res = renderer ? renderer.getSize(new THREE.Vector2()) : new THREE.Vector2(window.innerWidth, window.innerHeight);
+  const res = renderer
+    ? renderer.getSize(new THREE.Vector2())
+    : new THREE.Vector2(window.innerWidth, window.innerHeight);
 
   const toWorld = (lx, ly, z = 0.003) => {
     const v = new THREE.Vector3(lx, ly, z);
@@ -1386,10 +1913,10 @@ export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, 
       depthTest: false,
       resolution: res,
       transparent: isBevel || isDashed,
-      opacity: isBevel ? 0.55 : (isDashed ? 0.75 : 1.0),
+      opacity: isBevel ? 0.55 : isDashed ? 0.75 : 1.0,
       dashed: isDashed || isBevel,
-      dashSize: (isDashed || isBevel) ? 0.1 : 0,
-      gapSize: (isDashed || isBevel) ? 0.06 : 0,
+      dashSize: isDashed || isBevel ? 0.1 : 0,
+      gapSize: isDashed || isBevel ? 0.06 : 0,
     });
     const line = new Line2(geo, mat);
     line.computeLineDistances();
@@ -1398,13 +1925,20 @@ export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, 
     group.add(line);
 
     // Collect key points for dots
-    getSnapPoints([shape]).forEach((sp) => dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)));
+    getSnapPoints([shape]).forEach((sp) =>
+      dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)),
+    );
   });
 
   // ── Point dots ────────────────────────────────────────────────────────────
   if (dotWorldPts.length > 0) {
     const ptGeo = new THREE.BufferGeometry().setFromPoints(dotWorldPts);
-    const ptMat = new THREE.PointsMaterial({ color: 0xaabbff, size: 5, sizeAttenuation: false, depthTest: false });
+    const ptMat = new THREE.PointsMaterial({
+      color: 0xaabbff,
+      size: 5,
+      sizeAttenuation: false,
+      depthTest: false,
+    });
     const dots = new THREE.Points(ptGeo, ptMat);
     dots.renderOrder = 1003;
     dots.userData.isPointDots = true;
@@ -1413,38 +1947,63 @@ export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, 
 
   // ── Constraint icons ──────────────────────────────────────────────────────
   const constraints = selItem.constraints || [];
-  if (showConstraints) addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, showDimensions);
+  if (showConstraints)
+    addConstraintIconsToGroup(
+      group,
+      constraints,
+      shapes,
+      toWorld,
+      res,
+      showDimensions,
+    );
 
   // ── Enclosed region fills (hole-aware, hidden until hover) ──────────────────
-  const loopsWithShapes = findClosedLoopsWithShapes(shapes, curveSegments, precision);
+  const loopsWithShapes = findClosedLoopsWithShapes(
+    shapes,
+    curveSegments,
+    precision,
+  );
   if (loopsWithShapes.length > 0) {
-    const polygons    = loopsWithShapes.map((l) => l.polygon);
-    const polyShapeMap = new Map(loopsWithShapes.map((l) => [l.polygon, l.shapeIndices]));
-    const grouped     = groupLoopsWithHoles(polygons);
+    const polygons = loopsWithShapes.map((l) => l.polygon);
+    const polyShapeMap = new Map(
+      loopsWithShapes.map((l) => [l.polygon, l.shapeIndices]),
+    );
+    const grouped = groupLoopsWithHoles(polygons);
 
     // Recursive fill builder — each nesting level gets renderOrder + 1, ensuring
     // the innermost matching region always wins in updateHoverFills.
     const addRegionFill = ({ polygon, holes, entries }, renderOrder) => {
       if (polygon.length < 3) return;
       const outerIndices = polyShapeMap.get(polygon) || [];
-      const holeIndices  = holes.flatMap((h) => polyShapeMap.get(h) || []);
+      const holeIndices = holes.flatMap((h) => polyShapeMap.get(h) || []);
       const allShapeIndices = [...new Set([...outerIndices, ...holeIndices])];
-      const shape2D = new THREE.Shape(polygon.map((p) => new THREE.Vector2(p.x, p.y)));
+      const shape2D = new THREE.Shape(
+        polygon.map((p) => new THREE.Vector2(p.x, p.y)),
+      );
       holes.forEach((hole) => {
-        if (hole.length >= 3) shape2D.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))));
+        if (hole.length >= 3)
+          shape2D.holes.push(
+            new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))),
+          );
       });
       const fillMesh = new THREE.Mesh(
         new THREE.ShapeGeometry(shape2D),
-        new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthTest: false }),
+        new THREE.MeshBasicMaterial({
+          color: 0x4488ff,
+          transparent: true,
+          opacity: 0.18,
+          side: THREE.DoubleSide,
+          depthTest: false,
+        }),
       );
       fillMesh.position.copy(sketchMesh.position);
       fillMesh.quaternion.copy(sketchMesh.quaternion);
       fillMesh.renderOrder = renderOrder;
       fillMesh.visible = false;
-      fillMesh.userData.isRegionFill   = true;
-      fillMesh.userData.polygon2D      = polygon;
-      fillMesh.userData.holes2D        = holes;
-      fillMesh.userData.shapeIndices   = allShapeIndices;
+      fillMesh.userData.isRegionFill = true;
+      fillMesh.userData.polygon2D = polygon;
+      fillMesh.userData.holes2D = holes;
+      fillMesh.userData.shapeIndices = allShapeIndices;
       group.add(fillMesh);
       // Each child entry is itself a selectable region at a higher renderOrder.
       entries.forEach((sub) => addRegionFill(sub, renderOrder + 1));
@@ -1459,8 +2018,17 @@ export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, 
 
 export function applyRenderMode(renderMode, ctx) {
   const {
-    scene, renderer, cameraRef, objectsRef, originalMaterialsRef, itemsRef,
-    axisGroupRef, planeRef, sketchPlacementPlanesRef, composerRef, envTextureRef,
+    scene,
+    renderer,
+    cameraRef,
+    objectsRef,
+    originalMaterialsRef,
+    itemsRef,
+    axisGroupRef,
+    planeRef,
+    sketchPlacementPlanesRef,
+    composerRef,
+    envTextureRef,
     sketchModeRef,
   } = ctx;
 
@@ -1478,7 +2046,8 @@ export function applyRenderMode(renderMode, ctx) {
     renderer.toneMappingExposure = 1.2;
 
     const bgCanvas = document.createElement("canvas");
-    bgCanvas.width = 2; bgCanvas.height = 512;
+    bgCanvas.width = 2;
+    bgCanvas.height = 512;
     const bgCtx = bgCanvas.getContext("2d");
     const grad = bgCtx.createLinearGradient(0, 0, 0, 512);
     grad.addColorStop(0, "#0a0a2e");
@@ -1491,29 +2060,54 @@ export function applyRenderMode(renderMode, ctx) {
 
     if (axisGroupRef.current) axisGroupRef.current.visible = false;
     if (planeRef.current) planeRef.current.visible = false;
-    sketchPlacementPlanesRef.current.forEach(({ mesh }) => { mesh.visible = false; });
+    sketchPlacementPlanesRef.current.forEach(({ mesh }) => {
+      mesh.visible = false;
+    });
 
     if (!composerRef.current && cameraRef.current) {
       const composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene, cameraRef.current));
-      composer.addPass(new UnrealBloomPass(
-        new THREE.Vector2(renderer.domElement.clientWidth, renderer.domElement.clientHeight),
-        0.25, 0.5, 0.85,
-      ));
+      composer.addPass(
+        new UnrealBloomPass(
+          new THREE.Vector2(
+            renderer.domElement.clientWidth,
+            renderer.domElement.clientHeight,
+          ),
+          0.25,
+          0.5,
+          0.85,
+        ),
+      );
       composer.addPass(new OutputPass());
       composerRef.current = composer;
     }
 
     Object.values(objectsRef.current).forEach((mesh) => {
-      const itemData = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
-      if (itemData?.visible === false) { mesh.visible = false; return; }
-      if (itemData?.type === "sketch") { mesh.visible = false; return; }
+      const itemData = itemsRef.current.find(
+        (i) => i.id === mesh.userData.itemId,
+      );
+      if (itemData?.visible === false) {
+        mesh.visible = false;
+        return;
+      }
+      if (itemData?.type === "sketch") {
+        mesh.visible = false;
+        return;
+      }
       if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
-        if (mesh.userData.hullGeometry && mesh.geometry !== mesh.userData.hullGeometry) {
-          mesh.geometry.dispose(); mesh.geometry = mesh.userData.hullGeometry;
+        if (
+          mesh.userData.hullGeometry &&
+          mesh.geometry !== mesh.userData.hullGeometry
+        ) {
+          mesh.geometry.dispose();
+          mesh.geometry = mesh.userData.hullGeometry;
         }
-        if (mesh.userData.shaderMat && mesh.material !== mesh.userData.shaderMat) {
-          mesh.material.dispose(); mesh.material = mesh.userData.shaderMat;
+        if (
+          mesh.userData.shaderMat &&
+          mesh.material !== mesh.userData.shaderMat
+        ) {
+          mesh.material.dispose();
+          mesh.material = mesh.userData.shaderMat;
         }
         return;
       }
@@ -1521,10 +2115,16 @@ export function applyRenderMode(renderMode, ctx) {
       const col = orig ? orig.color.clone() : new THREE.Color(0xe0e0e0);
       if (mesh.material) mesh.material.dispose();
       mesh.material = new THREE.MeshPhysicalMaterial({
-        color: col, metalness: 0.15, roughness: 0.3,
-        clearcoat: 1.0, clearcoatRoughness: 0.1, envMapIntensity: 1.2,
+        color: col,
+        metalness: 0.15,
+        roughness: 0.3,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        envMapIntensity: 1.2,
       });
-      mesh.children.forEach((child) => { child.visible = false; });
+      mesh.children.forEach((child) => {
+        child.visible = false;
+      });
     });
   } else {
     scene.environment = null;
@@ -1538,30 +2138,58 @@ export function applyRenderMode(renderMode, ctx) {
     const bgColor = useStore.getState().theme === "light" ? 0xe8e8e8 : 0x1a1a1a;
     scene.background = new THREE.Color(bgColor);
 
-    if (axisGroupRef.current) axisGroupRef.current.visible = useStore.getState().axisVisible && !sketchModeRef.current;
-    if (planeRef.current && !sketchModeRef.current) planeRef.current.visible = true;
-    sketchPlacementPlanesRef.current.forEach(({ mesh }) => { mesh.visible = true; });
+    if (axisGroupRef.current)
+      axisGroupRef.current.visible =
+        useStore.getState().axisVisible && !sketchModeRef.current;
+    if (planeRef.current && !sketchModeRef.current)
+      planeRef.current.visible = true;
+    sketchPlacementPlanesRef.current.forEach(({ mesh }) => {
+      mesh.visible = true;
+    });
 
     Object.values(objectsRef.current).forEach((mesh) => {
-      const itemData = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
-      if (itemData?.visible === false) { mesh.visible = false; return; }
-      if (itemData?.type === "sketch") { mesh.visible = !sketchModeRef.current; return; }
+      const itemData = itemsRef.current.find(
+        (i) => i.id === mesh.userData.itemId,
+      );
+      if (itemData?.visible === false) {
+        mesh.visible = false;
+        return;
+      }
+      if (itemData?.type === "sketch") {
+        mesh.visible = !sketchModeRef.current;
+        return;
+      }
       if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
         if (renderMode === "wireframe") {
           let wfGeo;
-          if (itemData.type === "sphere") wfGeo = new THREE.SphereGeometry(1.5, 16, 12);
-          else if (itemData.type === "cylinder") wfGeo = new THREE.CylinderGeometry(1, 1, 2, 16);
+          if (itemData.type === "sphere")
+            wfGeo = new THREE.SphereGeometry(1.5, 16, 12);
+          else if (itemData.type === "cylinder")
+            wfGeo = new THREE.CylinderGeometry(1, 1, 2, 16);
           else wfGeo = new THREE.TorusGeometry(1.0, 0.4, 12, 24);
-          if (mesh.geometry !== mesh.userData.hullGeometry) mesh.geometry.dispose();
+          if (mesh.geometry !== mesh.userData.hullGeometry)
+            mesh.geometry.dispose();
           mesh.geometry = wfGeo;
-          if (mesh.material !== mesh.userData.shaderMat) mesh.material.dispose();
-          mesh.material = new THREE.MeshBasicMaterial({ color: 0xaaaaaa, wireframe: true });
+          if (mesh.material !== mesh.userData.shaderMat)
+            mesh.material.dispose();
+          mesh.material = new THREE.MeshBasicMaterial({
+            color: 0xaaaaaa,
+            wireframe: true,
+          });
         } else {
-          if (mesh.userData.hullGeometry && mesh.geometry !== mesh.userData.hullGeometry) {
-            mesh.geometry.dispose(); mesh.geometry = mesh.userData.hullGeometry;
+          if (
+            mesh.userData.hullGeometry &&
+            mesh.geometry !== mesh.userData.hullGeometry
+          ) {
+            mesh.geometry.dispose();
+            mesh.geometry = mesh.userData.hullGeometry;
           }
-          if (mesh.userData.shaderMat && mesh.material !== mesh.userData.shaderMat) {
-            mesh.material.dispose(); mesh.material = mesh.userData.shaderMat;
+          if (
+            mesh.userData.shaderMat &&
+            mesh.material !== mesh.userData.shaderMat
+          ) {
+            mesh.material.dispose();
+            mesh.material = mesh.userData.shaderMat;
           }
         }
         return;
@@ -1569,9 +2197,15 @@ export function applyRenderMode(renderMode, ctx) {
       const orig = originalMaterialsRef.current[mesh.userData.itemId];
       const col = orig ? orig.color.clone() : new THREE.Color(0xe0e0e0);
       if (mesh.material) mesh.material.dispose();
-      mesh.material = new THREE.MeshStandardMaterial({ color: col, metalness: 0.3, roughness: 0.5 });
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: col,
+        metalness: 0.3,
+        roughness: 0.5,
+      });
       mesh.material.wireframe = renderMode === "wireframe";
-      mesh.children.forEach((child) => { child.visible = true; });
+      mesh.children.forEach((child) => {
+        child.visible = true;
+      });
     });
   }
 }
