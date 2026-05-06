@@ -327,3 +327,91 @@ describe('intersecting sketch shapes produce correct hover regions', () => {
     });
   });
 });
+
+// ── Curve resolution ────────────────────────────────────────────────────────
+
+describe('curve resolution toggle', () => {
+  const C = (cx,cy,r) => ({ type:'circle', cx, cy, r });
+  const R = (x1,y1,x2,y2) => ({ type:'rect', x1, y1, x2, y2 });
+  const L = (x1,y1,x2,y2) => ({ type:'line', x1, y1, x2, y2 });
+
+  // ── Preview (32) vs print (128) segment counts ───────────────────────────
+
+  it('standalone circle: preview resolution uses 32 polygon points', () => {
+    const loops = findClosedLoopsWithShapes([C(0,0,5)], 32);
+    const circleLoop = loops.find(l => l.shapeIndices.includes(0));
+    expect(circleLoop).toBeDefined();
+    expect(circleLoop.polygon).toHaveLength(32);
+  });
+
+  it('standalone circle: print resolution uses 128 polygon points', () => {
+    const loops = findClosedLoopsWithShapes([C(0,0,5)], 128);
+    const circleLoop = loops.find(l => l.shapeIndices.includes(0));
+    expect(circleLoop).toBeDefined();
+    expect(circleLoop.polygon).toHaveLength(128);
+  });
+
+  it('print resolution has strictly more points than preview', () => {
+    const previewLoops = findClosedLoopsWithShapes([C(0,0,5)], 32);
+    const printLoops   = findClosedLoopsWithShapes([C(0,0,5)], 128);
+    const previewPts = previewLoops.find(l => l.shapeIndices.includes(0)).polygon.length;
+    const printPts   = printLoops  .find(l => l.shapeIndices.includes(0)).polygon.length;
+    expect(printPts).toBeGreaterThan(previewPts);
+  });
+
+  it('circle area is more accurately approximated at print resolution', () => {
+    // A polygon with more points is a better approximation of a disk.
+    const r = 5;
+    const trueArea = Math.PI * r * r;
+    const previewPoly = findClosedLoopsWithShapes([C(0,0,r)], 32)[0].polygon;
+    const printPoly   = findClosedLoopsWithShapes([C(0,0,r)], 128)[0].polygon;
+    const previewErr = Math.abs(polyArea(previewPoly) - trueArea);
+    const printErr   = Math.abs(polyArea(printPoly)   - trueArea);
+    expect(printErr).toBeLessThan(previewErr);
+  });
+
+  it('arc segments in a split circle also increase with resolution', () => {
+    // A circle split by a rectangle intersection creates arc sub-regions.
+    // Higher resolution should produce longer arc polygons.
+    const shapes = [R(0,0,4,4), C(5,2,2)]; // circle crosses right side
+    const previewLoops = findClosedLoopsWithShapes(shapes, 32);
+    const printLoops   = findClosedLoopsWithShapes(shapes, 128);
+
+    // The lens region (inside both) exists at both resolutions.
+    const previewLens = previewLoops.find(l => l.shapeIndices.includes(0) && l.shapeIndices.includes(1));
+    const printLens   = printLoops  .find(l => l.shapeIndices.includes(0) && l.shapeIndices.includes(1));
+    expect(previewLens).toBeDefined();
+    expect(printLens).toBeDefined();
+    expect(printLens.polygon.length).toBeGreaterThan(previewLens.polygon.length);
+  });
+
+  it('resolution does not affect topological structure (same loop count)', () => {
+    // Changing resolution should not alter which loops exist, only their
+    // vertex count.  Both resolutions must produce the same number of loops.
+    const shapes = [R(0,0,4,4), C(5,2,2)];
+    const previewLoops = findClosedLoopsWithShapes(shapes, 32);
+    const printLoops   = findClosedLoopsWithShapes(shapes, 128);
+    expect(printLoops.length).toBe(previewLoops.length);
+  });
+
+  it('two-circle intersection topology is preserved across resolutions', () => {
+    const shapes = [C(0,0,2), C(2.5,0,2)];
+    const previewLoops = findClosedLoopsWithShapes(shapes, 32);
+    const printLoops   = findClosedLoopsWithShapes(shapes, 128);
+    expect(printLoops.length).toBe(previewLoops.length);
+    // Every loop that references both circles at preview must also exist at print.
+    const previewBoth = previewLoops.filter(l => l.shapeIndices.includes(0) && l.shapeIndices.includes(1)).length;
+    const printBoth   = printLoops  .filter(l => l.shapeIndices.includes(0) && l.shapeIndices.includes(1)).length;
+    expect(printBoth).toBe(previewBoth);
+  });
+
+  it('preview resolution is backwards-compatible (same as omitting the argument)', () => {
+    const shapes = [C(0,0,3), R(0,0,5,5)];
+    const explicit = findClosedLoopsWithShapes(shapes, 32);
+    const implicit = findClosedLoopsWithShapes(shapes);       // default = 32
+    expect(explicit.length).toBe(implicit.length);
+    explicit.forEach((loop, i) => {
+      expect(loop.polygon.length).toBe(implicit[i].polygon.length);
+    });
+  });
+});

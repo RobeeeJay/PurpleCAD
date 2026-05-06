@@ -83,6 +83,9 @@ const Viewport = () => {
   const sketchDistanceInput = useStore((state) => state.sketchDistanceInput);
   const constraintsVisible = useStore((state) => state.constraintsVisible);
   const dimensionsVisible = useStore((state) => state.dimensionsVisible);
+  const curveResolution = useStore((state) => state.curveResolution);
+  const curveSegments = 32;
+  const printPrecision = curveResolution === "print" ? 0.01 : null;
 
   const _selItem = items.find((i) => i.id === selectedId);
   const isInSketchMode = _selItem != null && _selItem.type === "sketch";
@@ -306,7 +309,7 @@ const Viewport = () => {
 
   useEffect(() => {
     if (!sceneRef.current || !rendererRef.current) return;
-    buildSceneObjects(items, sceneRef.current, objectsRef, originalMaterialsRef);
+    buildSceneObjects(items, sceneRef.current, objectsRef, originalMaterialsRef, curveSegments, printPrecision);
     applyRenderMode(renderMode, {
       scene: sceneRef.current,
       renderer: rendererRef.current,
@@ -321,7 +324,7 @@ const Viewport = () => {
       envTextureRef,
       sketchModeRef,
     });
-  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Transform handles + bounding box ─────────────────────────────────────
 
@@ -619,13 +622,13 @@ const Viewport = () => {
       });
       sketchShapesGroupRef.current = null;
     }
-    const group = buildSketchShapesGroup(selectedId, items, objectsRef, rendererRef.current, constraintsVisible, dimensionsVisible);
+    const group = buildSketchShapesGroup(selectedId, items, objectsRef, rendererRef.current, constraintsVisible, dimensionsVisible, curveSegments, printPrecision);
     if (group) {
       if (renderMode === "smooth") group.visible = false;
       scene.add(group);
       sketchShapesGroupRef.current = group;
     }
-  }, [selectedId, items, constraintsVisible, dimensionsVisible]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedId, items, constraintsVisible, dimensionsVisible, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Object-view sketch construction lines ────────────────────────────────
 
@@ -663,10 +666,10 @@ const Viewport = () => {
       extrudeSelectGroupRef.current = null;
     }
     if (extrudeSelectMode === "profile") {
-      const group = buildExtrudeSelectGroup(items, objectsRef);
+      const group = buildExtrudeSelectGroup(items, objectsRef, curveSegments, printPrecision);
       if (group) { scene.add(group); extrudeSelectGroupRef.current = group; }
     }
-  }, [extrudeSelectMode, items]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [extrudeSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Emissive highlight ────────────────────────────────────────────────────
 

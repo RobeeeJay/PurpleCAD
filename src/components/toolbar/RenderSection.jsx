@@ -5,6 +5,8 @@ import ToolbarSection from "./ToolbarSection";
 const RenderSection = () => {
   const renderMode = useStore((s) => s.renderMode);
   const setRenderMode = useStore((s) => s.setRenderMode);
+  const curveResolution = useStore((s) => s.curveResolution);
+  const toggleCurveResolution = useStore((s) => s.toggleCurveResolution);
 
   return (
     <ToolbarSection label="Render">
@@ -39,6 +41,37 @@ const RenderSection = () => {
             </linearGradient>
           </defs>
           <path d="M3 5v14h18V5z" fill="url(#grad)" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${curveResolution === "print" ? "active" : ""}`}
+        title={curveResolution === "print" ? "High resolution (3D print) — click for preview" : "Preview resolution — click for high (3D print)"}
+        onClick={toggleCurveResolution}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
+          {curveResolution === "print" ? (
+            <>
+              <circle cx="12" cy="5"  r="1.2" fill="currentColor" />
+              <circle cx="16.95" cy="6.4"  r="1.2" fill="currentColor" />
+              <circle cx="19.6"  cy="11"  r="1.2" fill="currentColor" />
+              <circle cx="18.7"  cy="16.3" r="1.2" fill="currentColor" />
+              <circle cx="14.7"  cy="19.6" r="1.2" fill="currentColor" />
+              <circle cx="9.3"   cy="19.6" r="1.2" fill="currentColor" />
+              <circle cx="5.3"   cy="16.3" r="1.2" fill="currentColor" />
+              <circle cx="4.4"   cy="11"  r="1.2" fill="currentColor" />
+              <circle cx="7.05"  cy="6.4"  r="1.2" fill="currentColor" />
+            </>
+          ) : (
+            <>
+              <circle cx="12"    cy="5"   r="1.5" fill="currentColor" />
+              <circle cx="18.7"  cy="8.5" r="1.5" fill="currentColor" />
+              <circle cx="18.7"  cy="15.5" r="1.5" fill="currentColor" />
+              <circle cx="12"    cy="19"  r="1.5" fill="currentColor" />
+              <circle cx="5.3"   cy="15.5" r="1.5" fill="currentColor" />
+              <circle cx="5.3"   cy="8.5" r="1.5" fill="currentColor" />
+            </>
+          )}
         </svg>
       </button>
     </ToolbarSection>

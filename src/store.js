@@ -189,6 +189,7 @@ export const useStore = create((set) => ({
   constraintsVisible: true,
   dimensionsVisible: true,
   sketchMultiSelectedIndices: [],
+  curveResolution: "preview", // "preview" (32 pts) | "print" (128 pts)
 
   history: persisted ? withOrphanFlags(persisted.history) : defaultHistory,
   activeHistoryId: persisted ? persisted.activeHistoryId : null,
@@ -1014,6 +1015,7 @@ export const useStore = create((set) => ({
 
   toggleConstraintsVisible: () => set((state) => ({ constraintsVisible: !state.constraintsVisible })),
   toggleDimensionsVisible: () => set((state) => ({ dimensionsVisible: !state.dimensionsVisible })),
+  toggleCurveResolution: () => set((state) => ({ curveResolution: state.curveResolution === "print" ? "preview" : "print" })),
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
   toggleSketchShapesDashed: (sketchId, indices) =>

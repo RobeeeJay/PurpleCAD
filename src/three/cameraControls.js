@@ -1173,6 +1173,7 @@ export function attachCameraControls(ctx) {
       // are coplanar and raycasting would return an arbitrary first hit.
       let bestFill = null;
       let bestArea = Infinity;
+      let bestLocalPt = null;
       for (const fill of fills) {
         const profile = fill.userData.extrudeProfile;
         if (!profile) continue;
@@ -1184,12 +1185,19 @@ export function attachCameraControls(ctx) {
         const inHole  = (profile.holes || []).some(h => pointInPolygon2D(localPt, h));
         if (inOuter && !inHole) {
           const area = polyArea(profile.polygon2D);
-          if (area < bestArea) { bestFill = fill; bestArea = area; }
+          if (area < bestArea) { bestFill = fill; bestArea = area; bestLocalPt = localPt; }
         }
       }
       if (bestFill) {
         const profile = bestFill.userData.extrudeProfile;
-        extrudeProfileData = profile;
+        // Use the actual click position as profileCentroid rather than the
+        // pre-computed polyCentroid(polygon).  polyCentroid is the arithmetic
+        // mean of polygon vertices, which is biased toward densely-sampled arc
+        // boundaries and can fall inside a neighbouring smaller region.  The
+        // click point is guaranteed to be inside the correct polygon (we just
+        // verified inOuter && !inHole above), so it is a reliable anchor for
+        // profile re-matching in buildSceneObjects.
+        extrudeProfileData = { ...profile, profileCentroid: bestLocalPt };
         extrudeDepthOriginV3 = new THREE.Vector3(profile.position.x, profile.position.y, profile.position.z);
         extrudeNormalV3 = new THREE.Vector3(profile.normalWorld.x, profile.normalWorld.y, profile.normalWorld.z);
         const retargetItem = itemsRef.current.find((i) => i.id === useStore.getState().extrudeRetargetId);
@@ -2410,8 +2418,18 @@ export function attachCameraControls(ctx) {
             if (updates.length > 0) useStore.getState().setItemsTransform(updates);
           }
         } else {
-          useStore.getState().setItemTransform(drag.itemId,
-            { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
+          // For extrude meshes, mesh.position = item.position + rotated_centroid_offset.
+          // We must subtract the offset before storing so that the next buildSceneObjects
+          // call re-applies it and the solid stays in the same world position.
+          const elo = mesh.userData.extrudeLocalOffset;
+          let commitPos;
+          if (elo) {
+            const offsetWorld = new THREE.Vector3(elo.x, elo.y, elo.z).applyEuler(mesh.rotation);
+            commitPos = { x: mesh.position.x - offsetWorld.x, y: mesh.position.y - offsetWorld.y, z: mesh.position.z - offsetWorld.z };
+          } else {
+            commitPos = { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z };
+          }
+          useStore.getState().setItemTransform(drag.itemId, commitPos,
             { x: mesh.scale.x, y: mesh.scale.y, z: mesh.scale.z },
             null,
           );
@@ -2419,7 +2437,15 @@ export function attachCameraControls(ctx) {
             const updates = Object.keys(drag.startDescendantPositions).map((idStr) => {
               const dMesh = objectsRef.current[parseInt(idStr, 10)];
               if (!dMesh) return null;
-              return { id: parseInt(idStr, 10), position: { x: dMesh.position.x, y: dMesh.position.y, z: dMesh.position.z } };
+              const dElo = dMesh.userData.extrudeLocalOffset;
+              let dPos;
+              if (dElo) {
+                const dOffsetWorld = new THREE.Vector3(dElo.x, dElo.y, dElo.z).applyEuler(dMesh.rotation);
+                dPos = { x: dMesh.position.x - dOffsetWorld.x, y: dMesh.position.y - dOffsetWorld.y, z: dMesh.position.z - dOffsetWorld.z };
+              } else {
+                dPos = { x: dMesh.position.x, y: dMesh.position.y, z: dMesh.position.z };
+              }
+              return { id: parseInt(idStr, 10), position: dPos };
             }).filter(Boolean);
             if (updates.length > 0) useStore.getState().setItemsTransform(updates);
           }

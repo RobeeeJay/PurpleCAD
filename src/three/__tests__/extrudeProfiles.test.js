@@ -623,4 +623,176 @@ describe('extrude profile geometry', () => {
       expect(offset.y).toBeCloseTo(9, 1);
     });
   });
+
+  // ── Selection-to-extrusion area consistency ───────────────────────────────
+  // The extrude pipeline has two independent steps:
+  //   1. buildExtrudeSelectGroup – builds fill meshes; stores
+  //      profileCentroid = polyCentroid(polygon) on each mesh.
+  //   2. buildSceneObjects – on every rebuild, calls findClosedLoops and
+  //      picks the polygon whose interior contains profileCentroid
+  //      (smallest-area wins when multiple polygons qualify).
+  //
+  // These tests simulate both steps and assert the picked area and the
+  // re-matched area are the same, catching any regression where toggling
+  // resolution or sketch edits causes the wrong region to be extruded.
+
+  describe('selected area matches extruded area', () => {
+    // Mirrors buildExtrudeSelectGroup: build fills with the given resolution
+    // params and return the fill at `point` using the same pick rule.
+    function pickFillAtPoint(shapes, point, curveSegments = 32, precision = null) {
+      const loopsWithShapes = findClosedLoopsWithShapes(shapes, curveSegments, precision);
+      const polygons = loopsWithShapes.map(l => l.polygon);
+      const grouped  = groupLoopsWithHoles(polygons);
+      const fills = [];
+      const add = ({ polygon, holes, entries }, order) => {
+        fills.push({ polygon2D: polygon, holes2D: holes, renderOrder: order });
+        entries.forEach(e => add(e, order + 1));
+      };
+      grouped.forEach(e => add(e, 999));
+      let best = null;
+      for (const f of fills) {
+        if (!polyContainsPoint(f.polygon2D, point)) continue;
+        if (f.holes2D.some(h => polyContainsPoint(h, point))) continue;
+        const ord = f.renderOrder, area = polyArea(f.polygon2D);
+        const bOrd = best?.renderOrder ?? -1, bArea = best ? polyArea(best.polygon2D) : Infinity;
+        if (!best || ord > bOrd || (ord === bOrd && area < bArea)) best = f;
+      }
+      return best;
+    }
+
+    // Mirrors buildSceneObjects profile re-matching: given the stored click
+    // point (profileCentroid) and the stored polygon area, find the best-matching
+    // polygon.  The click point is guaranteed to be inside the correct polygon
+    // and not in any of its holes, so smallest-area among containing polygons is
+    // reliable.  The area comparison is used as a secondary guard when multiple
+    // polygons contain the point (e.g. after sketch edits or resolution changes).
+    // Falls back to nearest-centroid when no polygon contains the point.
+    function rematchFromCentroid(shapes, clickPoint, storedArea, curveSegments = 32, precision = null) {
+      const loops   = findClosedLoops(shapes, curveSegments, precision);
+      const grouped = groupLoopsWithHoles(loops);
+      const all = [];
+      const collect = e => { all.push(e); e.entries.forEach(collect); };
+      grouped.forEach(collect);
+      if (all.length === 0) return null;
+      const pc = clickPoint;
+      const inside = all.filter(g => polyContainsPoint(g.polygon, pc));
+      if (inside.length > 0) {
+        return inside.reduce((b, g) => {
+          const da = Math.abs(polyArea(g.polygon) - storedArea);
+          const db = Math.abs(polyArea(b.polygon) - storedArea);
+          return da < db ? g : b;
+        });
+      }
+      return all.reduce((b, g) => {
+        const c = polyCentroid(g.polygon);
+        const d = Math.hypot(c.x - pc.x, c.y - pc.y);
+        return d < b.d ? { g, d } : b;
+      }, { g: all[0], d: Infinity }).g;
+    }
+
+    // Pick a fill at `point`, then simulate what buildSceneObjects does:
+    // use the click position (not polyCentroid) as the stored profileCentroid
+    // and re-match at the given extrusion resolution.
+    function assertMatch(shapes, point, selSegs = 32, selPrec = null, extSegs = 32, extPrec = null) {
+      const sel = pickFillAtPoint(shapes, point, selSegs, selPrec);
+      expect(sel).not.toBeNull();
+      // Use the click point as profileCentroid — mirrors cameraControls.js which
+      // now stores bestLocalPt instead of polyCentroid(polygon).
+      const storedArea = polyArea(sel.polygon2D);
+      const matched    = rematchFromCentroid(shapes, point, storedArea, extSegs, extPrec);
+      expect(matched).not.toBeNull();
+      // Areas must agree within 0.5 unit² — tolerates minor tessellation
+      // differences between resolutions for the same geometric region.
+      expect(polyArea(matched.polygon)).toBeCloseTo(storedArea, 0);
+    }
+
+    describe('preview mode (32 segments)', () => {
+      it('standalone rectangle', () =>
+        assertMatch([R(0,0,4,4)], {x:2, y:2}));
+
+      it('standalone circle', () =>
+        assertMatch([C(0,0,2)], {x:0, y:0}));
+
+      it('circle+rect — lens region (inside both)', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:3.5, y:2}));
+
+      it('circle+rect — outer arc (inside circle only)', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:6, y:2}));
+
+      it('circle+rect — rect remainder (inside rect only)', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:0.5, y:2}));
+
+      it('two overlapping circles — left crescent', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:-1, y:0}));
+
+      it('two overlapping circles — lens', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:1.25, y:0}));
+
+      it('two overlapping circles — right crescent', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:3.5, y:0}));
+
+      it('circle fully inside rect — inner circle fill', () =>
+        assertMatch([R(0,0,10,10), C(5,5,2)], {x:5, y:5}));
+
+      it('circle fully inside rect — ring fill', () =>
+        assertMatch([R(0,0,10,10), C(5,5,2)], {x:1, y:1}));
+    });
+
+    describe('print mode (adaptive precision 0.01 mm)', () => {
+      const p = 0.01;
+
+      it('standalone rectangle', () =>
+        assertMatch([R(0,0,4,4)], {x:2, y:2}, 32, p, 32, p));
+
+      it('standalone circle', () =>
+        assertMatch([C(0,0,2)], {x:0, y:0}, 32, p, 32, p));
+
+      it('circle+rect — lens region', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:3.5, y:2}, 32, p, 32, p));
+
+      it('circle+rect — outer arc', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:6, y:2}, 32, p, 32, p));
+
+      it('circle+rect — rect remainder', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:0.5, y:2}, 32, p, 32, p));
+
+      it('two overlapping circles — lens', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:1.25, y:0}, 32, p, 32, p));
+
+      it('two overlapping circles — left crescent', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:-1, y:0}, 32, p, 32, p));
+
+      it('two overlapping circles — right crescent', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:3.5, y:0}, 32, p, 32, p));
+    });
+
+    describe('cross-resolution: profile stored in preview, rebuilt in print mode', () => {
+      // The primary regression scenario: user selects a fill in preview mode,
+      // then toggles to print mode.  buildSceneObjects re-runs findClosedLoops
+      // with adaptive precision, but the centroid stored at click time must
+      // still identify the correct polygon.
+      const p = 0.01;
+
+      it('standalone circle survives resolution change', () =>
+        assertMatch([C(0,0,2)], {x:0, y:0}, 32, null, 32, p));
+
+      it('circle+rect lens survives resolution change', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:3.5, y:2}, 32, null, 32, p));
+
+      it('circle+rect outer arc survives resolution change', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:6, y:2}, 32, null, 32, p));
+
+      it('circle+rect rect remainder survives resolution change', () =>
+        assertMatch([R(0,0,4,4), C(5,2,2)], {x:0.5, y:2}, 32, null, 32, p));
+
+      it('two-circle lens survives resolution change', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:1.25, y:0}, 32, null, 32, p));
+
+      it('two-circle left crescent survives resolution change', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:-1, y:0}, 32, null, 32, p));
+
+      it('two-circle right crescent survives resolution change', () =>
+        assertMatch([C(0,0,2), C(2.5,0,2)], {x:3.5, y:0}, 32, null, 32, p));
+    });
+  });
 });

@@ -333,7 +333,7 @@ export function getShapeLength(shape) {
 
 // ── Scene object building ─────────────────────────────────────────────────────
 
-export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef) {
+export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef, curveSegments = 32, precision = null) {
   Object.values(objectsRef.current).forEach((mesh) => {
     scene.remove(mesh);
     mesh.geometry.dispose();
@@ -375,7 +375,7 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
         if (profile.sketchId != null) {
           const sketchItem = items.find((si) => si.id === profile.sketchId);
           if (sketchItem && sketchItem.shapes && sketchItem.shapes.length > 0) {
-            const allLoops = findClosedLoops(sketchItem.shapes);
+            const allLoops = findClosedLoops(sketchItem.shapes, curveSegments, precision);
             const grouped = groupLoopsWithHoles(allLoops);
             if (grouped.length > 0) {
               // Search every entry in the hierarchy (roots and all descendants) so
@@ -385,13 +385,40 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
               const collect = (e) => { allEntries.push(e); e.entries.forEach(collect); };
               grouped.forEach(collect);
               const pc = profile.profileCentroid;
-              const match = pc
-                ? allEntries.reduce((best, g) => {
+              // Use polyContainsPoint rather than nearest-centroid distance so
+              // that the match is resolution-independent.  At higher curve
+              // segment counts the arithmetic-mean centroid of arc-dominated
+              // polygons drifts outside the polygon itself, causing the
+              // distance-based search to pick the wrong entry.  A geometric
+              // interior point stays inside the same region regardless of how
+              // many segments the arc is split into.
+              let match = allEntries[0];
+              if (pc) {
+                const containing = allEntries.filter(g => polyContainsPoint(g.polygon, pc));
+                if (containing.length > 0) {
+                  // Pick the polygon whose area is closest to the stored profile's
+                  // area rather than the smallest one.  polyCentroid is biased by
+                  // arc vertex density and can land inside a neighbouring smaller
+                  // polygon (e.g. a rect-remainder centroid drifting into the lens
+                  // it borders, or a ring centroid sitting at the inner circle
+                  // centre).  Area proximity is resolution-independent and reliably
+                  // identifies the same geometric region across tessellation changes.
+                  const targetArea = polyArea(poly);
+                  match = containing.reduce((best, g) => {
+                    const da = Math.abs(polyArea(g.polygon) - targetArea);
+                    const db = Math.abs(polyArea(best.polygon) - targetArea);
+                    return da < db ? g : best;
+                  });
+                } else {
+                  // Fall back to nearest centroid when nothing contains the
+                  // stored point (e.g. sketch was heavily edited).
+                  match = allEntries.reduce((best, g) => {
                     const c = polyCentroid(g.polygon);
                     const d = Math.hypot(c.x - pc.x, c.y - pc.y);
                     return d < best.d ? { g, d } : best;
-                  }, { g: allEntries[0], d: Infinity }).g
-                : allEntries[0];
+                  }, { g: allEntries[0], d: Infinity }).g;
+                }
+              }
               if (match.polygon.length >= 3) { poly = match.polygon; holePolys = match.holes.filter((h) => h.length >= 3); }
             }
           }
@@ -436,6 +463,11 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
     mesh.scale.setScalar(item.scale ? item.scale.x : 1);
 
     if (extrudeLocalOffset) {
+      // Tag the mesh with the pre-rotation local offset so the drag handler can
+      // subtract it when committing position to the store.  Without this, every
+      // drag commit would bake the offset into item.position and the next rebuild
+      // would add it again, causing the object to drift by one extra offset each move.
+      mesh.userData.extrudeLocalOffset = { x: extrudeLocalOffset.x, y: extrudeLocalOffset.y, z: extrudeLocalOffset.z };
       // Rotate the local centroid offset into world space and add it to the
       // stored sketch position so the solid appears where the user drew it.
       extrudeLocalOffset.applyEuler(mesh.rotation);
@@ -663,6 +695,23 @@ function lineCrossIntersect(li, lj) {
   return { ti, tj, x: li.x1 + ti * dx1, y: li.y1 + ti * dy1 };
 }
 
+// Computes the number of polygon samples for a sub-arc edge.
+// In print mode (precision != null), uses the sagitta formula so the chord
+// deviation from the true curve is ≤ precision mm.  In preview mode returns
+// curveSegments / 2, which is identical to the pre-adaptive behaviour and
+// keeps polygon shapes stable for profile re-matching.
+function arcSegsN(shape, arcAngle, curveSegments, precision) {
+  if (precision != null) {
+    const r = shape.r;
+    if (r > 0) {
+      const sUnits = precision / MM_PER_UNIT;
+      const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
+      return Math.max(8, Math.min(65536, Math.ceil(arcAngle / (2 * halfTheta))));
+    }
+  }
+  return Math.round(curveSegments / 2);
+}
+
 function sampleShapeForPoly(shape, startIsA, N = 16) {
   switch (shape.type) {
     case "line":
@@ -698,7 +747,7 @@ function sampleShapeForPoly(shape, startIsA, N = 16) {
 // each other's boundaries, their intersection points are computed, each shape is split
 // at those points, and the DFS finds all minimal face regions of the resulting planar
 // graph — including the overlap region, the circle-outside-rect region, etc.
-export function findClosedLoopsWithShapes(shapes) {
+export function findClosedLoopsWithShapes(shapes, curveSegments = 32, precision = null) {
   const EPS = 1e-4;
 
   // ── Filter solid shapes ───────────────────────────────────────────────────
@@ -855,11 +904,14 @@ export function findClosedLoopsWithShapes(shapes) {
         if (cycleKeys.has(cycleKey)) continue;
         cycleKeys.add(cycleKey);
         const sn1 = shapeNodes[si1], sn2 = shapeNodes[si2];
+        const sh1 = subEntries[si1].shape, sh2 = subEntries[si2].shape;
+        const ang1 = sh1.type === "arc" ? Math.abs(sh1.endAngle - sh1.startAngle) : Math.PI;
+        const ang2 = sh2.type === "arc" ? Math.abs(sh2.endAngle - sh2.startAngle) : Math.PI;
         const poly = [];
         const idxSet = new Set();
-        poly.push(...sampleShapeForPoly(subEntries[si1].shape, sn1.a === N1));
+        poly.push(...sampleShapeForPoly(sh1, sn1.a === N1, arcSegsN(sh1, ang1, curveSegments, precision)));
         idxSet.add(subEntries[si1].origIdx);
-        poly.push(...sampleShapeForPoly(subEntries[si2].shape, sn2.a === N2));
+        poly.push(...sampleShapeForPoly(sh2, sn2.a === N2, arcSegsN(sh2, ang2, curveSegments, precision)));
         idxSet.add(subEntries[si2].origIdx);
         results.push({ polygon: poly, shapeIndices: [...idxSet] });
       }
@@ -896,7 +948,9 @@ export function findClosedLoopsWithShapes(shapes) {
     const idxSet = new Set();
     for (const edge of path) {
       const sn = shapeNodes[edge.si];
-      poly.push(...sampleShapeForPoly(subEntries[edge.si].shape, sn.a === edge.fromNode));
+      const sh = subEntries[edge.si].shape;
+      const arcAngle = sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI;
+      poly.push(...sampleShapeForPoly(sh, sn.a === edge.fromNode, arcSegsN(sh, arcAngle, curveSegments, precision)));
       idxSet.add(subEntries[edge.si].origIdx);
     }
     results.push({ polygon: poly, shapeIndices: [...idxSet] });
@@ -905,17 +959,23 @@ export function findClosedLoopsWithShapes(shapes) {
   // ── Direct loops for self-closing shapes that were NOT split ──────────────
   solidEntries.forEach(({ shape, origIdx }) => {
     if (shape.type === "circle" && !splitCircleOrigIdxs.has(origIdx)) {
+      const segs = precision != null
+        ? arcSegsN(shape, 2 * Math.PI, curveSegments, precision)
+        : curveSegments;
       results.push({
-        polygon: Array.from({ length: 32 }, (_, i) => {
-          const a = (i / 32) * Math.PI * 2;
+        polygon: Array.from({ length: segs }, (_, i) => {
+          const a = (i / segs) * Math.PI * 2;
           return { x: shape.cx + Math.cos(a) * shape.r, y: shape.cy + Math.sin(a) * shape.r };
         }),
         shapeIndices: [origIdx],
       });
     } else if (shape.type === "ellipse") {
+      const segs = precision != null
+        ? arcSegsN({ r: Math.max(shape.rx, shape.ry) }, 2 * Math.PI, curveSegments, precision)
+        : curveSegments;
       results.push({
-        polygon: Array.from({ length: 32 }, (_, i) => {
-          const a = (i / 32) * Math.PI * 2;
+        polygon: Array.from({ length: segs }, (_, i) => {
+          const a = (i / segs) * Math.PI * 2;
           return { x: shape.cx + Math.cos(a) * shape.rx, y: shape.cy + Math.sin(a) * shape.ry };
         }),
         shapeIndices: [origIdx],
@@ -927,8 +987,8 @@ export function findClosedLoopsWithShapes(shapes) {
   return results;
 }
 
-export function findClosedLoops(shapes) {
-  return findClosedLoopsWithShapes(shapes).map((l) => l.polygon);
+export function findClosedLoops(shapes, curveSegments = 32, precision = null) {
+  return findClosedLoopsWithShapes(shapes, curveSegments, precision).map((l) => l.polygon);
 }
 
 // ── Object-view sketch lines (all sketches, lines only) ──────────────────────
@@ -1055,14 +1115,14 @@ export function groupLoopsWithHoles(loops) {
 
 // ── Extrude profile selection fills (one fill mesh per closed sketch loop) ───
 
-export function buildExtrudeSelectGroup(items, objectsRef) {
+export function buildExtrudeSelectGroup(items, objectsRef, curveSegments = 32, precision = null) {
   const sketchItems = items.filter((i) => i.type === "sketch" && i.shapes?.length > 0 && i.visible !== false);
   if (sketchItems.length === 0) return null;
   const group = new THREE.Group();
   sketchItems.forEach((item) => {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
-    const allLoops = findClosedLoops(item.shapes || []);
+    const allLoops = findClosedLoops(item.shapes || [], curveSegments, precision);
     const grouped  = groupLoopsWithHoles(allLoops);
     const euler    = new THREE.Euler().setFromQuaternion(sketchMesh.quaternion);
     const normal   = new THREE.Vector3(0, 0, 1).applyQuaternion(sketchMesh.quaternion);
@@ -1292,7 +1352,7 @@ export function rebuildPointDotsForDrag(group, shapes, sketchMesh) {
   group.add(dots);
 }
 
-export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, showConstraints = true, showDimensions = true) {
+export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, showConstraints = true, showDimensions = true, curveSegments = 32, precision = null) {
   const selItem = items.find((i) => i.id === selectedId);
   if (selItem?.type !== "sketch") return null;
   const sketchMesh = objectsRef.current[selectedId];
@@ -1356,7 +1416,7 @@ export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, 
   if (showConstraints) addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, showDimensions);
 
   // ── Enclosed region fills (hole-aware, hidden until hover) ──────────────────
-  const loopsWithShapes = findClosedLoopsWithShapes(shapes);
+  const loopsWithShapes = findClosedLoopsWithShapes(shapes, curveSegments, precision);
   if (loopsWithShapes.length > 0) {
     const polygons    = loopsWithShapes.map((l) => l.polygon);
     const polyShapeMap = new Map(loopsWithShapes.map((l) => [l.polygon, l.shapeIndices]));
