@@ -377,15 +377,20 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
             const allLoops = findClosedLoops(sketchItem.shapes);
             const grouped = groupLoopsWithHoles(allLoops);
             if (grouped.length > 0) {
-              // Find the outer loop group whose centroid is closest to the stored centroid.
+              // Search every entry in the hierarchy (roots and all descendants) so
+              // that sub-regions like the part of a circle inside a rectangle can be
+              // matched — those are children of a root, not roots themselves.
+              const allEntries = [];
+              const collect = (e) => { allEntries.push(e); e.entries.forEach(collect); };
+              grouped.forEach(collect);
               const pc = profile.profileCentroid;
               const match = pc
-                ? grouped.reduce((best, g) => {
+                ? allEntries.reduce((best, g) => {
                     const c = polyCentroid(g.polygon);
                     const d = Math.hypot(c.x - pc.x, c.y - pc.y);
                     return d < best.d ? { g, d } : best;
-                  }, { g: grouped[0], d: Infinity }).g
-                : grouped[0];
+                  }, { g: allEntries[0], d: Infinity }).g
+                : allEntries[0];
               if (match.polygon.length >= 3) { poly = match.polygon; holePolys = match.holes.filter((h) => h.length >= 3); }
             }
           }
@@ -565,6 +570,73 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
 
 // ── Closed-loop detection for fill regions ────────────────────────────────────
 
+// ── Intersection helpers ──────────────────────────────────────────────────────
+
+function normalizeAngle(a) { a %= 2 * Math.PI; return a < 0 ? a + 2 * Math.PI : a; }
+
+function uniqueSortedNums(arr, eps) {
+  const s = [...arr].sort((a, b) => a - b);
+  return s.filter((v, i) => i === 0 || v - s[i - 1] > eps);
+}
+
+// Intersection points of a line segment with a circle.
+// Returns [{t, x, y, angle}] — t∈(0,1) strict interior of the segment.
+function lineCircleIntersect(line, circle) {
+  const { x1, y1, x2, y2 } = line;
+  const { cx, cy, r } = circle;
+  const dx = x2 - x1, dy = y2 - y1;
+  const a = dx * dx + dy * dy;
+  if (a < 1e-12) return [];
+  const fx = x1 - cx, fy = y1 - cy;
+  const b = 2 * (fx * dx + fy * dy);
+  const c = fx * fx + fy * fy - r * r;
+  const disc = b * b - 4 * a * c;
+  if (disc < 0) return [];
+  const sq = Math.sqrt(Math.max(0, disc));
+  const EPS = 1e-6;
+  return [(-b - sq) / (2 * a), (-b + sq) / (2 * a)]
+    .filter(t => t > EPS && t < 1 - EPS)
+    .map(t => {
+      const x = x1 + t * dx, y = y1 + t * dy;
+      return { t, x, y, angle: normalizeAngle(Math.atan2(y - cy, x - cx)) };
+    });
+}
+
+// Intersection points of two circles.
+// Returns [{x, y, angle1, angle2}] — angles on each circle.
+function circleCircleIntersect(c1, c2) {
+  const dx = c2.cx - c1.cx, dy = c2.cy - c1.cy;
+  const d = Math.hypot(dx, dy);
+  if (d < 1e-10 || d > c1.r + c2.r + 1e-9 || d < Math.abs(c1.r - c2.r) - 1e-9) return [];
+  const a = (d * d + c1.r * c1.r - c2.r * c2.r) / (2 * d);
+  const h2 = c1.r * c1.r - a * a;
+  if (h2 < 0) return [];
+  const h = Math.sqrt(h2);
+  const px = c1.cx + a * dx / d, py = c1.cy + a * dy / d;
+  const pts = [];
+  for (const sign of [1, -1]) {
+    const x = px + sign * h * dy / d, y = py - sign * h * dx / d;
+    pts.push({ x, y, angle1: normalizeAngle(Math.atan2(y - c1.cy, x - c1.cx)), angle2: normalizeAngle(Math.atan2(y - c2.cy, x - c2.cx)) });
+  }
+  // De-duplicate tangent intersections
+  if (Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) < 1e-6) return [pts[0]];
+  return pts;
+}
+
+// Intersection of two line segments at a point strictly interior to both.
+function lineCrossIntersect(li, lj) {
+  const dx1 = li.x2 - li.x1, dy1 = li.y2 - li.y1;
+  const dx2 = lj.x2 - lj.x1, dy2 = lj.y2 - lj.y1;
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < 1e-12) return null;
+  const gdx = lj.x1 - li.x1, gdy = lj.y1 - li.y1;
+  const ti = (gdx * dy2 - gdy * dx2) / denom;
+  const tj = (gdx * dy1 - gdy * dx1) / denom;
+  const EPS = 1e-6;
+  if (ti < EPS || ti > 1 - EPS || tj < EPS || tj > 1 - EPS) return null;
+  return { ti, tj, x: li.x1 + ti * dx1, y: li.y1 + ti * dy1 };
+}
+
 function sampleShapeForPoly(shape, startIsA, N = 16) {
   switch (shape.type) {
     case "line":
@@ -595,14 +667,109 @@ function sampleShapeForPoly(shape, startIsA, N = 16) {
 }
 
 // Returns [{ polygon, shapeIndices }] — shapeIndices are original indices into `shapes`.
-// Both closed line-graphs AND self-closing shapes (circle/ellipse/rect) are included.
+//
+// Handles intersecting shapes: when two shapes (e.g. a circle and a rectangle) cross
+// each other's boundaries, their intersection points are computed, each shape is split
+// at those points, and the DFS finds all minimal face regions of the resulting planar
+// graph — including the overlap region, the circle-outside-rect region, etc.
 export function findClosedLoopsWithShapes(shapes) {
   const EPS = 1e-4;
-  // Map solid shapes to their original indices
+
+  // ── Filter solid shapes ───────────────────────────────────────────────────
   const solidEntries = [];
   shapes.forEach((s, i) => { if (!s.dashed && s.kind !== "bevel") solidEntries.push({ shape: s, origIdx: i }); });
-  const solidShapes = solidEntries.map(e => e.shape);
 
+  // ── Expand rects to 4 line segments so they participate in intersection ───
+  // expandedEntries: { shape (line/arc/bezier/circle/ellipse), origIdx }
+  const expandedEntries = [];
+  solidEntries.forEach(({ shape, origIdx }) => {
+    if (shape.type === "rect") {
+      const { x1, y1, x2, y2 } = shape;
+      expandedEntries.push({ shape: { type:"line", x1, y1, x2, y2: y1 }, origIdx });
+      expandedEntries.push({ shape: { type:"line", x1: x2, y1, x2, y2 }, origIdx });
+      expandedEntries.push({ shape: { type:"line", x1: x2, y1: y2, x2: x1, y2 }, origIdx });
+      expandedEntries.push({ shape: { type:"line", x1, y1: y2, x2: x1, y2: y1 }, origIdx });
+    } else {
+      expandedEntries.push({ shape, origIdx });
+    }
+  });
+
+  // ── Compute pairwise intersection points ─────────────────────────────────
+  // splitPts[i] = list of split parameters/angles on expandedEntries[i]
+  const splitPts = expandedEntries.map(() => []);
+
+  for (let i = 0; i < expandedEntries.length; i++) {
+    for (let j = i + 1; j < expandedEntries.length; j++) {
+      if (expandedEntries[i].origIdx === expandedEntries[j].origIdx) continue; // same source shape
+      const si = expandedEntries[i].shape, sj = expandedEntries[j].shape;
+
+      if (si.type === "line" && sj.type === "line") {
+        const pt = lineCrossIntersect(si, sj);
+        if (pt) {
+          splitPts[i].push({ value: pt.ti, x: pt.x, y: pt.y });
+          splitPts[j].push({ value: pt.tj, x: pt.x, y: pt.y });
+        }
+      } else if (si.type === "line" && sj.type === "circle") {
+        for (const pt of lineCircleIntersect(si, sj)) {
+          splitPts[i].push({ value: pt.t, x: pt.x, y: pt.y });
+          splitPts[j].push({ value: pt.angle, x: pt.x, y: pt.y, isAngle: true });
+        }
+      } else if (si.type === "circle" && sj.type === "line") {
+        for (const pt of lineCircleIntersect(sj, si)) {
+          splitPts[j].push({ value: pt.t, x: pt.x, y: pt.y });
+          splitPts[i].push({ value: pt.angle, x: pt.x, y: pt.y, isAngle: true });
+        }
+      } else if (si.type === "circle" && sj.type === "circle") {
+        for (const pt of circleCircleIntersect(si, sj)) {
+          splitPts[i].push({ value: pt.angle1, x: pt.x, y: pt.y, isAngle: true });
+          splitPts[j].push({ value: pt.angle2, x: pt.x, y: pt.y, isAngle: true });
+        }
+      }
+    }
+  }
+
+  // ── Split shapes at intersection points ───────────────────────────────────
+  const subEntries = []; // { shape (line or arc), origIdx }
+  const splitCircleOrigIdxs = new Set(); // circles that were split → skip direct-loop path
+
+  for (let i = 0; i < expandedEntries.length; i++) {
+    const { shape, origIdx } = expandedEntries[i];
+    const pts = splitPts[i];
+
+    if (pts.length === 0) {
+      subEntries.push({ shape, origIdx });
+      continue;
+    }
+
+    if (shape.type === "line") {
+      const ts = uniqueSortedNums(pts.map(p => p.value), EPS).filter(t => t > EPS && t < 1 - EPS);
+      if (ts.length === 0) { subEntries.push({ shape, origIdx }); continue; }
+      const bounds = [0, ...ts, 1];
+      for (let k = 0; k < bounds.length - 1; k++) {
+        const t1 = bounds[k], t2 = bounds[k + 1];
+        subEntries.push({ shape: {
+          type: "line",
+          x1: shape.x1 + t1 * (shape.x2 - shape.x1), y1: shape.y1 + t1 * (shape.y2 - shape.y1),
+          x2: shape.x1 + t2 * (shape.x2 - shape.x1), y2: shape.y1 + t2 * (shape.y2 - shape.y1),
+        }, origIdx });
+      }
+    } else if (shape.type === "circle") {
+      const angEps = EPS / Math.max(shape.r, 0.01);
+      const rawAngles = uniqueSortedNums(pts.map(p => normalizeAngle(p.value)), angEps);
+      if (rawAngles.length < 2) { subEntries.push({ shape, origIdx }); continue; }
+      splitCircleOrigIdxs.add(origIdx);
+      for (let k = 0; k < rawAngles.length; k++) {
+        const startAngle = rawAngles[k];
+        let endAngle = rawAngles[(k + 1) % rawAngles.length];
+        if (endAngle <= startAngle) endAngle += 2 * Math.PI;
+        subEntries.push({ shape: { type:"arc", cx:shape.cx, cy:shape.cy, r:shape.r, startAngle, endAngle }, origIdx });
+      }
+    } else {
+      subEntries.push({ shape, origIdx });
+    }
+  }
+
+  // ── Build adjacency graph from sub-shapes ─────────────────────────────────
   const nodes = [];
   const getNode = (x, y) => {
     for (let i = 0; i < nodes.length; i++) {
@@ -612,7 +779,7 @@ export function findClosedLoopsWithShapes(shapes) {
     return nodes.length - 1;
   };
 
-  const shapeNodes = solidShapes.map((shape) => {
+  const shapeNodes = subEntries.map(({ shape }) => {
     if (shape.type === "line")
       return { a: getNode(shape.x1, shape.y1), b: getNode(shape.x2, shape.y2) };
     if (shape.type === "arc")
@@ -632,10 +799,56 @@ export function findClosedLoopsWithShapes(shapes) {
     (adj[sn.b] = adj[sn.b] || []).push({ si, otherNode: sn.a });
   });
 
+  // ── Handle parallel edges (multiple edges between the same pair of nodes) ──
+  // When a circle intersects a line, both create edges between the same two
+  // intersection nodes.  We need to:
+  //   1. Explicitly generate 2-edge cycles for every pair of parallel edges
+  //      (these represent sub-regions like a circular segment or a full circle).
+  //   2. Remove non-canonical edges from adj so the DFS only traverses one edge
+  //      per node-pair, preventing spurious "triangle-with-arc" cycles.
   const cycleKeys = new Set();
+  const results = [];
+
+  const nodePairToEdges = new Map();
+  shapeNodes.forEach((sn, si) => {
+    if (!sn || sn.a === sn.b) return;
+    const key = `${Math.min(sn.a, sn.b)},${Math.max(sn.a, sn.b)}`;
+    if (!nodePairToEdges.has(key)) nodePairToEdges.set(key, []);
+    nodePairToEdges.get(key).push(si);
+  });
+
+  nodePairToEdges.forEach((edges) => {
+    if (edges.length < 2) return;
+    const sn0 = shapeNodes[edges[0]];
+    const N1 = Math.min(sn0.a, sn0.b);
+    const N2 = Math.max(sn0.a, sn0.b);
+    for (let i = 0; i < edges.length; i++) {
+      for (let j = i + 1; j < edges.length; j++) {
+        const si1 = edges[i], si2 = edges[j];
+        const cycleKey = `${Math.min(si1, si2)},${Math.max(si1, si2)}`;
+        if (cycleKeys.has(cycleKey)) continue;
+        cycleKeys.add(cycleKey);
+        const sn1 = shapeNodes[si1], sn2 = shapeNodes[si2];
+        const poly = [];
+        const idxSet = new Set();
+        poly.push(...sampleShapeForPoly(subEntries[si1].shape, sn1.a === N1));
+        idxSet.add(subEntries[si1].origIdx);
+        poly.push(...sampleShapeForPoly(subEntries[si2].shape, sn2.a === N2));
+        idxSet.add(subEntries[si2].origIdx);
+        results.push({ polygon: poly, shapeIndices: [...idxSet] });
+      }
+    }
+    // Keep all edges (including arc edges that have a parallel line segment) in
+    // adj so the DFS can find the "shape minus circle" sub-region — e.g. the
+    // part of a rectangle that excludes the area of a circle crossing one of
+    // its sides.  The explicit 2-edge cycles above already capture the small
+    // arc-vs-line sub-regions; the DFS then adds the larger complement cycles.
+  });
+
+  // ── DFS cycle detection ───────────────────────────────────────────────────
   const cycles = [];
   const dfs = (start, cur, path, visited) => {
-    if (path.length > 20) return;
+    if (path.length > 24) return;
     for (const { si, otherNode } of (adj[cur] || [])) {
       if (path.some((e) => e.si === si)) continue;
       if (otherNode === start && path.length >= 2) {
@@ -652,20 +865,20 @@ export function findClosedLoopsWithShapes(shapes) {
     if ((adj[ni] || []).length >= 2) dfs(ni, ni, [], new Set([ni]));
   });
 
-  const results = cycles.map((path) => {
+  cycles.forEach((path) => {
     const poly = [];
     const idxSet = new Set();
     for (const edge of path) {
       const sn = shapeNodes[edge.si];
-      poly.push(...sampleShapeForPoly(solidShapes[edge.si], sn.a === edge.fromNode));
-      idxSet.add(solidEntries[edge.si].origIdx);
+      poly.push(...sampleShapeForPoly(subEntries[edge.si].shape, sn.a === edge.fromNode));
+      idxSet.add(subEntries[edge.si].origIdx);
     }
-    return { polygon: poly, shapeIndices: [...idxSet] };
+    results.push({ polygon: poly, shapeIndices: [...idxSet] });
   });
 
-  // Self-closing shapes are always enclosed
+  // ── Direct loops for self-closing shapes that were NOT split ──────────────
   solidEntries.forEach(({ shape, origIdx }) => {
-    if (shape.type === "circle") {
+    if (shape.type === "circle" && !splitCircleOrigIdxs.has(origIdx)) {
       results.push({
         polygon: Array.from({ length: 32 }, (_, i) => {
           const a = (i / 32) * Math.PI * 2;
@@ -681,15 +894,8 @@ export function findClosedLoopsWithShapes(shapes) {
         }),
         shapeIndices: [origIdx],
       });
-    } else if (shape.type === "rect") {
-      results.push({
-        polygon: [
-          { x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y1 },
-          { x: shape.x2, y: shape.y2 }, { x: shape.x1, y: shape.y2 },
-        ],
-        shapeIndices: [origIdx],
-      });
     }
+    // rects are always expanded to 4 lines; the DFS finds the rectangular cycle
   });
 
   return results;
@@ -732,7 +938,7 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
 
 // ── Loop nesting helpers ──────────────────────────────────────────────────────
 
-function polyContainsPoint(poly, pt) {
+export function polyContainsPoint(poly, pt) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
@@ -742,25 +948,83 @@ function polyContainsPoint(poly, pt) {
   return inside;
 }
 
-function polyCentroid(poly) {
+export function polyCentroid(poly) {
   return {
     x: poly.reduce((s, p) => s + p.x, 0) / poly.length,
     y: poly.reduce((s, p) => s + p.y, 0) / poly.length,
   };
 }
 
-// Returns [{ polygon, holes: [...] }, ...] grouping loops by containment.
-// Outer loops are those whose centroid is not inside any other loop.
-// Each outer loop's holes are the immediate children (loops whose centroid is inside it).
-function groupLoopsWithHoles(loops) {
+export function polyArea(poly) {
+  let a = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++)
+    a += (poly[j].x + poly[i].x) * (poly[j].y - poly[i].y);
+  return Math.abs(a) / 2;
+}
+
+// Returns [{ polygon, holes, entries }, ...] where:
+//   polygon  – boundary polygon of this region
+//   holes    – direct child polygons carved out of this region (for THREE.Shape.holes)
+//   entries  – recursive { polygon, holes, entries } for each child, so nested
+//              sub-regions (e.g. a circle inside a triangle inside a rectangle)
+//              get their own fills at progressively higher renderOrder.
+//
+// Each loop's "direct parent" is the smallest-area loop that contains its centroid,
+// which prevents the symmetric false-containment bug that arises when the outer
+// loop's centroid happens to sit inside a smaller inner loop (e.g. a circle centred
+// inside a rectangle — both centroids are at the same point).
+export function groupLoopsWithHoles(loops) {
+  if (loops.length === 0) return [];
+  const areas     = loops.map(polyArea);
   const centroids = loops.map(polyCentroid);
-  const isInsideAny = (idx) => loops.some((other, j) => j !== idx && polyContainsPoint(other, centroids[idx]));
-  return loops
-    .map((loop, i) => (isInsideAny(i) ? null : {
-      polygon: loop,
-      holes: loops.filter((inner, j) => j !== i && polyContainsPoint(loop, centroids[j])),
-    }))
-    .filter(Boolean);
+
+  // A loop is only a valid parent when the child is FULLY contained — i.e. every
+  // polygon point of the child is inside (or exactly on the boundary of) the parent.
+  // This prevents a circle that crosses a rectangle boundary from being treated as a
+  // hole of that rectangle, which would cause THREE.ShapeGeometry to generate spurious
+  // triangles outside the expected area and produce a tangent-line artifact during hover.
+  //
+  // Because polyContainsPoint uses strict ray-casting (boundary → false), we nudge
+  // each candidate point 1e-4 of the way toward the parent's centroid before testing.
+  // The nudge is negligible for points genuinely inside but pushes exact-boundary
+  // points (e.g. shared vertices like a triangle corner on a rectangle edge) to a
+  // clearly-interior position while leaving truly-outside points outside.
+  const isFullyContained = (childIdx, parentIdx) => {
+    const parent = loops[parentIdx];
+    const pc = polyCentroid(parent);
+    const EPS = 1e-4;
+    return loops[childIdx].every(pt => {
+      if (polyContainsPoint(parent, pt)) return true;
+      const nudged = { x: pt.x + (pc.x - pt.x) * EPS, y: pt.y + (pc.y - pt.y) * EPS };
+      return polyContainsPoint(parent, nudged);
+    });
+  };
+
+  // For each loop: find the direct parent = smallest-area loop that contains its centroid.
+  const parents = loops.map((_, idx) => {
+    let best = -1, bestArea = Infinity;
+    for (let j = 0; j < loops.length; j++) {
+      if (j === idx) continue;
+      if (areas[j] > areas[idx]
+          && polyContainsPoint(loops[j], centroids[idx])
+          && isFullyContained(idx, j)
+          && areas[j] < bestArea) {
+        best = j; bestArea = areas[j];
+      }
+    }
+    return best;
+  });
+
+  const childIdxs = loops.map(() => /** @type {number[]} */ ([]));
+  parents.forEach((p, i) => { if (p !== -1) childIdxs[p].push(i); });
+
+  const buildEntry = (idx) => ({
+    polygon: loops[idx],
+    holes:   childIdxs[idx].map(j => loops[j]),
+    entries: childIdxs[idx].map(j => buildEntry(j)),
+  });
+
+  return loops.map((_, i) => parents[i] === -1 ? buildEntry(i) : null).filter(Boolean);
 }
 
 // ── Extrude profile selection fills (one fill mesh per closed sketch loop) ───
@@ -773,34 +1037,37 @@ export function buildExtrudeSelectGroup(items, objectsRef) {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
     const allLoops = findClosedLoops(item.shapes || []);
-    const grouped = groupLoopsWithHoles(allLoops);
-    const euler = new THREE.Euler().setFromQuaternion(sketchMesh.quaternion);
-    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(sketchMesh.quaternion);
-    grouped.forEach(({ polygon, holes }) => {
+    const grouped  = groupLoopsWithHoles(allLoops);
+    const euler    = new THREE.Euler().setFromQuaternion(sketchMesh.quaternion);
+    const normal   = new THREE.Vector3(0, 0, 1).applyQuaternion(sketchMesh.quaternion);
+    const pos      = sketchMesh.position;
+    const addProfile = ({ polygon, holes, entries }) => {
       if (polygon.length < 3) return;
       const shape = new THREE.Shape(polygon.map((p) => new THREE.Vector2(p.x, p.y)));
       holes.forEach((hole) => {
         if (hole.length >= 3)
           shape.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))));
       });
-      const geo = new THREE.ShapeGeometry(shape);
-      const mat = new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthTest: false });
-      const fill = new THREE.Mesh(geo, mat);
-      fill.position.copy(sketchMesh.position).addScaledVector(normal, 0.005);
+      const fill = new THREE.Mesh(
+        new THREE.ShapeGeometry(shape),
+        new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthTest: false }),
+      );
+      fill.position.copy(pos).addScaledVector(normal, 0.005);
       fill.quaternion.copy(sketchMesh.quaternion);
       fill.renderOrder = 995;
       fill.userData.extrudeProfile = {
-        type: "sketchLoop",
-        sketchId: item.id,
+        type: "sketchLoop", sketchId: item.id,
         profileCentroid: polyCentroid(polygon),
         polygon2D: polygon,
         holes: holes.filter((h) => h.length >= 3),
-        position: { x: sketchMesh.position.x, y: sketchMesh.position.y, z: sketchMesh.position.z },
+        position: { x: pos.x, y: pos.y, z: pos.z },
         rotation: { x: euler.x, y: euler.y, z: euler.z },
         normalWorld: { x: normal.x, y: normal.y, z: normal.z },
       };
       group.add(fill);
-    });
+      entries.forEach(addProfile);
+    };
+    grouped.forEach(addProfile);
   });
   return group.children.length > 0 ? group : null;
 }
@@ -970,19 +1237,26 @@ export function rebuildConstraintIconsForDrag(group, constraints, shapes, sketch
   addConstraintIconsToGroup(group, constraints, shapes, toWorld, res, showDimensions);
 }
 
-// Removes the existing point-dots object from the group and rebuilds it from the
-// current drag-state shapes so endpoint dots track their lines during drag preview.
+// Update endpoint dots to track dragged shapes. Reuses the existing THREE.Points object
+// and updates positions in-place when the count hasn't changed (the common drag case),
+// avoiding per-frame geometry allocation and material creation.
 export function rebuildPointDotsForDrag(group, shapes, sketchMesh) {
-  const old = group.children.filter((c) => c.userData.isPointDots);
-  old.forEach((d) => { if (d.geometry) d.geometry.dispose(); if (d.material) d.material.dispose(); group.remove(d); });
-  const toWorld = (lx, ly) => {
-    const v = new THREE.Vector3(lx, ly, 0.004);
-    v.applyQuaternion(sketchMesh.quaternion);
-    v.add(sketchMesh.position);
-    return v;
-  };
+  const toWorld = (lx, ly) => new THREE.Vector3(lx, ly, 0.004)
+    .applyQuaternion(sketchMesh.quaternion).add(sketchMesh.position);
+
   const pts = [];
   shapes.forEach((shape) => getSnapPoints([shape]).forEach((sp) => pts.push(toWorld(sp.x, sp.y))));
+
+  const existing = group.children.find((c) => c.userData.isPointDots);
+  if (existing && existing.geometry.attributes.position?.count === pts.length) {
+    const pos = existing.geometry.attributes.position;
+    pts.forEach((p, i) => pos.setXYZ(i, p.x, p.y, p.z));
+    pos.needsUpdate = true;
+    return;
+  }
+
+  // Count changed or no existing object — rebuild.
+  if (existing) { existing.geometry.dispose(); existing.material.dispose(); group.remove(existing); }
   if (pts.length === 0) return;
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const mat = new THREE.PointsMaterial({ color: 0xaabbff, size: 5, sizeAttenuation: false, depthTest: false });
@@ -1058,58 +1332,38 @@ export function buildSketchShapesGroup(selectedId, items, objectsRef, renderer, 
   // ── Enclosed region fills (hole-aware, hidden until hover) ──────────────────
   const loopsWithShapes = findClosedLoopsWithShapes(shapes);
   if (loopsWithShapes.length > 0) {
-    const polygons = loopsWithShapes.map((l) => l.polygon);
+    const polygons    = loopsWithShapes.map((l) => l.polygon);
     const polyShapeMap = new Map(loopsWithShapes.map((l) => [l.polygon, l.shapeIndices]));
-    const grouped = groupLoopsWithHoles(polygons);
-    grouped.forEach(({ polygon: outerPoly, holes }) => {
-      if (outerPoly.length < 3) return;
-      const outerIndices = polyShapeMap.get(outerPoly) || [];
-      const holeIndices = holes.flatMap((h) => polyShapeMap.get(h) || []);
+    const grouped     = groupLoopsWithHoles(polygons);
+
+    // Recursive fill builder — each nesting level gets renderOrder + 1, ensuring
+    // the innermost matching region always wins in updateHoverFills.
+    const addRegionFill = ({ polygon, holes, entries }, renderOrder) => {
+      if (polygon.length < 3) return;
+      const outerIndices = polyShapeMap.get(polygon) || [];
+      const holeIndices  = holes.flatMap((h) => polyShapeMap.get(h) || []);
       const allShapeIndices = [...new Set([...outerIndices, ...holeIndices])];
-      const shape2D = new THREE.Shape(outerPoly.map((p) => new THREE.Vector2(p.x, p.y)));
+      const shape2D = new THREE.Shape(polygon.map((p) => new THREE.Vector2(p.x, p.y)));
       holes.forEach((hole) => {
         if (hole.length >= 3) shape2D.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))));
       });
-      const fillGeo = new THREE.ShapeGeometry(shape2D);
-      const fillMat = new THREE.MeshBasicMaterial({
-        color: 0x4488ff, transparent: true, opacity: 0.18,
-        side: THREE.DoubleSide, depthTest: false,
-      });
-      const fillMesh = new THREE.Mesh(fillGeo, fillMat);
+      const fillMesh = new THREE.Mesh(
+        new THREE.ShapeGeometry(shape2D),
+        new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthTest: false }),
+      );
       fillMesh.position.copy(sketchMesh.position);
       fillMesh.quaternion.copy(sketchMesh.quaternion);
-      fillMesh.renderOrder = 999;
+      fillMesh.renderOrder = renderOrder;
       fillMesh.visible = false;
-      fillMesh.userData.isRegionFill = true;
-      fillMesh.userData.polygon2D = outerPoly;
-      fillMesh.userData.holes2D = holes;
-      fillMesh.userData.shapeIndices = allShapeIndices;
+      fillMesh.userData.isRegionFill   = true;
+      fillMesh.userData.polygon2D      = polygon;
+      fillMesh.userData.holes2D        = holes;
+      fillMesh.userData.shapeIndices   = allShapeIndices;
       group.add(fillMesh);
-
-      // Each hole is also a selectable region on its own (e.g. the circle inside a
-      // rectangle is clickable and highlights its own boundary shapes).
-      holes.forEach((hole) => {
-        if (hole.length < 3) return;
-        const innerIndices = polyShapeMap.get(hole) || [];
-        if (innerIndices.length === 0) return;
-        const innerShape2D = new THREE.Shape(hole.map((p) => new THREE.Vector2(p.x, p.y)));
-        const innerGeo = new THREE.ShapeGeometry(innerShape2D);
-        const innerMat = new THREE.MeshBasicMaterial({
-          color: 0x4488ff, transparent: true, opacity: 0.18,
-          side: THREE.DoubleSide, depthTest: false,
-        });
-        const innerFill = new THREE.Mesh(innerGeo, innerMat);
-        innerFill.position.copy(sketchMesh.position);
-        innerFill.quaternion.copy(sketchMesh.quaternion);
-        innerFill.renderOrder = 1000; // above the ring fill so it gets priority in click checks
-        innerFill.visible = false;
-        innerFill.userData.isRegionFill = true;
-        innerFill.userData.polygon2D = hole;
-        innerFill.userData.holes2D = [];
-        innerFill.userData.shapeIndices = innerIndices;
-        group.add(innerFill);
-      });
-    });
+      // Each child entry is itself a selectable region at a higher renderOrder.
+      entries.forEach((sub) => addRegionFill(sub, renderOrder + 1));
+    };
+    grouped.forEach((entry) => addRegionFill(entry, 999));
   }
 
   return group;
