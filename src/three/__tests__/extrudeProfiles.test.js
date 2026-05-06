@@ -519,4 +519,108 @@ describe('extrude profile geometry', () => {
       });
     });
   });
+
+  // ── Geometry centring for correct transform pivot ─────────────────────────
+  // ExtrudeGeometry is built from the raw 2D polygon coordinates, which live
+  // in the sketch's local space and are rarely centred at (0,0).  Without
+  // centring, the mesh's local origin (its transform pivot) ends up at the
+  // sketch origin — often the world origin — so rotation and scaling feel
+  // completely wrong.
+  //
+  // The fix: subtract polyCentroid from every polygon vertex before building
+  // the geometry, then compensate the mesh position by that same offset
+  // (rotated into world space).  This test suite verifies the centring
+  // calculation is correct so that the resulting geometry is always centred
+  // at (0,0) in local 2D and therefore uses the correct transform pivot.
+
+  describe('polygon centering for correct transform pivot', () => {
+
+    // Helper: apply the same centring the production code does and return
+    // the centred polygon plus the offset that was removed.
+    function centerPolygon(poly) {
+      const c = polyCentroid(poly);
+      return {
+        centered: poly.map(p => ({ x: p.x - c.x, y: p.y - c.y })),
+        offset: c,
+      };
+    }
+
+    it('a rectangle not at the origin has a non-zero centroid before centring', () => {
+      // Rect from (5,3) to (9,7): centroid should be (7,5).
+      const loops = findClosedLoops([R(5,3,9,7)]);
+      const poly  = loops[0];
+      const c = polyCentroid(poly);
+      expect(Math.abs(c.x)).toBeGreaterThan(0.1);
+      expect(Math.abs(c.y)).toBeGreaterThan(0.1);
+    });
+
+    it('after centring, the polygon centroid is at the origin', () => {
+      const loops = findClosedLoops([R(5,3,9,7)]);
+      const { centered } = centerPolygon(loops[0]);
+      const c = polyCentroid(centered);
+      expect(c.x).toBeCloseTo(0, 10);
+      expect(c.y).toBeCloseTo(0, 10);
+    });
+
+    it('centring a circle not at the origin places its centroid at (0,0)', () => {
+      const loops = findClosedLoops([C(4, -3, 1.5)]);
+      const { centered, offset } = centerPolygon(loops[0]);
+      // The removed offset should match the circle centre.
+      expect(offset.x).toBeCloseTo(4,   1);
+      expect(offset.y).toBeCloseTo(-3,  1);
+      const c = polyCentroid(centered);
+      expect(c.x).toBeCloseTo(0, 10);
+      expect(c.y).toBeCloseTo(0, 10);
+    });
+
+    it('centring preserves the polygon area', () => {
+      const loops = findClosedLoops([R(10,20,14,25)]);
+      const poly = loops[0];
+      const { centered } = centerPolygon(poly);
+      expect(polyArea(centered)).toBeCloseTo(polyArea(poly), 6);
+    });
+
+    it('centring the rect-minus-circle profile still preserves area', () => {
+      // One-side intersection: rect + circle crossing the right edge.
+      const shapes = [R(0,0,4,4), C(5.5,2,2)];
+      const fills  = buildFillDescriptors(shapes);
+      // The rect-minus-circle fill (largest rect sub-region).
+      const rectFill = pickExtrudeProfile(shapes, { x:0.5, y:2 });
+      expect(rectFill).not.toBeNull();
+      const { centered } = centerPolygon(rectFill.polygon2D);
+      expect(polyArea(centered)).toBeCloseTo(polyArea(rectFill.polygon2D), 3);
+    });
+
+    it('centring the inner-segment fill gives a (0,0) centroid', () => {
+      const shapes    = [R(0,0,4,4), C(5.5,2,2)];
+      const innerFill = pickExtrudeProfile(shapes, { x:3.8, y:2 });
+      expect(innerFill).not.toBeNull();
+      const { centered } = centerPolygon(innerFill.polygon2D);
+      const c = polyCentroid(centered);
+      expect(c.x).toBeCloseTo(0, 10);
+      expect(c.y).toBeCloseTo(0, 10);
+    });
+
+    it('every fill for two overlapping circles can be centred at origin', () => {
+      const fills = buildFillDescriptors([C(0,0,2), C(2.5,0,2)]);
+      fills.forEach(f => {
+        const { centered } = centerPolygon(f.polygon2D);
+        const c = polyCentroid(centered);
+        expect(c.x).toBeCloseTo(0, 8);
+        expect(c.y).toBeCloseTo(0, 8);
+      });
+    });
+
+    it('mesh position offset equals the polygon centroid (no rotation)', () => {
+      // For a sketch with no rotation, the world offset equals the local offset.
+      // Verify the offset vector matches what polyCentroid returns for the polygon.
+      const shapes = [R(3,7,7,11)]; // rect centred at (5,9)
+      const loops  = findClosedLoops(shapes);
+      const poly   = loops[0];
+      const { offset } = centerPolygon(poly);
+      // The mesh's position offset (in local XY) must equal the centroid.
+      expect(offset.x).toBeCloseTo(5, 1);
+      expect(offset.y).toBeCloseTo(9, 1);
+    });
+  });
 });

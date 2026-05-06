@@ -349,6 +349,7 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
 
   items.forEach((item) => {
     let geometry;
+    let extrudeLocalOffset = null; // set by the extrude case; used for mesh positioning
     switch (item.type) {
       case "cube":     geometry = new THREE.BoxGeometry(2, 2, 2); break;
       case "sphere":   geometry = new THREE.BoxGeometry(3, 3, 3); break;
@@ -396,10 +397,23 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
           }
         }
         if (!poly || poly.length < 3) return;
-        const shape = new THREE.Shape(poly.map((p) => new THREE.Vector2(p.x, p.y)));
-        holePolys.forEach((hole) => shape.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y)))));
-        geometry = new THREE.ExtrudeGeometry(shape, { depth: item.depth ?? 1.0, bevelEnabled: false });
+        const depth = item.depth ?? 1.0;
+        // Shift the 2D polygon so its centroid sits at the local origin.
+        // Without this the mesh pivot stays at the sketch origin (often the
+        // world origin), making rotation and scaling feel completely wrong.
+        const profileCentroid2D = polyCentroid(poly);
+        const centeredPoly  = poly.map((p) => ({ x: p.x - profileCentroid2D.x, y: p.y - profileCentroid2D.y }));
+        const centeredHoles = holePolys.map((h) => h.map((p) => ({ x: p.x - profileCentroid2D.x, y: p.y - profileCentroid2D.y })));
+        const shape = new THREE.Shape(centeredPoly.map((p) => new THREE.Vector2(p.x, p.y)));
+        centeredHoles.forEach((hole) => shape.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y)))));
+        geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
         geometry.computeVertexNormals();
+        // Also centre along the extrusion axis so the pivot is the volumetric
+        // centre of the solid, not the base face.
+        geometry.translate(0, 0, -depth / 2);
+        // Record the local-space offset so we can compensate the mesh position
+        // below (keeping the solid at the correct world location).
+        extrudeLocalOffset = new THREE.Vector3(profileCentroid2D.x, profileCentroid2D.y, depth / 2);
         break;
       }
       default: return;
@@ -416,11 +430,23 @@ export function buildSceneObjects(items, scene, objectsRef, originalMaterialsRef
       mesh.userData.shaderMat = material;
     }
 
-    const p = item.position;
-    mesh.position.set(p ? p.x : 0, p ? p.y : 2, p ? p.z : 0);
-    mesh.scale.setScalar(item.scale ? item.scale.x : 1);
+    const p   = item.position;
     const rot = item.rotation;
     if (rot) mesh.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
+    mesh.scale.setScalar(item.scale ? item.scale.x : 1);
+
+    if (extrudeLocalOffset) {
+      // Rotate the local centroid offset into world space and add it to the
+      // stored sketch position so the solid appears where the user drew it.
+      extrudeLocalOffset.applyEuler(mesh.rotation);
+      mesh.position.set(
+        (p ? p.x : 0) + extrudeLocalOffset.x,
+        (p ? p.y : 0) + extrudeLocalOffset.y,
+        (p ? p.z : 0) + extrudeLocalOffset.z,
+      );
+    } else {
+      mesh.position.set(p ? p.x : 0, p ? p.y : 2, p ? p.z : 0);
+    }
 
     if (item.type === "sphere") {
       mesh.raycast = (raycaster, intersects) => {
