@@ -2,7 +2,10 @@ import React from "react";
 import * as THREE from "three";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
-import { buildItemGeometry, buildBrushTransform } from "../../three/csgUtils.js";
+import {
+  buildItemGeometry,
+  buildBrushTransform,
+} from "../../three/csgUtils.js";
 import { applyBevelToSubGeometry } from "../../three/bevelUtils.js";
 
 const BevelSection = () => {
@@ -25,7 +28,12 @@ const BevelSection = () => {
       const geo = buildItemGeometry(item);
       if (!geo) return;
 
-      const result = applyBevelToSubGeometry(geo, selectedSubGeometry, 0.05, segments);
+      const result = applyBevelToSubGeometry(
+        geo,
+        selectedSubGeometry,
+        0.05,
+        segments,
+      );
       if (!result) return;
 
       const posAttr = result.getAttribute("position");
@@ -50,7 +58,9 @@ const BevelSection = () => {
       // brush-transform position (which already accounts for extrude centroid).
       const brushPos = buildBrushTransform(item).position;
       const rot = item.rotation || { x: 0, y: 0, z: 0 };
-      localCentre.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+      localCentre.applyEuler(
+        new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
+      );
 
       modifyItem(item.id, {
         type: "csg",
@@ -88,7 +98,14 @@ const BevelSection = () => {
             strokeWidth="2"
             strokeLinejoin="round"
           />
-          <line x1="14" y1="4" x2="20" y2="10" stroke="currentColor" strokeWidth="2" />
+          <line
+            x1="14"
+            y1="4"
+            x2="20"
+            y2="10"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
         </svg>
       </button>
       <button

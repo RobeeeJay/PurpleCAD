@@ -499,9 +499,30 @@ describe("canCsg enable logic (Boolean section)", () => {
     return { canCsg, targets: selectedEligible };
   }
 
-  const cube1 = { id: 1, type: "cube", position: P(0, 0, 0), scale: SCL(1), rotation: ROT(), visible: true };
-  const cube2 = { id: 2, type: "cube", position: P(1, 0, 0), scale: SCL(1), rotation: ROT(), visible: true };
-  const cube3 = { id: 3, type: "cube", position: P(2, 0, 0), scale: SCL(1), rotation: ROT(), visible: true };
+  const cube1 = {
+    id: 1,
+    type: "cube",
+    position: P(0, 0, 0),
+    scale: SCL(1),
+    rotation: ROT(),
+    visible: true,
+  };
+  const cube2 = {
+    id: 2,
+    type: "cube",
+    position: P(1, 0, 0),
+    scale: SCL(1),
+    rotation: ROT(),
+    visible: true,
+  };
+  const cube3 = {
+    id: 3,
+    type: "cube",
+    position: P(2, 0, 0),
+    scale: SCL(1),
+    rotation: ROT(),
+    visible: true,
+  };
   const sketch = { id: 4, type: "sketch", visible: true };
 
   it("disabled when nothing is selected", () => {
@@ -517,25 +538,38 @@ describe("canCsg enable logic (Boolean section)", () => {
   });
 
   it("enabled when exactly 2 non-sketch items are selected", () => {
-    expect(resolveTargets([cube1, cube2], [cube1.id, cube2.id]).canCsg).toBe(true);
+    expect(resolveTargets([cube1, cube2], [cube1.id, cube2.id]).canCsg).toBe(
+      true,
+    );
   });
 
   it("enabled when 3 non-sketch items are selected", () => {
-    expect(resolveTargets([cube1, cube2, cube3], [cube1.id, cube2.id, cube3.id]).canCsg).toBe(true);
+    expect(
+      resolveTargets([cube1, cube2, cube3], [cube1.id, cube2.id, cube3.id])
+        .canCsg,
+    ).toBe(true);
   });
 
   it("sketches are excluded from the selection count", () => {
-    expect(resolveTargets([cube1, sketch], [cube1.id, sketch.id]).canCsg).toBe(false);
+    expect(resolveTargets([cube1, sketch], [cube1.id, sketch.id]).canCsg).toBe(
+      false,
+    );
   });
 
   it("targets are exactly the selected non-sketch items", () => {
-    const { targets } = resolveTargets([cube1, cube2, cube3], [cube1.id, cube2.id]);
+    const { targets } = resolveTargets(
+      [cube1, cube2, cube3],
+      [cube1.id, cube2.id],
+    );
     expect(targets).toHaveLength(2);
     expect(targets.map((t) => t.id)).toEqual([cube1.id, cube2.id]);
   });
 
   it("selecting 3 items targets all 3", () => {
-    const { targets } = resolveTargets([cube1, cube2, cube3], [cube1.id, cube2.id, cube3.id]);
+    const { targets } = resolveTargets(
+      [cube1, cube2, cube3],
+      [cube1.id, cube2.id, cube3.id],
+    );
     expect(targets).toHaveLength(3);
   });
 

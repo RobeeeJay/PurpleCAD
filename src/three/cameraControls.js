@@ -678,13 +678,11 @@ export function attachCameraControls(ctx) {
       0x00ff88,
     );
     scene.add(sketchSelectionOverlay);
-    useStore
-      .getState()
-      .setSelectedSketchElement({
-        type: "point",
-        shapeIdx: snap.shapeIdx,
-        pointKey: snap.pointKey,
-      });
+    useStore.getState().setSelectedSketchElement({
+      type: "point",
+      shapeIdx: snap.shapeIdx,
+      pointKey: snap.pointKey,
+    });
   };
 
   const sketchSelectLine = (shapeIdx, shape, sketchMesh) => {
@@ -2526,8 +2524,14 @@ export function attachCameraControls(ctx) {
   let pendingFaceSelection = null; // { itemId, nx, ny, nz }
   let pendingEdgeSelection = null; // { itemId, ax, ay, az, bx, by, bz }
 
-  const clearFaceHighlight = () => { clearHL(faceHighlightRef); pendingFaceSelection = null; };
-  const clearEdgeHighlight = () => { clearHL(edgeHighlightRef); pendingEdgeSelection = null; };
+  const clearFaceHighlight = () => {
+    clearHL(faceHighlightRef);
+    pendingFaceSelection = null;
+  };
+  const clearEdgeHighlight = () => {
+    clearHL(edgeHighlightRef);
+    pendingEdgeSelection = null;
+  };
   const clearPointHighlight = () => clearHL(pointHighlightRef);
 
   const primitiveGeoForHighlight = (type) => {
@@ -2645,7 +2649,9 @@ export function attachCameraControls(ctx) {
       // Record for click-to-select
       pendingFaceSelection = {
         itemId: hitMesh.userData.itemId,
-        nx: localNormal.x, ny: localNormal.y, nz: localNormal.z,
+        nx: localNormal.x,
+        ny: localNormal.y,
+        nz: localNormal.z,
       };
     }
   };
@@ -2731,8 +2737,12 @@ export function attachCameraControls(ctx) {
       // Record for click-to-select
       pendingEdgeSelection = {
         itemId: hitMesh.userData.itemId,
-        ax: bestA.x, ay: bestA.y, az: bestA.z,
-        bx: bestB.x, by: bestB.y, bz: bestB.z,
+        ax: bestA.x,
+        ay: bestA.y,
+        az: bestA.z,
+        bx: bestB.x,
+        by: bestB.y,
+        bz: bestB.z,
       };
     }
   };
@@ -3526,17 +3536,15 @@ export function attachCameraControls(ctx) {
                 maxId = entry.instruction.item.id;
             });
             const id = maxId + 1;
-            useStore
-              .getState()
-              .addItem({
-                id,
-                name: `Sketch ${id}`,
-                type: "sketch",
-                children: [],
-                position,
-                scale: { x: 1, y: 1, z: 1 },
-                rotation,
-              });
+            useStore.getState().addItem({
+              id,
+              name: `Sketch ${id}`,
+              type: "sketch",
+              children: [],
+              position,
+              scale: { x: 1, y: 1, z: 1 },
+              rotation,
+            });
             useStore.getState().setSketchPlacementMode(false);
           } else {
             useStore.getState().setSketchPlacementMode(false);
@@ -3570,32 +3578,90 @@ export function attachCameraControls(ctx) {
       const cmdOrCtrl3d = isMac ? e.metaKey : e.ctrlKey;
       if (intersects.length > 0) {
         const clickedId = intersects[0].object.userData.itemId || null;
-        if (cmdOrCtrl3d && !e.shiftKey && pendingFaceSelection && pendingFaceSelection.itemId === clickedId) {
+        if (
+          cmdOrCtrl3d &&
+          !e.shiftKey &&
+          pendingFaceSelection &&
+          pendingFaceSelection.itemId === clickedId
+        ) {
           // Cmd/Ctrl+click in face mode: commit face to sub-geometry selection.
           // Faces and edges are mutually exclusive — always clear edges.
           const prev = useStore.getState().selectedSubGeometry;
-          const faces = prev?.itemId === clickedId && prev.edges.length === 0 ? [...prev.faces] : [];
+          const faces =
+            prev?.itemId === clickedId && prev.edges.length === 0
+              ? [...prev.faces]
+              : [];
           const n = pendingFaceSelection;
-          const already = faces.some(f => Math.abs(f.nx-n.nx)<0.01 && Math.abs(f.ny-n.ny)<0.01 && Math.abs(f.nz-n.nz)<0.01);
+          const already = faces.some(
+            (f) =>
+              Math.abs(f.nx - n.nx) < 0.01 &&
+              Math.abs(f.ny - n.ny) < 0.01 &&
+              Math.abs(f.nz - n.nz) < 0.01,
+          );
           useStore.getState().setSelectedSubGeometry({
             itemId: clickedId,
             edges: [],
-            faces: already ? faces.filter(f => !(Math.abs(f.nx-n.nx)<0.01&&Math.abs(f.ny-n.ny)<0.01&&Math.abs(f.nz-n.nz)<0.01)) : [...faces, {nx:n.nx,ny:n.ny,nz:n.nz}],
+            faces: already
+              ? faces.filter(
+                  (f) =>
+                    !(
+                      Math.abs(f.nx - n.nx) < 0.01 &&
+                      Math.abs(f.ny - n.ny) < 0.01 &&
+                      Math.abs(f.nz - n.nz) < 0.01
+                    ),
+                )
+              : [...faces, { nx: n.nx, ny: n.ny, nz: n.nz }],
           });
           // Sub-geometry selection is exclusive with multi-object selection.
           selectItem(null);
-        } else if (e.shiftKey && !cmdOrCtrl3d && pendingEdgeSelection && pendingEdgeSelection.itemId === clickedId) {
+        } else if (
+          e.shiftKey &&
+          !cmdOrCtrl3d &&
+          pendingEdgeSelection &&
+          pendingEdgeSelection.itemId === clickedId
+        ) {
           // Shift+click in edge mode: commit edge to sub-geometry selection.
           // Edges and faces are mutually exclusive — always clear faces.
           const prev = useStore.getState().selectedSubGeometry;
-          const edges = prev?.itemId === clickedId && prev.faces.length === 0 ? [...prev.edges] : [];
+          const edges =
+            prev?.itemId === clickedId && prev.faces.length === 0
+              ? [...prev.edges]
+              : [];
           const ed = pendingEdgeSelection;
-          const already = edges.some(e2 =>
-            Math.abs(e2.ax-ed.ax)<0.001 && Math.abs(e2.ay-ed.ay)<0.001 && Math.abs(e2.az-ed.az)<0.001 &&
-            Math.abs(e2.bx-ed.bx)<0.001 && Math.abs(e2.by-ed.by)<0.001 && Math.abs(e2.bz-ed.bz)<0.001);
+          const already = edges.some(
+            (e2) =>
+              Math.abs(e2.ax - ed.ax) < 0.001 &&
+              Math.abs(e2.ay - ed.ay) < 0.001 &&
+              Math.abs(e2.az - ed.az) < 0.001 &&
+              Math.abs(e2.bx - ed.bx) < 0.001 &&
+              Math.abs(e2.by - ed.by) < 0.001 &&
+              Math.abs(e2.bz - ed.bz) < 0.001,
+          );
           useStore.getState().setSelectedSubGeometry({
             itemId: clickedId,
-            edges: already ? edges.filter(e2 => !(Math.abs(e2.ax-ed.ax)<0.001&&Math.abs(e2.ay-ed.ay)<0.001&&Math.abs(e2.az-ed.az)<0.001&&Math.abs(e2.bx-ed.bx)<0.001&&Math.abs(e2.by-ed.by)<0.001&&Math.abs(e2.bz-ed.bz)<0.001)) : [...edges, {ax:ed.ax,ay:ed.ay,az:ed.az,bx:ed.bx,by:ed.by,bz:ed.bz}],
+            edges: already
+              ? edges.filter(
+                  (e2) =>
+                    !(
+                      Math.abs(e2.ax - ed.ax) < 0.001 &&
+                      Math.abs(e2.ay - ed.ay) < 0.001 &&
+                      Math.abs(e2.az - ed.az) < 0.001 &&
+                      Math.abs(e2.bx - ed.bx) < 0.001 &&
+                      Math.abs(e2.by - ed.by) < 0.001 &&
+                      Math.abs(e2.bz - ed.bz) < 0.001
+                    ),
+                )
+              : [
+                  ...edges,
+                  {
+                    ax: ed.ax,
+                    ay: ed.ay,
+                    az: ed.az,
+                    bx: ed.bx,
+                    by: ed.by,
+                    bz: ed.bz,
+                  },
+                ],
             faces: [],
           });
           // Sub-geometry selection is exclusive with multi-object selection.
@@ -3603,7 +3669,8 @@ export function attachCameraControls(ctx) {
         } else {
           // Normal click: select item and clear sub-geometry selection.
           useStore.getState().clearSelectedSubGeometry();
-          if (e.shiftKey && clickedId) useStore.getState().addToSelection(clickedId);
+          if (e.shiftKey && clickedId)
+            useStore.getState().addToSelection(clickedId);
           else selectItem(clickedId);
         }
       } else if (!e.shiftKey) {

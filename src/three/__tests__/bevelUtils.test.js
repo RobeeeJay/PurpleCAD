@@ -11,15 +11,42 @@ import {
 } from "../bevelUtils.js";
 
 vi.mock("../../store", () => ({ useStore: () => null }));
-vi.mock("three/addons/lines/Line2.js", () => ({ Line2: class { computeLineDistances() {} } }));
-vi.mock("three/addons/lines/LineMaterial.js", () => ({ LineMaterial: class {} }));
-vi.mock("three/addons/lines/LineGeometry.js", () => ({ LineGeometry: class { setPositions() {} } }));
-vi.mock("three/addons/environments/RoomEnvironment.js", () => ({ RoomEnvironment: class { dispose() {} } }));
-vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({ EffectComposer: class { dispose() {} addPass() {} } }));
-vi.mock("three/addons/postprocessing/RenderPass.js", () => ({ RenderPass: class {} }));
-vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({ UnrealBloomPass: class {} }));
-vi.mock("three/addons/postprocessing/OutputPass.js", () => ({ OutputPass: class {} }));
-vi.mock("../objectMaterials.js", () => ({ createMaterial: () => ({ dispose() {} }) }));
+vi.mock("three/addons/lines/Line2.js", () => ({
+  Line2: class {
+    computeLineDistances() {}
+  },
+}));
+vi.mock("three/addons/lines/LineMaterial.js", () => ({
+  LineMaterial: class {},
+}));
+vi.mock("three/addons/lines/LineGeometry.js", () => ({
+  LineGeometry: class {
+    setPositions() {}
+  },
+}));
+vi.mock("three/addons/environments/RoomEnvironment.js", () => ({
+  RoomEnvironment: class {
+    dispose() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({
+  EffectComposer: class {
+    dispose() {}
+    addPass() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/RenderPass.js", () => ({
+  RenderPass: class {},
+}));
+vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({
+  UnrealBloomPass: class {},
+}));
+vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
+  OutputPass: class {},
+}));
+vi.mock("../objectMaterials.js", () => ({
+  createMaterial: () => ({ dispose() {} }),
+}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -32,9 +59,14 @@ function countUniqueVerts(geo, eps = 1e-4) {
   const posAttr = geo.getAttribute("position");
   const unique = [];
   for (let i = 0; i < posAttr.count; i++) {
-    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+    const x = posAttr.getX(i),
+      y = posAttr.getY(i),
+      z = posAttr.getZ(i);
     const found = unique.some(
-      (u) => Math.abs(u[0] - x) < eps && Math.abs(u[1] - y) < eps && Math.abs(u[2] - z) < eps,
+      (u) =>
+        Math.abs(u[0] - x) < eps &&
+        Math.abs(u[1] - y) < eps &&
+        Math.abs(u[2] - z) < eps,
     );
     if (!found) unique.push([x, y, z]);
   }
@@ -68,8 +100,24 @@ describe("mergeVertices", () => {
   it("indexes a non-indexed geometry and deduplicates positions", () => {
     // Build a non-indexed geometry with duplicate vertices.
     const positions = new Float32Array([
-      0, 0, 0,  1, 0, 0,  0, 1, 0,   // triangle 1
-      0, 0, 0,  0, 1, 0,  0, 0, 1,   // triangle 2 (shares 2 verts with tri 1)
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0, // triangle 1
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1, // triangle 2 (shares 2 verts with tri 1)
     ]);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -82,7 +130,7 @@ describe("mergeVertices", () => {
   });
 
   it("preserves geometry when all positions are unique", () => {
-    const positions = new Float32Array([0,0,0, 1,0,0, 0,1,0]);
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     const result = mergeVertices(geo);
@@ -92,7 +140,7 @@ describe("mergeVertices", () => {
 
   it("merges vertices within eps tolerance", () => {
     // Two positions that differ by less than the default eps (1e-4).
-    const positions = new Float32Array([0,0,0,  0,0,0.00005,  1,0,0]);
+    const positions = new Float32Array([0, 0, 0, 0, 0, 0.00005, 1, 0, 0]);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     const result = mergeVertices(geo, 1e-4);
@@ -119,9 +167,12 @@ describe("findCoplanarFaces", () => {
   it("finds triangles on all 6 faces of a box", () => {
     const box = makeIndexedBox();
     const normals = [
-      new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
-      new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1),
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, -1, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, -1),
     ];
     for (const n of normals) {
       const faces = findCoplanarFaces(box, n);
@@ -165,8 +216,7 @@ describe("getBoundaryEdges", () => {
     const edges = getBoundaryEdges(tris);
     // Edge 0-2 appears in both triangles → not boundary
     const has02 = edges.some(
-      (e) =>
-        (e.a === 0 && e.b === 2) || (e.a === 2 && e.b === 0),
+      (e) => (e.a === 0 && e.b === 2) || (e.a === 2 && e.b === 0),
     );
     expect(has02).toBe(false);
   });
@@ -227,7 +277,7 @@ describe("chamferEdges", () => {
   it("handles multiple edge pairs", () => {
     const box = makeIndexedBox();
     const edgePairs = [
-      { ax: -1, ay: 1, az: 1,  bx: 1, by: 1, bz: 1  }, // top-front
+      { ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }, // top-front
       { ax: -1, ay: 1, az: -1, bx: 1, by: 1, bz: -1 }, // top-back
     ];
     const singleResult = chamferEdges(makeIndexedBox(), [edgePairs[0]], 0.1);
@@ -292,7 +342,12 @@ describe("bevelEdges", () => {
 describe("applyBevelToSubGeometry", () => {
   it("returns null when subGeo has no edges or faces", () => {
     const box = makeIndexedBox();
-    const result = applyBevelToSubGeometry(box, { edges: [], faces: [] }, 0.1, 1);
+    const result = applyBevelToSubGeometry(
+      box,
+      { edges: [], faces: [] },
+      0.1,
+      1,
+    );
     expect(result).toBeNull();
   });
 
@@ -313,7 +368,12 @@ describe("applyBevelToSubGeometry", () => {
       edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
       faces: [],
     };
-    const chamferResult = applyBevelToSubGeometry(makeIndexedBox(), subGeo, 0.1, 1);
+    const chamferResult = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      subGeo,
+      0.1,
+      1,
+    );
     const bevelResult = applyBevelToSubGeometry(box, subGeo, 0.1, 3);
     expect(bevelResult.index.count).toBeGreaterThan(chamferResult.index.count);
   });
@@ -339,7 +399,12 @@ describe("applyBevelToSubGeometry", () => {
       edges: [{ ax: -1, ay: 1, az: 1, bx: -1, by: -1, bz: 1 }], // left-front vertical
       faces: [{ nx: 0, ny: 1, nz: 0 }],
     };
-    const faceOnly = applyBevelToSubGeometry(makeIndexedBox(), { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] }, 0.05, 1);
+    const faceOnly = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
+      0.05,
+      1,
+    );
     const combined = applyBevelToSubGeometry(box, subGeo, 0.05, 1);
     expect(combined.index.count).toBeGreaterThan(faceOnly.index.count);
   });
