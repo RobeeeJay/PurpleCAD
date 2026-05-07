@@ -2521,8 +2521,13 @@ export function attachCameraControls(ctx) {
     }
   };
 
-  const clearFaceHighlight = () => clearHL(faceHighlightRef);
-  const clearEdgeHighlight = () => clearHL(edgeHighlightRef);
+  // Persistent data from the most-recent hover highlight, used to commit
+  // face/edge selection to the store when the user clicks.
+  let pendingFaceSelection = null; // { itemId, nx, ny, nz }
+  let pendingEdgeSelection = null; // { itemId, ax, ay, az, bx, by, bz }
+
+  const clearFaceHighlight = () => { clearHL(faceHighlightRef); pendingFaceSelection = null; };
+  const clearEdgeHighlight = () => { clearHL(edgeHighlightRef); pendingEdgeSelection = null; };
   const clearPointHighlight = () => clearHL(pointHighlightRef);
 
   const primitiveGeoForHighlight = (type) => {
@@ -2637,6 +2642,11 @@ export function attachCameraControls(ctx) {
       hlMesh.renderOrder = 996;
       scene.add(hlMesh);
       faceHighlightRef.current = hlMesh;
+      // Record for click-to-select
+      pendingFaceSelection = {
+        itemId: hitMesh.userData.itemId,
+        nx: localNormal.x, ny: localNormal.y, nz: localNormal.z,
+      };
     }
   };
 
@@ -2718,6 +2728,12 @@ export function attachCameraControls(ctx) {
       hlLine.renderOrder = 998;
       scene.add(hlLine);
       edgeHighlightRef.current = hlLine;
+      // Record for click-to-select
+      pendingEdgeSelection = {
+        itemId: hitMesh.userData.itemId,
+        ax: bestA.x, ay: bestA.y, az: bestA.z,
+        bx: bestB.x, by: bestB.y, bz: bestB.z,
+      };
     }
   };
 
@@ -3551,13 +3567,48 @@ export function attachCameraControls(ctx) {
         selectableMeshes,
         false,
       );
+      const cmdOrCtrl3d = isMac ? e.metaKey : e.ctrlKey;
       if (intersects.length > 0) {
         const clickedId = intersects[0].object.userData.itemId || null;
-        if (e.shiftKey && clickedId)
-          useStore.getState().addToSelection(clickedId);
-        else selectItem(clickedId);
+        if (cmdOrCtrl3d && !e.shiftKey && pendingFaceSelection && pendingFaceSelection.itemId === clickedId) {
+          // Cmd/Ctrl+click in face mode: commit face to sub-geometry selection.
+          // Faces and edges are mutually exclusive — always clear edges.
+          const prev = useStore.getState().selectedSubGeometry;
+          const faces = prev?.itemId === clickedId && prev.edges.length === 0 ? [...prev.faces] : [];
+          const n = pendingFaceSelection;
+          const already = faces.some(f => Math.abs(f.nx-n.nx)<0.01 && Math.abs(f.ny-n.ny)<0.01 && Math.abs(f.nz-n.nz)<0.01);
+          useStore.getState().setSelectedSubGeometry({
+            itemId: clickedId,
+            edges: [],
+            faces: already ? faces.filter(f => !(Math.abs(f.nx-n.nx)<0.01&&Math.abs(f.ny-n.ny)<0.01&&Math.abs(f.nz-n.nz)<0.01)) : [...faces, {nx:n.nx,ny:n.ny,nz:n.nz}],
+          });
+          // Sub-geometry selection is exclusive with multi-object selection.
+          selectItem(null);
+        } else if (e.shiftKey && !cmdOrCtrl3d && pendingEdgeSelection && pendingEdgeSelection.itemId === clickedId) {
+          // Shift+click in edge mode: commit edge to sub-geometry selection.
+          // Edges and faces are mutually exclusive — always clear faces.
+          const prev = useStore.getState().selectedSubGeometry;
+          const edges = prev?.itemId === clickedId && prev.faces.length === 0 ? [...prev.edges] : [];
+          const ed = pendingEdgeSelection;
+          const already = edges.some(e2 =>
+            Math.abs(e2.ax-ed.ax)<0.001 && Math.abs(e2.ay-ed.ay)<0.001 && Math.abs(e2.az-ed.az)<0.001 &&
+            Math.abs(e2.bx-ed.bx)<0.001 && Math.abs(e2.by-ed.by)<0.001 && Math.abs(e2.bz-ed.bz)<0.001);
+          useStore.getState().setSelectedSubGeometry({
+            itemId: clickedId,
+            edges: already ? edges.filter(e2 => !(Math.abs(e2.ax-ed.ax)<0.001&&Math.abs(e2.ay-ed.ay)<0.001&&Math.abs(e2.az-ed.az)<0.001&&Math.abs(e2.bx-ed.bx)<0.001&&Math.abs(e2.by-ed.by)<0.001&&Math.abs(e2.bz-ed.bz)<0.001)) : [...edges, {ax:ed.ax,ay:ed.ay,az:ed.az,bx:ed.bx,by:ed.by,bz:ed.bz}],
+            faces: [],
+          });
+          // Sub-geometry selection is exclusive with multi-object selection.
+          selectItem(null);
+        } else {
+          // Normal click: select item and clear sub-geometry selection.
+          useStore.getState().clearSelectedSubGeometry();
+          if (e.shiftKey && clickedId) useStore.getState().addToSelection(clickedId);
+          else selectItem(clickedId);
+        }
       } else if (!e.shiftKey) {
         selectItem(null);
+        useStore.getState().clearSelectedSubGeometry();
       }
     }
     save();

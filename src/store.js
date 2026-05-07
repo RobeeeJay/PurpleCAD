@@ -27,6 +27,11 @@ const applyInstruction = (items, instruction) => {
               : i.rotation,
         });
       });
+    case "modify":
+      return items.map((i) => {
+        if (i.id !== instruction.itemId) return i;
+        return Object.assign({}, i, instruction.patches);
+      });
     default:
       return items;
   }
@@ -294,6 +299,45 @@ export const useStore = create((set) => ({
           activeHistoryId: newActiveId,
           selectedId: fullItem.id,
           selectedIds: [fullItem.id],
+        },
+        withUndo(state),
+      );
+    }),
+
+  modifyItem: (id, patches) =>
+    set((state) => {
+      const newEntry = makeEntry("Modified", id, {
+        type: "modify",
+        itemId: id,
+        patches,
+      });
+
+      let insertIdx;
+      let newActiveId;
+      if (state.activeHistoryId !== null) {
+        const activeIdx = state.history.findIndex(
+          (h) => h.id === state.activeHistoryId,
+        );
+        insertIdx = activeIdx + 1;
+        newActiveId = newEntry.id;
+      } else {
+        insertIdx = state.history.length;
+        newActiveId = null;
+      }
+
+      const rawHistory = [
+        ...state.history.slice(0, insertIdx),
+        newEntry,
+        ...state.history.slice(insertIdx),
+      ];
+      const items = replayUpTo(rawHistory, insertIdx);
+
+      saveTimeline(rawHistory, newActiveId);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(rawHistory),
+          activeHistoryId: newActiveId,
         },
         withUndo(state),
       );
@@ -686,6 +730,13 @@ export const useStore = create((set) => ({
       return { selectedIds: newIds, selectedId: state.selectedId ?? id };
     }),
   setHoveredId: (id) => set({ hoveredId: id }),
+
+  // Sub-geometry selection used by the 3D Bevel/Chamfer toolbar buttons.
+  // null when nothing is selected; otherwise holds the item and its selected
+  // edges (by local-space endpoint positions) and/or faces (by surface normal).
+  selectedSubGeometry: null,
+  setSelectedSubGeometry: (data) => set({ selectedSubGeometry: data }),
+  clearSelectedSubGeometry: () => set({ selectedSubGeometry: null }),
   activeSketchTool: null,
   setActiveSketchTool: (tool) => set({ activeSketchTool: tool }),
 
