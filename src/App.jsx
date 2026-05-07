@@ -25,12 +25,15 @@ function App() {
       const tag = document.activeElement && document.activeElement.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       const isUndoKey = ctrlOrCmd && e.key === "z" && !e.shiftKey;
-      const isRedoKey = (ctrlOrCmd && e.key === "z" && e.shiftKey) || (!isMac && e.ctrlKey && e.key === "y");
+      const isRedoKey =
+        (ctrlOrCmd && e.key === "z" && e.shiftKey) ||
+        (!isMac && e.ctrlKey && e.key === "y");
       if (!isUndoKey && !isRedoKey) return;
       e.preventDefault();
       // Redirect to per-sketch undo/redo when a sketch is open
       const { selectedId: selId, items: its } = useStore.getState();
-      const isSketch = selId != null && its.find((i) => i.id === selId)?.type === "sketch";
+      const isSketch =
+        selId != null && its.find((i) => i.id === selId)?.type === "sketch";
       if (isSketch) {
         if (isUndoKey) undoSketch(selId);
         else redoSketch(selId);

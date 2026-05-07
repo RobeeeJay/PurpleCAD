@@ -6,14 +6,19 @@ const SketchModifySection = () => {
   const selectedId = useStore((s) => s.selectedId);
   const sketchModifyMode = useStore((s) => s.sketchModifyMode);
   const setSketchModifyMode = useStore((s) => s.setSketchModifyMode);
-  const sketchMultiSelectedIndices = useStore((s) => s.sketchMultiSelectedIndices);
+  const sketchMultiSelectedIndices = useStore(
+    (s) => s.sketchMultiSelectedIndices,
+  );
   const toggleSketchShapesDashed = useStore((s) => s.toggleSketchShapesDashed);
   const selectedSketchElement = useStore((s) => s.selectedSketchElement);
 
   const handleToggleDashed = () => {
-    const indices = sketchMultiSelectedIndices.length > 0
-      ? sketchMultiSelectedIndices
-      : selectedSketchElement?.type === "line" ? [selectedSketchElement.shapeIdx] : [];
+    const indices =
+      sketchMultiSelectedIndices.length > 0
+        ? sketchMultiSelectedIndices
+        : selectedSketchElement?.type === "line"
+          ? [selectedSketchElement.shapeIdx]
+          : [];
     if (indices.length > 0) toggleSketchShapesDashed(selectedId, indices);
   };
 
@@ -22,33 +27,78 @@ const SketchModifySection = () => {
       <button
         className={`toolbar-btn ${sketchModifyMode === "chamfer" ? "active" : ""}`}
         title="Chamfer — trim two connected lines and join with a straight edge"
-        onClick={() => setSketchModifyMode(sketchModifyMode === "chamfer" ? null : "chamfer")}
+        onClick={() =>
+          setSketchModifyMode(sketchModifyMode === "chamfer" ? null : "chamfer")
+        }
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <polyline points="4,20 4,8 14,8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-          <line x1="4" y1="8" x2="14" y2="20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <polyline
+            points="4,20 4,8 14,8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          <line
+            x1="4"
+            y1="8"
+            x2="14"
+            y2="20"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
           <circle cx="4" cy="8" r="2" fill="currentColor" />
         </svg>
       </button>
       <button
         className={`toolbar-btn ${sketchModifyMode === "bevel" ? "active" : ""}`}
         title="Bevel — trim two connected lines and join with a smooth arc"
-        onClick={() => setSketchModifyMode(sketchModifyMode === "bevel" ? null : "bevel")}
+        onClick={() =>
+          setSketchModifyMode(sketchModifyMode === "bevel" ? null : "bevel")
+        }
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path d="M4,20 L4,10 Q4,8 6,8 L14,8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-          <line x1="14" y1="8" x2="20" y2="8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path
+            d="M4,20 L4,10 Q4,8 6,8 L14,8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          <line
+            x1="14"
+            y1="8"
+            x2="20"
+            y2="8"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
           <circle cx="4" cy="10" r="1.5" fill="currentColor" opacity="0.5" />
         </svg>
       </button>
       <button
         className="toolbar-btn"
         title="Toggle Dashed — dashed lines constrain geometry but don't form closed regions or extrusions"
-        disabled={sketchMultiSelectedIndices.length === 0 && selectedSketchElement?.type !== "line"}
+        disabled={
+          sketchMultiSelectedIndices.length === 0 &&
+          selectedSketchElement?.type !== "line"
+        }
         onClick={handleToggleDashed}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="4 3" />
+          <line
+            x1="3"
+            y1="12"
+            x2="21"
+            y2="12"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray="4 3"
+          />
         </svg>
       </button>
     </ToolbarSection>
