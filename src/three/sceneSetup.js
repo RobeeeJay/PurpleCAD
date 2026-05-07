@@ -21,11 +21,7 @@ export function createCamera(projectionMode, aspect, savedState, targetRef) {
   } else {
     camera = new THREE.PerspectiveCamera(35, aspect, 0.1, 1000);
   }
-  camera.position.set(
-    savedState.positionX,
-    savedState.positionY,
-    savedState.positionZ,
-  );
+  camera.position.set(savedState.positionX, savedState.positionY, savedState.positionZ);
   camera.lookAt(targetRef.current);
   return camera;
 }
@@ -88,10 +84,7 @@ export function createGrid(scene) {
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  const gridPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(2000, 2000),
-    gridMaterial,
-  );
+  const gridPlane = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), gridMaterial);
   gridPlane.rotation.x = -Math.PI / 2;
   scene.add(gridPlane);
   return { gridPlane, gridMaterial };
@@ -108,42 +101,21 @@ export function createAxisGroup(scene) {
 
   const addAxisArrow = (color, shaftEuler, shaftPos, conePos) => {
     const mat = new THREE.MeshBasicMaterial({ color, depthTest: false });
-    const shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(AXIS_R, AXIS_R, AXIS_LEN, 8),
-      mat,
-    );
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(AXIS_R, AXIS_R, AXIS_LEN, 8), mat);
     shaft.rotation.copy(shaftEuler);
     shaft.position.copy(shaftPos);
     shaft.renderOrder = 997;
     axisGroup.add(shaft);
-    const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(CONE_R, CONE_H, 8),
-      mat.clone(),
-    );
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(CONE_R, CONE_H, 8), mat.clone());
     cone.rotation.copy(shaftEuler);
     cone.position.copy(conePos);
     cone.renderOrder = 997;
     axisGroup.add(cone);
   };
 
-  addAxisArrow(
-    0xff4444,
-    new THREE.Euler(0, 0, -Math.PI / 2),
-    new THREE.Vector3(AXIS_LEN / 2, 0, 0),
-    new THREE.Vector3(AXIS_LEN + CONE_H / 2, 0, 0),
-  );
-  addAxisArrow(
-    0x4488ff,
-    new THREE.Euler(0, 0, 0),
-    new THREE.Vector3(0, AXIS_LEN / 2, 0),
-    new THREE.Vector3(0, AXIS_LEN + CONE_H / 2, 0),
-  );
-  addAxisArrow(
-    0x44ff44,
-    new THREE.Euler(Math.PI / 2, 0, 0),
-    new THREE.Vector3(0, 0, AXIS_LEN / 2),
-    new THREE.Vector3(0, 0, AXIS_LEN + CONE_H / 2),
-  );
+  addAxisArrow(0xff4444, new THREE.Euler(0, 0, -Math.PI / 2), new THREE.Vector3(AXIS_LEN / 2, 0, 0), new THREE.Vector3(AXIS_LEN + CONE_H / 2, 0, 0));
+  addAxisArrow(0x4488ff, new THREE.Euler(0, 0, 0), new THREE.Vector3(0, AXIS_LEN / 2, 0), new THREE.Vector3(0, AXIS_LEN + CONE_H / 2, 0));
+  addAxisArrow(0x44ff44, new THREE.Euler(Math.PI / 2, 0, 0), new THREE.Vector3(0, 0, AXIS_LEN / 2), new THREE.Vector3(0, 0, AXIS_LEN + CONE_H / 2));
 
   const makeAxisLabel = (text, color) => {
     const canvas = document.createElement("canvas");
@@ -155,25 +127,14 @@ export function createAxisGroup(scene) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(text, 32, 32);
-    const sprite = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: new THREE.CanvasTexture(canvas),
-        depthTest: false,
-      }),
-    );
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false }));
     sprite.scale.set(0.5, 0.5, 0.5);
     return sprite;
   };
 
-  const xLabel = makeAxisLabel("X", "#ff4444");
-  xLabel.position.set(LABEL_DIST, 0, 0);
-  axisGroup.add(xLabel);
-  const yLabel = makeAxisLabel("Y", "#4488ff");
-  yLabel.position.set(0, LABEL_DIST, 0);
-  axisGroup.add(yLabel);
-  const zLabel = makeAxisLabel("Z", "#44ff44");
-  zLabel.position.set(0, 0, LABEL_DIST);
-  axisGroup.add(zLabel);
+  const xLabel = makeAxisLabel("X", "#ff4444"); xLabel.position.set(LABEL_DIST, 0, 0); axisGroup.add(xLabel);
+  const yLabel = makeAxisLabel("Y", "#4488ff"); yLabel.position.set(0, LABEL_DIST, 0); axisGroup.add(yLabel);
+  const zLabel = makeAxisLabel("Z", "#44ff44"); zLabel.position.set(0, 0, LABEL_DIST); axisGroup.add(zLabel);
 
   scene.add(axisGroup);
   return axisGroup;
@@ -181,12 +142,7 @@ export function createAxisGroup(scene) {
 
 export function createOrbitIndicator(scene) {
   const geo = new THREE.SphereGeometry(0.07, 16, 12);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    depthTest: false,
-    transparent: true,
-    opacity: 0.9,
-  });
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.9 });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.renderOrder = 999;
   mesh.visible = false;

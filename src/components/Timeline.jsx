@@ -48,21 +48,14 @@ const Timeline = () => {
       : history.length - 1;
 
   const handleKeyDown = (e) => {
-    if (
-      e.key === "ArrowUp" ||
-      e.key === "ArrowDown" ||
-      e.key === "ArrowLeft" ||
-      e.key === "ArrowRight"
-    ) {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
       let targetIndex;
       if (e.key === "ArrowUp") targetIndex = Math.max(0, activeIndex - 1);
-      else if (e.key === "ArrowDown")
-        targetIndex = Math.min(history.length - 1, activeIndex + 1);
+      else if (e.key === "ArrowDown") targetIndex = Math.min(history.length - 1, activeIndex + 1);
       else if (e.key === "ArrowLeft") targetIndex = 0;
       else targetIndex = history.length - 1;
-      if (targetIndex !== activeIndex)
-        restoreToHistory(history[targetIndex].id);
+      if (targetIndex !== activeIndex) restoreToHistory(history[targetIndex].id);
     }
   };
 
@@ -150,16 +143,11 @@ const Timeline = () => {
                 .filter(Boolean)
                 .join(" ")}
               draggable={isDraggable}
-              onDragStart={
-                isDraggable ? (e) => handleDragStart(e, entry.id) : undefined
-              }
+              onDragStart={isDraggable ? (e) => handleDragStart(e, entry.id) : undefined}
               onDragEnd={isDraggable ? handleDragEnd : undefined}
               onDragOver={(e) => handleDragOver(e, entry.id, index)}
               onDrop={(e) => handleDrop(e, index)}
-              onClick={() => {
-                restoreToHistory(entry.id);
-                containerRef.current?.focus();
-              }}
+              onClick={() => { restoreToHistory(entry.id); containerRef.current?.focus(); }}
             >
               <div className="timeline-track">
                 <div className={`timeline-dot${isActive ? " active" : ""}`}>
@@ -174,9 +162,7 @@ const Timeline = () => {
                   ⠿
                 </span>
               )}
-              <span className="timeline-label">
-                {getDisplayLabel(entry, history)}
-              </span>
+              <span className="timeline-label">{getDisplayLabel(entry, history)}</span>
               {canDelete(index) && (
                 <button
                   className="timeline-delete-btn"

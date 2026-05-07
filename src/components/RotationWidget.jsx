@@ -3,96 +3,36 @@ import * as THREE from "three";
 import "../styles/RotationWidget.css";
 
 const FACE_CONFIGS = [
-  {
-    label: "Right",
-    rotX: 0,
-    rotY: Math.PI / 2,
-    color: "#aa2222",
-    hover: "#cc4444",
-    pos: [1, 0, 0],
-    rx: 0,
-    ry: Math.PI / 2,
-  },
-  {
-    label: "Left",
-    rotX: 0,
-    rotY: -Math.PI / 2,
-    color: "#7a1a1a",
-    hover: "#aa3333",
-    pos: [-1, 0, 0],
-    rx: 0,
-    ry: -Math.PI / 2,
-  },
-  {
-    label: "Top",
-    rotX: Math.PI / 2,
-    rotY: 0,
-    color: "#1a4daa",
-    hover: "#3366cc",
-    pos: [0, 1, 0],
-    rx: -Math.PI / 2,
-    ry: 0,
-  },
-  {
-    label: "Bottom",
-    rotX: -Math.PI / 2,
-    rotY: 0,
-    color: "#13387a",
-    hover: "#2255aa",
-    pos: [0, -1, 0],
-    rx: Math.PI / 2,
-    ry: 0,
-  },
-  {
-    label: "Front",
-    rotX: 0,
-    rotY: 0,
-    color: "#1a7a2a",
-    hover: "#33aa44",
-    pos: [0, 0, 1],
-    rx: 0,
-    ry: 0,
-  },
-  {
-    label: "Back",
-    rotX: 0,
-    rotY: Math.PI,
-    color: "#135520",
-    hover: "#228833",
-    pos: [0, 0, -1],
-    rx: 0,
-    ry: Math.PI,
-  },
+  { label: "Right",  rotX: 0,            rotY: Math.PI / 2,  color: "#aa2222", hover: "#cc4444", pos: [ 1, 0, 0], rx: 0,             ry: Math.PI / 2  },
+  { label: "Left",   rotX: 0,            rotY: -Math.PI / 2, color: "#7a1a1a", hover: "#aa3333", pos: [-1, 0, 0], rx: 0,             ry: -Math.PI / 2 },
+  { label: "Top",    rotX: Math.PI / 2,  rotY: 0,            color: "#1a4daa", hover: "#3366cc", pos: [0,  1, 0], rx: -Math.PI / 2,  ry: 0            },
+  { label: "Bottom", rotX: -Math.PI / 2, rotY: 0,            color: "#13387a", hover: "#2255aa", pos: [0, -1, 0], rx: Math.PI / 2,   ry: 0            },
+  { label: "Front",  rotX: 0,            rotY: 0,            color: "#1a7a2a", hover: "#33aa44", pos: [0, 0,  1], rx: 0,             ry: 0            },
+  { label: "Back",   rotX: 0,            rotY: Math.PI,      color: "#135520", hover: "#228833", pos: [0, 0, -1], rx: 0,             ry: Math.PI      },
 ];
 
 // 12 edges: type indicates which axis the edge runs along; sa/sb/sc are ±1 signs
 const EDGE_DATA = [
   // Z-edges (between ±X and ±Y faces)
-  { type: "z", sa: 1, sb: 1, dir: [1, 1, 0] },
-  { type: "z", sa: -1, sb: 1, dir: [-1, 1, 0] },
-  { type: "z", sa: 1, sb: -1, dir: [1, -1, 0] },
+  { type: "z", sa:  1, sb:  1, dir: [ 1,  1, 0] },
+  { type: "z", sa: -1, sb:  1, dir: [-1,  1, 0] },
+  { type: "z", sa:  1, sb: -1, dir: [ 1, -1, 0] },
   { type: "z", sa: -1, sb: -1, dir: [-1, -1, 0] },
   // Y-edges (between ±X and ±Z faces)
-  { type: "y", sa: 1, sc: 1, dir: [1, 0, 1] },
-  { type: "y", sa: -1, sc: 1, dir: [-1, 0, 1] },
-  { type: "y", sa: 1, sc: -1, dir: [1, 0, -1] },
+  { type: "y", sa:  1, sc:  1, dir: [ 1, 0,  1] },
+  { type: "y", sa: -1, sc:  1, dir: [-1, 0,  1] },
+  { type: "y", sa:  1, sc: -1, dir: [ 1, 0, -1] },
   { type: "y", sa: -1, sc: -1, dir: [-1, 0, -1] },
   // X-edges (between ±Y and ±Z faces)
-  { type: "x", sb: 1, sc: 1, dir: [0, 1, 1] },
-  { type: "x", sb: -1, sc: 1, dir: [0, -1, 1] },
-  { type: "x", sb: 1, sc: -1, dir: [0, 1, -1] },
+  { type: "x", sb:  1, sc:  1, dir: [0,  1,  1] },
+  { type: "x", sb: -1, sc:  1, dir: [0, -1,  1] },
+  { type: "x", sb:  1, sc: -1, dir: [0,  1, -1] },
   { type: "x", sb: -1, sc: -1, dir: [0, -1, -1] },
 ];
 
 const CORNER_DATA = [
-  [1, 1, 1],
-  [1, 1, -1],
-  [1, -1, 1],
-  [1, -1, -1],
-  [-1, 1, 1],
-  [-1, 1, -1],
-  [-1, -1, 1],
-  [-1, -1, -1],
+  [ 1,  1,  1], [ 1,  1, -1], [ 1, -1,  1], [ 1, -1, -1],
+  [-1,  1,  1], [-1,  1, -1], [-1, -1,  1], [-1, -1, -1],
 ];
 
 // Parse "#rrggbb" → [r, g, b], blend N hex colors, return THREE.js hex number
@@ -102,9 +42,7 @@ const parseRGB = (hex) => {
 };
 const blendHex = (...hexColors) => {
   const cs = hexColors.map(parseRGB);
-  const avg = [0, 1, 2].map((i) =>
-    Math.round(cs.reduce((s, c) => s + c[i], 0) / cs.length),
-  );
+  const avg = [0, 1, 2].map((i) => Math.round(cs.reduce((s, c) => s + c[i], 0) / cs.length));
   return (avg[0] << 16) | (avg[1] << 8) | avg[2];
 };
 
@@ -175,9 +113,7 @@ const RotationWidget = ({ rotationState, onOrientationChange, style }) => {
 
     // ── Face materials ────────────────────────────────────────────────────────
     const faceMats = FACE_CONFIGS.map((f) => {
-      const mat = new THREE.MeshBasicMaterial({
-        map: makeFaceCanvas(f.label, f.color),
-      });
+      const mat = new THREE.MeshBasicMaterial({ map: makeFaceCanvas(f.label, f.color) });
       mat.userData.normalTex = mat.map;
       mat.userData.hoverTex = makeFaceCanvas(f.label, f.hover);
       return mat;
@@ -185,10 +121,7 @@ const RotationWidget = ({ rotationState, onOrientationChange, style }) => {
 
     // ── Face planes (6) ───────────────────────────────────────────────────────
     const faceMeshes = FACE_CONFIGS.map((f, i) => {
-      const mesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(2 * F, 2 * F),
-        faceMats[i],
-      );
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2 * F, 2 * F), faceMats[i]);
       mesh.position.set(f.pos[0] * H, f.pos[1] * H, f.pos[2] * H);
       mesh.rotation.x = f.rx;
       mesh.rotation.y = f.ry;
@@ -206,49 +139,38 @@ const RotationWidget = ({ rotationState, onOrientationChange, style }) => {
         v = [
           [sa * H, sb * F, -F],
           [sa * F, sb * H, -F],
-          [sa * F, sb * H, F],
-          [sa * H, sb * F, F],
+          [sa * F, sb * H,  F],
+          [sa * H, sb * F,  F],
         ];
       } else if (cfg.type === "y") {
         const { sa, sc } = cfg;
         v = [
           [sa * H, -F, sc * F],
           [sa * F, -F, sc * H],
-          [sa * F, F, sc * H],
-          [sa * H, F, sc * F],
+          [sa * F,  F, sc * H],
+          [sa * H,  F, sc * F],
         ];
       } else {
         const { sb, sc } = cfg;
         v = [
           [-F, sb * H, sc * F],
           [-F, sb * F, sc * H],
-          [F, sb * F, sc * H],
-          [F, sb * H, sc * F],
+          [ F, sb * F, sc * H],
+          [ F, sb * H, sc * F],
         ];
       }
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-          new Float32Array([
-            ...v[0],
-            ...v[1],
-            ...v[2],
-            ...v[0],
-            ...v[2],
-            ...v[3],
-          ]),
-          3,
-        ),
-      );
+      geo.setAttribute("position", new THREE.BufferAttribute(
+        new Float32Array([
+          ...v[0], ...v[1], ...v[2],
+          ...v[0], ...v[2], ...v[3],
+        ]), 3,
+      ));
       geo.computeVertexNormals();
       const fi = edgeFaceIndices(cfg);
       const baseColor = blendHex(...fi.map((i) => FACE_CONFIGS[i].color));
       const hoverColor = blendHex(...fi.map((i) => FACE_CONFIGS[i].hover));
-      const mat = new THREE.MeshBasicMaterial({
-        color: baseColor,
-        side: THREE.DoubleSide,
-      });
+      const mat = new THREE.MeshBasicMaterial({ color: baseColor, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.userData = { rotX, rotY, baseColor, hoverColor };
       group.add(mesh);
@@ -262,18 +184,14 @@ const RotationWidget = ({ rotationState, onOrientationChange, style }) => {
       const Pb = [a * F, b * H, c * F];
       const Pc = [a * F, b * F, c * H];
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute(
-        "position",
-        new THREE.BufferAttribute(new Float32Array([...Pa, ...Pb, ...Pc]), 3),
-      );
+      geo.setAttribute("position", new THREE.BufferAttribute(
+        new Float32Array([...Pa, ...Pb, ...Pc]), 3,
+      ));
       geo.computeVertexNormals();
       const fi = cornerFaceIndices([a, b, c]);
       const baseColor = blendHex(...fi.map((i) => FACE_CONFIGS[i].color));
       const hoverColor = blendHex(...fi.map((i) => FACE_CONFIGS[i].hover));
-      const mat = new THREE.MeshBasicMaterial({
-        color: baseColor,
-        side: THREE.DoubleSide,
-      });
+      const mat = new THREE.MeshBasicMaterial({ color: baseColor, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.userData = { rotX, rotY, baseColor, hoverColor };
       group.add(mesh);
@@ -334,14 +252,7 @@ const RotationWidget = ({ rotationState, onOrientationChange, style }) => {
     el.addEventListener("mousemove", onMouseMove);
     el.addEventListener("mouseleave", onMouseLeave);
 
-    threeRef.current = {
-      renderer,
-      scene,
-      camera,
-      group,
-      allPieces,
-      renderScene,
-    };
+    threeRef.current = { renderer, scene, camera, group, allPieces, renderScene };
     renderScene();
 
     return () => {

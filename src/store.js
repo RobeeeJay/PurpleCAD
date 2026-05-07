@@ -20,7 +20,8 @@ const applyInstruction = (items, instruction) => {
             instruction.position !== undefined
               ? instruction.position
               : i.position,
-          scale: instruction.scale !== undefined ? instruction.scale : i.scale,
+          scale:
+            instruction.scale !== undefined ? instruction.scale : i.scale,
           rotation:
             instruction.rotation !== undefined
               ? instruction.rotation
@@ -119,27 +120,18 @@ const sketchUndoStacks = new Map();
 const pushSketchSnapshot = (state, sketchId) => {
   const item = state.items.find((i) => i.id === sketchId);
   if (!item) return;
-  const stacks = sketchUndoStacks.get(sketchId) ?? {
-    undoStack: [],
-    redoStack: [],
-  };
+  const stacks = sketchUndoStacks.get(sketchId) ?? { undoStack: [], redoStack: [] };
   sketchUndoStacks.set(sketchId, stacks);
   stacks.undoStack = [
     ...stacks.undoStack,
-    {
-      shapes: (item.shapes || []).slice(),
-      constraints: (item.constraints || []).slice(),
-    },
+    { shapes: (item.shapes || []).slice(), constraints: (item.constraints || []).slice() },
   ].slice(-UNDO_LIMIT);
   stacks.redoStack = [];
 };
 
 export const getSketchUndoState = (sketchId) => {
   const stacks = sketchUndoStacks.get(sketchId);
-  return {
-    canUndo: (stacks?.undoStack.length ?? 0) > 0,
-    canRedo: (stacks?.redoStack.length ?? 0) > 0,
-  };
+  return { canUndo: (stacks?.undoStack.length ?? 0) > 0, canRedo: (stacks?.redoStack.length ?? 0) > 0 };
 };
 
 // Push current { history, activeHistoryId } onto the undo stack (capped at
@@ -219,23 +211,16 @@ export const useStore = create((set) => ({
         }
       }
       const newItems = state.items.map((i) => {
-        if (i.id === itemId)
-          return Object.assign({}, i, { parentId: newParentId ?? null });
-        if (newParentId !== null && i.id === newParentId)
-          return Object.assign({}, i, { expanded: true });
+        if (i.id === itemId) return Object.assign({}, i, { parentId: newParentId ?? null });
+        if (newParentId !== null && i.id === newParentId) return Object.assign({}, i, { expanded: true });
         return i;
       });
       // Persist parentId into the create history entry so it survives reload
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === itemId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === itemId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
-              item: Object.assign({}, entry.instruction.item, {
-                parentId: newParentId ?? null,
-              }),
+              item: Object.assign({}, entry.instruction.item, { parentId: newParentId ?? null }),
             }),
           });
         }
@@ -306,8 +291,9 @@ export const useStore = create((set) => ({
         state.activeHistoryId !== null
           ? state.history.slice(
               0,
-              state.history.findIndex((h) => h.id === state.activeHistoryId) +
-                1,
+              state.history.findIndex(
+                (h) => h.id === state.activeHistoryId,
+              ) + 1,
             )
           : state.history;
 
@@ -347,12 +333,7 @@ export const useStore = create((set) => ({
       const newActiveHistoryId = isLatest ? null : historyId;
       const items = replayUpTo(state.history, idx);
       saveTimeline(state.history, newActiveHistoryId);
-      return {
-        items,
-        selectedId: null,
-        selectedIds: [],
-        activeHistoryId: newActiveHistoryId,
-      };
+      return { items, selectedId: null, selectedIds: [], activeHistoryId: newActiveHistoryId };
     }),
 
   setItemTransform: (id, position, scale, rotation) =>
@@ -382,7 +363,9 @@ export const useStore = create((set) => ({
             ? Object.assign({}, item.position)
             : undefined,
         scale: isScaleAction ? Object.assign({}, item.scale) : undefined,
-        rotation: isRotateAction ? Object.assign({}, item.rotation) : undefined,
+        rotation: isRotateAction
+          ? Object.assign({}, item.rotation)
+          : undefined,
       };
 
       if (state.activeHistoryId !== null) {
@@ -474,10 +457,7 @@ export const useStore = create((set) => ({
         state.activeHistoryId !== null
           ? rawHistory.findIndex((h) => h.id === state.activeHistoryId)
           : rawHistory.length - 1;
-      const items = replayUpTo(
-        rawHistory,
-        activeIdx !== -1 ? activeIdx : rawHistory.length - 1,
-      );
+      const items = replayUpTo(rawHistory, activeIdx !== -1 ? activeIdx : rawHistory.length - 1);
 
       saveTimeline(rawHistory, state.activeHistoryId);
       return Object.assign(
@@ -529,7 +509,9 @@ export const useStore = create((set) => ({
       const snapshot = state.undoStack[state.undoStack.length - 1];
       const idx =
         snapshot.activeHistoryId !== null
-          ? snapshot.history.findIndex((h) => h.id === snapshot.activeHistoryId)
+          ? snapshot.history.findIndex(
+              (h) => h.id === snapshot.activeHistoryId,
+            )
           : snapshot.history.length - 1;
       const items = replayUpTo(
         snapshot.history,
@@ -556,7 +538,9 @@ export const useStore = create((set) => ({
       const snapshot = state.redoStack[state.redoStack.length - 1];
       const idx =
         snapshot.activeHistoryId !== null
-          ? snapshot.history.findIndex((h) => h.id === snapshot.activeHistoryId)
+          ? snapshot.history.findIndex(
+              (h) => h.id === snapshot.activeHistoryId,
+            )
           : snapshot.history.length - 1;
       const items = replayUpTo(
         snapshot.history,
@@ -671,8 +655,7 @@ export const useStore = create((set) => ({
       };
     }),
 
-  selectItem: (id) =>
-    set({ selectedId: id, selectedIds: id != null ? [id] : [] }),
+  selectItem: (id) => set({ selectedId: id, selectedIds: id != null ? [id] : [] }),
 
   addToSelection: (id) =>
     set((state) => {
@@ -701,30 +684,22 @@ export const useStore = create((set) => ({
   setSketchModifyMode: (mode) => set({ sketchModifyMode: mode }),
 
   sketchConstraintFirstPoint: null, // { shapeIdx, pointKey } | null
-  setSketchConstraintFirstPoint: (pt) =>
-    set({ sketchConstraintFirstPoint: pt }),
+  setSketchConstraintFirstPoint: (pt) => set({ sketchConstraintFirstPoint: pt }),
 
   addSketchConstraints: (sketchId, newConstraints) =>
     set((state) => {
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((item) =>
         item.id === sketchId
-          ? Object.assign({}, item, {
-              constraints: [...(item.constraints || []), ...newConstraints],
-            })
+          ? Object.assign({}, item, { constraints: [...(item.constraints || []), ...newConstraints] })
           : item,
       );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
-              item: Object.assign({}, entry.instruction.item, {
-                constraints: updatedItem?.constraints,
-              }),
+              item: Object.assign({}, entry.instruction.item, { constraints: updatedItem?.constraints }),
             }),
           });
         }
@@ -740,22 +715,15 @@ export const useStore = create((set) => ({
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
         return Object.assign({}, item, {
-          shapes: (item.shapes || []).map((s, i) =>
-            updatesMap.has(i) ? updatesMap.get(i) : s,
-          ),
+          shapes: (item.shapes || []).map((s, i) => updatesMap.has(i) ? updatesMap.get(i) : s),
         });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
-              item: Object.assign({}, entry.instruction.item, {
-                shapes: updatedItem?.shapes,
-              }),
+              item: Object.assign({}, entry.instruction.item, { shapes: updatedItem?.shapes }),
             }),
           });
         }
@@ -770,24 +738,15 @@ export const useStore = create((set) => ({
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((item) =>
         item.id === sketchId
-          ? Object.assign({}, item, {
-              shapes: item.shapes.map((s, i) =>
-                i === shapeIdx ? newShape : s,
-              ),
-            })
+          ? Object.assign({}, item, { shapes: item.shapes.map((s, i) => (i === shapeIdx ? newShape : s)) })
           : item,
       );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
-              item: Object.assign({}, entry.instruction.item, {
-                shapes: updatedItem?.shapes,
-              }),
+              item: Object.assign({}, entry.instruction.item, { shapes: updatedItem?.shapes }),
             }),
           });
         }
@@ -810,10 +769,7 @@ export const useStore = create((set) => ({
       );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
@@ -842,10 +798,7 @@ export const useStore = create((set) => ({
       );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
@@ -861,20 +814,12 @@ export const useStore = create((set) => ({
       return { items: updatedItems, history: withOrphanFlags(newHistory) };
     }),
 
-  applySketchModify: (
-    sketchId,
-    shapeUpdatesMap,
-    newShape,
-    removeConstraintPred,
-    addConstraints = [],
-  ) =>
+  applySketchModify: (sketchId, shapeUpdatesMap, newShape, removeConstraintPred, addConstraints = []) =>
     set((state) => {
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
-        const shapes = (item.shapes || []).map((s, i) =>
-          shapeUpdatesMap.has(i) ? shapeUpdatesMap.get(i) : s,
-        );
+        const shapes = (item.shapes || []).map((s, i) => shapeUpdatesMap.has(i) ? shapeUpdatesMap.get(i) : s);
         shapes.push(newShape);
         const constraints = [
           ...(item.constraints || []).filter((c) => !removeConstraintPred(c)),
@@ -884,10 +829,7 @@ export const useStore = create((set) => ({
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
@@ -912,47 +854,24 @@ export const useStore = create((set) => ({
         const oldShapes = item.shapes || [];
         const indexMap = new Map();
         let newIdx = 0;
-        oldShapes.forEach((_, i) => {
-          indexMap.set(i, deleteSet.has(i) ? -1 : newIdx++);
-        });
+        oldShapes.forEach((_, i) => { indexMap.set(i, deleteSet.has(i) ? -1 : newIdx++); });
         const shapes = oldShapes.filter((_, i) => !deleteSet.has(i));
         const constraints = (item.constraints || [])
           .filter((c) => {
-            if (c.type === "onLine")
-              return (
-                indexMap.get(c.pointShapeIdx) !== -1 &&
-                indexMap.get(c.lineShapeIdx) !== -1
-              );
-            if (c.type === "horizontal" || c.type === "vertical")
-              return indexMap.get(c.shapeIdx) !== -1;
-            return (
-              indexMap.get(c.shapeAIdx) !== -1 &&
-              indexMap.get(c.shapeBIdx) !== -1
-            );
+            if (c.type === "onLine") return indexMap.get(c.pointShapeIdx) !== -1 && indexMap.get(c.lineShapeIdx) !== -1;
+            if (c.type === "horizontal" || c.type === "vertical") return indexMap.get(c.shapeIdx) !== -1;
+            return indexMap.get(c.shapeAIdx) !== -1 && indexMap.get(c.shapeBIdx) !== -1;
           })
           .map((c) => {
-            if (c.type === "onLine")
-              return {
-                ...c,
-                pointShapeIdx: indexMap.get(c.pointShapeIdx),
-                lineShapeIdx: indexMap.get(c.lineShapeIdx),
-              };
-            if (c.type === "horizontal" || c.type === "vertical")
-              return { ...c, shapeIdx: indexMap.get(c.shapeIdx) };
-            return {
-              ...c,
-              shapeAIdx: indexMap.get(c.shapeAIdx),
-              shapeBIdx: indexMap.get(c.shapeBIdx),
-            };
+            if (c.type === "onLine") return { ...c, pointShapeIdx: indexMap.get(c.pointShapeIdx), lineShapeIdx: indexMap.get(c.lineShapeIdx) };
+            if (c.type === "horizontal" || c.type === "vertical") return { ...c, shapeIdx: indexMap.get(c.shapeIdx) };
+            return { ...c, shapeAIdx: indexMap.get(c.shapeAIdx), shapeBIdx: indexMap.get(c.shapeBIdx) };
           });
         return Object.assign({}, item, { shapes, constraints });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
@@ -976,32 +895,20 @@ export const useStore = create((set) => ({
       if (!item) return {};
       stacks.redoStack = [
         ...stacks.redoStack,
-        {
-          shapes: (item.shapes || []).slice(),
-          constraints: (item.constraints || []).slice(),
-        },
+        { shapes: (item.shapes || []).slice(), constraints: (item.constraints || []).slice() },
       ].slice(-UNDO_LIMIT);
       const prev = stacks.undoStack[stacks.undoStack.length - 1];
       stacks.undoStack = stacks.undoStack.slice(0, -1);
       const updatedItems = state.items.map((i) =>
-        i.id === sketchId
-          ? Object.assign({}, i, {
-              shapes: prev.shapes,
-              constraints: prev.constraints,
-            })
-          : i,
+        i.id === sketchId ? Object.assign({}, i, { shapes: prev.shapes, constraints: prev.constraints }) : i,
       );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
-                shapes: updatedItem?.shapes,
-                constraints: updatedItem?.constraints,
+                shapes: updatedItem?.shapes, constraints: updatedItem?.constraints,
               }),
             }),
           });
@@ -1020,32 +927,20 @@ export const useStore = create((set) => ({
       if (!item) return {};
       stacks.undoStack = [
         ...stacks.undoStack,
-        {
-          shapes: (item.shapes || []).slice(),
-          constraints: (item.constraints || []).slice(),
-        },
+        { shapes: (item.shapes || []).slice(), constraints: (item.constraints || []).slice() },
       ].slice(-UNDO_LIMIT);
       const next = stacks.redoStack[stacks.redoStack.length - 1];
       stacks.redoStack = stacks.redoStack.slice(0, -1);
       const updatedItems = state.items.map((i) =>
-        i.id === sketchId
-          ? Object.assign({}, i, {
-              shapes: next.shapes,
-              constraints: next.constraints,
-            })
-          : i,
+        i.id === sketchId ? Object.assign({}, i, { shapes: next.shapes, constraints: next.constraints }) : i,
       );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
-                shapes: updatedItem?.shapes,
-                constraints: updatedItem?.constraints,
+                shapes: updatedItem?.shapes, constraints: updatedItem?.constraints,
               }),
             }),
           });
@@ -1063,35 +958,22 @@ export const useStore = create((set) => ({
         if (item.id !== sketchId) return item;
         const shape = (item.shapes || [])[shapeIdx];
         if (!shape || shape.type !== "line") return item;
-        const mid =
-          type === "horizontal"
-            ? { y: (shape.y1 + shape.y2) / 2 }
-            : { x: (shape.x1 + shape.x2) / 2 };
-        const snapped =
-          type === "horizontal"
-            ? { ...shape, y1: mid.y, y2: mid.y }
-            : { ...shape, x1: mid.x, x2: mid.x };
-        const shapes = (item.shapes || []).map((s, i) =>
-          i === shapeIdx ? snapped : s,
-        );
+        const mid = type === "horizontal"
+          ? { y: (shape.y1 + shape.y2) / 2 }
+          : { x: (shape.x1 + shape.x2) / 2 };
+        const snapped = type === "horizontal"
+          ? { ...shape, y1: mid.y, y2: mid.y }
+          : { ...shape, x1: mid.x, x2: mid.x };
+        const shapes = (item.shapes || []).map((s, i) => (i === shapeIdx ? snapped : s));
         const constraints = [
-          ...(item.constraints || []).filter(
-            (c) =>
-              !(
-                (c.type === "horizontal" || c.type === "vertical") &&
-                c.shapeIdx === shapeIdx
-              ),
-          ),
+          ...(item.constraints || []).filter((c) => !((c.type === "horizontal" || c.type === "vertical") && c.shapeIdx === shapeIdx)),
           { type, shapeIdx },
         ];
         return Object.assign({}, item, { shapes, constraints });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
@@ -1113,22 +995,15 @@ export const useStore = create((set) => ({
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
         return Object.assign({}, item, {
-          constraints: (item.constraints || []).filter(
-            (_, i) => i !== constraintIdx,
-          ),
+          constraints: (item.constraints || []).filter((_, i) => i !== constraintIdx),
         });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
-              item: Object.assign({}, entry.instruction.item, {
-                constraints: updatedItem?.constraints,
-              }),
+              item: Object.assign({}, entry.instruction.item, { constraints: updatedItem?.constraints }),
             }),
           });
         }
@@ -1138,14 +1013,9 @@ export const useStore = create((set) => ({
       return { items: updatedItems, history: withOrphanFlags(newHistory) };
     }),
 
-  toggleConstraintsVisible: () =>
-    set((state) => ({ constraintsVisible: !state.constraintsVisible })),
-  toggleDimensionsVisible: () =>
-    set((state) => ({ dimensionsVisible: !state.dimensionsVisible })),
-  toggleCurveResolution: () =>
-    set((state) => ({
-      curveResolution: state.curveResolution === "print" ? "preview" : "print",
-    })),
+  toggleConstraintsVisible: () => set((state) => ({ constraintsVisible: !state.constraintsVisible })),
+  toggleDimensionsVisible: () => set((state) => ({ dimensionsVisible: !state.dimensionsVisible })),
+  toggleCurveResolution: () => set((state) => ({ curveResolution: state.curveResolution === "print" ? "preview" : "print" })),
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
   toggleSketchShapesDashed: (sketchId, indices) =>
@@ -1164,15 +1034,10 @@ export const useStore = create((set) => ({
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
-              item: Object.assign({}, entry.instruction.item, {
-                shapes: updatedItem?.shapes,
-              }),
+              item: Object.assign({}, entry.instruction.item, { shapes: updatedItem?.shapes }),
             }),
           });
         }
@@ -1188,23 +1053,16 @@ export const useStore = create((set) => ({
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
         const constraints = (item.constraints || []).map((c, i) =>
-          i === constraintIdx && c.type === "distance"
-            ? Object.assign({}, c, { distance: newDistance })
-            : c,
+          i === constraintIdx && c.type === "distance" ? Object.assign({}, c, { distance: newDistance }) : c,
         );
         return Object.assign({}, item, { constraints });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === sketchId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === sketchId) {
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
-              item: Object.assign({}, entry.instruction.item, {
-                constraints: updatedItem?.constraints,
-              }),
+              item: Object.assign({}, entry.instruction.item, { constraints: updatedItem?.constraints }),
             }),
           });
         }
@@ -1231,24 +1089,15 @@ export const useStore = create((set) => ({
       });
       const updatedItem = updatedItems.find((i) => i.id === extrudeId);
       const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === extrudeId
-        ) {
+        if (entry.instruction?.type === "create" && entry.instruction.item?.id === extrudeId) {
           return Object.assign({}, entry, {
-            instruction: Object.assign({}, entry.instruction, {
-              item: updatedItem,
-            }),
+            instruction: Object.assign({}, entry.instruction, { item: updatedItem }),
           });
         }
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return {
-        ...withUndo(state),
-        items: updatedItems,
-        history: withOrphanFlags(newHistory),
-      };
+      return { ...withUndo(state), items: updatedItems, history: withOrphanFlags(newHistory) };
     }),
   setRenderMode: (mode) => set({ renderMode: mode }),
   setProjectionMode: (mode) => set({ projectionMode: mode }),
@@ -1272,9 +1121,7 @@ export const useStore = create((set) => ({
     set((state) => ({
       items: state.items.map((item) =>
         item.id === id
-          ? Object.assign({}, item, {
-              visible: item.visible === false ? true : false,
-            })
+          ? Object.assign({}, item, { visible: item.visible === false ? true : false })
           : item,
       ),
     })),
@@ -1282,9 +1129,7 @@ export const useStore = create((set) => ({
   setItemsHidden: (ids) =>
     set((state) => ({
       items: state.items.map((item) =>
-        ids.includes(item.id)
-          ? Object.assign({}, item, { visible: false })
-          : item,
+        ids.includes(item.id) ? Object.assign({}, item, { visible: false }) : item,
       ),
     })),
 

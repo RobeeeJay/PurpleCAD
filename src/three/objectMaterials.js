@@ -195,7 +195,7 @@ export const TORUS_FRAGMENT_SHADER = `
 
 export function createMaterial(item, color) {
   const uniforms = () => ({
-    uColor: { value: new THREE.Color(color) },
+    uColor:    { value: new THREE.Color(color) },
     uEmissive: { value: new THREE.Color(0) },
   });
   if (item.type === "sketch") {
@@ -208,44 +208,24 @@ export function createMaterial(item, color) {
     });
   }
   if (item.type === "sphere") {
-    return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
-      vertexShader: SPHERE_VERTEX_SHADER,
-      fragmentShader: SPHERE_FRAGMENT_SHADER,
-    });
+    return new THREE.ShaderMaterial({ uniforms: uniforms(), vertexShader: SPHERE_VERTEX_SHADER, fragmentShader: SPHERE_FRAGMENT_SHADER });
   }
   if (item.type === "cylinder") {
-    return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
-      vertexShader: CYLINDER_VERTEX_SHADER,
-      fragmentShader: CYLINDER_FRAGMENT_SHADER,
-    });
+    return new THREE.ShaderMaterial({ uniforms: uniforms(), vertexShader: CYLINDER_VERTEX_SHADER, fragmentShader: CYLINDER_FRAGMENT_SHADER });
   }
   if (item.type === "torus") {
-    return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
-      vertexShader: TORUS_VERTEX_SHADER,
-      fragmentShader: TORUS_FRAGMENT_SHADER,
-    });
+    return new THREE.ShaderMaterial({ uniforms: uniforms(), vertexShader: TORUS_VERTEX_SHADER, fragmentShader: TORUS_FRAGMENT_SHADER });
   }
-  return new THREE.MeshStandardMaterial({
-    color,
-    metalness: 0.3,
-    roughness: 0.5,
-  });
+  return new THREE.MeshStandardMaterial({ color, metalness: 0.3, roughness: 0.5 });
 }
 
 export function updateEmissive(objectsRef, selectedId, selectedIds, hoveredId) {
   Object.entries(objectsRef.current).forEach(([itemId, mesh]) => {
     const id = parseInt(itemId);
-    const hex =
-      id === selectedId
-        ? 0x006666
-        : selectedIds.includes(id)
-          ? 0x550011
-          : id === hoveredId
-            ? 0x444444
-            : 0x000000;
+    const hex = id === selectedId ? 0x006666
+      : selectedIds.includes(id) ? 0x550011
+      : id === hoveredId ? 0x444444
+      : 0x000000;
     if (mesh.material.uniforms?.uEmissive) {
       mesh.material.uniforms.uEmissive.value.setHex(hex);
     } else if (mesh.material.emissive) {
