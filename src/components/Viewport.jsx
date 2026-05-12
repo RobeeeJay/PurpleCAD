@@ -33,6 +33,10 @@ import {
   saveCameraState,
   attachCameraControls,
 } from "../three/cameraControls.js";
+import {
+  disposeHighlightGroup,
+  reconcileSelectionHighlight,
+} from "../three/selectionHighlights.js";
 
 const Viewport = () => {
   const containerRef = useRef(null);
@@ -63,6 +67,7 @@ const Viewport = () => {
   const faceHighlightRef = useRef(null);
   const edgeHighlightRef = useRef(null);
   const pointHighlightRef = useRef(null);
+  const subGeoHighlightGroupRef = useRef(null);
   const sketchModeRef = useRef(false);
   const savedCameraStateRef = useRef(null);
   const sketchGridGroupRef = useRef(null);
@@ -111,6 +116,7 @@ const Viewport = () => {
   const constraintsVisible = useStore((state) => state.constraintsVisible);
   const dimensionsVisible = useStore((state) => state.dimensionsVisible);
   const curveResolution = useStore((state) => state.curveResolution);
+  const selectedSubGeometry = useStore((state) => state.selectedSubGeometry);
   const curveSegments = 32;
   const printPrecision = curveResolution === "print" ? 0.01 : null;
 
@@ -262,6 +268,13 @@ const Viewport = () => {
           ref.current = null;
         }
       });
+      if (subGeoHighlightGroupRef.current) {
+        subGeoHighlightGroupRef.current.traverse((obj) => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+        });
+        subGeoHighlightGroupRef.current = null;
+      }
       if (transformDebounceRef.current)
         clearTimeout(transformDebounceRef.current);
       saveCameraState(cameraRef, targetRef, cameraControlsRef);
@@ -451,6 +464,23 @@ const Viewport = () => {
       sketchModeRef,
     });
   }, [items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Persistent sub-geometry selection highlights ─────────────────────────
+  // Rebuild a darker-coloured overlay whenever the selected faces or edges
+  // change, so the user can see what they have committed to selection
+  // (distinct from the brighter hover highlight).
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    subGeoHighlightGroupRef.current = reconcileSelectionHighlight(
+      scene,
+      subGeoHighlightGroupRef.current,
+      selectedSubGeometry,
+      objectsRef.current,
+      items,
+    );
+  }, [selectedSubGeometry, items]);
 
   // ── Transform handles + bounding box ─────────────────────────────────────
 

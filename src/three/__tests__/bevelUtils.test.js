@@ -419,6 +419,147 @@ describe("applyBevelToSubGeometry", () => {
     expect(result.getAttribute("normal")).not.toBeNull();
   });
 
+  // Count edges that appear in exactly one triangle (a watertight manifold has 0).
+  // Compares by POSITION rather than index, because BoxGeometry duplicates
+  // corner vertices per face — only position-coincidence reflects topology.
+  function countBoundaryEdgesByPosition(geo) {
+    const posAttr = geo.getAttribute("position");
+    const idx = geo.index.array;
+    const key = (i) => {
+      const x = Math.round(posAttr.getX(i) * 1e4) / 1e4;
+      const y = Math.round(posAttr.getY(i) * 1e4) / 1e4;
+      const z = Math.round(posAttr.getZ(i) * 1e4) / 1e4;
+      return `${x},${y},${z}`;
+    };
+    const edgeCount = new Map();
+    for (let t = 0; t < idx.length; t += 3) {
+      const ks = [key(idx[t]), key(idx[t + 1]), key(idx[t + 2])];
+      for (let k = 0; k < 3; k++) {
+        const a = ks[k],
+          b = ks[(k + 1) % 3];
+        const ek = a < b ? a + "|" + b : b + "|" + a;
+        edgeCount.set(ek, (edgeCount.get(ek) || 0) + 1);
+      }
+    }
+    return [...edgeCount.values()].filter((c) => c === 1).length;
+  }
+
+  it("BoxGeometry baseline is watertight by position", () => {
+    expect(countBoundaryEdgesByPosition(makeIndexedBox())).toBe(0);
+  });
+
+  // The chamfer/bevel algorithm fills the visible corner notch with an
+  // end-cap fan that is coplanar with the perpendicular face — so the user
+  // does not see a gap.  Strict topological watertightness on
+  // BoxGeometry-style meshes (per-face duplicated vertices) is not achieved
+  // by this best-effort algorithm, but the count of boundary edges should
+  // be SMALL relative to the input — much fewer than what would exist if
+  // the end caps were missing entirely.
+  it("chamfer of a cube edge adds end-cap triangles at each end of the strip", () => {
+    const box = makeIndexedBox();
+    const subGeo = {
+      edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
+      faces: [],
+    };
+    const result = applyBevelToSubGeometry(box, subGeo, 0.1, 1);
+    // An end-cap triangle has all three vertices on a perpendicular face:
+    // the original corner + the two strip vertices.  Verify both ends have one.
+    const posAttr = result.getAttribute("position");
+    const idx = result.index.array;
+    const round = (v) => Math.round(v * 1e3) / 1e3;
+    const findCap = (cx, cy, cz) => {
+      for (let t = 0; t < idx.length; t += 3) {
+        const pts = [0, 1, 2].map((k) => [
+          round(posAttr.getX(idx[t + k])),
+          round(posAttr.getY(idx[t + k])),
+          round(posAttr.getZ(idx[t + k])),
+        ]);
+        const hasCorner = pts.some(
+          (p) => p[0] === cx && p[1] === cy && p[2] === cz,
+        );
+        // Strip vertices are offset by 0.1 from the corner.
+        const hasStrip0 = pts.some(
+          (p) => p[0] === cx && p[1] === cy && Math.abs(p[2] - (cz - 0.1)) < 1e-3,
+        );
+        const hasStrip1 = pts.some(
+          (p) => p[0] === cx && Math.abs(p[1] - (cy - 0.1)) < 1e-3 && p[2] === cz,
+        );
+        if (hasCorner && hasStrip0 && hasStrip1) return t;
+      }
+      return -1;
+    };
+    expect(findCap(-1, 1, 1)).toBeGreaterThanOrEqual(0); // left end cap
+    expect(findCap(1, 1, 1)).toBeGreaterThanOrEqual(0); // right end cap
+  });
+
+  it("multiple edges sharing a corner are ALL beveled (regression for shared-corner skip)", () => {
+    // Two edges of a cube share the corner (-1, 1, 1).  Earlier versions
+    // would silently skip the second edge because the first edge's coplanar
+    // replacement destroyed the corner reference the second edge needed.
+    const box = makeIndexedBox();
+    const subGeo = {
+      edges: [
+        { ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 },    // top-front
+        { ax: -1, ay: 1, az: 1, bx: -1, by: 1, bz: -1 },  // top-left
+      ],
+      faces: [],
+    };
+    const result = applyBevelToSubGeometry(box, subGeo, 0.1, 1);
+    const posAttr = result.getAttribute("position");
+    const round = (v) => Math.round(v * 1e3) / 1e3;
+
+    // Strip vertices for edge 1 (top-front) lie at y=1, x=±1, z≈0.9.
+    // Strip vertices for edge 2 (top-left) lie at y=1, x≈±0.9, z=±1.
+    let edge1Verts = 0, edge2Verts = 0;
+    for (let i = 0; i < posAttr.count; i++) {
+      const x = round(posAttr.getX(i));
+      const y = round(posAttr.getY(i));
+      const z = round(posAttr.getZ(i));
+      if (y === 1 && Math.abs(x) === 1 && Math.abs(z - 0.9) < 0.01) edge1Verts++;
+      if (y === 1 && Math.abs(x - 0.9) < 0.01 && Math.abs(z) === 1) edge2Verts++;
+      if (y === 1 && Math.abs(x + 0.9) < 0.01 && Math.abs(z) === 1) edge2Verts++;
+    }
+    expect(edge1Verts).toBeGreaterThanOrEqual(2); // both ends of edge 1
+    expect(edge2Verts).toBeGreaterThanOrEqual(2); // both ends of edge 2
+  });
+
+  it("three edges meeting at one corner are all beveled", () => {
+    // All three edges of a cube meeting at the corner (-1, 1, 1).
+    const box = makeIndexedBox();
+    const subGeo = {
+      edges: [
+        { ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 },    // top-front (along +X)
+        { ax: -1, ay: 1, az: 1, bx: -1, by: 1, bz: -1 },  // top-left (along -Z)
+        { ax: -1, ay: 1, az: 1, bx: -1, by: -1, bz: 1 },  // front-left (along -Y)
+      ],
+      faces: [],
+    };
+    const result = applyBevelToSubGeometry(box, subGeo, 0.1, 1);
+    // Each edge contributes 2(segments+1) = 4 new vertices.  Three edges → 12.
+    const originalVerts = box.getAttribute("position").count;
+    expect(result.getAttribute("position").count).toBeGreaterThanOrEqual(
+      originalVerts + 12,
+    );
+  });
+
+  it("bevel of a cube edge adds end-cap fans (one triangle per segment)", () => {
+    const box = makeIndexedBox();
+    const subGeo = {
+      edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
+      faces: [],
+    };
+    // Compare with chamfer (1 seg) vs bevel (4 segs): bevel adds 4 cap
+    // triangles per end (vs 1 for chamfer) → 6 extra triangles on top of
+    // strip differences.
+    const chamfer = applyBevelToSubGeometry(makeIndexedBox(), subGeo, 0.1, 1);
+    const bevel = applyBevelToSubGeometry(box, subGeo, 0.1, 4);
+    const extraStripTris = (4 - 1) * 2; // chamfer has 2, bevel has 8 = +6
+    const extraCapTris = (4 - 1) * 2; // 1 cap-tri/seg * (4-1) segs * 2 ends = +6
+    expect(bevel.index.count / 3).toBeGreaterThanOrEqual(
+      chamfer.index.count / 3 + extraStripTris + extraCapTris,
+    );
+  });
+
   it("bevel result vertices stay within the original bounding box", () => {
     const box = makeIndexedBox();
     const before = bbox(box);

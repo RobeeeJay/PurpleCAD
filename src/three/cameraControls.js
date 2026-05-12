@@ -3614,6 +3614,12 @@ export function attachCameraControls(ctx) {
           });
           // Sub-geometry selection is exclusive with multi-object selection.
           selectItem(null);
+          // Remove the hover overlay so the persistent selection highlight
+          // (a darker shade, drawn at a lower renderOrder) becomes immediately
+          // visible at click time.  Without this, the bright hover overlay
+          // continues drawing over the selection until the next pointer move,
+          // making the click appear to have no visual effect.
+          clearFaceHighlight();
         } else if (
           e.shiftKey &&
           !cmdOrCtrl3d &&
@@ -3666,6 +3672,10 @@ export function attachCameraControls(ctx) {
           });
           // Sub-geometry selection is exclusive with multi-object selection.
           selectItem(null);
+          // Remove the hover overlay so the persistent selection highlight
+          // becomes immediately visible at click time (same rationale as in
+          // the face-commit branch above).
+          clearEdgeHighlight();
         } else {
           // Normal click: select item and clear sub-geometry selection.
           useStore.getState().clearSelectedSubGeometry();

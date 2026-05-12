@@ -167,16 +167,23 @@ function applyBevel(geometry, edgePairs, amount, segments) {
   const posArr = Array.from(indexed.getAttribute("position").array);
   const idxArr = Array.from(indexed.index.array);
 
+  // ── Phase 1: discover adjacency for every edge BEFORE any modifications ──
+  // When multiple bevelled edges share a corner, the second edge's expected
+  // adjacent triangles would otherwise be destroyed by the first edge's
+  // coplanar replacement.  Snapshot the original adjacency up front so each
+  // edge is processed against the unmodified geometry.
+  const plans = [];
+  const posKey = (p) =>
+    `${Math.round(p.x * 1e4)},${Math.round(p.y * 1e4)},${Math.round(p.z * 1e4)}`;
+
   for (const ep of edgePairs) {
     const posA = new THREE.Vector3(ep.ax, ep.ay, ep.az);
     const posB = new THREE.Vector3(ep.bx, ep.by, ep.bz);
     const idxA = findVerticesAtPos(posArr, posA);
     const idxB = findVerticesAtPos(posArr, posB);
     if (idxA.length === 0 || idxB.length === 0) continue;
-
     const adjTris = findEdgeTriangles(idxArr, idxA, idxB);
-    if (adjTris.length !== 2) continue; // skip boundary or non-manifold
-
+    if (adjTris.length !== 2) continue;
     const setA = new Set(idxA),
       setB = new Set(idxB);
     const [T1, T2] = adjTris;
@@ -198,7 +205,6 @@ function applyBevel(geometry, edgePairs, amount, segments) {
     );
     const M = PA.clone().add(PB).multiplyScalar(0.5);
 
-    // Compute face normals
     const N1 = new THREE.Vector3()
       .crossVectors(
         new THREE.Vector3().subVectors(PB, PA),
@@ -212,19 +218,40 @@ function applyBevel(geometry, edgePairs, amount, segments) {
       )
       .normalize();
 
-    // Inward bevel direction for each face: from edge midpoint toward the
-    // third vertex, projected onto the face plane and perpendicular to the edge.
     const E = new THREE.Vector3().subVectors(PB, PA).normalize();
     const makeDir = (PC, N) => {
       const raw = new THREE.Vector3().subVectors(PC, M);
-      // Remove normal component (project onto face plane)
       raw.addScaledVector(N, -raw.dot(N));
-      // Remove edge component
       raw.addScaledVector(E, -raw.dot(E));
       return raw.normalize();
     };
     const D1 = makeDir(PC1, N1);
     const D2 = makeDir(PC2, N2);
+
+    plans.push({
+      posA, posB, idxA, idxB, setA, setB,
+      T1, T2, ic1, ic2,
+      PA, PB, M, N1, N2, D1, D2, E,
+    });
+  }
+
+  // Identify corner positions touched by 2+ edges — for these we must skip
+  // coplanar replacement (otherwise the second edge can't find its corner).
+  const cornerHits = new Map();
+  for (const p of plans) {
+    for (const pos of [p.posA, p.posB]) {
+      const k = posKey(pos);
+      cornerHits.set(k, (cornerHits.get(k) || 0) + 1);
+    }
+  }
+  const isSharedCorner = (pos) => (cornerHits.get(posKey(pos)) || 0) > 1;
+
+  // ── Phase 2: apply each plan ─────────────────────────────────────────────
+  for (const plan of plans) {
+    const {
+      posA, idxA, idxB, setA, setB,
+      T1, T2, PA, PB, N1, N2, D1, D2, E,
+    } = plan;
 
     // Build per-face vertex strips (segments+1 positions at A and B ends).
     // Strip[0] = face1 side, Strip[segments] = face2 side.
@@ -288,24 +315,118 @@ function applyBevel(geometry, edgePairs, amount, segments) {
       }
     }
 
-    // Update T1: replace its A and B vertices with strip[0]
+    // Identify the per-face corner vertex indices in T1 and T2.
     const iA1 = [T1.v0, T1.v1, T1.v2].find((v) => setA.has(v));
     const iB1 = [T1.v0, T1.v1, T1.v2].find((v) => setB.has(v));
-    for (let j = 0; j < 3; j++) {
-      if (idxArr[T1.triBase + j] === iA1) idxArr[T1.triBase + j] = stripA[0];
-      else if (idxArr[T1.triBase + j] === iB1)
-        idxArr[T1.triBase + j] = stripB[0];
-    }
-
-    // Update T2: replace its A and B vertices with strip[segments]
     const iA2 = [T2.v0, T2.v1, T2.v2].find((v) => setA.has(v));
     const iB2 = [T2.v0, T2.v1, T2.v2].find((v) => setB.has(v));
-    for (let j = 0; j < 3; j++) {
-      if (idxArr[T2.triBase + j] === iA2)
-        idxArr[T2.triBase + j] = stripA[segments];
-      else if (idxArr[T2.triBase + j] === iB2)
-        idxArr[T2.triBase + j] = stripB[segments];
+
+    // Replace corner indices in T1/T2 AND in any coplanar sibling triangles
+    // (BoxGeometry has 2 triangles per face — both must move together so the
+    // face's internal diagonal stays joined).
+    const isCoplanarWith = (triBase, refNorm) => {
+      const a = idxArr[triBase],
+        b = idxArr[triBase + 1],
+        c = idxArr[triBase + 2];
+      const pa = new THREE.Vector3(posArr[a*3], posArr[a*3+1], posArr[a*3+2]);
+      const pb = new THREE.Vector3(posArr[b*3], posArr[b*3+1], posArr[b*3+2]);
+      const pc = new THREE.Vector3(posArr[c*3], posArr[c*3+1], posArr[c*3+2]);
+      const n = new THREE.Vector3()
+        .crossVectors(
+          new THREE.Vector3().subVectors(pb, pa),
+          new THREE.Vector3().subVectors(pc, pa),
+        )
+        .normalize();
+      return n.dot(refNorm) > 0.999;
+    };
+
+    // Skip coplanar replacement for corner positions shared with another
+    // bevel edge — that corner must still be findable for the other edge.
+    // T1 and T2 themselves are always modified (direct replacement).
+    const skipA = isSharedCorner(plan.posA);
+    const skipB = isSharedCorner(plan.posB);
+    for (let t = 0; t < idxArr.length; t += 3) {
+      const isT1 = t === T1.triBase;
+      const isT2 = t === T2.triBase;
+      const coplN1 = isT1 || isCoplanarWith(t, N1);
+      const coplN2 = isT2 || isCoplanarWith(t, N2);
+      for (let j = 0; j < 3; j++) {
+        const v = idxArr[t + j];
+        if (coplN1) {
+          if (v === iA1 && (isT1 || !skipA)) idxArr[t + j] = stripA[0];
+          else if (v === iB1 && (isT1 || !skipB)) idxArr[t + j] = stripB[0];
+        }
+        if (coplN2) {
+          if (v === iA2 && (isT2 || !skipA)) idxArr[t + j] = stripA[segments];
+          else if (v === iB2 && (isT2 || !skipB)) idxArr[t + j] = stripB[segments];
+        }
+      }
     }
+
+    // ── End-cap fans on perpendicular faces ────────────────────────────────
+    // At each edge endpoint, find a vertex still at the corner position that
+    // belongs to a perpendicular face (one not coplanar with N1 or N2), and
+    // add a fan from that corner to the strip vertices.  This closes the
+    // visible triangular notch where the bevel strip terminates against the
+    // perpendicular face.  (The fan is coplanar with the perpendicular face,
+    // so overlap with the existing corner triangle is not visible.)
+    const findPerpCornerVert = (cornerPos) => {
+      for (let t = 0; t < idxArr.length; t += 3) {
+        const verts = [idxArr[t], idxArr[t + 1], idxArr[t + 2]];
+        const pts = verts.map(
+          (vi) =>
+            new THREE.Vector3(
+              posArr[vi * 3],
+              posArr[vi * 3 + 1],
+              posArr[vi * 3 + 2],
+            ),
+        );
+        // Compute triangle normal; skip bevel-coplanar triangles.
+        const triN = new THREE.Vector3()
+          .crossVectors(
+            new THREE.Vector3().subVectors(pts[1], pts[0]),
+            new THREE.Vector3().subVectors(pts[2], pts[0]),
+          )
+          .normalize();
+        if (Math.abs(triN.dot(N1)) > 0.999 || Math.abs(triN.dot(N2)) > 0.999)
+          continue;
+        for (let k = 0; k < 3; k++) {
+          if (
+            Math.abs(pts[k].x - cornerPos.x) < 1e-4 &&
+            Math.abs(pts[k].y - cornerPos.y) < 1e-4 &&
+            Math.abs(pts[k].z - cornerPos.z) < 1e-4
+          )
+            return { vertIdx: verts[k], norm: triN };
+        }
+      }
+      return null;
+    };
+
+    const addEndCap = (cornerPos, strip, capDir) => {
+      const found = findPerpCornerVert(cornerPos);
+      if (!found) return;
+      const cornerIdx = found.vertIdx;
+      const corner = new THREE.Vector3(
+        posArr[cornerIdx * 3],
+        posArr[cornerIdx * 3 + 1],
+        posArr[cornerIdx * 3 + 2],
+      );
+      for (let s = 0; s < segments; s++) {
+        const i1 = strip[s];
+        const i2 = strip[s + 1];
+        const p1 = new THREE.Vector3(posArr[i1*3], posArr[i1*3+1], posArr[i1*3+2]);
+        const p2 = new THREE.Vector3(posArr[i2*3], posArr[i2*3+1], posArr[i2*3+2]);
+        const triNorm = new THREE.Vector3().crossVectors(
+          new THREE.Vector3().subVectors(p1, corner),
+          new THREE.Vector3().subVectors(p2, corner),
+        );
+        if (triNorm.dot(capDir) >= 0) idxArr.push(cornerIdx, i1, i2);
+        else idxArr.push(cornerIdx, i2, i1);
+      }
+    };
+
+    addEndCap(PA, stripA, E.clone().negate());
+    addEndCap(PB, stripB, E);
   }
 
   const result = new THREE.BufferGeometry();

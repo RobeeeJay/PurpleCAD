@@ -1164,4 +1164,610 @@ describe("enforceConstraints", () => {
       assertCoincidesHold(result, constraints);
     });
   });
+
+  // ══ STRESS / REGRESSION COVERAGE FOR COINCIDENT VIOLATIONS ═══════════════
+  //
+  // These tests target failure modes where a *coincident* constraint can be
+  // silently circumvented during a drag operation. Each describes a real-world
+  // scenario where naïve solvers (or buggy edits to enforceConstraints) tend
+  // to leave one endpoint detached.
+
+  // Helper for chaining: build N collinear lines with end-to-start coincidents.
+  function chainOfLines(n) {
+    const shapes = [];
+    const constraints = [];
+    for (let i = 0; i < n; i++) shapes.push(L(i, 0, i + 1, 0));
+    for (let i = 0; i < n - 1; i++)
+      constraints.push(coin(i, "end", i + 1, "start"));
+    return { shapes, constraints };
+  }
+
+  // ── Incremental drag (simulate real cursor motion) ───────────────────────
+  describe("incremental drag preserves coincidents at every step", () => {
+    it("rectangle TL dragged through 50 tiny steps → no detachment ever", () => {
+      let { shapes, constraints } = makeRect();
+      // Walk TL from (0,2) → (3, 5) in 50 steps. At every step we must remain
+      // structurally valid: a single missed propagation in any step would leave
+      // an endpoint gap that persists for the rest of the drag.
+      const startPos = { x: 0, y: 2 };
+      const endPos = { x: 3, y: 5 };
+      const N = 50;
+      for (let i = 1; i <= N; i++) {
+        const t = i / N;
+        const target = {
+          x: startPos.x + t * (endPos.x - startPos.x),
+          y: startPos.y + t * (endPos.y - startPos.y),
+        };
+        shapes = apply(shapes, constraints, 0, "start", target);
+        assertCoincidesHold(shapes, constraints);
+      }
+      // Final position reached.
+      expect(pt(shapes, 0, "start")).toMatchObject({
+        x: expect.closeTo(endPos.x),
+        y: expect.closeTo(endPos.y),
+      });
+    });
+
+    it("rectangle+diagonal TL dragged through 30 steps → diagonal stays connected", () => {
+      let { shapes, constraints } = makeRectDiag();
+      const N = 30;
+      for (let i = 1; i <= N; i++) {
+        const target = { x: -i * 0.1, y: 2 + i * 0.15 };
+        shapes = apply(shapes, constraints, 3, "end", target);
+        assertCoincidesHold(shapes, constraints);
+      }
+    });
+
+    it("3-line chain end-walk in steps → propagation never falls behind", () => {
+      let { shapes, constraints } = threeLines();
+      // Drag L0.end around a circular path. L1.start must stay glued at every
+      // step. A bug that only fires on large jumps would survive a single
+      // assertion but die here.
+      for (let k = 0; k < 24; k++) {
+        const a = (k / 24) * 2 * Math.PI;
+        const target = { x: 1 + 0.5 * Math.cos(a), y: 0.5 * Math.sin(a) };
+        shapes = apply(shapes, constraints, 0, "end", target);
+        assertCoincidesHold(shapes, constraints);
+      }
+    });
+  });
+
+  // ── Body drag (preSeeded primary only, neighbors NOT preseeded) ──────────
+  // Real cameraControls.js path when the user drags a shape body without
+  // pre-collecting a rigid group: only the dragged shape is preseeded, and
+  // the coincident BFS must drag every neighbor along.
+  describe("body drag with single-shape preSeeded → neighbors follow", () => {
+    it("translate L0 only (preSeeded) → L1.start follows via coincident", () => {
+      const { shapes, constraints } = twoLinesH();
+      const movedL0 = L(0, 3, 1, 3); // L0 translated up by 3
+      const preSeeded = new Map([[0, movedL0]]);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        movedL0,
+        null,
+        preSeeded,
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+      assertCoincidesHold(result, constraints);
+      // L1.start should be at L0.end = (1, 3)
+      expect(pt(result, 1, "start")).toMatchObject({
+        x: expect.closeTo(1),
+        y: expect.closeTo(3),
+      });
+      // L1.end stays at its original position (only L1.start was pulled)
+      expect(pt(result, 1, "end")).toMatchObject({
+        x: expect.closeTo(2),
+        y: expect.closeTo(0),
+      });
+    });
+
+    it("translate middle of a chain (only L1 preSeeded) → both neighbors pull", () => {
+      // Body-drag L1 by (+0.5, +1). L0.end and L2.start should both follow.
+      const { shapes, constraints } = threeLines();
+      const movedL1 = L(1.5, 1, 2.5, 1);
+      const preSeeded = new Map([[1, movedL1]]);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        1,
+        movedL1,
+        null,
+        preSeeded,
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+      assertCoincidesHold(result, constraints);
+      // L0.end pulled to L1.start = (1.5, 1)
+      expect(pt(result, 0, "end")).toMatchObject({
+        x: expect.closeTo(1.5),
+        y: expect.closeTo(1),
+      });
+      // L2.start pulled to L1.end = (2.5, 1)
+      expect(pt(result, 2, "start")).toMatchObject({
+        x: expect.closeTo(2.5),
+        y: expect.closeTo(1),
+      });
+      // Free endpoints stayed
+      expect(pt(result, 0, "start")).toMatchObject({
+        x: expect.closeTo(0),
+        y: expect.closeTo(0),
+      });
+      expect(pt(result, 2, "end")).toMatchObject({
+        x: expect.closeTo(3),
+        y: expect.closeTo(0),
+      });
+    });
+  });
+
+  // ── Long coincident chains ───────────────────────────────────────────────
+  describe("long chains – BFS terminates and constraints hold", () => {
+    it.each([5, 8, 12])(
+      "chain of %i lines: drag head end → next link follows, tail untouched",
+      (n) => {
+        const { shapes, constraints } = chainOfLines(n);
+        const result = apply(shapes, constraints, 0, "end", { x: 1.5, y: 0.7 });
+        assertCoincidesHold(result, constraints);
+        expect(pt(result, 1, "start")).toMatchObject({
+          x: expect.closeTo(1.5),
+          y: expect.closeTo(0.7),
+        });
+        // The far tail (last line, free end) must not have moved.
+        expect(pt(result, n - 1, "end")).toMatchObject({
+          x: expect.closeTo(n),
+          y: expect.closeTo(0),
+        });
+      },
+    );
+
+    it("chain of 10 lines: drag middle node → exactly the two adjacent shapes move", () => {
+      const { shapes, constraints } = chainOfLines(10);
+      // Drag L4.end (= L5.start junction).
+      const result = apply(shapes, constraints, 4, "end", { x: 5, y: 2 });
+      assertCoincidesHold(result, constraints);
+      expect(pt(result, 5, "start")).toMatchObject({
+        x: expect.closeTo(5),
+        y: expect.closeTo(2),
+      });
+      // L3.end (the junction on the other side of L4) is untouched.
+      expect(pt(result, 3, "end")).toMatchObject({
+        x: expect.closeTo(4),
+        y: expect.closeTo(0),
+      });
+      // Far ends of chain unchanged.
+      expect(pt(result, 0, "start")).toMatchObject({
+        x: expect.closeTo(0),
+        y: expect.closeTo(0),
+      });
+      expect(pt(result, 9, "end")).toMatchObject({
+        x: expect.closeTo(10),
+        y: expect.closeTo(0),
+      });
+    });
+  });
+
+  // ── Asymmetric / "backwards" coincident definitions ──────────────────────
+  // The constraint may be authored as coin(A, ..., B, ...) or coin(B, ..., A, ...).
+  // Both forms must propagate equally — `c.shapeAIdx === idx` and
+  // `c.shapeBIdx === idx` branches must both be exercised correctly.
+  describe("coincident constraint order independence", () => {
+    it("backwards definition (B→A instead of A→B) still propagates", () => {
+      const shapes = [L(0, 0, 1, 0), L(1, 0, 2, 0)];
+      const constraints = [coin(1, "start", 0, "end")]; // reversed from twoLinesH()
+      const result = apply(shapes, constraints, 0, "end", { x: 1.5, y: 0.8 });
+      assertCoincidesHold(result, constraints);
+      expect(pt(result, 1, "start")).toMatchObject({
+        x: expect.closeTo(1.5),
+        y: expect.closeTo(0.8),
+      });
+    });
+
+    it("mixed ordering across a rectangle still solves", () => {
+      // Same rectangle but every coincident defined "backwards" from makeRect.
+      const shapes = [L(0, 2, 2, 2), L(2, 2, 2, 0), L(2, 0, 0, 0), L(0, 0, 0, 2)];
+      const constraints = [
+        coin(0, "start", 3, "end"), // reversed
+        coin(1, "start", 0, "end"), // reversed
+        coin(2, "start", 1, "end"), // reversed
+        coin(3, "start", 2, "end"), // reversed
+      ];
+      const result = apply(shapes, constraints, 0, "start", { x: 0.5, y: 2.5 });
+      assertCoincidesHold(result, constraints);
+    });
+
+    it("driving from B-side (originally listed as B) still works", () => {
+      // L0 listed as shapeB. Drag it directly — propagation still must reach L1.
+      const shapes = [L(0, 0, 1, 0), L(1, 0, 2, 0)];
+      const constraints = [coin(1, "start", 0, "end")];
+      const result = apply(shapes, constraints, 1, "start", { x: 0.3, y: 1.2 });
+      assertCoincidesHold(result, constraints);
+      expect(pt(result, 0, "end")).toMatchObject({
+        x: expect.closeTo(0.3),
+        y: expect.closeTo(1.2),
+      });
+    });
+  });
+
+  // ── 4-way and 5-way junctions (over-determined coincidents) ──────────────
+  // Beyond the T-junction (3-way). Each extra branch adds another constraint
+  // that must be propagated.
+  describe("high-degree junctions", () => {
+    it("4-way junction: drag hub → all 3 spokes follow", () => {
+      // L0.end = L1.start = L2.start = L3.start, all meeting at (1, 0).
+      const shapes = [
+        L(0, 0, 1, 0),
+        L(1, 0, 2, 0),
+        L(1, 0, 1, 2),
+        L(1, 0, 1, -2),
+      ];
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(0, "end", 2, "start"),
+        coin(0, "end", 3, "start"),
+      ];
+      const result = apply(shapes, constraints, 0, "end", { x: 1.7, y: 0.5 });
+      assertCoincidesHold(result, constraints);
+      for (const i of [1, 2, 3]) {
+        expect(pt(result, i, "start")).toMatchObject({
+          x: expect.closeTo(1.7),
+          y: expect.closeTo(0.5),
+        });
+      }
+    });
+
+    it("5-way junction: drag one spoke → hub + other 3 spokes all coalesce", () => {
+      // L0..L4 all meeting at (0,0) via their "start" endpoint.
+      const shapes = [
+        L(0, 0, 1, 0),
+        L(0, 0, -1, 0),
+        L(0, 0, 0, 1),
+        L(0, 0, 0, -1),
+        L(0, 0, 1, 1),
+      ];
+      const constraints = [
+        coin(0, "start", 1, "start"),
+        coin(1, "start", 2, "start"),
+        coin(2, "start", 3, "start"),
+        coin(3, "start", 4, "start"),
+      ];
+      const result = apply(shapes, constraints, 4, "start", { x: 2, y: 3 });
+      assertCoincidesHold(result, constraints);
+      for (const i of [0, 1, 2, 3]) {
+        expect(pt(result, i, "start")).toMatchObject({
+          x: expect.closeTo(2),
+          y: expect.closeTo(3),
+        });
+      }
+    });
+
+    it("4-way junction with REDUNDANT closing constraint → still consistent", () => {
+      // Same 4-way hub, but with an extra coincident already implied by the others.
+      // A bad solver might oscillate or break under the over-determined system.
+      const shapes = [
+        L(0, 0, 1, 0),
+        L(1, 0, 2, 0),
+        L(1, 0, 1, 2),
+        L(1, 0, 1, -2),
+      ];
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(0, "end", 2, "start"),
+        coin(0, "end", 3, "start"),
+        coin(1, "start", 2, "start"), // redundant
+        coin(2, "start", 3, "start"), // redundant
+      ];
+      const result = apply(shapes, constraints, 0, "end", { x: 2.5, y: -1 });
+      assertCoincidesHold(result, constraints);
+    });
+  });
+
+  // ── Closed cycles beyond rectangle ───────────────────────────────────────
+  describe("closed polygon cycles", () => {
+    it("pentagon (5 sides): drag one vertex → all coincidents hold", () => {
+      // Regular-ish pentagon. Vertices V0..V4.
+      const V = [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+        { x: 2.6, y: 1.9 },
+        { x: 1, y: 3 },
+        { x: -0.6, y: 1.9 },
+      ];
+      const shapes = V.map((_, i) =>
+        L(V[i].x, V[i].y, V[(i + 1) % 5].x, V[(i + 1) % 5].y),
+      );
+      const constraints = V.map((_, i) =>
+        coin(i, "end", (i + 1) % 5, "start"),
+      );
+      const result = apply(shapes, constraints, 0, "start", { x: -0.5, y: -0.3 });
+      assertCoincidesHold(result, constraints);
+      // Verify other 4 vertices unchanged: a buggy cycle-walk could drag every
+      // vertex in lock-step around the loop.
+      for (let i = 1; i < 5; i++) {
+        expect(pt(result, i, "start")).toMatchObject({
+          x: expect.closeTo(V[i].x),
+          y: expect.closeTo(V[i].y),
+        });
+      }
+    });
+
+    it("two triangles sharing an edge (5 lines, 4 vertices): drag shared-edge endpoint", () => {
+      //          V2
+      //         /  \
+      //   V0 ──┼────V1     V2─V1 is the shared edge between △V0V1V2 and △V1V2V3
+      //         \  /
+      //          V3
+      const V = [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+        { x: 1, y: 1.5 },
+        { x: 1, y: -1.5 },
+      ];
+      // Edges: 0=V0V1, 1=V1V2, 2=V2V0, 3=V1V3, 4=V3V0  (shared edge V1V2 is line 1)
+      const shapes = [
+        L(V[0].x, V[0].y, V[1].x, V[1].y),
+        L(V[1].x, V[1].y, V[2].x, V[2].y),
+        L(V[2].x, V[2].y, V[0].x, V[0].y),
+        L(V[1].x, V[1].y, V[3].x, V[3].y),
+        L(V[3].x, V[3].y, V[0].x, V[0].y),
+      ];
+      const constraints = [
+        // V1 shared by edges 0.end, 1.start, 3.start
+        coin(0, "end", 1, "start"),
+        coin(1, "start", 3, "start"),
+        // V2 shared by 1.end, 2.start
+        coin(1, "end", 2, "start"),
+        // V0 shared by 0.start, 2.end, 4.end
+        coin(0, "start", 2, "end"),
+        coin(2, "end", 4, "end"),
+        // V3 shared by 3.end, 4.start
+        coin(3, "end", 4, "start"),
+      ];
+      // Drag V1 (a high-degree vertex: 3 edges meet here).
+      const result = apply(shapes, constraints, 0, "end", { x: 2.4, y: 0.6 });
+      assertCoincidesHold(result, constraints);
+      expect(pt(result, 1, "start")).toMatchObject({
+        x: expect.closeTo(2.4),
+        y: expect.closeTo(0.6),
+      });
+      expect(pt(result, 3, "start")).toMatchObject({
+        x: expect.closeTo(2.4),
+        y: expect.closeTo(0.6),
+      });
+      // V0 should NOT have moved (it's diagonally opposite).
+      expect(pt(result, 0, "start")).toMatchObject({
+        x: expect.closeTo(V[0].x),
+        y: expect.closeTo(V[0].y),
+      });
+    });
+  });
+
+  // ── Multi-hop H/V side-effect propagation ────────────────────────────────
+  // When dragging through a horizontal-constrained line, H enforcement shifts
+  // the FAR endpoint, which must then propagate to *its* neighbor too.
+  describe("H/V side-effect propagation across multiple hops", () => {
+    it("H-line in middle of chain: drag one end → far end shifts AND its neighbor follows", () => {
+      // L0 free, L1 horizontal, L2 free.
+      //   L0.end = L1.start ; L1.end = L2.start
+      //   Drag L0.start way up → propagates to L1.start → H enforcement
+      //   shifts L1.end's y to match → must propagate to L2.start.
+      const shapes = [L(-1, 0, 0, 0), L(0, 0, 2, 0), L(2, 0, 3, 0)];
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(1, "end", 2, "start"),
+        hvC(1, "horizontal"),
+      ];
+      // Simulate the cameraControls flow: pre-apply H/V to primary, then enforce.
+      const moved0 = moveShapePoint(shapes[0], "end", { x: 0, y: 2 });
+      const updated = enforceConstraints(shapes, constraints, 0, moved0, "end");
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+      assertCoincidesHold(result, constraints);
+      // L1 should now be horizontal at y=2.
+      expect(pt(result, 1, "start").y).toBeCloseTo(2);
+      expect(pt(result, 1, "end").y).toBeCloseTo(2);
+      // L2.start must have followed L1.end up to y=2.
+      expect(pt(result, 2, "start").y).toBeCloseTo(2);
+    });
+
+    it("V-line side-effect: pulled vertical line drags its far neighbor sideways", () => {
+      // L0 vertical (x=0), L0.end coincident with L1.start.
+      // Drag L0.start to x=1 → V enforces L0.end.x = 1 → L1.start must follow.
+      const shapes = [L(0, 0, 0, 2), L(0, 2, 3, 2)];
+      const constraints = [hvC(0, "vertical"), coin(0, "end", 1, "start")];
+      const preEnforced = applyHVEnforcement(
+        moveShapePoint(shapes[0], "start", { x: 1, y: 0 }),
+        "start",
+        constraints,
+        0,
+      );
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preEnforced,
+        "start",
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+      assertCoincidesHold(result, constraints);
+      expect(pt(result, 0, "start").x).toBeCloseTo(1);
+      expect(pt(result, 0, "end").x).toBeCloseTo(1);
+      expect(pt(result, 1, "start").x).toBeCloseTo(1);
+    });
+  });
+
+  // ── Distance enforcement must not detach coincident neighbors ────────────
+  // When a distance constraint moves a shape's endpoint, propagateCoincidentFrom
+  // is supposed to pull connected neighbors. Easy to break by editing the
+  // distance branch and forgetting that call.
+  describe("distance enforcement preserves coincident neighbors", () => {
+    it("same-shape length-constrained line drag → coincident neighbor follows", () => {
+      // L0 length=3, L1.start coincident with L0.end.
+      // Drag L0.start: L0.end slides to keep length=3, L1.start must follow.
+      const shapes = [L(0, 0, 3, 0), L(3, 0, 5, 0)];
+      const constraints = [
+        fixed(0, "start", 0, "end", 3),
+        coin(0, "end", 1, "start"),
+      ];
+      const result = apply(shapes, constraints, 0, "start", { x: 0, y: 1 });
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+      const e = pt(result, 0, "end");
+      expect(pt(result, 1, "start")).toMatchObject({
+        x: expect.closeTo(e.x),
+        y: expect.closeTo(e.y),
+      });
+    });
+
+    it("two-shape distance constraint → coincident neighbor of the corrected shape follows", () => {
+      // L0 free, L1 distance=2 from L0.end. L1.end has a coincident neighbor L2.start.
+      // Drag L0.end → L1.start moves to satisfy distance → L2 must NOT detach
+      // from L1.end (L2.start stays at L1.end since L1.end was not the moved key).
+      const shapes = [L(0, 0, 1, 0), L(3, 0, 4, 0), L(4, 0, 5, 0)];
+      const constraints = [
+        fixed(0, "end", 1, "start", 2),
+        coin(1, "end", 2, "start"),
+      ];
+      const result = apply(shapes, constraints, 0, "end", { x: 2, y: 1 });
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+    });
+
+    it("length-constrained line in a rectangle: dragging adjacent corner → all coincidents hold", () => {
+      // Rectangle with the top side length-locked. Drag TR → top.length triggers
+      // distance adjustment of TL via the anchor relationship, which must
+      // propagate via TL's coincident to left.end.
+      const { shapes, constraints } = makeRect();
+      constraints.push(fixed(0, "start", 0, "end", 2)); // top side length = 2
+      const result = apply(shapes, constraints, 0, "end", { x: 2.7, y: 2 });
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+    });
+  });
+
+  // ── Both endpoints of one shape in different chains ──────────────────────
+  // L1 acts as a "bridge" between two independent chains. Dragging one side
+  // must not allow the other end of L1 to drift away from its own neighbor.
+  describe("bridge shape with both endpoints constrained to separate chains", () => {
+    it("dragging one chain doesn't detach the bridge from the other chain", () => {
+      // L0─L1─L2 chained, and L3 also constrained to L1.end (a side-branch).
+      // Drag L0.start (free end). L1.start follows? No — only L0 moves; L1
+      // unconnected to L0.start. Now drag L0.end:
+      //   L0.end → L1.start (via coincident)
+      //   L1.end is independent of L1.start (line preserves both); L2.start
+      //   should NOT have moved, and L3.start (=L1.end) should also not have moved.
+      const shapes = [
+        L(0, 0, 1, 0),
+        L(1, 0, 2, 0),
+        L(2, 0, 3, 0),
+        L(2, 0, 2, 1),
+      ];
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(1, "end", 2, "start"),
+        coin(1, "end", 3, "start"),
+      ];
+      // Drag L0.end up — L1.start follows. L1.end stays. L3 and L2 stay glued
+      // to L1.end at (2,0).
+      const result = apply(shapes, constraints, 0, "end", { x: 1.2, y: 0.9 });
+      assertCoincidesHold(result, constraints);
+      expect(pt(result, 1, "start")).toMatchObject({
+        x: expect.closeTo(1.2),
+        y: expect.closeTo(0.9),
+      });
+      expect(pt(result, 1, "end")).toMatchObject({
+        x: expect.closeTo(2),
+        y: expect.closeTo(0),
+      });
+      expect(pt(result, 2, "start")).toMatchObject({
+        x: expect.closeTo(2),
+        y: expect.closeTo(0),
+      });
+      expect(pt(result, 3, "start")).toMatchObject({
+        x: expect.closeTo(2),
+        y: expect.closeTo(0),
+      });
+    });
+
+    it("dragging the SHARED bridge endpoint pulls all branches", () => {
+      const shapes = [
+        L(0, 0, 1, 0),
+        L(1, 0, 2, 0),
+        L(2, 0, 3, 0),
+        L(2, 0, 2, 1),
+      ];
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(1, "end", 2, "start"),
+        coin(1, "end", 3, "start"),
+      ];
+      // Drag L1.end (the bridge node where L2 and L3 attach).
+      const result = apply(shapes, constraints, 1, "end", { x: 2.5, y: -0.5 });
+      assertCoincidesHold(result, constraints);
+      expect(pt(result, 2, "start")).toMatchObject({
+        x: expect.closeTo(2.5),
+        y: expect.closeTo(-0.5),
+      });
+      expect(pt(result, 3, "start")).toMatchObject({
+        x: expect.closeTo(2.5),
+        y: expect.closeTo(-0.5),
+      });
+      // L0.end (the other bridge end) is unaffected.
+      expect(pt(result, 0, "end")).toMatchObject({
+        x: expect.closeTo(1),
+        y: expect.closeTo(0),
+      });
+    });
+  });
+
+  // ── Constraint set mutated mid-drag should still solve ───────────────────
+  // Defensive: dragging is incremental, and applications often pass the same
+  // constraints array repeatedly. A solver that mutates the constraints array
+  // (or relies on iteration order) would fail this.
+  describe("constraint array immutability across drags", () => {
+    it("repeated drags do not mutate constraint definitions", () => {
+      const { shapes, constraints } = makeRect();
+      const snapshot = JSON.parse(JSON.stringify(constraints));
+      let cur = shapes;
+      for (let i = 0; i < 10; i++) {
+        cur = apply(cur, constraints, 0, "start", {
+          x: i * 0.1,
+          y: 2 + i * 0.1,
+        });
+      }
+      // Constraints unchanged.
+      expect(constraints).toEqual(snapshot);
+    });
+  });
+
+  // ── Same-endpoint redundant coincidents (chain forms a clique) ───────────
+  describe("redundant coincidents on the same endpoint", () => {
+    it("duplicated coincident has no extra effect", () => {
+      const shapes = [L(0, 0, 1, 0), L(1, 0, 2, 0)];
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(0, "end", 1, "start"), // exact duplicate
+      ];
+      const result = apply(shapes, constraints, 0, "end", { x: 1.7, y: 0.4 });
+      assertCoincidesHold(result, constraints);
+      expect(pt(result, 1, "start")).toMatchObject({
+        x: expect.closeTo(1.7),
+        y: expect.closeTo(0.4),
+      });
+    });
+
+    it("3 shapes all pairwise coincident at one point (triangular clique on a junction)", () => {
+      // L0.end = L1.start, L1.start = L2.start, L0.end = L2.start (clique).
+      const shapes = [L(0, 0, 1, 0), L(1, 0, 2, 0), L(1, 0, 1, 1)];
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(1, "start", 2, "start"),
+        coin(0, "end", 2, "start"),
+      ];
+      const result = apply(shapes, constraints, 0, "end", { x: 1.3, y: -0.2 });
+      assertCoincidesHold(result, constraints);
+    });
+  });
 });
