@@ -9,6 +9,7 @@ const CombineSection = () => {
   const history = useStore((s) => s.history);
   const addItem = useStore((s) => s.addItem);
   const setItemsHidden = useStore((s) => s.setItemsHidden);
+  const curveResolution = useStore((s) => s.curveResolution);
 
   // Non-sketch items from the current selection.
   const selectedEligible = selectedIds
@@ -23,7 +24,10 @@ const CombineSection = () => {
     const selectedItems = selectedEligible;
 
     try {
-      const result = performCsg(selectedItems, operation);
+      // Tessellate primitives at the high-resolution setting so the CSG
+      // result inherits the chord-deviation precision the user selected.
+      const printPrecision = curveResolution === "print" ? 0.01 : null;
+      const result = performCsg(selectedItems, operation, { printPrecision });
       if (!result) {
         // Fewer than two items produced usable geometry (e.g. all were sketches
         // or extrudes without a valid profile).  Nothing to combine.

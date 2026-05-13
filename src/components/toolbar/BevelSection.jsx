@@ -13,6 +13,7 @@ const BevelSection = () => {
   const items = useStore((s) => s.items);
   const modifyItem = useStore((s) => s.modifyItem);
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
+  const curveResolution = useStore((s) => s.curveResolution);
 
   const hasSelection =
     selectedSubGeometry &&
@@ -25,7 +26,11 @@ const BevelSection = () => {
     if (!item) return;
 
     try {
-      const geo = buildItemGeometry(item);
+      // Honour the global high-resolution / print-mode setting so primitives
+      // (sphere / cylinder / torus) are tessellated at the appropriate
+      // chord-deviation precision before the bevel runs.
+      const printPrecision = curveResolution === "print" ? 0.01 : null;
+      const geo = buildItemGeometry(item, { printPrecision });
       if (!geo) return;
 
       const result = applyBevelToSubGeometry(

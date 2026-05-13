@@ -462,6 +462,7 @@ const Viewport = () => {
       composerRef,
       envTextureRef,
       sketchModeRef,
+      printPrecision,
     });
   }, [items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -473,12 +474,17 @@ const Viewport = () => {
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
+    const renderer = rendererRef.current;
+    const resolution = renderer
+      ? renderer.getSize(new THREE.Vector2())
+      : undefined;
     subGeoHighlightGroupRef.current = reconcileSelectionHighlight(
       scene,
       subGeoHighlightGroupRef.current,
       selectedSubGeometry,
       objectsRef.current,
       items,
+      { resolution },
     );
   }, [selectedSubGeometry, items]);
 
@@ -638,6 +644,8 @@ const Viewport = () => {
           composerRef,
           envTextureRef,
           sketchModeRef,
+          printPrecision:
+            useStore.getState().curveResolution === "print" ? 0.01 : null,
         });
         clearSketchGrid();
         const saved = savedCameraStateRef.current;
@@ -966,6 +974,9 @@ const Viewport = () => {
   }, [hoveredId, selectedId, selectedIds]);
 
   // ── Render mode ───────────────────────────────────────────────────────────
+  // Also re-runs on curveResolution changes so the wireframe (and the
+  // primitive shader vs. wireframe swap) picks up the new chord-deviation
+  // precision and matches the smooth shader / CSG / bevel resolution.
 
   useEffect(() => {
     if (!sceneRef.current || !rendererRef.current) return;
@@ -982,13 +993,14 @@ const Viewport = () => {
       composerRef,
       envTextureRef,
       sketchModeRef,
+      printPrecision,
     });
     const isSmooth = renderMode === "smooth";
     if (allSketchGroupRef.current)
       allSketchGroupRef.current.visible = !isSmooth;
     if (sketchShapesGroupRef.current)
       sketchShapesGroupRef.current.visible = !isSmooth;
-  }, [renderMode]);
+  }, [renderMode, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="viewport-container">

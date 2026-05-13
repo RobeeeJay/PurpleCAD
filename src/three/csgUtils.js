@@ -6,20 +6,37 @@ import {
   SUBTRACTION,
   INTERSECTION,
 } from "three-bvh-csg";
-import { polyCentroid } from "./sceneObjects.js";
+import { polyCentroid, fullCircleSegments } from "./sceneObjects.js";
 
 // Builds the THREE.BufferGeometry for a given item, or returns null if the
 // item type does not produce solid geometry (e.g. sketches).
-export function buildItemGeometry(item) {
+//
+// `options.printPrecision` (mm) lets the caller request high-resolution
+// geometry for primitives (sphere / cylinder / torus).  When omitted or
+// null, primitives use the default 32-segment count for preview-quality.
+export function buildItemGeometry(item, options = {}) {
+  const precision = options.printPrecision ?? null;
   switch (item.type) {
     case "cube":
       return new THREE.BoxGeometry(2, 2, 2);
-    case "sphere":
-      return new THREE.SphereGeometry(1.5, 32, 32);
-    case "cylinder":
-      return new THREE.CylinderGeometry(1, 1, 2, 32);
-    case "torus":
-      return new THREE.TorusGeometry(1.0, 0.4, 16, 32);
+    case "sphere": {
+      const widthSegs = fullCircleSegments(1.5, precision, 32);
+      // Height segments are 1 full great-circle (radius = 1.5), so use the
+      // same formula but at half the count (half-arc, pole-to-pole).
+      const heightSegs = Math.max(8, Math.round(widthSegs / 2));
+      return new THREE.SphereGeometry(1.5, widthSegs, heightSegs);
+    }
+    case "cylinder": {
+      const segs = fullCircleSegments(1, precision, 32);
+      return new THREE.CylinderGeometry(1, 1, 2, segs);
+    }
+    case "torus": {
+      // Main ring radius = 1.0, tube radius = 0.4.  Each circle's segment
+      // count is sized to its own radius so the chord deviation matches.
+      const tubularSegs = fullCircleSegments(1.0, precision, 32);
+      const radialSegs = fullCircleSegments(0.4, precision, 16);
+      return new THREE.TorusGeometry(1.0, 0.4, radialSegs, tubularSegs);
+    }
 
     case "extrude": {
       const poly = item.profile?.polygon2D;
@@ -108,7 +125,11 @@ export function buildBrushTransform(item) {
 // Runs the CSG operation on the given items.
 // Returns { position, geometryData } for the new item, or null if the
 // operation cannot be completed (fewer than two items produce valid geometry).
-export function performCsg(selectedItems, operation) {
+//
+// `options.printPrecision` is forwarded to buildItemGeometry so primitives
+// (sphere / cylinder / torus) are tessellated at high resolution when print
+// mode is on.
+export function performCsg(selectedItems, operation, options = {}) {
   const evaluator = new Evaluator();
   const sharedMat = new THREE.MeshStandardMaterial();
 
@@ -122,7 +143,7 @@ export function performCsg(selectedItems, operation) {
   // Collect brushes — skip items whose type doesn't produce solid geometry.
   const brushes = [];
   for (const item of selectedItems) {
-    const geo = buildItemGeometry(item);
+    const geo = buildItemGeometry(item, options);
     if (!geo) continue;
 
     if (!geo.getAttribute("uv")) {

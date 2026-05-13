@@ -7,8 +7,12 @@ import {
 } from "../selectionHighlights.js";
 
 vi.mock("../../store", () => ({ useStore: () => null }));
+// We do NOT mock LineSegments2 / LineSegmentsGeometry / LineMaterial here —
+// the real three.js addon classes are needed so that the produced edge
+// overlay behaves like a real THREE.Object3D (traversable, disposable,
+// .isLineSegments2 etc.). The other Line2/LineGeometry imports are still
+// mocked because they're only pulled in transitively for unrelated tests.
 vi.mock("three/addons/lines/Line2.js", () => ({ Line2: class { computeLineDistances() {} } }));
-vi.mock("three/addons/lines/LineMaterial.js", () => ({ LineMaterial: class {} }));
 vi.mock("three/addons/lines/LineGeometry.js", () => ({ LineGeometry: class { setPositions() {} } }));
 vi.mock("three/addons/environments/RoomEnvironment.js", () => ({ RoomEnvironment: class { dispose() {} } }));
 vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({ EffectComposer: class { dispose() {} addPass() {} } }));
@@ -72,7 +76,7 @@ describe("buildSelectionHighlight – face overlay", () => {
     const group = buildSelectionHighlight(mesh, subGeo);
     expect(group).not.toBeNull();
     const faceMesh = group.children.find(
-      (c) => c.isMesh && !c.isLineSegments,
+      (c) => c.userData.kind === "face",
     );
     expect(faceMesh).toBeDefined();
     // Top face of a 2×2×2 cube has 2 triangles → 6 vertices.
@@ -138,26 +142,41 @@ describe("buildSelectionHighlight – face overlay", () => {
 // ── Edge highlights ──────────────────────────────────────────────────────────
 
 describe("buildSelectionHighlight – edge overlay", () => {
-  it("creates a LineSegments for a single selected edge", () => {
+  it("creates a thick line segment for a single selected edge", () => {
     const subGeo = {
       faces: [],
       edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
     };
     const group = buildSelectionHighlight(makeCubeMesh(), subGeo);
-    const lines = group.children.find((c) => c.isLineSegments);
+    const lines = group.children.find((c) => c.userData.kind === "edge");
     expect(lines).toBeDefined();
-    expect(lines.geometry.getAttribute("position").count).toBe(2);
+    // LineSegmentsGeometry stores each segment as an instanced pair; the
+    // segment count is on the per-instance start attribute.
+    expect(lines.geometry.attributes.instanceStart.count).toBe(1);
   });
 
-  it("edge overlay uses a darker yellow than the hover yellow", () => {
+  it("edge overlay uses a saturated orange so the line is clearly visible", () => {
+    // WebGL clamps LineBasicMaterial line widths to 1px, which makes a thin
+    // mustard line read as "dark" / invisible. We use a real thick LineMaterial
+    // AND a bright contrasting colour so the selection is unmistakable.
     const subGeo = {
       faces: [],
       edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
     };
     const group = buildSelectionHighlight(makeCubeMesh(), subGeo);
     const lines = group.children[0];
-    expect(lines.material.color.getHex()).toBe(0xaa8800);
+    expect(lines.material.color.getHex()).toBe(0xff5500);
     expect(lines.material.color.getHex()).not.toBe(0xffdd00); // not the hover yellow
+  });
+
+  it("edge overlay has a real pixel linewidth (> 1) so it's visible in WebGL", () => {
+    const subGeo = {
+      faces: [],
+      edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
+    };
+    const group = buildSelectionHighlight(makeCubeMesh(), subGeo);
+    const lines = group.children[0];
+    expect(lines.material.linewidth).toBeGreaterThan(1);
   });
 
   it("edge overlay disables depth test so the line is visible over the mesh", () => {
@@ -181,9 +200,10 @@ describe("buildSelectionHighlight – edge overlay", () => {
       edges_unused: 0,
     };
     const group = buildSelectionHighlight(makeCubeMesh(), subGeo);
-    const lines = group.children.find((c) => c.isLineSegments);
-    // 3 edges × 2 endpoints = 6 vertices.
-    expect(lines.geometry.getAttribute("position").count).toBe(6);
+    const lines = group.children.find((c) => c.userData.kind === "edge");
+    // LineSegmentsGeometry uses instanced rendering; the segment count is on
+    // instanceStart, not the base position attribute.
+    expect(lines.geometry.attributes.instanceStart.count).toBe(3);
   });
 });
 
@@ -197,8 +217,8 @@ describe("buildSelectionHighlight – mixed faces + edges", () => {
     };
     const group = buildSelectionHighlight(makeCubeMesh(), subGeo);
     expect(group.children.length).toBe(2);
-    expect(group.children.some((c) => c.isMesh && !c.isLineSegments)).toBe(true);
-    expect(group.children.some((c) => c.isLineSegments)).toBe(true);
+    expect(group.children.some((c) => c.userData.kind === "face")).toBe(true);
+    expect(group.children.some((c) => c.userData.kind === "edge")).toBe(true);
   });
 });
 
@@ -246,8 +266,8 @@ describe("buildSelectionHighlight – options", () => {
       faceColor: 0x123456,
       edgeColor: 0xabcdef,
     });
-    const faceMesh = group.children.find((c) => c.isMesh && !c.isLineSegments);
-    const lines = group.children.find((c) => c.isLineSegments);
+    const faceMesh = group.children.find((c) => c.userData.kind === "face");
+    const lines = group.children.find((c) => c.userData.kind === "edge");
     expect(faceMesh.material.color.getHex()).toBe(0x123456);
     expect(lines.material.color.getHex()).toBe(0xabcdef);
   });
@@ -302,7 +322,7 @@ describe("selection highlight scene lifecycle", () => {
     // And it must still have visible material settings (depthTest:false,
     // transparent, non-zero opacity, high renderOrder).
     const faceOverlay = selectionGroup.children.find(
-      (c) => c.isMesh && !c.isLineSegments,
+      (c) => c.userData.kind === "face",
     );
     expect(faceOverlay).toBeDefined();
     expect(faceOverlay.material.depthTest).toBe(false);
@@ -345,7 +365,7 @@ describe("selection highlight scene lifecycle", () => {
     expect(scene.children).toContain(group);
     // The line segments should have depthTest:false so the edge is visible
     // through the mesh from any angle.
-    const lines = group.children.find((c) => c.isLineSegments);
+    const lines = group.children.find((c) => c.userData.kind === "edge");
     expect(lines.material.depthTest).toBe(false);
   });
 });
@@ -418,6 +438,94 @@ describe("buildSelectionHighlight – primitive item types", () => {
     const overlay = group.children.find((c) => c.isMesh);
     expect(overlay).toBeDefined();
     expect(overlay.geometry.getAttribute("position").count).toBeGreaterThan(0);
+  });
+
+  it("primitive face-selection overlay matches the shader's exact radii (no inflated 'halo' past the object)", () => {
+    // Previously the overlay used 1.53 / 1.015 / 1.01-0.42 as z-fighting
+    // insurance, which made the highlight visibly larger than the actual
+    // primitive.  The overlay material uses depthTest:false + high render
+    // order, so inflation isn't needed — and these tests pin the bounding
+    // box of the overlay to the shader's exact dimensions.
+    {
+      const mesh = makePrimitiveMesh("sphere");
+      const group = buildSelectionHighlight(
+        mesh,
+        { faces: [{ nx: 0, ny: 1, nz: 0 }], edges: [] },
+        { itemType: "sphere" },
+      );
+      const overlay = group.children.find((c) => c.userData.kind === "face");
+      const bbox = new THREE.Box3().setFromBufferAttribute(
+        overlay.geometry.getAttribute("position"),
+      );
+      // Sphere radius 1.5; bbox half-extent must equal 1.5 (no inflation).
+      expect(bbox.max.x).toBeLessThanOrEqual(1.5 + 1e-3);
+      expect(bbox.min.x).toBeGreaterThanOrEqual(-1.5 - 1e-3);
+    }
+    {
+      const mesh = makePrimitiveMesh("cylinder");
+      const group = buildSelectionHighlight(
+        mesh,
+        { faces: [{ nx: 1, ny: 0, nz: 0 }], edges: [] },
+        { itemType: "cylinder" },
+      );
+      const overlay = group.children.find((c) => c.userData.kind === "face");
+      const bbox = new THREE.Box3().setFromBufferAttribute(
+        overlay.geometry.getAttribute("position"),
+      );
+      // Cylinder radius 1, height 2.
+      expect(bbox.max.x).toBeLessThanOrEqual(1.0 + 1e-3);
+      expect(bbox.max.y).toBeLessThanOrEqual(1.0 + 1e-3); // height/2
+      expect(bbox.min.y).toBeGreaterThanOrEqual(-1.0 - 1e-3);
+    }
+    {
+      const mesh = makePrimitiveMesh("torus");
+      const group = buildSelectionHighlight(
+        mesh,
+        { faces: [{ nx: 0, ny: 1, nz: 0 }], edges: [] },
+        { itemType: "torus" },
+      );
+      const overlay = group.children.find((c) => c.userData.kind === "face");
+      const bbox = new THREE.Box3().setFromBufferAttribute(
+        overlay.geometry.getAttribute("position"),
+      );
+      // Torus main r=1, tube=0.4 → outer x extent = 1.4, y extent = 0.4
+      // (after the -90° X rotation the shader's torus uses).
+      expect(bbox.max.x).toBeLessThanOrEqual(1.4 + 1e-3);
+      expect(bbox.max.y).toBeLessThanOrEqual(0.4 + 1e-3);
+    }
+  });
+
+  it("primitive face-selection overlay tessellates at DISPLAY_PRECISION (smooth, matches shader)", () => {
+    // Pin the *minimum* triangle count for primitive face-selection overlays
+    // so they match the smooth-rendered shape, not the previous 16-/20-segment
+    // hardcoded geometry.  At DISPLAY_PRECISION_MM = 0.01 mm:
+    //   sphere r=1.53  → ~88 width × ~44 height = ~3800 vertices
+    //   cylinder r=1.015 → ~70 radial → SphereGeometry-like vertex count
+    //   torus tube r=0.42 → ~46 radial × ~70 tubular
+    // We assert "well above the old hardcoded count" rather than an exact
+    // number, so the test stays stable if DISPLAY_PRECISION_MM changes
+    // slightly.
+    const types = [
+      { type: "sphere", minVerts: 200 }, // was 20 × 16 ≈ 360 verts; smooth ≈ 3800
+      { type: "cylinder", minVerts: 50 }, // was 24 segs ≈ 100 verts; smooth ≈ 290
+      { type: "torus", minVerts: 200 }, // was 16 × 32 ≈ 580 verts; smooth ≈ 3200
+    ];
+    for (const { type, minVerts } of types) {
+      const mesh = makePrimitiveMesh(type);
+      const normal =
+        type === "torus" ? { nx: 0, ny: 1, nz: 0 } : { nx: 0.577, ny: 0.577, nz: 0.577 };
+      const group = buildSelectionHighlight(
+        mesh,
+        { faces: [normal], edges: [] },
+        { itemType: type },
+      );
+      const overlay = group.children.find((c) => c.userData.kind === "face");
+      // matchVerts counts ALL triangles' positions (every tri = 3 positions),
+      // so the count = 3 × triangle count.  Tied to the tessellation density.
+      expect(overlay.geometry.getAttribute("position").count).toBeGreaterThan(
+        minVerts,
+      );
+    }
   });
 
   it("torus: produces a highlight overlay covering the whole surface", () => {
@@ -599,7 +707,7 @@ describe("reconcileSelectionHighlight", () => {
     //    missing in the bug report.
     expect(scene.children).toContain(selectionGroup);
     const overlay = selectionGroup.children.find(
-      (c) => c.isMesh && !c.isLineSegments,
+      (c) => c.userData.kind === "face",
     );
     expect(overlay).toBeDefined();
     // And it must still render visibly (depthTest:false + non-zero opacity).

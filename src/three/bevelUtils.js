@@ -2,36 +2,46 @@ import * as THREE from "three";
 
 // ── Topology helpers ──────────────────────────────────────────────────────────
 
-// Convert a non-indexed geometry to an indexed one by merging vertices that
-// share the same position within `eps`.  Returns the same object unchanged if
-// it is already indexed.
+// Convert any input geometry to an indexed geometry whose vertex positions
+// are deduplicated within `eps`.  Critically this must work for ALREADY
+// indexed geometries too (e.g. CylinderGeometry's cap, where the center
+// vertex is duplicated across all cap triangles): without position
+// deduplication, the boundary-edge walk would treat every "spoke" from the
+// cap center as a boundary edge, exploding into ~3x as many "edges" to bevel.
 export function mergeVertices(geometry, eps = 1e-4) {
-  if (geometry.index) return geometry;
   const posAttr = geometry.getAttribute("position");
+  const oldIndex = geometry.index ? geometry.index.array : null;
   const uniquePos = []; // flat [x,y,z, ...]
-  const newIndices = [];
+  const oldToNew = new Map(); // old vertex index → canonical index
+  const keyFor = (x, y, z) => {
+    const q = 1 / eps;
+    return (
+      Math.round(x * q) +
+      "," +
+      Math.round(y * q) +
+      "," +
+      Math.round(z * q)
+    );
+  };
+  const keyToIdx = new Map();
 
   for (let i = 0; i < posAttr.count; i++) {
     const x = posAttr.getX(i),
       y = posAttr.getY(i),
       z = posAttr.getZ(i);
-    let found = -1;
-    for (let j = 0; j < uniquePos.length / 3; j++) {
-      if (
-        Math.abs(uniquePos[j * 3] - x) < eps &&
-        Math.abs(uniquePos[j * 3 + 1] - y) < eps &&
-        Math.abs(uniquePos[j * 3 + 2] - z) < eps
-      ) {
-        found = j;
-        break;
-      }
-    }
-    if (found === -1) {
-      found = uniquePos.length / 3;
+    const k = keyFor(x, y, z);
+    let canonical = keyToIdx.get(k);
+    if (canonical === undefined) {
+      canonical = uniquePos.length / 3;
       uniquePos.push(x, y, z);
+      keyToIdx.set(k, canonical);
     }
-    newIndices.push(found);
+    oldToNew.set(i, canonical);
   }
+
+  const newIndices = oldIndex
+    ? Array.from(oldIndex, (i) => oldToNew.get(i))
+    : Array.from(oldToNew.values());
 
   const result = new THREE.BufferGeometry();
   result.setAttribute(
@@ -205,18 +215,37 @@ function applyBevel(geometry, edgePairs, amount, segments) {
     );
     const M = PA.clone().add(PB).multiplyScalar(0.5);
 
-    const N1 = new THREE.Vector3()
-      .crossVectors(
-        new THREE.Vector3().subVectors(PB, PA),
-        new THREE.Vector3().subVectors(PC1, PA),
-      )
-      .normalize();
-    const N2 = new THREE.Vector3()
-      .crossVectors(
-        new THREE.Vector3().subVectors(PB, PA),
-        new THREE.Vector3().subVectors(PC2, PA),
-      )
-      .normalize();
+    // Compute face normals using each triangle's OWN vertex winding order
+    // (rather than a fixed PA→PB→PC order) so the resulting normal is the
+    // actual outward face normal, not flipped to inward depending on which
+    // endpoint of the edge happened to be PA vs PB.  This matters for:
+    //   (1) the bevel strip's outward-direction check (wrong flip otherwise),
+    //   (2) Phase 3's shared-face detection between paired edges.
+    const computeTriNormal = (tri) => {
+      const p0 = new THREE.Vector3(
+        posArr[tri.v0 * 3],
+        posArr[tri.v0 * 3 + 1],
+        posArr[tri.v0 * 3 + 2],
+      );
+      const p1 = new THREE.Vector3(
+        posArr[tri.v1 * 3],
+        posArr[tri.v1 * 3 + 1],
+        posArr[tri.v1 * 3 + 2],
+      );
+      const p2 = new THREE.Vector3(
+        posArr[tri.v2 * 3],
+        posArr[tri.v2 * 3 + 1],
+        posArr[tri.v2 * 3 + 2],
+      );
+      return new THREE.Vector3()
+        .crossVectors(
+          new THREE.Vector3().subVectors(p1, p0),
+          new THREE.Vector3().subVectors(p2, p0),
+        )
+        .normalize();
+    };
+    const N1 = computeTriNormal(T1);
+    const N2 = computeTriNormal(T2);
 
     const E = new THREE.Vector3().subVectors(PB, PA).normalize();
     const makeDir = (PC, N) => {
@@ -363,16 +392,65 @@ function applyBevel(geometry, edgePairs, amount, segments) {
       }
     }
 
-    // ── End-cap fans on perpendicular faces ────────────────────────────────
-    // At each edge endpoint, find a vertex still at the corner position that
-    // belongs to a perpendicular face (one not coplanar with N1 or N2), and
-    // add a fan from that corner to the strip vertices.  This closes the
-    // visible triangular notch where the bevel strip terminates against the
-    // perpendicular face.  (The fan is coplanar with the perpendicular face,
-    // so overlap with the existing corner triangle is not visible.)
-    const findPerpCornerVert = (cornerPos) => {
+    // (Perpendicular-face re-triangulation is deferred to Phase 4 below so
+    // that its `idxArr.splice` operations don't shift other plans' captured
+    // `T1.triBase`/`T2.triBase` indices mid-iteration.)
+    const retriangulateCorner = (cornerPos, stripFirst, stripLast, N1, N2) => {
+      const stripFirstPos = new THREE.Vector3(
+        posArr[stripFirst * 3],
+        posArr[stripFirst * 3 + 1],
+        posArr[stripFirst * 3 + 2],
+      );
+      const stripLastPos = new THREE.Vector3(
+        posArr[stripLast * 3],
+        posArr[stripLast * 3 + 1],
+        posArr[stripLast * 3 + 2],
+      );
+
+      const eps = 1e-4;
+      const matchesCorner = (vi) =>
+        Math.abs(posArr[vi * 3] - cornerPos.x) < eps &&
+        Math.abs(posArr[vi * 3 + 1] - cornerPos.y) < eps &&
+        Math.abs(posArr[vi * 3 + 2] - cornerPos.z) < eps;
+
+      // Is `stripPos` on the segment from cornerPos to vertex at index `vi`?
+      const stripOnEdge = (stripPos, vi) => {
+        const px = posArr[vi * 3],
+          py = posArr[vi * 3 + 1],
+          pz = posArr[vi * 3 + 2];
+        const ex = px - cornerPos.x,
+          ey = py - cornerPos.y,
+          ez = pz - cornerPos.z;
+        const sx = stripPos.x - cornerPos.x,
+          sy = stripPos.y - cornerPos.y,
+          sz = stripPos.z - cornerPos.z;
+        const eLen2 = ex * ex + ey * ey + ez * ez;
+        if (eLen2 < 1e-12) return false;
+        const t = (sx * ex + sy * ey + sz * ez) / eLen2;
+        if (t < 1e-4 || t > 1 - 1e-4) return false;
+        const projX = cornerPos.x + t * ex,
+          projY = cornerPos.y + t * ey,
+          projZ = cornerPos.z + t * ez;
+        const dx = stripPos.x - projX,
+          dy = stripPos.y - projY,
+          dz = stripPos.z - projZ;
+        return dx * dx + dy * dy + dz * dz < eps * eps;
+      };
+
+      // Find all perpendicular-face triangles that contain a vertex at
+      // cornerPos.
+      const perpTris = [];
       for (let t = 0; t < idxArr.length; t += 3) {
         const verts = [idxArr[t], idxArr[t + 1], idxArr[t + 2]];
+        let cornerSlot = -1;
+        for (let k = 0; k < 3; k++) {
+          if (matchesCorner(verts[k])) {
+            cornerSlot = k;
+            break;
+          }
+        }
+        if (cornerSlot === -1) continue;
+        // Skip bevel-coplanar triangles (already handled by Phase 2).
         const pts = verts.map(
           (vi) =>
             new THREE.Vector3(
@@ -381,52 +459,260 @@ function applyBevel(geometry, edgePairs, amount, segments) {
               posArr[vi * 3 + 2],
             ),
         );
-        // Compute triangle normal; skip bevel-coplanar triangles.
         const triN = new THREE.Vector3()
           .crossVectors(
             new THREE.Vector3().subVectors(pts[1], pts[0]),
             new THREE.Vector3().subVectors(pts[2], pts[0]),
           )
           .normalize();
-        if (Math.abs(triN.dot(N1)) > 0.999 || Math.abs(triN.dot(N2)) > 0.999)
+        if (
+          Math.abs(triN.dot(N1)) > 0.999 ||
+          Math.abs(triN.dot(N2)) > 0.999
+        )
           continue;
-        for (let k = 0; k < 3; k++) {
-          if (
-            Math.abs(pts[k].x - cornerPos.x) < 1e-4 &&
-            Math.abs(pts[k].y - cornerPos.y) < 1e-4 &&
-            Math.abs(pts[k].z - cornerPos.z) < 1e-4
-          )
-            return { vertIdx: verts[k], norm: triN };
+        perpTris.push({ triBase: t, verts, cornerSlot, triN });
+      }
+      if (perpTris.length === 0) return;
+
+      const toRemove = [];
+      const toAdd = [];
+      // Each pending Case-C entry: a triangle that retained v_corner in one
+      // of its sub-triangles after a single-strip subdivision.  We expect
+      // these to come in pairs sharing the "otherVert" (the diagonal vertex
+      // of the original face quad).  We close the gap between paired Case-C
+      // entries with one merger triangle (stripA, otherVert, stripB).
+      const pending = []; // { strip, otherVert, triN }
+
+      const emitWith = (v0, v1, v2, triN) => {
+        const p0 = new THREE.Vector3(
+          posArr[v0 * 3],
+          posArr[v0 * 3 + 1],
+          posArr[v0 * 3 + 2],
+        );
+        const p1 = new THREE.Vector3(
+          posArr[v1 * 3],
+          posArr[v1 * 3 + 1],
+          posArr[v1 * 3 + 2],
+        );
+        const p2 = new THREE.Vector3(
+          posArr[v2 * 3],
+          posArr[v2 * 3 + 1],
+          posArr[v2 * 3 + 2],
+        );
+        const n = new THREE.Vector3().crossVectors(
+          new THREE.Vector3().subVectors(p1, p0),
+          new THREE.Vector3().subVectors(p2, p0),
+        );
+        if (n.dot(triN) >= 0) toAdd.push(v0, v1, v2);
+        else toAdd.push(v0, v2, v1);
+      };
+
+      for (const tri of perpTris) {
+        const cs = tri.cornerSlot;
+        const p1 = tri.verts[(cs + 1) % 3]; // next CCW
+        const p2 = tri.verts[(cs + 2) % 3]; // prev CCW (or "next next")
+        const firstOnP1 = stripOnEdge(stripFirstPos, p1);
+        const firstOnP2 = stripOnEdge(stripFirstPos, p2);
+        const lastOnP1 = stripOnEdge(stripLastPos, p1);
+        const lastOnP2 = stripOnEdge(stripLastPos, p2);
+
+        if ((firstOnP1 && lastOnP2) || (firstOnP2 && lastOnP1)) {
+          // Case B: both strips on this triangle's two corner-incident edges.
+          // The corner region (v_corner, stripFirst, stripLast) is the bevel
+          // notch — discard.  Remaining region is a quad split into 2 tris.
+          toRemove.push(tri.triBase);
+          if (firstOnP1 && lastOnP2) {
+            emitWith(stripFirst, p1, p2, tri.triN);
+            emitWith(stripFirst, p2, stripLast, tri.triN);
+          } else {
+            emitWith(stripLast, p1, p2, tri.triN);
+            emitWith(stripLast, p2, stripFirst, tri.triN);
+          }
+        } else if (firstOnP1 || firstOnP2 || lastOnP1 || lastOnP2) {
+          // Case C: exactly one strip lies on one of the triangle's
+          // corner-incident edges.  Subdivide: keep the non-corner sub-tri,
+          // queue the corner sub-tri for pairwise merger.
+          toRemove.push(tri.triBase);
+          let strip, near, far;
+          if (firstOnP1) {
+            strip = stripFirst;
+            near = p1;
+            far = p2;
+          } else if (firstOnP2) {
+            strip = stripFirst;
+            near = p2;
+            far = p1;
+          } else if (lastOnP1) {
+            strip = stripLast;
+            near = p1;
+            far = p2;
+          } else {
+            strip = stripLast;
+            near = p2;
+            far = p1;
+          }
+          // Non-corner sub: (strip, near, far).
+          emitWith(strip, near, far, tri.triN);
+          // The corner sub (v_corner, strip, far) is replaced by a merger
+          // with the paired Case-C triangle.
+          pending.push({ strip, otherVert: far, triN: tri.triN });
+        }
+        // Case D (no strip on any corner-incident edge): triangle isn't
+        // adjacent to the chamfer — leave it alone (no entry in toRemove).
+        // This is rare for cube/CSG meshes; if it occurs the perpendicular
+        // face will still contain v_corner, which is acceptable visually
+        // (the chamfer just shows a tiny coplanar spike).
+      }
+
+      // Pair Case-C entries by their "otherVert" (the shared diagonal of
+      // the perpendicular face quad).  Each matched pair gets one merger
+      // triangle that joins the two strip endpoints across the diagonal.
+      const usedPending = new Array(pending.length).fill(false);
+      for (let i = 0; i < pending.length; i++) {
+        if (usedPending[i]) continue;
+        for (let j = i + 1; j < pending.length; j++) {
+          if (usedPending[j]) continue;
+          if (pending[i].otherVert !== pending[j].otherVert) continue;
+          if (pending[i].strip === pending[j].strip) continue;
+          emitWith(
+            pending[i].strip,
+            pending[i].otherVert,
+            pending[j].strip,
+            pending[i].triN,
+          );
+          usedPending[i] = true;
+          usedPending[j] = true;
+          break;
         }
       }
-      return null;
+
+      // Remove old triangles from highest index down so earlier removals
+      // don't shift later ones.
+      toRemove.sort((a, b) => b - a);
+      for (const t of toRemove) idxArr.splice(t, 3);
+      idxArr.push(...toAdd);
     };
 
-    const addEndCap = (cornerPos, strip, capDir) => {
-      const found = findPerpCornerVert(cornerPos);
-      if (!found) return;
-      const cornerIdx = found.vertIdx;
-      const corner = new THREE.Vector3(
-        posArr[cornerIdx * 3],
-        posArr[cornerIdx * 3 + 1],
-        posArr[cornerIdx * 3 + 2],
-      );
-      for (let s = 0; s < segments; s++) {
-        const i1 = strip[s];
-        const i2 = strip[s + 1];
-        const p1 = new THREE.Vector3(posArr[i1*3], posArr[i1*3+1], posArr[i1*3+2]);
-        const p2 = new THREE.Vector3(posArr[i2*3], posArr[i2*3+1], posArr[i2*3+2]);
-        const triNorm = new THREE.Vector3().crossVectors(
-          new THREE.Vector3().subVectors(p1, corner),
-          new THREE.Vector3().subVectors(p2, corner),
-        );
-        if (triNorm.dot(capDir) >= 0) idxArr.push(cornerIdx, i1, i2);
-        else idxArr.push(cornerIdx, i2, i1);
+    // Stash the strip vertex indices on the plan so Phase 3 + Phase 4 can use them.
+    plan.stripA = stripA;
+    plan.stripB = stripB;
+    plan.iA1 = iA1;
+    plan.iB1 = iB1;
+    plan.iA2 = iA2;
+    plan.iB2 = iB2;
+    // Also remember the perpendicular-face re-triangulator so Phase 4 can run
+    // it AFTER all per-plan modifications are complete (otherwise its
+    // idxArr.splice operations would shift other plans' captured triBases).
+    plan.retriangulateCorner = retriangulateCorner;
+  }
+
+  // ── Phase 3: corner-blend triangles at shared corners ───────────────────
+  // When two beveled edges share a corner, each modifies its own T1/T2 but
+  // the shared face is left with an unfilled quad between the two strip
+  // endpoints, the original corner vertex, and the face's diagonal-opposite
+  // vertex (the "third vertex" of T1).  Walk every pair of plans sharing a
+  // corner+face and emit the two triangles needed to close that quad.
+  const stripEndpointFor = (plan, isPosA, isFace1) => {
+    if (isFace1) return isPosA ? plan.stripA[0] : plan.stripB[0];
+    return isPosA ? plan.stripA[segments] : plan.stripB[segments];
+  };
+  const cornerIdxFor = (plan, isPosA, isFace1) => {
+    if (isFace1) return isPosA ? plan.iA1 : plan.iB1;
+    return isPosA ? plan.iA2 : plan.iB2;
+  };
+  const thirdVertFor = (plan, isFace1) =>
+    isFace1 ? plan.ic1 : plan.ic2;
+  const normalFor = (plan, isFace1) => (isFace1 ? plan.N1 : plan.N2);
+
+  for (let i = 0; i < plans.length; i++) {
+    for (let j = i + 1; j < plans.length; j++) {
+      const A = plans[i],
+        B = plans[j];
+      // Iterate each corner of A vs each corner of B looking for shared
+      // positions.
+      for (const aIsPosA of [true, false]) {
+        for (const bIsPosA of [true, false]) {
+          const aPos = aIsPosA ? A.posA : A.posB;
+          const bPos = bIsPosA ? B.posA : B.posB;
+          if (aPos.distanceTo(bPos) > 1e-4) continue;
+          // Found a shared corner. Find shared bevel face(s) — both A and B
+          // must touch the same face plane at this corner.
+          for (const aIsFace1 of [true, false]) {
+            for (const bIsFace1 of [true, false]) {
+              const nA = normalFor(A, aIsFace1);
+              const nB = normalFor(B, bIsFace1);
+              if (nA.dot(nB) < 0.999) continue;
+              // Strip vertices of A and B on this shared face at this corner.
+              const sA = stripEndpointFor(A, aIsPosA, aIsFace1);
+              const sB = stripEndpointFor(B, bIsPosA, bIsFace1);
+              // Original corner vertex index (as used in A's T1/T2) and the
+              // face's third vertex (the diagonal-opposite corner of the
+              // shared face's triangulation).
+              const cornerIdx = cornerIdxFor(A, aIsPosA, aIsFace1);
+              const thirdA = thirdVertFor(A, aIsFace1);
+              const thirdB = thirdVertFor(B, bIsFace1);
+              // We only emit the diagonal-bridge triangle when both A and B
+              // share the same third vertex (true for BoxGeometry's 2-tri
+              // face triangulation).  The corner-fill triangle is always safe.
+              const emitWith = (v0, v1, v2) => {
+                // Choose winding so the triangle's normal aligns with nA
+                // (the outward face normal).
+                const p0 = new THREE.Vector3(
+                  posArr[v0 * 3],
+                  posArr[v0 * 3 + 1],
+                  posArr[v0 * 3 + 2],
+                );
+                const p1 = new THREE.Vector3(
+                  posArr[v1 * 3],
+                  posArr[v1 * 3 + 1],
+                  posArr[v1 * 3 + 2],
+                );
+                const p2 = new THREE.Vector3(
+                  posArr[v2 * 3],
+                  posArr[v2 * 3 + 1],
+                  posArr[v2 * 3 + 2],
+                );
+                const n = new THREE.Vector3().crossVectors(
+                  new THREE.Vector3().subVectors(p1, p0),
+                  new THREE.Vector3().subVectors(p2, p0),
+                );
+                if (n.dot(nA) >= 0) idxArr.push(v0, v1, v2);
+                else idxArr.push(v0, v2, v1);
+              };
+              // Corner-fill: small triangle at the original corner.
+              emitWith(sA, cornerIdx, sB);
+              // Diagonal bridge: only if both T1s share a third vertex.
+              if (thirdA === thirdB) emitWith(sA, thirdA, sB);
+            }
+          }
+        }
       }
-    };
+    }
+  }
 
-    addEndCap(PA, stripA, E.clone().negate());
-    addEndCap(PB, stripB, E);
+  // ── Phase 4: perpendicular-face re-triangulation ────────────────────────
+  // Run AFTER Phase 2 + Phase 3 are complete so that the idxArr.splice calls
+  // inside retriangulateCorner don't invalidate Phase 2's captured triBase
+  // indices (which they would do if invoked mid-iteration).
+  //
+  // The re-triangulator operates on the CURRENT state of idxArr and matches
+  // perpendicular-face triangles by VERTEX POSITION (matchesCorner), so it
+  // remains correct after each prior splice + push within Phase 4.
+  for (const plan of plans) {
+    plan.retriangulateCorner(
+      plan.PA,
+      plan.stripA[0],
+      plan.stripA[segments],
+      plan.N1,
+      plan.N2,
+    );
+    plan.retriangulateCorner(
+      plan.PB,
+      plan.stripB[0],
+      plan.stripB[segments],
+      plan.N1,
+      plan.N2,
+    );
   }
 
   const result = new THREE.BufferGeometry();

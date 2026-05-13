@@ -19,6 +19,8 @@ import {
   rebuildConstraintIconsForDrag,
   rebuildPointDotsForDrag,
   polyArea,
+  fullCircleSegments,
+  DISPLAY_PRECISION_MM,
 } from "./sceneObjects.js";
 import {
   applyHVEnforcement,
@@ -2535,13 +2537,37 @@ export function attachCameraControls(ctx) {
   const clearPointHighlight = () => clearHL(pointHighlightRef);
 
   const primitiveGeoForHighlight = (type) => {
-    if (type === "sphere") return new THREE.SphereGeometry(1.53, 20, 16);
-    if (type === "cylinder")
-      return new THREE.CylinderGeometry(1.015, 1.015, 2.03, 24);
+    // Hover & selection highlights are DISPLAY overlays on the smooth
+    // shader render — they must visually match the shader, not the
+    // (potentially coarse) CSG/bevel resolution.  Always tessellate at
+    // DISPLAY_PRECISION_MM, or finer if the user has print mode enabled.
+    // Radii MUST exactly match the shader's primitive dimensions (sphere
+    // r=1.5, cylinder r=1 h=2, torus r=1 tube=0.4); the previous tiny
+    // inflation (1.53, 1.015, 1.01/0.42) was a z-fighting workaround for
+    // depth-tested materials, but the highlight material uses
+    // depthTest:false + high renderOrder, so an inflated overlay just
+    // visibly extends past the actual primitive.
+    const printPrecisionMm =
+      useStore.getState().curveResolution === "print" ? 0.01 : null;
+    const displayPrecision =
+      printPrecisionMm != null
+        ? Math.min(printPrecisionMm, DISPLAY_PRECISION_MM)
+        : DISPLAY_PRECISION_MM;
+    if (type === "sphere") {
+      const w = fullCircleSegments(1.5, displayPrecision, 32);
+      const h = Math.max(8, Math.round(w / 2));
+      return new THREE.SphereGeometry(1.5, w, h);
+    }
+    if (type === "cylinder") {
+      const s = fullCircleSegments(1, displayPrecision, 32);
+      return new THREE.CylinderGeometry(1, 1, 2, s);
+    }
     if (type === "torus") {
-      // THREE.TorusGeometry ring is in XY plane; our torus shader ring is in XZ plane.
-      // Rotate -90° around X to align.
-      const geo = new THREE.TorusGeometry(1.01, 0.42, 16, 32);
+      // THREE.TorusGeometry ring is in XY plane; our torus shader ring is in
+      // XZ plane.  Rotate -90° around X to align.
+      const tubular = fullCircleSegments(1.0, displayPrecision, 32);
+      const radial = fullCircleSegments(0.4, displayPrecision, 16);
+      const geo = new THREE.TorusGeometry(1.0, 0.4, radial, tubular);
       geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
       return geo;
     }

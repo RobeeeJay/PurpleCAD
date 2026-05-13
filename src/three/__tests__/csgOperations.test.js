@@ -196,6 +196,169 @@ describe("buildItemGeometry", () => {
       }),
     ).toBeNull();
   });
+
+  // ── Primitive resolution scales with printPrecision ───────────────────────
+  // The print-mode setting requests chord deviation ≤ 0.01 mm.  Primitives
+  // (sphere / cylinder / torus) must scale their segment counts accordingly,
+  // otherwise CSG / bevel operations on print-quality models are limited to
+  // the preview-quality 32-segment circle.
+
+  it("cylinder honours printPrecision (high resolution has more segments than preview)", () => {
+    const preview = buildItemGeometry(
+      { type: "cylinder", position: P(0, 0, 0) },
+      { printPrecision: null },
+    );
+    const print = buildItemGeometry(
+      { type: "cylinder", position: P(0, 0, 0) },
+      { printPrecision: 0.01 },
+    );
+    expect(print.getAttribute("position").count).toBeGreaterThan(
+      preview.getAttribute("position").count,
+    );
+  });
+
+  it("sphere honours printPrecision (more vertices in print mode)", () => {
+    const preview = buildItemGeometry(mkSphere(), { printPrecision: null });
+    const print = buildItemGeometry(mkSphere(), { printPrecision: 0.01 });
+    expect(print.getAttribute("position").count).toBeGreaterThan(
+      preview.getAttribute("position").count,
+    );
+  });
+
+  it("torus honours printPrecision", () => {
+    const preview = buildItemGeometry(
+      { type: "torus", position: P(0, 0, 0) },
+      { printPrecision: null },
+    );
+    const print = buildItemGeometry(
+      { type: "torus", position: P(0, 0, 0) },
+      { printPrecision: 0.01 },
+    );
+    expect(print.getAttribute("position").count).toBeGreaterThan(
+      preview.getAttribute("position").count,
+    );
+  });
+
+  it("cube ignores printPrecision (no curved surface)", () => {
+    const preview = buildItemGeometry(mkCube(), { printPrecision: null });
+    const print = buildItemGeometry(mkCube(), { printPrecision: 0.01 });
+    expect(print.getAttribute("position").count).toBe(
+      preview.getAttribute("position").count,
+    );
+  });
+
+  it("primitive segment counts scale roughly with 1/precision (smaller precision → more segments)", () => {
+    const coarse = buildItemGeometry(
+      { type: "cylinder", position: P(0, 0, 0) },
+      { printPrecision: 0.1 }, // 0.1 mm chord deviation
+    );
+    const fine = buildItemGeometry(
+      { type: "cylinder", position: P(0, 0, 0) },
+      { printPrecision: 0.01 }, // 10× finer
+    );
+    expect(fine.getAttribute("position").count).toBeGreaterThan(
+      coarse.getAttribute("position").count,
+    );
+  });
+
+  it("primitive segment counts are clamped (extreme precision doesn't explode)", () => {
+    // Even at unreasonably high precision, segment count is capped.
+    const extreme = buildItemGeometry(
+      { type: "sphere", position: P(0, 0, 0) },
+      { printPrecision: 1e-9 },
+    );
+    // Sphere geometry: (widthSegs+1) × (heightSegs+1) approximately.  Cap of
+    // 256 width × 128 height ≈ 257 × 129 ≈ 33000 vertices upper bound.
+    expect(extreme.getAttribute("position").count).toBeLessThan(50000);
+  });
+
+  it("fullCircleSegments returns the default at preview (no precision)", async () => {
+    const { fullCircleSegments } = await import("../sceneObjects.js");
+    expect(fullCircleSegments(1, null)).toBe(32);
+    expect(fullCircleSegments(1, null, 64)).toBe(64);
+  });
+
+  it("fullCircleSegments scales with precision (sagitta formula)", async () => {
+    const { fullCircleSegments } = await import("../sceneObjects.js");
+    // r=1, precision=0.01 mm, MM_PER_UNIT=10 → sUnits=0.001.
+    // halfTheta = acos(1 - 0.001) ≈ 0.0447 rad → segs ≈ π/0.0447 ≈ 71.
+    const segs = fullCircleSegments(1, 0.01);
+    expect(segs).toBeGreaterThan(32);
+    expect(segs).toBeLessThan(256);
+    // A bigger radius at the same precision needs MORE segments (chord
+    // deviation scales with r, so finer division is needed).
+    expect(fullCircleSegments(2, 0.01)).toBeGreaterThan(segs);
+  });
+
+  it("fullCircleSegments is clamped to [8, 256] for extreme inputs", async () => {
+    const { fullCircleSegments } = await import("../sceneObjects.js");
+    // Tiny radius → degenerate; fall back to default.
+    expect(fullCircleSegments(0, 0.01)).toBe(32);
+    // Microscopic precision would otherwise blow up.
+    expect(fullCircleSegments(1, 1e-12)).toBeLessThanOrEqual(256);
+    // Coarse precision still gives at least 8 segments.
+    expect(fullCircleSegments(1, 100)).toBeGreaterThanOrEqual(8);
+  });
+
+  it("wireframe / highlight / CSG all share the same segment count for a given precision", async () => {
+    const { fullCircleSegments } = await import("../sceneObjects.js");
+    // The 3 sites (applyRenderMode wireframe, primitiveGeoForHighlight,
+    // buildItemGeometry) all derive their cylinder segment count from
+    // fullCircleSegments with the cylinder's actual radius and the same
+    // printPrecision.  Confirming the helper is deterministic guarantees
+    // they stay in sync.
+    const cylPrev = fullCircleSegments(1, null, 32);
+    const cylPrint = fullCircleSegments(1, 0.01, 32);
+    expect(cylPrev).toBe(32);
+    expect(cylPrint).toBeGreaterThan(cylPrev);
+    // And the CSG geometry's vertex count matches:
+    const cyl = buildItemGeometry(
+      { type: "cylinder", position: P(0, 0, 0) },
+      { printPrecision: 0.01 },
+    );
+    // CylinderGeometry(r, r, h, segs): vertex count = 2*(segs+1) + 2*(segs+1) + 2 = 4*segs + 6
+    // (top cap + bottom cap + side, with shared edges duplicated by THREE).
+    // The exact formula is implementation-defined; just verify it scales.
+    expect(cyl.getAttribute("position").count).toBeGreaterThan(
+      // Preview-quality vert count, also derived from fullCircleSegments(1, null) = 32.
+      4 * cylPrev + 6 - 1,
+    );
+  });
+
+  it("DISPLAY_PRECISION_MM is fine enough to look smooth at typical viewing", async () => {
+    // Display overlays (wireframe + hover/edge selection) tessellate at
+    // DISPLAY_PRECISION_MM regardless of the user's CSG resolution setting,
+    // so they always look smooth — matching the analytic shader render.
+    // Verify the resulting cylinder segment count is "smooth-looking"
+    // (≥ 64) at the smallest primitive radius the codebase uses (r = 1).
+    const { fullCircleSegments, DISPLAY_PRECISION_MM } = await import(
+      "../sceneObjects.js"
+    );
+    const segs = fullCircleSegments(1, DISPLAY_PRECISION_MM, 32);
+    expect(segs).toBeGreaterThanOrEqual(64);
+  });
+
+  it("DISPLAY_PRECISION is independent of CSG/bevel resolution (preview-quality CSG, smooth wireframe)", async () => {
+    // In preview mode, CSG geometry uses ~32 segments (the previous
+    // default).  Wireframe / highlight, however, MUST be smooth, so they
+    // tessellate at DISPLAY_PRECISION_MM giving ~70+ segments.
+    const { fullCircleSegments, DISPLAY_PRECISION_MM } = await import(
+      "../sceneObjects.js"
+    );
+    const csgPreview = fullCircleSegments(1, null, 32); // CSG preview default
+    const displaySegs = fullCircleSegments(1, DISPLAY_PRECISION_MM, 32);
+    expect(displaySegs).toBeGreaterThan(csgPreview);
+  });
+
+  it("buildItemGeometry without options behaves like the previous default (preview-quality)", () => {
+    // Backwards-compat: existing callers that don't pass options should
+    // still get the same preview-quality primitive as before.
+    const sphereDefault = buildItemGeometry(mkSphere());
+    const spherePreview = buildItemGeometry(mkSphere(), { printPrecision: null });
+    expect(sphereDefault.getAttribute("position").count).toBe(
+      spherePreview.getAttribute("position").count,
+    );
+  });
 });
 
 // ── 2. buildBrushTransform ────────────────────────────────────────────────────

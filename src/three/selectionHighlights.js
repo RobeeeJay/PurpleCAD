@@ -1,15 +1,33 @@
 import * as THREE from "three";
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import {
+  fullCircleSegments,
+  DISPLAY_PRECISION_MM,
+} from "./sceneObjects.js";
 
 // Returns a geometry to source overlay triangles from.  For primitive types
 // (sphere/cylinder/torus) the on-mesh geometry is just a BoxGeometry stand-in
 // — the actual visible surface is drawn by a shader, so we must synthesize
-// the real shape here.  For everything else we use the mesh's own geometry.
+// the real shape here.  Radii MUST exactly match the shader's primitive
+// dimensions; the overlay material uses depthTest:false + high renderOrder
+// so no z-fighting inflation is needed.  Tessellation uses
+// DISPLAY_PRECISION_MM to look smooth.
 function overlayGeometryFor(hitMesh, itemType) {
-  if (itemType === "sphere") return new THREE.SphereGeometry(1.53, 20, 16);
-  if (itemType === "cylinder")
-    return new THREE.CylinderGeometry(1.015, 1.015, 2.03, 24);
+  if (itemType === "sphere") {
+    const w = fullCircleSegments(1.5, DISPLAY_PRECISION_MM, 32);
+    const h = Math.max(8, Math.round(w / 2));
+    return new THREE.SphereGeometry(1.5, w, h);
+  }
+  if (itemType === "cylinder") {
+    const s = fullCircleSegments(1, DISPLAY_PRECISION_MM, 32);
+    return new THREE.CylinderGeometry(1, 1, 2, s);
+  }
   if (itemType === "torus") {
-    const g = new THREE.TorusGeometry(1.01, 0.42, 16, 32);
+    const tubular = fullCircleSegments(1.0, DISPLAY_PRECISION_MM, 32);
+    const radial = fullCircleSegments(0.4, DISPLAY_PRECISION_MM, 16);
+    const g = new THREE.TorusGeometry(1.0, 0.4, radial, tubular);
     g.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
     return g;
   }
@@ -42,9 +60,11 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
   // visibly darker version of the same blue so the user recognises this as
   // "selected" (and not a different selection mode).
   const faceColor = options.faceColor ?? 0x3377cc;
-  // Edge-select hover uses bright yellow 0xffdd00; selected is a darker
-  // mustard.
-  const edgeColor = options.edgeColor ?? 0xaa8800;
+  // Edge-select hover uses bright yellow 0xffdd00; the selected colour is a
+  // saturated orange so the line stays unmistakably visible on top of the
+  // mesh after the hover is cleared. (WebGL line widths are clamped to 1px,
+  // so colour saturation — not stroke weight — is what makes the line read.)
+  const edgeColor = options.edgeColor ?? 0xff5500;
 
   const group = new THREE.Group();
 
@@ -124,30 +144,41 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
       });
       const hlMesh = new THREE.Mesh(hlGeo, hlMat);
       hlMesh.renderOrder = 995;
+      hlMesh.userData.kind = "face";
       group.add(hlMesh);
     }
   }
 
   // ── Edge overlay ────────────────────────────────────────────────────────
+  // Use LineSegments2 (with LineMaterial) so the line has REAL pixel width
+  // — WebGL clamps LineBasicMaterial.linewidth to 1, which made the
+  // previous LineSegments-based highlight nearly invisible regardless of
+  // colour.  Resolution defaults to the current window size so a stand-alone
+  // caller still gets thick lines; the Viewport passes its own renderer
+  // resolution via options.resolution for pixel-perfect width.
   if (edges.length) {
     const positions = [];
     for (const e of edges) {
       positions.push(e.ax, e.ay, e.az, e.bx, e.by, e.bz);
     }
-    const hlGeo = new THREE.BufferGeometry();
-    hlGeo.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(positions), 3),
-    );
-    const hlLine = new THREE.LineSegments(
-      hlGeo,
-      new THREE.LineBasicMaterial({
-        color: edgeColor,
-        depthTest: false,
-        linewidth: 2,
-      }),
-    );
+    const segGeo = new LineSegmentsGeometry();
+    segGeo.setPositions(positions);
+    const res =
+      options.resolution ??
+      (typeof window !== "undefined"
+        ? new THREE.Vector2(window.innerWidth, window.innerHeight)
+        : new THREE.Vector2(1280, 720));
+    const mat = new LineMaterial({
+      color: edgeColor,
+      linewidth: options.edgeLinewidth ?? 4,
+      depthTest: false,
+      transparent: true,
+      resolution: res,
+    });
+    const hlLine = new LineSegments2(segGeo, mat);
+    hlLine.computeLineDistances();
     hlLine.renderOrder = 997;
+    hlLine.userData.kind = "edge";
     group.add(hlLine);
   }
 

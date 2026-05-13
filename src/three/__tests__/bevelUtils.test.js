@@ -91,10 +91,30 @@ function bbox(geo) {
 // ── mergeVertices ─────────────────────────────────────────────────────────────
 
 describe("mergeVertices", () => {
-  it("returns the same geometry unchanged when already indexed", () => {
+  it("deduplicates positions in already-indexed geometry (BoxGeometry: 24 → 8 verts)", () => {
+    // mergeVertices used to early-return for indexed input, leaving
+    // per-face-duplicated corners (BoxGeometry has 24 vertices for 8
+    // unique cube corners).  It now dedups indexed inputs too, which is
+    // essential for cylinder caps (the center vertex is duplicated across
+    // every cap triangle; without dedup, every "spoke" looks like a
+    // boundary edge to getBoundaryEdges).
     const box = makeIndexedBox();
+    expect(box.getAttribute("position").count).toBe(24);
     const result = mergeVertices(box);
-    expect(result).toBe(box);
+    expect(result.getAttribute("position").count).toBe(8);
+    // The triangle count must remain identical (no triangles dropped).
+    expect(result.index.count).toBe(box.index.count);
+  });
+
+  it("preserves a single-triangle non-degenerate indexed geometry as-is", () => {
+    // Three distinct vertex positions → 3 unique after dedup; one triangle.
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setIndex(new THREE.BufferAttribute(new Uint32Array([0, 1, 2]), 1));
+    const result = mergeVertices(geo);
+    expect(result.getAttribute("position").count).toBe(3);
+    expect(result.index.count).toBe(3);
   });
 
   it("indexes a non-indexed geometry and deduplicates positions", () => {
@@ -455,41 +475,102 @@ describe("applyBevelToSubGeometry", () => {
   // by this best-effort algorithm, but the count of boundary edges should
   // be SMALL relative to the input — much fewer than what would exist if
   // the end caps were missing entirely.
-  it("chamfer of a cube edge adds end-cap triangles at each end of the strip", () => {
+  it("chamfer removes the original cube corner from perpendicular faces", () => {
+    // The chamfer "shaves off" the cube's corner — the perpendicular face
+    // (e.g. the left face for a top-front edge bevel) must be re-triangulated
+    // as a pentagon, NOT extended over the chamfered-off region by leaving
+    // the original corner vertex in place.
     const box = makeIndexedBox();
     const subGeo = {
       edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
       faces: [],
     };
     const result = applyBevelToSubGeometry(box, subGeo, 0.1, 1);
-    // An end-cap triangle has all three vertices on a perpendicular face:
-    // the original corner + the two strip vertices.  Verify both ends have one.
     const posAttr = result.getAttribute("position");
     const idx = result.index.array;
     const round = (v) => Math.round(v * 1e3) / 1e3;
-    const findCap = (cx, cy, cz) => {
+    // After re-triangulation, NO triangle should contain the original cube
+    // corner at (-1, 1, 1) or (1, 1, 1) (the two endpoints of the beveled
+    // edge) — those vertices are now orphaned, and the chamfer face stitches
+    // directly into the perpendicular face's new pentagonal perimeter.
+    const hasCorner = (cx, cy, cz) => {
       for (let t = 0; t < idx.length; t += 3) {
-        const pts = [0, 1, 2].map((k) => [
-          round(posAttr.getX(idx[t + k])),
-          round(posAttr.getY(idx[t + k])),
-          round(posAttr.getZ(idx[t + k])),
-        ]);
-        const hasCorner = pts.some(
-          (p) => p[0] === cx && p[1] === cy && p[2] === cz,
-        );
-        // Strip vertices are offset by 0.1 from the corner.
-        const hasStrip0 = pts.some(
-          (p) => p[0] === cx && p[1] === cy && Math.abs(p[2] - (cz - 0.1)) < 1e-3,
-        );
-        const hasStrip1 = pts.some(
-          (p) => p[0] === cx && Math.abs(p[1] - (cy - 0.1)) < 1e-3 && p[2] === cz,
-        );
-        if (hasCorner && hasStrip0 && hasStrip1) return t;
+        for (let k = 0; k < 3; k++) {
+          const x = round(posAttr.getX(idx[t + k]));
+          const y = round(posAttr.getY(idx[t + k]));
+          const z = round(posAttr.getZ(idx[t + k]));
+          if (x === cx && y === cy && z === cz) return true;
+        }
       }
-      return -1;
+      return false;
     };
-    expect(findCap(-1, 1, 1)).toBeGreaterThanOrEqual(0); // left end cap
-    expect(findCap(1, 1, 1)).toBeGreaterThanOrEqual(0); // right end cap
+    expect(hasCorner(-1, 1, 1)).toBe(false);
+    expect(hasCorner(1, 1, 1)).toBe(false);
+  });
+
+  // ─── Adjacent-face shape verification ──────────────────────────────────────
+  // The chamfer modifies several faces that were NOT directly selected:
+  //   • the two faces sharing the beveled edge (these become trimmed)
+  //   • the perpendicular face(s) at each corner (these are re-triangulated
+  //     because the corner is "shaved off" by the chamfer)
+  // These tests pin down the SHAPE of the affected adjacent faces — both for
+  // simple cube cases and for more complex topologies.
+
+  // Helper: count triangles on a given plane (x|y|z == value) and check no
+  // triangle contains the given "removed" position.
+  function inspectPlanarFace(result, axis, value, removedPos) {
+    const posAttr = result.getAttribute("position");
+    const idx = result.index.array;
+    const round = (v) => Math.round(v * 1e3) / 1e3;
+    let triCount = 0;
+    let containsRemoved = 0;
+    const vertices = new Set();
+    for (let t = 0; t < idx.length; t += 3) {
+      const pts = [0, 1, 2].map((k) => [
+        round(posAttr.getX(idx[t + k])),
+        round(posAttr.getY(idx[t + k])),
+        round(posAttr.getZ(idx[t + k])),
+      ]);
+      const axisIdx = axis === "x" ? 0 : axis === "y" ? 1 : 2;
+      if (!pts.every((p) => p[axisIdx] === value)) continue;
+      triCount++;
+      for (const p of pts) vertices.add(`${p[0]},${p[1]},${p[2]}`);
+      if (
+        removedPos &&
+        pts.some(
+          (p) =>
+            p[0] === removedPos[0] &&
+            p[1] === removedPos[1] &&
+            p[2] === removedPos[2],
+        )
+      )
+        containsRemoved++;
+    }
+    return { triCount, containsRemoved, uniqueVerts: vertices.size };
+  }
+
+  it("chamfer re-triangulates the perpendicular face as a 3-triangle pentagon", () => {
+    // Left face (x = -1) after a top-front-edge chamfer should have exactly
+    // 3 triangles (the pentagon: D_topL, stripA[0], stripA[1], BF_left, D_botL).
+    // Right face similarly.
+    const box = makeIndexedBox();
+    const subGeo = {
+      edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
+      faces: [],
+    };
+    const result = applyBevelToSubGeometry(box, subGeo, 0.1, 1);
+    const posAttr = result.getAttribute("position");
+    const idx = result.index.array;
+    const round = (v) => Math.round(v * 1e3) / 1e3;
+    let leftCount = 0;
+    let rightCount = 0;
+    for (let t = 0; t < idx.length; t += 3) {
+      const xs = [0, 1, 2].map((k) => round(posAttr.getX(idx[t + k])));
+      if (xs.every((x) => x === -1)) leftCount++;
+      if (xs.every((x) => x === 1)) rightCount++;
+    }
+    expect(leftCount).toBe(3);
+    expect(rightCount).toBe(3);
   });
 
   it("multiple edges sharing a corner are ALL beveled (regression for shared-corner skip)", () => {
@@ -523,8 +604,373 @@ describe("applyBevelToSubGeometry", () => {
     expect(edge2Verts).toBeGreaterThanOrEqual(2); // both ends of edge 2
   });
 
+  it("shared-corner gap is closed with a corner-fill + diagonal-bridge triangle", () => {
+    // Two cube edges share corner (-1, 1, 1).  Without Phase 3, the top
+    // face is left with a quad-shaped hole between the two edges' strips.
+    // Phase 3 must emit a corner-fill triangle at the original corner AND a
+    // diagonal-bridge triangle through the face's diagonal-opposite vertex.
+    const box = makeIndexedBox();
+    const subGeo = {
+      edges: [
+        { ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 },   // top-front
+        { ax: -1, ay: 1, az: 1, bx: -1, by: 1, bz: -1 }, // top-left
+      ],
+      faces: [],
+    };
+    const result = applyBevelToSubGeometry(box, subGeo, 0.1, 1);
+    const posAttr = result.getAttribute("position");
+    const idx = result.index.array;
+    const round = (v) => Math.round(v * 1e3) / 1e3;
+
+    let cornerFill = 0;
+    let diagonalBridge = 0;
+    for (let t = 0; t < idx.length; t += 3) {
+      const pts = [0, 1, 2].map((k) => [
+        round(posAttr.getX(idx[t + k])),
+        round(posAttr.getY(idx[t + k])),
+        round(posAttr.getZ(idx[t + k])),
+      ]);
+      // All three vertices must lie on the top face plane y = 1.
+      if (!pts.every((p) => p[1] === 1)) continue;
+      const hasSE1 = pts.some((p) => p[0] === -1 && p[2] === 0.9);    // top-front strip @ A
+      const hasSE2 = pts.some((p) => p[0] === -0.9 && p[2] === 1);    // top-left strip @ A
+      const hasCorner = pts.some((p) => p[0] === -1 && p[2] === 1);   // original corner
+      const hasCtop = pts.some((p) => p[0] === 1 && p[2] === -1);     // diagonal-opposite
+      if (hasSE1 && hasSE2 && hasCorner) cornerFill++;
+      if (hasSE1 && hasSE2 && hasCtop) diagonalBridge++;
+    }
+    expect(cornerFill).toBeGreaterThanOrEqual(1);
+    expect(diagonalBridge).toBeGreaterThanOrEqual(1);
+  });
+
+  // ─── Adjacent-face SHAPE tests ─────────────────────────────────────────────
+
+  it("cube single-edge chamfer: left & right faces become 3-tri pentagons WITHOUT the corner vertex", () => {
+    const result = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      {
+        edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
+        faces: [],
+      },
+      0.1,
+      1,
+    );
+    const left = inspectPlanarFace(result, "x", -1, [-1, 1, 1]);
+    const right = inspectPlanarFace(result, "x", 1, [1, 1, 1]);
+    // Pentagon: 5 unique vertices, 3 triangles, original corner removed.
+    expect(left.triCount).toBe(3);
+    expect(left.uniqueVerts).toBe(5);
+    expect(left.containsRemoved).toBe(0);
+    expect(right.triCount).toBe(3);
+    expect(right.uniqueVerts).toBe(5);
+    expect(right.containsRemoved).toBe(0);
+  });
+
+  it("cube single-edge chamfer: top & front faces (the directly-beveled faces) STAY as quads with corner replaced", () => {
+    const result = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      {
+        edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
+        faces: [],
+      },
+      0.1,
+      1,
+    );
+    const top = inspectPlanarFace(result, "y", 1);
+    const front = inspectPlanarFace(result, "z", 1);
+    // Both bevel faces should still be 2 triangles (a smaller quad after the
+    // corner inset moves inward).  4 unique vertices on each.
+    expect(top.triCount).toBe(2);
+    expect(top.uniqueVerts).toBe(4);
+    expect(front.triCount).toBe(2);
+    expect(front.uniqueVerts).toBe(4);
+  });
+
+  it("cube single-edge chamfer: bottom & back (entirely unaffected) faces are untouched", () => {
+    const before = makeIndexedBox();
+    const beforeBot = inspectPlanarFace(before, "y", -1);
+    const beforeBack = inspectPlanarFace(before, "z", -1);
+    const result = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      {
+        edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
+        faces: [],
+      },
+      0.1,
+      1,
+    );
+    const bot = inspectPlanarFace(result, "y", -1);
+    const back = inspectPlanarFace(result, "z", -1);
+    expect(bot.triCount).toBe(beforeBot.triCount);
+    expect(bot.uniqueVerts).toBe(beforeBot.uniqueVerts);
+    expect(back.triCount).toBe(beforeBack.triCount);
+    expect(back.uniqueVerts).toBe(beforeBack.uniqueVerts);
+  });
+
+  it("cube shared-corner multi-edge chamfer: perpendicular faces of both edges have the corner REMOVED", () => {
+    // Two adjacent edges share corner (-1, 1, 1).  Edge 1 (top-front) needs
+    // the LEFT face re-triangulated; edge 2 (top-left) needs the FRONT face
+    // re-triangulated.  Both must omit the original corner vertex.
+    // BEFORE the Phase 4 restructure these re-triangulations were skipped
+    // because the corner was "shared" — so v_corner survived on adjacent
+    // faces (the user-visible "spike" at the corner).
+    const result = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      {
+        edges: [
+          { ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 },
+          { ax: -1, ay: 1, az: 1, bx: -1, by: 1, bz: -1 },
+        ],
+        faces: [],
+      },
+      0.1,
+      1,
+    );
+    const left = inspectPlanarFace(result, "x", -1, [-1, 1, 1]);
+    const front = inspectPlanarFace(result, "z", 1, [-1, 1, 1]);
+    expect(left.containsRemoved).toBe(0);
+    expect(front.containsRemoved).toBe(0);
+  });
+
+  it("cube shared-corner multi-edge chamfer: the non-shared OPPOSITE corner of each edge is also handled", () => {
+    // Edge 1's non-shared corner is (1, 1, 1); edge 2's is (-1, 1, -1).
+    // Both should have their perpendicular faces re-triangulated and the
+    // original corner removed.
+    const result = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      {
+        edges: [
+          { ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 },
+          { ax: -1, ay: 1, az: 1, bx: -1, by: 1, bz: -1 },
+        ],
+        faces: [],
+      },
+      0.1,
+      1,
+    );
+    // Right-face inspection (edge 1's non-shared corner (1,1,1)).
+    const right = inspectPlanarFace(result, "x", 1, [1, 1, 1]);
+    expect(right.containsRemoved).toBe(0);
+    // Back-face inspection (edge 2's non-shared corner (-1,1,-1)).
+    const back = inspectPlanarFace(result, "z", -1, [-1, 1, -1]);
+    expect(back.containsRemoved).toBe(0);
+  });
+
+  it("two non-adjacent chamfered edges: each chamfer's directly-incident perpendicular corners are removed", () => {
+    // Top-front and BOTTOM-back edges don't share any corner.  After both
+    // chamfers, each chamfer's perpendicular faces (the left/right sides)
+    // should NOT contain that chamfer's original corner positions.
+    //
+    // Known limitation: when TWO corners of the same perpendicular face
+    // (here left/right) are chamfered, the merger triangle from the first
+    // chamfer (which uses the OTHER corner as its "pivot") survives because
+    // the second chamfer's strips aren't on the merger triangle's edges.
+    // We assert what's guaranteed: each chamfer cleans up its OWN corner.
+    const result = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      {
+        edges: [
+          { ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 },     // top-front
+          { ax: -1, ay: -1, az: -1, bx: 1, by: -1, bz: -1 }, // bottom-back
+        ],
+        faces: [],
+      },
+      0.1,
+      1,
+    );
+    // Top-front's left/right corners: removed from the left/right faces by
+    // their respective perpendicular-face re-triangulation.
+    const leftTopCorner = inspectPlanarFace(result, "x", -1, [-1, 1, 1]);
+    const rightTopCorner = inspectPlanarFace(result, "x", 1, [1, 1, 1]);
+    expect(leftTopCorner.containsRemoved).toBe(0);
+    expect(rightTopCorner.containsRemoved).toBe(0);
+
+    // Bottom-back's perpendicular corners removed from top/bottom faces:
+    const botBotCorner = inspectPlanarFace(result, "y", -1, [-1, -1, -1]);
+    expect(botBotCorner.containsRemoved).toBe(0);
+  });
+
+  it("chamfer of a face boundary: every adjacent face touching the selected face is re-triangulated", () => {
+    // Selecting a FACE (rather than individual edges) chamfers ALL its
+    // boundary edges.  For a cube's top face, that means 4 chamfer strips
+    // (one per top-face edge) and ALL FOUR side faces become hexagons (their
+    // top corners are chamfered off on both sides).
+    const result = applyBevelToSubGeometry(
+      makeIndexedBox(),
+      {
+        edges: [],
+        faces: [{ nx: 0, ny: 1, nz: 0 }], // top face
+      },
+      0.1,
+      1,
+    );
+    // Each of the 4 top corners should be removed from its perpendicular face.
+    for (const [x, _y, z] of [
+      [-1, 1, 1],
+      [1, 1, 1],
+      [-1, 1, -1],
+      [1, 1, -1],
+    ]) {
+      const xFace = inspectPlanarFace(result, "x", x, [x, 1, z]);
+      const zFace = inspectPlanarFace(result, "z", z, [x, 1, z]);
+      expect(xFace.containsRemoved).toBe(0);
+      expect(zFace.containsRemoved).toBe(0);
+    }
+  });
+
+  // ─── Complex adjacent face shape (non-quad) ────────────────────────────────
+  // Construct a custom mesh where the perpendicular face has 5 vertices and
+  // 3 triangles (a real pentagonal face).  Verify the chamfer correctly
+  // re-triangulates this face — handling more vertices than the simple
+  // cube-quad case.
+
+  it("chamfer where adjacent face is a pentagon (3 triangles): corner is removed and face becomes hexagon", () => {
+    // Build a "stretched cube" where the left face has an extra mid-vertex
+    // making it a PENTAGON with 3 triangles instead of a quad with 2.  This
+    // mirrors what happens when adjacent faces are non-trivial polygons.
+    //
+    // Pentagon left face vertices (x = -1 plane, in (z, y)):
+    //   (1, 1)   = v_corner            ← shared with top-front edge
+    //   (-1, 1)  = D_topL
+    //   (-1, -1) = D_botL
+    //   (1, -1)  = BF_left
+    //   (0, 0)   = M_left (mid-face vertex)
+    // Triangulated by fan from M_left.
+    const positions = new Float32Array([
+      // back face (z = -1)
+      -1, 1, -1, // 0 D_topL/back
+      1, 1, -1,  // 1
+      1, -1, -1, // 2
+      -1, -1, -1, // 3 D_botL
+      // top face (y = 1)
+      -1, 1, 1,  // 4 v_corner
+      1, 1, 1,   // 5
+      // front face (z = 1)
+      1, -1, 1,  // 6
+      -1, -1, 1, // 7 BF_left
+      // left-face mid vertex
+      -1, 0, 0,  // 8 M_left
+    ]);
+    const indexed = new THREE.BufferGeometry();
+    indexed.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    // Triangulate. We need a closed mesh, but for this test only the left
+    // face's pentagon and the top/front faces matter.
+    indexed.setIndex([
+      // top face quad
+      4, 5, 1, 4, 1, 0,
+      // front face quad
+      4, 7, 6, 4, 6, 5,
+      // left face PENTAGON via fan from M_left=8
+      //   perimeter: D_topL(0) → v_corner(4) → BF_left(7) → D_botL(3) → 0
+      //   triangles: (8, 0, 4), (8, 4, 7), (8, 7, 3), (8, 3, 0)
+      8, 0, 4, 8, 4, 7, 8, 7, 3, 8, 3, 0,
+      // back face quad (so the mesh is closed-ish for findEdgeTriangles)
+      0, 1, 2, 0, 2, 3,
+      // right face quad
+      5, 2, 1, 5, 6, 2,
+      // bottom face quad
+      3, 2, 6, 3, 6, 7,
+    ]);
+
+    const result = applyBevelToSubGeometry(
+      indexed,
+      {
+        edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }], // top-front edge
+        faces: [],
+      },
+      0.1,
+      1,
+    );
+    // After chamfer of the top-front edge, the v_corner (-1, 1, 1) should
+    // be removed from all triangles on the left face plane.
+    const left = inspectPlanarFace(result, "x", -1, [-1, 1, 1]);
+    expect(left.containsRemoved).toBe(0);
+    // The mid-face vertex M_left = (-1, 0, 0) should still be present on
+    // the left face — re-triangulation must preserve interior vertices.
+    const posAttr = result.getAttribute("position");
+    const idx = result.index.array;
+    let hasMid = false;
+    for (let t = 0; t < idx.length; t += 3) {
+      for (let k = 0; k < 3; k++) {
+        const x = posAttr.getX(idx[t + k]);
+        const y = posAttr.getY(idx[t + k]);
+        const z = posAttr.getZ(idx[t + k]);
+        if (Math.abs(x + 1) < 1e-3 && Math.abs(y) < 1e-3 && Math.abs(z) < 1e-3) {
+          hasMid = true;
+          break;
+        }
+      }
+      if (hasMid) break;
+    }
+    expect(hasMid).toBe(true);
+  });
+
+  // ─── Cylinder cap chamfer (curved adjacent geometry) ──────────────────────
+  // The cylinder cap is triangulated as a fan from a shared center vertex.
+  // Before the mergeVertices fix the cap's center was duplicated across
+  // every cap triangle, so getBoundaryEdges treated every "spoke" as a
+  // boundary edge — leading to 3N "fake" boundary edges (vs N real
+  // perimeter edges) and a 700+-triangle explosion when chamfering an
+  // 8-segment cylinder.
+
+  it("cylinder cap face selection: getBoundaryEdges returns exactly N perimeter edges (one per segment)", () => {
+    for (const segs of [4, 6, 8, 16]) {
+      const cyl = new THREE.CylinderGeometry(1, 1, 2, segs);
+      const merged = mergeVertices(cyl);
+      const tris = findCoplanarFaces(merged, { nx: 0, ny: 1, nz: 0 });
+      const boundary = getBoundaryEdges(tris);
+      expect(boundary.length).toBe(segs); // one perimeter edge per segment
+      expect(tris.length).toBe(segs); // and N cap triangles
+    }
+  });
+
+  it("cylinder cap chamfer produces a bounded triangle count (no explosion)", () => {
+    // A reasonable result for an N-segment cylinder cap chamfer is roughly:
+    //   2N (cap modified + cap corner-fan)   strip quads (2 tris each) → 2N
+    // + 2N (corner-fill + diagonal-bridge on top cap per shared corner)
+    // + 2N (perpendicular-side re-triangulation, ~2 tris per corner)
+    // + 4N (the original side quads, still present but modified)
+    // + N  (the bottom cap)
+    // For N=8 this is ~80; we pin it to < 200 (was 724 before the fix).
+    const cyl = new THREE.CylinderGeometry(1, 1, 2, 8);
+    const result = applyBevelToSubGeometry(
+      cyl,
+      { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
+      0.1,
+      1,
+    );
+    expect(result.index.count / 3).toBeLessThan(200);
+  });
+
+  it("cylinder cap chamfer: no side triangle still extends to the original top (y = +1)", () => {
+    // After chamfering the top face the side quads' top edge should have
+    // moved down (to y = 1 - amount).  No side triangle should retain the
+    // original top y-coordinate.
+    const cyl = new THREE.CylinderGeometry(1, 1, 2, 8);
+    const result = applyBevelToSubGeometry(
+      cyl,
+      { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
+      0.1,
+      1,
+    );
+    const posAttr = result.getAttribute("position");
+    const idx = result.index.array;
+    const round = (v) => Math.round(v * 1e3) / 1e3;
+    let sideTrisAtOriginalTop = 0;
+    for (let t = 0; t < idx.length; t += 3) {
+      const ys = [0, 1, 2].map((k) => round(posAttr.getY(idx[t + k])));
+      // A side triangle has at least one vertex at y=-1 (bottom).
+      if (!ys.some((y) => y === -1)) continue;
+      // ...and uses at least one vertex at y=1 (original top).
+      if (ys.some((y) => y === 1)) sideTrisAtOriginalTop++;
+    }
+    expect(sideTrisAtOriginalTop).toBe(0);
+  });
+
   it("three edges meeting at one corner are all beveled", () => {
-    // All three edges of a cube meeting at the corner (-1, 1, 1).
+    // All three edges of a cube meeting at the corner (-1, 1, 1).  Each
+    // edge contributes 2(segments+1) = 4 new vertices.  Three edges → 12
+    // new strip vertices on top of the deduped cube's 8 corners → 20.
     const box = makeIndexedBox();
     const subGeo = {
       edges: [
@@ -535,28 +981,27 @@ describe("applyBevelToSubGeometry", () => {
       faces: [],
     };
     const result = applyBevelToSubGeometry(box, subGeo, 0.1, 1);
-    // Each edge contributes 2(segments+1) = 4 new vertices.  Three edges → 12.
-    const originalVerts = box.getAttribute("position").count;
+    // Cube has 8 unique corners after dedup; three edges add 12 strip verts.
     expect(result.getAttribute("position").count).toBeGreaterThanOrEqual(
-      originalVerts + 12,
+      8 + 12,
     );
   });
 
-  it("bevel of a cube edge adds end-cap fans (one triangle per segment)", () => {
+  it("bevel of a cube edge produces more strip triangles than chamfer", () => {
+    // Multi-segment bevel produces 'segments' strip quads per edge (= 2*segments
+    // triangles) versus chamfer's 1 quad (2 tris).  The perpendicular face
+    // re-triangulation is the same shape (pentagon, 3 tris/face) regardless
+    // of segment count.
     const box = makeIndexedBox();
     const subGeo = {
       edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
       faces: [],
     };
-    // Compare with chamfer (1 seg) vs bevel (4 segs): bevel adds 4 cap
-    // triangles per end (vs 1 for chamfer) → 6 extra triangles on top of
-    // strip differences.
     const chamfer = applyBevelToSubGeometry(makeIndexedBox(), subGeo, 0.1, 1);
     const bevel = applyBevelToSubGeometry(box, subGeo, 0.1, 4);
-    const extraStripTris = (4 - 1) * 2; // chamfer has 2, bevel has 8 = +6
-    const extraCapTris = (4 - 1) * 2; // 1 cap-tri/seg * (4-1) segs * 2 ends = +6
+    const extraStripTris = (4 - 1) * 2; // chamfer has 2, bevel has 8 → +6
     expect(bevel.index.count / 3).toBeGreaterThanOrEqual(
-      chamfer.index.count / 3 + extraStripTris + extraCapTris,
+      chamfer.index.count / 3 + extraStripTris,
     );
   });
 

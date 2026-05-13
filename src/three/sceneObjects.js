@@ -12,6 +12,26 @@ import { useStore } from "../store";
 
 export const MM_PER_UNIT = 10;
 
+// Number of polygon segments for a full circle of radius `r` at the given
+// chord-deviation precision (mm).  precision=null → return defaultSegs
+// (preview mode); otherwise use the sagitta formula so the chord deviation
+// from the true circle is ≤ precision mm.  Clamped to [8, 256].
+export function fullCircleSegments(r, precision, defaultSegs = 32) {
+  if (precision == null || r <= 0) return defaultSegs;
+  const sUnits = precision / MM_PER_UNIT;
+  const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
+  if (!isFinite(halfTheta) || halfTheta <= 0) return defaultSegs;
+  return Math.max(8, Math.min(256, Math.ceil(Math.PI / halfTheta)));
+}
+
+// Display-quality precision for wireframe & selection overlays.  The smooth
+// shader render is analytic (perfectly smooth), so wireframe / hover /
+// selection should ALWAYS look smooth to match — independently of the
+// user's curveResolution choice (which is for CSG/bevel "operation"
+// quality, not display).  Picked so 0.01 mm sagitta gives ~86 segments at
+// r=1.5, indistinguishable from smooth at normal viewing distance.
+export const DISPLAY_PRECISION_MM = 0.01;
+
 export const HANDLE_CONFIGS = [
   { type: "axisX", color: 0xff4444, dir: new THREE.Vector3(1, 0, 0) },
   { type: "axisY", color: 0x4488ff, dir: new THREE.Vector3(0, 1, 0) },
@@ -2030,6 +2050,7 @@ export function applyRenderMode(renderMode, ctx) {
     composerRef,
     envTextureRef,
     sketchModeRef,
+    printPrecision = null,
   } = ctx;
 
   if (renderMode === "smooth") {
@@ -2161,12 +2182,29 @@ export function applyRenderMode(renderMode, ctx) {
       }
       if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
         if (renderMode === "wireframe") {
+          // Wireframe is a DISPLAY overlay on the smooth shader render — it
+          // must look as smooth as the shader, regardless of the user's CSG
+          // resolution setting.  We pin it to DISPLAY_PRECISION_MM (the
+          // print precision) so it always looks smooth at normal viewing.
+          // In print mode the user might want even finer; honour whichever
+          // is smaller (more segments).
+          const wireframePrecision =
+            printPrecision != null
+              ? Math.min(printPrecision, DISPLAY_PRECISION_MM)
+              : DISPLAY_PRECISION_MM;
           let wfGeo;
-          if (itemData.type === "sphere")
-            wfGeo = new THREE.SphereGeometry(1.5, 16, 12);
-          else if (itemData.type === "cylinder")
-            wfGeo = new THREE.CylinderGeometry(1, 1, 2, 16);
-          else wfGeo = new THREE.TorusGeometry(1.0, 0.4, 12, 24);
+          if (itemData.type === "sphere") {
+            const w = fullCircleSegments(1.5, wireframePrecision, 32);
+            const h = Math.max(8, Math.round(w / 2));
+            wfGeo = new THREE.SphereGeometry(1.5, w, h);
+          } else if (itemData.type === "cylinder") {
+            const s = fullCircleSegments(1, wireframePrecision, 32);
+            wfGeo = new THREE.CylinderGeometry(1, 1, 2, s);
+          } else {
+            const tubular = fullCircleSegments(1.0, wireframePrecision, 32);
+            const radial = fullCircleSegments(0.4, wireframePrecision, 16);
+            wfGeo = new THREE.TorusGeometry(1.0, 0.4, radial, tubular);
+          }
           if (mesh.geometry !== mesh.userData.hullGeometry)
             mesh.geometry.dispose();
           mesh.geometry = wfGeo;
