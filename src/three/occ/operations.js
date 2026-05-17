@@ -157,6 +157,239 @@ export function filletShape(shape, edgePositions, radius = 0.05) {
   return mk.Shape();
 }
 
+// ── Face-based chamfer / fillet ──────────────────────────────────────────
+// Selecting a FACE in the viewport (e.g. the top cap of a cylinder) sends
+// a list of `{nx, ny, nz}` face-normal entries instead of edge endpoints.
+// To chamfer/fillet the boundary of those faces, walk every face of the
+// shape, compute its outward normal, match against the requested normals,
+// and add every edge of each matching face to the builder.  Edges shared
+// between two matching faces are added only once.
+
+function computeFaceNormal(oc, face) {
+  // For both planar and curved faces, use BRepAdaptor_Surface to read the
+  // surface derivatives at the centre of the UV domain and take their
+  // cross product.  For curved faces this gives the normal at the mid-
+  // point; for the cap of a cylinder/cone this is exactly the cap normal.
+  let adaptor;
+  try {
+    adaptor = new oc.BRepAdaptor_Surface_2(face, false);
+  } catch {
+    return null;
+  }
+  const u = (adaptor.FirstUParameter() + adaptor.LastUParameter()) / 2;
+  const v = (adaptor.FirstVParameter() + adaptor.LastVParameter()) / 2;
+  const pnt = new oc.gp_Pnt_1();
+  const du = new oc.gp_Vec_1();
+  const dv = new oc.gp_Vec_1();
+  try {
+    adaptor.D1(u, v, pnt, du, dv);
+  } catch {
+    return null;
+  }
+  const cross = du.Crossed(dv);
+  const mag = cross.Magnitude();
+  if (mag < 1e-9) return null;
+  // OCC face orientation flips the geometric normal when the face is
+  // REVERSED in the shell.
+  const reversed =
+    face.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+  const sign = reversed ? -1 : 1;
+  return {
+    x: (cross.X() / mag) * sign,
+    y: (cross.Y() / mag) * sign,
+    z: (cross.Z() / mag) * sign,
+  };
+}
+
+function edgeEndpointKey(oc, edge) {
+  const verts = [];
+  const exp = new oc.TopExp_Explorer_2(
+    edge,
+    oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+  );
+  while (exp.More()) {
+    const v = oc.TopoDS.Vertex_1(exp.Current());
+    const p = oc.BRep_Tool.Pnt(v);
+    verts.push(
+      `${Math.round(p.X() * 1000)},${Math.round(p.Y() * 1000)},${Math.round(p.Z() * 1000)}`,
+    );
+    exp.Next();
+  }
+  return verts.sort().join("|");
+}
+
+// Walk `shape`'s faces.  For each face whose outward normal matches any
+// entry in `faceNormals` (within `eps`), invoke `onEdge(edge)` for every
+// unique edge of that face.  `addedKeys` is the dedup set, shared across
+// calls so an edge between two matching faces is only added once.
+function forEachEdgeOfMatchingFaces(
+  oc,
+  shape,
+  faceNormals,
+  addedKeys,
+  onEdge,
+  eps = 0.05,
+) {
+  let added = 0;
+  const faceExp = new oc.TopExp_Explorer_2(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+  );
+  while (faceExp.More()) {
+    const face = oc.TopoDS.Face_1(faceExp.Current());
+    const n = computeFaceNormal(oc, face);
+    if (!n) {
+      faceExp.Next();
+      continue;
+    }
+    const matched = faceNormals.some(
+      (req) =>
+        Math.abs(req.nx - n.x) < eps &&
+        Math.abs(req.ny - n.y) < eps &&
+        Math.abs(req.nz - n.z) < eps,
+    );
+    if (matched) {
+      // Walk EVERY edge of the matched face — both the outer wire and any
+      // inner wires (holes).  When the user selects the top of an object
+      // with holes, they expect the chamfer/fillet to be applied to the
+      // outer perimeter AND the hole's perimeter (the hole stays open,
+      // just with a chamfered top edge).  OCC's BRepFilletAPI handles
+      // concave (hole) edges correctly as long as the chamfer/fillet
+      // amount is small relative to the hole size.
+      const edgeExp = new oc.TopExp_Explorer_2(
+        face,
+        oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      );
+      while (edgeExp.More()) {
+        const edge = oc.TopoDS.Edge_1(edgeExp.Current());
+        const key = edgeEndpointKey(oc, edge);
+        if (!addedKeys.has(key)) {
+          onEdge(edge);
+          addedKeys.add(key);
+          added++;
+        }
+        edgeExp.Next();
+      }
+    }
+    faceExp.Next();
+  }
+  return added;
+}
+
+// Chamfer / fillet the boundary of every face whose normal matches one of
+// `faceNormals`.  If `edgePositions` is non-empty, those edges are also
+// added (so callers can mix face-selection and edge-selection in a single
+// operation, matching the UI's behaviour).
+export function chamferShapeBy(shape, subGeo, amount = 0.05) {
+  if (!shape) return shape;
+  const edgePositions = subGeo?.edges || [];
+  const faceNormals = subGeo?.faces || [];
+  if (edgePositions.length === 0 && faceNormals.length === 0) return shape;
+  const oc = getOcc();
+  const mk = new oc.BRepFilletAPI_MakeChamfer(shape);
+  const addedKeys = new Set();
+  let added = 0;
+
+  // 1. Add edges from explicit edge endpoints.
+  if (edgePositions.length > 0) {
+    const exp = new oc.TopExp_Explorer_2(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+    );
+    while (exp.More()) {
+      const edge = oc.TopoDS.Edge_1(exp.Current());
+      for (const ep of edgePositions) {
+        const posA = { x: ep.ax, y: ep.ay, z: ep.az };
+        const posB = { x: ep.bx, y: ep.by, z: ep.bz };
+        if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
+          const key = edgeEndpointKey(oc, edge);
+          if (!addedKeys.has(key)) {
+            mk.Add_2(amount, edge);
+            addedKeys.add(key);
+            added++;
+          }
+          break;
+        }
+      }
+      exp.Next();
+    }
+  }
+
+  // 2. Add edges from the boundary of every face matching a requested normal.
+  if (faceNormals.length > 0) {
+    added += forEachEdgeOfMatchingFaces(
+      oc,
+      shape,
+      faceNormals,
+      addedKeys,
+      (edge) => mk.Add_2(amount, edge),
+    );
+  }
+
+  if (added === 0) return shape;
+  mk.Build();
+  if (!mk.IsDone()) return shape;
+  return mk.Shape();
+}
+
+export function filletShapeBy(shape, subGeo, radius = 0.05) {
+  if (!shape) return shape;
+  const edgePositions = subGeo?.edges || [];
+  const faceNormals = subGeo?.faces || [];
+  if (edgePositions.length === 0 && faceNormals.length === 0) return shape;
+  const oc = getOcc();
+  const mk = new oc.BRepFilletAPI_MakeFillet(
+    shape,
+    oc.ChFi3d_FilletShape.ChFi3d_Rational,
+  );
+  const addedKeys = new Set();
+  let added = 0;
+
+  if (edgePositions.length > 0) {
+    const exp = new oc.TopExp_Explorer_2(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+    );
+    while (exp.More()) {
+      const edge = oc.TopoDS.Edge_1(exp.Current());
+      for (const ep of edgePositions) {
+        const posA = { x: ep.ax, y: ep.ay, z: ep.az };
+        const posB = { x: ep.bx, y: ep.by, z: ep.bz };
+        if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
+          const key = edgeEndpointKey(oc, edge);
+          if (!addedKeys.has(key)) {
+            mk.Add_2(radius, edge);
+            addedKeys.add(key);
+            added++;
+          }
+          break;
+        }
+      }
+      exp.Next();
+    }
+  }
+
+  if (faceNormals.length > 0) {
+    added += forEachEdgeOfMatchingFaces(
+      oc,
+      shape,
+      faceNormals,
+      addedKeys,
+      (edge) => mk.Add_2(radius, edge),
+    );
+  }
+
+  if (added === 0) return shape;
+  mk.Build();
+  if (!mk.IsDone()) return shape;
+  return mk.Shape();
+}
+
 // ── Transforms (apply translation/rotation to a shape) ───────────────────
 
 export function transformShape(shape, position, rotation) {

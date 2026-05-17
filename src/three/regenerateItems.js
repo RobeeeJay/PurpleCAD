@@ -1,9 +1,12 @@
 import * as THREE from "three";
-import { buildBrushTransform, performCsg } from "./csgUtils.js";
-import { makePrimitiveShape } from "./occ/primitives.js";
 import {
-  chamferShape,
-  filletShape,
+  buildBrushTransform,
+  buildItemShapeLocal,
+  performCsg,
+} from "./csgUtils.js";
+import {
+  chamferShapeBy,
+  filletShapeBy,
 } from "./occ/operations.js";
 import { tessellateToData } from "./occ/tessellate.js";
 
@@ -21,15 +24,16 @@ import { tessellateToData } from "./occ/tessellate.js";
 //   • (Legacy "bevel" entries from before the OCC migration are ignored —
 //     callers should regenerate the item via the new chamfer flow.)
 
-function regenerateChamfer(regenerator, printPrecision) {
+function regenerateChamfer(regenerator, accumulatedItems, printPrecision) {
   const source = regenerator.source;
-  const sourceShape = makePrimitiveShape(source);
+  const sourceShape = buildItemShapeLocal(source, accumulatedItems);
   if (!sourceShape) return null;
-  const edges = regenerator.subGeo?.edges || [];
-  if (edges.length === 0) return null;
-  const op = regenerator.segments === 1 ? chamferShape : filletShape;
-  const result = op(sourceShape, edges, regenerator.amount ?? 0.05);
-  if (!result) return null;
+  const subGeo = regenerator.subGeo || { edges: [], faces: [] };
+  if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
+    return null;
+  const op = regenerator.segments === 1 ? chamferShapeBy : filletShapeBy;
+  const result = op(sourceShape, subGeo, regenerator.amount ?? 0.05);
+  if (!result || result === sourceShape) return null;
   const data = tessellateToData(result, printPrecision);
   if (!data) return null;
   // Centre, compute world position via source's brush transform.
@@ -80,7 +84,10 @@ function regenerateBoolean(regenerator, accumulatedItems, printPrecision) {
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean);
   if (inputs.length < 2) return null;
-  return performCsg(inputs, regenerator.op, { printPrecision });
+  return performCsg(inputs, regenerator.op, {
+    printPrecision,
+    allItems: accumulatedItems,
+  });
 }
 
 export function regenerateItemsForResolution(items, printPrecision) {
@@ -99,7 +106,7 @@ export function regenerateItemsForResolution(items, printPrecision) {
     }
     let result = null;
     if (r.kind === "chamfer") {
-      result = regenerateChamfer(r, printPrecision);
+      result = regenerateChamfer(r, out, printPrecision);
     } else if (r.kind === "boolean") {
       result = regenerateBoolean(r, out, printPrecision);
     }

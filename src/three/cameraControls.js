@@ -3128,10 +3128,16 @@ export function attachCameraControls(ctx) {
         if (planeHits.length > 0) planeHits[0].object.material.opacity = 0.45;
       }
     } else {
+      // Modifier-key scheme:
+      //   • CTRL (Cmd on Mac)        → edge selection mode
+      //   • ALT                      → face selection mode
+      //   • CTRL + ALT               → point selection mode
+      //   • SHIFT (orthogonal)       → additive selection in any of the
+      //                                above modes (incl. plain object mode).
       const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
-      const edgeMode = e.shiftKey && !cmdOrCtrl;
-      const pointMode = e.shiftKey && cmdOrCtrl;
-      const faceMode = !e.shiftKey && cmdOrCtrl;
+      const edgeMode = cmdOrCtrl && !e.altKey;
+      const faceMode = !cmdOrCtrl && e.altKey;
+      const pointMode = cmdOrCtrl && e.altKey;
 
       if (pointMode) {
         setHoveredId(null);
@@ -3601,20 +3607,31 @@ export function attachCameraControls(ctx) {
         selectableMeshes,
         false,
       );
+      // Modifier-key scheme (must match the hover branch above):
+      //   • CTRL/Cmd            → edge selection mode
+      //   • ALT                 → face selection mode
+      //   • CTRL/Cmd + ALT      → point selection mode (hover only)
+      //   • SHIFT (orthogonal)  → additive: append/toggle within the
+      //                           existing selection of the current mode.
       const cmdOrCtrl3d = isMac ? e.metaKey : e.ctrlKey;
+      const edgeMode3d = cmdOrCtrl3d && !e.altKey;
+      const faceMode3d = !cmdOrCtrl3d && e.altKey;
       if (intersects.length > 0) {
         const clickedId = intersects[0].object.userData.itemId || null;
         if (
-          cmdOrCtrl3d &&
-          !e.shiftKey &&
+          faceMode3d &&
           pendingFaceSelection &&
           pendingFaceSelection.itemId === clickedId
         ) {
-          // Cmd/Ctrl+click in face mode: commit face to sub-geometry selection.
+          // Alt+click in face mode: commit face to sub-geometry selection.
           // Faces and edges are mutually exclusive — always clear edges.
+          // With shift held, keep any existing face selection on this item
+          // and toggle the clicked face; without shift, replace it.
           const prev = useStore.getState().selectedSubGeometry;
           const faces =
-            prev?.itemId === clickedId && prev.edges.length === 0
+            e.shiftKey &&
+            prev?.itemId === clickedId &&
+            prev.edges.length === 0
               ? [...prev.faces]
               : [];
           const n = pendingFaceSelection;
@@ -3647,16 +3664,18 @@ export function attachCameraControls(ctx) {
           // making the click appear to have no visual effect.
           clearFaceHighlight();
         } else if (
-          e.shiftKey &&
-          !cmdOrCtrl3d &&
+          edgeMode3d &&
           pendingEdgeSelection &&
           pendingEdgeSelection.itemId === clickedId
         ) {
-          // Shift+click in edge mode: commit edge to sub-geometry selection.
-          // Edges and faces are mutually exclusive — always clear faces.
+          // Ctrl/Cmd+click in edge mode: commit edge to sub-geometry
+          // selection.  Edges and faces are mutually exclusive — always
+          // clear faces.  Shift extends the prior edge selection.
           const prev = useStore.getState().selectedSubGeometry;
           const edges =
-            prev?.itemId === clickedId && prev.faces.length === 0
+            e.shiftKey &&
+            prev?.itemId === clickedId &&
+            prev.faces.length === 0
               ? [...prev.edges]
               : [];
           const ed = pendingEdgeSelection;
@@ -3703,7 +3722,7 @@ export function attachCameraControls(ctx) {
           // the face-commit branch above).
           clearEdgeHighlight();
         } else {
-          // Normal click: select item and clear sub-geometry selection.
+          // Normal (object-mode) click: shift adds to multi-object selection.
           useStore.getState().clearSelectedSubGeometry();
           if (e.shiftKey && clickedId)
             useStore.getState().addToSelection(clickedId);
@@ -3921,12 +3940,21 @@ export function attachCameraControls(ctx) {
   // ── Keyboard ───────────────────────────────────────────────────────────────
 
   const onModifierUp = (e) => {
+    // Modifier-up: hide the corresponding mode's hover highlight visual
+    // so it doesn't linger.  Use clearHL (visual only) — NOT
+    // clearEdgeHighlight / clearFaceHighlight — so that pendingEdge/
+    // FaceSelection survives a momentary key release.  Otherwise a stray
+    // keyup between hover and click (or natural keyup→click ordering on
+    // some browsers) wipes the pending selection and the click falls
+    // through to object mode.
+    //   • CTRL/Cmd → edge mode (also part of point mode)
+    //   • ALT      → face mode (also part of point mode)
     if (e.key === "Meta" || e.key === "Control") {
-      clearHL(faceHighlightRef);
+      clearHL(edgeHighlightRef);
       clearHL(pointHighlightRef);
     }
-    if (e.key === "Shift") {
-      clearHL(edgeHighlightRef);
+    if (e.key === "Alt") {
+      clearHL(faceHighlightRef);
       clearHL(pointHighlightRef);
     }
   };

@@ -2,9 +2,16 @@ import React from "react";
 import * as THREE from "three";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
-import { buildBrushTransform } from "../../three/csgUtils.js";
-import { makePrimitiveShape } from "../../three/occ/primitives.js";
-import { chamferShape, filletShape } from "../../three/occ/operations.js";
+import {
+  buildBrushTransform,
+  buildItemShapeLocal,
+} from "../../three/csgUtils.js";
+import {
+  chamferShape,
+  filletShape,
+  chamferShapeBy,
+  filletShapeBy,
+} from "../../three/occ/operations.js";
 import { tessellateToData } from "../../three/occ/tessellate.js";
 
 const BevelSection = () => {
@@ -33,36 +40,52 @@ const BevelSection = () => {
       const amount = 0.05;
 
       // If the item already has a prior bevel/chamfer recipe with the same
-      // amount/segments, append the new edges to it and re-run the whole
-      // operation on the original source.  Otherwise snapshot the current
-      // item as the source.
+      // amount/segments, append the new edges + faces to it and re-run
+      // the whole operation on the original source.  Otherwise snapshot
+      // the current item as the source.
       const prior = item.regenerator;
-      let source, edges;
+      let source, subGeo;
       if (
         prior?.kind === "chamfer" &&
         prior.amount === amount &&
         prior.segments === segments
       ) {
         source = prior.source;
-        edges = [
-          ...(prior.subGeo?.edges || []),
-          ...(selectedSubGeometry.edges || []),
-        ];
+        subGeo = {
+          edges: [
+            ...(prior.subGeo?.edges || []),
+            ...(selectedSubGeometry.edges || []),
+          ],
+          faces: [
+            ...(prior.subGeo?.faces || []),
+            ...(selectedSubGeometry.faces || []),
+          ],
+        };
       } else {
         const sourceSnapshot = { ...item };
         delete sourceSnapshot.regenerator;
         source = sourceSnapshot;
-        edges = selectedSubGeometry.edges || [];
+        subGeo = {
+          edges: selectedSubGeometry.edges || [],
+          faces: selectedSubGeometry.faces || [],
+        };
       }
-      if (edges.length === 0) return;
+      if (subGeo.edges.length === 0 && subGeo.faces.length === 0) return;
 
-      // Build the source OCC shape, apply chamfer (segments=1) or fillet
-      // (segments>1), tessellate.
-      const sourceShape = makePrimitiveShape(source);
+      // Build the source's OCC shape (recursively for csg/booleans/
+      // chamfered sources), then apply chamfer (segments=1) or fillet
+      // (segments>1) and tessellate.  The "By" variants handle BOTH
+      // explicit edge endpoints and face-normal selections, expanding
+      // matching faces to their boundary edges via BRepAdaptor_Surface.
+      const sourceShape = buildItemShapeLocal(source, items);
       if (!sourceShape) return;
-      const op = segments === 1 ? chamferShape : filletShape;
-      const result = op(sourceShape, edges, amount);
+      const opBy = segments === 1 ? chamferShapeBy : filletShapeBy;
+      const result = opBy(sourceShape, subGeo, amount);
       if (!result) return;
+      // chamferShapeBy returns the original shape unchanged when nothing
+      // matched — detect that so we don't silently overwrite the item
+      // with an identical tessellation that looks like "nothing happened".
+      if (result === sourceShape) return;
       const data = tessellateToData(result, printPrecision);
       if (!data) return;
 
@@ -107,7 +130,7 @@ const BevelSection = () => {
         regenerator: {
           kind: "chamfer",
           source,
-          subGeo: { edges, faces: [] },
+          subGeo,
           amount,
           segments,
           regeneratedAt: printPrecision,

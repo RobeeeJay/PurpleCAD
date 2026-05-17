@@ -2,7 +2,12 @@ import * as THREE from "three";
 import { polyCentroid } from "./sceneObjects.js";
 import { makePrimitiveShape } from "./occ/primitives.js";
 import { tessellate, tessellateToData } from "./occ/tessellate.js";
-import { booleanOp, chamferShape, transformShape } from "./occ/operations.js";
+import {
+  booleanOp,
+  chamferShape,
+  filletShape,
+  transformShape,
+} from "./occ/operations.js";
 import { isOccReady } from "./occ/init.js";
 
 // Build the THREE.BufferGeometry for an item.  Primitives, CSG results and
@@ -90,8 +95,17 @@ export function buildBrushTransform(item) {
 // Build the OCC TopoDS_Shape for an item, transformed to world space.
 // Returns null for items that can't be expressed in OCC yet (e.g. extrude,
 // sketch).  Used by performCsg and chamfer paths.
-function buildItemShapeWorld(item) {
-  let shape = null;
+// Build the OCC TopoDS_Shape for an item in its LOCAL frame — the same
+// frame as its rendered geometryData (so that edge endpoints picked by
+// the user, which come from the rendered mesh, will match edges of this
+// shape).
+//
+// For primitives/extrudes: makePrimitiveShape directly.
+// For csg items: recursively rebuild via the regenerator (boolean →
+//   inputs at their world positions, then translate back by -item.position
+//   so the boolean result sits centred in the item's local frame;
+//   chamfer/fillet → rebuild source and apply the recorded operation).
+export function buildItemShapeLocal(item, allItems = []) {
   if (
     item.type === "cube" ||
     item.type === "sphere" ||
@@ -99,12 +113,47 @@ function buildItemShapeWorld(item) {
     item.type === "torus" ||
     item.type === "extrude"
   ) {
-    shape = makePrimitiveShape(item);
-  } else {
-    // csg / sketch are not directly OCC-native here (csg items go through
-    // their cached geometryData; sketches don't produce solids).
-    return null;
+    return makePrimitiveShape(item);
   }
+  if (item.type === "csg" && item.regenerator) {
+    const r = item.regenerator;
+    if (r.kind === "chamfer") {
+      const sourceShape = buildItemShapeLocal(r.source, allItems);
+      if (!sourceShape) return null;
+      const op = r.segments === 1 ? chamferShape : filletShape;
+      return op(sourceShape, r.subGeo?.edges || [], r.amount ?? 0.05);
+    }
+    if (r.kind === "boolean") {
+      const inputs = (r.inputIds || [])
+        .map((id) => allItems.find((i) => i.id === id))
+        .filter(Boolean)
+        .map((inp) => {
+          const local = buildItemShapeLocal(inp, allItems);
+          if (!local) return null;
+          const t = buildBrushTransform(inp);
+          return transformShape(local, t.position, t.rotation);
+        })
+        .filter(Boolean);
+      if (inputs.length < 2) return null;
+      let world = booleanOp(r.op, inputs);
+      if (!world) return null;
+      // Translate back into the item's local (bbox-centred) frame so
+      // edge endpoints picked from the rendered mesh match.
+      if (item.position) {
+        world = transformShape(
+          world,
+          { x: -item.position.x, y: -item.position.y, z: -item.position.z },
+          null,
+        );
+      }
+      return world;
+    }
+  }
+  return null;
+}
+
+function buildItemShapeWorld(item, allItems = []) {
+  const shape = buildItemShapeLocal(item, allItems);
   if (!shape) return null;
   const { position, rotation } = buildBrushTransform(item);
   return transformShape(shape, position, rotation);
@@ -118,9 +167,12 @@ export function performCsg(selectedItems, operation, options = {}) {
   if (!isOccReady()) {
     throw new Error("performCsg requires OpenCascade — await ensureOcc()");
   }
+  // `allItems` (defaults to the selection) is used when an input is
+  // itself a csg result whose regenerator references other items by id.
+  const allItems = options.allItems || selectedItems;
   const shapes = [];
   for (const item of selectedItems) {
-    const s = buildItemShapeWorld(item);
+    const s = buildItemShapeWorld(item, allItems);
     if (s) shapes.push(s);
   }
   if (shapes.length < 2) return null;

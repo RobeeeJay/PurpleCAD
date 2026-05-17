@@ -27,7 +27,10 @@ const CombineSection = () => {
       // Tessellate primitives at the high-resolution setting so the CSG
       // result inherits the chord-deviation precision the user selected.
       const printPrecision = curveResolution === "print" ? 0.01 : null;
-      const result = performCsg(selectedItems, operation, { printPrecision });
+      const result = performCsg(selectedItems, operation, {
+        printPrecision,
+        allItems: items,
+      });
       if (!result) {
         // Fewer than two items produced usable geometry (e.g. all were sketches
         // or extrudes without a valid profile).  Nothing to combine.
