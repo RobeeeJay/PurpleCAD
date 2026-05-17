@@ -6,7 +6,10 @@ import {
   buildItemGeometry,
   buildBrushTransform,
 } from "../../three/csgUtils.js";
-import { applyBevelToSubGeometry } from "../../three/bevelUtils.js";
+import {
+  applyBevelToSubGeometry,
+  combineBevelSubGeoOnSource,
+} from "../../three/bevelUtils.js";
 
 const BevelSection = () => {
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
@@ -30,15 +33,43 @@ const BevelSection = () => {
       // (sphere / cylinder / torus) are tessellated at the appropriate
       // chord-deviation precision before the bevel runs.
       const printPrecision = curveResolution === "print" ? 0.01 : null;
-      const geo = buildItemGeometry(item, { printPrecision });
+      const amount = 0.05;
+
+      // If this item already has a bevel regenerator with the same
+      // amount/segments, COMBINE the new selection with the prior one and
+      // re-run the bevel on the ORIGINAL source.  Sequential application
+      // would leave a hole at corners shared between successive chamfers
+      // because Phase 3 (corner-fill + diagonal-bridge) only fires within a
+      // single applyBevel call.  Combining lets Phase 3 close those corners.
+      const prior = item.regenerator;
+      let source, subGeo;
+      if (
+        prior?.kind === "bevel" &&
+        prior.amount === amount &&
+        prior.segments === segments
+      ) {
+        source = prior.source;
+        const sourceGeo = buildItemGeometry(source, { printPrecision });
+        subGeo = combineBevelSubGeoOnSource(
+          prior.subGeo,
+          selectedSubGeometry,
+          sourceGeo,
+          amount,
+        );
+      } else {
+        // First bevel on this item — snapshot the current (pre-bevel) state
+        // as the source for future re-runs.  Strip any prior regenerator
+        // (e.g. a boolean) so the source can be cleanly rebuilt.
+        const sourceSnapshot = { ...item };
+        delete sourceSnapshot.regenerator;
+        source = sourceSnapshot;
+        subGeo = selectedSubGeometry;
+      }
+
+      const geo = buildItemGeometry(source, { printPrecision });
       if (!geo) return;
 
-      const result = applyBevelToSubGeometry(
-        geo,
-        selectedSubGeometry,
-        0.05,
-        segments,
-      );
+      const result = applyBevelToSubGeometry(geo, subGeo, amount, segments);
       if (!result) return;
 
       const posAttr = result.getAttribute("position");
@@ -61,8 +92,10 @@ const BevelSection = () => {
 
       // Rotate the local-space offset into world space and add it to the
       // brush-transform position (which already accounts for extrude centroid).
-      const brushPos = buildBrushTransform(item).position;
-      const rot = item.rotation || { x: 0, y: 0, z: 0 };
+      // Use the SOURCE's brush transform so combined re-bevels land at the
+      // same world position as the first bevel did.
+      const brushPos = buildBrushTransform(source).position;
+      const rot = source.rotation || { x: 0, y: 0, z: 0 };
       localCentre.applyEuler(
         new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
       );
@@ -73,6 +106,14 @@ const BevelSection = () => {
           x: brushPos.x + localCentre.x,
           y: brushPos.y + localCentre.y,
           z: brushPos.z + localCentre.z,
+        },
+        regenerator: {
+          kind: "bevel",
+          source,
+          subGeo,
+          amount,
+          segments,
+          regeneratedAt: printPrecision,
         },
         geometryData: {
           positions: Array.from(posAttr.array),

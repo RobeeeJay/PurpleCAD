@@ -54,6 +54,16 @@ const CombineSection = () => {
         scale: { x: 1, y: 1, z: 1 },
         rotation: { x: 0, y: 0, z: 0 },
         geometryData: result.geometryData,
+        // Recipe for re-running this boolean at a different resolution so
+        // toggling the preview/print setting updates the result.  Records
+        // input item ids + the operation; the regenerate pass looks them
+        // up in the current items state.
+        regenerator: {
+          kind: "boolean",
+          op: operation,
+          inputIds: selectedItems.map((i) => i.id),
+          regeneratedAt: printPrecision,
+        },
       });
       setItemsHidden(selectedItems.map((i) => i.id));
     } catch (err) {

@@ -185,7 +185,7 @@ const getInitialItems = () => {
 // Store
 // ---------------------------------------------------------------------------
 
-export const useStore = create((set) => ({
+export const useStore = create((set, get) => ({
   items: getInitialItems(),
   selectedId: null,
   selectedIds: [],
@@ -1197,6 +1197,25 @@ export const useStore = create((set) => ({
     set((state) => ({
       curveResolution: state.curveResolution === "print" ? "preview" : "print",
     })),
+
+  // Re-runs CSG/bevel operations whose `regenerator.regeneratedAt` doesn't
+  // match the requested precision, so toggling the preview/print setting
+  // refreshes downstream booleans + bevels at the current timeline position.
+  // Items without a regenerator (older saves, untouched primitives) pass
+  // through untouched.
+  //
+  // This is a lazy import to avoid a circular dependency between the store
+  // and the three/ utilities at module-load time.
+  regenerateForResolution: async (printPrecision) => {
+    const { regenerateItemsForResolution } = await import(
+      "./three/regenerateItems.js"
+    );
+    const state = get();
+    const newItems = regenerateItemsForResolution(state.items, printPrecision);
+    if (newItems !== state.items) {
+      set({ items: newItems });
+    }
+  },
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
   toggleSketchShapesDashed: (sketchId, indices) =>

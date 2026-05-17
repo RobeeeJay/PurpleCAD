@@ -437,6 +437,17 @@ const Viewport = () => {
     return clearPlanes;
   }, [sketchPlacementMode]);
 
+  // ── Regenerate CSG/bevel results at the current resolution ───────────────
+  // CSG and bevel items store a `regenerator` describing how they were made.
+  // When the user toggles preview/print, walk items and re-run any whose
+  // baked geometryData was computed at the old precision.  This is what
+  // makes the scene "recalculate to the current timeline position" — the
+  // baked geometryData gets refreshed for the current setting before the
+  // scene rebuild reads from items.
+  useEffect(() => {
+    useStore.getState().regenerateForResolution(printPrecision);
+  }, [items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Rebuild scene objects ─────────────────────────────────────────────────
 
   useEffect(() => {
