@@ -1,98 +1,63 @@
 import * as THREE from "three";
-import {
-  Evaluator,
-  Brush,
-  ADDITION,
-  SUBTRACTION,
-  INTERSECTION,
-} from "three-bvh-csg";
-import { polyCentroid, fullCircleSegments } from "./sceneObjects.js";
+import { polyCentroid } from "./sceneObjects.js";
+import { makePrimitiveShape } from "./occ/primitives.js";
+import { tessellate, tessellateToData } from "./occ/tessellate.js";
+import { booleanOp, chamferShape, transformShape } from "./occ/operations.js";
+import { isOccReady } from "./occ/init.js";
 
-// Builds the THREE.BufferGeometry for a given item, or returns null if the
-// item type does not produce solid geometry (e.g. sketches).
-//
-// `options.printPrecision` (mm) lets the caller request high-resolution
-// geometry for primitives (sphere / cylinder / torus).  When omitted or
-// null, primitives use the default 32-segment count for preview-quality.
+// Build the THREE.BufferGeometry for an item.  Primitives, CSG results and
+// chamfer/fillet results all go through OpenCascade.js; the OCC kernel is
+// expected to be initialized (call ensureOcc() at app startup before any
+// scene-building code runs).  Sketches return null (they're 2D); extrude
+// items are still served by THREE.ExtrudeGeometry while that path is being
+// migrated separately.
 export function buildItemGeometry(item, options = {}) {
   const precision = options.printPrecision ?? null;
-  switch (item.type) {
-    case "cube":
-      return new THREE.BoxGeometry(2, 2, 2);
-    case "sphere": {
-      const widthSegs = fullCircleSegments(1.5, precision, 32);
-      // Height segments are 1 full great-circle (radius = 1.5), so use the
-      // same formula but at half the count (half-arc, pole-to-pole).
-      const heightSegs = Math.max(8, Math.round(widthSegs / 2));
-      return new THREE.SphereGeometry(1.5, widthSegs, heightSegs);
-    }
-    case "cylinder": {
-      const segs = fullCircleSegments(1, precision, 32);
-      return new THREE.CylinderGeometry(1, 1, 2, segs);
-    }
-    case "torus": {
-      // Main ring radius = 1.0, tube radius = 0.4.  Each circle's segment
-      // count is sized to its own radius so the chord deviation matches.
-      const tubularSegs = fullCircleSegments(1.0, precision, 32);
-      const radialSegs = fullCircleSegments(0.4, precision, 16);
-      return new THREE.TorusGeometry(1.0, 0.4, radialSegs, tubularSegs);
-    }
 
-    case "extrude": {
-      const poly = item.profile?.polygon2D;
-      if (!poly || poly.length < 3) return null;
-      const holes = item.profile.holes || [];
-      const depth = item.depth ?? 1.0;
-      const c = polyCentroid(poly);
-      const shape = new THREE.Shape(
-        poly.map((p) => new THREE.Vector2(p.x - c.x, p.y - c.y)),
-      );
-      holes.forEach((h) =>
-        shape.holes.push(
-          new THREE.Path(h.map((p) => new THREE.Vector2(p.x - c.x, p.y - c.y))),
-        ),
-      );
-      const geo = new THREE.ExtrudeGeometry(shape, {
-        depth,
-        bevelEnabled: false,
-      });
-      // Centre along the extrusion axis to match buildSceneObjects behaviour.
-      geo.translate(0, 0, -depth / 2);
-      return geo;
-    }
+  if (item.type === "sketch") return null;
 
-    case "csg": {
-      if (!item.geometryData) return null;
-      const { positions, normals, indices } = item.geometryData;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute(
-        "position",
-        new THREE.BufferAttribute(new Float32Array(positions), 3),
+  if (
+    item.type === "cube" ||
+    item.type === "sphere" ||
+    item.type === "cylinder" ||
+    item.type === "torus" ||
+    item.type === "extrude"
+  ) {
+    if (!isOccReady()) {
+      throw new Error(
+        `buildItemGeometry(${item.type}) requires OpenCascade — await ensureOcc() before rendering.`,
       );
-      if (normals)
-        geo.setAttribute(
-          "normal",
-          new THREE.BufferAttribute(new Float32Array(normals), 3),
-        );
-      if (indices)
-        geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
-      if (!normals) geo.computeVertexNormals();
-      return geo;
     }
-
-    default:
-      return null;
+    const shape = makePrimitiveShape(item);
+    if (!shape) return null;
+    return tessellate(shape, precision);
   }
+
+  if (item.type === "csg") {
+    if (!item.geometryData) return null;
+    const { positions, normals, indices } = item.geometryData;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positions), 3),
+    );
+    if (normals)
+      geo.setAttribute(
+        "normal",
+        new THREE.BufferAttribute(new Float32Array(normals), 3),
+      );
+    if (indices)
+      geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+    if (!normals) geo.computeVertexNormals();
+    return geo;
+  }
+
+  return null;
 }
 
-// Returns the world-space transform {position, rotation, scale} to use when
-// placing the CSG Brush for the given item.
-//
-// For most item types item.position IS the mesh world position and can be used
-// directly.  Extruded items are the exception: buildSceneObjects places the
-// mesh at item.position + rotated_centroid_offset so that the solid sits on
-// the sketch plane rather than floating at the sketch origin.  The CSG brush
-// must mirror that offset or the boolean operation will use the wrong location.
+// World-space transform for placing a CSG input.  Extruded items keep
+// their original centroid-offset behaviour so the solid sits on the sketch
+// plane rather than at the sketch origin.
 export function buildBrushTransform(item) {
   const r = item.rotation || { x: 0, y: 0, z: 0 };
   const s = item.scale ? item.scale.x : 1;
@@ -122,66 +87,51 @@ export function buildBrushTransform(item) {
   };
 }
 
-// Runs the CSG operation on the given items.
-// Returns { position, geometryData } for the new item, or null if the
-// operation cannot be completed (fewer than two items produce valid geometry).
-//
-// `options.printPrecision` is forwarded to buildItemGeometry so primitives
-// (sphere / cylinder / torus) are tessellated at high resolution when print
-// mode is on.
-export function performCsg(selectedItems, operation, options = {}) {
-  const evaluator = new Evaluator();
-  const sharedMat = new THREE.MeshStandardMaterial();
-
-  const op =
-    operation === "union"
-      ? ADDITION
-      : operation === "difference"
-        ? SUBTRACTION
-        : INTERSECTION;
-
-  // Collect brushes — skip items whose type doesn't produce solid geometry.
-  const brushes = [];
-  for (const item of selectedItems) {
-    const geo = buildItemGeometry(item, options);
-    if (!geo) continue;
-
-    if (!geo.getAttribute("uv")) {
-      const count = geo.getAttribute("position").count;
-      geo.setAttribute(
-        "uv",
-        new THREE.BufferAttribute(new Float32Array(count * 2), 2),
-      );
-    }
-
-    const brush = new Brush(geo, sharedMat);
-    const { position: p, rotation: r, scale: s } = buildBrushTransform(item);
-    brush.position.set(p.x, p.y, p.z);
-    brush.scale.setScalar(s);
-    brush.rotation.set(r.x || 0, r.y || 0, r.z || 0);
-    brush.updateMatrixWorld();
-    brushes.push(brush);
-  }
-
-  // Require at least two solids — a single-item "operation" is meaningless
-  // and the geometry would be in local space (not world space) making the
-  // bbox-centre position calculation wrong.
-  if (brushes.length < 2) {
-    sharedMat.dispose();
+// Build the OCC TopoDS_Shape for an item, transformed to world space.
+// Returns null for items that can't be expressed in OCC yet (e.g. extrude,
+// sketch).  Used by performCsg and chamfer paths.
+function buildItemShapeWorld(item) {
+  let shape = null;
+  if (
+    item.type === "cube" ||
+    item.type === "sphere" ||
+    item.type === "cylinder" ||
+    item.type === "torus" ||
+    item.type === "extrude"
+  ) {
+    shape = makePrimitiveShape(item);
+  } else {
+    // csg / sketch are not directly OCC-native here (csg items go through
+    // their cached geometryData; sketches don't produce solids).
     return null;
   }
+  if (!shape) return null;
+  const { position, rotation } = buildBrushTransform(item);
+  return transformShape(shape, position, rotation);
+}
 
-  let result = brushes[0];
-  for (let i = 1; i < brushes.length; i++) {
-    result = evaluator.evaluate(result, brushes[i], op);
+// Runs the CSG boolean (union/difference/intersection) on the given items
+// via OpenCascade.  Returns { position, geometryData } where geometryData
+// is the tessellation of the boolean result, or null if fewer than two
+// inputs produce a usable shape.
+export function performCsg(selectedItems, operation, options = {}) {
+  if (!isOccReady()) {
+    throw new Error("performCsg requires OpenCascade — await ensureOcc()");
   }
+  const shapes = [];
+  for (const item of selectedItems) {
+    const s = buildItemShapeWorld(item);
+    if (s) shapes.push(s);
+  }
+  if (shapes.length < 2) return null;
+  const result = booleanOp(operation, shapes);
+  if (!result) return null;
 
-  const posAttr = result.geometry.getAttribute("position");
-  const normAttr = result.geometry.getAttribute("normal");
-  const idxAttr = result.geometry.index;
-
-  // Centre the result geometry around its bounding-box centre so that
-  // item.position is the world-space pivot of the combined solid.
+  // Tessellate then centre the result around its bbox so item.position
+  // becomes the world-space pivot.
+  const tess = tessellate(result, options.printPrecision ?? null);
+  if (!tess) return null;
+  const posAttr = tess.getAttribute("position");
   const bbox = new THREE.Box3().setFromBufferAttribute(posAttr);
   const centre = new THREE.Vector3();
   bbox.getCenter(centre);
@@ -194,9 +144,8 @@ export function performCsg(selectedItems, operation, options = {}) {
     );
   }
   posAttr.needsUpdate = true;
-
-  sharedMat.dispose();
-
+  const normAttr = tess.getAttribute("normal");
+  const idxAttr = tess.index;
   return {
     position: { x: centre.x, y: centre.y, z: centre.z },
     geometryData: {
@@ -205,4 +154,36 @@ export function performCsg(selectedItems, operation, options = {}) {
       indices: idxAttr ? Array.from(idxAttr.array) : null,
     },
   };
+}
+
+// Apply a constant-distance chamfer to the edges in `subGeo` on `item`'s
+// shape.  Returns { position, geometryData } for the chamfered result, or
+// null if the chamfer couldn't be applied (e.g. unknown edges).
+//
+// `subGeo.edges` is an array of { ax, ay, az, bx, by, bz } endpoint pairs
+// in the item's LOCAL space.  Faces in `subGeo.faces` are handled by
+// chamfering every edge on the boundary of the matching face plane.
+export function chamferItemEdges(item, subGeo, amount = 0.05) {
+  if (!isOccReady()) {
+    throw new Error("chamferItemEdges requires OpenCascade — await ensureOcc()");
+  }
+  let shape;
+  if (
+    item.type === "cube" ||
+    item.type === "sphere" ||
+    item.type === "cylinder" ||
+    item.type === "torus"
+  ) {
+    shape = makePrimitiveShape(item);
+  } else {
+    return null;
+  }
+  if (!shape) return null;
+  const edges = Array.isArray(subGeo?.edges) ? [...subGeo.edges] : [];
+  // TODO: face → boundary-edge expansion via OCC TopExp_MapShapesAndAncestors
+  // (faces in subGeo.faces still rely on the caller pre-expanding for now).
+  if (edges.length === 0) return null;
+  const chamfered = chamferShape(shape, edges, amount);
+  if (!chamfered) return null;
+  return { shape: chamfered, ...tessellateToData(chamfered, null) };
 }

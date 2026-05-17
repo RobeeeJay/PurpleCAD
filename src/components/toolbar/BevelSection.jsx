@@ -2,14 +2,10 @@ import React from "react";
 import * as THREE from "three";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
-import {
-  buildItemGeometry,
-  buildBrushTransform,
-} from "../../three/csgUtils.js";
-import {
-  applyBevelToSubGeometry,
-  combineBevelSubGeoOnSource,
-} from "../../three/bevelUtils.js";
+import { buildBrushTransform } from "../../three/csgUtils.js";
+import { makePrimitiveShape } from "../../three/occ/primitives.js";
+import { chamferShape, filletShape } from "../../three/occ/operations.js";
+import { tessellateToData } from "../../three/occ/tessellate.js";
 
 const BevelSection = () => {
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
@@ -23,108 +19,109 @@ const BevelSection = () => {
     ((selectedSubGeometry.edges?.length ?? 0) > 0 ||
       (selectedSubGeometry.faces?.length ?? 0) > 0);
 
+  // `segments` here is preserved from the old (custom-mesh) chamfer API:
+  // segments=1 → chamfer (flat); segments>1 → bevel (rounded).  OCC
+  // expresses these as BRepFilletAPI_MakeChamfer (constant distance) and
+  // BRepFilletAPI_MakeFillet (radius); we map directly.
   const apply = (segments) => {
     if (!hasSelection) return;
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
 
     try {
-      // Honour the global high-resolution / print-mode setting so primitives
-      // (sphere / cylinder / torus) are tessellated at the appropriate
-      // chord-deviation precision before the bevel runs.
       const printPrecision = curveResolution === "print" ? 0.01 : null;
       const amount = 0.05;
 
-      // If this item already has a bevel regenerator with the same
-      // amount/segments, COMBINE the new selection with the prior one and
-      // re-run the bevel on the ORIGINAL source.  Sequential application
-      // would leave a hole at corners shared between successive chamfers
-      // because Phase 3 (corner-fill + diagonal-bridge) only fires within a
-      // single applyBevel call.  Combining lets Phase 3 close those corners.
+      // If the item already has a prior bevel/chamfer recipe with the same
+      // amount/segments, append the new edges to it and re-run the whole
+      // operation on the original source.  Otherwise snapshot the current
+      // item as the source.
       const prior = item.regenerator;
-      let source, subGeo;
+      let source, edges;
       if (
-        prior?.kind === "bevel" &&
+        prior?.kind === "chamfer" &&
         prior.amount === amount &&
         prior.segments === segments
       ) {
         source = prior.source;
-        const sourceGeo = buildItemGeometry(source, { printPrecision });
-        subGeo = combineBevelSubGeoOnSource(
-          prior.subGeo,
-          selectedSubGeometry,
-          sourceGeo,
-          amount,
-        );
+        edges = [
+          ...(prior.subGeo?.edges || []),
+          ...(selectedSubGeometry.edges || []),
+        ];
       } else {
-        // First bevel on this item — snapshot the current (pre-bevel) state
-        // as the source for future re-runs.  Strip any prior regenerator
-        // (e.g. a boolean) so the source can be cleanly rebuilt.
         const sourceSnapshot = { ...item };
         delete sourceSnapshot.regenerator;
         source = sourceSnapshot;
-        subGeo = selectedSubGeometry;
+        edges = selectedSubGeometry.edges || [];
       }
+      if (edges.length === 0) return;
 
-      const geo = buildItemGeometry(source, { printPrecision });
-      if (!geo) return;
-
-      const result = applyBevelToSubGeometry(geo, subGeo, amount, segments);
+      // Build the source OCC shape, apply chamfer (segments=1) or fillet
+      // (segments>1), tessellate.
+      const sourceShape = makePrimitiveShape(source);
+      if (!sourceShape) return;
+      const op = segments === 1 ? chamferShape : filletShape;
+      const result = op(sourceShape, edges, amount);
       if (!result) return;
+      const data = tessellateToData(result, printPrecision);
+      if (!data) return;
 
-      const posAttr = result.getAttribute("position");
-      const normAttr = result.getAttribute("normal");
-      const idxAttr = result.index;
-
-      // Centre the result geometry and compute the world-space pivot.
-      const bbox = new THREE.Box3().setFromBufferAttribute(posAttr);
-      const localCentre = new THREE.Vector3();
-      bbox.getCenter(localCentre);
-      for (let i = 0; i < posAttr.count; i++) {
-        posAttr.setXYZ(
-          i,
-          posAttr.getX(i) - localCentre.x,
-          posAttr.getY(i) - localCentre.y,
-          posAttr.getZ(i) - localCentre.z,
-        );
+      // Centre and compute world position from source's brushPos.
+      const arr = data.positions;
+      let minX = Infinity,
+        minY = Infinity,
+        minZ = Infinity,
+        maxX = -Infinity,
+        maxY = -Infinity,
+        maxZ = -Infinity;
+      for (let i = 0; i < arr.length; i += 3) {
+        if (arr[i] < minX) minX = arr[i];
+        if (arr[i] > maxX) maxX = arr[i];
+        if (arr[i + 1] < minY) minY = arr[i + 1];
+        if (arr[i + 1] > maxY) maxY = arr[i + 1];
+        if (arr[i + 2] < minZ) minZ = arr[i + 2];
+        if (arr[i + 2] > maxZ) maxZ = arr[i + 2];
       }
-      posAttr.needsUpdate = true;
+      const cx = (minX + maxX) / 2,
+        cy = (minY + maxY) / 2,
+        cz = (minZ + maxZ) / 2;
+      const centered = new Float32Array(arr.length);
+      for (let i = 0; i < arr.length; i += 3) {
+        centered[i] = arr[i] - cx;
+        centered[i + 1] = arr[i + 1] - cy;
+        centered[i + 2] = arr[i + 2] - cz;
+      }
 
-      // Rotate the local-space offset into world space and add it to the
-      // brush-transform position (which already accounts for extrude centroid).
-      // Use the SOURCE's brush transform so combined re-bevels land at the
-      // same world position as the first bevel did.
       const brushPos = buildBrushTransform(source).position;
       const rot = source.rotation || { x: 0, y: 0, z: 0 };
-      localCentre.applyEuler(
-        new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
-      );
+      const local = new THREE.Vector3(cx, cy, cz);
+      local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
 
       modifyItem(item.id, {
         type: "csg",
         position: {
-          x: brushPos.x + localCentre.x,
-          y: brushPos.y + localCentre.y,
-          z: brushPos.z + localCentre.z,
+          x: brushPos.x + local.x,
+          y: brushPos.y + local.y,
+          z: brushPos.z + local.z,
         },
         regenerator: {
-          kind: "bevel",
+          kind: "chamfer",
           source,
-          subGeo,
+          subGeo: { edges, faces: [] },
           amount,
           segments,
           regeneratedAt: printPrecision,
         },
         geometryData: {
-          positions: Array.from(posAttr.array),
-          normals: normAttr ? Array.from(normAttr.array) : null,
-          indices: idxAttr ? Array.from(idxAttr.array) : null,
+          positions: Array.from(centered),
+          normals: data.normals,
+          indices: data.indices,
         },
       });
       clearSelectedSubGeometry();
     } catch (err) {
-      console.error("Bevel operation failed:", err);
-      alert("Bevel operation failed: " + err.message);
+      console.error("Chamfer operation failed:", err);
+      alert("Chamfer operation failed: " + err.message);
     }
   };
 
