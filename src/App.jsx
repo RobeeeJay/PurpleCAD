@@ -6,6 +6,7 @@ import Timeline from "./components/Timeline";
 import VariablesDialog from "./components/VariablesDialog";
 import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
 import ChamferEditDialog from "./components/ChamferEditDialog";
+import BusyIndicator from "./components/BusyIndicator";
 import "./styles/App.css";
 import { useStore } from "./store";
 
@@ -62,6 +63,7 @@ function App() {
       <VariablesDialog />
       <ExtrudeLengthDialog />
       <ChamferEditDialog />
+      <BusyIndicator />
     </div>
   );
 }

@@ -3,17 +3,8 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
-import {
-  buildBrushTransform,
-  buildItemShapeLocal,
-} from "../../three/csgUtils.js";
-import {
-  chamferShape,
-  filletShape,
-  chamferShapeBy,
-  filletShapeBy,
-} from "../../three/occ/operations.js";
-import { tessellateToData } from "../../three/occ/tessellate.js";
+import { buildBrushTransform } from "../../three/csgUtils.js";
+import { chamferOrFilletItem } from "../../three/occClient.js";
 
 const BevelSection = () => {
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
@@ -39,7 +30,7 @@ const BevelSection = () => {
   // segments=1 → chamfer (flat); segments>1 → bevel (rounded).  OCC
   // expresses these as BRepFilletAPI_MakeChamfer (constant distance) and
   // BRepFilletAPI_MakeFillet (radius); we map directly.
-  const apply = (segments) => {
+  const apply = async (segments) => {
     if (!hasSelection) return;
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
@@ -89,50 +80,23 @@ const BevelSection = () => {
       }
       if (subGeo.edges.length === 0 && subGeo.faces.length === 0) return;
 
-      // Build the source's OCC shape (recursively for csg/booleans/
-      // chamfered sources), then apply chamfer (segments=1) or fillet
-      // (segments>1) and tessellate.  The "By" variants handle BOTH
-      // explicit edge endpoints and face-normal selections, expanding
-      // matching faces to their boundary edges via BRepAdaptor_Surface.
-      const sourceShape = buildItemShapeLocal(source, items);
-      if (!sourceShape) return;
-      const result =
-        segments === 1
-          ? chamferShapeBy(sourceShape, subGeo, amount, angleRad)
-          : filletShapeBy(sourceShape, subGeo, amount);
+      // Delegated to occClient — handles building the source shape,
+      // applying chamfer (segments=1) or fillet (segments>1), tessellating,
+      // and centring the result around its bbox.  The "By" variants used
+      // inside handle both explicit edge endpoints and face-normal
+      // selections.  Returns null when nothing matched.
+      const result = await chamferOrFilletItem({
+        source,
+        subGeo,
+        amount,
+        angleRad,
+        segments,
+        allItems: items,
+        printPrecision,
+      });
       if (!result) return;
-      // chamferShapeBy returns the original shape unchanged when nothing
-      // matched — detect that so we don't silently overwrite the item
-      // with an identical tessellation that looks like "nothing happened".
-      if (result === sourceShape) return;
-      const data = tessellateToData(result, printPrecision);
-      if (!data) return;
-
-      // Centre and compute world position from source's brushPos.
-      const arr = data.positions;
-      let minX = Infinity,
-        minY = Infinity,
-        minZ = Infinity,
-        maxX = -Infinity,
-        maxY = -Infinity,
-        maxZ = -Infinity;
-      for (let i = 0; i < arr.length; i += 3) {
-        if (arr[i] < minX) minX = arr[i];
-        if (arr[i] > maxX) maxX = arr[i];
-        if (arr[i + 1] < minY) minY = arr[i + 1];
-        if (arr[i + 1] > maxY) maxY = arr[i + 1];
-        if (arr[i + 2] < minZ) minZ = arr[i + 2];
-        if (arr[i + 2] > maxZ) maxZ = arr[i + 2];
-      }
-      const cx = (minX + maxX) / 2,
-        cy = (minY + maxY) / 2,
-        cz = (minZ + maxZ) / 2;
-      const centered = new Float32Array(arr.length);
-      for (let i = 0; i < arr.length; i += 3) {
-        centered[i] = arr[i] - cx;
-        centered[i + 1] = arr[i + 1] - cy;
-        centered[i + 2] = arr[i + 2] - cz;
-      }
+      const { geometryData, centerOffset } = result;
+      const { cx, cy, cz } = centerOffset;
 
       const brushPos = buildBrushTransform(source).position;
       const rot = source.rotation || { x: 0, y: 0, z: 0 };
@@ -157,11 +121,7 @@ const BevelSection = () => {
             angleRad,
             regeneratedAt: printPrecision,
           },
-          geometryData: {
-            positions: Array.from(centered),
-            normals: data.normals,
-            indices: data.indices,
-          },
+          geometryData,
         },
         segments === 1 ? "Chamfered" : "Filleted",
       );

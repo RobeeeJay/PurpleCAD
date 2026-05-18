@@ -856,6 +856,18 @@ export const useStore = create((set, get) => ({
   chamferEditTarget: null,
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
 
+  // Counter of in-flight long-running OCC operations.  Incremented by
+  // occClient.runOp before work starts, decremented in its finally.
+  // Drives the global <BusyIndicator>; staying a counter (not a boolean)
+  // means concurrent operations stack correctly.
+  pendingOperations: 0,
+  beginOperation: () =>
+    set((state) => ({ pendingOperations: state.pendingOperations + 1 })),
+  endOperation: () =>
+    set((state) => ({
+      pendingOperations: Math.max(0, state.pendingOperations - 1),
+    })),
+
   // Update the amount / angleRad on an existing chamfer-or-fillet history
   // entry, then replay history so the regenerator reflects the new values.
   // `regeneratedAt` is reset (different from any valid printPrecision) and
