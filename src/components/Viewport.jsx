@@ -1048,15 +1048,19 @@ const Viewport = () => {
             step="0.1"
             min="0.05"
             autoFocus
-            defaultValue={(
-              extrudeDepthInput.defaultDepth * MM_PER_UNIT
+            value={(
+              (extrudeDepthInput.currentDepth ??
+                extrudeDepthInput.defaultDepth) * MM_PER_UNIT
             ).toFixed(2)}
             onChange={(e) => {
               const mm = parseFloat(e.target.value);
               if (!isNaN(mm) && mm > 0) {
-                cameraControlsRef.current?.updateExtrudePreview?.(
-                  mm / MM_PER_UNIT,
-                );
+                const depth = mm / MM_PER_UNIT;
+                cameraControlsRef.current?.updateExtrudePreview?.(depth);
+                useStore.getState().setExtrudeDepthInput({
+                  ...extrudeDepthInput,
+                  currentDepth: depth,
+                });
               }
             }}
             onKeyDown={(e) => {

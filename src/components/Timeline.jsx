@@ -34,6 +34,10 @@ const Timeline = () => {
   const restoreToHistory = useStore((state) => state.restoreToHistory);
   const deleteHistoryEntry = useStore((state) => state.deleteHistoryEntry);
   const reorderHistory = useStore((state) => state.reorderHistory);
+  const setExtrudeRetargetId = useStore((state) => state.setExtrudeRetargetId);
+  const setExtrudeSelectMode = useStore((state) => state.setExtrudeSelectMode);
+  const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
+  const extrudeRetargetId = useStore((state) => state.extrudeRetargetId);
   const undoCount = useStore((state) => state.undoStack.length);
   const redoCount = useStore((state) => state.redoStack.length);
 
@@ -177,6 +181,52 @@ const Timeline = () => {
               <span className="timeline-label">
                 {getDisplayLabel(entry, history)}
               </span>
+              {entry.instruction?.type === "create" &&
+                entry.instruction.item?.type === "extrude" && (
+                  <button
+                    className={`timeline-action-btn${
+                      extrudeSelectMode === "profile" &&
+                      extrudeRetargetId === entry.instruction.item.id
+                        ? " active"
+                        : ""
+                    }`}
+                    title="Retarget Profile — pick a new face or sketch region to extrude from"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExtrudeRetargetId(entry.instruction.item.id);
+                      setExtrudeSelectMode("profile");
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                      <rect
+                        x="3"
+                        y="14"
+                        width="12"
+                        height="7"
+                        rx="1"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      />
+                      <polygon
+                        points="3,14 6,9 18,9 18,14"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        opacity="0.6"
+                      />
+                      <circle
+                        cx="19"
+                        cy="5"
+                        r="3"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <circle cx="19" cy="5" r="1" fill="currentColor" />
+                    </svg>
+                  </button>
+                )}
               {canDelete(index) && (
                 <button
                   className="timeline-delete-btn"

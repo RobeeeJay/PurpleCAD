@@ -6,7 +6,6 @@ import DocumentSection from "./toolbar/DocumentSection";
 import SketchDrawSection from "./toolbar/SketchDrawSection";
 import ObjectCreateSection from "./toolbar/ObjectCreateSection";
 import SketchModifySection from "./toolbar/SketchModifySection";
-import ExtrudeSection from "./toolbar/ExtrudeSection";
 import CombineSection from "./toolbar/CombineSection";
 import BevelSection from "./toolbar/BevelSection";
 import ConstrainSection from "./toolbar/ConstrainSection";
@@ -19,14 +18,12 @@ const Toolbar = () => {
 
   const selectedItem = items.find((i) => i.id === selectedId);
   const isSketchMode = selectedItem?.type === "sketch";
-  const isExtrudeSelected = !isSketchMode && selectedItem?.type === "extrude";
 
   return (
     <div className="toolbar">
       <DocumentSection />
       {isSketchMode ? <SketchDrawSection /> : <ObjectCreateSection />}
       {isSketchMode && <SketchModifySection />}
-      {isExtrudeSelected && <ExtrudeSection />}
       <CombineSection />
       <BevelSection />
       <ConstrainSection isSketchMode={isSketchMode} />

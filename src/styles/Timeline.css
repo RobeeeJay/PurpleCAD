@@ -137,7 +137,6 @@
   flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.15s ease, color 0.15s ease;
-  margin-left: auto;
 }
 
 .timeline-entry:hover .timeline-delete-btn {
@@ -154,6 +153,58 @@
 
 .timeline-entry.active .timeline-delete-btn:hover {
   color: #ff9999;
+}
+
+.timeline-action-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: color 0.15s ease, background-color 0.15s ease;
+  border-radius: 3px;
+}
+
+.timeline-action-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+}
+
+.timeline-action-btn.active {
+  color: #ffffff;
+  background-color: var(--selected-bg);
+}
+
+.timeline-entry.active .timeline-action-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.timeline-entry.active .timeline-action-btn:hover {
+  color: #ffffff;
+}
+
+.timeline-entry.active .timeline-action-btn.active {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* When an action button is present, the delete button no longer needs
+ * margin-left:auto — the action button already pushes everything right. */
+.timeline-action-btn + .timeline-delete-btn {
+  margin-left: 2px;
+}
+
+/* When NO action button is present, restore the original right-alignment. */
+.timeline-entry > .timeline-delete-btn {
+  margin-left: auto;
 }
 
 /* Scrollbar */

@@ -1675,7 +1675,10 @@ export function attachCameraControls(ctx) {
         useStore.getState().setExtrudeSelectMode("depth");
         useStore
           .getState()
-          .setExtrudeDepthInput({ defaultDepth: retargetItem?.depth ?? 1.0 });
+          .setExtrudeDepthInput({
+            defaultDepth: retargetItem?.depth ?? 1.0,
+            currentDepth: retargetItem?.depth ?? 1.0,
+          });
         renderer.domElement.style.cursor = "ns-resize";
         return;
       }
@@ -1707,7 +1710,10 @@ export function attachCameraControls(ctx) {
         useStore.getState().setExtrudeSelectMode("depth");
         useStore
           .getState()
-          .setExtrudeDepthInput({ defaultDepth: retargetItem?.depth ?? 1.0 });
+          .setExtrudeDepthInput({
+            defaultDepth: retargetItem?.depth ?? 1.0,
+            currentDepth: retargetItem?.depth ?? 1.0,
+          });
         renderer.domElement.style.cursor = "ns-resize";
       }
     }
@@ -1715,7 +1721,18 @@ export function attachCameraControls(ctx) {
 
   const handleExtrudeDepthMove = (screenX, screenY) => {
     const depth = computeExtrudeDepth(screenX, screenY);
-    if (extrudeProfileData) buildExtrudePreviewMesh(extrudeProfileData, depth);
+    if (!extrudeProfileData) return;
+    buildExtrudePreviewMesh(extrudeProfileData, depth);
+    // Keep the depth-input overlay in sync with the mouse-driven depth so
+    // the user can see the current value (and edit / confirm with Enter).
+    const store = useStore.getState();
+    const current = store.extrudeDepthInput;
+    if (current) {
+      const clamped = Math.max(0.05, depth);
+      if (Math.abs((current.currentDepth ?? -1) - clamped) > 1e-5) {
+        store.setExtrudeDepthInput({ ...current, currentDepth: clamped });
+      }
+    }
   };
 
   const finalizeExtrude = (screenX, screenY, depthOverride = null) => {
@@ -2502,12 +2519,10 @@ export function attachCameraControls(ctx) {
           useStore
             .getState()
             .addSketchShape(selectedIdRef.current, shape, constraints);
-        const chainStart = draw.chainStartPoint;
-        const closesChain =
-          clickSnap &&
-          chainStart &&
-          Math.hypot(localPt.x - chainStart.x, localPt.y - chainStart.y) < 0.01;
-        if (closesChain) {
+        // End the chain whenever the user clicks on ANY existing snap point
+        // (not just the chain's start) — connecting back to another shape's
+        // endpoint or midpoint is a natural "I'm done drawing" gesture.
+        if (clickSnap) {
           sketchDrawRef.current = null;
           setSketchDrawPhase("first");
           useStore.getState().setActiveSketchTool(null);
