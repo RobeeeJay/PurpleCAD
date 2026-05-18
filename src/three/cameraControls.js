@@ -29,6 +29,11 @@ import {
   norm2,
   buildBevelArc,
 } from "./sketchConstraints.js";
+import {
+  resolveItemDepth,
+  resolveConstraintDistance,
+  formatAsFormula,
+} from "./geometryParams.js";
 
 export function loadCameraState() {
   try {
@@ -1671,13 +1676,14 @@ export function attachCameraControls(ctx) {
         const retargetItem = itemsRef.current.find(
           (i) => i.id === useStore.getState().extrudeRetargetId,
         );
-        buildExtrudePreviewMesh(profile, retargetItem?.depth ?? 1.0);
+        const retargetDepth = retargetItem ? resolveItemDepth(retargetItem) : 1.0;
+        buildExtrudePreviewMesh(profile, retargetDepth);
         useStore.getState().setExtrudeSelectMode("depth");
         useStore
           .getState()
           .setExtrudeDepthInput({
-            defaultDepth: retargetItem?.depth ?? 1.0,
-            currentDepth: retargetItem?.depth ?? 1.0,
+            defaultDepth: retargetDepth,
+            currentDepth: retargetDepth,
           });
         renderer.domElement.style.cursor = "ns-resize";
         return;
@@ -1706,13 +1712,14 @@ export function attachCameraControls(ctx) {
         const retargetItem = itemsRef.current.find(
           (i) => i.id === useStore.getState().extrudeRetargetId,
         );
-        buildExtrudePreviewMesh(profile, retargetItem?.depth ?? 1.0);
+        const retargetDepth = retargetItem ? resolveItemDepth(retargetItem) : 1.0;
+        buildExtrudePreviewMesh(profile, retargetDepth);
         useStore.getState().setExtrudeSelectMode("depth");
         useStore
           .getState()
           .setExtrudeDepthInput({
-            defaultDepth: retargetItem?.depth ?? 1.0,
-            currentDepth: retargetItem?.depth ?? 1.0,
+            defaultDepth: retargetDepth,
+            currentDepth: retargetDepth,
           });
         renderer.domElement.style.cursor = "ns-resize";
       }
@@ -1743,9 +1750,13 @@ export function attachCameraControls(ctx) {
         : Math.max(0.05, computeExtrudeDepth(screenX, screenY));
     clearExtrudePreview();
     const store = useStore.getState();
+    // Persist the depth as a formula string in mm (the user-facing unit) so it
+    // can later reference variables.  The drag flow always commits a bare
+    // numeric value; the dedicated edit dialog writes its own formula string.
+    const depthStored = formatAsFormula(depth);
     const retargetId = store.extrudeRetargetId;
     if (retargetId != null) {
-      store.retargetExtrude(retargetId, extrudeProfileData, depth);
+      store.retargetExtrude(retargetId, extrudeProfileData, depthStored);
       store.setExtrudeRetargetId(null);
     } else {
       let maxId = 0;
@@ -1763,7 +1774,7 @@ export function attachCameraControls(ctx) {
         type: "extrude",
         children: [],
         profile: extrudeProfileData,
-        depth,
+        depth: depthStored,
         position: extrudeProfileData.position,
         rotation: extrudeProfileData.rotation,
         scale: { x: 1, y: 1, z: 1 },
@@ -3316,6 +3327,8 @@ export function attachCameraControls(ctx) {
                     pointA: c.pointA,
                     shapeBIdx: c.shapeBIdx,
                     pointB: c.pointB,
+                    // Preserve the raw distance (string formula or legacy
+                    // number) so the input shows what the user typed.
                     defaultDistance: c.distance,
                     constraintIdx: cObj.userData.constraintIdx,
                   });

@@ -139,28 +139,32 @@ const BevelSection = () => {
       const local = new THREE.Vector3(cx, cy, cz);
       local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
 
-      modifyItem(item.id, {
-        type: "csg",
-        position: {
-          x: brushPos.x + local.x,
-          y: brushPos.y + local.y,
-          z: brushPos.z + local.z,
+      modifyItem(
+        item.id,
+        {
+          type: "csg",
+          position: {
+            x: brushPos.x + local.x,
+            y: brushPos.y + local.y,
+            z: brushPos.z + local.z,
+          },
+          regenerator: {
+            kind: "chamfer",
+            source,
+            subGeo,
+            amount,
+            segments,
+            angleRad,
+            regeneratedAt: printPrecision,
+          },
+          geometryData: {
+            positions: Array.from(centered),
+            normals: data.normals,
+            indices: data.indices,
+          },
         },
-        regenerator: {
-          kind: "chamfer",
-          source,
-          subGeo,
-          amount,
-          segments,
-          angleRad,
-          regeneratedAt: printPrecision,
-        },
-        geometryData: {
-          positions: Array.from(centered),
-          normals: data.normals,
-          indices: data.indices,
-        },
-      });
+        segments === 1 ? "Chamfered" : "Filleted",
+      );
       clearSelectedSubGeometry();
     } catch (err) {
       console.error("Chamfer operation failed:", err);

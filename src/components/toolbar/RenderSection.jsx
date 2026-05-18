@@ -40,6 +40,22 @@ const RenderSection = () => {
         </svg>
       </button>
       <button
+        className={`toolbar-btn ${renderMode === "transparent" ? "active" : ""}`}
+        title="Transparent (50%)"
+        onClick={() => setRenderMode("transparent")}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <path
+            d="M3 5v14h18V5z"
+            fill="currentColor"
+            opacity="0.3"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeDasharray="3 2"
+          />
+        </svg>
+      </button>
+      <button
         className={`toolbar-btn ${renderMode === "smooth" ? "active" : ""}`}
         title="Smooth"
         onClick={() => setRenderMode("smooth")}

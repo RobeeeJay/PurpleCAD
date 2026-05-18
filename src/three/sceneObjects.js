@@ -9,6 +9,35 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { createMaterial } from "./objectMaterials.js";
 import { useStore } from "../store";
+import {
+  resolveItemDepth,
+  resolveConstraintDistance,
+} from "./geometryParams.js";
+
+// Signed shoelace area: positive when the polygon is CCW (in a +Y-up
+// Cartesian frame), negative when CW.  Used to normalize hole windings
+// before handing them to THREE.ExtrudeGeometry — Three.js builds side-wall
+// quads by walking each path in vertex order, so if a hole is CCW (same
+// orientation as the outer boundary) the inner walls come out facing the
+// wrong way (you see their backside, the normals point INTO the solid
+// instead of into the hole).
+function signedPolyAreaXY(poly) {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % poly.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a / 2;
+}
+
+// Return `poly` with the requested winding (CCW when wantCcw=true, CW
+// otherwise).  No-op when the polygon already matches.
+function withWinding(poly, wantCcw) {
+  if (!poly || poly.length < 3) return poly;
+  const isCcw = signedPolyAreaXY(poly) > 0;
+  return isCcw === wantCcw ? poly : [...poly].reverse();
+}
 
 export const MM_PER_UNIT = 10;
 
@@ -610,7 +639,7 @@ export function buildSceneObjects(
           }
         }
         if (!poly || poly.length < 3) return;
-        const depth = item.depth ?? 1.0;
+        const depth = resolveItemDepth(item);
         // Shift the 2D polygon so its centroid sits at the local origin.
         // Without this the mesh pivot stays at the sketch origin (often the
         // world origin), making rotation and scaling feel completely wrong.
@@ -625,10 +654,19 @@ export function buildSceneObjects(
             y: p.y - profileCentroid2D.y,
           })),
         );
-        const shape = new THREE.Shape(
-          centeredPoly.map((p) => new THREE.Vector2(p.x, p.y)),
+        // Normalize windings: outer CCW, holes CW.  Polygons traced from
+        // sketch lines can come back from findClosedLoops in either order
+        // (DFS traversal direction is arbitrary); without normalization
+        // an inner hole drawn from lines ends up with its side-wall
+        // normals inverted when fed to THREE.ExtrudeGeometry.
+        const outerCcw = withWinding(centeredPoly, /* wantCcw */ true);
+        const holesCw = centeredHoles.map((h) =>
+          withWinding(h, /* wantCcw */ false),
         );
-        centeredHoles.forEach((hole) =>
+        const shape = new THREE.Shape(
+          outerCcw.map((p) => new THREE.Vector2(p.x, p.y)),
+        );
+        holesCw.forEach((hole) =>
           shape.holes.push(
             new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))),
           ),
@@ -1732,16 +1770,35 @@ function addConstraintIconsToGroup(
         addTagged(t);
       }
       // Label position: radius → outside circle edge; linear → offset from midpoint.
+      // c.distance may be a number or a formula string; evaluate before display.
+      const resolvedDist = resolveConstraintDistance(c);
+      // When the constraint's value is a formula (any string that isn't a
+      // bare number), surface it on the label so the user can see which
+      // variable / expression drives the dimension.  A bare-number string
+      // ("10.5") is shown as just the mm value, matching the legacy look.
+      const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
+      const formulaSrc =
+        typeof c.distance === "string" &&
+        !/^-?\d+(\.\d+)?$/.test(c.distance.trim())
+          ? c.distance.trim()
+          : null;
       const labelText =
-        (isRadius ? "R " : "") + (c.distance * MM_PER_UNIT).toFixed(1) + "mm";
+        (isRadius ? "R " : "") +
+        (formulaSrc ? `${formulaSrc} = ${valueMm}mm` : `${valueMm}mm`);
       const canvas = document.createElement("canvas");
-      canvas.width = 160;
+      const tmpCtx = canvas.getContext("2d");
+      const labelFont = "bold 18px sans-serif";
+      tmpCtx.font = labelFont;
+      // Measure first so longer formula labels don't get clipped at the
+      // edges; pad each side by 12px for the rounded background.
+      const measured = tmpCtx.measureText(labelText).width;
+      canvas.width = Math.max(160, Math.ceil(measured) + 24);
       canvas.height = 32;
       const ctx2d = canvas.getContext("2d");
       ctx2d.fillStyle = "rgba(40,30,0,0.85)";
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
       ctx2d.fillStyle = "#ffee88";
-      ctx2d.font = "bold 18px sans-serif";
+      ctx2d.font = labelFont;
       ctx2d.textAlign = "center";
       ctx2d.textBaseline = "middle";
       ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
@@ -1749,7 +1806,11 @@ function addConstraintIconsToGroup(
       const sprite = new THREE.Sprite(
         new THREE.SpriteMaterial({ map: tex, depthTest: false }),
       );
-      sprite.scale.set(isRadius ? 0.85 : 0.7, 0.175, 1);
+      // Sprite world-size scales with the canvas's aspect ratio so longer
+      // formula labels stay readable instead of being squished.
+      const baseW = isRadius ? 0.85 : 0.7;
+      const aspect = canvas.width / 160;
+      sprite.scale.set(baseW * aspect, 0.175, 1);
       if (isRadius) {
         sprite.position.copy(wLineTo.clone().addScaledVector(dir, 0.45));
       } else {
@@ -2180,6 +2241,7 @@ export function applyRenderMode(renderMode, ctx) {
         mesh.visible = !sketchModeRef.current;
         return;
       }
+      const isTransparent = renderMode === "transparent";
       if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
         if (renderMode === "wireframe") {
           // Wireframe is a DISPLAY overlay on the smooth shader render — it
@@ -2229,6 +2291,14 @@ export function applyRenderMode(renderMode, ctx) {
             mesh.material.dispose();
             mesh.material = mesh.userData.shaderMat;
           }
+          // The analytic shader carries its own opacity uniform; flip its
+          // transparency flag (and the gl alpha) for transparent mode.
+          if (mesh.material.uniforms?.uOpacity) {
+            mesh.material.uniforms.uOpacity.value = isTransparent ? 0.5 : 1.0;
+          }
+          mesh.material.transparent = isTransparent;
+          mesh.material.depthWrite = !isTransparent;
+          mesh.material.needsUpdate = true;
         }
         return;
       }
@@ -2239,6 +2309,9 @@ export function applyRenderMode(renderMode, ctx) {
         color: col,
         metalness: 0.3,
         roughness: 0.5,
+        transparent: isTransparent,
+        opacity: isTransparent ? 0.5 : 1.0,
+        depthWrite: !isTransparent,
       });
       mesh.material.wireframe = renderMode === "wireframe";
       mesh.children.forEach((child) => {

@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { polyCentroid } from "./sceneObjects.js";
 import { makePrimitiveShape } from "./occ/primitives.js";
+import { resolveItemDepth } from "./geometryParams.js";
 import { tessellate, tessellateToData } from "./occ/tessellate.js";
 import {
   booleanOp,
-  chamferShape,
-  filletShape,
+  chamferShapeBy,
+  filletShapeBy,
   transformShape,
 } from "./occ/operations.js";
 import { isOccReady } from "./occ/init.js";
@@ -69,7 +70,7 @@ export function buildBrushTransform(item) {
 
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
     const poly = item.profile.polygon2D;
-    const depth = item.depth ?? 1.0;
+    const depth = resolveItemDepth(item);
     const c = polyCentroid(poly);
     const offset = new THREE.Vector3(c.x, c.y, depth / 2);
     offset.applyEuler(new THREE.Euler(r.x || 0, r.y || 0, r.z || 0));
@@ -120,8 +121,17 @@ export function buildItemShapeLocal(item, allItems = []) {
     if (r.kind === "chamfer") {
       const sourceShape = buildItemShapeLocal(r.source, allItems);
       if (!sourceShape) return null;
-      const op = r.segments === 1 ? chamferShape : filletShape;
-      return op(sourceShape, r.subGeo?.edges || [], r.amount ?? 0.05);
+      const subGeo = r.subGeo || { edges: [], faces: [] };
+      // Use the "*By" variants so face selections expand into their
+      // boundary edges (matching the live chamfer/fillet flow).  The plain
+      // chamferShape/filletShape variants only accept explicit edges and
+      // silently drop face-mode chamfers — that's why STL/STEP exports
+      // were missing chamfers and fillets on regenerated CSG items.
+      const amount = r.amount ?? 0.05;
+      if (r.segments === 1) {
+        return chamferShapeBy(sourceShape, subGeo, amount, r.angleRad ?? null);
+      }
+      return filletShapeBy(sourceShape, subGeo, amount);
     }
     if (r.kind === "boolean") {
       const inputs = (r.inputIds || [])

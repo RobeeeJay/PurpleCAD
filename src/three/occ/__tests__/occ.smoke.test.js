@@ -32,7 +32,11 @@ import {
 // The store + viewport pull in many three.js addons that need browser-only
 // globals; mock them so we can import primitives.js which transitively
 // imports sceneObjects.js for polyCentroid.
-vi.mock("../../../store", () => ({ useStore: () => null }));
+vi.mock("../../../store", () => {
+  const useStore = () => null;
+  useStore.getState = () => ({ variables: [] });
+  return { useStore };
+});
 vi.mock("three/addons/lines/Line2.js", () => ({
   Line2: class {
     computeLineDistances() {}
@@ -238,6 +242,87 @@ describe("OCC extrude", () => {
       expect(wallTriCounts[p]).toBeGreaterThan(0);
       expect(correctTriCounts[p]).toBe(wallTriCounts[p]);
     }
+  });
+
+  it("extrudes a sketch with an L-shaped cut-out drawn as 6 lines (concave hole)", async () => {
+    // Stronger regression: a non-convex hole.  Concave holes are the case
+    // where signed-area normalization can subtly do the wrong thing
+    // because the polygon's shoelace signed area is small relative to its
+    // perimeter, and DFS traversal direction matters.
+    const { findClosedLoops, groupLoopsWithHoles } = await import(
+      "../../sceneObjects.js"
+    );
+    const outerLines = [
+      { type: "line", x1: -3, y1: -3, x2: 3, y2: -3 },
+      { type: "line", x1: 3, y1: -3, x2: 3, y2: 3 },
+      { type: "line", x1: 3, y1: 3, x2: -3, y2: 3 },
+      { type: "line", x1: -3, y1: 3, x2: -3, y2: -3 },
+    ];
+    // L-shape hole (vertices going CCW for clarity, but lines drawn in
+    // random order to exercise the DFS):
+    //   (-1,-1) → (1,-1) → (1,0) → (0,0) → (0,1) → (-1,1) → close
+    const innerLines = [
+      { type: "line", x1: 0, y1: 1, x2: -1, y2: 1 },
+      { type: "line", x1: -1, y1: -1, x2: 1, y2: -1 },
+      { type: "line", x1: -1, y1: 1, x2: -1, y2: -1 },
+      { type: "line", x1: 1, y1: -1, x2: 1, y2: 0 },
+      { type: "line", x1: 1, y1: 0, x2: 0, y2: 0 },
+      { type: "line", x1: 0, y1: 0, x2: 0, y2: 1 },
+    ];
+    const loops = findClosedLoops([...outerLines, ...innerLines], 32, null);
+    const grouped = groupLoopsWithHoles(loops);
+    expect(grouped.length).toBe(1);
+    expect(grouped[0].holes.length).toBe(1);
+    const shape = makeExtrude({
+      type: "extrude",
+      profile: {
+        polygon2D: grouped[0].polygon,
+        holes: grouped[0].holes,
+      },
+      depth: 1,
+    });
+    expect(shape).toBeTruthy();
+    const geo = tessellate(shape, null);
+    expectSolidGeometry(geo);
+    // OCC convention: a hole's inner walls face INTO the hole (their
+    // normals point toward the hole interior, away from the surrounding
+    // solid).  We sample a point inside the L-shape hole and check every
+    // inner-wall triangle's normal points TOWARD that point.
+    const pos = geo.getAttribute("position");
+    const idx = geo.index.array;
+    const eps = 1e-3;
+    // Interior point inside the L hole (the bottom-left arm of the L).
+    const ix = -0.5,
+      iy = -0.5;
+    let innerWallTris = 0;
+    let correctNormalCount = 0;
+    for (let t = 0; t < idx.length; t += 3) {
+      const ax = pos.getX(idx[t]),
+        ay = pos.getY(idx[t]),
+        az = pos.getZ(idx[t]);
+      const bx = pos.getX(idx[t + 1]),
+        by = pos.getY(idx[t + 1]),
+        bz = pos.getZ(idx[t + 1]);
+      const cx = pos.getX(idx[t + 2]),
+        cy = pos.getY(idx[t + 2]),
+        cz = pos.getZ(idx[t + 2]);
+      if (Math.abs(az - bz) < eps && Math.abs(az - cz) < eps) continue;
+      const tcx = (ax + bx + cx) / 3;
+      const tcy = (ay + by + cy) / 3;
+      const distToHole = Math.hypot(tcx - 0, tcy - 0);
+      if (distToHole > 1.5) continue;
+      innerWallTris++;
+      const u = [bx - ax, by - ay, bz - az];
+      const v = [cx - ax, cy - ay, cz - az];
+      const nx = u[1] * v[2] - u[2] * v[1];
+      const ny = u[2] * v[0] - u[0] * v[2];
+      // Hole-wall normal points INTO the hole = toward interior (ix,iy).
+      const dx = ix - tcx,
+        dy = iy - tcy;
+      if (nx * dx + ny * dy > 0) correctNormalCount++;
+    }
+    expect(innerWallTris).toBeGreaterThan(0);
+    expect(correctNormalCount).toBe(innerWallTris);
   });
 
   it("extrudes a sketch with a triangular cut-out drawn as 3 lines", async () => {

@@ -168,9 +168,15 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-left: auto;
+  margin-left: 2px;
   transition: color 0.15s ease, background-color 0.15s ease;
   border-radius: 3px;
+}
+
+/* First action button claims leftover space so the action+delete cluster
+ * sticks to the right edge of the row. */
+.timeline-label + .timeline-action-btn {
+  margin-left: auto;
 }
 
 .timeline-action-btn:hover {

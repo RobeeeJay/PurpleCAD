@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { resolveDistanceConstraints } from "./three/sketchConstraints.js";
+import { variablesToMap } from "./utils/formulas.js";
 
 // ---------------------------------------------------------------------------
 // Instruction application
@@ -111,6 +113,27 @@ const loadTimeline = () => {
     console.warn("Failed to load timeline from localStorage:", e);
   }
   return null;
+};
+
+const saveVariables = (variables) => {
+  try {
+    localStorage.setItem("cad-variables", JSON.stringify(variables));
+  } catch (e) {
+    console.warn("Failed to save variables to localStorage:", e);
+  }
+};
+
+const loadVariables = () => {
+  try {
+    const raw = localStorage.getItem("cad-variables");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn("Failed to load variables from localStorage:", e);
+  }
+  return [];
 };
 
 const UNDO_LIMIT = 50;
@@ -304,9 +327,9 @@ export const useStore = create((set, get) => ({
       );
     }),
 
-  modifyItem: (id, patches) =>
+  modifyItem: (id, patches, label = "Modified") =>
     set((state) => {
-      const newEntry = makeEntry("Modified", id, {
+      const newEntry = makeEntry(label, id, {
         type: "modify",
         itemId: id,
         patches,
@@ -634,6 +657,7 @@ export const useStore = create((set, get) => ({
         },
       ];
       saveTimeline(freshHistory, null);
+      saveVariables([]);
       localStorage.removeItem("cad-camera-state");
       return {
         items: [],
@@ -644,6 +668,7 @@ export const useStore = create((set, get) => ({
         hoveredId: null,
         undoStack: [],
         redoStack: [],
+        variables: [],
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),
@@ -674,6 +699,8 @@ export const useStore = create((set, get) => ({
         data.history,
         targetIdx !== -1 ? targetIdx : data.history.length - 1,
       );
+      const variables = Array.isArray(data.variables) ? data.variables : [];
+      saveVariables(variables);
       return {
         items,
         history: withOrphanFlags(data.history),
@@ -683,6 +710,7 @@ export const useStore = create((set, get) => ({
         hoveredId: null,
         undoStack: [],
         redoStack: [],
+        variables,
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),
@@ -754,6 +782,129 @@ export const useStore = create((set, get) => ({
   // for display).
   extrudeDepthInput: null, // { defaultDepth } | null
   setExtrudeDepthInput: (v) => set({ extrudeDepthInput: v }),
+
+  // Document-wide named variables.  Each entry is { name, formula } where
+  // `formula` is a string that may reference other variables (e.g. "width * 2").
+  // Used by dimension constraints and extrusion depths.
+  variables: loadVariables(),
+  variablesDialogOpen: false,
+  setVariablesDialogOpen: (open) => set({ variablesDialogOpen: open }),
+  setVariables: (variables) =>
+    set((state) => {
+      saveVariables(variables);
+      // Re-solve every sketch's distance constraints in case any of them
+      // reference variables that just changed.  Pass the new variable map
+      // explicitly — resolveConstraintDistance otherwise reads from the
+      // store, which still holds the old variables until this set()
+      // returns.
+      const newVarsMap = variablesToMap(variables);
+      const updatedItems = state.items.map((item) => {
+        if (item.type !== "sketch" || !item.constraints?.length) return item;
+        const newShapes = resolveDistanceConstraints(
+          item.shapes || [],
+          item.constraints,
+          newVarsMap,
+        );
+        if (!newShapes) return item;
+        return { ...item, shapes: newShapes };
+      });
+      // Persist any sketch-shape changes into the matching create-history
+      // entries so reload/undo see the new positions.
+      const changedSketchIds = updatedItems
+        .filter((it, i) => it !== state.items[i])
+        .map((it) => it.id);
+      const newHistory =
+        changedSketchIds.length === 0
+          ? state.history
+          : state.history.map((entry) => {
+              const inst = entry.instruction;
+              if (
+                inst?.type === "create" &&
+                changedSketchIds.includes(inst.item?.id)
+              ) {
+                const item = updatedItems.find((i) => i.id === inst.item.id);
+                return {
+                  ...entry,
+                  instruction: {
+                    ...inst,
+                    item: { ...inst.item, shapes: item.shapes },
+                  },
+                };
+              }
+              return entry;
+            });
+      if (changedSketchIds.length > 0) {
+        saveTimeline(newHistory, state.activeHistoryId);
+      }
+      return {
+        variables,
+        items: updatedItems,
+        history:
+          changedSketchIds.length > 0
+            ? withOrphanFlags(newHistory)
+            : state.history,
+      };
+    }),
+
+  // Modal state for editing the depth/length of a single extrude item from
+  // the timeline.  null when closed; { itemId } when open.
+  extrudeEditTarget: null,
+  setExtrudeEditTarget: (target) => set({ extrudeEditTarget: target }),
+
+  // Modal state for editing chamfer/fillet parameters from the timeline.
+  // null when closed; { entryId } when open.
+  chamferEditTarget: null,
+  setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
+
+  // Update the amount / angleRad on an existing chamfer-or-fillet history
+  // entry, then replay history so the regenerator reflects the new values.
+  // `regeneratedAt` is reset (different from any valid printPrecision) and
+  // `geometryData` is cleared so regenerateItemsForResolution's skip-check
+  // (`regeneratedAt === printPrecision && geometryData`) misses, forcing a
+  // fresh tessellation with the new parameters.  Setting regeneratedAt to
+  // a sentinel string instead of null/undefined ensures the comparison
+  // also fails in preview mode where printPrecision itself is null.
+  updateChamferParams: (entryId, params) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        const r = inst.patches?.regenerator;
+        if (r?.kind !== "chamfer") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches: {
+              ...inst.patches,
+              regenerator: {
+                ...r,
+                ...params,
+                regeneratedAt: "dirty",
+              },
+              geometryData: null,
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(newHistory),
+        },
+        withUndo(state),
+      );
+    }),
 
   sketchModifyMode: null, // 'chamfer' | 'bevel' | null
   setSketchModifyMode: (mode) => set({ sketchModifyMode: mode }),

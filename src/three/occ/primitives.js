@@ -12,6 +12,7 @@
 
 import { getOcc } from "./init.js";
 import { polyCentroid } from "../sceneObjects.js";
+import { resolveItemDepth } from "../geometryParams.js";
 
 // Shoelace signed area: positive when the polygon is wound CCW (when
 // viewed from +Z), negative when CW.  sceneObjects.polyArea returns the
@@ -116,7 +117,7 @@ export function makeExtrude(item) {
   const poly = item.profile?.polygon2D;
   if (!poly || poly.length < 3) return null;
   const holes = item.profile?.holes || [];
-  const depth = item.depth ?? 1.0;
+  const depth = resolveItemDepth(item);
   const c = polyCentroid(poly);
 
   // Outer boundary must be CCW (positive signed area); inner holes must

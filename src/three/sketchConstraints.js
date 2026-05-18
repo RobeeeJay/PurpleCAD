@@ -1,4 +1,66 @@
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
+import { resolveConstraintDistance } from "./geometryParams.js";
+
+// Force-re-solve a sketch's distance constraints when their evaluated
+// values may have changed (e.g. after a variable edit).  For every
+// distance constraint whose current geometry doesn't match the resolved
+// distance, treat pointA as the anchor and move pointB to the correct
+// distance, then propagate through coincident constraints.  Returns the
+// new shapes array; returns `null` if nothing changed.  Pass an explicit
+// `variables` Map when the store's globally-active variables haven't yet
+// been updated (e.g. inside a setVariables set() callback).
+export function resolveDistanceConstraints(
+  inputShapes,
+  constraints,
+  variables = null,
+) {
+  if (!constraints || constraints.length === 0) return null;
+  let shapes = inputShapes.slice();
+  let anyChange = false;
+  const tol = 1e-5;
+  for (const c of constraints) {
+    if (c.type !== "distance") continue;
+    const target = resolveConstraintDistance(c, variables);
+    if (!(target > 0)) continue;
+    const sA = shapes[c.shapeAIdx];
+    const sB = shapes[c.shapeBIdx];
+    if (!sA || !sB) continue;
+    const pA = getShapePoint(sA, c.pointA);
+    const pB = getShapePoint(sB, c.pointB);
+    if (!pA || !pB) continue;
+    const dx = pB.x - pA.x,
+      dy = pB.y - pA.y;
+    const cur = Math.hypot(dx, dy);
+    if (cur < 1e-10) continue;
+    if (Math.abs(cur - target) < tol) continue;
+    const newPt = {
+      x: pA.x + (dx / cur) * target,
+      y: pA.y + (dy / cur) * target,
+    };
+    // Same-shape (line-length / radius): slide pointB endpoint on the
+    // same shape.  Two-shape: move pointB on shapeB.
+    const targetIdx = c.shapeBIdx;
+    const targetKey = c.pointB;
+    const baseShape = shapes[targetIdx];
+    let moved = moveShapePoint(baseShape, targetKey, newPt);
+    if (!moved) continue;
+    if (moved.type === "circle" && targetKey === "center") {
+      moved = { ...moved, r: target };
+    }
+    moved = applyHVEnforcement(moved, targetKey, constraints, targetIdx);
+    // Propagate via enforceConstraints with this as the primary move.
+    const after = enforceConstraints(
+      shapes,
+      constraints,
+      targetIdx,
+      moved,
+      targetKey,
+    );
+    for (const [idx, s] of after) shapes[idx] = s;
+    anyChange = true;
+  }
+  return anyChange ? shapes : null;
+}
 
 // All valid endpoint key names across all sketch shape types.
 export const SHAPE_KEYS = [
@@ -312,13 +374,9 @@ export function enforceConstraints(
     let anyChange = false;
     for (const c of constraints) {
       if (c.type !== "distance") continue;
-      const {
-        shapeAIdx: ai,
-        pointA: pA,
-        shapeBIdx: bi,
-        pointB: pB,
-        distance: d,
-      } = c;
+      const { shapeAIdx: ai, pointA: pA, shapeBIdx: bi, pointB: pB } = c;
+      const d = resolveConstraintDistance(c);
+      if (!(d > 0)) continue;
 
       if (ai === bi) {
         // Same-shape: line-length or radius. The placed endpoint is the anchor;

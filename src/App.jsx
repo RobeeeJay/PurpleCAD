@@ -3,6 +3,9 @@ import Toolbar from "./components/Toolbar";
 import Viewport from "./components/Viewport";
 import TreeView from "./components/TreeView";
 import Timeline from "./components/Timeline";
+import VariablesDialog from "./components/VariablesDialog";
+import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
+import ChamferEditDialog from "./components/ChamferEditDialog";
 import "./styles/App.css";
 import { useStore } from "./store";
 
@@ -56,6 +59,9 @@ function App() {
         </div>
         <Viewport />
       </div>
+      <VariablesDialog />
+      <ExtrudeLengthDialog />
+      <ChamferEditDialog />
     </div>
   );
 }

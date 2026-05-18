@@ -17,6 +17,7 @@ export const SPHERE_FRAGMENT_SHADER = `
   uniform mat4 projectionMatrix;
   uniform vec3 uColor;
   uniform vec3 uEmissive;
+  uniform float uOpacity;
   varying vec3 vViewPos;
   varying vec3 vSphereCenter;
   varying float vSphereRadius;
@@ -42,7 +43,7 @@ export const SPHERE_FRAGMENT_SHADER = `
     vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
     vec4 cp = projectionMatrix * vec4(hit, 1.0);
     gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
-    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
   }
 `;
 
@@ -67,6 +68,7 @@ export const CYLINDER_FRAGMENT_SHADER = `
   uniform mat4 projectionMatrix;
   uniform vec3 uColor;
   uniform vec3 uEmissive;
+  uniform float uOpacity;
   varying vec3 vViewPos;
   varying vec3 vCylCenter;
   varying vec3 vCylAxis;
@@ -125,7 +127,7 @@ export const CYLINDER_FRAGMENT_SHADER = `
     vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
     vec4 cp = projectionMatrix * vec4(hit, 1.0);
     gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
-    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
   }
 `;
 
@@ -151,6 +153,7 @@ export const TORUS_FRAGMENT_SHADER = `
   uniform mat4 projectionMatrix;
   uniform vec3 uColor;
   uniform vec3 uEmissive;
+  uniform float uOpacity;
   varying vec3 vViewPos;
   varying vec3 vTorusCenter;
   varying vec3 vTorusNormal;
@@ -189,7 +192,7 @@ export const TORUS_FRAGMENT_SHADER = `
     vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
     vec4 cp = projectionMatrix * vec4(hitPos, 1.0);
     gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
-    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
   }
 `;
 
@@ -197,6 +200,7 @@ export function createMaterial(item, color) {
   const uniforms = () => ({
     uColor: { value: new THREE.Color(color) },
     uEmissive: { value: new THREE.Color(0) },
+    uOpacity: { value: 1.0 },
   });
   if (item.type === "sketch") {
     return new THREE.MeshStandardMaterial({

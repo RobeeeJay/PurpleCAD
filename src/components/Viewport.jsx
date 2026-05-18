@@ -3,6 +3,7 @@ import * as THREE from "three";
 import RotationWidget from "./RotationWidget";
 import "../styles/Viewport.css";
 import { useStore } from "../store";
+import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
 import {
   createScene,
   createCamera,
@@ -93,6 +94,7 @@ const Viewport = () => {
   const activeSketchToolRef = useRef(null);
 
   const items = useStore((state) => state.items);
+  const variables = useStore((state) => state.variables);
   const theme = useStore((state) => state.theme);
   const hoveredId = useStore((state) => state.hoveredId);
   const setHoveredId = useStore((state) => state.setHoveredId);
@@ -447,7 +449,10 @@ const Viewport = () => {
   // scene rebuild reads from items.
   useEffect(() => {
     useStore.getState().regenerateForResolution(printPrecision);
-  }, [items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Variables drive extrude depth and dimension distances via formula
+    // resolution; re-run when they change so geometry/labels reflect the
+    // new values.
+  }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Rebuild scene objects ─────────────────────────────────────────────────
 
@@ -476,7 +481,10 @@ const Viewport = () => {
       sketchModeRef,
       printPrecision,
     });
-  }, [items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Variables drive extrude depth and dimension distances via formula
+    // resolution; re-run when they change so geometry/labels reflect the
+    // new values.
+  }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Persistent sub-geometry selection highlights ─────────────────────────
   // Rebuild a darker-coloured overlay whenever the selected faces or edges
@@ -1109,18 +1117,25 @@ const Viewport = () => {
               : "Distance (mm):"}
           </span>
           <input
-            type="number"
-            step="0.1"
-            min="0.01"
+            type="text"
             autoFocus
-            defaultValue={(
-              sketchDistanceInput.defaultDistance * MM_PER_UNIT
-            ).toFixed(2)}
+            defaultValue={
+              typeof sketchDistanceInput.defaultDistance === "string"
+                ? sketchDistanceInput.defaultDistance
+                : (sketchDistanceInput.defaultDistance * MM_PER_UNIT).toFixed(2)
+            }
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter") {
-                const mm = parseFloat(e.target.value);
-                if (!isNaN(mm) && mm > 0) {
+                const raw = e.target.value.trim();
+                // Quick validation: evaluate the formula against the current
+                // variable map to ensure it produces a positive number; if not,
+                // bail without committing so the user can fix their input.
+                const variablesMap = variablesToMap(
+                  useStore.getState().variables,
+                );
+                const mm = evaluateFormula(raw, variablesMap);
+                if (Number.isFinite(mm) && mm > 0) {
                   const {
                     shapeAIdx,
                     pointA,
@@ -1128,6 +1143,9 @@ const Viewport = () => {
                     pointB,
                     constraintIdx,
                   } = sketchDistanceInput;
+                  // Store the formula string so future edits can reference
+                  // variables; geometry resolution converts mm → scene units.
+                  const formula = raw;
                   const d = mm / MM_PER_UNIT;
                   if (constraintIdx != null) {
                     useStore
@@ -1135,7 +1153,7 @@ const Viewport = () => {
                       .updateSketchConstraintDistance(
                         selectedId,
                         constraintIdx,
-                        d,
+                        formula,
                       );
                   } else {
                     useStore.getState().addSketchConstraints(selectedId, [
@@ -1145,7 +1163,7 @@ const Viewport = () => {
                         pointA,
                         shapeBIdx,
                         pointB,
-                        distance: d,
+                        distance: formula,
                       },
                     ]);
                   }
