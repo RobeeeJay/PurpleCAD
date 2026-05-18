@@ -1,28 +1,60 @@
-// occClient — async, promise-based wrapper around the OpenCascade.js
-// operations.
+// occClient — async, promise-based RPC layer around the OCC operations.
 //
-// Step 1 of the worker migration (see proposal in the conversation
-// history): every call site that talks to OCC will go through this
-// module.  Today the implementation runs in-process on the main thread —
-// the work doesn't move yet — but it returns Promises and increments
-// a busy counter so the UI can already show a spinner and so the
-// eventual switch to a real Web Worker is a single internal change here.
+// In the browser this posts messages to a dedicated Web Worker (see
+// occ.worker.js) so the OpenCascade.js kernel runs off the main thread
+// and the UI stays responsive during slow operations like complex
+// chamfers and CSG.
+//
+// In environments without `Worker` (node / vitest) the same surface
+// falls back to in-process execution by calling the shared `ops` map
+// directly — so unit tests and the original single-thread code path
+// remain unchanged.
 //
 // Design notes:
-//   • Inputs/outputs are plain JS values (numbers, strings, plain objects,
-//     typed arrays).  No TopoDS_Shape ever crosses this boundary — when an
-//     operation needs to chain multiple OCC steps it composes them inside
-//     a single call (e.g. chamferItem builds source, applies, tessellates).
-//   • Errors surface as rejected promises; callers do `try { await … }
-//     catch { … }` exactly as they would with any async API.
-//   • Every public function increments `pendingOperations` on the store
-//     so a global spinner can light up while OCC work is in flight.
+//   • Inputs/outputs are plain JS — never a TopoDS_Shape — so the worker
+//     boundary requires no special marshalling.
+//   • `pendingOperations` is incremented around every public call so
+//     <BusyIndicator> can show a global spinner.
 
 import { useStore } from "../store";
-import { ensureOcc } from "./occ/init.js";
-import { buildItemShapeLocal } from "./csgUtils.js";
-import { chamferShapeBy, filletShapeBy } from "./occ/operations.js";
-import { tessellateToData } from "./occ/tessellate.js";
+import { ops as inProcessOps } from "./occOps.js";
+
+const hasWorker = typeof Worker !== "undefined";
+
+let workerPromise = null;
+let nextId = 1;
+const pending = new Map();
+
+function onWorkerMessage(e) {
+  const { id, ok, result, error } = e.data || {};
+  const slot = pending.get(id);
+  if (!slot) return;
+  pending.delete(id);
+  if (ok) slot.resolve(result);
+  else slot.reject(new Error(error || "OCC worker error"));
+}
+
+function onWorkerError(e) {
+  // Fail every in-flight call so callers don't hang; a future op will
+  // re-init the worker from scratch.
+  const message = (e && e.message) || "OCC worker crashed";
+  for (const slot of pending.values()) slot.reject(new Error(message));
+  pending.clear();
+  workerPromise = null;
+}
+
+async function getWorker() {
+  if (!hasWorker) return null;
+  if (workerPromise) return workerPromise;
+  workerPromise = import("./occ.worker.js?worker").then((mod) => {
+    const OccWorker = mod.default;
+    const w = new OccWorker();
+    w.onmessage = onWorkerMessage;
+    w.onerror = onWorkerError;
+    return w;
+  });
+  return workerPromise;
+}
 
 function inc() {
   const s = useStore.getState();
@@ -33,89 +65,42 @@ function dec() {
   if (typeof s.endOperation === "function") s.endOperation();
 }
 
-// Wrap a synchronous OCC computation in a Promise so the call site is
-// async-ready.  We don't `await` anything inside — but yielding via
-// queueMicrotask() lets React flush the spinner state before the heavy
-// work blocks the main thread.  When this module is moved into a Web
-// Worker the synchronous body becomes a postMessage round-trip and the
-// caller sees no difference.
-async function runOp(fn) {
+// Dispatch a single named op; resolves with whatever the op returns.
+async function callOp(op, args) {
+  const w = hasWorker ? await getWorker() : null;
+  if (!w) {
+    // Fallback path: no Worker available (node tests, or browsers
+    // without module-worker support).  Run the op directly on the
+    // current thread.
+    const fn = inProcessOps[op];
+    if (typeof fn !== "function") {
+      throw new Error(`Unknown op "${op}"`);
+    }
+    return fn(args);
+  }
+  return new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    w.postMessage({ id, op, args });
+  });
+}
+
+// Wrap an op call with the busy-counter increment/decrement.  Yields a
+// macrotask first so React has a chance to render the spinner before
+// we post the heavy work — without this, the spinner sometimes lights
+// up only after the work has already finished.
+async function runOp(op, args) {
   inc();
   try {
-    await ensureOcc();
-    // Yield once so a pending `pendingOperations` store update has a
-    // chance to render before the synchronous OCC call begins.  Without
-    // this the spinner only appears after the work finishes.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    return fn();
+    await new Promise((r) => setTimeout(r, 0));
+    return await callOp(op, args);
   } finally {
     dec();
   }
 }
 
-// Apply a chamfer (segments===1) or fillet (segments>1) to an item and
-// return the tessellated geometry + bookkeeping the caller needs to
-// produce a "modify" patch.  Returns null when the operation was a no-op
-// (e.g. no edges/faces matched the selection).
-//
-// Result shape:
-//   {
-//     geometryData: { positions: number[], normals, indices },
-//     centerOffset: { cx, cy, cz },   // bbox centre in shape-local frame
-//   }
-export async function chamferOrFilletItem({
-  source,
-  subGeo,
-  amount,
-  angleRad,
-  segments,
-  allItems,
-  printPrecision,
-}) {
-  return runOp(() => {
-    const sourceShape = buildItemShapeLocal(source, allItems);
-    if (!sourceShape) return null;
-    const result =
-      segments === 1
-        ? chamferShapeBy(sourceShape, subGeo, amount, angleRad)
-        : filletShapeBy(sourceShape, subGeo, amount);
-    if (!result || result === sourceShape) return null;
-    const data = tessellateToData(result, printPrecision);
-    if (!data) return null;
-
-    // Centre the tessellation around its bbox so the resulting item.position
-    // is the volumetric centre.  Callers translate to world space.
-    const arr = data.positions;
-    let minX = Infinity,
-      minY = Infinity,
-      minZ = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity,
-      maxZ = -Infinity;
-    for (let i = 0; i < arr.length; i += 3) {
-      if (arr[i] < minX) minX = arr[i];
-      if (arr[i] > maxX) maxX = arr[i];
-      if (arr[i + 1] < minY) minY = arr[i + 1];
-      if (arr[i + 1] > maxY) maxY = arr[i + 1];
-      if (arr[i + 2] < minZ) minZ = arr[i + 2];
-      if (arr[i + 2] > maxZ) maxZ = arr[i + 2];
-    }
-    const cx = (minX + maxX) / 2,
-      cy = (minY + maxY) / 2,
-      cz = (minZ + maxZ) / 2;
-    const centered = new Array(arr.length);
-    for (let i = 0; i < arr.length; i += 3) {
-      centered[i] = arr[i] - cx;
-      centered[i + 1] = arr[i + 1] - cy;
-      centered[i + 2] = arr[i + 2] - cz;
-    }
-    return {
-      geometryData: {
-        positions: centered,
-        normals: data.normals,
-        indices: data.indices,
-      },
-      centerOffset: { cx, cy, cz },
-    };
-  });
+// Apply a chamfer (segments===1) or fillet (segments>1) to an item.
+// See occOps.js#chamferOrFilletItem for the result shape.
+export function chamferOrFilletItem(args) {
+  return runOp("chamferOrFilletItem", args);
 }

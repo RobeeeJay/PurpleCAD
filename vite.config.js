@@ -17,6 +17,16 @@ export default defineConfig({
   // Make sure the .wasm file is treated as an asset and copied to the
   // build output preserving its filename so opencascade.js can find it.
   assetsInclude: ["**/*.wasm"],
+  // Module worker (occ.worker.js) shares OCC code with the main bundle —
+  // forcing ES output lets Rollup split chunks across the worker/main
+  // boundary instead of bailing with the default IIFE format.
+  // inlineDynamicImports collapses the worker's chunks into a single
+  // file, sidestepping a Vite-4 bug where the OCC wasm asset gets
+  // emitted twice (main + worker) and crashes build-import-analysis.
+  worker: {
+    format: "es",
+    rollupOptions: { output: { inlineDynamicImports: true } },
+  },
   test: {
     environment: 'node',
     globals: true,
