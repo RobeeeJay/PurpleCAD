@@ -748,6 +748,13 @@ export const useStore = create((set, get) => ({
   sketchDistanceInput: null, // { shapeAIdx, pointA, shapeBIdx, pointB, defaultDistance } | null
   setSketchDistanceInput: (v) => set({ sketchDistanceInput: v }),
 
+  // Active extrude-depth input overlay.  Populated when the user enters
+  // "depth" mode after picking a profile; cleared when they confirm/cancel
+  // the extrude.  defaultDepth is in scene units (multiply by MM_PER_UNIT
+  // for display).
+  extrudeDepthInput: null, // { defaultDepth } | null
+  setExtrudeDepthInput: (v) => set({ extrudeDepthInput: v }),
+
   sketchModifyMode: null, // 'chamfer' | 'bevel' | null
   setSketchModifyMode: (mode) => set({ sketchModifyMode: mode }),
 

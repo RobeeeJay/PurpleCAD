@@ -144,6 +144,196 @@ describe("OCC extrude", () => {
     // The holed prism has more triangles because of the inner walls.
     expect(holedGeo.index.count).toBeGreaterThan(solidGeo.index.count);
   });
+
+  it("extrudes a sketch where the cut-out is drawn as 4 lines (via findClosedLoops)", async () => {
+    // Regression for: "A sketch which contains a cut out made of lines does
+    // not extrude properly, the faces for the cut out seem to be either
+    // missing or their normal is inverted."  Exercises the SAME path the
+    // viewport uses: 4 lines for the outer rectangle + 4 lines for the
+    // inner cut-out → findClosedLoops → groupLoopsWithHoles → makeExtrude.
+    const { findClosedLoops, groupLoopsWithHoles } = await import(
+      "../../sceneObjects.js"
+    );
+    // Outer rectangle drawn as 4 lines (CCW).
+    const outerLines = [
+      { type: "line", x1: -2, y1: -2, x2: 2, y2: -2 },
+      { type: "line", x1: 2, y1: -2, x2: 2, y2: 2 },
+      { type: "line", x1: 2, y1: 2, x2: -2, y2: 2 },
+      { type: "line", x1: -2, y1: 2, x2: -2, y2: -2 },
+    ];
+    // Inner cut-out drawn as 4 lines.  Use the DRAWING order that would
+    // come from a user sketching CW (top-left → top-right → bottom-right
+    // → bottom-left), which exercises the winding-normalization path in
+    // makeWireFromPolygon.
+    const innerLines = [
+      { type: "line", x1: -0.5, y1: 0.5, x2: 0.5, y2: 0.5 },
+      { type: "line", x1: 0.5, y1: 0.5, x2: 0.5, y2: -0.5 },
+      { type: "line", x1: 0.5, y1: -0.5, x2: -0.5, y2: -0.5 },
+      { type: "line", x1: -0.5, y1: -0.5, x2: -0.5, y2: 0.5 },
+    ];
+    const loops = findClosedLoops([...outerLines, ...innerLines], 32, null);
+    expect(loops.length).toBeGreaterThanOrEqual(2);
+    const grouped = groupLoopsWithHoles(loops);
+    // Exactly one top-level region (the outer rectangle) with one hole.
+    expect(grouped.length).toBe(1);
+    expect(grouped[0].holes.length).toBe(1);
+    const shape = makeExtrude({
+      type: "extrude",
+      profile: {
+        polygon2D: grouped[0].polygon,
+        holes: grouped[0].holes,
+      },
+      depth: 1,
+    });
+    expect(shape).toBeTruthy();
+    const geo = tessellate(shape, null);
+    expectSolidGeometry(geo);
+    const pos = geo.getAttribute("position");
+    const idx = geo.index.array;
+    const eps = 1e-3;
+    // Same inner-wall normal check as the explicit-polygon test: each of
+    // the 4 inner walls (at x = ±0.5 or y = ±0.5) must have at least one
+    // triangle, and every triangle's normal must point INTO the hole.
+    const planes = [
+      { axis: 0, value: 0.5, normalSign: -1 },
+      { axis: 0, value: -0.5, normalSign: 1 },
+      { axis: 1, value: 0.5, normalSign: -1 },
+      { axis: 1, value: -0.5, normalSign: 1 },
+    ];
+    const wallTriCounts = planes.map(() => 0);
+    const correctTriCounts = planes.map(() => 0);
+    for (let t = 0; t < idx.length; t += 3) {
+      const ax = pos.getX(idx[t]),
+        ay = pos.getY(idx[t]),
+        az = pos.getZ(idx[t]);
+      const bx = pos.getX(idx[t + 1]),
+        by = pos.getY(idx[t + 1]),
+        bz = pos.getZ(idx[t + 1]);
+      const cx = pos.getX(idx[t + 2]),
+        cy = pos.getY(idx[t + 2]),
+        cz = pos.getZ(idx[t + 2]);
+      for (let p = 0; p < planes.length; p++) {
+        const { axis, value, normalSign } = planes[p];
+        const va = axis === 0 ? ax : ay;
+        const vb = axis === 0 ? bx : by;
+        const vc = axis === 0 ? cx : cy;
+        if (
+          Math.abs(va - value) < eps &&
+          Math.abs(vb - value) < eps &&
+          Math.abs(vc - value) < eps
+        ) {
+          wallTriCounts[p]++;
+          const u = [bx - ax, by - ay, bz - az];
+          const v = [cx - ax, cy - ay, cz - az];
+          const nx = u[1] * v[2] - u[2] * v[1];
+          const ny = u[2] * v[0] - u[0] * v[2];
+          const nz = u[0] * v[1] - u[1] * v[0];
+          void nz;
+          const component = axis === 0 ? nx : ny;
+          if (Math.sign(component) === normalSign) correctTriCounts[p]++;
+        }
+      }
+    }
+    for (let p = 0; p < planes.length; p++) {
+      expect(wallTriCounts[p]).toBeGreaterThan(0);
+      expect(correctTriCounts[p]).toBe(wallTriCounts[p]);
+    }
+  });
+
+  it("extrudes a sketch with a triangular cut-out drawn as 3 lines", async () => {
+    // Variant of the above with an odd-sided hole (triangle) and lines
+    // drawn in arbitrary order — the path that more closely matches what
+    // users actually produce when sketching.
+    const { findClosedLoops, groupLoopsWithHoles, polyArea } = await import(
+      "../../sceneObjects.js"
+    );
+    const outerLines = [
+      { type: "line", x1: -3, y1: -3, x2: 3, y2: -3 },
+      { type: "line", x1: 3, y1: -3, x2: 3, y2: 3 },
+      { type: "line", x1: 3, y1: 3, x2: -3, y2: 3 },
+      { type: "line", x1: -3, y1: 3, x2: -3, y2: -3 },
+    ];
+    // Triangle drawn in non-sequential order (line 2 first, line 0 second,
+    // line 1 last) to simulate a user clicking endpoints out of order.
+    const innerLines = [
+      { type: "line", x1: 1, y1: -1, x2: -1, y2: -1 },
+      { type: "line", x1: 0, y1: 1, x2: 1, y2: -1 },
+      { type: "line", x1: -1, y1: -1, x2: 0, y2: 1 },
+    ];
+    const loops = findClosedLoops([...outerLines, ...innerLines], 32, null);
+    expect(loops.length).toBeGreaterThanOrEqual(2);
+    const grouped = groupLoopsWithHoles(loops);
+    expect(grouped.length).toBe(1);
+    expect(grouped[0].holes.length).toBe(1);
+    // The hole polygon should have ~the area of the triangle (base 2,
+    // height 2 → area 2.0).  This catches the case where findClosedLoops
+    // returns a degenerate or wrong-shape polygon.
+    expect(polyArea(grouped[0].holes[0])).toBeGreaterThan(1.9);
+    expect(polyArea(grouped[0].holes[0])).toBeLessThan(2.1);
+    const shape = makeExtrude({
+      type: "extrude",
+      profile: {
+        polygon2D: grouped[0].polygon,
+        holes: grouped[0].holes,
+      },
+      depth: 1,
+    });
+    expect(shape).toBeTruthy();
+    const geo = tessellate(shape, null);
+    expectSolidGeometry(geo);
+    // For each inner wall of the triangular hole, its average outward
+    // normal should point AWAY from the triangle's centroid (0, -0.333).
+    const pos = geo.getAttribute("position");
+    const idx = geo.index.array;
+    const cx_hole = 0,
+      cy_hole = -1 / 3;
+    const eps = 1e-3;
+    let innerWallTris = 0;
+    let inwardCount = 0;
+    // The hole's vertical extent is y ∈ [-1, 1].  An inner wall
+    // triangle has all 3 verts in that range AND not on the top/bottom
+    // faces.  We detect inner walls by their normal being approximately
+    // horizontal (perpendicular to z) AND the triangle centroid being
+    // inside the hole (within polygon).
+    for (let t = 0; t < idx.length; t += 3) {
+      const ax = pos.getX(idx[t]),
+        ay = pos.getY(idx[t]),
+        az = pos.getZ(idx[t]);
+      const bx = pos.getX(idx[t + 1]),
+        by = pos.getY(idx[t + 1]),
+        bz = pos.getZ(idx[t + 1]);
+      const cx = pos.getX(idx[t + 2]),
+        cy = pos.getY(idx[t + 2]),
+        cz = pos.getZ(idx[t + 2]);
+      // Skip top/bottom face triangles (constant z).
+      if (
+        Math.abs(az - bz) < eps &&
+        Math.abs(az - cz) < eps
+      )
+        continue;
+      const tcx = (ax + bx + cx) / 3;
+      const tcy = (ay + by + cy) / 3;
+      // Triangle centroid must be very close to the line connecting any
+      // two vertices of the hole's triangle.  Approximate: if it's within
+      // 0.05 of the triangular path, count it as an inner-wall tri.
+      const distToCentre = Math.hypot(tcx - cx_hole, tcy - cy_hole);
+      if (distToCentre > 1.1) continue; // outer wall (rectangle at ±3)
+      innerWallTris++;
+      // Outward normal points away from hole centre.
+      const u = [bx - ax, by - ay, bz - az];
+      const v = [cx - ax, cy - ay, cz - az];
+      const nx = u[1] * v[2] - u[2] * v[1];
+      const ny = u[2] * v[0] - u[0] * v[2];
+      // Direction from triangle centroid to hole centre.
+      const dxC = cx_hole - tcx;
+      const dyC = cy_hole - tcy;
+      // Inward = normal pointing toward hole centre.
+      const dot = nx * dxC + ny * dyC;
+      if (dot > 0) inwardCount++;
+    }
+    expect(innerWallTris).toBeGreaterThan(0);
+    expect(inwardCount).toBe(innerWallTris);
+  });
 });
 
 describe("OCC boolean operations", () => {
@@ -465,6 +655,117 @@ describe("OCC chamfer", () => {
     }
     expect(wrongDirVerts).toBe(0);
     expect(correctDirVerts).toBeGreaterThan(0);
+  });
+
+  it("extruded polygon with a hole has inner wall normals pointing INTO the hole", () => {
+    // Regression for: "A sketch which contains a cut out made of lines
+    // does not extrude properly, the faces for the cut out seem to be
+    // either missing or their normal is inverted."
+    // For each inner wall face, its average normal must point toward the
+    // hole's centre (not into the surrounding solid).
+    const outer = [
+      { x: -2, y: -2 },
+      { x: 2, y: -2 },
+      { x: 2, y: 2 },
+      { x: -2, y: 2 },
+    ];
+    const hole = [
+      { x: -0.5, y: -0.5 },
+      { x: -0.5, y: 0.5 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.5, y: -0.5 },
+    ];
+    const shape = makeExtrude({
+      type: "extrude",
+      profile: { polygon2D: outer, holes: [hole] },
+      depth: 1,
+    });
+    const geo = tessellate(shape, null);
+    const pos = geo.getAttribute("position");
+    const idx = geo.index.array;
+    const eps = 1e-3;
+    // Walk every triangle; if all 3 vertices lie on one of the hole's
+    // inner walls (e.g. all at x ≈ +0.5 with y ∈ [-0.5, +0.5]), check
+    // its face normal points toward x = 0 (inward).
+    const planes = [
+      { axis: 0, value: 0.5, normalSign: -1 }, // +X wall → normal -X
+      { axis: 0, value: -0.5, normalSign: 1 },
+      { axis: 1, value: 0.5, normalSign: -1 },
+      { axis: 1, value: -0.5, normalSign: 1 },
+    ];
+    const wallTriCounts = planes.map(() => 0);
+    const correctTriCounts = planes.map(() => 0);
+    for (let t = 0; t < idx.length; t += 3) {
+      const ax = pos.getX(idx[t]),
+        ay = pos.getY(idx[t]),
+        az = pos.getZ(idx[t]);
+      const bx = pos.getX(idx[t + 1]),
+        by = pos.getY(idx[t + 1]),
+        bz = pos.getZ(idx[t + 1]);
+      const cx = pos.getX(idx[t + 2]),
+        cy = pos.getY(idx[t + 2]),
+        cz = pos.getZ(idx[t + 2]);
+      for (let p = 0; p < planes.length; p++) {
+        const { axis, value, normalSign } = planes[p];
+        const va = axis === 0 ? ax : ay;
+        const vb = axis === 0 ? bx : by;
+        const vc = axis === 0 ? cx : cy;
+        if (
+          Math.abs(va - value) < eps &&
+          Math.abs(vb - value) < eps &&
+          Math.abs(vc - value) < eps
+        ) {
+          wallTriCounts[p]++;
+          // Compute face normal via (B-A) × (C-A) and check the component
+          // along `axis` has the expected sign.
+          const u = [bx - ax, by - ay, bz - az];
+          const v = [cx - ax, cy - ay, cz - az];
+          const nx = u[1] * v[2] - u[2] * v[1];
+          const ny = u[2] * v[0] - u[0] * v[2];
+          const nz = u[0] * v[1] - u[1] * v[0];
+          void nz;
+          const component = axis === 0 ? nx : ny;
+          if (Math.sign(component) === normalSign) correctTriCounts[p]++;
+        }
+      }
+    }
+    // Each of the 4 inner walls must have at least one triangle, and
+    // EVERY triangle on each wall must have its normal pointing inward.
+    for (let p = 0; p < planes.length; p++) {
+      expect(wallTriCounts[p]).toBeGreaterThan(0);
+      expect(correctTriCounts[p]).toBe(wallTriCounts[p]);
+    }
+  });
+
+  it("chamferShapeBy respects an explicit angle (asymmetric chamfer)", () => {
+    // A 45° chamfer on a cube edge is symmetric (same offset on both faces).
+    // Tilting the angle to 30° should produce a noticeably DIFFERENT
+    // tessellation — the chamfer slants more steeply toward one face.
+    const cube = makeCube();
+    const sym = chamferShapeBy(
+      cube,
+      { edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }], faces: [] },
+      0.1,
+      Math.PI / 4, // 45°
+    );
+    const asym = chamferShapeBy(
+      cube,
+      { edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }], faces: [] },
+      0.1,
+      (Math.PI / 180) * 30, // 30°
+    );
+    const symGeo = tessellate(sym, null);
+    const asymGeo = tessellate(asym, null);
+    expectSolidGeometry(symGeo);
+    expectSolidGeometry(asymGeo);
+    // Both produce valid solids; their tessellations should NOT match —
+    // a 30° chamfer puts the chamfer face's two long edges at different
+    // offsets along the two adjacent faces.
+    const symPositions = Array.from(symGeo.getAttribute("position").array);
+    const asymPositions = Array.from(asymGeo.getAttribute("position").array);
+    const symKey = symPositions.map((v) => v.toFixed(4)).join(",");
+    const asymKey = asymPositions.map((v) => v.toFixed(4)).join(",");
+    expect(asymKey).not.toBe(symKey);
   });
 
   it("chamferShapeBy returns the shape unchanged when no faces or edges match", () => {

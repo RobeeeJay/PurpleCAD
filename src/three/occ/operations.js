@@ -267,7 +267,7 @@ function forEachEdgeOfMatchingFaces(
         const edge = oc.TopoDS.Edge_1(edgeExp.Current());
         const key = edgeEndpointKey(oc, edge);
         if (!addedKeys.has(key)) {
-          onEdge(edge);
+          onEdge(edge, face);
           addedKeys.add(key);
           added++;
         }
@@ -279,11 +279,45 @@ function forEachEdgeOfMatchingFaces(
   return added;
 }
 
+// Find one adjacent face for the given edge, scanning the parent shape.
+// Used as the reference face when applying an angled chamfer (AddDA needs
+// to know which face the angle is measured against).
+function findAdjacentFace(oc, shape, targetEdge) {
+  const targetKey = edgeEndpointKey(oc, targetEdge);
+  const faceExp = new oc.TopExp_Explorer_2(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+  );
+  while (faceExp.More()) {
+    const face = oc.TopoDS.Face_1(faceExp.Current());
+    const edgeExp = new oc.TopExp_Explorer_2(
+      face,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+    );
+    while (edgeExp.More()) {
+      const e = oc.TopoDS.Edge_1(edgeExp.Current());
+      if (edgeEndpointKey(oc, e) === targetKey) return face;
+      edgeExp.Next();
+    }
+    faceExp.Next();
+  }
+  return null;
+}
+
 // Chamfer / fillet the boundary of every face whose normal matches one of
 // `faceNormals`.  If `edgePositions` is non-empty, those edges are also
 // added (so callers can mix face-selection and edge-selection in a single
 // operation, matching the UI's behaviour).
-export function chamferShapeBy(shape, subGeo, amount = 0.05) {
+//
+// `angleRad` is OPTIONAL.  When omitted (or null), uses the simple
+// symmetric `Add_2(dist, edge)`.  When provided, uses
+// `AddDA(dist, angle, edge, refFace)` so the user can control the slant
+// of the chamfer face relative to a reference face — angleRad=π/4 with
+// perpendicular adjacent faces is symmetric and matches the no-angle
+// case; smaller/larger angles tilt the chamfer toward one face.
+export function chamferShapeBy(shape, subGeo, amount = 0.05, angleRad = null) {
   if (!shape) return shape;
   const edgePositions = subGeo?.edges || [];
   const faceNormals = subGeo?.faces || [];
@@ -292,6 +326,15 @@ export function chamferShapeBy(shape, subGeo, amount = 0.05) {
   const mk = new oc.BRepFilletAPI_MakeChamfer(shape);
   const addedKeys = new Set();
   let added = 0;
+
+  const useAngle = typeof angleRad === "number" && isFinite(angleRad);
+  const addEdge = (edge, refFace) => {
+    if (useAngle && refFace) {
+      mk.AddDA(amount, angleRad, edge, refFace);
+    } else {
+      mk.Add_2(amount, edge);
+    }
+  };
 
   // 1. Add edges from explicit edge endpoints.
   if (edgePositions.length > 0) {
@@ -308,7 +351,8 @@ export function chamferShapeBy(shape, subGeo, amount = 0.05) {
         if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
           const key = edgeEndpointKey(oc, edge);
           if (!addedKeys.has(key)) {
-            mk.Add_2(amount, edge);
+            const refFace = useAngle ? findAdjacentFace(oc, shape, edge) : null;
+            addEdge(edge, refFace);
             addedKeys.add(key);
             added++;
           }
@@ -320,13 +364,14 @@ export function chamferShapeBy(shape, subGeo, amount = 0.05) {
   }
 
   // 2. Add edges from the boundary of every face matching a requested normal.
+  // When an angle was specified, the matched face is the natural reference.
   if (faceNormals.length > 0) {
     added += forEachEdgeOfMatchingFaces(
       oc,
       shape,
       faceNormals,
       addedKeys,
-      (edge) => mk.Add_2(amount, edge),
+      (edge, matchedFace) => addEdge(edge, matchedFace),
     );
   }
 

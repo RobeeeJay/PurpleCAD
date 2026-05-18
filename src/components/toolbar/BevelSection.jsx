@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import * as THREE from "three";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 import {
   buildBrushTransform,
   buildItemShapeLocal,
@@ -21,6 +22,14 @@ const BevelSection = () => {
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const curveResolution = useStore((s) => s.curveResolution);
 
+  // User-controllable chamfer parameters.  Distance is in millimetres
+  // (converted to scene units by MM_PER_UNIT before passing to OCC).
+  // Angle is in degrees and only affects the Chamfer button (fillet has
+  // no angle parameter — its radius alone determines the curve).  45° is
+  // the symmetric default that matches a plain Add(dist, edge) call.
+  const [distanceMm, setDistanceMm] = useState(0.5); // 0.5 mm = 0.05 scene units
+  const [angleDeg, setAngleDeg] = useState(45);
+
   const hasSelection =
     selectedSubGeometry &&
     ((selectedSubGeometry.edges?.length ?? 0) > 0 ||
@@ -37,7 +46,15 @@ const BevelSection = () => {
 
     try {
       const printPrecision = curveResolution === "print" ? 0.01 : null;
-      const amount = 0.05;
+      const amount = distanceMm / MM_PER_UNIT;
+      // Only chamfer (segments=1) uses the angle; fillet is purely
+      // radius-driven.  Treat angle ≈ 45° as "symmetric" and skip the
+      // AddDA path (cheaper, and BRepFilletAPI_MakeChamfer's Add_2 also
+      // handles convex/concave cases more robustly).
+      const angleRad =
+        segments === 1 && Math.abs(angleDeg - 45) > 0.1
+          ? (angleDeg * Math.PI) / 180
+          : null;
 
       // If the item already has a prior bevel/chamfer recipe with the same
       // amount/segments, append the new edges + faces to it and re-run
@@ -79,8 +96,10 @@ const BevelSection = () => {
       // matching faces to their boundary edges via BRepAdaptor_Surface.
       const sourceShape = buildItemShapeLocal(source, items);
       if (!sourceShape) return;
-      const opBy = segments === 1 ? chamferShapeBy : filletShapeBy;
-      const result = opBy(sourceShape, subGeo, amount);
+      const result =
+        segments === 1
+          ? chamferShapeBy(sourceShape, subGeo, amount, angleRad)
+          : filletShapeBy(sourceShape, subGeo, amount);
       if (!result) return;
       // chamferShapeBy returns the original shape unchanged when nothing
       // matched — detect that so we don't silently overwrite the item
@@ -133,6 +152,7 @@ const BevelSection = () => {
           subGeo,
           amount,
           segments,
+          angleRad,
           regeneratedAt: printPrecision,
         },
         geometryData: {
@@ -150,6 +170,53 @@ const BevelSection = () => {
 
   return (
     <ToolbarSection label="Modify">
+      <label
+        title="Chamfer/Bevel distance in mm"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          fontSize: 11,
+          color: "#aaa",
+        }}
+      >
+        <span>D</span>
+        <input
+          type="number"
+          step="0.1"
+          min="0.05"
+          value={distanceMm}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            if (!isNaN(v) && v > 0) setDistanceMm(v);
+          }}
+          style={{ width: 48 }}
+        />
+      </label>
+      <label
+        title="Chamfer angle (degrees; 45° = symmetric)"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          fontSize: 11,
+          color: "#aaa",
+        }}
+      >
+        <span>θ</span>
+        <input
+          type="number"
+          step="1"
+          min="1"
+          max="89"
+          value={angleDeg}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            if (!isNaN(v) && v > 0 && v < 90) setAngleDeg(v);
+          }}
+          style={{ width: 44 }}
+        />
+      </label>
       <button
         className="toolbar-btn"
         title="Chamfer"

@@ -1439,6 +1439,12 @@ export function attachCameraControls(ctx) {
     const poly = profile.polygon2D;
     if (!poly || poly.length < 3) return;
     const shape = new THREE.Shape(poly.map((p) => new THREE.Vector2(p.x, p.y)));
+    (profile.holes || []).forEach((h) => {
+      if (h && h.length >= 3)
+        shape.holes.push(
+          new THREE.Path(h.map((p) => new THREE.Vector2(p.x, p.y))),
+        );
+    });
     const geo = new THREE.ExtrudeGeometry(shape, {
       depth: Math.max(0.05, depth),
       bevelEnabled: false,
@@ -1667,6 +1673,9 @@ export function attachCameraControls(ctx) {
         );
         buildExtrudePreviewMesh(profile, retargetItem?.depth ?? 1.0);
         useStore.getState().setExtrudeSelectMode("depth");
+        useStore
+          .getState()
+          .setExtrudeDepthInput({ defaultDepth: retargetItem?.depth ?? 1.0 });
         renderer.domElement.style.cursor = "ns-resize";
         return;
       }
@@ -1696,6 +1705,9 @@ export function attachCameraControls(ctx) {
         );
         buildExtrudePreviewMesh(profile, retargetItem?.depth ?? 1.0);
         useStore.getState().setExtrudeSelectMode("depth");
+        useStore
+          .getState()
+          .setExtrudeDepthInput({ defaultDepth: retargetItem?.depth ?? 1.0 });
         renderer.domElement.style.cursor = "ns-resize";
       }
     }
@@ -1706,9 +1718,12 @@ export function attachCameraControls(ctx) {
     if (extrudeProfileData) buildExtrudePreviewMesh(extrudeProfileData, depth);
   };
 
-  const finalizeExtrude = (screenX, screenY) => {
+  const finalizeExtrude = (screenX, screenY, depthOverride = null) => {
     if (!extrudeProfileData) return;
-    const depth = Math.max(0.05, computeExtrudeDepth(screenX, screenY));
+    const depth =
+      depthOverride != null
+        ? Math.max(0.05, depthOverride)
+        : Math.max(0.05, computeExtrudeDepth(screenX, screenY));
     clearExtrudePreview();
     const store = useStore.getState();
     const retargetId = store.extrudeRetargetId;
@@ -1741,7 +1756,22 @@ export function attachCameraControls(ctx) {
     extrudeDepthOriginV3 = null;
     extrudeNormalV3 = null;
     store.setExtrudeSelectMode(null);
+    store.setExtrudeDepthInput(null);
     renderer.domElement.style.cursor = "";
+  };
+
+  // Expose extrude-overlay control to the React layer:
+  //   • finalizeExtrudeWithDepth(d) — commit at depth `d`, called on Enter.
+  //   • updateExtrudePreview(d)     — re-render the live preview mesh at
+  //                                   depth `d` as the user types.  Lets
+  //                                   the input field drive the same
+  //                                   live preview as the mouse drag.
+  controls.finalizeExtrudeWithDepth = (depth) =>
+    finalizeExtrude(null, null, depth);
+  controls.updateExtrudePreview = (depth) => {
+    if (!extrudeProfileData) return;
+    const d = Math.max(0.05, depth);
+    buildExtrudePreviewMesh(extrudeProfileData, d);
   };
 
   const cancelExtrude = () => {
@@ -1761,6 +1791,7 @@ export function attachCameraControls(ctx) {
     const store = useStore.getState();
     store.setExtrudeSelectMode(null);
     store.setExtrudeRetargetId(null);
+    store.setExtrudeDepthInput(null);
   };
 
   const trySelectSketchLine = (screenX, screenY) => {

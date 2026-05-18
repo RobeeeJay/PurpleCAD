@@ -106,6 +106,7 @@ const Viewport = () => {
   const cameraResetTrigger = useStore((state) => state.cameraResetTrigger);
   const sketchPlacementMode = useStore((state) => state.sketchPlacementMode);
   const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
+  const extrudeDepthInput = useStore((state) => state.extrudeDepthInput);
   const activeSketchTool = useStore((state) => state.activeSketchTool);
   const sketchConstraintMode = useStore((state) => state.sketchConstraintMode);
   const sketchConstraintFirstPoint = useStore(
@@ -1036,7 +1037,43 @@ const Viewport = () => {
       )}
       {extrudeSelectMode === "depth" && (
         <div className="sketch-placement-hint">
-          Move mouse to set depth · Click to confirm · Esc to cancel
+          Move mouse to set depth, or type below · Click to confirm · Esc to cancel
+        </div>
+      )}
+      {extrudeSelectMode === "depth" && extrudeDepthInput && (
+        <div className="sketch-distance-input-overlay">
+          <span>Depth (mm):</span>
+          <input
+            type="number"
+            step="0.1"
+            min="0.05"
+            autoFocus
+            defaultValue={(
+              extrudeDepthInput.defaultDepth * MM_PER_UNIT
+            ).toFixed(2)}
+            onChange={(e) => {
+              const mm = parseFloat(e.target.value);
+              if (!isNaN(mm) && mm > 0) {
+                cameraControlsRef.current?.updateExtrudePreview?.(
+                  mm / MM_PER_UNIT,
+                );
+              }
+            }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") {
+                const mm = parseFloat(e.target.value);
+                if (!isNaN(mm) && mm > 0) {
+                  const depth = mm / MM_PER_UNIT;
+                  cameraControlsRef.current?.finalizeExtrudeWithDepth?.(depth);
+                }
+              } else if (e.key === "Escape") {
+                useStore.getState().setExtrudeSelectMode(null);
+                useStore.getState().setExtrudeRetargetId(null);
+                useStore.getState().setExtrudeDepthInput(null);
+              }
+            }}
+          />
         </div>
       )}
       {activeSketchTool && sketchDrawPhase !== "second" && (

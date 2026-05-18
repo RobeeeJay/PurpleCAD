@@ -31,8 +31,15 @@ function regenerateChamfer(regenerator, accumulatedItems, printPrecision) {
   const subGeo = regenerator.subGeo || { edges: [], faces: [] };
   if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
     return null;
-  const op = regenerator.segments === 1 ? chamferShapeBy : filletShapeBy;
-  const result = op(sourceShape, subGeo, regenerator.amount ?? 0.05);
+  const result =
+    regenerator.segments === 1
+      ? chamferShapeBy(
+          sourceShape,
+          subGeo,
+          regenerator.amount ?? 0.05,
+          regenerator.angleRad ?? null,
+        )
+      : filletShapeBy(sourceShape, subGeo, regenerator.amount ?? 0.05);
   if (!result || result === sourceShape) return null;
   const data = tessellateToData(result, printPrecision);
   if (!data) return null;
