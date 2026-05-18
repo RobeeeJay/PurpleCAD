@@ -437,19 +437,31 @@ describe("OCC chamfer", () => {
     const geo = tessellate(chamfered, null);
     const pos = geo.getAttribute("position");
     const round = (v) => Math.round(v * 1000) / 1000;
+
+    // Look at every vertex on the TOP plane (z = +0.5) near the hole's
+    // perimeter.  Correct direction: the chamfer's top-face inset moves
+    // OUTWARD from the hole edge (e.g. x = ±0.6 at the +X/-X edges, y =
+    // ±0.6 at the +Y/-Y edges).  Wrong direction: the inset moves INTO
+    // the hole interior (vertices with both |x| < 0.5 AND |y| < 0.5 on
+    // the top plane).
     let wrongDirVerts = 0;
     let correctDirVerts = 0;
     for (let i = 0; i < pos.count; i++) {
       const x = round(pos.getX(i)),
         y = round(pos.getY(i)),
         z = round(pos.getZ(i));
-      // Look at vertices on (or very near) the top face plane z = +0.5.
       if (z !== 0.5) continue;
-      // Inner-edge region of the hole, +Y inner wall corner.
-      if (x < -0.5 || x > 0.5) continue;
-      if (y > 0.5 && y < 0.6) correctDirVerts++;
-      // Wrong direction: vertex pulled INSIDE the hole on the top plane.
-      if (y < 0.5 && y > 0.4) wrongDirVerts++;
+      // Strictly inside the hole's footprint on the top plane = wrong.
+      if (Math.abs(x) < 0.5 && Math.abs(y) < 0.5) wrongDirVerts++;
+      // Just outside the hole edge (within `amount` of it) = correct
+      // chamfer-strip endpoint.
+      if (
+        ((Math.abs(x) > 0.5 && Math.abs(x) <= 0.7) ||
+          (Math.abs(y) > 0.5 && Math.abs(y) <= 0.7)) &&
+        Math.abs(x) <= 0.7 &&
+        Math.abs(y) <= 0.7
+      )
+        correctDirVerts++;
     }
     expect(wrongDirVerts).toBe(0);
     expect(correctDirVerts).toBeGreaterThan(0);
