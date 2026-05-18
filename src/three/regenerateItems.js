@@ -1,14 +1,13 @@
 import * as THREE from "three";
-import {
-  buildBrushTransform,
-  buildItemShapeLocal,
-  performCsg,
-} from "./csgUtils.js";
-import {
-  chamferShapeBy,
-  filletShapeBy,
-} from "./occ/operations.js";
-import { tessellateToData } from "./occ/tessellate.js";
+import { buildBrushTransform } from "./csgUtils.js";
+// Use the in-process ops directly rather than going through occClient.
+// The store dynamically imports this file, so its transitive deps end up
+// in the worker bundle (via Vite's `inlineDynamicImports` for workers);
+// importing occClient here would create a cycle (occClient → worker →
+// regenerateItems → occClient).  The trade-off is that resolution-toggle
+// regeneration runs on the main thread — live chamfer/CSG creation still
+// goes through the worker via BevelSection / CombineSection.
+import { ops } from "./occOps.js";
 
 // Items that came from CSG or chamfer operations store a `regenerator`
 // field describing how to re-run the operation.  This lets us recompute
@@ -23,53 +22,29 @@ import { tessellateToData } from "./occ/tessellate.js";
 //                    subGeo: { edges, faces }, amount, segments }
 //   • (Legacy "bevel" entries from before the OCC migration are ignored —
 //     callers should regenerate the item via the new chamfer flow.)
+//
+// Regeneration is async because both branches go through occClient, which
+// posts to the OCC Web Worker in the browser and runs in-process in node.
 
-function regenerateChamfer(regenerator, accumulatedItems, printPrecision) {
-  const source = regenerator.source;
-  const sourceShape = buildItemShapeLocal(source, accumulatedItems);
-  if (!sourceShape) return null;
+async function regenerateChamfer(regenerator, accumulatedItems, printPrecision) {
   const subGeo = regenerator.subGeo || { edges: [], faces: [] };
   if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
     return null;
-  const result =
-    regenerator.segments === 1
-      ? chamferShapeBy(
-          sourceShape,
-          subGeo,
-          regenerator.amount ?? 0.05,
-          regenerator.angleRad ?? null,
-        )
-      : filletShapeBy(sourceShape, subGeo, regenerator.amount ?? 0.05);
-  if (!result || result === sourceShape) return null;
-  const data = tessellateToData(result, printPrecision);
-  if (!data) return null;
-  // Centre, compute world position via source's brush transform.
-  const arr = data.positions;
-  let minX = Infinity,
-    minY = Infinity,
-    minZ = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity,
-    maxZ = -Infinity;
-  for (let i = 0; i < arr.length; i += 3) {
-    if (arr[i] < minX) minX = arr[i];
-    if (arr[i] > maxX) maxX = arr[i];
-    if (arr[i + 1] < minY) minY = arr[i + 1];
-    if (arr[i + 1] > maxY) maxY = arr[i + 1];
-    if (arr[i + 2] < minZ) minZ = arr[i + 2];
-    if (arr[i + 2] > maxZ) maxZ = arr[i + 2];
-  }
-  const cx = (minX + maxX) / 2,
-    cy = (minY + maxY) / 2,
-    cz = (minZ + maxZ) / 2;
-  const centered = new Float32Array(arr.length);
-  for (let i = 0; i < arr.length; i += 3) {
-    centered[i] = arr[i] - cx;
-    centered[i + 1] = arr[i + 1] - cy;
-    centered[i + 2] = arr[i + 2] - cz;
-  }
-  const brushPos = buildBrushTransform(source).position;
-  const rot = source.rotation || { x: 0, y: 0, z: 0 };
+  const result = await ops.chamferOrFilletItem({
+    source: regenerator.source,
+    subGeo,
+    amount: regenerator.amount ?? 0.05,
+    angleRad: regenerator.angleRad ?? null,
+    segments: regenerator.segments,
+    allItems: accumulatedItems,
+    printPrecision,
+  });
+  if (!result) return null;
+  const { geometryData, centerOffset: { cx, cy, cz } } = result;
+  // World position = source's brush position + centroid offset rotated
+  // into world space (so chained chamfers stay anchored to their source).
+  const brushPos = buildBrushTransform(regenerator.source).position;
+  const rot = regenerator.source.rotation || { x: 0, y: 0, z: 0 };
   const local = new THREE.Vector3(cx, cy, cz);
   local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
   return {
@@ -78,29 +53,29 @@ function regenerateChamfer(regenerator, accumulatedItems, printPrecision) {
       y: brushPos.y + local.y,
       z: brushPos.z + local.z,
     },
-    geometryData: {
-      positions: Array.from(centered),
-      normals: data.normals,
-      indices: data.indices,
-    },
+    geometryData,
   };
 }
 
-function regenerateBoolean(regenerator, accumulatedItems, printPrecision) {
+async function regenerateBoolean(regenerator, accumulatedItems, printPrecision) {
   const inputs = regenerator.inputIds
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean);
   if (inputs.length < 2) return null;
-  return performCsg(inputs, regenerator.op, {
+  return ops.performCsg({
+    selectedItems: inputs,
+    operation: regenerator.op,
     printPrecision,
     allItems: accumulatedItems,
   });
 }
 
-export function regenerateItemsForResolution(items, printPrecision) {
+export async function regenerateItemsForResolution(items, printPrecision) {
   if (!items || items.length === 0) return items;
   const out = [];
   let changed = false;
+  // Sequential: each iteration can depend on earlier results in `out`
+  // (e.g. a boolean whose inputIds reference items we just regenerated).
   for (const item of items) {
     const r = item.regenerator;
     if (!r) {
@@ -113,9 +88,9 @@ export function regenerateItemsForResolution(items, printPrecision) {
     }
     let result = null;
     if (r.kind === "chamfer") {
-      result = regenerateChamfer(r, out, printPrecision);
+      result = await regenerateChamfer(r, out, printPrecision);
     } else if (r.kind === "boolean") {
-      result = regenerateBoolean(r, out, printPrecision);
+      result = await regenerateBoolean(r, out, printPrecision);
     }
     if (!result) {
       out.push(item);

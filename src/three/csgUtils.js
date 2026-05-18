@@ -162,61 +162,8 @@ export function buildItemShapeLocal(item, allItems = []) {
   return null;
 }
 
-function buildItemShapeWorld(item, allItems = []) {
-  const shape = buildItemShapeLocal(item, allItems);
-  if (!shape) return null;
-  const { position, rotation } = buildBrushTransform(item);
-  return transformShape(shape, position, rotation);
-}
-
-// Runs the CSG boolean (union/difference/intersection) on the given items
-// via OpenCascade.  Returns { position, geometryData } where geometryData
-// is the tessellation of the boolean result, or null if fewer than two
-// inputs produce a usable shape.
-export function performCsg(selectedItems, operation, options = {}) {
-  if (!isOccReady()) {
-    throw new Error("performCsg requires OpenCascade — await ensureOcc()");
-  }
-  // `allItems` (defaults to the selection) is used when an input is
-  // itself a csg result whose regenerator references other items by id.
-  const allItems = options.allItems || selectedItems;
-  const shapes = [];
-  for (const item of selectedItems) {
-    const s = buildItemShapeWorld(item, allItems);
-    if (s) shapes.push(s);
-  }
-  if (shapes.length < 2) return null;
-  const result = booleanOp(operation, shapes);
-  if (!result) return null;
-
-  // Tessellate then centre the result around its bbox so item.position
-  // becomes the world-space pivot.
-  const tess = tessellate(result, options.printPrecision ?? null);
-  if (!tess) return null;
-  const posAttr = tess.getAttribute("position");
-  const bbox = new THREE.Box3().setFromBufferAttribute(posAttr);
-  const centre = new THREE.Vector3();
-  bbox.getCenter(centre);
-  for (let i = 0; i < posAttr.count; i++) {
-    posAttr.setXYZ(
-      i,
-      posAttr.getX(i) - centre.x,
-      posAttr.getY(i) - centre.y,
-      posAttr.getZ(i) - centre.z,
-    );
-  }
-  posAttr.needsUpdate = true;
-  const normAttr = tess.getAttribute("normal");
-  const idxAttr = tess.index;
-  return {
-    position: { x: centre.x, y: centre.y, z: centre.z },
-    geometryData: {
-      positions: Array.from(posAttr.array),
-      normals: normAttr ? Array.from(normAttr.array) : null,
-      indices: idxAttr ? Array.from(idxAttr.array) : null,
-    },
-  };
-}
+// Removed sync `performCsg` — every caller now goes through occClient
+// (occOps.js#performCsg), which routes the work to the OCC Web Worker.
 
 // Apply a constant-distance chamfer to the edges in `subGeo` on `item`'s
 // shape.  Returns { position, geometryData } for the chamfered result, or

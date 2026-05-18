@@ -104,3 +104,9 @@ async function runOp(op, args) {
 export function chamferOrFilletItem(args) {
   return runOp("chamferOrFilletItem", args);
 }
+
+// Run a CSG boolean (union / difference / intersection) over the items
+// in `selectedItems`.  See occOps.js#performCsg for the result shape.
+export function performCsg(args) {
+  return runOp("performCsg", args);
+}

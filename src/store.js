@@ -1381,7 +1381,13 @@ export const useStore = create((set, get) => ({
       "./three/regenerateItems.js"
     );
     const state = get();
-    const newItems = regenerateItemsForResolution(state.items, printPrecision);
+    // regenerateItemsForResolution is now async (routes through occClient
+    // / the OCC worker) — await the resolved items array before pushing
+    // it back into the store.
+    const newItems = await regenerateItemsForResolution(
+      state.items,
+      printPrecision,
+    );
     if (newItems !== state.items) {
       set({ items: newItems });
     }

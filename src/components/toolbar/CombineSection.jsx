@@ -1,7 +1,7 @@
 import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
-import { performCsg } from "../../three/csgUtils.js";
+import { performCsg } from "../../three/occClient.js";
 
 const CombineSection = () => {
   const selectedIds = useStore((s) => s.selectedIds);
@@ -19,7 +19,7 @@ const CombineSection = () => {
   // Require 2+ selected non-sketch items.
   const canCsg = selectedEligible.length >= 2;
 
-  const handleCsg = (operation) => {
+  const handleCsg = async (operation) => {
     if (!canCsg) return;
     const selectedItems = selectedEligible;
 
@@ -27,7 +27,9 @@ const CombineSection = () => {
       // Tessellate primitives at the high-resolution setting so the CSG
       // result inherits the chord-deviation precision the user selected.
       const printPrecision = curveResolution === "print" ? 0.01 : null;
-      const result = performCsg(selectedItems, operation, {
+      const result = await performCsg({
+        selectedItems,
+        operation,
         printPrecision,
         allItems: items,
       });
