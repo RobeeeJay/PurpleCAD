@@ -24,7 +24,37 @@ beforeAll(async () => {
   await ensureOcc();
 }, 60_000);
 
-describe("STL export pipeline", () => {
+describe("occOps.exportSTL / exportSTEP", () => {
+  it("exportSTL emits a valid binary STL for a scene", async () => {
+    const { ops } = await import("../../occOps.js");
+    const items = [
+      { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } },
+      { id: 2, type: "sphere", position: { x: 4, y: 0, z: 0 } },
+    ];
+    const buf = await ops.exportSTL({ items });
+    expect(buf).toBeInstanceOf(ArrayBuffer);
+    // 80-byte header + 4-byte count + 50 bytes per triangle.
+    expect(buf.byteLength).toBeGreaterThan(84);
+    const view = new DataView(buf);
+    const triCount = view.getUint32(80, true);
+    expect(triCount).toBeGreaterThan(0);
+    expect(buf.byteLength).toBe(84 + triCount * 50);
+  });
+
+  it("exportSTL returns null for an empty scene", async () => {
+    const { ops } = await import("../../occOps.js");
+    expect(await ops.exportSTL({ items: [] })).toBeNull();
+  });
+
+  it("exportSTEP emits an ISO-10303-21 file", async () => {
+    const { ops } = await import("../../occOps.js");
+    const items = [{ id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } }];
+    const content = await ops.exportSTEP({ items });
+    expect(typeof content).toBe("string");
+    expect(content.startsWith("ISO-10303-21;")).toBe(true);
+    expect(content.trim().endsWith("END-ISO-10303-21;")).toBe(true);
+  });
+
   it("export pipeline preserves chamfers on CSG items", async () => {
     // Regression for: "Exported STL and Step files do not seem to include
     // chamfers or bevels."  buildItemShapeLocal must use chamferShapeBy

@@ -110,3 +110,15 @@ export function chamferOrFilletItem(args) {
 export function performCsg(args) {
   return runOp("performCsg", args);
 }
+
+// Export the scene as binary STL.  Resolves to an ArrayBuffer ready to
+// be wrapped in a Blob, or null when there are no exportable items.
+export function exportSTL(args) {
+  return runOp("exportSTL", args);
+}
+
+// Export the scene as a STEP file.  Resolves to a string (the ISO-10303-21
+// file contents) or null when there are no exportable items.
+export function exportSTEP(args) {
+  return runOp("exportSTEP", args);
+}

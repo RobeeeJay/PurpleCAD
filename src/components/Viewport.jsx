@@ -448,7 +448,12 @@ const Viewport = () => {
   // baked geometryData gets refreshed for the current setting before the
   // scene rebuild reads from items.
   useEffect(() => {
-    useStore.getState().regenerateForResolution(printPrecision);
+    // The orchestrator is a UI-only module that's never reachable from
+    // the OCC worker's transitive imports, so it can route per-item regen
+    // through occClient → worker without creating a bundling cycle.
+    import("../three/regenerateOrchestrator.js").then((m) => {
+      m.regenerateForResolution(printPrecision);
+    });
     // Variables drive extrude depth and dimension distances via formula
     // resolution; re-run when they change so geometry/labels reflect the
     // new values.

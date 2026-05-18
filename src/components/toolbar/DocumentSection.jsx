@@ -1,50 +1,7 @@
 import React, { useRef } from "react";
-import * as THREE from "three";
-import { STLExporter } from "three/addons/exporters/STLExporter.js";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
-import { buildItemShapeLocal } from "../../three/csgUtils.js";
-import { transformShape } from "../../three/occ/operations.js";
-import { tessellate } from "../../three/occ/tessellate.js";
-import { ensureOcc, getOcc } from "../../three/occ/init.js";
-import { MM_PER_UNIT } from "../../three/sceneObjects.js";
-
-const EXPORTABLE_TYPES = new Set([
-  "cube",
-  "sphere",
-  "cylinder",
-  "torus",
-  "extrude",
-  "csg",
-]);
-
-// Build each exportable item's OCC shape in WORLD space (position + rotation
-// applied, then scaled by item.scale, then by MM_PER_UNIT so the output is
-// in millimetres — the conventional unit for STL/STEP).  Returns an array
-// of TopoDS_Shape.
-function buildWorldShapes(items) {
-  const oc = getOcc();
-  const out = [];
-  for (const item of items) {
-    if (item.visible === false) continue;
-    if (!EXPORTABLE_TYPES.has(item.type)) continue;
-    const local = buildItemShapeLocal(item, items);
-    if (!local) continue;
-    const positioned = transformShape(local, item.position, item.rotation);
-    if (!positioned) continue;
-    const sceneScale = item.scale ? item.scale.x : 1;
-    const finalScale = sceneScale * MM_PER_UNIT;
-    if (Math.abs(finalScale - 1) < 1e-9) {
-      out.push(positioned);
-      continue;
-    }
-    const trsf = new oc.gp_Trsf_1();
-    trsf.SetScaleFactor(finalScale);
-    const mk = new oc.BRepBuilderAPI_Transform_2(positioned, trsf, true);
-    out.push(mk.Shape());
-  }
-  return out;
-}
+import { exportSTL, exportSTEP } from "../../three/occClient.js";
 
 const DocumentSection = () => {
   const history = useStore((s) => s.history);
@@ -114,43 +71,28 @@ const DocumentSection = () => {
     reader.readAsText(file);
   };
 
+  // Trigger a browser download for a Blob.
+  const download = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExportSTL = async () => {
     if (items.length === 0) {
       alert("No objects to export.");
       return;
     }
     try {
-      await ensureOcc();
-      const shapes = buildWorldShapes(items);
-      if (shapes.length === 0) {
+      const buffer = await exportSTL({ items });
+      if (!buffer) {
         alert("No exportable objects in the scene.");
         return;
       }
-      // Tessellate each shape with print-quality deflection and add as a
-      // Mesh to a temporary scene; STLExporter walks meshes and writes
-      // their position attributes.  Rotate +π/2 around X so the app's
-      // +Y (viewport "up") maps to +Z (the Z-up convention used by every
-      // mainstream STL viewer) — without this the object appears upside
-      // down in external viewers and doesn't match the in-app orientation.
-      const scene = new THREE.Scene();
-      const exportGroup = new THREE.Group();
-      exportGroup.rotation.x = Math.PI / 2;
-      scene.add(exportGroup);
-      for (const shape of shapes) {
-        const geo = tessellate(shape, 0.01);
-        if (!geo) continue;
-        const mesh = new THREE.Mesh(geo);
-        exportGroup.add(mesh);
-      }
-      scene.updateMatrixWorld(true);
-      const stlData = new STLExporter().parse(scene, { binary: true });
-      const blob = new Blob([stlData], { type: "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "scene.stl";
-      a.click();
-      URL.revokeObjectURL(url);
+      download(new Blob([buffer], { type: "application/octet-stream" }), "scene.stl");
     } catch (err) {
       console.error("STL export failed:", err);
       alert("STL export failed: " + err.message);
@@ -163,60 +105,12 @@ const DocumentSection = () => {
       return;
     }
     try {
-      await ensureOcc();
-      const oc = getOcc();
-      const shapes = buildWorldShapes(items);
-      if (shapes.length === 0) {
+      const content = await exportSTEP({ items });
+      if (!content) {
         alert("No exportable objects in the scene.");
         return;
       }
-      // STEPControl_Writer accumulates shapes via .Transfer; STEPControl_AsIs
-      // tells the writer to pick the best representation for each shape
-      // (B-rep solids stay as solids, etc.) — this produces files that
-      // FreeCAD, Fusion, SolidWorks, and other CAD readers open natively.
-      // This binding of OCC predates Message_ProgressRange, so Transfer's
-      // signature is (shape, mode, compgraph).
-      const writer = new oc.STEPControl_Writer_1();
-      const mode = oc.STEPControl_StepModelType.STEPControl_AsIs;
-      // Y-up → Z-up: STEP's de-facto convention is Z-up (matches FreeCAD,
-      // Fusion, SolidWorks).  Apply +π/2 around X so the viewport's "up"
-      // direction lines up with the receiving CAD app's "up".
-      for (const shape of shapes) {
-        const oriented = transformShape(shape, null, { x: Math.PI / 2 });
-        writer.Transfer(oriented, mode, true);
-      }
-      // OCC.js marshals the JS filename string through a transient heap
-      // allocation, and in this build the path ends up garbled in the
-      // virtual FS.  Snapshot the FS before/after Write so we can locate
-      // the actually-created file rather than trusting the filename we
-      // passed.
-      const before = new Set(oc.FS.readdir("/"));
-      writer.Write("scene.step");
-      const writtenName = oc.FS.readdir("/").find((n) => !before.has(n));
-      if (!writtenName) {
-        throw new Error("STEP writer did not produce a file");
-      }
-      const fileContent = oc.FS.readFile("/" + writtenName, {
-        encoding: "utf8",
-      });
-      try {
-        oc.FS.unlink("/" + writtenName);
-      } catch {
-        /* best-effort cleanup */
-      }
-      if (!fileContent || fileContent.length < 100) {
-        throw new Error("STEP writer produced an empty or truncated file");
-      }
-      if (!fileContent.startsWith("ISO-10303-21;")) {
-        throw new Error("STEP writer produced an invalid header");
-      }
-      const blob = new Blob([fileContent], { type: "application/step" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "scene.step";
-      a.click();
-      URL.revokeObjectURL(url);
+      download(new Blob([content], { type: "application/step" }), "scene.step");
     } catch (err) {
       console.error("STEP export failed:", err);
       alert("STEP export failed: " + err.message);

@@ -1376,22 +1376,10 @@ export const useStore = create((set, get) => ({
   //
   // This is a lazy import to avoid a circular dependency between the store
   // and the three/ utilities at module-load time.
-  regenerateForResolution: async (printPrecision) => {
-    const { regenerateItemsForResolution } = await import(
-      "./three/regenerateItems.js"
-    );
-    const state = get();
-    // regenerateItemsForResolution is now async (routes through occClient
-    // / the OCC worker) — await the resolved items array before pushing
-    // it back into the store.
-    const newItems = await regenerateItemsForResolution(
-      state.items,
-      printPrecision,
-    );
-    if (newItems !== state.items) {
-      set({ items: newItems });
-    }
-  },
+  // (regenerateForResolution moved to three/regenerateOrchestrator.js so
+  // that regenerateItems can route through occClient → worker without
+  // creating a worker → store → regenerateItems → occClient → worker
+  // import cycle.  Viewport calls the orchestrator directly.)
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
   toggleSketchShapesDashed: (sketchId, indices) =>

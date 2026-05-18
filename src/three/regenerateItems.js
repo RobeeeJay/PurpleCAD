@@ -1,13 +1,10 @@
 import * as THREE from "three";
 import { buildBrushTransform } from "./csgUtils.js";
-// Use the in-process ops directly rather than going through occClient.
-// The store dynamically imports this file, so its transitive deps end up
-// in the worker bundle (via Vite's `inlineDynamicImports` for workers);
-// importing occClient here would create a cycle (occClient → worker →
-// regenerateItems → occClient).  The trade-off is that resolution-toggle
-// regeneration runs on the main thread — live chamfer/CSG creation still
-// goes through the worker via BevelSection / CombineSection.
-import { ops } from "./occOps.js";
+// Routed through occClient → the OCC worker.  This file is no longer
+// imported from the store (the orchestrator in regenerateOrchestrator.js
+// is what Viewport pulls in), so it's outside the worker's transitive
+// graph and the previous cycle no longer applies.
+import { chamferOrFilletItem, performCsg } from "./occClient.js";
 
 // Items that came from CSG or chamfer operations store a `regenerator`
 // field describing how to re-run the operation.  This lets us recompute
@@ -30,7 +27,7 @@ async function regenerateChamfer(regenerator, accumulatedItems, printPrecision) 
   const subGeo = regenerator.subGeo || { edges: [], faces: [] };
   if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
     return null;
-  const result = await ops.chamferOrFilletItem({
+  const result = await chamferOrFilletItem({
     source: regenerator.source,
     subGeo,
     amount: regenerator.amount ?? 0.05,
@@ -62,7 +59,7 @@ async function regenerateBoolean(regenerator, accumulatedItems, printPrecision) 
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean);
   if (inputs.length < 2) return null;
-  return ops.performCsg({
+  return performCsg({
     selectedItems: inputs,
     operation: regenerator.op,
     printPrecision,
