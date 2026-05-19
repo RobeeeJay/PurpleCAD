@@ -1571,6 +1571,9 @@ export function attachCameraControls(ctx) {
       position: { x: origin.x, y: origin.y, z: origin.z },
       rotation: { x: euler.x, y: euler.y, z: euler.z },
       normalWorld: { x: worldNormal.x, y: worldNormal.y, z: worldNormal.z },
+      // The solid the face came from — used as the natural target of a
+      // cut-extrusion when one is requested via the depth-overlay toggle.
+      sourceItemId: hitMesh.userData?.itemId ?? null,
     };
   };
 
@@ -1736,13 +1739,121 @@ export function attachCameraControls(ctx) {
     const current = store.extrudeDepthInput;
     if (current) {
       const clamped = Math.max(0.05, depth);
-      if (Math.abs((current.currentDepth ?? -1) - clamped) > 1e-5) {
-        store.setExtrudeDepthInput({ ...current, currentDepth: clamped });
+      // Mouse-drag wins: clear any user-typed formula so the input reverts
+      // to showing the current numeric mm value.
+      if (
+        Math.abs((current.currentDepth ?? -1) - clamped) > 1e-5 ||
+        current.formula != null
+      ) {
+        store.setExtrudeDepthInput({
+          ...current,
+          currentDepth: clamped,
+          formula: null,
+        });
       }
     }
   };
 
-  const finalizeExtrude = (screenX, screenY, depthOverride = null) => {
+  // Run a cut-extrusion: subtract the new extrude shape from the target
+  // solid (or every visible solid when no source was captured), then hide
+  // both the original target(s) and the new extrude so only the boolean
+  // result remains visible.  Uses the same performCsg flow as the
+  // Combine toolbar — runs async through occClient → OCC worker.
+  const runCutExtrusion = async (
+    extrudeItemId,
+    sourceItemId,
+    /* profileSnapshot */ _profileSnapshot,
+    initialStore,
+  ) => {
+    try {
+      const { performCsg } = await import("./occClient.js");
+      const freshStore = useStore.getState();
+      const items = freshStore.items;
+      const extrude = items.find((i) => i.id === extrudeItemId);
+      if (!extrude) return;
+      // Determine the targets to cut from.  When the user extruded from
+      // a face we already know the source solid; otherwise fall back to
+      // every visible non-sketch non-extrude item.
+      let targets;
+      if (sourceItemId != null) {
+        const src = items.find(
+          (i) => i.id === sourceItemId && i.type !== "sketch",
+        );
+        targets = src ? [src] : [];
+      } else {
+        targets = items.filter(
+          (i) =>
+            i.type !== "sketch" &&
+            i.type !== "extrude" &&
+            i.id !== extrudeItemId &&
+            i.visible !== false,
+        );
+      }
+      if (targets.length === 0) {
+        // Nothing to cut from — undo the standalone extrude so nothing's
+        // left dangling.
+        useStore.getState().setItemsHidden([extrudeItemId]);
+        return;
+      }
+      void initialStore;
+      // Run one difference per target.  Each call produces a single CSG
+      // item that replaces the target.
+      for (const target of targets) {
+        const result = await performCsg({
+          selectedItems: [target, extrude],
+          operation: "difference",
+          printPrecision:
+            freshStore.curveResolution === "print" ? 0.01 : null,
+          allItems: items,
+        });
+        if (!result) continue;
+        const after = useStore.getState();
+        let maxId = 0;
+        after.history.forEach((e) => {
+          if (
+            e.instruction?.type === "create" &&
+            e.instruction.item.id > maxId
+          )
+            maxId = e.instruction.item.id;
+        });
+        const id = maxId + 1;
+        useStore.getState().addItem({
+          id,
+          name: `Cut ${id}`,
+          type: "csg",
+          children: [],
+          position: result.position,
+          scale: { x: 1, y: 1, z: 1 },
+          rotation: { x: 0, y: 0, z: 0 },
+          geometryData: result.geometryData,
+          regenerator: {
+            kind: "boolean",
+            op: "difference",
+            inputIds: [target.id, extrudeItemId],
+            regeneratedAt:
+              freshStore.curveResolution === "print" ? 0.01 : null,
+          },
+        });
+      }
+      // Hide the source solids and the standalone extrude — the new CSG
+      // items take their visual place.
+      useStore
+        .getState()
+        .setItemsHidden([
+          extrudeItemId,
+          ...targets.map((t) => t.id),
+        ]);
+    } catch (err) {
+      console.error("Cut extrusion failed:", err);
+    }
+  };
+
+  const finalizeExtrude = (
+    screenX,
+    screenY,
+    depthOverride = null,
+    formulaOverride = null,
+  ) => {
     if (!extrudeProfileData) return;
     const depth =
       depthOverride != null
@@ -1750,11 +1861,19 @@ export function attachCameraControls(ctx) {
         : Math.max(0.05, computeExtrudeDepth(screenX, screenY));
     clearExtrudePreview();
     const store = useStore.getState();
-    // Persist the depth as a formula string in mm (the user-facing unit) so it
-    // can later reference variables.  The drag flow always commits a bare
-    // numeric value; the dedicated edit dialog writes its own formula string.
-    const depthStored = formatAsFormula(depth);
+    // Persist the depth as a formula string in mm so it can later
+    // reference variables.  When the user typed a non-numeric formula
+    // we keep their exact text; otherwise we serialise the numeric mm
+    // value so future edits see a sensible default.
+    const depthStored =
+      typeof formulaOverride === "string" && formulaOverride.trim() !== ""
+        ? formulaOverride.trim()
+        : formatAsFormula(depth);
     const retargetId = store.extrudeRetargetId;
+    const isCut = !!store.extrudeDepthInput?.cut;
+    const sourceItemId = extrudeProfileData?.sourceItemId ?? null;
+    const profileSnapshot = extrudeProfileData;
+    let newExtrudeId = null;
     if (retargetId != null) {
       store.retargetExtrude(retargetId, extrudeProfileData, depthStored);
       store.setExtrudeRetargetId(null);
@@ -1768,9 +1887,10 @@ export function attachCameraControls(ctx) {
         )
           maxId = e.instruction.item.id;
       });
+      newExtrudeId = maxId + 1;
       store.addItem({
-        id: maxId + 1,
-        name: `Extrude ${maxId + 1}`,
+        id: newExtrudeId,
+        name: `Extrude ${newExtrudeId}`,
         type: "extrude",
         children: [],
         profile: extrudeProfileData,
@@ -1779,6 +1899,13 @@ export function attachCameraControls(ctx) {
         rotation: extrudeProfileData.rotation,
         scale: { x: 1, y: 1, z: 1 },
       });
+    }
+    // Cut extrusion: subtract the freshly-created extrude from a target
+    // solid via a difference boolean, then hide the now-redundant extrude
+    // and the source solid (the cut result is a new CSG item that takes
+    // their place visually).  Runs async via performCsg through occClient.
+    if (isCut && newExtrudeId != null) {
+      void runCutExtrusion(newExtrudeId, sourceItemId, profileSnapshot, store);
     }
     extrudeProfileData = null;
     extrudeDepthOriginV3 = null;
@@ -1789,13 +1916,60 @@ export function attachCameraControls(ctx) {
   };
 
   // Expose extrude-overlay control to the React layer:
-  //   • finalizeExtrudeWithDepth(d) — commit at depth `d`, called on Enter.
-  //   • updateExtrudePreview(d)     — re-render the live preview mesh at
-  //                                   depth `d` as the user types.  Lets
-  //                                   the input field drive the same
-  //                                   live preview as the mouse drag.
+  //   • finalizeExtrudeWithDepth(d)         — commit at numeric depth `d`.
+  //   • finalizeExtrudeWithFormula(f, d)    — commit storing formula `f`
+  //                                           and using its resolved depth
+  //                                           `d` for the preview/profile.
+  //   • updateExtrudePreview(d)             — re-render the live preview
+  //                                           mesh at depth `d`.
   controls.finalizeExtrudeWithDepth = (depth) =>
     finalizeExtrude(null, null, depth);
+  controls.finalizeExtrudeWithFormula = (formula, depth) =>
+    finalizeExtrude(null, null, depth, formula);
+  controls.cancelExtrude = () => cancelExtrude();
+
+  // Drop the selected non-sketch objects so their lowest world-Y point
+  // sits on the ground plane (Y=0).  Computes the min Y across all
+  // selected meshes' world-space bounding boxes, then dispatches a
+  // single setItemsTransform with each item's new Y position.
+  controls.dropSelectedToGround = () => {
+    const store = useStore.getState();
+    const selected = (store.selectedIds && store.selectedIds.length > 0
+      ? store.selectedIds
+      : store.selectedId != null
+        ? [store.selectedId]
+        : []
+    )
+      .map((id) => ({ id, item: store.items.find((i) => i.id === id) }))
+      .filter(({ item }) => item && item.type !== "sketch");
+    if (selected.length === 0) return;
+    let minY = Infinity;
+    const box = new THREE.Box3();
+    for (const { id } of selected) {
+      const mesh = objectsRef.current?.[id];
+      if (!mesh) continue;
+      mesh.updateMatrixWorld(true);
+      box.setFromObject(mesh);
+      if (Number.isFinite(box.min.y) && box.min.y < minY) minY = box.min.y;
+    }
+    if (!Number.isFinite(minY)) return;
+    const shift = -minY;
+    if (Math.abs(shift) < 1e-6) return;
+    const updates = selected.map(({ id, item }) => ({
+      id,
+      position: {
+        x: item.position?.x ?? 0,
+        y: (item.position?.y ?? 0) + shift,
+        z: item.position?.z ?? 0,
+      },
+    }));
+    store.setItemsTransform(updates);
+    // Persist as undoable history entries so the move survives a replay
+    // / reload (setItemsTransform alone only touches `items`).
+    for (const u of updates) {
+      useStore.getState().recordTransformHistory(u.id, "Moved");
+    }
+  };
   controls.updateExtrudePreview = (depth) => {
     if (!extrudeProfileData) return;
     const d = Math.max(0.05, depth);

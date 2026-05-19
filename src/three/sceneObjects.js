@@ -676,15 +676,14 @@ export function buildSceneObjects(
           bevelEnabled: false,
         });
         geometry.computeVertexNormals();
-        // Also centre along the extrusion axis so the pivot is the volumetric
-        // centre of the solid, not the base face.
-        geometry.translate(0, 0, -depth / 2);
-        // Record the local-space offset so we can compensate the mesh position
-        // below (keeping the solid at the correct world location).
+        // The prism's base face sits at z=0 in the sketch's local frame and
+        // it extends to z=+depth.  Don't shift it down to be midpoint-
+        // centred — the user expects the bottom of the extrusion to sit
+        // ON the sketch plane, not straddle it.
         extrudeLocalOffset = new THREE.Vector3(
           profileCentroid2D.x,
           profileCentroid2D.y,
-          depth / 2,
+          0,
         );
         break;
       }

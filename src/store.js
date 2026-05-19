@@ -799,14 +799,28 @@ export const useStore = create((set, get) => ({
       // returns.
       const newVarsMap = variablesToMap(variables);
       const updatedItems = state.items.map((item) => {
-        if (item.type !== "sketch" || !item.constraints?.length) return item;
-        const newShapes = resolveDistanceConstraints(
-          item.shapes || [],
-          item.constraints,
-          newVarsMap,
-        );
-        if (!newShapes) return item;
-        return { ...item, shapes: newShapes };
+        if (item.type === "sketch" && item.constraints?.length) {
+          const newShapes = resolveDistanceConstraints(
+            item.shapes || [],
+            item.constraints,
+            newVarsMap,
+          );
+          if (newShapes) return { ...item, shapes: newShapes };
+          return item;
+        }
+        // Booleans and chamfers cache their tessellated `geometryData`
+        // keyed by `regeneratedAt`.  Their inputs (extrude depths,
+        // dimension distances) may now resolve to new values, but the
+        // regen-skip check (regeneratedAt === printPrecision) would
+        // otherwise keep the stale geometry.  Force a rebuild on the
+        // next regenerateForResolution pass by clearing the flag.
+        if (item.type === "csg" && item.regenerator) {
+          return {
+            ...item,
+            regenerator: { ...item.regenerator, regeneratedAt: "dirty" },
+          };
+        }
+        return item;
       });
       // Persist any sketch-shape changes into the matching create-history
       // entries so reload/undo see the new positions.
@@ -855,6 +869,14 @@ export const useStore = create((set, get) => ({
   // null when closed; { entryId } when open.
   chamferEditTarget: null,
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
+
+  // Non-reactive slot holding the live cameraControls object (set by
+  // Viewport during mount).  Lets UI components outside the Viewport call
+  // viewport-anchored helpers (eg dropSelectedToGround) without
+  // prop-drilling a ref through React Context.  Don't subscribe to this —
+  // it's a handle, not state.
+  _cameraControls: null,
+  setCameraControls: (controls) => set({ _cameraControls: controls }),
 
   // Counter of in-flight long-running OCC operations.  Incremented by
   // occClient.runOp before work starts, decremented in its finally.

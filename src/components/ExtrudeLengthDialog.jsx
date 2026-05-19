@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
+import FormulaInput from "./FormulaInput";
 import "../styles/VariablesDialog.css";
 
 // Returns the depth as a user-editable mm formula string regardless of the
@@ -72,9 +73,10 @@ const ExtrudeLengthDialog = () => {
             }}
           >
             <span>Length (mm) — number or formula referencing variables</span>
-            <input
+            <FormulaInput
               type="text"
               autoFocus
+              variables={variables}
               value={formula}
               onChange={(e) => setFormula(e.target.value)}
               onKeyDown={(e) => {

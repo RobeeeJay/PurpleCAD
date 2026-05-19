@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useCallback } from "react";
 import * as THREE from "three";
 import RotationWidget from "./RotationWidget";
+import BusyIndicator from "./BusyIndicator";
+import FormulaInput from "./FormulaInput";
 import "../styles/Viewport.css";
 import { useStore } from "../store";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
@@ -185,6 +187,9 @@ const Viewport = () => {
     scene.add(camera);
 
     const controls = cameraControlsRef.current;
+    // Expose this controls object to non-Viewport components (the toolbar
+    // calls dropSelectedToGround through here).
+    useStore.getState().setCameraControls(controls);
     const px = savedState.positionX - savedState.targetX;
     const py = savedState.positionY - savedState.targetY;
     const pz = savedState.positionZ - savedState.targetZ;
@@ -1038,6 +1043,7 @@ const Viewport = () => {
             : undefined
         }
       />
+      <BusyIndicator />
       {sketchPlacementMode && (
         <div className="sketch-placement-hint">
           Click an axis plane or object face to place the sketch · Esc to cancel
@@ -1056,38 +1062,94 @@ const Viewport = () => {
       {extrudeSelectMode === "depth" && extrudeDepthInput && (
         <div className="sketch-distance-input-overlay">
           <span>Depth (mm):</span>
-          <input
-            type="number"
-            step="0.1"
-            min="0.05"
-            autoFocus
-            value={(
-              (extrudeDepthInput.currentDepth ??
-                extrudeDepthInput.defaultDepth) * MM_PER_UNIT
-            ).toFixed(2)}
-            onChange={(e) => {
-              const mm = parseFloat(e.target.value);
-              if (!isNaN(mm) && mm > 0) {
-                const depth = mm / MM_PER_UNIT;
-                cameraControlsRef.current?.updateExtrudePreview?.(depth);
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 11,
+              color: "#aaa",
+              marginRight: 8,
+            }}
+            title="Cut extrusion — subtract this solid from the target instead of adding it"
+          >
+            <input
+              type="checkbox"
+              checked={!!extrudeDepthInput.cut}
+              onChange={(e) => {
                 useStore.getState().setExtrudeDepthInput({
                   ...extrudeDepthInput,
-                  currentDepth: depth,
+                  cut: e.target.checked,
                 });
+              }}
+            />
+            Cut
+          </label>
+          <FormulaInput
+            type="text"
+            autoFocus
+            variables={variables}
+            // Accept either a bare number or a formula like "width * 2".
+            // The mouse-drag path clears `formula` and updates `currentDepth`
+            // so the field reverts to a numeric mm value as the user drags;
+            // typing replaces both with the user's text and its evaluation.
+            value={
+              extrudeDepthInput.formula ??
+              (
+                (extrudeDepthInput.currentDepth ??
+                  extrudeDepthInput.defaultDepth) * MM_PER_UNIT
+              ).toFixed(2)
+            }
+            onChange={(e) => {
+              const raw = e.target.value;
+              const variablesMap = variablesToMap(
+                useStore.getState().variables,
+              );
+              const mm = evaluateFormula(raw, variablesMap);
+              const validNum = Number.isFinite(mm) && mm > 0;
+              const depth = validNum ? mm / MM_PER_UNIT : undefined;
+              if (validNum) {
+                cameraControlsRef.current?.updateExtrudePreview?.(depth);
               }
+              useStore.getState().setExtrudeDepthInput({
+                ...extrudeDepthInput,
+                formula: raw,
+                currentDepth: validNum
+                  ? depth
+                  : extrudeDepthInput.currentDepth,
+              });
             }}
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter") {
-                const mm = parseFloat(e.target.value);
-                if (!isNaN(mm) && mm > 0) {
+                const raw = e.target.value.trim();
+                const variablesMap = variablesToMap(
+                  useStore.getState().variables,
+                );
+                const mm = evaluateFormula(raw, variablesMap);
+                if (Number.isFinite(mm) && mm > 0) {
                   const depth = mm / MM_PER_UNIT;
-                  cameraControlsRef.current?.finalizeExtrudeWithDepth?.(depth);
+                  // If the user typed a non-numeric formula, preserve it as
+                  // the stored value; otherwise the bare numeric path
+                  // (formatAsFormula) handles it inside finalizeExtrude.
+                  const isFormula = !/^-?\d+(\.\d+)?$/.test(raw);
+                  if (isFormula) {
+                    cameraControlsRef.current?.finalizeExtrudeWithFormula?.(
+                      raw,
+                      depth,
+                    );
+                  } else {
+                    cameraControlsRef.current?.finalizeExtrudeWithDepth?.(
+                      depth,
+                    );
+                  }
                 }
               } else if (e.key === "Escape") {
-                useStore.getState().setExtrudeSelectMode(null);
-                useStore.getState().setExtrudeRetargetId(null);
-                useStore.getState().setExtrudeDepthInput(null);
+                // cancelExtrude clears BOTH the preview mesh and the
+                // store state, then resets cursor / face highlights —
+                // the store-only path would leave the preview hovering
+                // in the scene.
+                cameraControlsRef.current?.cancelExtrude?.();
               }
             }}
           />
@@ -1121,9 +1183,10 @@ const Viewport = () => {
               ? "Edit distance (mm):"
               : "Distance (mm):"}
           </span>
-          <input
+          <FormulaInput
             type="text"
             autoFocus
+            variables={variables}
             defaultValue={
               typeof sketchDistanceInput.defaultDistance === "string"
                 ? sketchDistanceInput.defaultDistance

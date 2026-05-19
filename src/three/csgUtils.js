@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { polyCentroid } from "./sceneObjects.js";
 import { makePrimitiveShape } from "./occ/primitives.js";
-import { resolveItemDepth } from "./geometryParams.js";
 import { tessellate, tessellateToData } from "./occ/tessellate.js";
 import {
   booleanOp,
@@ -70,9 +69,10 @@ export function buildBrushTransform(item) {
 
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
     const poly = item.profile.polygon2D;
-    const depth = resolveItemDepth(item);
     const c = polyCentroid(poly);
-    const offset = new THREE.Vector3(c.x, c.y, depth / 2);
+    // Extrude base sits at z=0 in the sketch local frame; no depth-axis
+    // shift here, matching the render path in sceneObjects.js.
+    const offset = new THREE.Vector3(c.x, c.y, 0);
     offset.applyEuler(new THREE.Euler(r.x || 0, r.y || 0, r.z || 0));
     const base = item.position || { x: 0, y: 0, z: 0 };
     return {

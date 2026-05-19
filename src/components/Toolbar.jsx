@@ -8,6 +8,7 @@ import ObjectCreateSection from "./toolbar/ObjectCreateSection";
 import SketchModifySection from "./toolbar/SketchModifySection";
 import CombineSection from "./toolbar/CombineSection";
 import BevelSection from "./toolbar/BevelSection";
+import ModifySection from "./toolbar/ModifySection";
 import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
 import OptionsSection from "./toolbar/OptionsSection";
@@ -26,6 +27,7 @@ const Toolbar = () => {
       {isSketchMode && <SketchModifySection />}
       <CombineSection />
       <BevelSection />
+      {!isSketchMode && <ModifySection />}
       <ConstrainSection isSketchMode={isSketchMode} />
       <RenderSection />
       <OptionsSection />

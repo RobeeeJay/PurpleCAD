@@ -1,0 +1,58 @@
+.formula-input-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.formula-input-wrap > input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.formula-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-width: 280px;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  z-index: 10001;
+  overflow: hidden;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.formula-suggestion {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 10px;
+  gap: 14px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.formula-suggestion:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.formula-suggestion.active {
+  background-color: var(--selected-bg);
+  color: #ffffff;
+}
+
+.formula-suggestion-name {
+  font-weight: 600;
+}
+
+.formula-suggestion-value {
+  color: var(--text-secondary);
+}
+
+.formula-suggestion.active .formula-suggestion-value {
+  color: rgba(255, 255, 255, 0.85);
+}

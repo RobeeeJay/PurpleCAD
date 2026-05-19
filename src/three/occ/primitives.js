@@ -138,16 +138,12 @@ export function makeExtrude(item) {
     face = faceWithHole.Face();
   }
 
-  // Prism along +Z by depth.
+  // Prism along +Z by depth, base at z=0.  Matches the render-side path
+  // in sceneObjects.js so the bottom face of every extrusion sits on
+  // the sketch plane instead of straddling it.
   const dir = new oc.gp_Vec_4(0, 0, depth);
   const prismMk = new oc.BRepPrimAPI_MakePrism_1(face, dir, false, true);
-  const shape = prismMk.Shape();
-
-  // Centre along the extrusion axis (so item.position is the mid-z).
-  const trsf = new oc.gp_Trsf_1();
-  trsf.SetTranslation_1(new oc.gp_Vec_4(0, 0, -depth / 2));
-  const xform = new oc.BRepBuilderAPI_Transform_2(shape, trsf, true);
-  return xform.Shape();
+  return prismMk.Shape();
 }
 
 // Dispatch by item type.

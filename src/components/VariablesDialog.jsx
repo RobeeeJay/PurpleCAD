@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
+import FormulaInput from "./FormulaInput";
 import "../styles/VariablesDialog.css";
 
 const VariablesDialog = () => {
@@ -85,8 +86,11 @@ const VariablesDialog = () => {
                     />
                   </td>
                   <td>
-                    <input
+                    <FormulaInput
                       type="text"
+                      // Hide the row itself from suggestions — referencing
+                      // your own row is a cycle and useless to suggest.
+                      variables={draft.filter((_, j) => j !== i)}
                       value={row.formula}
                       placeholder="e.g. width * 2"
                       onChange={(e) =>

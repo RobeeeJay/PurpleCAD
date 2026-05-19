@@ -565,12 +565,13 @@ describe("OCC chamfer", () => {
       depth: 1,
     });
     const baselineGeo = tessellate(holed, null);
-    // Top-outer edge at (-2,-2,0.5) → (2,-2,0.5) (after the prism is
-    // centred along z, half-depth offset puts it at z = +0.5).
+    // Top-outer edge at (-2,-2,1) → (2,-2,1) — the prism's base sits at
+    // z=0 and it extends up by `depth` (= 1 here), so the top face is at
+    // z = +1.
     const chamfered = chamferShapeBy(
       holed,
       {
-        edges: [{ ax: -2, ay: -2, az: 0.5, bx: 2, by: -2, bz: 0.5 }],
+        edges: [{ ax: -2, ay: -2, az: 1, bx: 2, by: -2, bz: 1 }],
         faces: [],
       },
       0.1,
@@ -624,16 +625,17 @@ describe("OCC chamfer", () => {
     const pos = geo.getAttribute("position");
     const round = (v) => Math.round(v * 100) / 100;
 
-    // 1. Outer top sharp corner is GONE.  (-2,-2,+0.5) etc were the outer
-    //    top corners of the baseline; after chamfering the top face's
-    //    outer wire those sharp corners are replaced by chamfered ones.
+    // 1. Outer top sharp corner is GONE.  (-2,-2,+1) etc were the outer
+    //    top corners of the baseline (base at z=0, top at z=depth=1);
+    //    after chamfering the top face's outer wire those sharp corners
+    //    are replaced by chamfered ones.
     let baselineOuterCorner = 0;
     const basePos = baselineGeo.getAttribute("position");
     for (let i = 0; i < basePos.count; i++) {
       const x = round(basePos.getX(i)),
         y = round(basePos.getY(i)),
         z = round(basePos.getZ(i));
-      if (Math.abs(x) === 2 && Math.abs(y) === 2 && z === 0.5)
+      if (Math.abs(x) === 2 && Math.abs(y) === 2 && z === 1)
         baselineOuterCorner++;
     }
     let chamferedOuterCorner = 0;
@@ -641,34 +643,34 @@ describe("OCC chamfer", () => {
       const x = round(pos.getX(i)),
         y = round(pos.getY(i)),
         z = round(pos.getZ(i));
-      if (Math.abs(x) === 2 && Math.abs(y) === 2 && z === 0.5)
+      if (Math.abs(x) === 2 && Math.abs(y) === 2 && z === 1)
         chamferedOuterCorner++;
     }
     expect(baselineOuterCorner).toBeGreaterThan(0); // sanity
     expect(chamferedOuterCorner).toBe(0);
 
     // 2. Inner (hole) top sharp corner is also GONE.  The baseline had
-    //    sharp inner corners at (±0.5, ±0.5, +0.5); they should now be
+    //    sharp inner corners at (±0.5, ±0.5, +1); they should now be
     //    chamfered away.
     let chamferedInnerCorner = 0;
     for (let i = 0; i < pos.count; i++) {
       const x = round(pos.getX(i)),
         y = round(pos.getY(i)),
         z = round(pos.getZ(i));
-      if (Math.abs(x) === 0.5 && Math.abs(y) === 0.5 && z === 0.5)
+      if (Math.abs(x) === 0.5 && Math.abs(y) === 0.5 && z === 1)
         chamferedInnerCorner++;
     }
     expect(chamferedInnerCorner).toBe(0);
 
     // 3. Hole remains open all the way through.  The bottom of the hole's
-    //    inner walls is at z = -0.5; sharp inner corners there should
-    //    still exist (we only chamfered the TOP face).
+    //    inner walls is at z = 0; sharp inner corners there should still
+    //    exist (we only chamfered the TOP face).
     let bottomInnerCorner = 0;
     for (let i = 0; i < pos.count; i++) {
       const x = round(pos.getX(i)),
         y = round(pos.getY(i)),
         z = round(pos.getZ(i));
-      if (Math.abs(x) === 0.5 && Math.abs(y) === 0.5 && z === -0.5)
+      if (Math.abs(x) === 0.5 && Math.abs(y) === 0.5 && z === 0)
         bottomInnerCorner++;
     }
     expect(bottomInnerCorner).toBeGreaterThan(0);
@@ -681,10 +683,10 @@ describe("OCC chamfer", () => {
     //
     // For an inner hole edge at y = +0.5 (the +Y inner wall's top corner),
     // a correct chamfer eats material from the L-shaped corner between
-    // the top face (z=+0.5, y > +0.5) and the inner wall (y=+0.5, z varies).
+    // the top face (z=+1, y > +0.5) and the inner wall (y=+0.5, z varies).
     // After a 0.1 chamfer, the new chamfer face vertices should be at:
     //   • on the top face: y in (+0.5, +0.6], i.e. OUTSIDE the hole.
-    //   • on the inner wall: z in (+0.4, +0.5), i.e. moved DOWN.
+    //   • on the inner wall: z in (+0.9, +1), i.e. moved DOWN.
     // No new vertex should appear at y in [+0.4, +0.5) on the top plane —
     // that would be a chamfer slanting INTO the hole (filling it).
     const outer = [
@@ -713,7 +715,7 @@ describe("OCC chamfer", () => {
     const pos = geo.getAttribute("position");
     const round = (v) => Math.round(v * 1000) / 1000;
 
-    // Look at every vertex on the TOP plane (z = +0.5) near the hole's
+    // Look at every vertex on the TOP plane (z = +1) near the hole's
     // perimeter.  Correct direction: the chamfer's top-face inset moves
     // OUTWARD from the hole edge (e.g. x = ±0.6 at the +X/-X edges, y =
     // ±0.6 at the +Y/-Y edges).  Wrong direction: the inset moves INTO
@@ -725,7 +727,7 @@ describe("OCC chamfer", () => {
       const x = round(pos.getX(i)),
         y = round(pos.getY(i)),
         z = round(pos.getZ(i));
-      if (z !== 0.5) continue;
+      if (z !== 1) continue;
       // Strictly inside the hole's footprint on the top plane = wrong.
       if (Math.abs(x) < 0.5 && Math.abs(y) < 0.5) wrongDirVerts++;
       // Just outside the hole edge (within `amount` of it) = correct
