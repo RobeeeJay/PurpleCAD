@@ -49,7 +49,8 @@ const ChamferEditDialog = () => {
 
   const opName = isFillet ? "fillet" : "chamfer";
   const valueLabel = isFillet ? "Radius (mm)" : "Distance (mm)";
-  const distValid = Number.isFinite(parseFloat(distanceMm)) && parseFloat(distanceMm) > 0;
+  const distValid =
+    Number.isFinite(parseFloat(distanceMm)) && parseFloat(distanceMm) > 0;
   const angValid = isFillet
     ? true
     : (() => {
@@ -75,7 +76,14 @@ const ChamferEditDialog = () => {
             ×
           </button>
         </div>
-        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div
+          style={{
+            padding: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
           <label
             style={{
               display: "flex",

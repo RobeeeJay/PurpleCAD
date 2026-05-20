@@ -12,14 +12,39 @@ vi.mock("../../store", () => ({ useStore: () => null }));
 // overlay behaves like a real THREE.Object3D (traversable, disposable,
 // .isLineSegments2 etc.). The other Line2/LineGeometry imports are still
 // mocked because they're only pulled in transitively for unrelated tests.
-vi.mock("three/addons/lines/Line2.js", () => ({ Line2: class { computeLineDistances() {} } }));
-vi.mock("three/addons/lines/LineGeometry.js", () => ({ LineGeometry: class { setPositions() {} } }));
-vi.mock("three/addons/environments/RoomEnvironment.js", () => ({ RoomEnvironment: class { dispose() {} } }));
-vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({ EffectComposer: class { dispose() {} addPass() {} } }));
-vi.mock("three/addons/postprocessing/RenderPass.js", () => ({ RenderPass: class {} }));
-vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({ UnrealBloomPass: class {} }));
-vi.mock("three/addons/postprocessing/OutputPass.js", () => ({ OutputPass: class {} }));
-vi.mock("../objectMaterials.js", () => ({ createMaterial: () => ({ dispose() {} }) }));
+vi.mock("three/addons/lines/Line2.js", () => ({
+  Line2: class {
+    computeLineDistances() {}
+  },
+}));
+vi.mock("three/addons/lines/LineGeometry.js", () => ({
+  LineGeometry: class {
+    setPositions() {}
+  },
+}));
+vi.mock("three/addons/environments/RoomEnvironment.js", () => ({
+  RoomEnvironment: class {
+    dispose() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({
+  EffectComposer: class {
+    dispose() {}
+    addPass() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/RenderPass.js", () => ({
+  RenderPass: class {},
+}));
+vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({
+  UnrealBloomPass: class {},
+}));
+vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
+  OutputPass: class {},
+}));
+vi.mock("../objectMaterials.js", () => ({
+  createMaterial: () => ({ dispose() {} }),
+}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,9 +100,7 @@ describe("buildSelectionHighlight – face overlay", () => {
     };
     const group = buildSelectionHighlight(mesh, subGeo);
     expect(group).not.toBeNull();
-    const faceMesh = group.children.find(
-      (c) => c.userData.kind === "face",
-    );
+    const faceMesh = group.children.find((c) => c.userData.kind === "face");
     expect(faceMesh).toBeDefined();
     // Top face of a 2×2×2 cube has 2 triangles → 6 vertices.
     expect(faceMesh.geometry.getAttribute("position").count).toBe(6);
@@ -246,7 +269,10 @@ describe("buildSelectionHighlight – matches hit mesh transform", () => {
   it("copies scale from the hit mesh", () => {
     const mesh = makeCubeMesh();
     mesh.scale.set(2.5, 2.5, 2.5);
-    const subGeo = { faces: [], edges: [{ ax: 0, ay: 0, az: 0, bx: 1, by: 0, bz: 0 }] };
+    const subGeo = {
+      faces: [],
+      edges: [{ ax: 0, ay: 0, az: 0, bx: 1, by: 0, bz: 0 }],
+    };
     const group = buildSelectionHighlight(mesh, subGeo);
     expect(group.scale.x).toBeCloseTo(2.5);
     expect(group.scale.y).toBeCloseTo(2.5);
@@ -513,7 +539,9 @@ describe("buildSelectionHighlight – primitive item types", () => {
     for (const { type, minVerts } of types) {
       const mesh = makePrimitiveMesh(type);
       const normal =
-        type === "torus" ? { nx: 0, ny: 1, nz: 0 } : { nx: 0.577, ny: 0.577, nz: 0.577 };
+        type === "torus"
+          ? { nx: 0, ny: 1, nz: 0 }
+          : { nx: 0.577, ny: 0.577, nz: 0.577 };
       const group = buildSelectionHighlight(
         mesh,
         { faces: [normal], edges: [] },

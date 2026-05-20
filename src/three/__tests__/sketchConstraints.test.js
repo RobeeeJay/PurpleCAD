@@ -1366,7 +1366,12 @@ describe("enforceConstraints", () => {
 
     it("mixed ordering across a rectangle still solves", () => {
       // Same rectangle but every coincident defined "backwards" from makeRect.
-      const shapes = [L(0, 2, 2, 2), L(2, 2, 2, 0), L(2, 0, 0, 0), L(0, 0, 0, 2)];
+      const shapes = [
+        L(0, 2, 2, 2),
+        L(2, 2, 2, 0),
+        L(2, 0, 0, 0),
+        L(0, 0, 0, 2),
+      ];
       const constraints = [
         coin(0, "start", 3, "end"), // reversed
         coin(1, "start", 0, "end"), // reversed
@@ -1477,10 +1482,11 @@ describe("enforceConstraints", () => {
       const shapes = V.map((_, i) =>
         L(V[i].x, V[i].y, V[(i + 1) % 5].x, V[(i + 1) % 5].y),
       );
-      const constraints = V.map((_, i) =>
-        coin(i, "end", (i + 1) % 5, "start"),
-      );
-      const result = apply(shapes, constraints, 0, "start", { x: -0.5, y: -0.3 });
+      const constraints = V.map((_, i) => coin(i, "end", (i + 1) % 5, "start"));
+      const result = apply(shapes, constraints, 0, "start", {
+        x: -0.5,
+        y: -0.3,
+      });
       assertCoincidesHold(result, constraints);
       // Verify other 4 vertices unchanged: a buggy cycle-walk could drag every
       // vertex in lock-step around the loop.

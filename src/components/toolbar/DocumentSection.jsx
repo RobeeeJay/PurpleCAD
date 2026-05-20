@@ -92,7 +92,10 @@ const DocumentSection = () => {
         alert("No exportable objects in the scene.");
         return;
       }
-      download(new Blob([buffer], { type: "application/octet-stream" }), "scene.stl");
+      download(
+        new Blob([buffer], { type: "application/octet-stream" }),
+        "scene.stl",
+      );
     } catch (err) {
       console.error("STL export failed:", err);
       alert("STL export failed: " + err.message);

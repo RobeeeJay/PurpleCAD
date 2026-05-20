@@ -95,9 +95,7 @@ export function tessellate(shape, printPrecision = null) {
     "position",
     new THREE.BufferAttribute(new Float32Array(positions), 3),
   );
-  geometry.setIndex(
-    new THREE.BufferAttribute(new Uint32Array(indices), 1),
-  );
+  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
   geometry.computeVertexNormals();
   return geometry;
 }

@@ -2,21 +2,11 @@ import React, { useEffect, useRef, useCallback } from "react";
 import * as THREE from "three";
 import RotationWidget from "./RotationWidget";
 import BusyIndicator from "./BusyIndicator";
-import FormulaInput from "./FormulaInput";
+import SketchOverlays from "./viewport/SketchOverlays";
+import { useViewportInit } from "./viewport/useViewportInit";
+import { useSketchModeEffect } from "./viewport/useSketchModeEffect";
 import "../styles/Viewport.css";
 import { useStore } from "../store";
-import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
-import {
-  createScene,
-  createCamera,
-  createRenderer,
-  createLights,
-  createGrid,
-  createAxisGroup,
-  createOrbitIndicator,
-  setupResize,
-} from "../three/sceneSetup.js";
-import { updateEmissive } from "../three/objectMaterials.js";
 import {
   buildSceneObjects,
   buildTransformHandles,
@@ -24,22 +14,10 @@ import {
   buildAllSketchShapesGroup,
   buildExtrudeSelectGroup,
   applyRenderMode,
-  makeMeasureLabel,
-  MM_PER_UNIT,
-  placeDimLabels,
-  getShapePoint,
-  moveShapePoint,
 } from "../three/sceneObjects.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import {
-  loadCameraState,
-  saveCameraState,
-  attachCameraControls,
-} from "../three/cameraControls.js";
-import {
-  disposeHighlightGroup,
-  reconcileSelectionHighlight,
-} from "../three/selectionHighlights.js";
+import { updateEmissive } from "../three/objectMaterials.js";
+import { saveCameraState } from "../three/cameraControls.js";
+import { reconcileSelectionHighlight } from "../three/selectionHighlights.js";
 
 const Viewport = () => {
   const containerRef = useRef(null);
@@ -49,6 +27,8 @@ const Viewport = () => {
   const objectsRef = useRef({});
   const originalMaterialsRef = useRef({});
   const planeRef = useRef(null);
+  const shadowGroundRef = useRef(null);
+  const shadowLightRef = useRef(null);
   const targetRef = useRef(new THREE.Vector3(0, 0, 0));
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
@@ -83,6 +63,11 @@ const Viewport = () => {
   const sketchShapesGroupRef = useRef(null);
   const allSketchGroupRef = useRef(null);
   const sketchGhostGroupRef = useRef(null);
+  // Remembers the user's projection setting from before entering sketch
+  // mode so it can be restored on exit.  Sketch mode forces isometric
+  // (orthographic) projection so the sketch plane has no perspective
+  // distortion.
+  const preSketchProjectionRef = useRef(null);
   const dimHintRef = useRef(null);
   const propagateConstraintsRef = useRef(null);
 
@@ -104,6 +89,7 @@ const Viewport = () => {
   const selectedIds = useStore((state) => state.selectedIds);
   const selectItem = useStore((state) => state.selectItem);
   const renderMode = useStore((state) => state.renderMode);
+  const shadowsEnabled = useStore((state) => state.shadowsEnabled);
   const projectionMode = useStore((state) => state.projectionMode);
   const widgetVisible = useStore((state) => state.widgetVisible);
   const axisVisible = useStore((state) => state.axisVisible);
@@ -166,167 +152,85 @@ const Viewport = () => {
 
   // ── Main Three.js setup ───────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const savedState = loadCameraState();
-
-    const scene = createScene(theme);
-    sceneRef.current = scene;
-
-    const aspect =
-      containerRef.current.clientWidth / containerRef.current.clientHeight;
-    const savedTarget = new THREE.Vector3(
-      savedState.targetX,
-      savedState.targetY,
-      savedState.targetZ,
-    );
-    targetRef.current.copy(savedTarget);
-
-    const camera = createCamera(projectionMode, aspect, savedState, targetRef);
-    cameraRef.current = camera;
-    scene.add(camera);
-
-    const controls = cameraControlsRef.current;
-    // Expose this controls object to non-Viewport components (the toolbar
-    // calls dropSelectedToGround through here).
-    useStore.getState().setCameraControls(controls);
-    const px = savedState.positionX - savedState.targetX;
-    const py = savedState.positionY - savedState.targetY;
-    const pz = savedState.positionZ - savedState.targetZ;
-    const dist = Math.sqrt(px * px + py * py + pz * pz);
-    controls.targetRotationX =
-      dist > 0 ? Math.asin(Math.max(-1, Math.min(1, py / dist))) : 0;
-    controls.targetRotationY = Math.atan2(px, pz);
-    setRotationState(camera.quaternion.clone());
-
-    const renderer = createRenderer(containerRef.current);
-    rendererRef.current = renderer;
-
-    createLights(scene, camera);
-    const { gridPlane, gridMaterial } = createGrid(scene);
-    planeRef.current = gridPlane;
-    axisGroupRef.current = createAxisGroup(scene);
-    axisGroupRef.current.visible = useStore.getState().axisVisible;
-
-    const {
-      mesh: orbitIndicator,
-      geo: orbitGeo,
-      mat: orbitMat,
-    } = createOrbitIndicator(scene);
-    const cleanupResize = setupResize(
-      containerRef,
-      cameraRef,
-      renderer,
-      composerRef,
-    );
-
-    const cleanupControls = attachCameraControls({
-      renderer,
-      scene,
-      sceneRef,
-      cameraRef,
-      targetRef,
-      raycasterRef,
-      mouseRef,
-      cameraControlsRef,
-      objectsRef,
-      itemsRef,
-      handlesRef,
-      handleDragRef,
-      transformDebounceRef,
-      boundingBoxRef,
-      faceHighlightRef,
-      edgeHighlightRef,
-      pointHighlightRef,
-      sketchModeRef,
-      sketchDrawRef,
-      sketchPlacementModeRef,
-      sketchPlacementPlanesRef,
-      activeSketchToolRef,
-      selectedIdRef,
-      selectedIdsRef,
-      dimHintRef,
-      cameraAnimRef,
-      savedCameraStateRef,
-      planeRef,
-      axisGroupRef,
-      sketchGridGroupRef,
-      sketchShapesGroupRef,
-      extrudeSelectGroupRef,
-      extrudeSelectModeRef,
-      orbitIndicator,
-      gridMaterial,
-      composerRef,
-      setRotationState,
-      setHoveredId,
-      selectItem,
-      setSketchDrawPhase,
-      propagateConstraintsRef,
-    });
-
-    return () => {
-      cleanupControls();
-      cleanupResize();
-      orbitGeo.dispose();
-      orbitMat.dispose();
-      [faceHighlightRef, edgeHighlightRef, pointHighlightRef].forEach((ref) => {
-        if (ref.current) {
-          ref.current.geometry.dispose();
-          ref.current.material.dispose();
-          ref.current = null;
-        }
-      });
-      if (subGeoHighlightGroupRef.current) {
-        subGeoHighlightGroupRef.current.traverse((obj) => {
-          if (obj.geometry) obj.geometry.dispose();
-          if (obj.material) obj.material.dispose();
-        });
-        subGeoHighlightGroupRef.current = null;
-      }
-      if (transformDebounceRef.current)
-        clearTimeout(transformDebounceRef.current);
-      saveCameraState(cameraRef, targetRef, cameraControlsRef);
-      if (composerRef.current) {
-        composerRef.current.dispose();
-        composerRef.current = null;
-      }
-      if (envTextureRef.current) {
-        envTextureRef.current.dispose();
-        envTextureRef.current = null;
-      }
-      if (axisGroupRef.current) {
-        axisGroupRef.current.traverse((obj) => {
-          if (obj.geometry) obj.geometry.dispose();
-          if (obj.material) {
-            if (obj.material.map) obj.material.map.dispose();
-            obj.material.dispose();
-          }
-        });
-        axisGroupRef.current = null;
-      }
-      if (sketchGridGroupRef.current) {
-        scene.remove(sketchGridGroupRef.current);
-        sketchGridGroupRef.current.traverse((obj) => {
-          if (obj.geometry) obj.geometry.dispose();
-          if (obj.material) {
-            if (obj.material.map) obj.material.map.dispose();
-            obj.material.dispose();
-          }
-        });
-        sketchGridGroupRef.current = null;
-      }
-      sketchModeRef.current = false;
-      setSketchMode(false);
-      if (containerRef.current)
-        containerRef.current.removeChild(renderer.domElement);
-      renderer.dispose();
-    };
-  }, [theme, setHoveredId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useViewportInit({
+    containerRef,
+    sceneRef,
+    cameraRef,
+    rendererRef,
+    objectsRef,
+    planeRef,
+    shadowGroundRef,
+    shadowLightRef,
+    targetRef,
+    raycasterRef,
+    mouseRef,
+    cameraControlsRef,
+    handlesRef,
+    handleDragRef,
+    transformDebounceRef,
+    boundingBoxRef,
+    axisGroupRef,
+    composerRef,
+    envTextureRef,
+    faceHighlightRef,
+    edgeHighlightRef,
+    pointHighlightRef,
+    subGeoHighlightGroupRef,
+    sketchModeRef,
+    savedCameraStateRef,
+    sketchGridGroupRef,
+    cameraAnimRef,
+    sketchPlacementModeRef,
+    sketchPlacementPlanesRef,
+    extrudeSelectModeRef,
+    extrudeSelectGroupRef,
+    sketchDrawRef,
+    sketchShapesGroupRef,
+    dimHintRef,
+    propagateConstraintsRef,
+    activeSketchToolRef,
+    selectedIdRef,
+    selectedIdsRef,
+    itemsRef,
+    theme,
+    projectionMode,
+    setHoveredId,
+    selectItem,
+    setSketchDrawPhase,
+    setSketchMode,
+    setRotationState,
+  });
 
   useEffect(() => {
     if (axisGroupRef.current)
       axisGroupRef.current.visible = axisVisible && !sketchModeRef.current;
   }, [axisVisible]);
+
+  // Toggle ground-plane shadows.  The directional light and the
+  // ShadowMaterial receiver-plane are both gated by the same flag so
+  // turning shadows off skips the shadow-map render and hides the
+  // tinted plane.  shadowMap on the renderer stays enabled — flipping
+  // that at runtime forces every material to recompile.
+  useEffect(() => {
+    if (shadowLightRef.current)
+      shadowLightRef.current.castShadow = shadowsEnabled;
+    if (shadowGroundRef.current)
+      shadowGroundRef.current.visible = shadowsEnabled;
+  }, [shadowsEnabled]);
+
+  // Global Escape → cancel any in-progress extrude.  Captures the event
+  // BEFORE the form input's own handler so the cancel fires even when
+  // the depth-overlay FormulaInput has focus and its autocomplete
+  // popup would otherwise swallow the Escape.
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key !== "Escape") return;
+      if (!useStore.getState().extrudeSelectMode) return;
+      cameraControlsRef.current?.cancelExtrude?.();
+    };
+    document.addEventListener("keydown", handler, true); // capture phase
+    return () => document.removeEventListener("keydown", handler, true);
+  }, []);
 
   // ── Projection mode switch ────────────────────────────────────────────────
 
@@ -599,314 +503,37 @@ const Viewport = () => {
 
   // ── Sketch mode (top-down view + grid) ───────────────────────────────────
 
-  useEffect(() => {
-    if (!sceneRef.current) return;
-    const scene = sceneRef.current;
-    const selectedItem = items.find((i) => i.id === selectedId);
-    const isSketch = selectedItem && selectedItem.type === "sketch";
-
-    const clearSketchGrid = () => {
-      if (sketchGridGroupRef.current) {
-        scene.remove(sketchGridGroupRef.current);
-        sketchGridGroupRef.current.traverse((obj) => {
-          if (obj.geometry) obj.geometry.dispose();
-          if (obj.material) {
-            if (obj.material.map) obj.material.map.dispose();
-            obj.material.dispose();
-          }
-        });
-        sketchGridGroupRef.current = null;
-      }
-    };
-
-    if (!isSketch) {
-      if (sketchModeRef.current) {
-        sketchModeRef.current = false;
-        setSketchMode(false);
-        if (sketchDrawRef.current) {
-          sketchDrawRef.current.previewObjects.forEach((obj) => {
-            scene.remove(obj);
-            if (obj.geometry) obj.geometry.dispose();
-            if (obj.material) obj.material.dispose();
-          });
-          sketchDrawRef.current = null;
-        }
-        if (dimHintRef.current) dimHintRef.current.style.display = "none";
-        setSketchDrawPhase(null);
-        useStore.getState().setActiveSketchTool(null);
-        if (sketchShapesGroupRef.current) {
-          scene.remove(sketchShapesGroupRef.current);
-          sketchShapesGroupRef.current.traverse((obj) => {
-            if (obj.geometry) obj.geometry.dispose();
-            if (obj.material) obj.material.dispose();
-          });
-          sketchShapesGroupRef.current = null;
-        }
-        if (sketchGhostGroupRef.current) {
-          scene.remove(sketchGhostGroupRef.current);
-          sketchGhostGroupRef.current.traverse((obj) => {
-            if (obj.geometry) obj.geometry.dispose();
-            if (obj.material) obj.material.dispose();
-          });
-          sketchGhostGroupRef.current = null;
-        }
-        if (axisGroupRef.current)
-          axisGroupRef.current.visible = useStore.getState().axisVisible;
-        if (planeRef.current) planeRef.current.visible = true;
-        // Rebuild scene objects so any sketch-dependent geometry (e.g. extrudes)
-        // picks up the latest sketch shapes before becoming visible again.
-        buildSceneObjects(
-          itemsRef.current,
-          scene,
-          objectsRef,
-          originalMaterialsRef,
-        );
-        applyRenderMode(useStore.getState().renderMode, {
-          scene,
-          renderer: rendererRef.current,
-          cameraRef,
-          objectsRef,
-          originalMaterialsRef,
-          itemsRef,
-          axisGroupRef,
-          planeRef,
-          sketchPlacementPlanesRef,
-          composerRef,
-          envTextureRef,
-          sketchModeRef,
-          printPrecision:
-            useStore.getState().curveResolution === "print" ? 0.01 : null,
-        });
-        clearSketchGrid();
-        const saved = savedCameraStateRef.current;
-        if (saved && cameraRef.current && cameraControlsRef.current) {
-          const camera = cameraRef.current;
-          const controls = cameraControlsRef.current;
-          cameraAnimRef.current = {
-            startPos: camera.position.clone(),
-            endPos: new THREE.Vector3(
-              saved.positionX,
-              saved.positionY,
-              saved.positionZ,
-            ),
-            startTarget: targetRef.current.clone(),
-            endTarget: new THREE.Vector3(
-              saved.targetX,
-              saved.targetY,
-              saved.targetZ,
-            ),
-            startUp: camera.up.clone(),
-            endUp: new THREE.Vector3(0, 1, 0),
-            startTime: Date.now(),
-            duration: 500,
-            onComplete: () => {
-              cameraRef.current.up.set(0, 1, 0);
-              controls.targetRotationX = saved.rotationX;
-              controls.targetRotationY = saved.rotationY;
-              setRotationState(cameraRef.current.quaternion.clone());
-              savedCameraStateRef.current = null;
-            },
-          };
-        }
-      }
-      return;
-    }
-
-    const mesh = objectsRef.current[selectedId];
-    if (!mesh) return;
-
-    if (!sketchModeRef.current) {
-      if (cameraRef.current && cameraControlsRef.current) {
-        const camera = cameraRef.current;
-        const controls = cameraControlsRef.current;
-        savedCameraStateRef.current = {
-          positionX: camera.position.x,
-          positionY: camera.position.y,
-          positionZ: camera.position.z,
-          targetX: targetRef.current.x,
-          targetY: targetRef.current.y,
-          targetZ: targetRef.current.z,
-          rotationX: controls.targetRotationX,
-          rotationY: controls.targetRotationY,
-        };
-      }
-      sketchModeRef.current = true;
-      setSketchMode(true);
-      if (axisGroupRef.current) axisGroupRef.current.visible = false;
-      if (mesh) mesh.visible = false;
-
-      // Project all non-sketch scene objects onto the sketch plane as faint reference lines
-      scene.updateMatrixWorld();
-      const planeNormal = new THREE.Vector3(0, 0, 1)
-        .applyQuaternion(mesh.quaternion)
-        .normalize();
-      const planeOrigin = mesh.position.clone();
-      const projectVertex = (v) =>
-        v
-          .clone()
-          .addScaledVector(
-            planeNormal,
-            -planeNormal.dot(v.clone().sub(planeOrigin)),
-          );
-      const ghostMat = new THREE.LineBasicMaterial({
-        color: 0x7799bb,
-        transparent: true,
-        opacity: 0.18,
-        depthTest: false,
-      });
-      const ghostGroup = new THREE.Group();
-      items.forEach((item) => {
-        if (item.type === "sketch" || item.visible === false) return;
-        const m = objectsRef.current[item.id];
-        if (!m) return;
-        const isPrim = ["sphere", "cylinder", "torus"].includes(item.type);
-        let srcGeo;
-        if (item.type === "sphere")
-          srcGeo = new THREE.SphereGeometry(1.5, 12, 8);
-        else if (item.type === "cylinder")
-          srcGeo = new THREE.CylinderGeometry(1, 1, 2, 12);
-        else if (item.type === "torus")
-          srcGeo = new THREE.TorusGeometry(1.0, 0.4, 6, 12);
-        else srcGeo = m.geometry;
-        const edgesGeo = new THREE.EdgesGeometry(srcGeo);
-        if (isPrim) srcGeo.dispose();
-        const posAttr = edgesGeo.getAttribute("position");
-        const pts = [];
-        for (let i = 0; i < posAttr.count; i++) {
-          const v = new THREE.Vector3(
-            posAttr.getX(i),
-            posAttr.getY(i),
-            posAttr.getZ(i),
-          ).applyMatrix4(m.matrixWorld);
-          pts.push(projectVertex(v).addScaledVector(planeNormal, 0.003));
-        }
-        edgesGeo.dispose();
-        if (pts.length < 2) return;
-        const ghost = new THREE.LineSegments(
-          new THREE.BufferGeometry().setFromPoints(pts),
-          ghostMat,
-        );
-        ghost.frustumCulled = false;
-        ghost.renderOrder = 998;
-        ghostGroup.add(ghost);
-      });
-      if (ghostGroup.children.length > 0) {
-        scene.add(ghostGroup);
-        sketchGhostGroupRef.current = ghostGroup;
-      } else {
-        ghostMat.dispose();
-      }
-    }
-
-    const worldNormal = new THREE.Vector3(0, 0, 1)
-      .applyQuaternion(mesh.quaternion)
-      .normalize();
-    const worldUp = new THREE.Vector3(0, 1, 0)
-      .applyQuaternion(mesh.quaternion)
-      .normalize();
-    const meshCenter = mesh.position.clone();
-    const camPos = meshCenter.clone().addScaledVector(worldNormal, 15);
-
-    if (cameraRef.current && cameraControlsRef.current) {
-      const camera = cameraRef.current;
-      const controls = cameraControlsRef.current;
-      cameraAnimRef.current = {
-        startPos: camera.position.clone(),
-        endPos: camPos.clone(),
-        startTarget: targetRef.current.clone(),
-        endTarget: meshCenter.clone(),
-        startUp: camera.up.clone(),
-        endUp: worldUp.clone(),
-        startTime: Date.now(),
-        duration: 500,
-        onComplete: () => {
-          cameraRef.current.up.copy(worldUp);
-          const dp = camPos.clone().sub(meshCenter);
-          const dist = dp.length();
-          controls.targetRotationX =
-            dist > 0 ? Math.asin(Math.max(-1, Math.min(1, dp.y / dist))) : 0;
-          controls.targetRotationY = Math.atan2(dp.x, dp.z);
-          setRotationState(cameraRef.current.quaternion.clone());
-        },
-      };
-    }
-
-    if (planeRef.current) planeRef.current.visible = false;
-    Object.values(objectsRef.current).forEach((m) => {
-      m.visible = false;
-    });
-
-    clearSketchGrid();
-    const GRID_HALF = 25;
-    const gridGroup = new THREE.Group();
-    gridGroup.frustumCulled = false;
-
-    // Minor grid (repositioned each frame to follow camera)
-    const minorGridGroup = new THREE.Group();
-    minorGridGroup.frustumCulled = false;
-    const makeGridLine = (a, b) => {
-      const l = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([a, b]),
-        new THREE.LineBasicMaterial({
-          color: 0x445566,
-          transparent: true,
-          opacity: 0.45,
-          depthTest: false,
-        }),
-      );
-      l.frustumCulled = false;
-      l.renderOrder = 990;
-      return l;
-    };
-    for (let i = -GRID_HALF; i <= GRID_HALF; i++) {
-      if (i === 0) continue;
-      minorGridGroup.add(
-        makeGridLine(
-          new THREE.Vector3(i, -GRID_HALF, 0),
-          new THREE.Vector3(i, GRID_HALF, 0),
-        ),
-      );
-      minorGridGroup.add(
-        makeGridLine(
-          new THREE.Vector3(-GRID_HALF, i, 0),
-          new THREE.Vector3(GRID_HALF, i, 0),
-        ),
-      );
-    }
-    gridGroup.add(minorGridGroup);
-    gridGroup.userData.minorGrid = minorGridGroup;
-
-    // Axis lines — long enough to always cross the screen
-    const AXIS_HALF = 500;
-    const makeAxis = (a, b, col) => {
-      const l = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([a, b]),
-        new THREE.LineBasicMaterial({ color: col, depthTest: false }),
-      );
-      l.frustumCulled = false;
-      l.renderOrder = 991;
-      return l;
-    };
-    gridGroup.add(
-      makeAxis(
-        new THREE.Vector3(-AXIS_HALF, 0, 0),
-        new THREE.Vector3(AXIS_HALF, 0, 0),
-        0xff4444,
-      ),
-    );
-    gridGroup.add(
-      makeAxis(
-        new THREE.Vector3(0, -AXIS_HALF, 0),
-        new THREE.Vector3(0, AXIS_HALF, 0),
-        0x4488ff,
-      ),
-    );
-
-    gridGroup.position.copy(mesh.position);
-    gridGroup.quaternion.copy(mesh.quaternion);
-    scene.add(gridGroup);
-    sketchGridGroupRef.current = gridGroup;
-  }, [selectedId, items]); // eslint-disable-line react-hooks/exhaustive-deps
+  useSketchModeEffect({
+    sceneRef,
+    cameraRef,
+    rendererRef,
+    cameraControlsRef,
+    objectsRef,
+    originalMaterialsRef,
+    itemsRef,
+    axisGroupRef,
+    planeRef,
+    sketchPlacementPlanesRef,
+    composerRef,
+    envTextureRef,
+    sketchModeRef,
+    sketchDrawRef,
+    sketchShapesGroupRef,
+    sketchGhostGroupRef,
+    sketchGridGroupRef,
+    savedCameraStateRef,
+    cameraAnimRef,
+    targetRef,
+    dimHintRef,
+    preSketchProjectionRef,
+    setSketchMode,
+    setSketchDrawPhase,
+    setRotationState,
+    selectedId,
+    items,
+    projectionMode,
+    printPrecision,
+  });
 
   // ── Sketch shape lines ────────────────────────────────────────────────────
 
@@ -1044,331 +671,26 @@ const Viewport = () => {
         }
       />
       <BusyIndicator />
-      {sketchPlacementMode && (
-        <div className="sketch-placement-hint">
-          Click an axis plane or object face to place the sketch · Esc to cancel
-        </div>
-      )}
-      {extrudeSelectMode === "profile" && (
-        <div className="sketch-placement-hint">
-          Click an enclosed sketch region or flat object face · Esc to cancel
-        </div>
-      )}
-      {extrudeSelectMode === "depth" && (
-        <div className="sketch-placement-hint">
-          Move mouse to set depth, or type below · Click to confirm · Esc to cancel
-        </div>
-      )}
-      {extrudeSelectMode === "depth" && extrudeDepthInput && (
-        <div className="sketch-distance-input-overlay">
-          <span>Depth (mm):</span>
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 11,
-              color: "#aaa",
-              marginRight: 8,
-            }}
-            title="Cut extrusion — subtract this solid from the target instead of adding it"
-          >
-            <input
-              type="checkbox"
-              checked={!!extrudeDepthInput.cut}
-              onChange={(e) => {
-                useStore.getState().setExtrudeDepthInput({
-                  ...extrudeDepthInput,
-                  cut: e.target.checked,
-                });
-              }}
-            />
-            Cut
-          </label>
-          <FormulaInput
-            type="text"
-            autoFocus
-            variables={variables}
-            // Accept either a bare number or a formula like "width * 2".
-            // The mouse-drag path clears `formula` and updates `currentDepth`
-            // so the field reverts to a numeric mm value as the user drags;
-            // typing replaces both with the user's text and its evaluation.
-            value={
-              extrudeDepthInput.formula ??
-              (
-                (extrudeDepthInput.currentDepth ??
-                  extrudeDepthInput.defaultDepth) * MM_PER_UNIT
-              ).toFixed(2)
-            }
-            onChange={(e) => {
-              const raw = e.target.value;
-              const variablesMap = variablesToMap(
-                useStore.getState().variables,
-              );
-              const mm = evaluateFormula(raw, variablesMap);
-              const validNum = Number.isFinite(mm) && mm > 0;
-              const depth = validNum ? mm / MM_PER_UNIT : undefined;
-              if (validNum) {
-                cameraControlsRef.current?.updateExtrudePreview?.(depth);
-              }
-              useStore.getState().setExtrudeDepthInput({
-                ...extrudeDepthInput,
-                formula: raw,
-                currentDepth: validNum
-                  ? depth
-                  : extrudeDepthInput.currentDepth,
-              });
-            }}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") {
-                const raw = e.target.value.trim();
-                const variablesMap = variablesToMap(
-                  useStore.getState().variables,
-                );
-                const mm = evaluateFormula(raw, variablesMap);
-                if (Number.isFinite(mm) && mm > 0) {
-                  const depth = mm / MM_PER_UNIT;
-                  // If the user typed a non-numeric formula, preserve it as
-                  // the stored value; otherwise the bare numeric path
-                  // (formatAsFormula) handles it inside finalizeExtrude.
-                  const isFormula = !/^-?\d+(\.\d+)?$/.test(raw);
-                  if (isFormula) {
-                    cameraControlsRef.current?.finalizeExtrudeWithFormula?.(
-                      raw,
-                      depth,
-                    );
-                  } else {
-                    cameraControlsRef.current?.finalizeExtrudeWithDepth?.(
-                      depth,
-                    );
-                  }
-                }
-              } else if (e.key === "Escape") {
-                // cancelExtrude clears BOTH the preview mesh and the
-                // store state, then resets cursor / face highlights —
-                // the store-only path would leave the preview hovering
-                // in the scene.
-                cameraControlsRef.current?.cancelExtrude?.();
-              }
-            }}
-          />
-        </div>
-      )}
-      {activeSketchTool && sketchDrawPhase !== "second" && (
-        <div className="sketch-placement-hint">
-          Click to set the start point
-        </div>
-      )}
-      {sketchMode && sketchConstraintMode === "coincident" && (
-        <div className="sketch-placement-hint">
-          {sketchConstraintFirstPoint
-            ? "Select second point · Esc to cancel"
-            : "Select a point · Esc to cancel"}
-        </div>
-      )}
-      {sketchMode &&
-        sketchConstraintMode === "distance" &&
-        !sketchDistanceInput && (
-          <div className="sketch-placement-hint">
-            {sketchConstraintFirstPoint
-              ? "Select second point · Esc to cancel"
-              : "Click a line to set its length, or click two points · Esc to cancel"}
-          </div>
-        )}
-      {sketchMode && sketchDistanceInput && (
-        <div className="sketch-distance-input-overlay">
-          <span>
-            {sketchDistanceInput.constraintIdx != null
-              ? "Edit distance (mm):"
-              : "Distance (mm):"}
-          </span>
-          <FormulaInput
-            type="text"
-            autoFocus
-            variables={variables}
-            defaultValue={
-              typeof sketchDistanceInput.defaultDistance === "string"
-                ? sketchDistanceInput.defaultDistance
-                : (sketchDistanceInput.defaultDistance * MM_PER_UNIT).toFixed(2)
-            }
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") {
-                const raw = e.target.value.trim();
-                // Quick validation: evaluate the formula against the current
-                // variable map to ensure it produces a positive number; if not,
-                // bail without committing so the user can fix their input.
-                const variablesMap = variablesToMap(
-                  useStore.getState().variables,
-                );
-                const mm = evaluateFormula(raw, variablesMap);
-                if (Number.isFinite(mm) && mm > 0) {
-                  const {
-                    shapeAIdx,
-                    pointA,
-                    shapeBIdx,
-                    pointB,
-                    constraintIdx,
-                  } = sketchDistanceInput;
-                  // Store the formula string so future edits can reference
-                  // variables; geometry resolution converts mm → scene units.
-                  const formula = raw;
-                  const d = mm / MM_PER_UNIT;
-                  if (constraintIdx != null) {
-                    useStore
-                      .getState()
-                      .updateSketchConstraintDistance(
-                        selectedId,
-                        constraintIdx,
-                        formula,
-                      );
-                  } else {
-                    useStore.getState().addSketchConstraints(selectedId, [
-                      {
-                        type: "distance",
-                        shapeAIdx,
-                        pointA,
-                        shapeBIdx,
-                        pointB,
-                        distance: formula,
-                      },
-                    ]);
-                  }
-                  // Enforce the new/changed distance immediately.
-                  // Key: use B (the shape being moved) as the primary, not A.
-                  // Using A as primary causes the coincident BFS to mark B as "updated"
-                  // before the distance enforcement pass runs, which makes it skip.
-                  itemsRef.current = useStore.getState().items;
-                  if (propagateConstraintsRef.current) {
-                    const freshItem = itemsRef.current.find(
-                      (i) => i.id === selectedId,
-                    );
-                    if (freshItem) {
-                      if (shapeAIdx === shapeBIdx) {
-                        // Same shape: line-length — keep pointA end fixed, slide pointB end.
-                        const shape = freshItem.shapes[shapeAIdx];
-                        if (shape) {
-                          const pA = getShapePoint(shape, pointA);
-                          const pB = getShapePoint(shape, pointB);
-                          if (pA && pB) {
-                            const ddx = pB.x - pA.x,
-                              ddy = pB.y - pA.y;
-                            const curLen = Math.hypot(ddx, ddy);
-                            if (curLen > 1e-10) {
-                              const newEnd = {
-                                x: pA.x + (ddx / curLen) * d,
-                                y: pA.y + (ddy / curLen) * d,
-                              };
-                              const newShape = moveShapePoint(
-                                shape,
-                                pointB,
-                                newEnd,
-                              );
-                              if (newShape) {
-                                const propagated =
-                                  propagateConstraintsRef.current(
-                                    selectedId,
-                                    shapeAIdx,
-                                    newShape,
-                                    pointB,
-                                  );
-                                if (propagated.size > 1)
-                                  useStore
-                                    .getState()
-                                    .updateSketchShapes(selectedId, propagated);
-                                else
-                                  useStore
-                                    .getState()
-                                    .updateSketchShape(
-                                      selectedId,
-                                      shapeAIdx,
-                                      newShape,
-                                    );
-                              }
-                            }
-                          }
-                        }
-                      } else {
-                        // Two shapes: keep A fixed, move B's constrained point to distance d from A.
-                        const sA = freshItem.shapes[shapeAIdx];
-                        const sB = freshItem.shapes[shapeBIdx];
-                        if (sA && sB) {
-                          const pA = getShapePoint(sA, pointA);
-                          const pB = getShapePoint(sB, pointB);
-                          if (pA && pB) {
-                            const ddx = pB.x - pA.x,
-                              ddy = pB.y - pA.y;
-                            const curDist = Math.hypot(ddx, ddy);
-                            if (curDist > 1e-10) {
-                              const newPt = {
-                                x: pA.x + (ddx / curDist) * d,
-                                y: pA.y + (ddy / curDist) * d,
-                              };
-                              const newSB = moveShapePoint(sB, pointB, newPt);
-                              if (newSB) {
-                                const propagated =
-                                  propagateConstraintsRef.current(
-                                    selectedId,
-                                    shapeBIdx,
-                                    newSB,
-                                    pointB,
-                                  );
-                                if (propagated.size > 1)
-                                  useStore
-                                    .getState()
-                                    .updateSketchShapes(selectedId, propagated);
-                                else
-                                  useStore
-                                    .getState()
-                                    .updateSketchShape(
-                                      selectedId,
-                                      shapeBIdx,
-                                      newSB,
-                                    );
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-                useStore.getState().setSketchDistanceInput(null);
-                useStore.getState().setSketchConstraintMode(null);
-              } else if (e.key === "Escape") {
-                useStore.getState().setSketchDistanceInput(null);
-                useStore.getState().setSketchConstraintMode(null);
-              }
-            }}
-          />
-        </div>
-      )}
-      {sketchMode && sketchModifyMode && (
-        <div className="sketch-placement-hint">
-          {sketchModifyMode === "chamfer"
-            ? "Click a corner between two lines to chamfer"
-            : "Click a corner between two lines to bevel"}{" "}
-          · Esc to cancel
-        </div>
-      )}
-      <div
-        ref={dimHintRef}
-        className="sketch-dim-overlay"
-        style={{ display: "none" }}
+      <SketchOverlays
+        sketchPlacementMode={sketchPlacementMode}
+        extrudeSelectMode={extrudeSelectMode}
+        extrudeDepthInput={extrudeDepthInput}
+        activeSketchTool={activeSketchTool}
+        sketchDrawPhase={sketchDrawPhase}
+        sketchMode={sketchMode}
+        sketchConstraintMode={sketchConstraintMode}
+        sketchConstraintFirstPoint={sketchConstraintFirstPoint}
+        sketchModifyMode={sketchModifyMode}
+        sketchDistanceInput={sketchDistanceInput}
+        isInSketchMode={isInSketchMode}
+        selectedId={selectedId}
+        variables={variables}
+        cameraControlsRef={cameraControlsRef}
+        dimHintRef={dimHintRef}
+        itemsRef={itemsRef}
+        propagateConstraintsRef={propagateConstraintsRef}
+        selectItem={selectItem}
       />
-      {isInSketchMode && (
-        <button
-          className="close-sketch-btn"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            selectItem(null);
-          }}
-        >
-          ✕ Close Sketch
-        </button>
-      )}
       {widgetVisible && (
         <RotationWidget
           rotationState={rotationState}

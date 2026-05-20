@@ -7,6 +7,8 @@ const RenderSection = () => {
   const setRenderMode = useStore((s) => s.setRenderMode);
   const curveResolution = useStore((s) => s.curveResolution);
   const toggleCurveResolution = useStore((s) => s.toggleCurveResolution);
+  const shadowsEnabled = useStore((s) => s.shadowsEnabled);
+  const setShadowsEnabled = useStore((s) => s.setShadowsEnabled);
 
   return (
     <ToolbarSection label="Render">
@@ -72,6 +74,44 @@ const RenderSection = () => {
             fill="url(#grad)"
             stroke="currentColor"
             strokeWidth="2"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${shadowsEnabled ? "active" : ""}`}
+        title={
+          shadowsEnabled
+            ? "Shadows on — click to disable"
+            : "Shadows off — click to enable ground-plane shadows"
+        }
+        onClick={() => setShadowsEnabled(!shadowsEnabled)}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* Object */}
+          <rect
+            x="6"
+            y="5"
+            width="8"
+            height="10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          {/* Ground plane line */}
+          <line
+            x1="3"
+            y1="18"
+            x2="21"
+            y2="18"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          {/* Skewed shadow projection */}
+          <path
+            d="M 6 15 L 18 15 L 20 18 L 8 18 Z"
+            fill="currentColor"
+            opacity="0.45"
           />
         </svg>
       </button>

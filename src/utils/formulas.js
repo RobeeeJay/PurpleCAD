@@ -25,7 +25,10 @@ function tokenize(src) {
     }
     if ((c >= "0" && c <= "9") || c === ".") {
       let j = i;
-      while (j < src.length && ((src[j] >= "0" && src[j] <= "9") || src[j] === "."))
+      while (
+        j < src.length &&
+        ((src[j] >= "0" && src[j] <= "9") || src[j] === ".")
+      )
         j++;
       tokens.push({ type: "num", value: parseFloat(src.slice(i, j)) });
       i = j;
@@ -108,9 +111,7 @@ export function evaluateFormula(formula, variables = {}) {
   if (!Number.isNaN(asNum) && /^-?\d+(\.\d+)?$/.test(src)) return asNum;
 
   const lookup =
-    variables instanceof Map
-      ? (n) => variables.get(n)
-      : (n) => variables[n];
+    variables instanceof Map ? (n) => variables.get(n) : (n) => variables[n];
 
   const stack = new Set();
   const cache = new Map();

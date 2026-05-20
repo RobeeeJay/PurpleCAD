@@ -25,3 +25,28 @@ export async function regenerateForResolution(printPrecision) {
     useStore.setState({ items: newItems });
   }
 }
+
+// Force every CSG / chamfer regenerator in the current scene to re-run
+// from scratch — used by the Timeline's "Recalculate" button.  The
+// current items array already reflects every create / transform /
+// delete / modify history step (the store's reducers replay history on
+// every mutation), so the only thing that can be stale is the cached
+// `geometryData` on regenerator items.  Clearing both `regeneratedAt`
+// and `geometryData` forces regenerateItemsForResolution to rebuild
+// each one via the OCC worker.
+export async function recalculateTimeline() {
+  const state = useStore.getState();
+  const dirtied = state.items.map((item) => {
+    if (item.type !== "csg" || !item.regenerator) return item;
+    return {
+      ...item,
+      regenerator: { ...item.regenerator, regeneratedAt: "dirty" },
+      geometryData: null,
+    };
+  });
+  useStore.setState({ items: dirtied });
+  const printPrecision =
+    useStore.getState().curveResolution === "print" ? 0.01 : null;
+  const newItems = await regenerateItemsForResolution(dirtied, printPrecision);
+  if (newItems !== dirtied) useStore.setState({ items: newItems });
+}

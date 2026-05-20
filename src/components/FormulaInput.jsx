@@ -204,8 +204,7 @@ const FormulaInput = React.forwardRef(function FormulaInput(
               >
                 <span className="formula-suggestion-name">{s.name}</span>
                 <span className="formula-suggestion-value">
-                  ={" "}
-                  {Number.isFinite(v) ? v : "—"}
+                  = {Number.isFinite(v) ? v : "—"}
                 </span>
               </div>
             );

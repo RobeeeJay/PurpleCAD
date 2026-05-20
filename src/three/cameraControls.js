@@ -34,6 +34,7 @@ import {
   resolveConstraintDistance,
   formatAsFormula,
 } from "./geometryParams.js";
+import { createHighlightHelpers } from "./cameraControls/highlights.js";
 
 export function loadCameraState() {
   try {
@@ -1450,14 +1451,22 @@ export function attachCameraControls(ctx) {
           new THREE.Path(h.map((p) => new THREE.Vector2(p.x, p.y))),
         );
     });
+    // ExtrudeGeometry only accepts a positive depth.  For a negative
+    // depth we extrude by the absolute value then translate the geometry
+    // so the prism extends in the -Z (sketch-local) direction instead.
+    const absDepth = Math.max(0.05, Math.abs(depth));
     const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: Math.max(0.05, depth),
+      depth: absDepth,
       bevelEnabled: false,
     });
+    if (depth < 0) geo.translate(0, 0, -absDepth);
+    // Cut-extrusions preview in red so the user can see at a glance that
+    // their action will subtract material rather than add it.
+    const cutMode = !!useStore.getState().extrudeDepthInput?.cut;
     const mat = new THREE.MeshBasicMaterial({
-      color: 0x4488ff,
+      color: cutMode ? 0xff4444 : 0x4488ff,
       transparent: true,
-      opacity: 0.35,
+      opacity: cutMode ? 0.5 : 0.35,
       side: THREE.DoubleSide,
       depthTest: true,
     });
@@ -1589,7 +1598,12 @@ export function attachCameraControls(ctx) {
     const hit = new THREE.Vector3();
     if (!ray.ray.intersectPlane(plane, hit)) return 1.0;
     const depth = hit.sub(extrudeDepthOriginV3).dot(extrudeNormalV3);
-    return Math.max(0.05, depth);
+    // Preserve sign so dragging the cursor to the back side of the
+    // sketch plane produces a negative-direction extrusion.  Only the
+    // magnitude is clamped to the 0.05 minimum (zero-depth extrusions
+    // would be a degenerate face).
+    const sign = depth < 0 ? -1 : 1;
+    return sign * Math.max(0.05, Math.abs(depth));
   };
 
   const handleExtrudeHover = (screenX, screenY) => {
@@ -1679,15 +1693,15 @@ export function attachCameraControls(ctx) {
         const retargetItem = itemsRef.current.find(
           (i) => i.id === useStore.getState().extrudeRetargetId,
         );
-        const retargetDepth = retargetItem ? resolveItemDepth(retargetItem) : 1.0;
+        const retargetDepth = retargetItem
+          ? resolveItemDepth(retargetItem)
+          : 1.0;
         buildExtrudePreviewMesh(profile, retargetDepth);
         useStore.getState().setExtrudeSelectMode("depth");
-        useStore
-          .getState()
-          .setExtrudeDepthInput({
-            defaultDepth: retargetDepth,
-            currentDepth: retargetDepth,
-          });
+        useStore.getState().setExtrudeDepthInput({
+          defaultDepth: retargetDepth,
+          currentDepth: retargetDepth,
+        });
         renderer.domElement.style.cursor = "ns-resize";
         return;
       }
@@ -1715,15 +1729,15 @@ export function attachCameraControls(ctx) {
         const retargetItem = itemsRef.current.find(
           (i) => i.id === useStore.getState().extrudeRetargetId,
         );
-        const retargetDepth = retargetItem ? resolveItemDepth(retargetItem) : 1.0;
+        const retargetDepth = retargetItem
+          ? resolveItemDepth(retargetItem)
+          : 1.0;
         buildExtrudePreviewMesh(profile, retargetDepth);
         useStore.getState().setExtrudeSelectMode("depth");
-        useStore
-          .getState()
-          .setExtrudeDepthInput({
-            defaultDepth: retargetDepth,
-            currentDepth: retargetDepth,
-          });
+        useStore.getState().setExtrudeDepthInput({
+          defaultDepth: retargetDepth,
+          currentDepth: retargetDepth,
+        });
         renderer.domElement.style.cursor = "ns-resize";
       }
     }
@@ -1738,7 +1752,10 @@ export function attachCameraControls(ctx) {
     const store = useStore.getState();
     const current = store.extrudeDepthInput;
     if (current) {
-      const clamped = Math.max(0.05, depth);
+      // computeExtrudeDepth already clamps |depth| to ≥ 0.05 with the
+      // sign preserved — don't re-clamp to positive here or backward
+      // drags can't update the overlay.
+      const clamped = depth;
       // Mouse-drag wins: clear any user-typed formula so the input reverts
       // to showing the current numeric mm value.
       if (
@@ -1771,28 +1788,27 @@ export function attachCameraControls(ctx) {
       const items = freshStore.items;
       const extrude = items.find((i) => i.id === extrudeItemId);
       if (!extrude) return;
-      // Determine the targets to cut from.  When the user extruded from
-      // a face we already know the source solid; otherwise fall back to
-      // every visible non-sketch non-extrude item.
-      let targets;
-      if (sourceItemId != null) {
-        const src = items.find(
-          (i) => i.id === sourceItemId && i.type !== "sketch",
-        );
-        targets = src ? [src] : [];
-      } else {
-        targets = items.filter(
-          (i) =>
-            i.type !== "sketch" &&
-            i.type !== "extrude" &&
-            i.id !== extrudeItemId &&
-            i.visible !== false,
-        );
-      }
+      void sourceItemId; // cut against every solid, not just the source
+      // Every visible non-sketch solid is a potential cut target — that
+      // includes existing extrudes (a base extrude with a cut extrude
+      // drilled through it is the canonical case), CSG results, and the
+      // built-in primitives.  Don't bbox-filter: the new extrude's
+      // mesh may not be in objectsRef yet, so a `setFromObject` would
+      // return an empty box and (silently) reject every target — the
+      // exact failure mode the user just reported.  OCC's
+      // BRepAlgoAPI_Cut returns the first shape unchanged when the two
+      // shapes don't overlap, so the worst case here is one wasted
+      // boolean per disjoint solid, not a missed cut.
+      const targets = items.filter(
+        (i) =>
+          i.type !== "sketch" && i.id !== extrudeItemId && i.visible !== false,
+      );
       if (targets.length === 0) {
-        // Nothing to cut from — undo the standalone extrude so nothing's
-        // left dangling.
-        useStore.getState().setItemsHidden([extrudeItemId]);
+        // Nothing to cut from — fold the standalone extrude away.
+        // consumeItems instead of setItemsHidden so the hidden state is
+        // written back into the extrude's CREATE history entry; otherwise
+        // the next timeline replay would resurrect the extrude.
+        useStore.getState().consumeItems([extrudeItemId]);
         return;
       }
       void initialStore;
@@ -1802,18 +1818,14 @@ export function attachCameraControls(ctx) {
         const result = await performCsg({
           selectedItems: [target, extrude],
           operation: "difference",
-          printPrecision:
-            freshStore.curveResolution === "print" ? 0.01 : null,
+          printPrecision: freshStore.curveResolution === "print" ? 0.01 : null,
           allItems: items,
         });
         if (!result) continue;
         const after = useStore.getState();
         let maxId = 0;
         after.history.forEach((e) => {
-          if (
-            e.instruction?.type === "create" &&
-            e.instruction.item.id > maxId
-          )
+          if (e.instruction?.type === "create" && e.instruction.item.id > maxId)
             maxId = e.instruction.item.id;
         });
         const id = maxId + 1;
@@ -1830,19 +1842,18 @@ export function attachCameraControls(ctx) {
             kind: "boolean",
             op: "difference",
             inputIds: [target.id, extrudeItemId],
-            regeneratedAt:
-              freshStore.curveResolution === "print" ? 0.01 : null,
+            regeneratedAt: freshStore.curveResolution === "print" ? 0.01 : null,
           },
         });
       }
-      // Hide the source solids and the standalone extrude — the new CSG
-      // items take their visual place.
+      // Fold the source solids and the standalone extrude into the new
+      // CSG cuts.  consumeItems rewrites each consumed item's CREATE
+      // history entry to bake in `visible: false`, so a timeline replay
+      // doesn't bring the original solids or the extrude back as
+      // overlapping ghosts.
       useStore
         .getState()
-        .setItemsHidden([
-          extrudeItemId,
-          ...targets.map((t) => t.id),
-        ]);
+        .consumeItems([extrudeItemId, ...targets.map((t) => t.id)]);
     } catch (err) {
       console.error("Cut extrusion failed:", err);
     }
@@ -1855,10 +1866,15 @@ export function attachCameraControls(ctx) {
     formulaOverride = null,
   ) => {
     if (!extrudeProfileData) return;
-    const depth =
+    // Allow negative depths so the user can extrude backwards from the
+    // sketch plane.  Only the *magnitude* is clamped to the 0.05 minimum
+    // (zero-depth extrusions would just be a face, which OCC rejects).
+    const rawDepth =
       depthOverride != null
-        ? Math.max(0.05, depthOverride)
-        : Math.max(0.05, computeExtrudeDepth(screenX, screenY));
+        ? depthOverride
+        : computeExtrudeDepth(screenX, screenY);
+    const sign = rawDepth < 0 ? -1 : 1;
+    const depth = sign * Math.max(0.05, Math.abs(rawDepth));
     clearExtrudePreview();
     const store = useStore.getState();
     // Persist the depth as a formula string in mm so it can later
@@ -1934,11 +1950,12 @@ export function attachCameraControls(ctx) {
   // single setItemsTransform with each item's new Y position.
   controls.dropSelectedToGround = () => {
     const store = useStore.getState();
-    const selected = (store.selectedIds && store.selectedIds.length > 0
-      ? store.selectedIds
-      : store.selectedId != null
-        ? [store.selectedId]
-        : []
+    const selected = (
+      store.selectedIds && store.selectedIds.length > 0
+        ? store.selectedIds
+        : store.selectedId != null
+          ? [store.selectedId]
+          : []
     )
       .map((id) => ({ id, item: store.items.find((i) => i.id === id) }))
       .filter(({ item }) => item && item.type !== "sketch");
@@ -2712,6 +2729,14 @@ export function attachCameraControls(ctx) {
           setSketchDrawPhase("first");
           useStore.getState().setActiveSketchTool(null);
         } else {
+          // Carry the original chain start forward so closes-back-to-start
+          // detection still works on subsequent clicks.  Previously this
+          // line referenced an undeclared `chainStart`, which threw inside
+          // the object literal — the assignment never landed, sketchDrawRef
+          // kept its old `startLocal = P1`, and the *next* click committed
+          // a line P1→P3 (the user-visible bug: "second line starts at the
+          // first line's start, not its end").
+          const chainStart = draw.chainStartPoint;
           const contSnap = clickSnap ?? {
             shapeIdx: shapes.length,
             pointKey: "end",
@@ -2743,314 +2768,21 @@ export function attachCameraControls(ctx) {
 
   // ── Highlight helpers ──────────────────────────────────────────────────────
 
-  const clearHL = (ref) => {
-    if (ref.current) {
-      scene.remove(ref.current);
-      ref.current.geometry.dispose();
-      ref.current.material.dispose();
-      ref.current = null;
-    }
-  };
-
-  // Persistent data from the most-recent hover highlight, used to commit
-  // face/edge selection to the store when the user clicks.
-  let pendingFaceSelection = null; // { itemId, nx, ny, nz }
-  let pendingEdgeSelection = null; // { itemId, ax, ay, az, bx, by, bz }
-
-  const clearFaceHighlight = () => {
-    clearHL(faceHighlightRef);
-    pendingFaceSelection = null;
-  };
-  const clearEdgeHighlight = () => {
-    clearHL(edgeHighlightRef);
-    pendingEdgeSelection = null;
-  };
-  const clearPointHighlight = () => clearHL(pointHighlightRef);
-
-  const primitiveGeoForHighlight = (type) => {
-    // Hover & selection highlights are DISPLAY overlays on the smooth
-    // shader render — they must visually match the shader, not the
-    // (potentially coarse) CSG/bevel resolution.  Always tessellate at
-    // DISPLAY_PRECISION_MM, or finer if the user has print mode enabled.
-    // Radii MUST exactly match the shader's primitive dimensions (sphere
-    // r=1.5, cylinder r=1 h=2, torus r=1 tube=0.4); the previous tiny
-    // inflation (1.53, 1.015, 1.01/0.42) was a z-fighting workaround for
-    // depth-tested materials, but the highlight material uses
-    // depthTest:false + high renderOrder, so an inflated overlay just
-    // visibly extends past the actual primitive.
-    const printPrecisionMm =
-      useStore.getState().curveResolution === "print" ? 0.01 : null;
-    const displayPrecision =
-      printPrecisionMm != null
-        ? Math.min(printPrecisionMm, DISPLAY_PRECISION_MM)
-        : DISPLAY_PRECISION_MM;
-    if (type === "sphere") {
-      const w = fullCircleSegments(1.5, displayPrecision, 32);
-      const h = Math.max(8, Math.round(w / 2));
-      return new THREE.SphereGeometry(1.5, w, h);
-    }
-    if (type === "cylinder") {
-      const s = fullCircleSegments(1, displayPrecision, 32);
-      return new THREE.CylinderGeometry(1, 1, 2, s);
-    }
-    if (type === "torus") {
-      // THREE.TorusGeometry ring is in XY plane; our torus shader ring is in
-      // XZ plane.  Rotate -90° around X to align.
-      const tubular = fullCircleSegments(1.0, displayPrecision, 32);
-      const radial = fullCircleSegments(0.4, displayPrecision, 16);
-      const geo = new THREE.TorusGeometry(1.0, 0.4, radial, tubular);
-      geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-      return geo;
-    }
-    return null;
-  };
-
-  const applyFaceHighlight = (hit, color) => {
-    const hitMesh = hit.object;
-    const hitNormal = hit.face.normal;
-    const itemData = itemsRef.current.find(
-      (i) => i.id === hitMesh.userData.itemId,
-    );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
-      itemData?.type,
-    )
-      ? itemData.type
-      : null;
-
-    const workGeo = primitiveType
-      ? primitiveGeoForHighlight(primitiveType)
-      : hitMesh.geometry;
-    const posAttr = workGeo.getAttribute("position");
-    const indexAttr = workGeo.index;
-    const triCount = indexAttr ? indexAttr.count / 3 : posAttr.count / 3;
-    const vA = new THREE.Vector3(),
-      vB = new THREE.Vector3(),
-      vC = new THREE.Vector3();
-    const triNormal = new THREE.Vector3();
-    const matchVerts = [];
-
-    // For primitives, convert world-space hit normal to local space for region matching
-    let localNormal = hitNormal;
-    if (primitiveType) {
-      const invMatrix = new THREE.Matrix4().copy(hitMesh.matrixWorld).invert();
-      localNormal = hitNormal.clone().transformDirection(invMatrix).normalize();
-    }
-
-    for (let i = 0; i < triCount; i++) {
-      let a, b, c;
-      if (indexAttr) {
-        a = indexAttr.getX(i * 3);
-        b = indexAttr.getX(i * 3 + 1);
-        c = indexAttr.getX(i * 3 + 2);
-      } else {
-        a = i * 3;
-        b = i * 3 + 1;
-        c = i * 3 + 2;
-      }
-      vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
-      vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
-      vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
-      triNormal
-        .crossVectors(
-          new THREE.Vector3().subVectors(vB, vA),
-          new THREE.Vector3().subVectors(vC, vA),
-        )
-        .normalize();
-      if (primitiveType === "cylinder") {
-        // Separate top cap / bottom cap / side by local normal Y component
-        const topHit = localNormal.y > 0.9,
-          botHit = localNormal.y < -0.9;
-        const isTop = triNormal.y > 0.9,
-          isBot = triNormal.y < -0.9,
-          isSide = Math.abs(triNormal.y) < 0.1;
-        if (
-          (topHit && isTop) ||
-          (botHit && isBot) ||
-          (!topHit && !botHit && isSide)
-        )
-          matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
-      } else if (primitiveType) {
-        // Sphere / torus: entire surface is one face region
-        matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
-      } else {
-        if (Math.abs(triNormal.dot(localNormal)) > 0.999)
-          matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
-      }
-    }
-    if (primitiveType) workGeo.dispose();
-
-    clearFaceHighlight();
-    if (matchVerts.length > 0) {
-      const hlGeo = new THREE.BufferGeometry();
-      hlGeo.setAttribute(
-        "position",
-        new THREE.BufferAttribute(new Float32Array(matchVerts), 3),
-      );
-      const hlMat = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.5,
-        depthTest: primitiveType ? false : true,
-        side: THREE.DoubleSide,
-        polygonOffset: !primitiveType,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      });
-      const hlMesh = new THREE.Mesh(hlGeo, hlMat);
-      hlMesh.position.copy(hitMesh.position);
-      hlMesh.rotation.copy(hitMesh.rotation);
-      hlMesh.scale.copy(hitMesh.scale);
-      hlMesh.renderOrder = 996;
-      scene.add(hlMesh);
-      faceHighlightRef.current = hlMesh;
-      // Record for click-to-select
-      pendingFaceSelection = {
-        itemId: hitMesh.userData.itemId,
-        nx: localNormal.x,
-        ny: localNormal.y,
-        nz: localNormal.z,
-      };
-    }
-  };
-
-  const distToSeg = (p, a, b) => {
-    const ab = new THREE.Vector3().subVectors(b, a);
-    const ap = new THREE.Vector3().subVectors(p, a);
-    const t = Math.max(
-      0,
-      Math.min(1, ap.dot(ab) / Math.max(ab.lengthSq(), 1e-10)),
-    );
-    return p.distanceTo(
-      new THREE.Vector3().addVectors(a, ab.multiplyScalar(t)),
-    );
-  };
-
-  const applyEdgeHighlight = (hit) => {
-    clearEdgeHighlight();
-    const hitMesh = hit.object;
-    const localHit = hitMesh.worldToLocal(hit.point.clone());
-    const itemData = itemsRef.current.find(
-      (i) => i.id === hitMesh.userData.itemId,
-    );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
-      itemData?.type,
-    )
-      ? itemData.type
-      : null;
-    const srcGeo = primitiveType
-      ? primitiveGeoForHighlight(primitiveType)
-      : hitMesh.geometry;
-    const edgesGeo = new THREE.EdgesGeometry(srcGeo);
-    if (primitiveType) srcGeo.dispose();
-    const posAttr = edgesGeo.getAttribute("position");
-    let minDist = Infinity,
-      bestA = null,
-      bestB = null;
-    for (let i = 0; i < posAttr.count; i += 2) {
-      const a = new THREE.Vector3(
-        posAttr.getX(i),
-        posAttr.getY(i),
-        posAttr.getZ(i),
-      );
-      const b = new THREE.Vector3(
-        posAttr.getX(i + 1),
-        posAttr.getY(i + 1),
-        posAttr.getZ(i + 1),
-      );
-      const d = distToSeg(localHit, a, b);
-      if (d < minDist) {
-        minDist = d;
-        bestA = a;
-        bestB = b;
-      }
-    }
-    edgesGeo.dispose();
-    if (bestA) {
-      const hlGeo = new THREE.BufferGeometry();
-      hlGeo.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-          new Float32Array([
-            bestA.x,
-            bestA.y,
-            bestA.z,
-            bestB.x,
-            bestB.y,
-            bestB.z,
-          ]),
-          3,
-        ),
-      );
-      const hlLine = new THREE.LineSegments(
-        hlGeo,
-        new THREE.LineBasicMaterial({ color: 0xffdd00, depthTest: false }),
-      );
-      hlLine.position.copy(hitMesh.position);
-      hlLine.rotation.copy(hitMesh.rotation);
-      hlLine.scale.copy(hitMesh.scale);
-      hlLine.renderOrder = 998;
-      scene.add(hlLine);
-      edgeHighlightRef.current = hlLine;
-      // Record for click-to-select
-      pendingEdgeSelection = {
-        itemId: hitMesh.userData.itemId,
-        ax: bestA.x,
-        ay: bestA.y,
-        az: bestA.z,
-        bx: bestB.x,
-        by: bestB.y,
-        bz: bestB.z,
-      };
-    }
-  };
-
-  const applyPointHighlight = (hit) => {
-    clearPointHighlight();
-    const hitMesh = hit.object;
-    const localHit = hitMesh.worldToLocal(hit.point.clone());
-    const itemData = itemsRef.current.find(
-      (i) => i.id === hitMesh.userData.itemId,
-    );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
-      itemData?.type,
-    )
-      ? itemData.type
-      : null;
-    const srcGeo = primitiveType
-      ? primitiveGeoForHighlight(primitiveType)
-      : hitMesh.geometry;
-    const posAttr = srcGeo.getAttribute("position");
-    let minDist = Infinity,
-      bestV = null;
-    const seen = new Set();
-    for (let i = 0; i < posAttr.count; i++) {
-      const v = new THREE.Vector3(
-        posAttr.getX(i),
-        posAttr.getY(i),
-        posAttr.getZ(i),
-      );
-      const key = `${v.x.toFixed(5)},${v.y.toFixed(5)},${v.z.toFixed(5)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const d = v.distanceTo(localHit);
-      if (d < minDist) {
-        minDist = d;
-        bestV = v.clone();
-      }
-    }
-    if (primitiveType) srcGeo.dispose();
-    if (bestV) {
-      bestV.applyMatrix4(hitMesh.matrixWorld);
-      const hlMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06, 10, 8),
-        new THREE.MeshBasicMaterial({ color: 0xff44aa, depthTest: false }),
-      );
-      hlMesh.position.copy(bestV);
-      hlMesh.renderOrder = 999;
-      scene.add(hlMesh);
-      pointHighlightRef.current = hlMesh;
-    }
-  };
+  const highlights = createHighlightHelpers({
+    scene,
+    faceHighlightRef,
+    edgeHighlightRef,
+    pointHighlightRef,
+    itemsRef,
+  });
+  const {
+    clearFaceHighlight,
+    clearEdgeHighlight,
+    clearPointHighlight,
+    applyFaceHighlight,
+    applyEdgeHighlight,
+    applyPointHighlight,
+  } = highlights;
 
   // ── Mouse event handlers ───────────────────────────────────────────────────
 
@@ -3249,12 +2981,25 @@ export function attachCameraControls(ctx) {
 
         if (drag.handleType.startsWith("rot")) {
           const delta = -dxPx * 0.01;
+          // Rotate around the WORLD axis the handle represents, not the
+          // matching Euler component.  Three.js Euler XYZ order applies
+          // R_z · R_y · R_x to vectors, so setting `mesh.rotation.y`
+          // rotates around the X-rotated Y axis once the user has
+          // already rotated around X — which is why the prior
+          // Euler-assignment approach made the Y/Z handles "rotate
+          // around the wrong axis" after even a single prior rotation.
+          // Compose the new orientation as a delta quaternion around the
+          // pure world axis premultiplied with the orientation that was
+          // present when the drag started; that decouples each handle's
+          // effect from any other axis the object is already rotated on.
+          let worldAxis;
           if (drag.handleType === "rotX")
-            mesh.rotation.x = drag.startRotation.x + delta;
+            worldAxis = new THREE.Vector3(1, 0, 0);
           else if (drag.handleType === "rotY")
-            mesh.rotation.y = drag.startRotation.y - delta;
-          else if (drag.handleType === "rotZ")
-            mesh.rotation.z = drag.startRotation.z + delta;
+            worldAxis = new THREE.Vector3(0, 1, 0);
+          else worldAxis = new THREE.Vector3(0, 0, 1);
+          const dq = new THREE.Quaternion().setFromAxisAngle(worldAxis, delta);
+          mesh.quaternion.copy(drag.startParentQuaternion).premultiply(dq);
           const bb = boundingBoxRef.current;
           if (bb) bb.boxMesh.rotation.copy(mesh.rotation);
 
@@ -3784,7 +3529,18 @@ export function attachCameraControls(ctx) {
               );
               if (hitPlane) {
                 const hp = planeHits[0].point;
-                position = { x: hp.x, y: hp.y, z: hp.z };
+                // The placement-plane meshes are drawn at the current
+                // camera target so they stay visible to the user, but the
+                // canonical XZ/XY/YZ planes themselves pass through the
+                // world origin.  Zero out the axis perpendicular to the
+                // selected plane so a sketch created on (e.g.) XZ lands
+                // at world Y=0 rather than wherever the camera happened
+                // to be focused (often on top of the most recent solid).
+                const onAxis = { x: hp.x, y: hp.y, z: hp.z };
+                if (hitPlane.name === "XZ") onAxis.y = 0;
+                else if (hitPlane.name === "XY") onAxis.z = 0;
+                else if (hitPlane.name === "YZ") onAxis.x = 0;
+                position = onAxis;
                 rotation = hitPlane.euler;
               }
             }
@@ -3862,9 +3618,7 @@ export function attachCameraControls(ctx) {
           // and toggle the clicked face; without shift, replace it.
           const prev = useStore.getState().selectedSubGeometry;
           const faces =
-            e.shiftKey &&
-            prev?.itemId === clickedId &&
-            prev.edges.length === 0
+            e.shiftKey && prev?.itemId === clickedId && prev.edges.length === 0
               ? [...prev.faces]
               : [];
           const n = pendingFaceSelection;
@@ -3906,9 +3660,7 @@ export function attachCameraControls(ctx) {
           // clear faces.  Shift extends the prior edge selection.
           const prev = useStore.getState().selectedSubGeometry;
           const edges =
-            e.shiftKey &&
-            prev?.itemId === clickedId &&
-            prev.faces.length === 0
+            e.shiftKey && prev?.itemId === clickedId && prev.faces.length === 0
               ? [...prev.edges]
               : [];
           const ed = pendingEdgeSelection;
@@ -4433,6 +4185,42 @@ export function attachCameraControls(ctx) {
       }
     }
 
+    // Keep the axis-indicator gizmo and the object transform/rotation
+    // handles a constant on-screen size regardless of zoom level.  We
+    // derive a per-frame scale factor from the camera's effective view
+    // size (visible world height at the gizmo's position) and apply it
+    // uniformly to each gizmo group.  Without this the handles balloon
+    // when the camera zooms in and disappear into the object when it
+    // zooms out.
+    const cam = cameraRef.current;
+    if (cam) {
+      const REFERENCE_HEIGHT = 10; // arbitrary baseline; tuned visually
+      const gizmoScale = (worldPos) => {
+        if (cam.isOrthographicCamera) {
+          // (top - bottom) / zoom is the world height the camera shows.
+          return (cam.top - cam.bottom) / cam.zoom / REFERENCE_HEIGHT;
+        }
+        // Perspective: visible height at distance d is 2*d*tan(fov/2).
+        const d = cam.position.distanceTo(worldPos);
+        return (2 * d * Math.tan((cam.fov * Math.PI) / 360)) / REFERENCE_HEIGHT;
+      };
+      if (axisGroupRef?.current && axisGroupRef.current.visible) {
+        const s = gizmoScale(axisGroupRef.current.position);
+        axisGroupRef.current.scale.setScalar(s);
+      }
+      if (handlesRef?.current && handlesRef.current.length > 0) {
+        // Use the first handle's position as a stand-in for "the gizmo
+        // cluster centre"; all handles belong to one selection.
+        const ref = handlesRef.current[0].mesh.position;
+        const s = gizmoScale(ref);
+        handlesRef.current.forEach(({ mesh: hm }) => {
+          // Each handle was authored at unit scale; reset rather than
+          // multiply so we don't compound across frames.
+          if (hm.userData.baseScale == null) hm.userData.baseScale = 1;
+          hm.scale.setScalar(hm.userData.baseScale * s);
+        });
+      }
+    }
     gridMaterial.uniforms.uCameraPos.value.copy(cameraRef.current.position);
     if (composerRef.current) composerRef.current.render();
     else renderer.render(scene, cameraRef.current);

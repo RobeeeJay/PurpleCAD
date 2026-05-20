@@ -8,10 +8,7 @@
 // crosses the boundary.
 
 import { ensureOcc, getOcc } from "./occ/init.js";
-import {
-  buildItemShapeLocal,
-  buildBrushTransform,
-} from "./csgUtils.js";
+import { buildItemShapeLocal, buildBrushTransform } from "./csgUtils.js";
 import {
   booleanOp,
   chamferShapeBy,

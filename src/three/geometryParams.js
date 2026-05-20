@@ -34,7 +34,8 @@ export function getCurrentVariablesMap() {
 // Returns `fallback` (already in scene units) for empty/invalid inputs.
 export function resolveValue(value, fallback = 0, variables = null) {
   if (value == null || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  if (typeof value === "number")
+    return Number.isFinite(value) ? value : fallback;
   const map = variables ?? getCurrentVariablesMap();
   const mm = evaluateFormula(value, map);
   if (!Number.isFinite(mm)) return fallback;

@@ -8,7 +8,7 @@ const CombineSection = () => {
   const items = useStore((s) => s.items);
   const history = useStore((s) => s.history);
   const addItem = useStore((s) => s.addItem);
-  const setItemsHidden = useStore((s) => s.setItemsHidden);
+  const consumeItems = useStore((s) => s.consumeItems);
   const curveResolution = useStore((s) => s.curveResolution);
 
   // Non-sketch items from the current selection.
@@ -70,7 +70,12 @@ const CombineSection = () => {
           regeneratedAt: printPrecision,
         },
       });
-      setItemsHidden(selectedItems.map((i) => i.id));
+      // Bake the consumed flag into each input's CREATE history entry so
+      // the boolean's inputs stay hidden across a timeline replay (a
+      // plain `setItemsHidden` mutates state.items but doesn't touch
+      // history, so a replay would resurrect both the inputs and the
+      // result, leaving overlapping geometry).
+      consumeItems(selectedItems.map((i) => i.id));
     } catch (err) {
       console.error("CSG operation failed:", err);
       alert("Boolean operation failed: " + err.message);

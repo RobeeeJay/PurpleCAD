@@ -42,7 +42,9 @@ vi.mock("three/addons/lines/Line2.js", () => ({
     computeLineDistances() {}
   },
 }));
-vi.mock("three/addons/lines/LineMaterial.js", () => ({ LineMaterial: class {} }));
+vi.mock("three/addons/lines/LineMaterial.js", () => ({
+  LineMaterial: class {},
+}));
 vi.mock("three/addons/lines/LineGeometry.js", () => ({
   LineGeometry: class {
     setPositions() {}
@@ -59,12 +61,18 @@ vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({
     addPass() {}
   },
 }));
-vi.mock("three/addons/postprocessing/RenderPass.js", () => ({ RenderPass: class {} }));
+vi.mock("three/addons/postprocessing/RenderPass.js", () => ({
+  RenderPass: class {},
+}));
 vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({
   UnrealBloomPass: class {},
 }));
-vi.mock("three/addons/postprocessing/OutputPass.js", () => ({ OutputPass: class {} }));
-vi.mock("../../objectMaterials.js", () => ({ createMaterial: () => ({ dispose() {} }) }));
+vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
+  OutputPass: class {},
+}));
+vi.mock("../../objectMaterials.js", () => ({
+  createMaterial: () => ({ dispose() {} }),
+}));
 
 beforeAll(async () => {
   await ensureOcc();
@@ -155,9 +163,8 @@ describe("OCC extrude", () => {
     // missing or their normal is inverted."  Exercises the SAME path the
     // viewport uses: 4 lines for the outer rectangle + 4 lines for the
     // inner cut-out → findClosedLoops → groupLoopsWithHoles → makeExtrude.
-    const { findClosedLoops, groupLoopsWithHoles } = await import(
-      "../../sceneObjects.js"
-    );
+    const { findClosedLoops, groupLoopsWithHoles } =
+      await import("../../sceneObjects.js");
     // Outer rectangle drawn as 4 lines (CCW).
     const outerLines = [
       { type: "line", x1: -2, y1: -2, x2: 2, y2: -2 },
@@ -249,9 +256,8 @@ describe("OCC extrude", () => {
     // where signed-area normalization can subtly do the wrong thing
     // because the polygon's shoelace signed area is small relative to its
     // perimeter, and DFS traversal direction matters.
-    const { findClosedLoops, groupLoopsWithHoles } = await import(
-      "../../sceneObjects.js"
-    );
+    const { findClosedLoops, groupLoopsWithHoles } =
+      await import("../../sceneObjects.js");
     const outerLines = [
       { type: "line", x1: -3, y1: -3, x2: 3, y2: -3 },
       { type: "line", x1: 3, y1: -3, x2: 3, y2: 3 },
@@ -329,9 +335,8 @@ describe("OCC extrude", () => {
     // Variant of the above with an odd-sided hole (triangle) and lines
     // drawn in arbitrary order — the path that more closely matches what
     // users actually produce when sketching.
-    const { findClosedLoops, groupLoopsWithHoles, polyArea } = await import(
-      "../../sceneObjects.js"
-    );
+    const { findClosedLoops, groupLoopsWithHoles, polyArea } =
+      await import("../../sceneObjects.js");
     const outerLines = [
       { type: "line", x1: -3, y1: -3, x2: 3, y2: -3 },
       { type: "line", x1: 3, y1: -3, x2: 3, y2: 3 },
@@ -391,11 +396,7 @@ describe("OCC extrude", () => {
         cy = pos.getY(idx[t + 2]),
         cz = pos.getZ(idx[t + 2]);
       // Skip top/bottom face triangles (constant z).
-      if (
-        Math.abs(az - bz) < eps &&
-        Math.abs(az - cz) < eps
-      )
-        continue;
+      if (Math.abs(az - bz) < eps && Math.abs(az - cz) < eps) continue;
       const tcx = (ax + bx + cx) / 3;
       const tcy = (ay + by + cy) / 3;
       // Triangle centroid must be very close to the line connecting any

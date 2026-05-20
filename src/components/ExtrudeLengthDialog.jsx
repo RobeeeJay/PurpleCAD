@@ -22,9 +22,8 @@ const ExtrudeLengthDialog = () => {
   const variables = useStore((s) => s.variables);
   const modifyItem = useStore((s) => s.modifyItem);
 
-  const item = target?.itemId != null
-    ? items.find((i) => i.id === target.itemId)
-    : null;
+  const item =
+    target?.itemId != null ? items.find((i) => i.id === target.itemId) : null;
 
   const [formula, setFormula] = useState("");
   useEffect(() => {

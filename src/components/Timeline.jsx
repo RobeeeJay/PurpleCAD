@@ -19,8 +19,7 @@ const entryIcon = (label) => {
   if (label.startsWith("Moved")) return "↔";
   if (label.startsWith("Rotated")) return "↻";
   if (label.startsWith("Scaled")) return "⤢";
-  if (label.startsWith("Chamfered") || label.startsWith("Filleted"))
-    return "◆";
+  if (label.startsWith("Chamfered") || label.startsWith("Filleted")) return "◆";
   return "◆";
 };
 
@@ -151,7 +150,55 @@ const Timeline = () => {
 
   return (
     <div className="timeline">
-      <div className="timeline-header">Timeline</div>
+      <div className="timeline-header">
+        <span>Timeline</span>
+        <button
+          className="timeline-recalc-btn"
+          title="Recalculate every step from the beginning"
+          onClick={() => {
+            // Lazy-import so the orchestrator module isn't pulled into
+            // the worker's transitive graph (see regenerateOrchestrator.js
+            // for the cycle constraint).
+            import("../three/regenerateOrchestrator.js").then((m) => {
+              m.recalculateTimeline();
+            });
+          }}
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14">
+            {/* Circular refresh arrow */}
+            <path
+              d="M4 12 a8 8 0 0 1 14-5.7"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <polyline
+              points="18,2 18,7 13,7"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M20 12 a8 8 0 0 1 -14 5.7"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <polyline
+              points="6,22 6,17 11,17"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
       <div
         ref={containerRef}
         className="timeline-content"

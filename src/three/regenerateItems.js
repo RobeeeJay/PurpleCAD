@@ -23,7 +23,11 @@ import { chamferOrFilletItem, performCsg } from "./occClient.js";
 // Regeneration is async because both branches go through occClient, which
 // posts to the OCC Web Worker in the browser and runs in-process in node.
 
-async function regenerateChamfer(regenerator, accumulatedItems, printPrecision) {
+async function regenerateChamfer(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+) {
   const subGeo = regenerator.subGeo || { edges: [], faces: [] };
   if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
     return null;
@@ -37,7 +41,10 @@ async function regenerateChamfer(regenerator, accumulatedItems, printPrecision) 
     printPrecision,
   });
   if (!result) return null;
-  const { geometryData, centerOffset: { cx, cy, cz } } = result;
+  const {
+    geometryData,
+    centerOffset: { cx, cy, cz },
+  } = result;
   // World position = source's brush position + centroid offset rotated
   // into world space (so chained chamfers stay anchored to their source).
   const brushPos = buildBrushTransform(regenerator.source).position;
@@ -54,7 +61,11 @@ async function regenerateChamfer(regenerator, accumulatedItems, printPrecision) 
   };
 }
 
-async function regenerateBoolean(regenerator, accumulatedItems, printPrecision) {
+async function regenerateBoolean(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+) {
   const inputs = regenerator.inputIds
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean);

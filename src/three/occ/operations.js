@@ -446,10 +446,7 @@ export function transformShape(shape, position, rotation) {
     if (rotation.x) {
       const r = new oc.gp_Trsf_1();
       r.SetRotation_1(
-        new oc.gp_Ax1_2(
-          new oc.gp_Pnt_3(0, 0, 0),
-          new oc.gp_Dir_4(1, 0, 0),
-        ),
+        new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(1, 0, 0)),
         rotation.x,
       );
       trsf.Multiply(r);
@@ -457,10 +454,7 @@ export function transformShape(shape, position, rotation) {
     if (rotation.y) {
       const r = new oc.gp_Trsf_1();
       r.SetRotation_1(
-        new oc.gp_Ax1_2(
-          new oc.gp_Pnt_3(0, 0, 0),
-          new oc.gp_Dir_4(0, 1, 0),
-        ),
+        new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(0, 1, 0)),
         rotation.y,
       );
       trsf.Multiply(r);
@@ -468,10 +462,7 @@ export function transformShape(shape, position, rotation) {
     if (rotation.z) {
       const r = new oc.gp_Trsf_1();
       r.SetRotation_1(
-        new oc.gp_Ax1_2(
-          new oc.gp_Pnt_3(0, 0, 0),
-          new oc.gp_Dir_4(0, 0, 1),
-        ),
+        new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(0, 0, 1)),
         rotation.z,
       );
       trsf.Multiply(r);

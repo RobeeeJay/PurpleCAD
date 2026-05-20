@@ -174,7 +174,9 @@ export function buildItemShapeLocal(item, allItems = []) {
 // chamfering every edge on the boundary of the matching face plane.
 export function chamferItemEdges(item, subGeo, amount = 0.05) {
   if (!isOccReady()) {
-    throw new Error("chamferItemEdges requires OpenCascade — await ensureOcc()");
+    throw new Error(
+      "chamferItemEdges requires OpenCascade — await ensureOcc()",
+    );
   }
   let shape;
   if (

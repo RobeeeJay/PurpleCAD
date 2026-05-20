@@ -34,15 +34,52 @@ export function createRenderer(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
+  // Compile shadow-aware shaders up-front; the runtime toggle controls
+  // whether the directional light actually casts (and whether the
+  // ground-plane shadow receiver is visible), not whether the renderer
+  // supports it.
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
   return renderer;
+}
+
+// Shadow-receiver plane at Y=0.  Uses ShadowMaterial so the plane itself
+// stays invisible — only shadow contribution is rendered.  Off by default;
+// Viewport flips visibility when the user enables shadows.
+export function createShadowGround(scene) {
+  const geo = new THREE.PlaneGeometry(2000, 2000);
+  const mat = new THREE.ShadowMaterial({ opacity: 0.35 });
+  const plane = new THREE.Mesh(geo, mat);
+  plane.rotation.x = -Math.PI / 2;
+  plane.position.y = 0;
+  plane.receiveShadow = true;
+  plane.visible = false;
+  plane.userData.isShadowGround = true;
+  // Render BEFORE the grid so the grid lines stay readable on top.
+  plane.renderOrder = -1;
+  scene.add(plane);
+  return plane;
 }
 
 export function createLights(scene, camera) {
   scene.add(new THREE.AmbientLight(0xffffff, 0.4));
   const dir1 = new THREE.DirectionalLight(0xffffff, 1.0);
   dir1.position.set(10, 15, 10);
-  dir1.castShadow = true;
+  // Disabled by default — the Render-section shadow toggle flips this on.
+  // Without these orthographic-camera frustum settings the default shadow
+  // camera covers a tiny 10-unit cube which clips the scene and produces
+  // a near-black ground plane.
+  dir1.castShadow = false;
+  dir1.shadow.mapSize.set(1024, 1024);
+  dir1.shadow.camera.left = -25;
+  dir1.shadow.camera.right = 25;
+  dir1.shadow.camera.top = 25;
+  dir1.shadow.camera.bottom = -25;
+  dir1.shadow.camera.near = 0.5;
+  dir1.shadow.camera.far = 80;
+  dir1.shadow.bias = -0.0005;
+  dir1.shadow.normalBias = 0.02;
   camera.add(dir1);
   const dir2 = new THREE.DirectionalLight(0xffffff, 0.5);
   dir2.position.set(-10, 10, -10);
@@ -50,6 +87,8 @@ export function createLights(scene, camera) {
   const pt = new THREE.PointLight(0xffffff, 0.3, 50);
   pt.position.set(0, 10, 0);
   camera.add(pt);
+  // Return dir1 so the Viewport can toggle castShadow at runtime.
+  return { dir1 };
 }
 
 export function createGrid(scene) {

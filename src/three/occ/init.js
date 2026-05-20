@@ -11,13 +11,11 @@ async function initInNode() {
   const fs = await import("fs");
   const pathMod = await import("path");
   const url = await import("url");
-  const ocFactory = (
-    await import("opencascade.js/dist/opencascade.wasm.js")
-  ).default;
+  const ocFactory = (await import("opencascade.js/dist/opencascade.wasm.js"))
+    .default;
   // Resolve the .wasm relative to the opencascade.js package on disk.
-  const ocJsUrl = await import.meta.resolve(
-    "opencascade.js/dist/opencascade.wasm.wasm",
-  );
+  const ocJsUrl = await import.meta
+    .resolve("opencascade.js/dist/opencascade.wasm.wasm");
   const ocWasmPath = url.fileURLToPath(ocJsUrl);
   void pathMod;
   const wasmBinary = fs.readFileSync(ocWasmPath);
