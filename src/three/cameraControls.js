@@ -35,6 +35,11 @@ import {
   formatAsFormula,
 } from "./geometryParams.js";
 import { createHighlightHelpers } from "./cameraControls/highlights.js";
+import { createExtrudeHelpers } from "./cameraControls/extrude.js";
+import { createAnimateLoop } from "./cameraControls/animateLoop.js";
+import { createSketchModifyHelpers } from "./cameraControls/sketchModify.js";
+import { createSketchConstraintHandlers } from "./cameraControls/sketchConstraintHandlers.js";
+import { createSketchDrawHelpers } from "./cameraControls/sketchDraw.js";
 
 export function loadCameraState() {
   try {
@@ -623,6 +628,11 @@ export function attachCameraControls(ctx) {
   // ── Sketch element selection + coincident constraints ─────────────────────
   let sketchSelectionOverlay = null;
   let coincidentFirstOverlay = null;
+  // Setter exposed to extracted modules that need to swap the ring overlay
+  // mesh (they can't reassign the closure-local `let` directly).
+  const setCoincidentFirstOverlay = (o) => {
+    coincidentFirstOverlay = o;
+  };
   let multiSelectedIndices = [];
   let multiSelectOverlays = [];
   let marqueeStartScreen = null;
@@ -933,552 +943,31 @@ export function attachCameraControls(ctx) {
     if (dimHintRef.current) dimHintRef.current.style.display = "none";
   };
 
-  const handleDistanceConstraintClick = (screenX, screenY) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!selItem || !sketchMesh) return;
-    const shapes = selItem.shapes || [];
-    const store = useStore.getState();
-    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+  // ── Highlight helpers ──────────────────────────────────────────────────────
+  // Constructed BEFORE extrude because extrude depends on
+  // clearFaceHighlight / applyFaceHighlight.
 
-    if (!snap) {
-      // No snap point nearby — try a line hit-test for a line-length constraint
-      const sketchGroup = sketchShapesGroupRef?.current;
-      if (!sketchGroup) return;
-      const rect = renderer.domElement.getBoundingClientRect();
-      const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
-      const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
-      const ray = new THREE.Raycaster();
-      ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
-      const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null,
-      );
-      const hits = hitTestSketchLines(ray, lineObjs);
-      if (hits.length === 0 || hits[0].object.userData.shapeIdx == null) return;
-      const lineIdx = hits[0].object.userData.shapeIdx;
-      const shape = shapes[lineIdx];
-      if (!shape) return;
-      store.setSketchConstraintFirstPoint(null);
-      clearCoincidentFirstOverlay();
-      if (shape.type === "circle") {
-        store.setSketchDistanceInput({
-          shapeAIdx: lineIdx,
-          pointA: "center",
-          shapeBIdx: lineIdx,
-          pointB: "edge",
-          defaultDistance: shape.r,
-        });
-      } else if (shape.type === "line") {
-        store.setSketchDistanceInput({
-          shapeAIdx: lineIdx,
-          pointA: "start",
-          shapeBIdx: lineIdx,
-          pointB: "end",
-          defaultDistance: Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1),
-        });
-      }
-      return;
-    }
-
-    const firstPt = store.sketchConstraintFirstPoint;
-    if (!firstPt) {
-      store.setSketchConstraintFirstPoint({
-        shapeIdx: snap.shapeIdx,
-        pointKey: snap.pointKey,
-      });
-      clearCoincidentFirstOverlay();
-      coincidentFirstOverlay = makeRingOverlay(
-        { x: snap.x, y: snap.y },
-        sketchMesh,
-        0xff8800,
-      );
-      scene.add(coincidentFirstOverlay);
-    } else {
-      if (
-        firstPt.shapeIdx === snap.shapeIdx &&
-        firstPt.pointKey === snap.pointKey
-      )
-        return;
-      const firstShape = shapes[firstPt.shapeIdx];
-      const firstPos = firstShape
-        ? getShapePoint(firstShape, firstPt.pointKey)
-        : null;
-      const secondPos = { x: snap.x, y: snap.y };
-      if (firstPos) {
-        const defaultDist = Math.hypot(
-          secondPos.x - firstPos.x,
-          secondPos.y - firstPos.y,
-        );
-        store.setSketchDistanceInput({
-          shapeAIdx: firstPt.shapeIdx,
-          pointA: firstPt.pointKey,
-          shapeBIdx: snap.shapeIdx,
-          pointB: snap.pointKey,
-          defaultDistance: defaultDist,
-        });
-        clearCoincidentFirstOverlay();
-        store.setSketchConstraintFirstPoint(null);
-      }
-    }
-  };
-
-  const handleCoincidentClick = (screenX, screenY) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!selItem || !sketchMesh) return;
-    const shapes = selItem.shapes || [];
-    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-    const store = useStore.getState();
-    const firstPt = store.sketchConstraintFirstPoint;
-
-    if (!snap) {
-      // No nearby point — if a first point is already selected, try a line-body hit
-      // to create a point-on-line constraint.
-      if (!firstPt) return;
-      const sketchGroup = sketchShapesGroupRef?.current;
-      if (!sketchGroup) return;
-      const ray = makeRay(screenX, screenY);
-      const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null,
-      );
-      const hits = hitTestSketchLines(ray, lineObjs);
-      if (hits.length === 0 || hits[0].object.userData.shapeIdx == null) return;
-      const lineIdx = hits[0].object.userData.shapeIdx;
-      const lineShape = shapes[lineIdx];
-      if (!lineShape || lineShape.type !== "line") return;
-      const ptShape = shapes[firstPt.shapeIdx];
-      const ptPos = ptShape ? getShapePoint(ptShape, firstPt.pointKey) : null;
-      if (!ptPos) return;
-      // Project the point onto the line and commit
-      const projected = projectOntoLine(ptPos, lineShape);
-      const newPtShape = moveShapePoint(ptShape, firstPt.pointKey, projected);
-      if (newPtShape) {
-        const propagated = propagateConstraints(
-          selectedIdRef.current,
-          firstPt.shapeIdx,
-          newPtShape,
-          firstPt.pointKey,
-        );
-        if (propagated.size > 1)
-          store.updateSketchShapes(selectedIdRef.current, propagated);
-        else
-          store.updateSketchShape(
-            selectedIdRef.current,
-            firstPt.shapeIdx,
-            newPtShape,
-          );
-      }
-      store.addSketchConstraints(selectedIdRef.current, [
-        {
-          type: "onLine",
-          pointShapeIdx: firstPt.shapeIdx,
-          pointKey: firstPt.pointKey,
-          lineShapeIdx: lineIdx,
-        },
-      ]);
-      store.setSketchConstraintMode(null);
-      store.setSketchConstraintFirstPoint(null);
-      clearCoincidentFirstOverlay();
-      clearSketchSelection();
-      return;
-    }
-
-    if (!firstPt) {
-      store.setSketchConstraintFirstPoint({
-        shapeIdx: snap.shapeIdx,
-        pointKey: snap.pointKey,
-      });
-      clearCoincidentFirstOverlay();
-      coincidentFirstOverlay = makeRingOverlay(
-        { x: snap.x, y: snap.y },
-        sketchMesh,
-        0xff8800,
-      );
-      scene.add(coincidentFirstOverlay);
-    } else {
-      if (
-        firstPt.shapeIdx === snap.shapeIdx &&
-        firstPt.pointKey === snap.pointKey
-      )
-        return;
-      const firstShape = shapes[firstPt.shapeIdx];
-      const firstPos = firstShape
-        ? getShapePoint(firstShape, firstPt.pointKey)
-        : null;
-      if (firstPos) {
-        const secondShape = shapes[snap.shapeIdx];
-        const newSecondShape = secondShape
-          ? moveShapePoint(secondShape, snap.pointKey, firstPos)
-          : null;
-        let currentShapes = shapes; // shapes after propagation, for coincident scan
-        if (newSecondShape) {
-          const propagated = propagateConstraints(
-            selectedIdRef.current,
-            snap.shapeIdx,
-            newSecondShape,
-            snap.pointKey,
-          );
-          if (propagated.size > 1)
-            store.updateSketchShapes(selectedIdRef.current, propagated);
-          else
-            store.updateSketchShape(
-              selectedIdRef.current,
-              snap.shapeIdx,
-              newSecondShape,
-            );
-          // Build updated snapshot so we can detect which points landed at firstPos
-          currentShapes = shapes.slice();
-          propagated.forEach((s, i) => {
-            currentShapes[i] = s;
-          });
-        }
-
-        // Primary constraint: A → B
-        const newConstraints = [
-          {
-            type: "coincident",
-            shapeAIdx: firstPt.shapeIdx,
-            pointA: firstPt.pointKey,
-            shapeBIdx: snap.shapeIdx,
-            pointB: snap.pointKey,
-          },
-        ];
-
-        // Auto-link every other point that is now sitting at firstPos (including
-        // those that arrived there because they were coincident with B and moved
-        // during propagation). This ensures a multi-line junction gets all of its
-        // constraints in one operation.
-        const EPS_COINCI = 1e-3;
-        const existingConstraints = selItem.constraints || [];
-        getSnapPoints(currentShapes).forEach((sp) => {
-          if (
-            sp.shapeIdx === firstPt.shapeIdx &&
-            sp.pointKey === firstPt.pointKey
-          )
-            return; // A itself
-          if (sp.shapeIdx === snap.shapeIdx && sp.pointKey === snap.pointKey)
-            return; // B (already primary)
-          const spPos = getShapePoint(currentShapes[sp.shapeIdx], sp.pointKey);
-          if (!spPos) return;
-          if (
-            Math.hypot(spPos.x - firstPos.x, spPos.y - firstPos.y) > EPS_COINCI
-          )
-            return;
-          // Already linked to A?
-          const linked =
-            existingConstraints.some(
-              (c) =>
-                c.type === "coincident" &&
-                ((c.shapeAIdx === firstPt.shapeIdx &&
-                  c.pointA === firstPt.pointKey &&
-                  c.shapeBIdx === sp.shapeIdx &&
-                  c.pointB === sp.pointKey) ||
-                  (c.shapeBIdx === firstPt.shapeIdx &&
-                    c.pointB === firstPt.pointKey &&
-                    c.shapeAIdx === sp.shapeIdx &&
-                    c.pointA === sp.pointKey)),
-            ) ||
-            newConstraints.some(
-              (c) =>
-                c.shapeAIdx === firstPt.shapeIdx &&
-                c.pointA === firstPt.pointKey &&
-                c.shapeBIdx === sp.shapeIdx &&
-                c.pointB === sp.pointKey,
-            );
-          if (!linked) {
-            newConstraints.push({
-              type: "coincident",
-              shapeAIdx: firstPt.shapeIdx,
-              pointA: firstPt.pointKey,
-              shapeBIdx: sp.shapeIdx,
-              pointB: sp.pointKey,
-            });
-          }
-        });
-
-        store.addSketchConstraints(selectedIdRef.current, newConstraints);
-      }
-      store.setSketchConstraintMode(null);
-      store.setSketchConstraintFirstPoint(null);
-      clearCoincidentFirstOverlay();
-      clearSketchSelection();
-    }
-  };
-
-  // ── Chamfer / Bevel ──────────────────────────────────────────────────────
-  const MODIFY_DIST = 0.25;
-
-  let modifyPreviewObjs = [];
-  const clearModifyPreview = () => {
-    modifyPreviewObjs.forEach((o) => {
-      scene.remove(o);
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) o.material.dispose();
-    });
-    modifyPreviewObjs = [];
-  };
-
-  const findJunction = (snap, shapes, constraints) => {
-    for (const c of constraints) {
-      if (c.type !== "coincident") continue;
-      let aIdx, aKey, bIdx, bKey;
-      if (c.shapeAIdx === snap.shapeIdx && c.pointA === snap.pointKey) {
-        aIdx = c.shapeAIdx;
-        aKey = c.pointA;
-        bIdx = c.shapeBIdx;
-        bKey = c.pointB;
-      } else if (c.shapeBIdx === snap.shapeIdx && c.pointB === snap.pointKey) {
-        aIdx = c.shapeBIdx;
-        aKey = c.pointB;
-        bIdx = c.shapeAIdx;
-        bKey = c.pointA;
-      } else continue;
-      if (shapes[aIdx]?.type === "line" && shapes[bIdx]?.type === "line")
-        return { aIdx, aKey, bIdx, bKey, constraint: c };
-    }
-    return null;
-  };
-
-  const lineEndpoint = (shape, key) =>
-    key === "start"
-      ? { x: shape.x1, y: shape.y1 }
-      : { x: shape.x2, y: shape.y2 };
-
-  const computeModify = (shapes, junc, dist) => {
-    const { aIdx, aKey, bIdx, bKey } = junc;
-    const sA = shapes[aIdx],
-      sB = shapes[bIdx];
-    const P = lineEndpoint(sA, aKey);
-    const otherA =
-      aKey === "start" ? { x: sA.x2, y: sA.y2 } : { x: sA.x1, y: sA.y1 };
-    const otherB =
-      bKey === "start" ? { x: sB.x2, y: sB.y2 } : { x: sB.x1, y: sB.y1 };
-    const uA = norm2({ x: otherA.x - P.x, y: otherA.y - P.y });
-    const uB = norm2({ x: otherB.x - P.x, y: otherB.y - P.y });
-    const trimA = { x: P.x + uA.x * dist, y: P.y + uA.y * dist };
-    const trimB = { x: P.x + uB.x * dist, y: P.y + uB.y * dist };
-    return { P, uA, uB, trimA, trimB, sA, sB, aIdx, aKey, bIdx, bKey };
-  };
-
-  const applyModify = (screenX, screenY, mode) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!selItem || !sketchMesh) return;
-    const shapes = selItem.shapes || [];
-    const constraints = selItem.constraints || [];
-    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-    if (!snap) return;
-    const junc = findJunction(snap, shapes, constraints);
-    if (!junc) return;
-    const m = computeModify(shapes, junc, MODIFY_DIST);
-    const newSA = moveShapePoint(m.sA, m.aKey, m.trimA);
-    const newSB = moveShapePoint(m.sB, m.bKey, m.trimB);
-    if (!newSA || !newSB) return;
-    // Propagate constraints from each trimmed line so anything attached to their
-    // far ends follows the trim.
-    const propA = propagateConstraints(
-      selectedIdRef.current,
-      m.aIdx,
-      newSA,
-      m.aKey,
-    );
-    const propB = propagateConstraints(
-      selectedIdRef.current,
-      m.bIdx,
-      newSB,
-      m.bKey,
-    );
-    const updates = new Map([...propA, ...propB]);
-    let newElement;
-    if (mode === "chamfer") {
-      newElement = {
-        type: "line",
-        x1: m.trimA.x,
-        y1: m.trimA.y,
-        x2: m.trimB.x,
-        y2: m.trimB.y,
-      };
-    } else {
-      newElement = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
-      if (!newElement) {
-        newElement = {
-          type: "line",
-          x1: m.trimA.x,
-          y1: m.trimA.y,
-          x2: m.trimB.x,
-          y2: m.trimB.y,
-        };
-      } else {
-        newElement.kind = "bevel";
-        newElement.bevelData = {
-          aIdx: m.aIdx,
-          aKey: m.aKey,
-          bIdx: m.bIdx,
-          bKey: m.bKey,
-          dist: MODIFY_DIST,
-        };
-      }
-    }
-    const newIdx = shapes.length;
-    const newConstraints = [
-      {
-        type: "coincident",
-        shapeAIdx: newIdx,
-        pointA: "start",
-        shapeBIdx: m.aIdx,
-        pointB: m.aKey,
-      },
-      {
-        type: "coincident",
-        shapeAIdx: newIdx,
-        pointA: "end",
-        shapeBIdx: m.bIdx,
-        pointB: m.bKey,
-      },
-    ];
-    const juncConstraint = junc.constraint;
-    useStore
-      .getState()
-      .applySketchModify(
-        selectedIdRef.current,
-        updates,
-        newElement,
-        (c) => c === juncConstraint,
-        newConstraints,
-      );
-    clearModifyPreview();
-  };
-
-  const showModifyPreview = (screenX, screenY, mode) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!selItem || !sketchMesh) {
-      clearModifyPreview();
-      return;
-    }
-    const shapes = selItem.shapes || [];
-    const constraints = selItem.constraints || [];
-    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-    if (!snap) {
-      clearModifyPreview();
-      renderer.domElement.style.cursor = "";
-      return;
-    }
-    const junc = findJunction(snap, shapes, constraints);
-    if (!junc) {
-      clearModifyPreview();
-      renderer.domElement.style.cursor = "crosshair";
-      return;
-    }
-    clearModifyPreview();
-    renderer.domElement.style.cursor = "pointer";
-    const m = computeModify(shapes, junc, MODIFY_DIST);
-    const toW = (lx, ly) => {
-      const v = new THREE.Vector3(lx, ly, 0.006);
-      v.applyQuaternion(sketchMesh.quaternion);
-      v.add(sketchMesh.position);
-      return v;
-    };
-    const previewMat = new THREE.LineBasicMaterial({
-      color: 0xffcc44,
-      depthTest: false,
-    });
-    const addPreview = (pts) => {
-      const l = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        previewMat,
-      );
-      l.renderOrder = 1008;
-      scene.add(l);
-      modifyPreviewObjs.push(l);
-    };
-    // Trimmed line A
-    const newSA = moveShapePoint(m.sA, m.aKey, m.trimA);
-    if (newSA) {
-      const pts = getSketchShapePoints(newSA, sketchMesh);
-      if (pts.length >= 2) addPreview(pts);
-    }
-    // Trimmed line B
-    const newSB = moveShapePoint(m.sB, m.bKey, m.trimB);
-    if (newSB) {
-      const pts = getSketchShapePoints(newSB, sketchMesh);
-      if (pts.length >= 2) addPreview(pts);
-    }
-    // New element
-    if (mode === "chamfer") {
-      addPreview([toW(m.trimA.x, m.trimA.y), toW(m.trimB.x, m.trimB.y)]);
-    } else {
-      const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
-      if (arc) {
-        const pts = getSketchShapePoints(arc, sketchMesh);
-        if (pts.length >= 2) addPreview(pts);
-      }
-    }
-  };
+  const highlights = createHighlightHelpers({
+    scene,
+    faceHighlightRef,
+    edgeHighlightRef,
+    pointHighlightRef,
+    itemsRef,
+  });
+  const {
+    clearFaceHighlight,
+    clearEdgeHighlight,
+    clearPointHighlight,
+    applyFaceHighlight,
+    applyEdgeHighlight,
+    applyPointHighlight,
+  } = highlights;
 
   // ── Extrude profile selection ─────────────────────────────────────────────
 
-  let extrudePreviewMesh = null;
-  let extrudeProfileData = null;
-  let extrudeDepthOriginV3 = null;
-  let extrudeNormalV3 = null;
-
-  const clearExtrudePreview = () => {
-    if (extrudePreviewMesh) {
-      scene.remove(extrudePreviewMesh);
-      extrudePreviewMesh.geometry.dispose();
-      extrudePreviewMesh.material.dispose();
-      extrudePreviewMesh = null;
-    }
-  };
-
-  const buildExtrudePreviewMesh = (profile, depth) => {
-    clearExtrudePreview();
-    const poly = profile.polygon2D;
-    if (!poly || poly.length < 3) return;
-    const shape = new THREE.Shape(poly.map((p) => new THREE.Vector2(p.x, p.y)));
-    (profile.holes || []).forEach((h) => {
-      if (h && h.length >= 3)
-        shape.holes.push(
-          new THREE.Path(h.map((p) => new THREE.Vector2(p.x, p.y))),
-        );
-    });
-    // ExtrudeGeometry only accepts a positive depth.  For a negative
-    // depth we extrude by the absolute value then translate the geometry
-    // so the prism extends in the -Z (sketch-local) direction instead.
-    const absDepth = Math.max(0.05, Math.abs(depth));
-    const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: absDepth,
-      bevelEnabled: false,
-    });
-    if (depth < 0) geo.translate(0, 0, -absDepth);
-    // Cut-extrusions preview in red so the user can see at a glance that
-    // their action will subtract material rather than add it.
-    const cutMode = !!useStore.getState().extrudeDepthInput?.cut;
-    const mat = new THREE.MeshBasicMaterial({
-      color: cutMode ? 0xff4444 : 0x4488ff,
-      transparent: true,
-      opacity: cutMode ? 0.5 : 0.35,
-      side: THREE.DoubleSide,
-      depthTest: true,
-    });
-    extrudePreviewMesh = new THREE.Mesh(geo, mat);
-    const rot = profile.rotation;
-    extrudePreviewMesh.rotation.set(rot.x, rot.y, rot.z);
-    const pos = profile.position;
-    extrudePreviewMesh.position.set(pos.x, pos.y, pos.z);
-    extrudePreviewMesh.renderOrder = 10;
-    scene.add(extrudePreviewMesh);
-  };
-
+  // Shared screen→ray helper used by extrude AND by sketch-line picking
+  // further down.  Kept here so a single definition is in scope for both
+  // the extrude factory and the in-function sketch hover/click paths.
   const makeRay = (screenX, screenY) => {
     const rect = renderer.domElement.getBoundingClientRect();
     const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
@@ -1488,448 +977,31 @@ export function attachCameraControls(ctx) {
     return ray;
   };
 
-  const convexHull2D = (points) => {
-    if (points.length <= 3) return points;
-    let lo = 0;
-    for (let i = 1; i < points.length; i++)
-      if (points[i].x < points[lo].x) lo = i;
-    const hull = [];
-    let p = lo,
-      safety = 0;
-    do {
-      hull.push(points[p]);
-      let q = (p + 1) % points.length;
-      for (let i = 0; i < points.length; i++) {
-        const cross =
-          (points[q].x - points[p].x) * (points[i].y - points[p].y) -
-          (points[q].y - points[p].y) * (points[i].x - points[p].x);
-        if (cross > 0) q = i;
-      }
-      p = q;
-    } while (p !== lo && ++safety <= points.length + 2);
-    return hull;
-  };
-
-  const extractFaceProfile = (hit) => {
-    const hitMesh = hit.object;
-    const localNormal = hit.face.normal.clone();
-    const normalMatrix = new THREE.Matrix3().getNormalMatrix(
-      hitMesh.matrixWorld,
-    );
-    const worldNormal = localNormal
-      .clone()
-      .applyMatrix3(normalMatrix)
-      .normalize();
-
-    const posAttr = hitMesh.geometry.getAttribute("position");
-    const idxAttr = hitMesh.geometry.index;
-    const triCount = idxAttr ? idxAttr.count / 3 : posAttr.count / 3;
-    const vA = new THREE.Vector3(),
-      vB = new THREE.Vector3(),
-      vC = new THREE.Vector3();
-    const seen = new Map();
-    for (let i = 0; i < triCount; i++) {
-      let a, b, c;
-      if (idxAttr) {
-        a = idxAttr.getX(i * 3);
-        b = idxAttr.getX(i * 3 + 1);
-        c = idxAttr.getX(i * 3 + 2);
-      } else {
-        a = i * 3;
-        b = i * 3 + 1;
-        c = i * 3 + 2;
-      }
-      vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
-      vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
-      vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
-      const triNorm = new THREE.Vector3()
-        .crossVectors(
-          new THREE.Vector3().subVectors(vB, vA),
-          new THREE.Vector3().subVectors(vC, vA),
-        )
-        .normalize();
-      if (triNorm.dot(localNormal) < 0.99) continue;
-      for (const v of [vA, vB, vC]) {
-        const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
-        if (!seen.has(key))
-          seen.set(key, v.clone().applyMatrix4(hitMesh.matrixWorld));
-      }
-    }
-    if (seen.size < 3) return null;
-
-    // Build face-local 2D coordinate system consistent with the rotation quaternion
-    const q = new THREE.Quaternion().setFromUnitVectors(
-      new THREE.Vector3(0, 0, 1),
-      worldNormal,
-    );
-    const euler = new THREE.Euler().setFromQuaternion(q);
-    const xLocal = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
-    const yLocal = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-
-    const origin = hit.point.clone();
-    const verts2D = [...seen.values()].map((v) => {
-      const rel = v.clone().sub(origin);
-      return { x: rel.dot(xLocal), y: rel.dot(yLocal) };
-    });
-    const polygon2D = convexHull2D(verts2D);
-    if (polygon2D.length < 3) return null;
-
-    return {
-      type: "face",
-      polygon2D,
-      position: { x: origin.x, y: origin.y, z: origin.z },
-      rotation: { x: euler.x, y: euler.y, z: euler.z },
-      normalWorld: { x: worldNormal.x, y: worldNormal.y, z: worldNormal.z },
-      // The solid the face came from — used as the natural target of a
-      // cut-extrusion when one is requested via the depth-overlay toggle.
-      sourceItemId: hitMesh.userData?.itemId ?? null,
-    };
-  };
-
-  const computeExtrudeDepth = (screenX, screenY) => {
-    if (!extrudeDepthOriginV3 || !extrudeNormalV3) return 1.0;
-    const ray = makeRay(screenX, screenY);
-    const camDir = new THREE.Vector3();
-    cameraRef.current.getWorldDirection(camDir);
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-      camDir,
-      extrudeDepthOriginV3,
-    );
-    const hit = new THREE.Vector3();
-    if (!ray.ray.intersectPlane(plane, hit)) return 1.0;
-    const depth = hit.sub(extrudeDepthOriginV3).dot(extrudeNormalV3);
-    // Preserve sign so dragging the cursor to the back side of the
-    // sketch plane produces a negative-direction extrusion.  Only the
-    // magnitude is clamped to the 0.05 minimum (zero-depth extrusions
-    // would be a degenerate face).
-    const sign = depth < 0 ? -1 : 1;
-    return sign * Math.max(0.05, Math.abs(depth));
-  };
-
-  const handleExtrudeHover = (screenX, screenY) => {
-    const fills =
-      extrudeSelectGroupRef && extrudeSelectGroupRef.current
-        ? extrudeSelectGroupRef.current.children
-        : [];
-    fills.forEach((m) => {
-      m.material.opacity = 0;
-    });
-    const ray = makeRay(screenX, screenY);
-    // Check sketch fills first
-    if (fills.length > 0) {
-      const hits = ray.intersectObjects(fills, false);
-      if (hits.length > 0) {
-        hits[0].object.material.opacity = 0.3;
-        renderer.domElement.style.cursor = "pointer";
-        clearFaceHighlight();
-        return;
-      }
-    }
-    // Check solid object faces
-    const solids = Object.values(objectsRef.current).filter((m) => {
-      if (!m.visible) return false;
-      const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
-      return it && it.type !== "sketch" && it.type !== "extrude";
-    });
-    const solidHits = ray.intersectObjects(solids, false);
-    if (solidHits.length > 0) {
-      applyFaceHighlight(solidHits[0], 0x4488ff);
-      renderer.domElement.style.cursor = "pointer";
-      return;
-    }
-    clearFaceHighlight();
-    renderer.domElement.style.cursor = "crosshair";
-  };
-
-  const handleExtrudeProfileClick = (screenX, screenY) => {
-    const fills = extrudeSelectGroupRef?.current?.children ?? [];
-    if (fills.length > 0) {
-      // Use 2D point-in-polygon detection instead of 3D raycasting so that the most
-      // specific (smallest-area) region is always selected even when multiple fill meshes
-      // are coplanar and raycasting would return an arbitrary first hit.
-      let bestFill = null;
-      let bestArea = Infinity;
-      let bestLocalPt = null;
-      for (const fill of fills) {
-        const profile = fill.userData.extrudeProfile;
-        if (!profile) continue;
-        const sketchMesh = objectsRef.current[profile.sketchId];
-        if (!sketchMesh) continue;
-        const localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
-        if (!localPt) continue;
-        const inOuter = pointInPolygon2D(localPt, profile.polygon2D);
-        const inHole = (profile.holes || []).some((h) =>
-          pointInPolygon2D(localPt, h),
-        );
-        if (inOuter && !inHole) {
-          const area = polyArea(profile.polygon2D);
-          if (area < bestArea) {
-            bestFill = fill;
-            bestArea = area;
-            bestLocalPt = localPt;
-          }
-        }
-      }
-      if (bestFill) {
-        const profile = bestFill.userData.extrudeProfile;
-        // Use the actual click position as profileCentroid rather than the
-        // pre-computed polyCentroid(polygon).  polyCentroid is the arithmetic
-        // mean of polygon vertices, which is biased toward densely-sampled arc
-        // boundaries and can fall inside a neighbouring smaller region.  The
-        // click point is guaranteed to be inside the correct polygon (we just
-        // verified inOuter && !inHole above), so it is a reliable anchor for
-        // profile re-matching in buildSceneObjects.
-        extrudeProfileData = { ...profile, profileCentroid: bestLocalPt };
-        extrudeDepthOriginV3 = new THREE.Vector3(
-          profile.position.x,
-          profile.position.y,
-          profile.position.z,
-        );
-        extrudeNormalV3 = new THREE.Vector3(
-          profile.normalWorld.x,
-          profile.normalWorld.y,
-          profile.normalWorld.z,
-        );
-        const retargetItem = itemsRef.current.find(
-          (i) => i.id === useStore.getState().extrudeRetargetId,
-        );
-        const retargetDepth = retargetItem
-          ? resolveItemDepth(retargetItem)
-          : 1.0;
-        buildExtrudePreviewMesh(profile, retargetDepth);
-        useStore.getState().setExtrudeSelectMode("depth");
-        useStore.getState().setExtrudeDepthInput({
-          defaultDepth: retargetDepth,
-          currentDepth: retargetDepth,
-        });
-        renderer.domElement.style.cursor = "ns-resize";
-        return;
-      }
-    }
-    const solids = Object.values(objectsRef.current).filter((m) => {
-      if (!m.visible) return false;
-      const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
-      return it && it.type !== "sketch" && it.type !== "extrude";
-    });
-    const solidHits = ray.intersectObjects(solids, false);
-    if (solidHits.length > 0) {
-      const profile = extractFaceProfile(solidHits[0]);
-      if (profile) {
-        extrudeProfileData = profile;
-        extrudeDepthOriginV3 = new THREE.Vector3(
-          profile.position.x,
-          profile.position.y,
-          profile.position.z,
-        );
-        extrudeNormalV3 = new THREE.Vector3(
-          profile.normalWorld.x,
-          profile.normalWorld.y,
-          profile.normalWorld.z,
-        );
-        const retargetItem = itemsRef.current.find(
-          (i) => i.id === useStore.getState().extrudeRetargetId,
-        );
-        const retargetDepth = retargetItem
-          ? resolveItemDepth(retargetItem)
-          : 1.0;
-        buildExtrudePreviewMesh(profile, retargetDepth);
-        useStore.getState().setExtrudeSelectMode("depth");
-        useStore.getState().setExtrudeDepthInput({
-          defaultDepth: retargetDepth,
-          currentDepth: retargetDepth,
-        });
-        renderer.domElement.style.cursor = "ns-resize";
-      }
-    }
-  };
-
-  const handleExtrudeDepthMove = (screenX, screenY) => {
-    const depth = computeExtrudeDepth(screenX, screenY);
-    if (!extrudeProfileData) return;
-    buildExtrudePreviewMesh(extrudeProfileData, depth);
-    // Keep the depth-input overlay in sync with the mouse-driven depth so
-    // the user can see the current value (and edit / confirm with Enter).
-    const store = useStore.getState();
-    const current = store.extrudeDepthInput;
-    if (current) {
-      // computeExtrudeDepth already clamps |depth| to ≥ 0.05 with the
-      // sign preserved — don't re-clamp to positive here or backward
-      // drags can't update the overlay.
-      const clamped = depth;
-      // Mouse-drag wins: clear any user-typed formula so the input reverts
-      // to showing the current numeric mm value.
-      if (
-        Math.abs((current.currentDepth ?? -1) - clamped) > 1e-5 ||
-        current.formula != null
-      ) {
-        store.setExtrudeDepthInput({
-          ...current,
-          currentDepth: clamped,
-          formula: null,
-        });
-      }
-    }
-  };
-
-  // Run a cut-extrusion: subtract the new extrude shape from the target
-  // solid (or every visible solid when no source was captured), then hide
-  // both the original target(s) and the new extrude so only the boolean
-  // result remains visible.  Uses the same performCsg flow as the
-  // Combine toolbar — runs async through occClient → OCC worker.
-  const runCutExtrusion = async (
-    extrudeItemId,
-    sourceItemId,
-    /* profileSnapshot */ _profileSnapshot,
-    initialStore,
-  ) => {
-    try {
-      const { performCsg } = await import("./occClient.js");
-      const freshStore = useStore.getState();
-      const items = freshStore.items;
-      const extrude = items.find((i) => i.id === extrudeItemId);
-      if (!extrude) return;
-      void sourceItemId; // cut against every solid, not just the source
-      // Every visible non-sketch solid is a potential cut target — that
-      // includes existing extrudes (a base extrude with a cut extrude
-      // drilled through it is the canonical case), CSG results, and the
-      // built-in primitives.  Don't bbox-filter: the new extrude's
-      // mesh may not be in objectsRef yet, so a `setFromObject` would
-      // return an empty box and (silently) reject every target — the
-      // exact failure mode the user just reported.  OCC's
-      // BRepAlgoAPI_Cut returns the first shape unchanged when the two
-      // shapes don't overlap, so the worst case here is one wasted
-      // boolean per disjoint solid, not a missed cut.
-      const targets = items.filter(
-        (i) =>
-          i.type !== "sketch" && i.id !== extrudeItemId && i.visible !== false,
-      );
-      if (targets.length === 0) {
-        // Nothing to cut from — fold the standalone extrude away.
-        // consumeItems instead of setItemsHidden so the hidden state is
-        // written back into the extrude's CREATE history entry; otherwise
-        // the next timeline replay would resurrect the extrude.
-        useStore.getState().consumeItems([extrudeItemId]);
-        return;
-      }
-      void initialStore;
-      // Run one difference per target.  Each call produces a single CSG
-      // item that replaces the target.
-      for (const target of targets) {
-        const result = await performCsg({
-          selectedItems: [target, extrude],
-          operation: "difference",
-          printPrecision: freshStore.curveResolution === "print" ? 0.01 : null,
-          allItems: items,
-        });
-        if (!result) continue;
-        const after = useStore.getState();
-        let maxId = 0;
-        after.history.forEach((e) => {
-          if (e.instruction?.type === "create" && e.instruction.item.id > maxId)
-            maxId = e.instruction.item.id;
-        });
-        const id = maxId + 1;
-        useStore.getState().addItem({
-          id,
-          name: `Cut ${id}`,
-          type: "csg",
-          children: [],
-          position: result.position,
-          scale: { x: 1, y: 1, z: 1 },
-          rotation: { x: 0, y: 0, z: 0 },
-          geometryData: result.geometryData,
-          regenerator: {
-            kind: "boolean",
-            op: "difference",
-            inputIds: [target.id, extrudeItemId],
-            regeneratedAt: freshStore.curveResolution === "print" ? 0.01 : null,
-          },
-        });
-      }
-      // Fold the source solids and the standalone extrude into the new
-      // CSG cuts.  consumeItems rewrites each consumed item's CREATE
-      // history entry to bake in `visible: false`, so a timeline replay
-      // doesn't bring the original solids or the extrude back as
-      // overlapping ghosts.
-      useStore
-        .getState()
-        .consumeItems([extrudeItemId, ...targets.map((t) => t.id)]);
-    } catch (err) {
-      console.error("Cut extrusion failed:", err);
-    }
-  };
-
-  const finalizeExtrude = (
-    screenX,
-    screenY,
-    depthOverride = null,
-    formulaOverride = null,
-  ) => {
-    if (!extrudeProfileData) return;
-    // Allow negative depths so the user can extrude backwards from the
-    // sketch plane.  Only the *magnitude* is clamped to the 0.05 minimum
-    // (zero-depth extrusions would just be a face, which OCC rejects).
-    const rawDepth =
-      depthOverride != null
-        ? depthOverride
-        : computeExtrudeDepth(screenX, screenY);
-    const sign = rawDepth < 0 ? -1 : 1;
-    const depth = sign * Math.max(0.05, Math.abs(rawDepth));
-    clearExtrudePreview();
-    const store = useStore.getState();
-    // Persist the depth as a formula string in mm so it can later
-    // reference variables.  When the user typed a non-numeric formula
-    // we keep their exact text; otherwise we serialise the numeric mm
-    // value so future edits see a sensible default.
-    const depthStored =
-      typeof formulaOverride === "string" && formulaOverride.trim() !== ""
-        ? formulaOverride.trim()
-        : formatAsFormula(depth);
-    const retargetId = store.extrudeRetargetId;
-    const isCut = !!store.extrudeDepthInput?.cut;
-    const sourceItemId = extrudeProfileData?.sourceItemId ?? null;
-    const profileSnapshot = extrudeProfileData;
-    let newExtrudeId = null;
-    if (retargetId != null) {
-      store.retargetExtrude(retargetId, extrudeProfileData, depthStored);
-      store.setExtrudeRetargetId(null);
-    } else {
-      let maxId = 0;
-      store.history.forEach((e) => {
-        if (
-          e.instruction &&
-          e.instruction.type === "create" &&
-          e.instruction.item.id > maxId
-        )
-          maxId = e.instruction.item.id;
-      });
-      newExtrudeId = maxId + 1;
-      store.addItem({
-        id: newExtrudeId,
-        name: `Extrude ${newExtrudeId}`,
-        type: "extrude",
-        children: [],
-        profile: extrudeProfileData,
-        depth: depthStored,
-        position: extrudeProfileData.position,
-        rotation: extrudeProfileData.rotation,
-        scale: { x: 1, y: 1, z: 1 },
-      });
-    }
-    // Cut extrusion: subtract the freshly-created extrude from a target
-    // solid via a difference boolean, then hide the now-redundant extrude
-    // and the source solid (the cut result is a new CSG item that takes
-    // their place visually).  Runs async via performCsg through occClient.
-    if (isCut && newExtrudeId != null) {
-      void runCutExtrusion(newExtrudeId, sourceItemId, profileSnapshot, store);
-    }
-    extrudeProfileData = null;
-    extrudeDepthOriginV3 = null;
-    extrudeNormalV3 = null;
-    store.setExtrudeSelectMode(null);
-    store.setExtrudeDepthInput(null);
-    renderer.domElement.style.cursor = "";
-  };
+  const extrude = createExtrudeHelpers(
+    {
+      scene,
+      renderer,
+      cameraRef,
+      objectsRef,
+      itemsRef,
+      extrudeSelectGroupRef,
+    },
+    {
+      clearFaceHighlight,
+      applyFaceHighlight,
+      screenToSketchLocal,
+      pointInPolygon2D,
+      makeRay,
+    },
+  );
+  const {
+    buildExtrudePreviewMesh,
+    handleExtrudeHover,
+    handleExtrudeProfileClick,
+    handleExtrudeDepthMove,
+    finalizeExtrude,
+    cancelExtrude,
+  } = extrude;
 
   // Expose extrude-overlay control to the React layer:
   //   • finalizeExtrudeWithDepth(d)         — commit at numeric depth `d`.
@@ -1943,6 +1015,11 @@ export function attachCameraControls(ctx) {
   controls.finalizeExtrudeWithFormula = (formula, depth) =>
     finalizeExtrude(null, null, depth, formula);
   controls.cancelExtrude = () => cancelExtrude();
+  controls.updateExtrudePreview = (depth) => {
+    if (!extrude.extrudeProfileData) return;
+    const d = Math.max(0.05, depth);
+    buildExtrudePreviewMesh(extrude.extrudeProfileData, d);
+  };
 
   // Drop the selected non-sketch objects so their lowest world-Y point
   // sits on the ground plane (Y=0).  Computes the min Y across all
@@ -1986,31 +1063,6 @@ export function attachCameraControls(ctx) {
     for (const u of updates) {
       useStore.getState().recordTransformHistory(u.id, "Moved");
     }
-  };
-  controls.updateExtrudePreview = (depth) => {
-    if (!extrudeProfileData) return;
-    const d = Math.max(0.05, depth);
-    buildExtrudePreviewMesh(extrudeProfileData, d);
-  };
-
-  const cancelExtrude = () => {
-    clearExtrudePreview();
-    extrudeProfileData = null;
-    extrudeDepthOriginV3 = null;
-    extrudeNormalV3 = null;
-    const fills =
-      extrudeSelectGroupRef && extrudeSelectGroupRef.current
-        ? extrudeSelectGroupRef.current.children
-        : [];
-    fills.forEach((m) => {
-      m.material.opacity = 0;
-    });
-    clearFaceHighlight();
-    renderer.domElement.style.cursor = "";
-    const store = useStore.getState();
-    store.setExtrudeSelectMode(null);
-    store.setExtrudeRetargetId(null);
-    store.setExtrudeDepthInput(null);
   };
 
   const trySelectSketchLine = (screenX, screenY) => {
@@ -2152,6 +1204,38 @@ export function attachCameraControls(ctx) {
   // after adding or editing them (outside a drag operation).
   if (propagateConstraintsRef)
     propagateConstraintsRef.current = propagateConstraints;
+
+  // ── Chamfer / Bevel helpers ───────────────────────────────────────────────
+  const sketchModify = createSketchModifyHelpers(
+    { scene, renderer, objectsRef, itemsRef, selectedIdRef },
+    { findSnap, propagateConstraints },
+  );
+  const { clearModifyPreview, applyModify, showModifyPreview } = sketchModify;
+
+  // ── Sketch constraint click handlers (distance / coincident / on-line) ────
+  const sketchConstraints = createSketchConstraintHandlers(
+    {
+      scene,
+      renderer,
+      cameraRef,
+      objectsRef,
+      itemsRef,
+      selectedIdRef,
+      sketchShapesGroupRef,
+    },
+    {
+      findSnap,
+      hitTestSketchLines,
+      makeRay,
+      propagateConstraints,
+      makeRingOverlay,
+      clearCoincidentFirstOverlay,
+      clearSketchSelection,
+      setCoincidentFirstOverlay,
+    },
+  );
+  const { handleDistanceConstraintClick, handleCoincidentClick } =
+    sketchConstraints;
 
   const applySketchDragMove = (screenX, screenY, shiftKey) => {
     if (!sketchDrag) return;
@@ -2446,343 +1530,30 @@ export function attachCameraControls(ctx) {
     return false;
   };
 
-  const updateSketchPreview = (screenX, screenY, shiftKey = false) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!sketchMesh) return;
-
-    // Show snap indicator even before first click
-    const rawCur = screenToSketchLocal(screenX, screenY, sketchMesh);
-    if (!shiftKey && rawCur) {
-      const shapes = selItem?.shapes || [];
-      const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-      if (snap) showSnapIndicator(snap, sketchMesh);
-      else clearSnapIndicator();
-    } else {
-      clearSnapIndicator();
-    }
-
-    const draw = sketchDrawRef.current;
-    if (!draw) return;
-    const cur = rawCur;
-    if (!cur) return;
-
-    // Resolve snapped cursor position
-    let effectiveCur = cur;
-    let activeSnap = null;
-    if (!shiftKey) {
-      const shapes = selItem?.shapes || [];
-      const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-      if (snap) {
-        effectiveCur = { x: snap.x, y: snap.y };
-        activeSnap = snap;
-      }
-    }
-    draw.currentSnap = activeSnap;
-
-    clearSketchPreview();
-    clearHoverFills();
-
-    if (draw.tool === "bezier") {
-      const allPts = [...draw.points, effectiveCur];
-      const toWorld = (p) => {
-        const v = new THREE.Vector3(p.x, p.y, 0.003);
-        v.applyQuaternion(sketchMesh.quaternion);
-        v.add(sketchMesh.position);
-        return v;
-      };
-      // Control polygon
-      const ctrlWorldPts = allPts.map(toWorld);
-      const ctrlLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(ctrlWorldPts),
-        new THREE.LineBasicMaterial({
-          color: 0x556677,
-          transparent: true,
-          opacity: 0.4,
-          depthTest: false,
-        }),
-      );
-      ctrlLine.renderOrder = 1001;
-      scene.add(ctrlLine);
-      draw.previewObjects.push(ctrlLine);
-      // Bezier curve preview once we have all 4 points
-      if (allPts.length >= 4) {
-        const [q0, q1, q2, q3] = allPts;
-        const curve = new THREE.CubicBezierCurve(
-          new THREE.Vector2(q0.x, q0.y),
-          new THREE.Vector2(q1.x, q1.y),
-          new THREE.Vector2(q2.x, q2.y),
-          new THREE.Vector2(q3.x, q3.y),
-        );
-        const curvePts = curve
-          .getPoints(48)
-          .map(({ x, y }) => toWorld({ x, y }));
-        const curveLine = makePreviewLine2(curvePts);
-        if (curveLine) {
-          scene.add(curveLine);
-          draw.previewObjects.push(curveLine);
-        }
-      }
-      if (dimHintRef.current) {
-        const rect = renderer.domElement.getBoundingClientRect();
-        const labels = ["Start", "Control 1", "Control 2", "End"];
-        dimHintRef.current.textContent =
-          labels[Math.min(draw.points.length, 3)];
-        dimHintRef.current.style.display = "block";
-        dimHintRef.current.style.left = `${screenX - rect.left + 16}px`;
-        dimHintRef.current.style.top = `${screenY - rect.top - 10}px`;
-      }
-      return;
-    }
-
-    const shape = buildSketchShape(draw.tool, draw.startLocal, effectiveCur);
-    if (shape) {
-      const pts = getSketchShapePoints(shape, sketchMesh);
-      const line = makePreviewLine2(pts);
-      if (line) {
-        scene.add(line);
-        draw.previewObjects.push(line);
-      }
-    }
-    if (dimHintRef.current) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      dimHintRef.current.textContent = sketchDimText(
-        draw.tool,
-        draw.startLocal,
-        effectiveCur,
-      );
-      dimHintRef.current.style.display = "block";
-      dimHintRef.current.style.left = `${screenX - rect.left + 16}px`;
-      dimHintRef.current.style.top = `${screenY - rect.top - 10}px`;
-    }
-  };
-
-  const handleSketchClick = (screenX, screenY, shiftKey = false) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!sketchMesh) return;
-    let localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
-    if (!localPt) return;
-
-    const shapes = selItem?.shapes || [];
-    let clickSnap = null;
-    if (!shiftKey) {
-      clickSnap = findSnap(screenX, screenY, shapes, sketchMesh);
-      if (clickSnap) localPt = { x: clickSnap.x, y: clickSnap.y };
-    }
-
-    // Helper: build constraints from recorded snaps for a completed shape
-    const buildConstraints = (snaps, tool) => {
-      const newIdx = shapes.length;
-      return snaps
-        .map((snap, i) => {
-          if (!snap) return null;
-          const pointKeys =
-            tool === "bezier" ? ["p0", "p1", "p2", "p3"] : ["start", "end"];
-          return {
-            type: "coincident",
-            shapeAIdx: newIdx,
-            pointA: pointKeys[i] ?? `p${i}`,
-            shapeBIdx: snap.shapeIdx,
-            pointB: snap.pointKey,
-          };
-        })
-        .filter(Boolean);
-    };
-
-    if (!sketchDrawRef.current) {
-      sketchDrawRef.current = {
-        tool: activeSketchToolRef.current,
-        startLocal: localPt,
-        points: [localPt],
-        snaps: [clickSnap],
-        chainStartPoint: localPt,
-        previewObjects: [],
-      };
-      setSketchDrawPhase("second");
-    } else if (sketchDrawRef.current.tool === "bezier") {
-      const draw = sketchDrawRef.current;
-      draw.points.push(localPt);
-      draw.snaps.push(clickSnap);
-      if (draw.points.length === 4) {
-        const [p0, p1, p2, p3] = draw.points;
-        const constraints = buildConstraints(draw.snaps, "bezier");
-        clearSketchPreview();
-        clearSnapIndicator();
-        if (dimHintRef.current) dimHintRef.current.style.display = "none";
-        useStore
-          .getState()
-          .addSketchShape(
-            selectedIdRef.current,
-            { type: "bezier", p0, p1, p2, p3 },
-            constraints,
-          );
-        const chainStart = draw.chainStartPoint;
-        const closesChain =
-          clickSnap &&
-          chainStart &&
-          Math.hypot(p3.x - chainStart.x, p3.y - chainStart.y) < 0.01;
-        if (closesChain) {
-          sketchDrawRef.current = null;
-          setSketchDrawPhase("first");
-          useStore.getState().setActiveSketchTool(null);
-        } else {
-          const contSnap = draw.snaps[3] ?? {
-            shapeIdx: shapes.length,
-            pointKey: "p3",
-            x: p3.x,
-            y: p3.y,
-          };
-          sketchDrawRef.current = {
-            tool: "bezier",
-            startLocal: { x: p3.x, y: p3.y },
-            points: [{ x: p3.x, y: p3.y }],
-            snaps: [contSnap],
-            chainStartPoint: chainStart,
-            previewObjects: [],
-          };
-          setSketchDrawPhase("second");
-        }
-      }
-    } else if (sketchDrawRef.current.tool === "rect") {
-      const draw = sketchDrawRef.current;
-      draw.snaps.push(clickSnap);
-      const shape = buildSketchShape("rect", draw.startLocal, localPt);
-      clearSketchPreview();
-      clearSnapIndicator();
-      sketchDrawRef.current = null;
-      setSketchDrawPhase("first");
-      if (dimHintRef.current) dimHintRef.current.style.display = "none";
-      if (shape) {
-        const sx = shape.x1,
-          sy = shape.y1,
-          ex = shape.x2,
-          ey = shape.y2;
-        const n = shapes.length;
-        useStore.getState().addSketchShapes(
-          selectedIdRef.current,
-          [
-            { type: "line", x1: sx, y1: sy, x2: ex, y2: sy }, // top — horizontal
-            { type: "line", x1: ex, y1: sy, x2: ex, y2: ey }, // right — vertical
-            { type: "line", x1: ex, y1: ey, x2: sx, y2: ey }, // bottom — horizontal
-            { type: "line", x1: sx, y1: ey, x2: sx, y2: sy }, // left — vertical
-          ],
-          [
-            {
-              type: "coincident",
-              shapeAIdx: n,
-              pointA: "end",
-              shapeBIdx: n + 1,
-              pointB: "start",
-            },
-            {
-              type: "coincident",
-              shapeAIdx: n + 1,
-              pointA: "end",
-              shapeBIdx: n + 2,
-              pointB: "start",
-            },
-            {
-              type: "coincident",
-              shapeAIdx: n + 2,
-              pointA: "end",
-              shapeBIdx: n + 3,
-              pointB: "start",
-            },
-            {
-              type: "coincident",
-              shapeAIdx: n + 3,
-              pointA: "end",
-              shapeBIdx: n,
-              pointB: "start",
-            },
-            { type: "horizontal", shapeIdx: n },
-            { type: "vertical", shapeIdx: n + 1 },
-            { type: "horizontal", shapeIdx: n + 2 },
-            { type: "vertical", shapeIdx: n + 3 },
-          ],
-        );
-      }
-      useStore.getState().setActiveSketchTool(null);
-    } else {
-      const draw = sketchDrawRef.current;
-      draw.snaps.push(clickSnap);
-      const shape = buildSketchShape(draw.tool, draw.startLocal, localPt);
-      const constraints = buildConstraints(draw.snaps, draw.tool);
-      clearSketchPreview();
-      clearSnapIndicator();
-      if (dimHintRef.current) dimHintRef.current.style.display = "none";
-      if (draw.tool === "line") {
-        if (shape)
-          useStore
-            .getState()
-            .addSketchShape(selectedIdRef.current, shape, constraints);
-        // End the chain whenever the user clicks on ANY existing snap point
-        // (not just the chain's start) — connecting back to another shape's
-        // endpoint or midpoint is a natural "I'm done drawing" gesture.
-        if (clickSnap) {
-          sketchDrawRef.current = null;
-          setSketchDrawPhase("first");
-          useStore.getState().setActiveSketchTool(null);
-        } else {
-          // Carry the original chain start forward so closes-back-to-start
-          // detection still works on subsequent clicks.  Previously this
-          // line referenced an undeclared `chainStart`, which threw inside
-          // the object literal — the assignment never landed, sketchDrawRef
-          // kept its old `startLocal = P1`, and the *next* click committed
-          // a line P1→P3 (the user-visible bug: "second line starts at the
-          // first line's start, not its end").
-          const chainStart = draw.chainStartPoint;
-          const contSnap = clickSnap ?? {
-            shapeIdx: shapes.length,
-            pointKey: "end",
-            x: localPt.x,
-            y: localPt.y,
-          };
-          sketchDrawRef.current = {
-            tool: "line",
-            startLocal: localPt,
-            points: [localPt],
-            snaps: [contSnap],
-            chainStartPoint: chainStart,
-            previewObjects: [],
-          };
-          setSketchDrawPhase("second");
-        }
-      } else {
-        // circle, ellipse, arc: complete the shape and deselect the tool
-        sketchDrawRef.current = null;
-        setSketchDrawPhase("first");
-        if (shape)
-          useStore
-            .getState()
-            .addSketchShape(selectedIdRef.current, shape, constraints);
-        useStore.getState().setActiveSketchTool(null);
-      }
-    }
-  };
-
-  // ── Highlight helpers ──────────────────────────────────────────────────────
-
-  const highlights = createHighlightHelpers({
-    scene,
-    faceHighlightRef,
-    edgeHighlightRef,
-    pointHighlightRef,
-    itemsRef,
-  });
-  const {
-    clearFaceHighlight,
-    clearEdgeHighlight,
-    clearPointHighlight,
-    applyFaceHighlight,
-    applyEdgeHighlight,
-    applyPointHighlight,
-  } = highlights;
+  // ── Active sketch tool: preview + click commit ────────────────────────────
+  const sketchDraw = createSketchDrawHelpers(
+    {
+      scene,
+      renderer,
+      objectsRef,
+      itemsRef,
+      selectedIdRef,
+      sketchDrawRef,
+      activeSketchToolRef,
+      dimHintRef,
+    },
+    {
+      screenToSketchLocal,
+      findSnap,
+      showSnapIndicator,
+      clearSnapIndicator,
+      clearSketchPreview,
+      clearHoverFills,
+      makePreviewLine2,
+      setSketchDrawPhase,
+    },
+  );
+  const { updateSketchPreview, handleSketchClick } = sketchDraw;
 
   // ── Mouse event handlers ───────────────────────────────────────────────────
 
@@ -3609,8 +2380,8 @@ export function attachCameraControls(ctx) {
         const clickedId = intersects[0].object.userData.itemId || null;
         if (
           faceMode3d &&
-          pendingFaceSelection &&
-          pendingFaceSelection.itemId === clickedId
+          highlights.pendingFaceSelection &&
+          highlights.pendingFaceSelection.itemId === clickedId
         ) {
           // Alt+click in face mode: commit face to sub-geometry selection.
           // Faces and edges are mutually exclusive — always clear edges.
@@ -3621,7 +2392,7 @@ export function attachCameraControls(ctx) {
             e.shiftKey && prev?.itemId === clickedId && prev.edges.length === 0
               ? [...prev.faces]
               : [];
-          const n = pendingFaceSelection;
+          const n = highlights.pendingFaceSelection;
           const already = faces.some(
             (f) =>
               Math.abs(f.nx - n.nx) < 0.01 &&
@@ -3652,8 +2423,8 @@ export function attachCameraControls(ctx) {
           clearFaceHighlight();
         } else if (
           edgeMode3d &&
-          pendingEdgeSelection &&
-          pendingEdgeSelection.itemId === clickedId
+          highlights.pendingEdgeSelection &&
+          highlights.pendingEdgeSelection.itemId === clickedId
         ) {
           // Ctrl/Cmd+click in edge mode: commit edge to sub-geometry
           // selection.  Edges and faces are mutually exclusive — always
@@ -3663,7 +2434,7 @@ export function attachCameraControls(ctx) {
             e.shiftKey && prev?.itemId === clickedId && prev.faces.length === 0
               ? [...prev.edges]
               : [];
-          const ed = pendingEdgeSelection;
+          const ed = highlights.pendingEdgeSelection;
           const already = edges.some(
             (e2) =>
               Math.abs(e2.ax - ed.ax) < 0.001 &&
@@ -4151,81 +2922,22 @@ export function attachCameraControls(ctx) {
 
   // ── Animate loop ───────────────────────────────────────────────────────────
 
-  let animId;
-  const animate = () => {
-    animId = requestAnimationFrame(animate);
-
-    if (cameraAnimRef.current) {
-      const anim = cameraAnimRef.current;
-      const t = Math.min(1, (Date.now() - anim.startTime) / anim.duration);
-      const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      cameraRef.current.position.lerpVectors(anim.startPos, anim.endPos, ease);
-      targetRef.current.lerpVectors(anim.startTarget, anim.endTarget, ease);
-      cameraRef.current.up
-        .lerpVectors(anim.startUp, anim.endUp, ease)
-        .normalize();
-      cameraRef.current.lookAt(targetRef.current);
-      setRotationState(cameraRef.current.quaternion.clone());
-      if (t >= 1) {
-        if (anim.onComplete) anim.onComplete();
-        cameraAnimRef.current = null;
-      }
-    }
-
-    if (sketchModeRef.current && sketchGridGroupRef?.current) {
-      const minorGrid = sketchGridGroupRef.current.userData.minorGrid;
-      const sketchMesh = objectsRef.current[selectedIdRef.current];
-      if (minorGrid && sketchMesh) {
-        const inv = sketchMesh.quaternion.clone().invert();
-        const local = targetRef.current
-          .clone()
-          .sub(sketchMesh.position)
-          .applyQuaternion(inv);
-        minorGrid.position.set(Math.round(local.x), Math.round(local.y), 0);
-      }
-    }
-
-    // Keep the axis-indicator gizmo and the object transform/rotation
-    // handles a constant on-screen size regardless of zoom level.  We
-    // derive a per-frame scale factor from the camera's effective view
-    // size (visible world height at the gizmo's position) and apply it
-    // uniformly to each gizmo group.  Without this the handles balloon
-    // when the camera zooms in and disappear into the object when it
-    // zooms out.
-    const cam = cameraRef.current;
-    if (cam) {
-      const REFERENCE_HEIGHT = 10; // arbitrary baseline; tuned visually
-      const gizmoScale = (worldPos) => {
-        if (cam.isOrthographicCamera) {
-          // (top - bottom) / zoom is the world height the camera shows.
-          return (cam.top - cam.bottom) / cam.zoom / REFERENCE_HEIGHT;
-        }
-        // Perspective: visible height at distance d is 2*d*tan(fov/2).
-        const d = cam.position.distanceTo(worldPos);
-        return (2 * d * Math.tan((cam.fov * Math.PI) / 360)) / REFERENCE_HEIGHT;
-      };
-      if (axisGroupRef?.current && axisGroupRef.current.visible) {
-        const s = gizmoScale(axisGroupRef.current.position);
-        axisGroupRef.current.scale.setScalar(s);
-      }
-      if (handlesRef?.current && handlesRef.current.length > 0) {
-        // Use the first handle's position as a stand-in for "the gizmo
-        // cluster centre"; all handles belong to one selection.
-        const ref = handlesRef.current[0].mesh.position;
-        const s = gizmoScale(ref);
-        handlesRef.current.forEach(({ mesh: hm }) => {
-          // Each handle was authored at unit scale; reset rather than
-          // multiply so we don't compound across frames.
-          if (hm.userData.baseScale == null) hm.userData.baseScale = 1;
-          hm.scale.setScalar(hm.userData.baseScale * s);
-        });
-      }
-    }
-    gridMaterial.uniforms.uCameraPos.value.copy(cameraRef.current.position);
-    if (composerRef.current) composerRef.current.render();
-    else renderer.render(scene, cameraRef.current);
-  };
-  animate();
+  const animateLoop = createAnimateLoop({
+    scene,
+    renderer,
+    cameraRef,
+    targetRef,
+    cameraAnimRef,
+    sketchModeRef,
+    sketchGridGroupRef,
+    objectsRef,
+    selectedIdRef,
+    axisGroupRef,
+    handlesRef,
+    gridMaterial,
+    composerRef,
+    setRotationState,
+  });
 
   // ── Attach listeners ───────────────────────────────────────────────────────
 
@@ -4243,7 +2955,7 @@ export function attachCameraControls(ctx) {
   document.addEventListener("keydown", onKeyDown);
 
   return () => {
-    cancelAnimationFrame(animId);
+    animateLoop.stop();
     clearTimeout(shiftScrollSessionTimer);
     el.removeEventListener("mousedown", onMouseDown);
     el.removeEventListener("mousemove", onMouseMove);
