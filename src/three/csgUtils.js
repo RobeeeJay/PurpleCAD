@@ -147,8 +147,13 @@ export function buildItemShapeLocal(item, allItems = []) {
       if (inputs.length < 2) return null;
       let world = booleanOp(r.op, inputs);
       if (!world) return null;
-      // Translate back into the item's local (bbox-centred) frame so
-      // edge endpoints picked from the rendered mesh match.
+      // Translate back into the item's local frame so edge endpoints
+      // picked from the rendered mesh match.  item.position is the
+      // anchor used when the csg was created (first input's world
+      // position — see occOps.js#performCsg) — geometryData was
+      // recentred relative to that anchor at creation, so the same
+      // -item.position translation here keeps the OCC shape's
+      // coordinate frame aligned with the rendered mesh.
       if (item.position) {
         world = transformShape(
           world,

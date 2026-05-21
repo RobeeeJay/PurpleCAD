@@ -130,10 +130,15 @@ async function chamferOrFilletItem({
 }
 
 // Build each item's OCC shape in world space and combine them with the
-// given boolean operation, then tessellate and centre the result around
-// its bbox.  `position` is the world-space bbox centre (== where the
-// caller should place the new item so its mesh origin is its volumetric
-// centre).
+// given boolean operation, then tessellate.  The returned `position` is
+// the FIRST INPUT'S world position — geometryData is recentred relative
+// to that anchor.  Anchoring to the first input (rather than the bbox
+// centre) means the new csg's item.position matches where the original
+// minuend lived, so transform handles, the bounding-box overlay, and
+// downstream operations don't visibly shift the moment a cut applies.
+// The visible mesh ends up at the same world coordinates either way —
+// only item.position differs (item.position + recentred vertex == world
+// vertex in both schemes).
 async function performCsg({
   selectedItems,
   allItems,
@@ -143,12 +148,16 @@ async function performCsg({
   await ensureOcc();
   const sources = allItems || selectedItems;
   const shapes = [];
+  const worldAnchors = [];
   for (const item of selectedItems) {
     const local = buildItemShapeLocal(item, sources);
     if (!local) continue;
     const { position, rotation } = buildBrushTransform(item);
     const world = transformShape(local, position, rotation);
-    if (world) shapes.push(world);
+    if (world) {
+      shapes.push(world);
+      worldAnchors.push(position);
+    }
   }
   if (shapes.length < 2) return null;
   const result = booleanOp(operation, shapes);
@@ -159,17 +168,27 @@ async function performCsg({
   const normAttr = tess.getAttribute("normal");
   const idxAttr = tess.index;
   const positions = Array.from(posAttr.array);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(positions);
-  const cx = (minX + maxX) / 2,
-    cy = (minY + maxY) / 2,
-    cz = (minZ + maxZ) / 2;
+  // Anchor at the first contributing input's world position.  Fall back
+  // to the bbox centre if no anchor was captured (defensive — shouldn't
+  // happen since shapes.length >= 2 implies at least 2 anchors).
+  let ax, ay, az;
+  if (worldAnchors.length > 0) {
+    ax = worldAnchors[0].x;
+    ay = worldAnchors[0].y;
+    az = worldAnchors[0].z;
+  } else {
+    const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(positions);
+    ax = (minX + maxX) / 2;
+    ay = (minY + maxY) / 2;
+    az = (minZ + maxZ) / 2;
+  }
   for (let i = 0; i < positions.length; i += 3) {
-    positions[i] -= cx;
-    positions[i + 1] -= cy;
-    positions[i + 2] -= cz;
+    positions[i] -= ax;
+    positions[i + 1] -= ay;
+    positions[i + 2] -= az;
   }
   return {
-    position: { x: cx, y: cy, z: cz },
+    position: { x: ax, y: ay, z: az },
     geometryData: {
       positions,
       normals: normAttr ? Array.from(normAttr.array) : null,

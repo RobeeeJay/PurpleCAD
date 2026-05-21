@@ -443,6 +443,102 @@ describe("OCC boolean operations", () => {
     const inter = intersectShapes([a, b]);
     expectSolidGeometry(tessellate(inter, null));
   });
+
+  it("performCsg anchors at an extrude's visible world centre (centroid offset baked in)", async () => {
+    // Regression for: "The origin for boolean operations involving
+    // extruded objects may be wrong."  buildBrushTransform shifts the
+    // extrude's stored position by the rotated polygon centroid so the
+    // OCC shape and the rendered mesh share the same world position;
+    // performCsg's anchor (worldAnchors[0]) MUST come from the same
+    // brushPos, otherwise the new csg's item.position lands at the raw
+    // item.position instead of where the extrude visibly sits.
+    const { ops } = await import("../../occOps.js");
+    // Extrude with a polygon whose centroid is NOT at the origin: this
+    // ensures the centroid offset is visibly non-zero so the test would
+    // catch a regression that drops it.
+    const extrude = {
+      id: 10,
+      type: "extrude",
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      profile: {
+        // Square centred at (2, 0) — centroid offset is (2, 0, 0).
+        polygon2D: [
+          { x: 1, y: -1 },
+          { x: 3, y: -1 },
+          { x: 3, y: 1 },
+          { x: 1, y: 1 },
+        ],
+      },
+      depth: 1,
+    };
+    const cube = { id: 11, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    const result = await ops.performCsg({
+      selectedItems: [extrude, cube],
+      allItems: [extrude, cube],
+      operation: "union",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // Anchor MUST be extrude.position + rotated polygon centroid offset,
+    // i.e. (0 + 2, 0 + 0, 0 + 0) = (2, 0, 0) — NOT the raw item.position
+    // of (0, 0, 0).  Without buildBrushTransform's extrude branch, the
+    // shape would be placed at (0, 0, 0) and the boolean would happen at
+    // the wrong world location.
+    expect(result.position.x).toBeCloseTo(2);
+    expect(result.position.y).toBeCloseTo(0);
+    expect(result.position.z).toBeCloseTo(0);
+  });
+
+  it("performCsg anchors the result at the first input's world position", async () => {
+    // Regression for: "Applying a cut extrusion results in objects that
+    // extrusion touches moving before the cut is applied."  Previously
+    // performCsg returned the bbox centre of the result, which shifts
+    // when material is removed asymmetrically — visually, the source
+    // object's transform-handle bounding box jumped the instant the cut
+    // applied.  The fix anchors the result at the first input's
+    // brushPos so item.position stays put across the cut.
+    const { ops } = await import("../../occOps.js");
+    const cubeA = {
+      id: 1,
+      type: "cube",
+      position: { x: 4, y: 0, z: 0 },
+    };
+    const sphereB = {
+      id: 2,
+      type: "sphere",
+      // Sphere offset to one side so the difference (cube minus sphere)
+      // produces an asymmetric bite — the bbox of the result is NOT
+      // centred on cubeA's centre.
+      position: { x: 4.6, y: 0, z: 0 },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cubeA, sphereB],
+      allItems: [cubeA, sphereB],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // The anchor MUST be cubeA's world position, not the bbox centre.
+    expect(result.position.x).toBeCloseTo(4);
+    expect(result.position.y).toBeCloseTo(0);
+    expect(result.position.z).toBeCloseTo(0);
+    // geometryData is recentred relative to the anchor, so its bbox
+    // centroid sits at a non-zero offset from origin (would be ~0 under
+    // the old bbox-centred convention).
+    const xs = [];
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      xs.push(result.geometryData.positions[i]);
+    }
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    // Cube at x=4 spans local [-1, +1]; the bite from sphere at x=4.6
+    // trims the +X side, so the local bbox runs ~[-1, +0.4] — note the
+    // bbox centroid is no longer at the local origin.
+    expect(minX).toBeLessThan(0);
+    expect(maxX).toBeLessThan(1);
+  });
 });
 
 describe("OCC chamfer", () => {

@@ -376,21 +376,44 @@ export function createExtrudeHelpers(
       const items = freshStore.items;
       const extrude = items.find((i) => i.id === extrudeItemId);
       if (!extrude) return;
-      void sourceItemId; // cut against every solid, not just the source
-      // Every visible non-sketch solid is a potential cut target — that
-      // includes existing extrudes (a base extrude with a cut extrude
-      // drilled through it is the canonical case), CSG results, and the
-      // built-in primitives.  Don't bbox-filter: the new extrude's
-      // mesh may not be in objectsRef yet, so a `setFromObject` would
-      // return an empty box and (silently) reject every target — the
-      // exact failure mode the user just reported.  OCC's
-      // BRepAlgoAPI_Cut returns the first shape unchanged when the two
-      // shapes don't overlap, so the worst case here is one wasted
-      // boolean per disjoint solid, not a missed cut.
-      const targets = items.filter(
-        (i) =>
-          i.type !== "sketch" && i.id !== extrudeItemId && i.visible !== false,
-      );
+      // Determine the targets to cut from.  In priority order:
+      //   1. sourceItemId from the extrude profile (face-profile path —
+      //      the user clicked a solid face directly).
+      //   2. The sketch's hostSolidId (recorded when the sketch was
+      //      placed on a solid's face).  Without this, cuts on a
+      //      sketch-loop fall back to every visible solid in the scene,
+      //      which silently turns unrelated primitives into CSG items —
+      //      the visible appearance changes (analytic shader →
+      //      tessellated mesh) and the user perceives this as the cut
+      //      having a wrong origin.
+      //   3. Every visible non-sketch non-extrude item (last resort for
+      //      sketches placed on an axis plane with no specific host).
+      let targets;
+      if (sourceItemId != null) {
+        const src = items.find(
+          (i) => i.id === sourceItemId && i.type !== "sketch",
+        );
+        targets = src ? [src] : [];
+      } else {
+        const sketchId = extrude?.profile?.sketchId ?? null;
+        const sketch =
+          sketchId != null ? items.find((i) => i.id === sketchId) : null;
+        const hostId = sketch?.hostSolidId ?? null;
+        if (hostId != null) {
+          const host = items.find(
+            (i) => i.id === hostId && i.type !== "sketch",
+          );
+          targets = host ? [host] : [];
+        } else {
+          targets = items.filter(
+            (i) =>
+              i.type !== "sketch" &&
+              i.type !== "extrude" &&
+              i.id !== extrudeItemId &&
+              i.visible !== false,
+          );
+        }
+      }
       if (targets.length === 0) {
         // Nothing to cut from — fold the standalone extrude away.
         // consumeItems instead of setItemsHidden so the hidden state is

@@ -2227,22 +2227,25 @@ export function attachCameraControls(ctx) {
           }
         }
 
-        if (transformDebounceRef.current)
+        // Record the transform to history IMMEDIATELY at drag commit
+        // rather than via an 800ms debounce.  The debounced version had
+        // a race: setItemTransform updates items[] live, but until the
+        // debounce fires history is stale.  Any history-replaying action
+        // (eg. addItem → replayUpTo) inside that 800ms window would
+        // rebuild items from the stale history and the dragged object
+        // would snap back to its pre-drag position.  recordTransformHistory's
+        // own merge-in-place logic already coalesces successive transforms
+        // on the same item, so the debounce wasn't needed for coalescing.
+        if (transformDebounceRef.current) {
           clearTimeout(transformDebounceRef.current);
-        const capturedId = drag.itemId;
-        const capturedType = drag.handleType;
-        transformDebounceRef.current = setTimeout(() => {
-          const currentItem = useStore
-            .getState()
-            .items.find((i) => i.id === capturedId);
-          if (!currentItem) return;
-          const label = capturedType.startsWith("rot")
-            ? "Rotated"
-            : capturedType === "scale"
-              ? "Scaled"
-              : "Moved";
-          useStore.getState().recordTransformHistory(capturedId, label);
-        }, 800);
+          transformDebounceRef.current = null;
+        }
+        const label = drag.handleType.startsWith("rot")
+          ? "Rotated"
+          : drag.handleType === "scale"
+            ? "Scaled"
+            : "Moved";
+        useStore.getState().recordTransformHistory(drag.itemId, label);
       }
       handleDragRef.current = null;
       return;
@@ -2270,6 +2273,7 @@ export function attachCameraControls(ctx) {
             false,
           );
           let position, rotation;
+          let hostSolidId = null;
           if (objHits.length > 0) {
             const hit = objHits[0];
             const normalMatrix = new THREE.Matrix3().getNormalMatrix(
@@ -2286,6 +2290,15 @@ export function attachCameraControls(ctx) {
             const euler = new THREE.Euler().setFromQuaternion(q);
             position = { x: hit.point.x, y: hit.point.y, z: hit.point.z };
             rotation = { x: euler.x, y: euler.y, z: euler.z };
+            // Remember which solid this sketch was placed on so a later
+            // cut-extrude from the sketch's loops targets only that
+            // solid.  Without this, sketch-loop cuts fall back to
+            // "every visible non-sketch solid", which silently turns
+            // unrelated primitives into csg items at the same world
+            // position (the visible appearance changes from analytic
+            // shader to tessellated mesh — the user perceives this as
+            // the cut having a wrong origin).
+            hostSolidId = hit.object.userData?.itemId ?? null;
           } else {
             const planeMeshes = sketchPlacementPlanesRef.current.map(
               (p) => p.mesh,
@@ -2336,6 +2349,7 @@ export function attachCameraControls(ctx) {
               position,
               scale: { x: 1, y: 1, z: 1 },
               rotation,
+              hostSolidId,
             });
             useStore.getState().setSketchPlacementMode(false);
           } else {
