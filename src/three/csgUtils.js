@@ -93,6 +93,35 @@ export function buildBrushTransform(item) {
   };
 }
 
+// Compute the chamfered-shape's centroid offset in the source's local
+// frame.  New chamfers store this on regenerator.centerOffset at create/
+// regen time; for legacy items without it, derive it from item.position
+// and the source's brushPos so older saved scenes still work.
+function chamferCenterOffset(regenerator, item) {
+  if (regenerator.centerOffset) {
+    const { cx, cy, cz } = regenerator.centerOffset;
+    return { x: cx, y: cy, z: cz };
+  }
+  // Legacy path: item.position = source.brushPos + R(source.rotation) *
+  // centerOffset, so centerOffset = R^-1 * (item.position - source.brushPos).
+  if (!regenerator.source || !item?.position) return null;
+  const sourceBrush = buildBrushTransform(regenerator.source).position;
+  const dx = item.position.x - sourceBrush.x;
+  const dy = item.position.y - sourceBrush.y;
+  const dz = item.position.z - sourceBrush.z;
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9 && Math.abs(dz) < 1e-9) {
+    return { x: 0, y: 0, z: 0 };
+  }
+  const rot = regenerator.source.rotation || { x: 0, y: 0, z: 0 };
+  const v = new THREE.Vector3(dx, dy, dz);
+  const q = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
+  );
+  q.invert();
+  v.applyQuaternion(q);
+  return { x: v.x, y: v.y, z: v.z };
+}
+
 // Build the OCC TopoDS_Shape for an item, transformed to world space.
 // Returns null for items that can't be expressed in OCC yet (e.g. extrude,
 // sketch).  Used by performCsg and chamfer paths.
@@ -128,10 +157,29 @@ export function buildItemShapeLocal(item, allItems = []) {
       // silently drop face-mode chamfers — that's why STL/STEP exports
       // were missing chamfers and fillets on regenerated CSG items.
       const amount = r.amount ?? 0.05;
-      if (r.segments === 1) {
-        return chamferShapeBy(sourceShape, subGeo, amount, r.angleRad ?? null);
+      const chamfered =
+        r.segments === 1
+          ? chamferShapeBy(sourceShape, subGeo, amount, r.angleRad ?? null)
+          : filletShapeBy(sourceShape, subGeo, amount);
+      if (!chamfered) return null;
+      // The chamfered OCC shape sits in the source's LOCAL frame, but
+      // the chamfered csg item's geometryData was recentred around the
+      // bbox-centre offset at chamfer time (centerOffset) and
+      // item.position bakes that offset in.  So when this OCC shape is
+      // later passed through transformShape(item.position, item.rotation),
+      // it lands R*centerOffset away from where the rendered mesh sits
+      // — chained cuts on a chamfered solid appear rotated + offset.
+      // Translate the shape by -centerOffset here so its local frame
+      // matches the visible mesh's local frame.
+      const offset = chamferCenterOffset(r, item);
+      if (offset) {
+        return transformShape(
+          chamfered,
+          { x: -offset.x, y: -offset.y, z: -offset.z },
+          null,
+        );
       }
-      return filletShapeBy(sourceShape, subGeo, amount);
+      return chamfered;
     }
     if (r.kind === "boolean") {
       const inputs = (r.inputIds || [])

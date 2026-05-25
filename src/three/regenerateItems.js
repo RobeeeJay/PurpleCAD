@@ -58,6 +58,10 @@ async function regenerateChamfer(
       z: brushPos.z + local.z,
     },
     geometryData,
+    // Propagated up so the regenerator gets the freshly-computed
+    // centerOffset stamped in (regen at a different precision can
+    // produce a slightly different bbox).
+    centerOffset: { cx, cy, cz },
   };
 }
 
@@ -105,11 +109,18 @@ export async function regenerateItemsForResolution(items, printPrecision) {
       continue;
     }
     changed = true;
+    // Carry the freshly-computed centerOffset back onto the chamfer
+    // regenerator so buildItemShapeLocal stays in sync with the bbox
+    // a re-tessellation just produced.
+    const nextRegen = { ...r, regeneratedAt: printPrecision };
+    if (r.kind === "chamfer" && result.centerOffset) {
+      nextRegen.centerOffset = result.centerOffset;
+    }
     out.push({
       ...item,
       position: result.position,
       geometryData: result.geometryData,
-      regenerator: { ...r, regeneratedAt: printPrecision },
+      regenerator: nextRegen,
     });
   }
   return changed ? out : items;

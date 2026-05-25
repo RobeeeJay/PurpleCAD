@@ -42,7 +42,12 @@ export function resolveValue(value, fallback = 0, variables = null) {
   return mm / MM_PER_UNIT;
 }
 
-// Convenience: resolve an extrude item's depth in scene units.
+// Convenience: resolve an extrude item's depth in scene units.  The
+// sign of the stored depth determines direction (positive = along the
+// face normal / sketch +Z, negative = opposite).  This holds for both
+// regular and cut extrudes — `isCut` is informational only (drives
+// the "Extrude Cut" timeline label + the post-extrude difference
+// boolean), it does NOT flip direction.
 export function resolveItemDepth(item, variables = null) {
   return resolveValue(item?.depth, 1.0, variables);
 }

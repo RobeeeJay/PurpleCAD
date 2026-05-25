@@ -40,6 +40,7 @@ import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSketchModifyHelpers } from "./cameraControls/sketchModify.js";
 import { createSketchConstraintHandlers } from "./cameraControls/sketchConstraintHandlers.js";
 import { createSketchDrawHelpers } from "./cameraControls/sketchDraw.js";
+import { rotationQuaternionForDrag } from "./cameraControls/rotationHandle.js";
 
 export function loadCameraState() {
   try {
@@ -1751,26 +1752,17 @@ export function attachCameraControls(ctx) {
         const dyPx = e.clientY - drag.startMouseY;
 
         if (drag.handleType.startsWith("rot")) {
-          const delta = -dxPx * 0.01;
-          // Rotate around the WORLD axis the handle represents, not the
-          // matching Euler component.  Three.js Euler XYZ order applies
-          // R_z · R_y · R_x to vectors, so setting `mesh.rotation.y`
-          // rotates around the X-rotated Y axis once the user has
-          // already rotated around X — which is why the prior
-          // Euler-assignment approach made the Y/Z handles "rotate
-          // around the wrong axis" after even a single prior rotation.
-          // Compose the new orientation as a delta quaternion around the
-          // pure world axis premultiplied with the orientation that was
-          // present when the drag started; that decouples each handle's
-          // effect from any other axis the object is already rotated on.
-          let worldAxis;
-          if (drag.handleType === "rotX")
-            worldAxis = new THREE.Vector3(1, 0, 0);
-          else if (drag.handleType === "rotY")
-            worldAxis = new THREE.Vector3(0, 1, 0);
-          else worldAxis = new THREE.Vector3(0, 0, 1);
-          const dq = new THREE.Quaternion().setFromAxisAngle(worldAxis, delta);
-          mesh.quaternion.copy(drag.startParentQuaternion).premultiply(dq);
+          // See cameraControls/rotationHandle.js for the per-axis sign
+          // convention.  Rotates around the WORLD axis the handle
+          // represents (premultiplied with the orientation captured at
+          // drag start) so each handle stays decoupled from any other
+          // axis the object is already rotated on.
+          const newQuat = rotationQuaternionForDrag(
+            drag.handleType,
+            drag.startParentQuaternion,
+            dxPx,
+          );
+          if (newQuat) mesh.quaternion.copy(newQuat);
           const bb = boundingBoxRef.current;
           if (bb) bb.boxMesh.rotation.copy(mesh.rotation);
 
@@ -2948,6 +2940,7 @@ export function attachCameraControls(ctx) {
     selectedIdRef,
     axisGroupRef,
     handlesRef,
+    boundingBoxRef,
     gridMaterial,
     composerRef,
     setRotationState,

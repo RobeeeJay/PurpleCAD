@@ -119,6 +119,12 @@ const BevelSection = () => {
             amount,
             segments,
             angleRad,
+            // bbox-centre offset in the source's LOCAL frame.
+            // buildItemShapeLocal uses this to translate the rebuilt
+            // chamfer OCC shape into the same frame as the visible
+            // mesh — without it, a later cut on this chamfer lands
+            // R*centerOffset away from where the mesh is rendered.
+            centerOffset: { cx, cy, cz },
             regeneratedAt: printPrecision,
           },
           geometryData,

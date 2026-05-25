@@ -68,6 +68,11 @@ const Viewport = () => {
   // (orthographic) projection so the sketch plane has no perspective
   // distortion.
   const preSketchProjectionRef = useRef(null);
+  // Remembers the user's render mode from before an extrude began so it
+  // can be restored on confirm / cancel.  Extrude mode temporarily
+  // forces "transparent" so the user can see through the source solid
+  // to gauge the depth and direction of the cut/extrusion.
+  const preExtrudeRenderModeRef = useRef(null);
   const dimHintRef = useRef(null);
   const propagateConstraintsRef = useRef(null);
 
@@ -96,6 +101,7 @@ const Viewport = () => {
   const cameraResetTrigger = useStore((state) => state.cameraResetTrigger);
   const sketchPlacementMode = useStore((state) => state.sketchPlacementMode);
   const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
+  const cutExtrudeInProgress = useStore((state) => state.cutExtrudeInProgress);
   const extrudeDepthInput = useStore((state) => state.extrudeDepthInput);
   const activeSketchTool = useStore((state) => state.activeSketchTool);
   const sketchConstraintMode = useStore((state) => state.sketchConstraintMode);
@@ -623,6 +629,33 @@ const Viewport = () => {
       }
     }
   }, [extrudeSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Transparent during extrude ────────────────────────────────────────────
+  // While the user is choosing a profile, dragging the depth, OR the
+  // async CSG cut is still running, force the render mode to
+  // "transparent" so they can see through the source solid.  Stashes
+  // the prior mode in a ref and restores it once both flags clear —
+  // setExtrudeSelectMode(null) fires synchronously in finalizeExtrude,
+  // but the actual CSG difference runs after a microtask, so without
+  // the cutExtrudeInProgress flag the source solid would pop back to
+  // opaque for a frame before the cut result lands.
+  useEffect(() => {
+    const inExtrude = extrudeSelectMode != null || cutExtrudeInProgress;
+    if (inExtrude) {
+      if (preExtrudeRenderModeRef.current == null) {
+        preExtrudeRenderModeRef.current = renderMode;
+      }
+      if (renderMode !== "transparent") {
+        useStore.getState().setRenderMode("transparent");
+      }
+    } else if (preExtrudeRenderModeRef.current != null) {
+      const prev = preExtrudeRenderModeRef.current;
+      preExtrudeRenderModeRef.current = null;
+      if (prev !== renderMode) {
+        useStore.getState().setRenderMode(prev);
+      }
+    }
+  }, [extrudeSelectMode, cutExtrudeInProgress]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Emissive highlight ────────────────────────────────────────────────────
 

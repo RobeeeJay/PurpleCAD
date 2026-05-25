@@ -131,6 +131,8 @@ files just to make these go away.
 - The `_cameraControls` slot on the store is a deliberate non-reactive
   handle for toolbar buttons that need access to viewport helpers (eg
   `dropSelectedToGround`). Don't `useStore.subscribe` to it.
-- Per-frame constant-size scaling for the axis indicator and transform
-  handles happens in the `animate` loop in `cameraControls.js` — don't
-  scale them elsewhere or the per-frame pass will fight you.
+- Per-frame constant-on-screen-size scaling for the axis indicator,
+  transform handles, and bounding-box dimension labels happens in
+  `cameraControls/animateLoop.js` — don't scale them elsewhere or the
+  per-frame pass will fight you. Each entry caches its authored scale
+  on userData.baseScale on first sight.

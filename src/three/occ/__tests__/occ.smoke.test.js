@@ -491,6 +491,268 @@ describe("OCC boolean operations", () => {
     expect(result.position.z).toBeCloseTo(0);
   });
 
+  it("cut on a chamfered csg respects centerOffset (no rotated/offset result)", async () => {
+    // Regression for: "Cut on a chamfer/fillet result looks rotated and
+    // offset."  The chamfered csg's geometryData was recentred around
+    // the chamfer's bbox centroid (centerOffset) and item.position bakes
+    // that offset in.  buildItemShapeLocal MUST translate the rebuilt
+    // OCC chamfer by -centerOffset so its frame matches the visible
+    // mesh — otherwise a subsequent cut comes out at R*centerOffset
+    // away from where the chamfered cube is rendered.
+    const { ops } = await import("../../occOps.js");
+    const { buildItemShapeLocal } = await import("../../csgUtils.js");
+    // A cube at world (5, 0, 0) chamfered on its +X face (asymmetric, so
+    // centerOffset is non-zero).
+    const cube = { id: 1, type: "cube", position: { x: 5, y: 0, z: 0 } };
+    // Synthesise a chamfered-csg item with a non-zero centerOffset so
+    // we can verify the translate-by-(-centerOffset) takes it back to
+    // where the visible mesh sits.
+    const centerOffset = { cx: 0.05, cy: 0, cz: 0 };
+    const chamfered = {
+      id: 2,
+      type: "csg",
+      // item.position = source.brushPos + R(source.rotation) * centerOffset
+      // = (5, 0, 0) + (0.05, 0, 0) = (5.05, 0, 0) for non-rotated cube.
+      position: { x: 5.05, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      regenerator: {
+        kind: "chamfer",
+        source: cube,
+        subGeo: { edges: [], faces: [{ nx: 1, ny: 0, nz: 0 }] },
+        amount: 0.05,
+        segments: 1,
+        angleRad: null,
+        centerOffset,
+      },
+    };
+    // Verify buildItemShapeLocal returns the chamfered shape in a frame
+    // such that transformShape(item.position, item.rotation) recovers
+    // the original world cube position (cube spans world ~[4..6, -1..1,
+    // -1..1] with a small chamfer on +X side).
+    const localShape = buildItemShapeLocal(chamfered, [cube, chamfered]);
+    expect(localShape).toBeTruthy();
+
+    // Now actually run a cut through this chamfered cube to verify the
+    // cut hole lands at the world location of the cube's TOP face
+    // (y=+1), not shifted by centerOffset.
+    const cut = {
+      id: 3,
+      type: "extrude",
+      position: { x: 5, y: 1, z: 0 },
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: -0.3,
+      isCut: true,
+      profile: {
+        polygon2D: [
+          { x: -0.1, y: -0.1 },
+          { x: 0.1, y: -0.1 },
+          { x: 0.1, y: 0.1 },
+          { x: -0.1, y: 0.1 },
+        ],
+      },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [chamfered, cut],
+      allItems: [cube, chamfered, cut],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // Anchor at chamfered.position (5.05, 0, 0).  Visible vertex =
+    // anchor + recentred.  The cube's TOP face is at world y=+1 — the
+    // remaining material should still reach y=+1 (the sketch plane).
+    let maxY = -Infinity;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wy = result.position.y + result.geometryData.positions[i + 1];
+      if (wy > maxY) maxY = wy;
+    }
+    expect(maxY).toBeCloseTo(1, 3);
+    // World x should span roughly the cube's x range (4 to 6 minus
+    // chamfer trim).  Without the fix, the cut shape would be offset
+    // by +0.05 in x (centerOffset baked in twice) and minX would be
+    // > 4.
+    let minX = Infinity;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wx = result.position.x + result.geometryData.positions[i];
+      if (wx < minX) minX = wx;
+    }
+    expect(minX).toBeCloseTo(4, 3);
+  });
+
+  it("chained cut on a csg result anchors at the csg's position (no rotation/offset)", async () => {
+    // Repro for: "When an extrude cut hits a previous CSG result, the
+    // cut object looks rotated and offset."  We synthesise a csg item
+    // whose regenerator references a cube + a cut-extrude (mirroring
+    // what runCutExtrusion produces), then run a SECOND cut on top of
+    // it and verify the result anchor matches the csg's position and
+    // the visible vertex envelope still hugs the cube's bounding box.
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    const cut1 = {
+      id: 2,
+      type: "extrude",
+      position: { x: 0, y: 1, z: 0 },
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: -0.3,
+      isCut: true,
+      profile: {
+        polygon2D: [
+          { x: -0.2, y: -0.2 },
+          { x: 0.2, y: -0.2 },
+          { x: 0.2, y: 0.2 },
+          { x: -0.2, y: 0.2 },
+        ],
+      },
+    };
+    const csg1 = {
+      id: 3,
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      regenerator: {
+        kind: "boolean",
+        op: "difference",
+        inputIds: [1, 2],
+      },
+    };
+    // Second cut on csg1.
+    const cut2 = {
+      id: 4,
+      type: "extrude",
+      position: { x: 0.5, y: 1, z: 0 },
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: -0.3,
+      isCut: true,
+      profile: {
+        polygon2D: [
+          { x: -0.1, y: -0.1 },
+          { x: 0.1, y: -0.1 },
+          { x: 0.1, y: 0.1 },
+          { x: -0.1, y: 0.1 },
+        ],
+      },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [csg1, cut2],
+      allItems: [cube, cut1, csg1, cut2],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // Anchor MUST be csg1.position (= 0, 0, 0), not cut2's brushPos.
+    expect(result.position.x).toBeCloseTo(0);
+    expect(result.position.y).toBeCloseTo(0);
+    expect(result.position.z).toBeCloseTo(0);
+    // The visible world envelope should still be inside the cube
+    // bounding box (-1..+1, -1..+1, -1..+1).  If the result were
+    // rotated, vertices would extend outside.
+    let maxAbs = 0;
+    for (let i = 0; i < result.geometryData.positions.length; i++) {
+      const v = Math.abs(result.geometryData.positions[i]);
+      if (v > maxAbs) maxAbs = v;
+    }
+    expect(maxAbs).toBeLessThanOrEqual(1 + 1e-3);
+  });
+
+  it("cut extrude with polygon offset from sketch origin still starts at sketch plane", async () => {
+    // The sketch's polygon centroid sits at (1.2, 0) in sketch-local
+    // coords — NOT at the sketch origin.  buildBrushTransform shifts
+    // the prism's brushPos by that rotated centroid, and the prism is
+    // built around its own centroid in OCC local.  Verify the resulting
+    // cut still starts at the cube's top face (y = +1) and doesn't
+    // shift along the prism axis.
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    const sketchOnTop = {
+      id: 2,
+      type: "extrude",
+      position: { x: 0, y: 1, z: 0 },
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: -0.5,
+      isCut: true,
+      profile: {
+        // Square centred at (1.2, 0) — centroid offset is (1.2, 0).
+        polygon2D: [
+          { x: 0.9, y: -0.3 },
+          { x: 1.5, y: -0.3 },
+          { x: 1.5, y: 0.3 },
+          { x: 0.9, y: 0.3 },
+        ],
+      },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cube, sketchOnTop],
+      allItems: [cube, sketchOnTop],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    let maxY = -Infinity;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wy = result.position.y + result.geometryData.positions[i + 1];
+      if (wy > maxY) maxY = wy;
+    }
+    // Cube top remains at world y=+1 wherever the sketch hole doesn't
+    // cover it; the cut must START there, not at a shifted plane.
+    expect(maxY).toBeCloseTo(1, 3);
+  });
+
+  it("cut extrude on a face starts the hole AT the sketch plane (not offset)", async () => {
+    // Regression for: "When an extrude cut hits an object and subtracts
+    // from that object, the offset of the cut does not begin on the
+    // sketch plane."  A negative-depth extrude whose profile sits on
+    // the cube's top face MUST produce a hole whose top edge is at
+    // y = cube_top (= cube.position.y + 1 for a 2x2x2 cube), not
+    // shifted along the prism axis.
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    // Sketch placed on the cube's +Y face.  position = a point on the
+    // face plane (cube center y=0, half-height 1 ⇒ top at y=+1).
+    // rotation = euler that maps sketch +Z to world +Y (i.e. -π/2 around X).
+    const sketchOnTop = {
+      id: 2,
+      type: "extrude",
+      position: { x: 0, y: 1, z: 0 },
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: -0.5, // negative depth ⇒ prism extends inward (down into cube)
+      isCut: true,
+      profile: {
+        polygon2D: [
+          { x: -0.3, y: -0.3 },
+          { x: 0.3, y: -0.3 },
+          { x: 0.3, y: 0.3 },
+          { x: -0.3, y: 0.3 },
+        ],
+      },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cube, sketchOnTop],
+      allItems: [cube, sketchOnTop],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // Result is anchored at cube.brushPos = (0, 0, 0); geometryData
+    // positions are recentred around that.  Visible vertices = anchor +
+    // recentred.  The hole's top edge MUST contain points whose world
+    // y == +1 (the cube top / sketch plane) — anything lower means the
+    // cut started below the sketch plane.
+    let maxY = -Infinity;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wy = result.position.y + result.geometryData.positions[i + 1];
+      if (wy > maxY) maxY = wy;
+    }
+    // The remaining cube material still reaches the top face → maxY ≈ 1.
+    expect(maxY).toBeCloseTo(1, 3);
+  });
+
   it("performCsg anchors the result at the first input's world position", async () => {
     // Regression for: "Applying a cut extrusion results in objects that
     // extrusion touches moving before the cut is applied."  Previously

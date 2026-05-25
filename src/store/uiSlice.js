@@ -52,6 +52,14 @@ export const uiInitial = {
   // global <BusyIndicator>; a counter (not a boolean) means concurrent
   // operations stack correctly.
   pendingOperations: 0,
+
+  // True from the moment the user confirms a cut-extrude until the
+  // async CSG difference + consumeItems lands.  Lets the Viewport
+  // keep "transparent" render mode active across the brief window
+  // between extrudeSelectMode going null and the cut actually being
+  // visible — without this, the source solid pops back to opaque for
+  // a frame before the cut result replaces it.
+  cutExtrudeInProgress: false,
 };
 
 export const createUiSlice = (set) => ({
@@ -98,6 +106,7 @@ export const createUiSlice = (set) => ({
 
   setSketchPlacementMode: (active) => set({ sketchPlacementMode: active }),
   setExtrudeSelectMode: (mode) => set({ extrudeSelectMode: mode }),
+  setCutExtrudeInProgress: (v) => set({ cutExtrudeInProgress: !!v }),
   setExtrudeRetargetId: (id) => set({ extrudeRetargetId: id }),
   setRenderMode: (mode) => set({ renderMode: mode }),
   setProjectionMode: (mode) => set({ projectionMode: mode }),

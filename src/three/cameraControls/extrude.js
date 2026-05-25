@@ -283,11 +283,13 @@ export function createExtrudeHelpers(
         const retargetDepth = retargetItem
           ? resolveItemDepth(retargetItem)
           : 1.0;
+        const retargetIsCut = !!retargetItem?.isCut;
         buildExtrudePreviewMesh(profile, retargetDepth);
         useStore.getState().setExtrudeSelectMode("depth");
         useStore.getState().setExtrudeDepthInput({
           defaultDepth: retargetDepth,
           currentDepth: retargetDepth,
+          cut: retargetIsCut,
         });
         renderer.domElement.style.cursor = "ns-resize";
         return;
@@ -320,11 +322,13 @@ export function createExtrudeHelpers(
         const retargetDepth = retargetItem
           ? resolveItemDepth(retargetItem)
           : 1.0;
+        const retargetIsCut = !!retargetItem?.isCut;
         buildExtrudePreviewMesh(profile, retargetDepth);
         useStore.getState().setExtrudeSelectMode("depth");
         useStore.getState().setExtrudeDepthInput({
           defaultDepth: retargetDepth,
           currentDepth: retargetDepth,
+          cut: retargetIsCut,
         });
         renderer.domElement.style.cursor = "ns-resize";
       }
@@ -342,7 +346,9 @@ export function createExtrudeHelpers(
     if (current) {
       // computeExtrudeDepth already clamps |depth| to ≥ 0.05 with the
       // sign preserved — don't re-clamp to positive here or backward
-      // drags can't update the overlay.
+      // drags can't update the overlay.  The sign of the stored depth
+      // controls direction (positive = along face normal, negative =
+      // opposite) for both cut and non-cut extrudes.
       const clamped = depth;
       // Mouse-drag wins: clear any user-typed formula so the input reverts
       // to showing the current numeric mm value.
@@ -488,16 +494,17 @@ export function createExtrudeHelpers(
     const depth = sign * Math.max(0.05, Math.abs(rawDepth));
     clearExtrudePreview();
     const store = useStore.getState();
-    // Persist the depth as a formula string in mm so it can later
-    // reference variables.  When the user typed a non-numeric formula
-    // we keep their exact text; otherwise we serialise the numeric mm
-    // value so future edits see a sensible default.
+    const retargetId = store.extrudeRetargetId;
+    const isCut = !!store.extrudeDepthInput?.cut;
+    // Persist the depth signed — the sign controls direction (positive =
+    // along face normal, negative = opposite) for both cut and non-cut
+    // extrudes.  isCut flags the extrude for the "Extrude Cut" label
+    // and the post-extrude difference boolean, but doesn't flip the
+    // direction.
     const depthStored =
       typeof formulaOverride === "string" && formulaOverride.trim() !== ""
         ? formulaOverride.trim()
         : formatAsFormula(depth);
-    const retargetId = store.extrudeRetargetId;
-    const isCut = !!store.extrudeDepthInput?.cut;
     const sourceItemId = extrudeProfileData?.sourceItemId ?? null;
     const profileSnapshot = extrudeProfileData;
     let newExtrudeId = null;
@@ -515,13 +522,22 @@ export function createExtrudeHelpers(
           maxId = e.instruction.item.id;
       });
       newExtrudeId = maxId + 1;
+      // Cut extrusions are consumed by the boolean immediately after
+      // creation — distinguishing them in the object list ("Extrude
+      // Cut" vs plain "Extrude") makes the timeline easier to read.
+      const nameLabel = isCut ? "Extrude Cut" : "Extrude";
       store.addItem({
         id: newExtrudeId,
-        name: `Extrude ${newExtrudeId}`,
+        name: `${nameLabel} ${newExtrudeId}`,
         type: "extrude",
         children: [],
         profile: extrudeProfileData,
         depth: depthStored,
+        // `isCut` flips the prism direction in resolveItemDepth so the
+        // OCC shape + rendered mesh extend INTO the source regardless
+        // of the sign stored on `depth`.  Keeps `depth` displaying as
+        // a positive mm value in the edit dialog.
+        ...(isCut ? { isCut: true } : null),
         position: extrudeProfileData.position,
         rotation: extrudeProfileData.rotation,
         scale: { x: 1, y: 1, z: 1 },
@@ -531,8 +547,19 @@ export function createExtrudeHelpers(
     // solid via a difference boolean, then hide the now-redundant extrude
     // and the source solid (the cut result is a new CSG item that takes
     // their place visually).  Runs async via performCsg through occClient.
+    // Set cutExtrudeInProgress so the Viewport's transparent-during-
+    // extrude effect keeps the source solid see-through until the cut
+    // actually lands, not just until the user confirms.
     if (isCut && newExtrudeId != null) {
-      void runCutExtrusion(newExtrudeId, sourceItemId, profileSnapshot, store);
+      store.setCutExtrudeInProgress(true);
+      void runCutExtrusion(
+        newExtrudeId,
+        sourceItemId,
+        profileSnapshot,
+        store,
+      ).finally(() => {
+        useStore.getState().setCutExtrudeInProgress(false);
+      });
     }
     extrudeProfileData = null;
     extrudeDepthOriginV3 = null;
@@ -560,6 +587,7 @@ export function createExtrudeHelpers(
     store.setExtrudeSelectMode(null);
     store.setExtrudeRetargetId(null);
     store.setExtrudeDepthInput(null);
+    store.setCutExtrudeInProgress(false);
   };
 
   return {

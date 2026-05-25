@@ -34,7 +34,10 @@ const ExtrudeLengthDialog = () => {
 
   const map = variablesToMap(variables);
   const mm = evaluateFormula(formula, map);
-  const valid = Number.isFinite(mm) && mm > 0;
+  // Allow any non-zero value — negative depths flip the extrude
+  // direction (opposite the face normal), which is how the user
+  // controls direction for both regular and cut extrudes.
+  const valid = Number.isFinite(mm) && mm !== 0;
 
   const close = () => setTarget(null);
   const commit = () => {
