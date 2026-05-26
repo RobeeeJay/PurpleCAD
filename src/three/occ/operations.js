@@ -440,14 +440,26 @@ export function filletShapeBy(shape, subGeo, radius = 0.05) {
 export function transformShape(shape, position, rotation) {
   if (!shape) return shape;
   const oc = getOcc();
+  // We want world = T · R_z · R_y · R_x · local (i.e. rotate the local
+  // point in XYZ-Euler order, then translate to world).  OCC's
+  // `gp_Trsf::Multiply(T)` is `this = this * T`, so to build
+  //    trsf = T · R_z · R_y · R_x
+  // we must SET translation first and then `Multiply` with R_z, R_y,
+  // R_x in that order.  The old order (rotations first, translation
+  // last) produced trsf = R_x · R_y · R_z · T, which translates BEFORE
+  // rotating — visible as a boolean cut whose hole lands at the
+  // wrong world XZ when the input has a non-zero polyCentroid offset
+  // (e.g. an extrude on a global plane).
   const trsf = new oc.gp_Trsf_1();
-  // Compose rotations in XYZ order (matches THREE.Euler default).
+  if (position) {
+    trsf.SetTranslation_1(new oc.gp_Vec_4(position.x, position.y, position.z));
+  }
   if (rotation) {
-    if (rotation.x) {
+    if (rotation.z) {
       const r = new oc.gp_Trsf_1();
       r.SetRotation_1(
-        new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(1, 0, 0)),
-        rotation.x,
+        new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(0, 0, 1)),
+        rotation.z,
       );
       trsf.Multiply(r);
     }
@@ -459,19 +471,14 @@ export function transformShape(shape, position, rotation) {
       );
       trsf.Multiply(r);
     }
-    if (rotation.z) {
+    if (rotation.x) {
       const r = new oc.gp_Trsf_1();
       r.SetRotation_1(
-        new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(0, 0, 1)),
-        rotation.z,
+        new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(1, 0, 0)),
+        rotation.x,
       );
       trsf.Multiply(r);
     }
-  }
-  if (position) {
-    const t = new oc.gp_Trsf_1();
-    t.SetTranslation_1(new oc.gp_Vec_4(position.x, position.y, position.z));
-    trsf.Multiply(t);
   }
   const mk = new oc.BRepBuilderAPI_Transform_2(shape, trsf, true);
   return mk.Shape();

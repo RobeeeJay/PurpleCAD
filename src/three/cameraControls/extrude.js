@@ -542,6 +542,17 @@ export function createExtrudeHelpers(
         rotation: extrudeProfileData.rotation,
         scale: { x: 1, y: 1, z: 1 },
       });
+      if (isCut) {
+        // addItem auto-selects the prism, but a cut extrude exists for
+        // only ~200ms before runCutExtrusion replaces it with a CSG
+        // item at the TARGET's position.  Leaving the prism selected
+        // attaches the transform-handle bbox to the prism's mesh
+        // origin (item.position + R·polyCentroid) — visibly different
+        // from the target's centre — so the handles jump in X / Z when
+        // the cut lands.  Clearing the selection here keeps the gizmo
+        // invisible until addItem(csg) reselects at the right spot.
+        store.selectItem(null);
+      }
     }
     // Cut extrusion: subtract the freshly-created extrude from a target
     // solid via a difference boolean, then hide the now-redundant extrude

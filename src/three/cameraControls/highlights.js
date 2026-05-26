@@ -146,7 +146,10 @@ export function createHighlightHelpers({
         // Sphere / torus: entire surface is one face region
         matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
       } else {
-        if (Math.abs(triNormal.dot(localNormal)) > 0.999)
+        // Signed dot — anti-parallel triangles belong to the OPPOSITE
+        // face (e.g. the cube's back face when the user is hovering the
+        // front).  Math.abs here would light both faces simultaneously.
+        if (triNormal.dot(localNormal) > 0.999)
           matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
       }
     }

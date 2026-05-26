@@ -753,6 +753,325 @@ describe("OCC boolean operations", () => {
     expect(maxY).toBeCloseTo(1, 3);
   });
 
+  it("ground-plane sketch cutting ground-plane cube keeps cube position fixed", async () => {
+    // Regression for: "An extrude cut from a sketch on the ground plane
+    // into a cube on the ground plane wrongly ends up moving the
+    // extruded object before the cut both in the Z and X axis before
+    // applying the cut."
+    //
+    // Setup mirrors the live UX:
+    //   - cube on ground plane (size 2 cube centred at (cx, 1, cz) so
+    //     its base sits at y=0)
+    //   - sketch on ground plane at world origin (sketch +Z normal points
+    //     up so rotation = -π/2 about X)
+    //   - rectangle drawn at an OFFSET inside the sketch (centroid not
+    //     at sketch origin — this is the key case where polyCentroid
+    //     gets applied)
+    //   - positive depth so the prism extrudes UP into the cube
+    const { ops } = await import("../../occOps.js");
+    const cube = {
+      id: 1,
+      type: "cube",
+      position: { x: 2.5, y: 1, z: 1.5 },
+    };
+    // Sketch lies on the ground (XZ) plane.  Polygon drawn inside the
+    // cube footprint: rectangle from sketch-local (2.0, 1.0) to
+    // (3.0, 2.0) — centroid (2.5, 1.5).  Sketch +Z under -π/2 X rotation
+    // maps to world +Y, so positive depth extrudes UP.
+    const extrude = {
+      id: 2,
+      type: "extrude",
+      position: { x: 0, y: 0, z: 0 }, // sketch at origin
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: 3,
+      isCut: true,
+      profile: {
+        polygon2D: [
+          { x: 2.0, y: 1.0 },
+          { x: 3.0, y: 1.0 },
+          { x: 3.0, y: 2.0 },
+          { x: 2.0, y: 2.0 },
+        ],
+      },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cube, extrude],
+      allItems: [cube, extrude],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // The cut result MUST be anchored at the cube's position — not at
+    // some shifted position derived from the extrude's polygon centroid.
+    expect(result.position.x).toBeCloseTo(2.5, 6);
+    expect(result.position.y).toBeCloseTo(1, 6);
+    expect(result.position.z).toBeCloseTo(1.5, 6);
+    // And the visible mesh must still occupy the cube's original world
+    // bbox in X and Z (cube is 2×2×2 centred at (2.5, 1, 1.5) → spans
+    // [1.5, 3.5] in X and [0.5, 2.5] in Z).  A hole in the middle
+    // doesn't shrink the bbox along these axes.
+    let minX = Infinity,
+      maxX = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wx = result.position.x + result.geometryData.positions[i];
+      const wz = result.position.z + result.geometryData.positions[i + 2];
+      if (wx < minX) minX = wx;
+      if (wx > maxX) maxX = wx;
+      if (wz < minZ) minZ = wz;
+      if (wz > maxZ) maxZ = wz;
+    }
+    expect(minX).toBeCloseTo(1.5, 3);
+    expect(maxX).toBeCloseTo(3.5, 3);
+    expect(minZ).toBeCloseTo(0.5, 3);
+    expect(maxZ).toBeCloseTo(2.5, 3);
+  });
+
+  it("toolbar Difference (cube first, extrude on a side face second) anchors the result at the cube and the visible bbox matches the cube's", async () => {
+    // Regression for: "Applying a boolean cut for one object to another,
+    // the resulting cut is offset in the Z and Y axis."  This matches
+    // the toolbar Combine → Difference path with the user's selection
+    // ordering: primitive selected first (the minuend), an extrude
+    // selected second.  The extrude's brushPos is offset from
+    // item.position (by R · polyCentroid); the cube's is not.  Anchor
+    // must be the CUBE's position, and the rendered CSG mesh must occupy
+    // the cube's original world bbox (the bite shrinks but does not
+    // shift it).
+    const { ops } = await import("../../occOps.js");
+    // Cube centred at world (0, 0, 0), size 2 → spans [-1, +1] in every
+    // axis.
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    // Sketch placed on the cube's +X face (sketch normal = world +X).
+    // Sketch frame: rotation about Y by -π/2 puts sketch +Z onto world
+    // +X; sketch.position sits on the face plane (cube center.x + 1).
+    // Polygon offset from sketch origin → produces a non-zero
+    // polyCentroid in sketch-local Y, which under R_y(-π/2) maps to a
+    // -X world component for the brushPos (sketch +Y stays as world
+    // +Y, sketch +X maps to world -Z).  Crucially, the polyCentroid
+    // offset has Y and Z components in world space — exactly the axes
+    // the user reported as offset on the result.
+    const extrude = {
+      id: 2,
+      type: "extrude",
+      position: { x: 1, y: 0, z: 0 }, // sketch on cube's +X face
+      rotation: { x: 0, y: -Math.PI / 2, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      // R_y(-π/2)·(0,0,1) = (-1,0,0), so sketch +Z = world -X (into
+      // the cube).  Positive depth ⇒ prism extends INTO the cube.
+      depth: 0.6,
+      profile: {
+        // Polygon centroid offset from sketch origin in both axes
+        polygon2D: [
+          { x: 0.1, y: 0.3 },
+          { x: 0.5, y: 0.3 },
+          { x: 0.5, y: 0.5 },
+          { x: 0.1, y: 0.5 },
+        ],
+      },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cube, extrude],
+      allItems: [cube, extrude],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // Anchor MUST be the cube's position, not the extrude's offset
+    // brushPos.
+    expect(result.position.x).toBeCloseTo(0, 6);
+    expect(result.position.y).toBeCloseTo(0, 6);
+    expect(result.position.z).toBeCloseTo(0, 6);
+    // World bbox of the visible mesh must occupy the cube's original
+    // span: [-1, +1] in X, Y and Z.  A bite on the +X side trims the
+    // local maxX in X, but Y and Z are unaffected: their world span
+    // stays exactly [-1, +1].
+    let minY = Infinity,
+      maxY = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wy = result.position.y + result.geometryData.positions[i + 1];
+      const wz = result.position.z + result.geometryData.positions[i + 2];
+      if (wy < minY) minY = wy;
+      if (wy > maxY) maxY = wy;
+      if (wz < minZ) minZ = wz;
+      if (wz > maxZ) maxZ = wz;
+    }
+    expect(minY).toBeCloseTo(-1, 3);
+    expect(maxY).toBeCloseTo(1, 3);
+    expect(minZ).toBeCloseTo(-1, 3);
+    expect(maxZ).toBeCloseTo(1, 3);
+  });
+
+  it("toolbar Difference: cube minus extrude on a YZ-plane sketch — the hole lands where the prism was rendered (Y/Z aligned)", async () => {
+    // Regression for: "Applying a boolean cut for one object to another,
+    // the resulting cut is offset in the Z and Y axis."  User report:
+    // hole is in the wrong place on the cube, sketch placed on a global
+    // plane (the YZ plane is the case where polyCentroid offsets map to
+    // world Y/Z — sketch +Z under R_y(π/2) → world +X, sketch +X → world
+    // -Z, sketch +Y → world +Y).
+    //
+    // What aligns the hole with the rendered prism is that
+    // buildBrushTransform(extrude) — which positions the OCC shape —
+    // uses the SAME polyCentroid as sceneBuilder uses for the mesh's
+    // visible centre.  Both shift by `R · polyCentroid(polygon2D)`.  If
+    // they ever diverge (different polygon, different tessellation, a
+    // stale stored polygon2D vs a re-traced sketch), the hole appears
+    // offset from where the prism was visible.
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    // Sketch placed on the YZ plane at the world origin: rotation
+    // (0, π/2, 0) puts sketch +Z onto world +X.
+    // Rectangle in sketch-local with centroid at (0.4, 0.6) — offset
+    // from the sketch origin.  Centroid under R_y(π/2):
+    //   (cx, cy, 0) → (0, cy, -cx) = (0, 0.6, -0.4)
+    // — Y and Z offsets, no X.  This is the exact pattern the user
+    // reported as "offset in Z and Y".
+    const extrude = {
+      id: 2,
+      type: "extrude",
+      position: { x: 0, y: 0, z: 0 }, // sketch at world origin on YZ
+      rotation: { x: 0, y: Math.PI / 2, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: 2,
+      profile: {
+        polygon2D: [
+          { x: 0.2, y: 0.4 },
+          { x: 0.6, y: 0.4 },
+          { x: 0.6, y: 0.8 },
+          { x: 0.2, y: 0.8 },
+        ],
+      },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cube, extrude],
+      allItems: [cube, extrude],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // Anchor: cube's position (the cube is the minuend).
+    expect(result.position.x).toBeCloseTo(0, 6);
+    expect(result.position.y).toBeCloseTo(0, 6);
+    expect(result.position.z).toBeCloseTo(0, 6);
+    // The hole must land where the polygon's world projection puts it.
+    // For YZ-plane rotation (0, π/2, 0):
+    //   sketch (px, py, 0) → world (0, py, -px)
+    // So polygon X = [0.2, 0.6] maps to world Z = [-0.6, -0.2];
+    // polygon Y = [0.4, 0.8] maps to world Y = [+0.4, +0.8].  The HOLE
+    // in the cube must be at world (any X) × Y∈[0.4,0.8] × Z∈[-0.6,-0.2].
+    // The simplest invariant we can check on the recentred geometryData:
+    // on the cube's +X face (recentred X = +1) the material must have
+    // a gap on the rectangle Y∈[0.4,0.8], Z∈[-0.6,-0.2].  Equivalently,
+    // no triangle vertex at the cube's +X face inside that rectangle.
+    let pointsAtPlusXNearHole = 0;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wx = result.position.x + result.geometryData.positions[i];
+      const wy = result.position.y + result.geometryData.positions[i + 1];
+      const wz = result.position.z + result.geometryData.positions[i + 2];
+      // Strictly inside the hole rectangle on the +X face: the cube's
+      // outer surface at +X should be missing here.
+      if (
+        Math.abs(wx - 1) < 0.001 &&
+        wy > 0.42 &&
+        wy < 0.78 &&
+        wz > -0.58 &&
+        wz < -0.22
+      )
+        pointsAtPlusXNearHole++;
+    }
+    expect(pointsAtPlusXNearHole).toBe(0);
+  });
+
+  it("toolbar Difference: hole on the cube's bottom face lands at the triangle's world XZ (rotation BEFORE translation)", async () => {
+    // Regression for: "Applying a boolean cut for one object to another,
+    // the resulting cut is offset in the Z and Y axis."  Root cause was
+    // transformShape composing trsf = R · T instead of T · R (OCC's
+    // gp_Trsf::Multiply does `this = this * T`, so building rotations
+    // first then translation produced a transform that TRANSLATED the
+    // local shape first and only THEN rotated — wrong).  Catch it with
+    // a vertex-position check: a triangle drawn at sketch-local
+    // (0..1, 0..1) on the XZ ground plane, extruded UP into a cube,
+    // must produce a hole on the cube's bottom face whose vertices lie
+    // at the triangle's world XZ projection: sketch (px, py, 0) under
+    // R_x(-π/2) → world (px, 0, -py).  With the broken order the same
+    // vertex would sit at world (px, ?, +centroid.y - py) — a shift in
+    // Z by the polyCentroid's Y component.
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 2, z: 0 } };
+    const extrude = {
+      id: 2,
+      type: "extrude",
+      position: { x: 0, y: 0, z: 0 }, // sketch on XZ ground at origin
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: 4,
+      profile: {
+        // Triangle with vertices at sketch-local (0,0), (1,0), (0.5,1)
+        // — centroid (0.5, 0.333) is non-zero so the bug shows.
+        polygon2D: [
+          { x: 0, y: 0 },
+          { x: 1, y: 0 },
+          { x: 0.5, y: 1 },
+        ],
+      },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cube, extrude],
+      allItems: [cube, extrude],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // Anchor: cube.position.
+    expect(result.position.x).toBeCloseTo(0, 6);
+    expect(result.position.y).toBeCloseTo(2, 6);
+    expect(result.position.z).toBeCloseTo(0, 6);
+    // Find triangles on the cube's bottom face (world y = +1, the
+    // cube's bottom since it spans y=[1,3]).  Collect the unique XZ
+    // points among their vertices.
+    const p = result.geometryData.positions;
+    const idx = result.geometryData.indices;
+    const triCount = idx ? idx.length / 3 : p.length / 9;
+    const bottomXZ = new Set();
+    for (let i = 0; i < triCount; i++) {
+      const a = idx ? idx[i * 3] : i * 3;
+      const b = idx ? idx[i * 3 + 1] : i * 3 + 1;
+      const c = idx ? idx[i * 3 + 2] : i * 3 + 2;
+      const ay = result.position.y + p[a * 3 + 1];
+      const by = result.position.y + p[b * 3 + 1];
+      const cy = result.position.y + p[c * 3 + 1];
+      if (
+        Math.abs(ay - 1) < 0.001 &&
+        Math.abs(by - 1) < 0.001 &&
+        Math.abs(cy - 1) < 0.001
+      ) {
+        for (const v of [a, b, c]) {
+          const wx = result.position.x + p[v * 3];
+          const wz = result.position.z + p[v * 3 + 2];
+          bottomXZ.add(`${wx.toFixed(3)},${wz.toFixed(3)}`);
+        }
+      }
+    }
+    // The triangle's world XZ projection under R_x(-π/2):
+    //   sketch (px, py, 0) → world (px, 0, -py)
+    // Corners: (0,0)→(0,0); (1,0)→(1,0); (0.5,1)→(0.5,-1).
+    // The hole on the cube's bottom face MUST include the triangle's
+    // interior — verify by checking that the corner (0.5, -1) (which
+    // lies on the cube boundary in Z, since cube Z spans [-1,1]) is
+    // referenced by some bottom-face vertex.  Under the OLD (broken)
+    // composition, the corner would sit at world Z = +0.333 instead of
+    // -1.  The corner (0.5, -1) is unambiguous in the cube/hole bottom.
+    const triangleCornerKey = `${(0.5).toFixed(3)},${(-1).toFixed(3)}`;
+    expect(bottomXZ.has(triangleCornerKey)).toBe(true);
+    // And the broken-order vertex (0.5, +0.333) must NOT be on the
+    // bottom face.
+    const brokenCornerKey = `${(0.5).toFixed(3)},${(0.333).toFixed(3)}`;
+    expect(bottomXZ.has(brokenCornerKey)).toBe(false);
+  });
+
   it("performCsg anchors the result at the first input's world position", async () => {
     // Regression for: "Applying a cut extrusion results in objects that
     // extrusion touches moving before the cut is applied."  Previously
