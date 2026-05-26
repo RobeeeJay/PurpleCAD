@@ -70,11 +70,15 @@ export function makeCylinder() {
 
 export function makeTorus() {
   const oc = getOcc();
-  // BRepPrimAPI_MakeTorus_5(Ax2, R1, R2): axis frame + major + minor.
-  // (The simpler _1(R1, R2) constructor would axis the torus on Z, which
-  // matches three.js TorusGeometry's default orientation.  For
-  // consistency with the original three.js path we just use that.)
-  const mk = new oc.BRepPrimAPI_MakeTorus_1(1.0, 0.4);
+  // Axis along +Y to match the rendered torus.  The visible torus shader
+  // (objectMaterials.js) uses the mesh's local +Y as the torus normal,
+  // and the highlight/wireframe overlays rotate the raw THREE.TorusGeometry
+  // by R_x(-π/2) to align with that.  Building the OCC torus with the
+  // default Z-axis means booleans involving a torus operate on a shape
+  // that's rotated 90° from where the user sees it — the cut comes out
+  // visibly wrong.  Y-axis here keeps OCC and the shader in sync.
+  const ax = ax2YUp({ x: 0, y: 0, z: 0 });
+  const mk = new oc.BRepPrimAPI_MakeTorus_5(ax, 1.0, 0.4);
   return mk.Shape();
 }
 

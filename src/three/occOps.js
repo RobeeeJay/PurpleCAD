@@ -146,14 +146,28 @@ async function performCsg({
   printPrecision,
 }) {
   await ensureOcc();
+  const oc = getOcc();
   const sources = allItems || selectedItems;
   const shapes = [];
   const worldAnchors = [];
   for (const item of selectedItems) {
     const local = buildItemShapeLocal(item, sources);
     if (!local) continue;
-    const { position, rotation } = buildBrushTransform(item);
-    const world = transformShape(local, position, rotation);
+    const { position, rotation, scale } = buildBrushTransform(item);
+    // Apply uniform scale BEFORE rotate+translate so the input enters
+    // the boolean at its visible size.  Without this, a primitive that
+    // the user has resized via the transform handles contributes its
+    // unscaled local geometry to the boolean — visually wrong: the cut
+    // ignores the resize.  Export already does this same scale step in
+    // buildExportShapes.
+    let scaled = local;
+    if (scale != null && Math.abs(scale - 1) > 1e-9) {
+      const sTrsf = new oc.gp_Trsf_1();
+      sTrsf.SetScaleFactor(scale);
+      const mk = new oc.BRepBuilderAPI_Transform_2(local, sTrsf, true);
+      scaled = mk.Shape();
+    }
+    const world = transformShape(scaled, position, rotation);
     if (world) {
       shapes.push(world);
       worldAnchors.push(position);

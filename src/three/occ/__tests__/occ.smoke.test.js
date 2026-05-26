@@ -100,6 +100,46 @@ describe("OCC primitives", () => {
   it("torus tessellates", () => {
     expectSolidGeometry(tessellate(makeTorus(), null));
   });
+  it("torus is oriented with its axis along +Y to match the shader (R=1.0, r=0.4 ring in the XZ plane)", () => {
+    // Regression for: "Torus do not operate properly in boolean
+    // operations, the rotation is incorrect."  The rendered torus uses
+    // its mesh-local +Y as the torus normal (see objectMaterials.js'
+    // shader vTorusNormal = modelViewMatrix[1].xyz), so the OCC torus
+    // MUST also be Y-axis or booleans will operate on a shape rotated
+    // 90° from where the user sees it.
+    //
+    // Y-axis torus: ring in XZ plane.  Outer extent on +X is R+r=1.4,
+    // inner extent is R-r=0.6.  Along the Y axis the extent is just r=0.4
+    // (top and bottom of the tube).  Bbox: X∈[-1.4,1.4], Z∈[-1.4,1.4],
+    // Y∈[-0.4,0.4].  A Z-axis (wrong) torus would have Y∈[-1.4,1.4]
+    // and Z∈[-0.4,0.4] — flipped.
+    const geo = tessellate(makeTorus(), null);
+    const pos = geo.getAttribute("position");
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i),
+        y = pos.getY(i),
+        z = pos.getZ(i);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }
+    expect(maxX).toBeCloseTo(1.4, 2);
+    expect(minX).toBeCloseTo(-1.4, 2);
+    expect(maxZ).toBeCloseTo(1.4, 2);
+    expect(minZ).toBeCloseTo(-1.4, 2);
+    // The axis dimension (Y) is just the tube radius.
+    expect(maxY).toBeCloseTo(0.4, 2);
+    expect(minY).toBeCloseTo(-0.4, 2);
+  });
   it("print precision yields more vertices than preview", () => {
     const preview = tessellate(makeSphere(), null);
     const print = tessellate(makeSphere(), 0.01);
@@ -1070,6 +1110,59 @@ describe("OCC boolean operations", () => {
     // bottom face.
     const brokenCornerKey = `${(0.5).toFixed(3)},${(0.333).toFixed(3)}`;
     expect(bottomXZ.has(brokenCornerKey)).toBe(false);
+  });
+
+  it("boolean cut respects item.scale (resized primitives contribute at their visible size)", async () => {
+    // Regression for: "Performing a boolean cut operation between two
+    // primitive objects, such as cubes or spheres, does not respect the
+    // resizing of the primitive objects, only the rotation and
+    // movement."  buildExportShapes applies item.scale explicitly when
+    // building OCC shapes for STL/STEP, but performCsg ignored the
+    // scale field returned by buildBrushTransform — so a cube the user
+    // had scaled up still got boolean'd at its unscaled 2×2×2 size.
+    const { ops } = await import("../../occOps.js");
+    // Cube A at the origin scaled to 3× — should occupy [-3, +3]^3.
+    const cubeA = {
+      id: 1,
+      type: "cube",
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 3, y: 3, z: 3 },
+    };
+    // Cube B at +4 on X, unscaled — occupies [3, 5] × [-1, 1] × [-1, 1].
+    // Cubes overlap on the +X face of A (X ∈ [3, 3]).  Difference A − B
+    // takes a bite from A.  If A's scale were ignored, A would only
+    // span [-1, 1]^3 and cube B would sit entirely OUTSIDE A — the
+    // boolean would return A unchanged.
+    const cubeB = {
+      id: 2,
+      type: "cube",
+      position: { x: 4, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cubeA, cubeB],
+      allItems: [cubeA, cubeB],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    // Anchor at cube A's position.
+    expect(result.position.x).toBeCloseTo(0, 6);
+    // World bbox of the result should reach to cube A's scaled extent
+    // (X = -3) on the -X side.  If scale were ignored, minX would be
+    // ~-1 (just the unscaled cube).
+    let minX = Infinity,
+      maxX = -Infinity;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wx = result.position.x + result.geometryData.positions[i];
+      if (wx < minX) minX = wx;
+      if (wx > maxX) maxX = wx;
+    }
+    expect(minX).toBeCloseTo(-3, 3);
+    // The +X side gets the bite from cube B (which spans X up to +5);
+    // material is removed from X = 3 onwards within B's Y/Z footprint.
+    // A's outer extent on +X (outside B's footprint) is still +3.
+    expect(maxX).toBeCloseTo(3, 3);
   });
 
   it("performCsg anchors the result at the first input's world position", async () => {

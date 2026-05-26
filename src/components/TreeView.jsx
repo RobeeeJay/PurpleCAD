@@ -45,6 +45,7 @@ const TreeViewItem = ({
   onDrop,
 }) => {
   const selectItem = useStore((s) => s.selectItem);
+  const addToSelection = useStore((s) => s.addToSelection);
   const setHoveredId = useStore((s) => s.setHoveredId);
   const toggleItemExpanded = useStore((s) => s.toggleItemExpanded);
   const toggleItemVisibility = useStore((s) => s.toggleItemVisibility);
@@ -157,7 +158,12 @@ const TreeViewItem = ({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="tree-label" onClick={() => selectItem(node.id)}>
+          <span
+            className="tree-label"
+            onClick={(e) =>
+              e.shiftKey ? addToSelection(node.id) : selectItem(node.id)
+            }
+          >
             {node.name}
           </span>
         )}
