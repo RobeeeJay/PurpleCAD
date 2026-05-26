@@ -37,10 +37,13 @@ const EXPORTABLE_TYPES = new Set([
 function buildExportShapes(items) {
   const oc = getOcc();
   const out = [];
+  // STL/STEP exports always run at print precision (0.01 mm) so curve
+  // resolution in extrudes matches the export chord deviation.
+  const exportPrecision = 0.01;
   for (const item of items) {
     if (item.visible === false) continue;
     if (!EXPORTABLE_TYPES.has(item.type)) continue;
-    const local = buildItemShapeLocal(item, items);
+    const local = buildItemShapeLocal(item, items, exportPrecision);
     if (!local) continue;
     const positioned = transformShape(local, item.position, item.rotation);
     if (!positioned) continue;
@@ -98,7 +101,7 @@ async function chamferOrFilletItem({
   printPrecision,
 }) {
   await ensureOcc();
-  const sourceShape = buildItemShapeLocal(source, allItems);
+  const sourceShape = buildItemShapeLocal(source, allItems, printPrecision);
   if (!sourceShape) return null;
   const result =
     segments === 1
@@ -151,7 +154,7 @@ async function performCsg({
   const shapes = [];
   const worldAnchors = [];
   for (const item of selectedItems) {
-    const local = buildItemShapeLocal(item, sources);
+    const local = buildItemShapeLocal(item, sources, printPrecision);
     if (!local) continue;
     const { position, rotation, scale } = buildBrushTransform(item);
     // Apply uniform scale BEFORE rotate+translate so the input enters

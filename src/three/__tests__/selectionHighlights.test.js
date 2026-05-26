@@ -147,6 +147,40 @@ describe("buildSelectionHighlight – face overlay", () => {
     expect(faceMesh.renderOrder).toBeGreaterThan(0);
   });
 
+  it("BFS-by-centroid: picks the face under the clicked point, not the other coplanar face", () => {
+    // Regression for: "With the previous highlight face fix, that
+    // worked for hover but when selecting it would select the wrong
+    // face."  Two coplanar +Y plateaus on the same mesh — face A at
+    // X∈[0,1], face B at X∈[3,4].  A stored face entry with
+    // `{nx:0, ny:1, nz:0, cx:0.5, cy:1, cz:0.5}` (a point on face A)
+    // must produce an overlay that covers ONLY A.
+    const positions = new Float32Array([
+      // Plateau A at y=1, X∈[0,1], Z∈[0,1].  Two triangles, +Y normal.
+      0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0,
+      // Plateau B at y=1, X∈[3,4], Z∈[0,1].  Disconnected from A.
+      3, 1, 0, 3, 1, 1, 4, 1, 1, 3, 1, 0, 4, 1, 1, 4, 1, 0,
+    ]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial());
+    const subGeo = {
+      faces: [{ nx: 0, ny: 1, nz: 0, cx: 0.5, cy: 1, cz: 0.5 }],
+      edges: [],
+    };
+    const group = buildSelectionHighlight(mesh, subGeo);
+    expect(group).not.toBeNull();
+    const faceMesh = group.children.find((c) => c.userData.kind === "face");
+    expect(faceMesh).toBeDefined();
+    const pos = faceMesh.geometry.getAttribute("position");
+    // Plateau A: 2 triangles → 6 vertices.  If the seed picking
+    // landed on B (X∈[3,4]) the overlay would either come from B or
+    // include both plateaus (12 vertices).
+    expect(pos.count).toBe(6);
+    for (let i = 0; i < pos.count; i++) {
+      expect(pos.getX(i)).toBeLessThanOrEqual(1.0001);
+    }
+  });
+
   it("creates one overlay covering all triangles when multiple faces selected", () => {
     const subGeo = {
       faces: [

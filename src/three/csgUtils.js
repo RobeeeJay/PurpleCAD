@@ -1,5 +1,11 @@
 import * as THREE from "three";
-import { polyCentroid } from "./sceneObjects.js";
+import {
+  polyCentroid,
+  findClosedLoops,
+  groupLoopsWithHoles,
+  polyContainsPoint,
+  polyArea,
+} from "./sceneObjects.js";
 import { makePrimitiveShape } from "./occ/primitives.js";
 import { tessellate, tessellateToData } from "./occ/tessellate.js";
 import {
@@ -125,6 +131,62 @@ function chamferCenterOffset(regenerator, item) {
 // Build the OCC TopoDS_Shape for an item, transformed to world space.
 // Returns null for items that can't be expressed in OCC yet (e.g. extrude,
 // sketch).  Used by performCsg and chamfer paths.
+// Re-tessellate an extrude's profile polygon at the current curve
+// precision.  The stored `item.profile.polygon2D` is whatever
+// findClosedLoops produced at extrude creation time — fine for the
+// rendered THREE.ExtrudeGeometry (sceneBuilder also re-tessellates
+// live), but the OCC `makeExtrude` previously used the stored polygon
+// verbatim.  Result: a CSG / chamfer / cut that used the extrude as an
+// input was baked from the LOW-RES polygon and toggling print
+// resolution didn't smooth out the curves.  When `precision` and a
+// reachable sketch are available, redo findClosedLoops at the live
+// precision and substitute the matching loop, so the OCC shape reflects
+// what the user sees on screen.
+function extrudeWithLivePolygon(item, allItems, precision) {
+  const profile = item.profile;
+  if (!profile || profile.sketchId == null) return item;
+  if (precision == null) return item;
+  const sketch = allItems.find((i) => i.id === profile.sketchId);
+  if (!sketch || !Array.isArray(sketch.shapes) || sketch.shapes.length === 0)
+    return item;
+  const loops = findClosedLoops(sketch.shapes, 32, precision);
+  if (!loops || loops.length === 0) return item;
+  const grouped = groupLoopsWithHoles(loops);
+  const allEntries = [];
+  const collect = (e) => {
+    allEntries.push(e);
+    e.entries.forEach(collect);
+  };
+  grouped.forEach(collect);
+  if (allEntries.length === 0) return item;
+  // Match the same loop the rendered mesh uses: prefer the entry that
+  // CONTAINS the stored profileCentroid (an interior point the user
+  // clicked when creating the extrude) and whose area is closest to the
+  // stored polygon's area.  Mirrors sceneBuilder's matching logic so
+  // OCC and the visible mesh stay aligned.
+  const pc = profile.profileCentroid;
+  const storedArea = polyArea(profile.polygon2D);
+  let match = allEntries[0];
+  if (pc) {
+    const containing = allEntries.filter((g) =>
+      polyContainsPoint(g.polygon, pc),
+    );
+    const pool = containing.length > 0 ? containing : allEntries;
+    match = pool.reduce((best, g) => {
+      const da = Math.abs(polyArea(g.polygon) - storedArea);
+      const db = Math.abs(polyArea(best.polygon) - storedArea);
+      return da < db ? g : best;
+    });
+  }
+  if (!match || match.polygon.length < 3) return item;
+  return Object.assign({}, item, {
+    profile: Object.assign({}, profile, {
+      polygon2D: match.polygon,
+      holes: match.holes.filter((h) => h.length >= 3),
+    }),
+  });
+}
+
 // Build the OCC TopoDS_Shape for an item in its LOCAL frame — the same
 // frame as its rendered geometryData (so that edge endpoints picked by
 // the user, which come from the rendered mesh, will match edges of this
@@ -135,20 +197,27 @@ function chamferCenterOffset(regenerator, item) {
 //   inputs at their world positions, then translate back by -item.position
 //   so the boolean result sits centred in the item's local frame;
 //   chamfer/fillet → rebuild source and apply the recorded operation).
-export function buildItemShapeLocal(item, allItems = []) {
+//
+// `precision` (when non-null) re-tessellates extrude profiles from
+// their sketch shapes so curve-heavy extrudes pick up the current
+// resolution setting when used in CSGs / chamfers / cuts.
+export function buildItemShapeLocal(item, allItems = [], precision = null) {
   if (
     item.type === "cube" ||
     item.type === "sphere" ||
     item.type === "cylinder" ||
-    item.type === "torus" ||
-    item.type === "extrude"
+    item.type === "torus"
   ) {
     return makePrimitiveShape(item);
+  }
+  if (item.type === "extrude") {
+    const live = extrudeWithLivePolygon(item, allItems, precision);
+    return makePrimitiveShape(live);
   }
   if (item.type === "csg" && item.regenerator) {
     const r = item.regenerator;
     if (r.kind === "chamfer") {
-      const sourceShape = buildItemShapeLocal(r.source, allItems);
+      const sourceShape = buildItemShapeLocal(r.source, allItems, precision);
       if (!sourceShape) return null;
       const subGeo = r.subGeo || { edges: [], faces: [] };
       // Use the "*By" variants so face selections expand into their
@@ -186,7 +255,7 @@ export function buildItemShapeLocal(item, allItems = []) {
         .map((id) => allItems.find((i) => i.id === id))
         .filter(Boolean)
         .map((inp) => {
-          const local = buildItemShapeLocal(inp, allItems);
+          const local = buildItemShapeLocal(inp, allItems, precision);
           if (!local) return null;
           const t = buildBrushTransform(inp);
           return transformShape(local, t.position, t.rotation);

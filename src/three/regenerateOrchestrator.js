@@ -20,7 +20,12 @@ export async function regenerateForResolution(printPrecision) {
   const newItems = await regenerateItemsForResolution(
     state.items,
     printPrecision,
+    // Publish progress so the BusyIndicator can show a progress bar
+    // while the regen runs.  Clear it at the end (in the finally below)
+    // so the bar doesn't linger after work finishes.
+    (p) => useStore.getState().setRegenProgress(p),
   );
+  useStore.getState().setRegenProgress(null);
   if (newItems !== state.items) {
     useStore.setState({ items: newItems });
   }
@@ -47,6 +52,11 @@ export async function recalculateTimeline() {
   useStore.setState({ items: dirtied });
   const printPrecision =
     useStore.getState().curveResolution === "print" ? 0.01 : null;
-  const newItems = await regenerateItemsForResolution(dirtied, printPrecision);
+  const newItems = await regenerateItemsForResolution(
+    dirtied,
+    printPrecision,
+    (p) => useStore.getState().setRegenProgress(p),
+  );
+  useStore.getState().setRegenProgress(null);
   if (newItems !== dirtied) useStore.setState({ items: newItems });
 }

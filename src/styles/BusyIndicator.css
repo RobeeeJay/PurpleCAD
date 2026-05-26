@@ -37,3 +37,17 @@
     transform: rotate(360deg);
   }
 }
+
+.busy-progress {
+  width: 200px;
+  height: 6px;
+  background-color: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.busy-progress-fill {
+  height: 100%;
+  background-color: #ffffff;
+  transition: width 120ms ease-out;
+}

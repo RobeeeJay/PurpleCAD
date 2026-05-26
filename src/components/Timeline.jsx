@@ -20,6 +20,8 @@ const entryIcon = (label) => {
   if (label.startsWith("Rotated")) return "↻";
   if (label.startsWith("Scaled")) return "⤢";
   if (label.startsWith("Chamfered") || label.startsWith("Filleted")) return "◆";
+  if (label.startsWith("Hidden")) return "⊘";
+  if (label.startsWith("Shown")) return "◉";
   return "◆";
 };
 

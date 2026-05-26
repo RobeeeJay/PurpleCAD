@@ -959,6 +959,7 @@ export function attachCameraControls(ctx) {
     clearFaceHighlight,
     clearEdgeHighlight,
     clearPointHighlight,
+    clearHL,
     applyFaceHighlight,
     applyEdgeHighlight,
     applyPointHighlight,
@@ -2399,25 +2400,33 @@ export function attachCameraControls(ctx) {
               ? [...prev.faces]
               : [];
           const n = highlights.pendingFaceSelection;
-          const already = faces.some(
-            (f) =>
-              Math.abs(f.nx - n.nx) < 0.01 &&
-              Math.abs(f.ny - n.ny) < 0.01 &&
-              Math.abs(f.nz - n.nz) < 0.01,
-          );
+          // Two stored faces are "the same" if BOTH the normal and the
+          // centroid sample point are close — normal alone can't
+          // distinguish coplanar disconnected faces.
+          const sameFace = (f) =>
+            Math.abs(f.nx - n.nx) < 0.01 &&
+            Math.abs(f.ny - n.ny) < 0.01 &&
+            Math.abs(f.nz - n.nz) < 0.01 &&
+            (f.cx == null ||
+              n.cx == null ||
+              (Math.abs(f.cx - n.cx) < 0.05 &&
+                Math.abs(f.cy - n.cy) < 0.05 &&
+                Math.abs(f.cz - n.cz) < 0.05));
+          const already = faces.some(sameFace);
           useStore.getState().setSelectedSubGeometry({
             itemId: clickedId,
             edges: [],
             faces: already
-              ? faces.filter(
-                  (f) =>
-                    !(
-                      Math.abs(f.nx - n.nx) < 0.01 &&
-                      Math.abs(f.ny - n.ny) < 0.01 &&
-                      Math.abs(f.nz - n.nz) < 0.01
-                    ),
-                )
-              : [...faces, { nx: n.nx, ny: n.ny, nz: n.nz }],
+              ? faces.filter((f) => !sameFace(f))
+              : [
+                  ...faces,
+                  {
+                    nx: n.nx,
+                    ny: n.ny,
+                    nz: n.nz,
+                    ...(n.cx != null ? { cx: n.cx, cy: n.cy, cz: n.cz } : null),
+                  },
+                ],
           });
           // Sub-geometry selection is exclusive with multi-object selection.
           selectItem(null);

@@ -1025,6 +1025,142 @@ describe("OCC boolean operations", () => {
     expect(pointsAtPlusXNearHole).toBe(0);
   });
 
+  it("chamferOrFilletItem can chamfer a CSG source that still carries its boolean regenerator (regression: chamfer on a post-boolean shape used to no-op)", async () => {
+    // Regression for: "When applying a chamfer or bevel to any surface
+    // or edge which is part of an object that has had a boolean
+    // operation applied to it, regardless of if it is a cut or a
+    // combine, appears to do nothing."  BevelSection used to strip the
+    // source CSG's regenerator before passing it to chamferOrFilletItem
+    // — but buildItemShapeLocal requires the regenerator to rebuild a
+    // csg's TopoDS_Shape, so the chamfer silently returned null.
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    const sphere = { id: 2, type: "sphere", position: { x: 1.5, y: 0, z: 0 } };
+    // Mimic the post-Combine state: a CSG item that knows how to
+    // rebuild itself via inputIds, with geometryData baked in.  The
+    // user has just clicked a face of THIS csg and asked to chamfer.
+    const csg = {
+      id: 3,
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      geometryData: {
+        positions: [0, 0, 0],
+        normals: null,
+        indices: null,
+      },
+      regenerator: {
+        kind: "boolean",
+        op: "difference",
+        inputIds: [1, 2],
+        regeneratedAt: null,
+      },
+    };
+    const result = await ops.chamferOrFilletItem({
+      source: csg,
+      subGeo: { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
+      amount: 0.05,
+      angleRad: null,
+      segments: 1,
+      allItems: [cube, sphere, csg],
+      printPrecision: null,
+    });
+    // Chamfering the top face of the cube-minus-sphere CSG MUST produce
+    // a non-null result with real geometry.  buildItemShapeLocal needs
+    // csg.regenerator to be present to rebuild the OCC shape.
+    expect(result).toBeTruthy();
+    expect(result.geometryData.positions.length).toBeGreaterThan(0);
+    // And — proving the bug at the OCC layer — passing the SAME csg
+    // with its regenerator stripped (the broken BevelSection snapshot)
+    // returns null.  That's why "chamfer doesn't work on objects with
+    // a boolean applied" — the toolbar was throwing away the recipe
+    // chamferOrFilletItem needs to rebuild the source shape.
+    const regenStripped = { ...csg };
+    delete regenStripped.regenerator;
+    const noResult = await ops.chamferOrFilletItem({
+      source: regenStripped,
+      subGeo: { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
+      amount: 0.05,
+      angleRad: null,
+      segments: 1,
+      allItems: [cube, sphere, regenStripped],
+      printPrecision: null,
+    });
+    expect(noResult).toBeNull();
+  });
+
+  it("extrude in a CSG uses the live sketch tessellation at the current resolution (curves get finer when printPrecision is set)", async () => {
+    // Regression for: "When a sketch contains extruded curves, the high
+    // resolution toggle does not cause those curves to increase in
+    // divisions when toggled, the resolution is respected only during
+    // the initial extrusion."  The OCC `makeExtrude` used to take
+    // `item.profile.polygon2D` verbatim — a snapshot taken at extrude
+    // creation time.  In a CSG (cube minus extruded circle), the
+    // boolean output came out with the SAME number of facets around
+    // the cylindrical hole regardless of the print/preview setting.
+    const { ops } = await import("../../occOps.js");
+    const sketch = {
+      id: 10,
+      type: "sketch",
+      shapes: [{ type: "circle", cx: 0, cy: 0, r: 0.5 }],
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+    };
+    // The extrude's stored polygon2D is a coarse 8-sample approximation
+    // of the circle.  At print precision the live tessellation produces
+    // dozens of samples on the same circle.
+    const N_STORED = 8;
+    const storedPoly = [];
+    for (let i = 0; i < N_STORED; i++) {
+      const a = (i / N_STORED) * 2 * Math.PI;
+      storedPoly.push({ x: 0.5 * Math.cos(a), y: 0.5 * Math.sin(a) });
+    }
+    const extrude = {
+      id: 11,
+      type: "extrude",
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      depth: 2,
+      profile: {
+        type: "sketchLoop",
+        sketchId: 10,
+        polygon2D: storedPoly,
+        holes: [],
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+        profileCentroid: { x: 0, y: 0 },
+      },
+    };
+    const cube = {
+      id: 12,
+      type: "cube",
+      position: { x: 0, y: 1, z: 0 },
+    };
+
+    const preview = await ops.performCsg({
+      selectedItems: [cube, extrude],
+      allItems: [cube, extrude, sketch],
+      operation: "difference",
+      printPrecision: null,
+    });
+    const print = await ops.performCsg({
+      selectedItems: [cube, extrude],
+      allItems: [cube, extrude, sketch],
+      operation: "difference",
+      printPrecision: 0.01,
+    });
+    expect(preview).toBeTruthy();
+    expect(print).toBeTruthy();
+    // The OCC boolean's tessellated vertex count scales with how many
+    // sides the cylindrical hole has.  Print mode (precision 0.01) must
+    // produce MORE vertices than preview (8-sample polygon) for the
+    // same scene.  If makeExtrude were still using the stored polygon
+    // verbatim, vertex counts would be identical and this assertion fails.
+    const previewCount = preview.geometryData.positions.length / 3;
+    const printCount = print.geometryData.positions.length / 3;
+    expect(printCount).toBeGreaterThan(previewCount);
+  });
+
   it("toolbar Difference: hole on the cube's bottom face lands at the triangle's world XZ (rotation BEFORE translation)", async () => {
     // Regression for: "Applying a boolean cut for one object to another,
     // the resulting cut is offset in the Z and Y axis."  Root cause was
@@ -1624,6 +1760,43 @@ describe("OCC chamfer", () => {
     const symKey = symPositions.map((v) => v.toFixed(4)).join(",");
     const asymKey = asymPositions.map((v) => v.toFixed(4)).join(",");
     expect(asymKey).not.toBe(symKey);
+  });
+
+  it("chamfering a curved edge (cylinder top rim): line-segment endpoints LYING ON the curve match the OCC edge", () => {
+    // Regression for: "Chamfer and bevel doesn't work with holes in
+    // objects" (selecting the rim of a hole or a curved edge).  The OCC
+    // shape stores a circular rim as a SINGLE curved edge — but the
+    // rendered mesh tessellates it into many short straight segments.
+    // When the user Cmd-clicks a segment, applyEdgeHighlight stores
+    // that segment's endpoints — neither of which equals the OCC
+    // edge's true start/end vertex, so the old endpoint-equality test
+    // in edgeMatchesEndpoints returned no match.  The fix adds a
+    // curve fallback: if both endpoints lie ON the edge's underlying
+    // curve (via BRepExtrema_DistShapeShape), accept the match.
+    //
+    // Use a cylinder — its top cap edge is a TRUE circle in OCC.  Pick
+    // two points on that circle that are NOT its vertex (the seam point
+    // is the only true vertex).  Without the curve fallback the chamfer
+    // would no-op; with it, OCC chamfers the whole circular edge.
+    const cyl = makeCylinder(); // r=1, h=2, axis +Y, centred → top cap circle is at y=+1
+    // Two points on the top cap rim, 90° apart, both NOT at the seam:
+    const a = { x: Math.cos(0.3), y: 1, z: Math.sin(0.3) };
+    const b = { x: Math.cos(0.8), y: 1, z: Math.sin(0.8) };
+    const baseline = tessellate(cyl, null);
+    const chamfered = chamferShapeBy(
+      cyl,
+      {
+        edges: [{ ax: a.x, ay: a.y, az: a.z, bx: b.x, by: b.y, bz: b.z }],
+        faces: [],
+      },
+      0.05,
+    );
+    expect(chamfered).not.toBe(cyl);
+    const geo = tessellate(chamfered, null);
+    expectSolidGeometry(geo);
+    expect(geo.getAttribute("position").count).toBeGreaterThan(
+      baseline.getAttribute("position").count,
+    );
   });
 
   it("chamferShapeBy returns the shape unchanged when no faces or edges match", () => {

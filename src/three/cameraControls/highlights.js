@@ -108,29 +108,43 @@ export function createHighlightHelpers({
       const invMatrix = new THREE.Matrix4().copy(hitMesh.matrixWorld).invert();
       localNormal = hitNormal.clone().transformDirection(invMatrix).normalize();
     }
+    // Sample point on the highlighted face, in mesh-local — used to
+    // disambiguate coplanar disconnected faces in the OCC chamfer step
+    // (two faces can share a normal but be distinct).  Some callers
+    // (unit tests) build a synthetic hit without a `point` field; fall
+    // back to the origin and let the BFS branch overwrite with the
+    // centroid of the connected face.
+    let centroidSample;
+    if (hit.point) {
+      const localHit = hitMesh.worldToLocal(hit.point.clone());
+      centroidSample = { x: localHit.x, y: localHit.y, z: localHit.z };
+    } else {
+      centroidSample = { x: 0, y: 0, z: 0 };
+    }
 
-    for (let i = 0; i < triCount; i++) {
-      let a, b, c;
-      if (indexAttr) {
-        a = indexAttr.getX(i * 3);
-        b = indexAttr.getX(i * 3 + 1);
-        c = indexAttr.getX(i * 3 + 2);
-      } else {
-        a = i * 3;
-        b = i * 3 + 1;
-        c = i * 3 + 2;
-      }
-      vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
-      vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
-      vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
-      triNormal
-        .crossVectors(
-          new THREE.Vector3().subVectors(vB, vA),
-          new THREE.Vector3().subVectors(vC, vA),
-        )
-        .normalize();
-      if (primitiveType === "cylinder") {
-        // Separate top cap / bottom cap / side by local normal Y component
+    // Helper to read triangle i's three vertex indices.
+    const triIdx = (i) =>
+      indexAttr
+        ? [
+            indexAttr.getX(i * 3),
+            indexAttr.getX(i * 3 + 1),
+            indexAttr.getX(i * 3 + 2),
+          ]
+        : [i * 3, i * 3 + 1, i * 3 + 2];
+
+    if (primitiveType === "cylinder") {
+      for (let i = 0; i < triCount; i++) {
+        const [a, b, c] = triIdx(i);
+        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
+        triNormal
+          .crossVectors(
+            new THREE.Vector3().subVectors(vB, vA),
+            new THREE.Vector3().subVectors(vC, vA),
+          )
+          .normalize();
+        // Separate top cap / bottom cap / side by local normal Y component.
         const topHit = localNormal.y > 0.9,
           botHit = localNormal.y < -0.9;
         const isTop = triNormal.y > 0.9,
@@ -142,16 +156,129 @@ export function createHighlightHelpers({
           (!topHit && !botHit && isSide)
         )
           matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
-      } else if (primitiveType) {
-        // Sphere / torus: entire surface is one face region
-        matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
-      } else {
-        // Signed dot — anti-parallel triangles belong to the OPPOSITE
-        // face (e.g. the cube's back face when the user is hovering the
-        // front).  Math.abs here would light both faces simultaneously.
-        if (triNormal.dot(localNormal) > 0.999)
-          matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
       }
+    } else if (primitiveType) {
+      // Sphere / torus: entire surface is one face region.
+      for (let i = 0; i < triCount; i++) {
+        const [a, b, c] = triIdx(i);
+        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
+        matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+      }
+    } else {
+      // BFS from the hit triangle along shared edges to find every
+      // connected triangle with the same normal.  Plain normal-equality
+      // would light up *every* coplanar triangle (e.g. all parts of a
+      // stepped CSG result that point the same way, or a holed extrude's
+      // outer + hole tops) even when they're physically disconnected
+      // faces.  Connectivity restricts the highlight to the actual face
+      // the cursor is on.
+      // Precompute per-triangle normals.
+      const triNormals = new Array(triCount);
+      for (let i = 0; i < triCount; i++) {
+        const [a, b, c] = triIdx(i);
+        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
+        const n = new THREE.Vector3()
+          .crossVectors(
+            new THREE.Vector3().subVectors(vB, vA),
+            new THREE.Vector3().subVectors(vC, vA),
+          )
+          .normalize();
+        triNormals[i] = n;
+      }
+
+      // Seed the BFS from the raycast's reported triangle when it
+      // matches the hit normal.  Otherwise (synthetic test hits with no
+      // faceIndex, or a triangle on a flipped winding) find any
+      // triangle whose normal matches hitNormal and use that.
+      let seedTri = -1;
+      if (
+        typeof hit.faceIndex === "number" &&
+        triNormals[hit.faceIndex] &&
+        triNormals[hit.faceIndex].dot(hitNormal) > 0.999
+      ) {
+        seedTri = hit.faceIndex;
+      } else {
+        for (let i = 0; i < triCount; i++) {
+          if (triNormals[i].dot(hitNormal) > 0.999) {
+            seedTri = i;
+            break;
+          }
+        }
+      }
+      if (seedTri < 0) {
+        clearFaceHighlight();
+        return;
+      }
+
+      // Build edge → adjacent-triangle map.  Vertex-pair key uses the
+      // POSITION (rounded), not the index, so coplanar triangles that
+      // share an edge via duplicated/welded verts still connect — e.g.
+      // ExtrudeGeometry sometimes splits seam vertices across faces.
+      const round = (v) => Math.round(v * 1000) / 1000;
+      const vertKey = (idx) =>
+        `${round(posAttr.getX(idx))},${round(posAttr.getY(idx))},${round(posAttr.getZ(idx))}`;
+      const edgeKey = (i1, i2) => {
+        const k1 = vertKey(i1),
+          k2 = vertKey(i2);
+        return k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
+      };
+      const edgeToTris = new Map();
+      const triEdges = new Array(triCount);
+      for (let i = 0; i < triCount; i++) {
+        const [a, b, c] = triIdx(i);
+        const e1 = edgeKey(a, b),
+          e2 = edgeKey(b, c),
+          e3 = edgeKey(c, a);
+        triEdges[i] = [e1, e2, e3];
+        for (const k of [e1, e2, e3]) {
+          let list = edgeToTris.get(k);
+          if (!list) {
+            list = [];
+            edgeToTris.set(k, list);
+          }
+          list.push(i);
+        }
+      }
+
+      // BFS from seed, only following neighbours with a matching normal.
+      const seedN = triNormals[seedTri];
+      const visited = new Set([seedTri]);
+      const queue = [seedTri];
+      while (queue.length > 0) {
+        const t = queue.shift();
+        const [a, b, c] = triIdx(t);
+        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
+        matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+        for (const ek of triEdges[t]) {
+          const adj = edgeToTris.get(ek);
+          if (!adj) continue;
+          for (const nt of adj) {
+            if (visited.has(nt)) continue;
+            if (triNormals[nt].dot(seedN) > 0.999) {
+              visited.add(nt);
+              queue.push(nt);
+            }
+          }
+        }
+      }
+      // `centroidSample` stays as the hit point in mesh-local (set
+      // above from hit.point).  We deliberately do NOT use the BFS
+      // average of visited vertices: for non-convex faces (L-shapes
+      // and CSG step regions) that average can land in the concave
+      // part OUTSIDE the actual face, and the click-commit highlight
+      // / OCC chamfer matcher would then pick the wrong coplanar
+      // face.  hit.point is guaranteed to lie on the face the user
+      // clicked.
+      // Use seedN as the canonical normal so anti-parallel-vs-parallel
+      // ambiguity (the cross-product can flip sign on degenerate
+      // triangles) is consistent.
+      localNormal = seedN;
     }
     if (primitiveType) workGeo.dispose();
 
@@ -179,12 +306,18 @@ export function createHighlightHelpers({
       hlMesh.renderOrder = 996;
       scene.add(hlMesh);
       faceHighlightRef.current = hlMesh;
-      // Record for click-to-select
+      // Record for click-to-select.  cx/cy/cz is a point on the
+      // highlighted face (centroid of the connected region, or the
+      // raw hit point for primitives) — chamferShapeBy uses it to
+      // pick the correct face when multiple share the same normal.
       pendingFaceSelection = {
         itemId: hitMesh.userData.itemId,
         nx: localNormal.x,
         ny: localNormal.y,
         nz: localNormal.z,
+        cx: centroidSample.x,
+        cy: centroidSample.y,
+        cz: centroidSample.z,
       };
     }
   };
@@ -332,6 +465,11 @@ export function createHighlightHelpers({
     clearFaceHighlight,
     clearEdgeHighlight,
     clearPointHighlight,
+    // Visual-only clearer (does NOT reset pendingFaceSelection /
+    // pendingEdgeSelection).  Used by the modifier-keyup handler in
+    // cameraControls.js so a stray keyup between hover and click doesn't
+    // wipe the pending selection.
+    clearHL,
     applyFaceHighlight,
     applyEdgeHighlight,
     applyPointHighlight,

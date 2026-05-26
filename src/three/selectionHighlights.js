@@ -80,43 +80,163 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
     // For sphere/torus the whole surface is one "face"; for cylinder split
     // by top-cap / bottom-cap / side using the stored hit-normal's Y.
     const storedN = faces[0];
-    for (let i = 0; i < triCount; i++) {
-      const a = indexAttr ? indexAttr.getX(i * 3) : i * 3;
-      const b = indexAttr ? indexAttr.getX(i * 3 + 1) : i * 3 + 1;
-      const c = indexAttr ? indexAttr.getX(i * 3 + 2) : i * 3 + 2;
-      vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
-      vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
-      vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
-      triNormal
-        .crossVectors(
-          new THREE.Vector3().subVectors(vB, vA),
-          new THREE.Vector3().subVectors(vC, vA),
-        )
-        .normalize();
-      let matches;
-      if (isPrimitive && options.itemType === "cylinder") {
-        const topHit = storedN.ny > 0.9,
-          botHit = storedN.ny < -0.9;
-        const isTop = triNormal.y > 0.9,
-          isBot = triNormal.y < -0.9,
-          isSide = Math.abs(triNormal.y) < 0.1;
-        matches =
-          (topHit && isTop) ||
-          (botHit && isBot) ||
-          (!topHit && !botHit && isSide);
-      } else if (isPrimitive) {
-        // Sphere / torus: entire surface is one face region.
-        matches = true;
-      } else {
-        matches = faces.some(
-          (f) =>
-            Math.abs(triNormal.x - f.nx) < 0.01 &&
-            Math.abs(triNormal.y - f.ny) < 0.01 &&
-            Math.abs(triNormal.z - f.nz) < 0.01,
-        );
+
+    const triIdx = (i) =>
+      indexAttr
+        ? [
+            indexAttr.getX(i * 3),
+            indexAttr.getX(i * 3 + 1),
+            indexAttr.getX(i * 3 + 2),
+          ]
+        : [i * 3, i * 3 + 1, i * 3 + 2];
+
+    if (isPrimitive) {
+      // Existing primitive paths: whole surface or top/bot/side split.
+      for (let i = 0; i < triCount; i++) {
+        const [a, b, c] = triIdx(i);
+        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
+        triNormal
+          .crossVectors(
+            new THREE.Vector3().subVectors(vB, vA),
+            new THREE.Vector3().subVectors(vC, vA),
+          )
+          .normalize();
+        let matches;
+        if (options.itemType === "cylinder") {
+          const topHit = storedN.ny > 0.9,
+            botHit = storedN.ny < -0.9;
+          const isTop = triNormal.y > 0.9,
+            isBot = triNormal.y < -0.9,
+            isSide = Math.abs(triNormal.y) < 0.1;
+          matches =
+            (topHit && isTop) ||
+            (botHit && isBot) ||
+            (!topHit && !botHit && isSide);
+        } else {
+          matches = true;
+        }
+        if (matches)
+          matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
       }
-      if (matches)
+    } else {
+      // BFS per stored face (same algorithm as cameraControls/highlights.js
+      // applyFaceHighlight) so the persistent overlay tracks the SAME
+      // connected face the user hovered, not every coplanar triangle on
+      // the mesh.
+      const triNormals = new Array(triCount);
+      const triCenters = new Array(triCount);
+      for (let i = 0; i < triCount; i++) {
+        const [a, b, c] = triIdx(i);
+        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
+        triNormals[i] = new THREE.Vector3()
+          .crossVectors(
+            new THREE.Vector3().subVectors(vB, vA),
+            new THREE.Vector3().subVectors(vC, vA),
+          )
+          .normalize();
+        triCenters[i] = {
+          x: (vA.x + vB.x + vC.x) / 3,
+          y: (vA.y + vB.y + vC.y) / 3,
+          z: (vA.z + vB.z + vC.z) / 3,
+        };
+      }
+      const round = (v) => Math.round(v * 1000) / 1000;
+      const vertKey = (idx) =>
+        `${round(posAttr.getX(idx))},${round(posAttr.getY(idx))},${round(posAttr.getZ(idx))}`;
+      const edgeKey = (i1, i2) => {
+        const k1 = vertKey(i1),
+          k2 = vertKey(i2);
+        return k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
+      };
+      const edgeToTris = new Map();
+      const triEdges = new Array(triCount);
+      for (let i = 0; i < triCount; i++) {
+        const [a, b, c] = triIdx(i);
+        const e1 = edgeKey(a, b),
+          e2 = edgeKey(b, c),
+          e3 = edgeKey(c, a);
+        triEdges[i] = [e1, e2, e3];
+        for (const k of [e1, e2, e3]) {
+          let list = edgeToTris.get(k);
+          if (!list) {
+            list = [];
+            edgeToTris.set(k, list);
+          }
+          list.push(i);
+        }
+      }
+
+      const visitedAll = new Set();
+      for (const f of faces) {
+        // Seed: triangle whose centre is closest to the stored centroid
+        // AND whose normal matches.  If no centroid is stored (legacy
+        // entry), fall back to ANY triangle with the matching normal —
+        // and accept the old behaviour for that face only.
+        let seed = -1;
+        if (f.cx != null) {
+          let bestD = Infinity;
+          for (let i = 0; i < triCount; i++) {
+            const n = triNormals[i];
+            if (
+              Math.abs(n.x - f.nx) >= 0.01 ||
+              Math.abs(n.y - f.ny) >= 0.01 ||
+              Math.abs(n.z - f.nz) >= 0.01
+            )
+              continue;
+            const c = triCenters[i];
+            const dx = c.x - f.cx,
+              dy = c.y - f.cy,
+              dz = c.z - f.cz;
+            const d = dx * dx + dy * dy + dz * dz;
+            if (d < bestD) {
+              bestD = d;
+              seed = i;
+            }
+          }
+        } else {
+          for (let i = 0; i < triCount; i++) {
+            const n = triNormals[i];
+            if (
+              Math.abs(n.x - f.nx) < 0.01 &&
+              Math.abs(n.y - f.ny) < 0.01 &&
+              Math.abs(n.z - f.nz) < 0.01
+            ) {
+              if (seed < 0) seed = i;
+              visitedAll.add(i); // legacy: include every coplanar tri
+            }
+          }
+          continue;
+        }
+        if (seed < 0) continue;
+        const queue = [seed];
+        const seenLocal = new Set([seed]);
+        while (queue.length > 0) {
+          const t = queue.shift();
+          visitedAll.add(t);
+          for (const ek of triEdges[t]) {
+            const adj = edgeToTris.get(ek);
+            if (!adj) continue;
+            for (const nt of adj) {
+              if (seenLocal.has(nt)) continue;
+              if (triNormals[nt].dot(triNormals[seed]) > 0.999) {
+                seenLocal.add(nt);
+                queue.push(nt);
+              }
+            }
+          }
+        }
+      }
+      for (const t of visitedAll) {
+        const [a, b, c] = triIdx(t);
+        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
         matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+      }
     }
     if (isPrimitive) geo.dispose();
     if (matchVerts.length > 0) {

@@ -82,79 +82,139 @@ function edgeMatchesEndpoints(oc, edge, posA, posB, eps = 1e-3) {
     pts.push({ x: pnt.X(), y: pnt.Y(), z: pnt.Z() });
     exp.Next();
   }
-  if (pts.length < 2) return false;
   const close = (a, b) =>
     Math.abs(a.x - b.x) < eps &&
     Math.abs(a.y - b.y) < eps &&
     Math.abs(a.z - b.z) < eps;
-  return (
-    (close(pts[0], posA) && close(pts[1], posB)) ||
-    (close(pts[0], posB) && close(pts[1], posA))
-  );
+  if (
+    pts.length >= 2 &&
+    ((close(pts[0], posA) && close(pts[1], posB)) ||
+      (close(pts[0], posB) && close(pts[1], posA)))
+  ) {
+    return true;
+  }
+  // Fallback for CURVED edges (circles / arcs / splines): the rendered
+  // mesh tessellates them into many short line segments, so the user
+  // hovers ONE of those segments and we get (posA, posB) as two
+  // interior points of the curve, not the curve's vertices.  The OCC
+  // edge's vertices don't match, but BOTH (posA, posB) lie ON the
+  // underlying curve.  Use BRepExtrema_DistShapeShape (exact min
+  // distance from a vertex to the edge) to check, with a tolerance
+  // matched to the tessellation chord deviation rather than the strict
+  // 1e-3 used for vertex-equality.
+  const curveEps = 0.05;
+  const pointOnEdge = (p) => {
+    const pnt = new oc.gp_Pnt_3(p.x, p.y, p.z);
+    const vMk = new oc.BRepBuilderAPI_MakeVertex(pnt);
+    const vertex = vMk.Vertex();
+    const dist = new oc.BRepExtrema_DistShapeShape_2(
+      vertex,
+      edge,
+      oc.Extrema_ExtFlag.Extrema_ExtFlag_MIN,
+      oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad,
+    );
+    dist.Perform();
+    if (!dist.IsDone() || dist.NbSolution() < 1) return false;
+    return dist.Value() < curveEps;
+  };
+  return pointOnEdge(posA) && pointOnEdge(posB);
+}
+
+// OCC's BRepFilletAPI throws Standard_Failure (a C++ object) when the
+// edge / face / radius combination is geometrically invalid — most
+// commonly when the radius is too large for the local geometry, or
+// when an attempted fillet would self-intersect.  In the emscripten
+// build of opencascade.js those exceptions surface in JS as a bare
+// integer (the C++ pointer), which previously bubbled through the
+// worker as "Chamfer operation failed: 44795024" — useless to the
+// user.  Wrap the entire chamfer/fillet body — including the
+// constructor, every Add_2 / AddDA, and Build/Shape — so any OCC
+// throw becomes a JS Error with an actionable message.
+function runFilletOp(kind, fn) {
+  try {
+    return fn();
+  } catch (e) {
+    const sizeWord = kind === "Fillet" ? "radius" : "distance";
+    const detail =
+      e && e.message
+        ? e.message
+        : typeof e === "number"
+          ? "OCC kernel rejected the operation"
+          : String(e);
+    throw new Error(
+      `${kind} failed — try a smaller ${sizeWord} or a different edge / face (${detail}).`,
+    );
+  }
+}
+
+function finalizeFilletBuilder(mk, shape) {
+  mk.Build();
+  if (!mk.IsDone()) return shape;
+  return mk.Shape();
 }
 
 export function chamferShape(shape, edgePositions, amount = 0.05) {
   if (!shape || !edgePositions || edgePositions.length === 0) return shape;
-  const oc = getOcc();
-  const mk = new oc.BRepFilletAPI_MakeChamfer(shape);
-  // Walk every edge of the shape, add to the chamfer-builder if its
-  // endpoints match any requested edge.
-  const exp = new oc.TopExp_Explorer_2(
-    shape,
-    oc.TopAbs_ShapeEnum.TopAbs_EDGE,
-    oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
-  );
-  let added = 0;
-  while (exp.More()) {
-    const edge = oc.TopoDS.Edge_1(exp.Current());
-    for (const ep of edgePositions) {
-      const posA = { x: ep.ax, y: ep.ay, z: ep.az };
-      const posB = { x: ep.bx, y: ep.by, z: ep.bz };
-      if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
-        mk.Add_2(amount, edge);
-        added++;
-        break;
+  return runFilletOp("Chamfer", () => {
+    const oc = getOcc();
+    const mk = new oc.BRepFilletAPI_MakeChamfer(shape);
+    // Walk every edge of the shape, add to the chamfer-builder if its
+    // endpoints match any requested edge.
+    const exp = new oc.TopExp_Explorer_2(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+    );
+    let added = 0;
+    while (exp.More()) {
+      const edge = oc.TopoDS.Edge_1(exp.Current());
+      for (const ep of edgePositions) {
+        const posA = { x: ep.ax, y: ep.ay, z: ep.az };
+        const posB = { x: ep.bx, y: ep.by, z: ep.bz };
+        if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
+          mk.Add_2(amount, edge);
+          added++;
+          break;
+        }
       }
+      exp.Next();
     }
-    exp.Next();
-  }
-  if (added === 0) return shape;
-  mk.Build();
-  if (!mk.IsDone()) return shape;
-  return mk.Shape();
+    if (added === 0) return shape;
+    return finalizeFilletBuilder(mk, shape);
+  });
 }
 
 // ── Fillet (rounded) ─────────────────────────────────────────────────────
 export function filletShape(shape, edgePositions, radius = 0.05) {
   if (!shape || !edgePositions || edgePositions.length === 0) return shape;
-  const oc = getOcc();
-  const mk = new oc.BRepFilletAPI_MakeFillet(
-    shape,
-    oc.ChFi3d_FilletShape.ChFi3d_Rational,
-  );
-  const exp = new oc.TopExp_Explorer_2(
-    shape,
-    oc.TopAbs_ShapeEnum.TopAbs_EDGE,
-    oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
-  );
-  let added = 0;
-  while (exp.More()) {
-    const edge = oc.TopoDS.Edge_1(exp.Current());
-    for (const ep of edgePositions) {
-      const posA = { x: ep.ax, y: ep.ay, z: ep.az };
-      const posB = { x: ep.bx, y: ep.by, z: ep.bz };
-      if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
-        mk.Add_2(radius, edge);
-        added++;
-        break;
+  return runFilletOp("Fillet", () => {
+    const oc = getOcc();
+    const mk = new oc.BRepFilletAPI_MakeFillet(
+      shape,
+      oc.ChFi3d_FilletShape.ChFi3d_Rational,
+    );
+    const exp = new oc.TopExp_Explorer_2(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+    );
+    let added = 0;
+    while (exp.More()) {
+      const edge = oc.TopoDS.Edge_1(exp.Current());
+      for (const ep of edgePositions) {
+        const posA = { x: ep.ax, y: ep.ay, z: ep.az };
+        const posB = { x: ep.bx, y: ep.by, z: ep.bz };
+        if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
+          mk.Add_2(radius, edge);
+          added++;
+          break;
+        }
       }
+      exp.Next();
     }
-    exp.Next();
-  }
-  if (added === 0) return shape;
-  mk.Build();
-  if (!mk.IsDone()) return shape;
-  return mk.Shape();
+    if (added === 0) return shape;
+    return finalizeFilletBuilder(mk, shape);
+  });
 }
 
 // ── Face-based chamfer / fillet ──────────────────────────────────────────
@@ -244,12 +304,33 @@ function forEachEdgeOfMatchingFaces(
       faceExp.Next();
       continue;
     }
-    const matched = faceNormals.some(
-      (req) =>
-        Math.abs(req.nx - n.x) < eps &&
-        Math.abs(req.ny - n.y) < eps &&
-        Math.abs(req.nz - n.z) < eps,
-    );
+    const matched = faceNormals.some((req) => {
+      if (
+        Math.abs(req.nx - n.x) >= eps ||
+        Math.abs(req.ny - n.y) >= eps ||
+        Math.abs(req.nz - n.z) >= eps
+      ) {
+        return false;
+      }
+      // If the stored selection carries a centroid sample point, require
+      // it to lie ON this face.  Two coplanar faces of a CSG result
+      // (e.g. the top of a stepped solid, or a holed extrude's outer
+      // top + the hole's top rim) share a normal, and without this
+      // check chamferShapeBy would apply the operation to every one.
+      if (req.cx == null) return true;
+      const pnt = new oc.gp_Pnt_3(req.cx, req.cy, req.cz);
+      const vMk = new oc.BRepBuilderAPI_MakeVertex(pnt);
+      const vertex = vMk.Vertex();
+      const dist = new oc.BRepExtrema_DistShapeShape_2(
+        vertex,
+        face,
+        oc.Extrema_ExtFlag.Extrema_ExtFlag_MIN,
+        oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad,
+      );
+      dist.Perform();
+      if (!dist.IsDone() || dist.NbSolution() < 1) return false;
+      return dist.Value() < 0.05;
+    });
     if (matched) {
       // Walk EVERY edge of the matched face — both the outer wire and any
       // inner wires (holes).  When the user selects the top of an object
@@ -322,63 +403,66 @@ export function chamferShapeBy(shape, subGeo, amount = 0.05, angleRad = null) {
   const edgePositions = subGeo?.edges || [];
   const faceNormals = subGeo?.faces || [];
   if (edgePositions.length === 0 && faceNormals.length === 0) return shape;
-  const oc = getOcc();
-  const mk = new oc.BRepFilletAPI_MakeChamfer(shape);
-  const addedKeys = new Set();
-  let added = 0;
+  return runFilletOp("Chamfer", () => {
+    const oc = getOcc();
+    const mk = new oc.BRepFilletAPI_MakeChamfer(shape);
+    const addedKeys = new Set();
+    let added = 0;
 
-  const useAngle = typeof angleRad === "number" && isFinite(angleRad);
-  const addEdge = (edge, refFace) => {
-    if (useAngle && refFace) {
-      mk.AddDA(amount, angleRad, edge, refFace);
-    } else {
-      mk.Add_2(amount, edge);
-    }
-  };
-
-  // 1. Add edges from explicit edge endpoints.
-  if (edgePositions.length > 0) {
-    const exp = new oc.TopExp_Explorer_2(
-      shape,
-      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
-      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
-    );
-    while (exp.More()) {
-      const edge = oc.TopoDS.Edge_1(exp.Current());
-      for (const ep of edgePositions) {
-        const posA = { x: ep.ax, y: ep.ay, z: ep.az };
-        const posB = { x: ep.bx, y: ep.by, z: ep.bz };
-        if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
-          const key = edgeEndpointKey(oc, edge);
-          if (!addedKeys.has(key)) {
-            const refFace = useAngle ? findAdjacentFace(oc, shape, edge) : null;
-            addEdge(edge, refFace);
-            addedKeys.add(key);
-            added++;
-          }
-          break;
-        }
+    const useAngle = typeof angleRad === "number" && isFinite(angleRad);
+    const addEdge = (edge, refFace) => {
+      if (useAngle && refFace) {
+        mk.AddDA(amount, angleRad, edge, refFace);
+      } else {
+        mk.Add_2(amount, edge);
       }
-      exp.Next();
+    };
+
+    // 1. Add edges from explicit edge endpoints.
+    if (edgePositions.length > 0) {
+      const exp = new oc.TopExp_Explorer_2(
+        shape,
+        oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      );
+      while (exp.More()) {
+        const edge = oc.TopoDS.Edge_1(exp.Current());
+        for (const ep of edgePositions) {
+          const posA = { x: ep.ax, y: ep.ay, z: ep.az };
+          const posB = { x: ep.bx, y: ep.by, z: ep.bz };
+          if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
+            const key = edgeEndpointKey(oc, edge);
+            if (!addedKeys.has(key)) {
+              const refFace = useAngle
+                ? findAdjacentFace(oc, shape, edge)
+                : null;
+              addEdge(edge, refFace);
+              addedKeys.add(key);
+              added++;
+            }
+            break;
+          }
+        }
+        exp.Next();
+      }
     }
-  }
 
-  // 2. Add edges from the boundary of every face matching a requested normal.
-  // When an angle was specified, the matched face is the natural reference.
-  if (faceNormals.length > 0) {
-    added += forEachEdgeOfMatchingFaces(
-      oc,
-      shape,
-      faceNormals,
-      addedKeys,
-      (edge, matchedFace) => addEdge(edge, matchedFace),
-    );
-  }
+    // 2. Add edges from the boundary of every face matching a requested
+    // normal.  When an angle was specified, the matched face is the
+    // natural reference.
+    if (faceNormals.length > 0) {
+      added += forEachEdgeOfMatchingFaces(
+        oc,
+        shape,
+        faceNormals,
+        addedKeys,
+        (edge, matchedFace) => addEdge(edge, matchedFace),
+      );
+    }
 
-  if (added === 0) return shape;
-  mk.Build();
-  if (!mk.IsDone()) return shape;
-  return mk.Shape();
+    if (added === 0) return shape;
+    return finalizeFilletBuilder(mk, shape);
+  });
 }
 
 export function filletShapeBy(shape, subGeo, radius = 0.05) {
@@ -386,53 +470,53 @@ export function filletShapeBy(shape, subGeo, radius = 0.05) {
   const edgePositions = subGeo?.edges || [];
   const faceNormals = subGeo?.faces || [];
   if (edgePositions.length === 0 && faceNormals.length === 0) return shape;
-  const oc = getOcc();
-  const mk = new oc.BRepFilletAPI_MakeFillet(
-    shape,
-    oc.ChFi3d_FilletShape.ChFi3d_Rational,
-  );
-  const addedKeys = new Set();
-  let added = 0;
-
-  if (edgePositions.length > 0) {
-    const exp = new oc.TopExp_Explorer_2(
+  return runFilletOp("Fillet", () => {
+    const oc = getOcc();
+    const mk = new oc.BRepFilletAPI_MakeFillet(
       shape,
-      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
-      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      oc.ChFi3d_FilletShape.ChFi3d_Rational,
     );
-    while (exp.More()) {
-      const edge = oc.TopoDS.Edge_1(exp.Current());
-      for (const ep of edgePositions) {
-        const posA = { x: ep.ax, y: ep.ay, z: ep.az };
-        const posB = { x: ep.bx, y: ep.by, z: ep.bz };
-        if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
-          const key = edgeEndpointKey(oc, edge);
-          if (!addedKeys.has(key)) {
-            mk.Add_2(radius, edge);
-            addedKeys.add(key);
-            added++;
+    const addedKeys = new Set();
+    let added = 0;
+
+    if (edgePositions.length > 0) {
+      const exp = new oc.TopExp_Explorer_2(
+        shape,
+        oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      );
+      while (exp.More()) {
+        const edge = oc.TopoDS.Edge_1(exp.Current());
+        for (const ep of edgePositions) {
+          const posA = { x: ep.ax, y: ep.ay, z: ep.az };
+          const posB = { x: ep.bx, y: ep.by, z: ep.bz };
+          if (edgeMatchesEndpoints(oc, edge, posA, posB)) {
+            const key = edgeEndpointKey(oc, edge);
+            if (!addedKeys.has(key)) {
+              mk.Add_2(radius, edge);
+              addedKeys.add(key);
+              added++;
+            }
+            break;
           }
-          break;
         }
+        exp.Next();
       }
-      exp.Next();
     }
-  }
 
-  if (faceNormals.length > 0) {
-    added += forEachEdgeOfMatchingFaces(
-      oc,
-      shape,
-      faceNormals,
-      addedKeys,
-      (edge) => mk.Add_2(radius, edge),
-    );
-  }
+    if (faceNormals.length > 0) {
+      added += forEachEdgeOfMatchingFaces(
+        oc,
+        shape,
+        faceNormals,
+        addedKeys,
+        (edge) => mk.Add_2(radius, edge),
+      );
+    }
 
-  if (added === 0) return shape;
-  mk.Build();
-  if (!mk.IsDone()) return shape;
-  return mk.Shape();
+    if (added === 0) return shape;
+    return finalizeFilletBuilder(mk, shape);
+  });
 }
 
 // ── Transforms (apply translation/rotation to a shape) ───────────────────

@@ -53,6 +53,15 @@ export const uiInitial = {
   // operations stack correctly.
   pendingOperations: 0,
 
+  // When the regeneration orchestrator is recalculating timeline steps,
+  // this tracks how many items have completed vs. how many need to be
+  // regenerated.  null when no recalculation is in flight.  The
+  // BusyIndicator promotes its spinner to a progress bar while this is
+  // set, since recalcs over a many-step timeline can take long enough
+  // that "Working…" alone leaves the user wondering how far along they
+  // are.
+  regenProgress: null,
+
   // True from the moment the user confirms a cut-extrude until the
   // async CSG difference + consumeItems lands.  Lets the Viewport
   // keep "transparent" render mode active across the brief window
@@ -94,6 +103,8 @@ export const createUiSlice = (set) => ({
     set((state) => ({
       pendingOperations: Math.max(0, state.pendingOperations - 1),
     })),
+
+  setRegenProgress: (progress) => set({ regenProgress: progress }),
 
   toggleConstraintsVisible: () =>
     set((state) => ({ constraintsVisible: !state.constraintsVisible })),

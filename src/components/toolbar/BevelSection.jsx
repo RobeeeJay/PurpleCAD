@@ -70,9 +70,14 @@ const BevelSection = () => {
           ],
         };
       } else {
-        const sourceSnapshot = { ...item };
-        delete sourceSnapshot.regenerator;
-        source = sourceSnapshot;
+        // KEEP the source's existing regenerator: buildItemShapeLocal
+        // needs it to rebuild a CSG source's OCC shape from its
+        // boolean / prior-chamfer recipe.  Stripping it left the source
+        // with only `geometryData`, which isn't enough to construct a
+        // TopoDS_Shape — chamferOrFilletItem then returned null and the
+        // chamfer / bevel silently did nothing on any object that had a
+        // boolean operation applied.
+        source = { ...item };
         subGeo = {
           edges: selectedSubGeometry.edges || [],
           faces: selectedSubGeometry.faces || [],

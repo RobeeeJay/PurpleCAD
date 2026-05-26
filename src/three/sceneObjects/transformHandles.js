@@ -20,9 +20,21 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   const handles = [];
   const ext = getObjectExtent(item.type, mesh.scale.x);
 
+  // `transparent: true` is REQUIRED (alongside depthTest:false +
+  // renderOrder) so the gizmo lands in three.js's transparent render
+  // queue.  In Transparent render mode every solid mesh becomes
+  // `transparent: true`, and three.js renders the ENTIRE opaque queue
+  // before the transparent queue — so an opaque handle (the default
+  // for MeshBasicMaterial) draws BEFORE the transparent solid and gets
+  // overdrawn by it.  Marking the handle transparent puts it in the
+  // same queue, where its renderOrder (998/999) keeps it on top.
   HANDLE_CONFIGS.forEach(({ type, color, dir }) => {
     const geo = new THREE.SphereGeometry(0.12, 10, 10);
-    const mat = new THREE.MeshBasicMaterial({ color, depthTest: false });
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      depthTest: false,
+      transparent: true,
+    });
     const hMesh = new THREE.Mesh(geo, mat);
     hMesh.renderOrder = 999;
     hMesh.userData.isHandle = true;
@@ -40,6 +52,7 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
     const mat = new THREE.MeshBasicMaterial({
       color,
       depthTest: false,
+      transparent: true,
       side: THREE.DoubleSide,
     });
     const torus = new THREE.Mesh(geo, mat);

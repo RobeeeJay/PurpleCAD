@@ -82,8 +82,25 @@ async function regenerateBoolean(
   });
 }
 
-export async function regenerateItemsForResolution(items, printPrecision) {
+// `onProgress({ current, total })` fires after each item that ACTUALLY
+// needed regeneration completes — used by the orchestrator to drive the
+// busy-indicator's timeline-recalculation progress bar.  Items that
+// skip the regen path (no regenerator, or already at the requested
+// precision) are NOT counted: there's nothing to wait for there.
+export async function regenerateItemsForResolution(
+  items,
+  printPrecision,
+  onProgress = null,
+) {
   if (!items || items.length === 0) return items;
+  const total = items.reduce((n, item) => {
+    const r = item.regenerator;
+    if (!r) return n;
+    if (r.regeneratedAt === printPrecision && item.geometryData) return n;
+    return n + 1;
+  }, 0);
+  if (onProgress) onProgress({ current: 0, total });
+  let progressed = 0;
   const out = [];
   let changed = false;
   // Sequential: each iteration can depend on earlier results in `out`
@@ -104,6 +121,8 @@ export async function regenerateItemsForResolution(items, printPrecision) {
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
     }
+    progressed += 1;
+    if (onProgress) onProgress({ current: progressed, total });
     if (!result) {
       out.push(item);
       continue;
