@@ -158,12 +158,13 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         inputShapeIds.forEach((id) => occ.releaseShape(id));
       }
       if (!worldId) return null;
-      if (item.position) {
+      const center = r.originalCenter || item.position;
+      if (center) {
         const localId = occ.transformShape(
           worldId,
-          -item.position.x,
-          -item.position.y,
-          -item.position.z,
+          -center.x,
+          -center.y,
+          -center.z,
           0,
           0,
           0,

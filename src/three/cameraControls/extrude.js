@@ -459,6 +459,7 @@ export function createExtrudeHelpers(
             kind: "boolean",
             op: "difference",
             inputIds: [target.id, extrudeItemId],
+            originalCenter: result.position,
             regeneratedAt: freshStore.curveResolution === "print" ? 0.01 : null,
           },
         });

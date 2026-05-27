@@ -1,6 +1,6 @@
 // OCC bridge for Electron main process.
 // Implements performCsg and chamferOrFilletItem using the native C++ addon
-// instead of opencascade.js WASM, mirroring the logic of:
+// mirroring the logic of:
 //   src/three/csgUtils.js#buildItemShapeLocal
 //   src/three/occOps.js#performCsg / chamferOrFilletItem
 //

@@ -18,11 +18,6 @@ const { app, BrowserWindow, ipcMain, protocol } = electron;
 const fsMod = require("fs");
 const urlMod = require("url");
 
-// We serve the built dist over a custom `app://` scheme rather than
-// `file://`.  OpenCascade.js's WASM loader uses `fetch()` to grab its
-// .wasm file, and Chromium refuses fetches from `file://` origins by
-// default — the renderer logged "both async and sync fetching of the
-// wasm failed" until we routed asset loading through a real protocol.
 // Registering as a standard scheme up front (before app `ready`) makes
 // `app://`-served pages behave like HTTPS for fetch + worker semantics.
 protocol.registerSchemesAsPrivileged([

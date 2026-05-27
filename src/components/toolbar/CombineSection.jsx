@@ -67,6 +67,7 @@ const CombineSection = () => {
           kind: "boolean",
           op: operation,
           inputIds: selectedItems.map((i) => i.id),
+          originalCenter: result.position,
           regeneratedAt: printPrecision,
         },
       });
