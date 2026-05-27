@@ -71,20 +71,25 @@ describe("occClient (in-process fallback)", () => {
     expect(typeof result.centerOffset.cx).toBe("number");
   });
 
-  it("returns null for a no-op selection without leaking the counter", async () => {
+  it("throws a descriptive error (and releases the busy counter) when the selection doesn't match anything on the source", async () => {
     const before = counter;
     const cube = { id: 2, type: "cube", position: { x: 0, y: 0, z: 0 } };
-    const result = await chamferOrFilletItem({
-      source: cube,
-      // A normal no face of the cube has — the chamfer ends up as a no-op.
-      subGeo: { edges: [], faces: [{ nx: 0.7, ny: 0.7, nz: 0 }] },
-      amount: 0.05,
-      angleRad: null,
-      segments: 1,
-      allItems: [cube],
-      printPrecision: null,
-    });
-    expect(result).toBeNull();
+    await expect(
+      chamferOrFilletItem({
+        source: cube,
+        // A normal no face of the cube has — chamferShapeBy returns the
+        // input shape unchanged.  Previously chamferOrFilletItem swallowed
+        // that as a null return; now it throws so the toolbar alert
+        // surfaces the failure instead of the click looking ignored.
+        subGeo: { edges: [], faces: [{ nx: 0.7, ny: 0.7, nz: 0 }] },
+        amount: 0.05,
+        angleRad: null,
+        segments: 1,
+        allItems: [cube],
+        printPrecision: null,
+      }),
+    ).rejects.toThrow(/couldn't find a matching/i);
+    // The busy counter still has to balance even on the error path.
     expect(counter).toBe(before);
   });
 

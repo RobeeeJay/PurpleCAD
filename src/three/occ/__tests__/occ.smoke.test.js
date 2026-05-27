@@ -1071,21 +1071,50 @@ describe("OCC boolean operations", () => {
     expect(result.geometryData.positions.length).toBeGreaterThan(0);
     // And — proving the bug at the OCC layer — passing the SAME csg
     // with its regenerator stripped (the broken BevelSection snapshot)
-    // returns null.  That's why "chamfer doesn't work on objects with
-    // a boolean applied" — the toolbar was throwing away the recipe
-    // chamferOrFilletItem needs to rebuild the source shape.
+    // surfaces a descriptive error rather than silently returning
+    // null.  The old behaviour ("Chamfer click does nothing") came
+    // from BevelSection throwing away the recipe chamferOrFilletItem
+    // needs to rebuild the source shape; the throw makes the failure
+    // visible.
     const regenStripped = { ...csg };
     delete regenStripped.regenerator;
-    const noResult = await ops.chamferOrFilletItem({
-      source: regenStripped,
-      subGeo: { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
-      amount: 0.05,
-      angleRad: null,
-      segments: 1,
-      allItems: [cube, sphere, regenStripped],
-      printPrecision: null,
-    });
-    expect(noResult).toBeNull();
+    await expect(
+      ops.chamferOrFilletItem({
+        source: regenStripped,
+        subGeo: { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
+        amount: 0.05,
+        angleRad: null,
+        segments: 1,
+        allItems: [cube, sphere, regenStripped],
+        printPrecision: null,
+      }),
+    ).rejects.toThrow(/recipe.*missing|references deleted inputs/i);
+  });
+
+  it("chamferOrFilletItem throws when no edge / face on the source matches the requested subGeo (instead of silently no-oping)", async () => {
+    // Previously when chamferShapeBy returned the input shape
+    // unchanged (e.g. when the user's selected edge coords didn't
+    // match any OCC edge), chamferOrFilletItem returned null and the
+    // toolbar's apply() silently bailed — the user clicked Chamfer
+    // and nothing happened.  Now it throws a descriptive error so the
+    // failure surfaces in the alert.
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    await expect(
+      ops.chamferOrFilletItem({
+        source: cube,
+        // An edge with endpoints that don't lie on any cube edge.
+        subGeo: {
+          edges: [{ ax: 10, ay: 10, az: 10, bx: 20, by: 20, bz: 20 }],
+          faces: [],
+        },
+        amount: 0.05,
+        angleRad: null,
+        segments: 1,
+        allItems: [cube],
+        printPrecision: null,
+      }),
+    ).rejects.toThrow(/couldn't find a matching/i);
   });
 
   it("extrude in a CSG uses the live sketch tessellation at the current resolution (curves get finer when printPrecision is set)", async () => {

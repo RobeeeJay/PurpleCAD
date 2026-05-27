@@ -102,12 +102,37 @@ async function chamferOrFilletItem({
 }) {
   await ensureOcc();
   const sourceShape = buildItemShapeLocal(source, allItems, printPrecision);
-  if (!sourceShape) return null;
+  if (!sourceShape) {
+    // Source's OCC shape couldn't be built — typically because the
+    // item is a CSG whose regenerator was stripped or whose inputs
+    // were deleted.  Surface this instead of returning null silently.
+    throw new Error(
+      "Could not rebuild the source shape — the item's recipe (boolean / chamfer) is missing or references deleted inputs.",
+    );
+  }
   const result =
     segments === 1
       ? chamferShapeBy(sourceShape, subGeo, amount, angleRad)
       : filletShapeBy(sourceShape, subGeo, amount);
-  if (!result || result === sourceShape) return null;
+  if (!result) return null;
+  if (result === sourceShape) {
+    // chamferShapeBy / filletShapeBy returns the input unchanged when
+    // none of the requested edges or faces matched an edge of the OCC
+    // shape.  For a chamfer on a CSG this typically means the rebuilt
+    // shape's edge coordinates don't match the rendered mesh's edge
+    // selection — e.g. a re-tessellation moved vertices outside the
+    // matcher's tolerance.  Surface the failure so the user knows the
+    // click wasn't ignored.
+    const kind = segments === 1 ? "Chamfer" : "Fillet";
+    const hasEdges = (subGeo?.edges || []).length > 0;
+    const hasFaces = (subGeo?.faces || []).length > 0;
+    const what =
+      hasEdges && hasFaces ? "edge / face" : hasEdges ? "edge" : "face";
+    throw new Error(
+      `${kind} couldn't find a matching ${what} on the source shape. ` +
+        `Try re-selecting the ${what} on the current object.`,
+    );
+  }
   const data = tessellateToData(result, printPrecision);
   if (!data) return null;
 
