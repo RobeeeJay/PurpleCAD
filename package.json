@@ -13,7 +13,9 @@
     "test:watch": "vitest",
     "electron": "unset ELECTRON_RUN_AS_NODE; electron .",
     "electron:dev": "concurrently -k -n vite,electron -c blue,magenta \"vite --port 3000\" \"wait-on http://localhost:3000 && unset ELECTRON_RUN_AS_NODE; ELECTRON_START_URL=http://localhost:3000 electron .\"",
-    "electron:start": "vite build && unset ELECTRON_RUN_AS_NODE; electron ."
+    "electron:start": "vite build && unset ELECTRON_RUN_AS_NODE; electron .",
+    "addon:build": "npm --prefix native/occ-addon run build",
+    "addon:test": "npm --prefix native/occ-addon test"
   },
   "dependencies": {
     "opencascade.js": "^1.1.1",
