@@ -37,6 +37,12 @@ function readGitCommit() {
 }
 
 export default defineConfig({
+  // Relative `base` so the built bundle loads under Electron's
+  // `file://` scheme (and from any subpath when served).  Vite's
+  // default of "/" works for a web server but breaks file-system
+  // loading: index.html ends up requesting /assets/... which file://
+  // resolves to the volume root.
+  base: "./",
   plugins: [react()],
   define: {
     // JSON.stringify wraps the value as a string literal in the bundle
