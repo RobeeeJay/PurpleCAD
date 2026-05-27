@@ -1,26 +1,23 @@
-// Pure OCC operation bodies, shared between the worker (occ.worker.js)
-// and the in-process fallback used by node tests and pre-worker browsers.
+// OCC operation bodies — native C++ addon implementation.
 //
 // Each op takes a plain-JS args object and returns a Promise resolving to
-// a plain-JS result (or null for no-ops).  No TopoDS_Shape ever escapes
-// these functions — when a single user action needs multiple OCC steps,
-// they compose those steps inside one op so only the final tessellation
-// crosses the boundary.
+// a plain-JS result (or null for no-ops).  Shape IDs never escape these
+// functions: every ID created is released before the function returns.
 
-import { ensureOcc, getOcc } from "./occ/init.js";
-import { buildItemShapeLocal, buildBrushTransform } from "./csgUtils.js";
+import { createRequire } from "module";
+const _require = createRequire(import.meta.url);
+const occ = _require("../../native/occ-addon/build/Release/occ_addon.node");
+
 import {
-  booleanOp,
-  chamferShapeBy,
-  filletShapeBy,
-  transformShape,
-} from "./occ/operations.js";
-import { tessellate, tessellateToData } from "./occ/tessellate.js";
+  buildBrushTransform,
+  chamferCenterOffset,
+  extrudeWithLivePolygon,
+} from "./csgUtils.js";
+import { polyCentroid } from "./sceneObjects.js";
 import { MM_PER_UNIT } from "./sceneObjects.js";
+import { withWinding } from "./sceneObjects/closedLoops.js";
+import { resolveItemDepth } from "./geometryParams.js";
 
-// Item types that produce a TopoDS_Shape we can export.  Sketches are
-// 2D-only; everything else is either a primitive, an extrude, or a CSG
-// result whose regenerator we can rebuild.
 const EXPORTABLE_TYPES = new Set([
   "cube",
   "sphere",
@@ -30,43 +27,6 @@ const EXPORTABLE_TYPES = new Set([
   "csg",
 ]);
 
-// Build every exportable item's OCC shape in world space, scaled to
-// millimetres (the convention used by every mainstream STL/STEP viewer)
-// and rotated +π/2 around X so the viewport's +Y maps to the export's
-// +Z (Z-up convention).
-function buildExportShapes(items) {
-  const oc = getOcc();
-  const out = [];
-  // STL/STEP exports always run at print precision (0.01 mm) so curve
-  // resolution in extrudes matches the export chord deviation.
-  const exportPrecision = 0.01;
-  for (const item of items) {
-    if (item.visible === false) continue;
-    if (!EXPORTABLE_TYPES.has(item.type)) continue;
-    const local = buildItemShapeLocal(item, items, exportPrecision);
-    if (!local) continue;
-    const positioned = transformShape(local, item.position, item.rotation);
-    if (!positioned) continue;
-    const sceneScale = item.scale ? item.scale.x : 1;
-    const finalScale = sceneScale * MM_PER_UNIT;
-    let scaled = positioned;
-    if (Math.abs(finalScale - 1) > 1e-9) {
-      const trsf = new oc.gp_Trsf_1();
-      trsf.SetScaleFactor(finalScale);
-      const mk = new oc.BRepBuilderAPI_Transform_2(positioned, trsf, true);
-      scaled = mk.Shape();
-    }
-    // Y-up viewport → Z-up export.
-    const oriented = transformShape(scaled, null, { x: Math.PI / 2 });
-    if (oriented) out.push(oriented);
-  }
-  return out;
-}
-
-// Compute axis-aligned bbox over a flat [x,y,z, x,y,z, ...] positions
-// array.  Used by every op that centres its output around its bbox —
-// inlining keeps occOps free of three.js so the worker bundle doesn't
-// pull THREE in just to call Box3.
 function bboxOf(positions) {
   let minX = Infinity,
     minY = Infinity,
@@ -88,9 +48,172 @@ function bboxOf(positions) {
   return { minX, minY, minZ, maxX, maxY, maxZ };
 }
 
-// Apply a chamfer (segments===1) or fillet (segments>1) and return the
-// centred tessellation plus the bbox-centre offset the caller uses to
-// place the new item in world space.
+// Build the native OCC shape for an item in its LOCAL frame (matching the
+// frame of the rendered geometryData so edge endpoints from the viewport
+// mesh align with the OCC shape's edges).
+//
+// Returns a shape ID (integer >= 1) on success, or null on failure.
+// Caller MUST release the returned ID via occ.releaseShape().
+export function buildItemShapeLocal(item, allItems = [], precision = null) {
+  if (item.type === "cube") return occ.makeBox(-1, -1, -1, 1, 1, 1);
+  if (item.type === "sphere") return occ.makeSphere(1.5);
+  if (item.type === "cylinder") return occ.makeCylinder(-1, 1, 2);
+  if (item.type === "torus") return occ.makeTorus(1.0, 0.4);
+
+  if (item.type === "extrude") {
+    const live = extrudeWithLivePolygon(item, allItems, precision);
+    const poly = live.profile?.polygon2D;
+    if (!poly || poly.length < 3) return null;
+    const holes = live.profile?.holes || [];
+    const depth = resolveItemDepth(live);
+    const c = polyCentroid(poly);
+    const outerFlat = new Float64Array(
+      withWinding(poly, true).flatMap((p) => [p.x, p.y]),
+    );
+    const holesFlat = holes
+      .filter((h) => h && h.length >= 3)
+      .map(
+        (h) =>
+          new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
+      );
+    return occ.makeExtrude(outerFlat, holesFlat, c.x, c.y, depth);
+  }
+
+  if (item.type === "csg" && item.regenerator) {
+    const r = item.regenerator;
+
+    if (r.kind === "chamfer") {
+      const sourceId = buildItemShapeLocal(r.source, allItems, precision);
+      if (sourceId == null) return null;
+      const subGeo = r.subGeo || { edges: [], faces: [] };
+      const amount = r.amount ?? 0.05;
+      let resultId;
+      try {
+        resultId =
+          r.segments === 1
+            ? occ.chamferShape(sourceId, subGeo, amount, r.angleRad ?? null)
+            : occ.filletShape(sourceId, subGeo, amount);
+      } finally {
+        occ.releaseShape(sourceId);
+      }
+      if (!resultId) return null;
+      const offset = chamferCenterOffset(r, item);
+      if (
+        offset &&
+        (Math.abs(offset.x) > 1e-9 ||
+          Math.abs(offset.y) > 1e-9 ||
+          Math.abs(offset.z) > 1e-9)
+      ) {
+        const corrected = occ.transformShape(
+          resultId,
+          -offset.x,
+          -offset.y,
+          -offset.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
+    if (r.kind === "boolean") {
+      const inputShapeIds = (r.inputIds || [])
+        .map((id) => allItems.find((i) => i.id === id))
+        .filter(Boolean)
+        .map((inp) => {
+          const localId = buildItemShapeLocal(inp, allItems, precision);
+          if (localId == null) return null;
+          const t = buildBrushTransform(inp);
+          let scaledId = localId;
+          if (Math.abs(t.scale - 1) > 1e-9) {
+            scaledId = occ.scaleShape(localId, t.scale);
+            occ.releaseShape(localId);
+          }
+          const worldId = occ.transformShape(
+            scaledId,
+            t.position.x,
+            t.position.y,
+            t.position.z,
+            t.rotation.x || 0,
+            t.rotation.y || 0,
+            t.rotation.z || 0,
+          );
+          if (scaledId !== localId) occ.releaseShape(scaledId);
+          else occ.releaseShape(localId);
+          return worldId;
+        })
+        .filter((id) => id != null);
+
+      if (inputShapeIds.length < 2) {
+        inputShapeIds.forEach((id) => occ.releaseShape(id));
+        return null;
+      }
+      let worldId;
+      try {
+        worldId = occ.booleanOp(inputShapeIds, r.op || "difference");
+      } finally {
+        inputShapeIds.forEach((id) => occ.releaseShape(id));
+      }
+      if (!worldId) return null;
+      if (item.position) {
+        const localId = occ.transformShape(
+          worldId,
+          -item.position.x,
+          -item.position.y,
+          -item.position.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(worldId);
+        return localId;
+      }
+      return worldId;
+    }
+  }
+
+  return null;
+}
+
+// Build all visible exportable items in world space, scaled to mm and
+// rotated +π/2 around X (viewport Y-up → export Z-up).
+// Returns an array of shape IDs; caller must release each.
+function buildExportShapes(items) {
+  const out = [];
+  for (const item of items) {
+    if (item.visible === false) continue;
+    if (!EXPORTABLE_TYPES.has(item.type)) continue;
+    const localId = buildItemShapeLocal(item, items, 0.01);
+    if (localId == null) continue;
+    const t = buildBrushTransform(item);
+    const finalScale = (t.scale != null ? t.scale : 1) * MM_PER_UNIT;
+    let scaledId = localId;
+    if (Math.abs(finalScale - 1) > 1e-9) {
+      scaledId = occ.scaleShape(localId, finalScale);
+      occ.releaseShape(localId);
+    }
+    const worldId = occ.transformShape(
+      scaledId,
+      t.position.x * MM_PER_UNIT,
+      t.position.y * MM_PER_UNIT,
+      t.position.z * MM_PER_UNIT,
+      t.rotation.x || 0,
+      t.rotation.y || 0,
+      t.rotation.z || 0,
+    );
+    if (scaledId !== localId) occ.releaseShape(scaledId);
+    else occ.releaseShape(localId);
+    if (worldId == null) continue;
+    const orientedId = occ.transformShape(worldId, 0, 0, 0, Math.PI / 2, 0, 0);
+    occ.releaseShape(worldId);
+    if (orientedId != null) out.push(orientedId);
+  }
+  return out;
+}
+
 async function chamferOrFilletItem({
   source,
   subGeo,
@@ -100,30 +223,25 @@ async function chamferOrFilletItem({
   allItems,
   printPrecision,
 }) {
-  await ensureOcc();
-  const sourceShape = buildItemShapeLocal(source, allItems, printPrecision);
-  if (!sourceShape) {
-    // Source's OCC shape couldn't be built — typically because the
-    // item is a CSG whose regenerator was stripped or whose inputs
-    // were deleted.  Surface this instead of returning null silently.
+  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe (boolean / chamfer) is missing or references deleted inputs.",
     );
   }
-  const result =
-    segments === 1
-      ? chamferShapeBy(sourceShape, subGeo, amount, angleRad)
-      : filletShapeBy(sourceShape, subGeo, amount);
-  if (!result) return null;
-  if (result === sourceShape) {
-    // chamferShapeBy / filletShapeBy returns the input unchanged when
-    // none of the requested edges or faces matched an edge of the OCC
-    // shape.  For a chamfer on a CSG this typically means the rebuilt
-    // shape's edge coordinates don't match the rendered mesh's edge
-    // selection — e.g. a re-tessellation moved vertices outside the
-    // matcher's tolerance.  Surface the failure so the user knows the
-    // click wasn't ignored.
-    const kind = segments === 1 ? "Chamfer" : "Fillet";
+
+  const kind = segments === 1 ? "Chamfer" : "Fillet";
+  let resultId;
+  try {
+    resultId =
+      segments === 1
+        ? occ.chamferShape(sourceId, subGeo, amount, angleRad ?? null)
+        : occ.filletShape(sourceId, subGeo, amount);
+  } finally {
+    occ.releaseShape(sourceId);
+  }
+
+  if (!resultId) {
     const hasEdges = (subGeo?.edges || []).length > 0;
     const hasFaces = (subGeo?.faces || []).length > 0;
     const what =
@@ -133,86 +251,92 @@ async function chamferOrFilletItem({
         `Try re-selecting the ${what} on the current object.`,
     );
   }
-  const data = tessellateToData(result, printPrecision);
-  if (!data) return null;
 
-  const arr = data.positions;
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
   const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
   const cx = (minX + maxX) / 2,
     cy = (minY + maxY) / 2,
     cz = (minZ + maxZ) / 2;
-  const centered = new Array(arr.length);
-  for (let i = 0; i < arr.length; i += 3) {
-    centered[i] = arr[i] - cx;
-    centered[i + 1] = arr[i + 1] - cy;
-    centered[i + 2] = arr[i + 2] - cz;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx;
+    centered[i + 1] -= cy;
+    centered[i + 2] -= cz;
   }
   return {
     geometryData: {
       positions: centered,
-      normals: data.normals,
-      indices: data.indices,
+      normals: null,
+      indices: Array.from(tess.indices),
     },
     centerOffset: { cx, cy, cz },
   };
 }
 
-// Build each item's OCC shape in world space and combine them with the
-// given boolean operation, then tessellate.  The returned `position` is
-// the FIRST INPUT'S world position — geometryData is recentred relative
-// to that anchor.  Anchoring to the first input (rather than the bbox
-// centre) means the new csg's item.position matches where the original
-// minuend lived, so transform handles, the bounding-box overlay, and
-// downstream operations don't visibly shift the moment a cut applies.
-// The visible mesh ends up at the same world coordinates either way —
-// only item.position differs (item.position + recentred vertex == world
-// vertex in both schemes).
 async function performCsg({
   selectedItems,
   allItems,
   operation,
   printPrecision,
 }) {
-  await ensureOcc();
-  const oc = getOcc();
   const sources = allItems || selectedItems;
-  const shapes = [];
+  const shapeIds = [];
   const worldAnchors = [];
+
   for (const item of selectedItems) {
-    const local = buildItemShapeLocal(item, sources, printPrecision);
-    if (!local) continue;
-    const { position, rotation, scale } = buildBrushTransform(item);
-    // Apply uniform scale BEFORE rotate+translate so the input enters
-    // the boolean at its visible size.  Without this, a primitive that
-    // the user has resized via the transform handles contributes its
-    // unscaled local geometry to the boolean — visually wrong: the cut
-    // ignores the resize.  Export already does this same scale step in
-    // buildExportShapes.
-    let scaled = local;
-    if (scale != null && Math.abs(scale - 1) > 1e-9) {
-      const sTrsf = new oc.gp_Trsf_1();
-      sTrsf.SetScaleFactor(scale);
-      const mk = new oc.BRepBuilderAPI_Transform_2(local, sTrsf, true);
-      scaled = mk.Shape();
+    const localId = buildItemShapeLocal(item, sources, printPrecision);
+    if (localId == null) continue;
+    const t = buildBrushTransform(item);
+    let scaledId = localId;
+    if (Math.abs(t.scale - 1) > 1e-9) {
+      scaledId = occ.scaleShape(localId, t.scale);
+      occ.releaseShape(localId);
     }
-    const world = transformShape(scaled, position, rotation);
-    if (world) {
-      shapes.push(world);
-      worldAnchors.push(position);
-    }
+    const worldId = occ.transformShape(
+      scaledId,
+      t.position.x,
+      t.position.y,
+      t.position.z,
+      t.rotation.x || 0,
+      t.rotation.y || 0,
+      t.rotation.z || 0,
+    );
+    if (scaledId !== localId) occ.releaseShape(scaledId);
+    else occ.releaseShape(localId);
+    shapeIds.push(worldId);
+    worldAnchors.push(t.position);
   }
-  if (shapes.length < 2) return null;
-  const result = booleanOp(operation, shapes);
-  if (!result) return null;
-  const tess = tessellate(result, printPrecision ?? null);
+
+  if (shapeIds.length < 2) {
+    shapeIds.forEach((id) => occ.releaseShape(id));
+    return null;
+  }
+
+  let resultId;
+  try {
+    resultId = occ.booleanOp(shapeIds, operation);
+  } finally {
+    shapeIds.forEach((id) => occ.releaseShape(id));
+  }
+  if (!resultId) return null;
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
   if (!tess) return null;
-  const posAttr = tess.getAttribute("position");
-  const normAttr = tess.getAttribute("normal");
-  const idxAttr = tess.index;
-  const positions = Array.from(posAttr.array);
-  // Anchor at the first contributing input's world position.  Fall back
-  // to the bbox centre if no anchor was captured (defensive — shouldn't
-  // happen since shapes.length >= 2 implies at least 2 anchors).
+
+  const positions = Array.from(tess.positions);
   let ax, ay, az;
   if (worldAnchors.length > 0) {
     ax = worldAnchors[0].x;
@@ -233,67 +357,56 @@ async function performCsg({
     position: { x: ax, y: ay, z: az },
     geometryData: {
       positions,
-      normals: normAttr ? Array.from(normAttr.array) : null,
-      indices: idxAttr ? Array.from(idxAttr.array) : null,
+      normals: null,
+      indices: Array.from(tess.indices),
     },
   };
 }
 
-// Write a binary STL by walking each exportable item's tessellation.
-// The format is trivial enough to emit inline rather than pull three.js
-// into the worker bundle just for STLExporter.  Returns an ArrayBuffer
-// suitable for `new Blob([...])` on the main thread.
-//
-// Binary STL layout:
-//   80 bytes  header (ignored)
-//    4 bytes  uint32 LE triangle count
-//   per tri:  12 bytes normal (3 × float32 LE)
-//             36 bytes vertices (9 × float32 LE)
-//              2 bytes attribute byte count (0)
 async function exportSTL({ items }) {
-  await ensureOcc();
-  const shapes = buildExportShapes(items);
-  if (shapes.length === 0) return null;
-  // First pass: tessellate everything and count triangles so we can
-  // allocate the output buffer exactly once.
+  const shapeIds = buildExportShapes(items);
+  if (shapeIds.length === 0) return null;
+
   const tessellations = [];
   let triCount = 0;
-  for (const shape of shapes) {
-    const geo = tessellate(shape, 0.01);
-    if (!geo) continue;
-    const idx = geo.index;
-    const pos = geo.getAttribute("position");
-    const n = idx ? idx.count / 3 : pos.count / 3;
-    tessellations.push({ geo, n });
+  for (const id of shapeIds) {
+    const tess = occ.tessellate(id, 0.01);
+    occ.releaseShape(id);
+    if (!tess) continue;
+    const n = tess.indices.length / 3;
+    tessellations.push({ pos: tess.positions, idx: tess.indices, n });
     triCount += n;
   }
   if (triCount === 0) return null;
-  const byteLength = 84 + triCount * 50;
-  const buf = new ArrayBuffer(byteLength);
+
+  const buf = new ArrayBuffer(84 + triCount * 50);
   const view = new DataView(buf);
   view.setUint32(80, triCount, true);
   let offset = 84;
-  for (const { geo, n } of tessellations) {
-    const pos = geo.getAttribute("position");
-    const idx = geo.index;
-    const get = (vi) => [pos.getX(vi), pos.getY(vi), pos.getZ(vi)];
+
+  for (const { pos, idx, n } of tessellations) {
     for (let t = 0; t < n; t++) {
-      const a = idx ? idx.getX(t * 3) : t * 3;
-      const b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
-      const c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
-      const [ax, ay, az] = get(a);
-      const [bx, by, bz] = get(b);
-      const [cx, cy, cz] = get(c);
-      // Face normal via (B-A) × (C-A), normalized.
+      const a = idx[t * 3],
+        b = idx[t * 3 + 1],
+        c = idx[t * 3 + 2];
+      const ax = pos[a * 3],
+        ay = pos[a * 3 + 1],
+        az = pos[a * 3 + 2];
+      const bx = pos[b * 3],
+        by = pos[b * 3 + 1],
+        bz = pos[b * 3 + 2];
+      const cx = pos[c * 3],
+        cy = pos[c * 3 + 1],
+        cz = pos[c * 3 + 2];
       const ux = bx - ax,
         uy = by - ay,
         uz = bz - az;
       const vx = cx - ax,
         vy = cy - ay,
         vz = cz - az;
-      let nx = uy * vz - uz * vy;
-      let ny = uz * vx - ux * vz;
-      let nz = ux * vy - uy * vx;
+      let nx = uy * vz - uz * vy,
+        ny = uz * vx - ux * vz,
+        nz = ux * vy - uy * vx;
       const len = Math.hypot(nx, ny, nz) || 1;
       nx /= len;
       ny /= len;
@@ -317,37 +430,14 @@ async function exportSTL({ items }) {
   return buf;
 }
 
-// Write a B-rep STEP via OCC's STEPControl_Writer.  Returns the file
-// content as a string; the main thread wraps it in a Blob and triggers a
-// download.  See DocumentSection's previous comments for the
-// filename-marshalling quirk we work around with a before/after readdir.
 async function exportSTEP({ items }) {
-  await ensureOcc();
-  const oc = getOcc();
-  const shapes = buildExportShapes(items);
-  if (shapes.length === 0) return null;
-  const writer = new oc.STEPControl_Writer_1();
-  const mode = oc.STEPControl_StepModelType.STEPControl_AsIs;
-  for (const shape of shapes) {
-    writer.Transfer(shape, mode, true);
-  }
-  const before = new Set(oc.FS.readdir("/"));
-  writer.Write("scene.step");
-  const writtenName = oc.FS.readdir("/").find((n) => !before.has(n));
-  if (!writtenName) throw new Error("STEP writer did not produce a file");
-  const content = oc.FS.readFile("/" + writtenName, { encoding: "utf8" });
+  const shapeIds = buildExportShapes(items);
+  if (shapeIds.length === 0) return null;
   try {
-    oc.FS.unlink("/" + writtenName);
-  } catch {
-    /* best-effort */
+    return occ.exportSTEP(shapeIds);
+  } finally {
+    shapeIds.forEach((id) => occ.releaseShape(id));
   }
-  if (!content || content.length < 100) {
-    throw new Error("STEP writer produced an empty or truncated file");
-  }
-  if (!content.startsWith("ISO-10303-21;")) {
-    throw new Error("STEP writer produced an invalid header");
-  }
-  return content;
 }
 
 export const ops = {

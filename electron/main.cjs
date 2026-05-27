@@ -14,7 +14,7 @@ if (process.env.ELECTRON_RUN_AS_NODE) {
 }
 
 const electron = require("electron");
-const { app, BrowserWindow, protocol } = electron;
+const { app, BrowserWindow, ipcMain, protocol } = electron;
 const fsMod = require("fs");
 const urlMod = require("url");
 
@@ -40,6 +40,26 @@ protocol.registerSchemesAsPrivileged([
 
 const path = require("path");
 
+// Load the native OCC addon and register IPC handlers so the renderer can
+// invoke OCC operations without accessing Node.js or native modules directly.
+// We defer the require to here so the ELECTRON_RUN_AS_NODE guard above fires
+// before we attempt to load the addon.
+let occBridge = null;
+try {
+  occBridge = require("./occ-bridge.cjs");
+  // performCsg / chamferOrFilletItem are synchronous in C++ but can throw.
+  // ipcMain.handle wraps the return value in a promise automatically.
+  ipcMain.handle("occ:performCsg", (_e, args) => occBridge.performCsg(args));
+  ipcMain.handle("occ:chamferOrFilletItem", (_e, args) =>
+    occBridge.chamferOrFilletItem(args),
+  );
+  ipcMain.handle("occ:exportSTL", (_e, args) => occBridge.exportSTL(args));
+  ipcMain.handle("occ:exportSTEP", (_e, args) => occBridge.exportSTEP(args));
+} catch (err) {
+  // Addon not built or OCC dylib missing — fall back to WASM path in renderer.
+  console.warn("[main] native OCC addon unavailable:", err.message);
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
@@ -49,6 +69,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   });
   const DEV_URL = process.env.ELECTRON_START_URL || null;

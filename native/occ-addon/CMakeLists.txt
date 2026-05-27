@@ -42,19 +42,24 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${OpenCASCADE_INCLUDE_DIR}
 )
 
-# Phase-0 subset: only the toolkit libraries needed for ping() + tessellation.
-# Boolean ops (TKBO/TKBool), fillet (TKFillet), extrude (TKPrim/TKTopAlgo),
-# and export (TKSTEP/TKIGES) will be added in later phases.
 target_link_libraries(${PROJECT_NAME} PRIVATE
   ${CMAKE_JS_LIB}
   TKernel
   TKMath
+  TKG2d
   TKG3d
   TKGeomBase
+  TKGeomAlgo
   TKBRep
-  TKPrim
-  TKMesh
   TKTopAlgo
+  TKPrim
+  TKBO
+  TKBool
+  TKFillet
+  TKShHealing
+  TKMesh
+  TKXSBase
+  TKDESTEP
 )
 
 # NAPI_CPP_EXCEPTIONS lets node-addon-api throw Napi::Error from catch blocks.

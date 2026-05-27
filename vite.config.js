@@ -55,25 +55,16 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 3000,
     open: true,
-    // opencascade.js's WASM file is large (~63MB) and needs to be served
-    // with the correct MIME type and no aggressive caching during dev.
     fs: { strict: false },
   },
-  // Don't try to pre-bundle opencascade.js — it expects to load its own
-  // .wasm via fetch/fs at runtime.
-  optimizeDeps: { exclude: ["opencascade.js"] },
-  // Make sure the .wasm file is treated as an asset and copied to the
-  // build output preserving its filename so opencascade.js can find it.
-  assetsInclude: ["**/*.wasm"],
-  // Module worker (occ.worker.js) shares OCC code with the main bundle —
-  // forcing ES output lets Rollup split chunks across the worker/main
-  // boundary instead of bailing with the default IIFE format.
-  // inlineDynamicImports collapses the worker's chunks into a single
-  // file, sidestepping a Vite-4 bug where the OCC wasm asset gets
-  // emitted twice (main + worker) and crashes build-import-analysis.
-  worker: {
-    format: "es",
-    rollupOptions: { output: { inlineDynamicImports: true } },
+  build: {
+    // occOps.js uses Node.js createRequire for the native C++ addon — it must
+    // not be bundled into the browser/renderer chunk.  In Electron the renderer
+    // never reaches the occOps import path (all OCC calls go through IPC);
+    // in Node/vitest the module is resolved directly from the source tree.
+    rollupOptions: {
+      external: (id) => /\/occOps\.js$/.test(id),
+    },
   },
   test: {
     environment: "node",

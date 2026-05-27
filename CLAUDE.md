@@ -25,9 +25,9 @@ npx vite build         # production bundle, ~3s
 ```
 
 Both must succeed before declaring work done. The build sometimes catches
-issues vitest misses (worker bundling, asset emission, opencascade.js
-chunking). Vite 4.5.x is pinned for a specific reason — see
-`vite.config.js` `worker.format: "es" + inlineDynamicImports`.
+issues vitest misses (native module leaking into the renderer bundle, etc.).
+Vite 4.5.x is pinned; `vite.config.js` marks `occOps.js` as external so
+the Node.js `createRequire` usage doesn't pollute the browser bundle.
 
 ## Stale IDE diagnostics
 
@@ -87,23 +87,24 @@ files just to make these go away.
   the burden of a name that fits, a place in the tree, and an import
   graph that doesn't break the worker bundle.
 
-## OCC worker boundary
+## OCC execution boundary
 
-- `occClient.js` is the only main-thread surface for OCC calls. It posts
-  to a Web Worker in the browser, falls back to in-process for node tests.
-- Operation bodies live in `occOps.js` (shared between worker and
-  fallback). Any new op:
+- `occClient.js` is the only renderer-side surface for OCC calls. In
+  Electron it routes through IPC (`window.electronAPI.invokeOcc`); in
+  Node/vitest it dynamically imports `occOps.js` in-process.
+- Operation bodies live in `occOps.js`. Any new op:
   1. Add a function to `occOps.js`'s `ops` map.
   2. Add an `export` wrapper in `occClient.js` that calls `runOp("name",
      args)`.
   3. Call from React via `await occClient.theOp(args)`. The busy
      counter / spinner auto-attaches.
-- **Don't import `occClient.js` from anything in the worker's transitive
-  graph.** The worker dynamic-imports `occOps.js`, which statically pulls
-  in `csgUtils → sceneObjects → store`. If anything reachable from the
-  store imports `occClient`, Vite tries to bundle the worker inside
-  itself and hangs. This is why
-  `regenerateOrchestrator.js` exists separately from the store.
+- **`occOps.js` must never be statically imported** from the renderer
+  bundle — it uses Node.js `createRequire` for the native addon.
+  `vite.config.js` marks it `external` so Rollup skips bundling it.
+  In the Electron renderer the dynamic-import code path in `occClient.js`
+  is never reached (IPC is used instead). This is why
+  `regenerateOrchestrator.js` exists separately from the store (same
+  reason: avoid creating a bundling cycle through `occClient`).
 
 ## Variables / formulas
 

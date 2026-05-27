@@ -10,7 +10,6 @@
 // timeout to 30 s for this reason.
 
 import { describe, it, expect, beforeAll, vi } from "vitest";
-import { ensureOcc } from "../init.js";
 import {
   makeCube,
   makeSphere,
@@ -73,10 +72,6 @@ vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
 vi.mock("../../objectMaterials.js", () => ({
   createMaterial: () => ({ dispose() {} }),
 }));
-
-beforeAll(async () => {
-  await ensureOcc();
-}, 60_000);
 
 function expectSolidGeometry(geo) {
   expect(geo).toBeTruthy();
@@ -540,7 +535,7 @@ describe("OCC boolean operations", () => {
     // mesh — otherwise a subsequent cut comes out at R*centerOffset
     // away from where the chamfered cube is rendered.
     const { ops } = await import("../../occOps.js");
-    const { buildItemShapeLocal } = await import("../../csgUtils.js");
+    const { buildItemShapeLocal } = await import("../../occOps.js");
     // A cube at world (5, 0, 0) chamfered on its +X face (asymmetric, so
     // centerOffset is non-zero).
     const cube = { id: 1, type: "cube", position: { x: 5, y: 0, z: 0 } };
@@ -1398,7 +1393,7 @@ describe("OCC chamfer", () => {
     // Regression for "Chamfers on more complicated shapes do not do anything":
     // shapes built via union/difference/etc. must still be chamferable, not
     // just bare primitives.
-    const { buildItemShapeLocal } = await import("../../csgUtils.js");
+    const { buildItemShapeLocal } = await import("../../occOps.js");
     const cubeA = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
     const cubeB = { id: 2, type: "cube", position: { x: 1, y: 0, z: 0 } };
     // Synthesize a csg item with a boolean regenerator pointing at the cubes.
@@ -1840,7 +1835,7 @@ describe("OCC chamfer", () => {
   });
 
   it("chamfers an already-chamfered shape (chamfer-on-chamfer)", async () => {
-    const { buildItemShapeLocal } = await import("../../csgUtils.js");
+    const { buildItemShapeLocal } = await import("../../occOps.js");
     const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
     // Synthesize a chamfered-cube item via the chamfer regenerator.
     const chamferedCube = {
