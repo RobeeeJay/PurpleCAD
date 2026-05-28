@@ -165,22 +165,26 @@ export function buildBevelArc(P, uA, uB, trimA, trimB) {
 }
 
 // BFS over coincident constraints from startIdx to propagate a newly placed position
-// to all connected shapes not yet in `updated`. Uses per-shape guard — safe for
-// post-enforcement cleanup passes where we just need to keep attached shapes in sync.
+// to all connected shapes.  Uses a local `visited` set (not the global `updated` map)
+// so that shapes already processed by the main BFS can still be re-synchronised here
+// after distance enforcement shifts an endpoint they share.
 function propagateCoincidentFrom(startIdx, shapes, updated, constraints) {
+  const visited = new Set();
   const queue = [startIdx];
   while (queue.length > 0) {
     const idx = queue.shift();
+    if (visited.has(idx)) continue;
+    visited.add(idx);
     const cur = shapes[idx];
     if (!cur) continue;
     for (const c of constraints) {
       if (c.type !== "coincident") continue;
       let oIdx, oKey, tKey;
-      if (c.shapeAIdx === idx && !updated.has(c.shapeBIdx)) {
+      if (c.shapeAIdx === idx && !visited.has(c.shapeBIdx)) {
         oIdx = c.shapeBIdx;
         oKey = c.pointB;
         tKey = c.pointA;
-      } else if (c.shapeBIdx === idx && !updated.has(c.shapeAIdx)) {
+      } else if (c.shapeBIdx === idx && !visited.has(c.shapeAIdx)) {
         oIdx = c.shapeAIdx;
         oKey = c.pointA;
         tKey = c.pointB;
@@ -336,6 +340,7 @@ export function enforceConstraints(
             const wasInUpdated = updated.has(sOtherIdx);
             shapes[sOtherIdx] = sMoved;
             updated.set(sOtherIdx, sMoved);
+            movedKeys.set(sOtherIdx, sOtherKey);
             placedEP.add(epKey(sOtherIdx, sOtherKey));
             if (!wasInUpdated) queue.push(sOtherIdx);
           }

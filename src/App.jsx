@@ -17,6 +17,14 @@ function App() {
   const redo = useStore((state) => state.redo);
   const undoSketch = useStore((state) => state.undoSketch);
   const redoSketch = useStore((state) => state.redoSketch);
+  const notification = useStore((state) => state.notification);
+  const clearNotification = useStore((state) => state.clearNotification);
+
+  useEffect(() => {
+    if (!notification) return;
+    const t = setTimeout(clearNotification, 4000);
+    return () => clearTimeout(t);
+  }, [notification, clearNotification]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -64,6 +72,28 @@ function App() {
       <ExtrudeLengthDialog />
       <ChamferEditDialog />
       <VersionTag />
+      {notification && (
+        <div
+          style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "rgba(30, 10, 10, 0.92)",
+            color: "#ffaaaa",
+            padding: "12px 20px",
+            borderRadius: 6,
+            fontSize: 13,
+            maxWidth: 340,
+            textAlign: "center",
+            zIndex: 9999,
+            pointerEvents: "none",
+            lineHeight: 1.45,
+          }}
+        >
+          {notification}
+        </div>
+      )}
     </div>
   );
 }

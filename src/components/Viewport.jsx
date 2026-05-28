@@ -460,18 +460,21 @@ const Viewport = () => {
     }
 
     if (!selectedId) return;
-    if (selectedIdsRef.current.length > 1) return;
 
     const result = buildTransformHandles(selectedId, items, objectsRef);
     if (!result) return;
 
     const { handles, boundingBox } = result;
-    handles.forEach(({ mesh }) => scene.add(mesh));
+    const isMultiSelect = selectedIdsRef.current.length > 1;
+    const visibleHandles = isMultiSelect
+      ? handles.filter(({ type }) => !type.startsWith("rot"))
+      : handles;
+    visibleHandles.forEach(({ mesh }) => scene.add(mesh));
     scene.add(boundingBox.boxMesh);
     scene.add(boundingBox.labelX.sprite);
     scene.add(boundingBox.labelY.sprite);
     scene.add(boundingBox.labelZ.sprite);
-    handlesRef.current = handles;
+    handlesRef.current = visibleHandles;
     boundingBoxRef.current = boundingBox;
 
     return () => {
@@ -505,7 +508,7 @@ const Viewport = () => {
         boundingBoxRef.current = null;
       }
     };
-  }, [selectedId, items]);
+  }, [selectedId, selectedIds, items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sketch mode (top-down view + grid) ───────────────────────────────────
 

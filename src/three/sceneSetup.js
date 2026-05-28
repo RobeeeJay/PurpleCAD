@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { MM_PER_UNIT } from "./sceneObjects/dimensions.js";
 
 export function createScene(theme) {
   const scene = new THREE.Scene();
@@ -50,13 +51,16 @@ export function createRenderer(container) {
 export function createShadowGround(scene) {
   const geo = new THREE.PlaneGeometry(2000, 2000);
   const mat = new THREE.ShadowMaterial({ opacity: 0.35 });
+  // Don't write to the depth buffer: the shadow receiver is coplanar with
+  // the grid at Y=0.  A depth write here causes the grid to fail its own
+  // depth test (floating-point ties resolve inconsistently) and vanish.
+  mat.depthWrite = false;
   const plane = new THREE.Mesh(geo, mat);
   plane.rotation.x = -Math.PI / 2;
   plane.position.y = 0;
   plane.receiveShadow = true;
   plane.visible = false;
   plane.userData.isShadowGround = true;
-  // Render BEFORE the grid so the grid lines stay readable on top.
   plane.renderOrder = -1;
   scene.add(plane);
   return plane;
@@ -89,6 +93,32 @@ export function createLights(scene, camera) {
   camera.add(pt);
   // Return dir1 so the Viewport can toggle castShadow at runtime.
   return { dir1 };
+}
+
+function makeRulerSprite(text, small = false) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 160;
+  canvas.height = 40;
+  const ctx = canvas.getContext("2d");
+  const fontSize = small ? 18 : 26;
+  ctx.font = `bold ${fontSize}px monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // White outline keeps text legible on dark backgrounds.
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
+  ctx.lineWidth = small ? 3 : 4;
+  ctx.strokeText(text, 80, 20);
+  ctx.fillStyle = "rgba(40, 40, 40, 1.0)";
+  ctx.fillText(text, 80, 20);
+  const mat = new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(canvas),
+    depthTest: false,
+    transparent: true,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(small ? 0.7 : 1.0, small ? 0.175 : 0.25, 1);
+  sprite.renderOrder = 1;
+  return sprite;
 }
 
 export function createGrid(scene) {
@@ -133,7 +163,47 @@ export function createGrid(scene) {
   );
   gridPlane.rotation.x = -Math.PI / 2;
   scene.add(gridPlane);
-  return { gridPlane, gridMaterial };
+
+  // Ruler labels along X (at Z offset) and Z (at X offset) axes.
+  // Coarse labels every 5 units (50 mm) from ±50–500 mm; fine labels
+  // every 1 unit (10 mm) at the subdivisions between coarse lines.
+  const rulerGroup = new THREE.Group();
+  const COARSE = 5; // scene units per coarse square
+  const COUNT = 10; // coarse squares in each direction (±500 mm total)
+  const FINE_TOTAL = COUNT * COARSE; // 50 units = 500 mm
+  const AXIS_OFFSET = 0.7;
+  const Y = 0.05;
+
+  for (let i = 1; i <= COUNT; i++) {
+    for (const sign of [1, -1]) {
+      const pos = sign * i * COARSE;
+      const labelText = `${pos * MM_PER_UNIT}mm`;
+      const sx = makeRulerSprite(labelText, false);
+      sx.position.set(pos, Y, AXIS_OFFSET);
+      rulerGroup.add(sx);
+      const sz = makeRulerSprite(labelText, false);
+      sz.position.set(AXIS_OFFSET, Y, pos);
+      rulerGroup.add(sz);
+    }
+  }
+
+  for (let i = 1; i <= FINE_TOTAL; i++) {
+    if (i % COARSE === 0) continue; // coarse lines already labelled above
+    for (const sign of [1, -1]) {
+      const pos = sign * i;
+      const labelText = `${pos * MM_PER_UNIT}mm`;
+      const sx = makeRulerSprite(labelText, true);
+      sx.position.set(pos, Y, AXIS_OFFSET);
+      rulerGroup.add(sx);
+      const sz = makeRulerSprite(labelText, true);
+      sz.position.set(AXIS_OFFSET, Y, pos);
+      rulerGroup.add(sz);
+    }
+  }
+
+  scene.add(rulerGroup);
+
+  return { gridPlane, gridMaterial, rulerGroup };
 }
 
 export function createAxisGroup(scene) {

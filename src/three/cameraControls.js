@@ -245,7 +245,7 @@ export function attachCameraControls(ctx) {
     });
     const geo = new THREE.BufferGeometry().setFromPoints(circlePts);
     const mat = new THREE.LineBasicMaterial({
-      color: 0xffdd00,
+      color: 0xcc44ff,
       depthTest: false,
     });
     currentSnapIndicator = new THREE.Line(geo, mat);
@@ -567,11 +567,28 @@ export function attachCameraControls(ctx) {
           );
           clearHoverPointIndicator();
           renderer.domElement.style.cursor = "default";
+          if (dimHintRef.current) {
+            const CONSTRAINT_LABELS = {
+              coincident: "Coincident",
+              distance: "Distance",
+              onLine: "On Line",
+              horizontal: "Horizontal",
+              vertical: "Vertical",
+            };
+            const tipRect = renderer.domElement.getBoundingClientRect();
+            dimHintRef.current.textContent =
+              CONSTRAINT_LABELS[cObj.userData.constraintType] ??
+              cObj.userData.constraintType;
+            dimHintRef.current.style.display = "block";
+            dimHintRef.current.style.left = `${screenX - tipRect.left + 16}px`;
+            dimHintRef.current.style.top = `${screenY - tipRect.top - 10}px`;
+          }
           return;
         }
       }
     }
     clearConstraintHoverHighlight();
+    if (dimHintRef.current) dimHintRef.current.style.display = "none";
 
     // ── Point hover takes priority over line hover ────────────────────────────
     const snap = findSnap(screenX, screenY, selItem?.shapes || [], sketchMesh);

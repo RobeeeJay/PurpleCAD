@@ -1748,6 +1748,212 @@ describe("enforceConstraints", () => {
     });
   });
 
+  // ══ DISTANCE + H/V ON CONSTRAINED RECTANGLE ══════════════════════════════
+  //
+  // Simulates a realistic sketch workflow: 90×60 mm rectangle (9×6 scene
+  // units; MM_PER_UNIT=10) with horizontal/vertical constraints on all
+  // sides, a distance constraint on the top edge (=9) and on the left edge
+  // (=6).  Dragging the TL corner 20 mm left and 20 mm up should keep
+  // right=6 and bottom=9 — the same dimensions as the original rectangle.
+  //
+  // Shapes: 0=top, 1=right, 2=bottom, 3=left (same winding as makeRect)
+  //   TL=(0,6), TR=(9,6), BR=(9,0), BL=(0,0)
+
+  describe("constrained 90×60 rectangle: drag TL keeps right=60mm and bottom=90mm", () => {
+    function makeConstrainedRect() {
+      return {
+        shapes: [
+          L(0, 6, 9, 6), // 0: top   TL→TR
+          L(9, 6, 9, 0), // 1: right TR→BR
+          L(9, 0, 0, 0), // 2: bottom BR→BL
+          L(0, 0, 0, 6), // 3: left  BL→TL
+        ],
+        constraints: [
+          coin(3, "end", 0, "start"), // TL
+          coin(0, "end", 1, "start"), // TR
+          coin(1, "end", 2, "start"), // BR
+          coin(2, "end", 3, "start"), // BL
+          hvC(0, "horizontal"),
+          hvC(1, "vertical"),
+          hvC(2, "horizontal"),
+          hvC(3, "vertical"),
+          fixed(0, "start", 0, "end", 9), // top = 90 mm
+          fixed(3, "start", 3, "end", 6), // left = 60 mm
+        ],
+      };
+    }
+
+    it("drag TL 20 mm left+up: right edge stays 6 units, bottom stays 9 units", () => {
+      const { shapes, constraints } = makeConstrainedRect();
+      // Simulate cameraControls: pre-apply H/V to the dragged shape (top,
+      // primaryIdx=0, "start"=TL), then let enforceConstraints propagate.
+      // 20 mm left/up = 2 scene units each direction.
+      const movedTop = moveShapePoint(shapes[0], "start", { x: -2, y: 8 });
+      const preEnforced = applyHVEnforcement(movedTop, "start", constraints, 0);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preEnforced,
+        "start",
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      // Right edge length must remain 60 mm (6 scene units).
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      // Bottom edge length must remain 90 mm (9 scene units).
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+
+    it("drag BR 20 mm right+down: right edge stays 6 units, bottom stays 9 units", () => {
+      const { shapes, constraints } = makeConstrainedRect();
+      // Drag right.end (BR) from (9,0) to (11,-2). Pre-apply V enforcement
+      // (shape 1 is V-constrained). 20 mm right/down = 2 scene units each.
+      const movedRight = moveShapePoint(shapes[1], "end", { x: 11, y: -2 });
+      const preEnforced = applyHVEnforcement(movedRight, "end", constraints, 1);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        1,
+        preEnforced,
+        "end",
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      // Right edge length must remain 60 mm (6 scene units).
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      // Bottom edge length must remain 90 mm (9 scene units).
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+  });
+
+  // ══ DISTANCE + H/V + DIAGONAL ON CONSTRAINED RECTANGLE ══════════════════
+  //
+  // Same 90×60 mm rectangle as above, extended with a diagonal from TL to BR
+  // (shape 4).  Two coincident constraints anchor the diagonal:
+  //   diag.start = TL  (via left.end)
+  //   diag.end   = BR  (via bottom.start)
+  //
+  // The BR coincident uses bottom.start rather than right.end so that when
+  // the solver propagates the left-distance update through bottom, the
+  // diagonal's end is updated (to the correct new BR) before the diagonal
+  // is processed — avoiding a BFS ordering conflict where a stale diag.end
+  // would otherwise revert right.end back to the original position.
+  //
+  // Drag: top.start (TL) moves down 20 mm (2 scene units).
+  // Expected: diagonal still spans the new TL→BR; right=6; bottom=9.
+
+  describe("constrained 90×60 rectangle with TL→BR diagonal: drag top edge 20mm down", () => {
+    function makeConstrainedRectWithDiag() {
+      return {
+        shapes: [
+          L(0, 6, 9, 6), // 0: top    TL→TR
+          L(9, 6, 9, 0), // 1: right  TR→BR
+          L(9, 0, 0, 0), // 2: bottom BR→BL
+          L(0, 0, 0, 6), // 3: left   BL→TL
+          L(0, 6, 9, 0), // 4: diag   TL→BR
+        ],
+        constraints: [
+          coin(3, "end", 0, "start"), // TL
+          coin(0, "end", 1, "start"), // TR
+          coin(1, "end", 2, "start"), // BR
+          coin(2, "end", 3, "start"), // BL
+          hvC(0, "horizontal"),
+          hvC(1, "vertical"),
+          hvC(2, "horizontal"),
+          hvC(3, "vertical"),
+          fixed(0, "start", 0, "end", 9), // top = 90 mm
+          fixed(3, "start", 3, "end", 6), // left = 60 mm
+          coin(3, "end", 4, "start"), // diag.start = TL (left.end)
+          coin(2, "start", 4, "end"), // diag.end = BR (bottom.start)
+        ],
+      };
+    }
+
+    it("drag top edge down 20 mm: diagonal spans new TL→BR, right stays 6 units, bottom stays 9 units", () => {
+      const { shapes, constraints } = makeConstrainedRectWithDiag();
+      // Drag top.start (TL) from (0,6) to (0,4): 20 mm down = 2 scene units.
+      // Pre-apply H enforcement on top before passing to enforceConstraints.
+      const movedTop = moveShapePoint(shapes[0], "start", { x: 0, y: 4 });
+      const preEnforced = applyHVEnforcement(movedTop, "start", constraints, 0);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preEnforced,
+        "start",
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      // Diagonal must still connect TL to BR after the move.
+      const tl = pt(result, 0, "start");
+      const br = pt(result, 1, "end");
+      expect(pt(result, 4, "start"), "diag start = TL").toMatchObject({
+        x: expect.closeTo(tl.x),
+        y: expect.closeTo(tl.y),
+      });
+      expect(pt(result, 4, "end"), "diag end = BR").toMatchObject({
+        x: expect.closeTo(br.x),
+        y: expect.closeTo(br.y),
+      });
+
+      // Edge lengths must be preserved.
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+  });
+
   // ── Same-endpoint redundant coincidents (chain forms a clique) ───────────
   describe("redundant coincidents on the same endpoint", () => {
     it("duplicated coincident has no extra effect", () => {

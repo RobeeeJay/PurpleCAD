@@ -163,23 +163,54 @@ export function createSketchDrawHelpers(
       if (clickSnap) localPt = { x: clickSnap.x, y: clickSnap.y };
     }
 
-    // Helper: build constraints from recorded snaps for a completed shape
+    // Helper: build constraints from recorded snaps for a completed shape.
+    // Also creates coincident constraints for any existing points that are
+    // already coincident with the snapped point, so the new shape is fully
+    // connected at multi-point junctions.
     const buildConstraints = (snaps, tool) => {
       const newIdx = shapes.length;
-      return snaps
-        .map((snap, i) => {
-          if (!snap) return null;
-          const pointKeys =
-            tool === "bezier" ? ["p0", "p1", "p2", "p3"] : ["start", "end"];
-          return {
-            type: "coincident",
-            shapeAIdx: newIdx,
-            pointA: pointKeys[i] ?? `p${i}`,
-            shapeBIdx: snap.shapeIdx,
-            pointB: snap.pointKey,
-          };
-        })
-        .filter(Boolean);
+      const existingConstraints = selItem?.constraints || [];
+      return snaps.flatMap((snap, i) => {
+        if (!snap) return [];
+        const pointKeys =
+          tool === "bezier" ? ["p0", "p1", "p2", "p3"] : ["start", "end"];
+        const newPointKey = pointKeys[i] ?? `p${i}`;
+        const primary = {
+          type: "coincident",
+          shapeAIdx: newIdx,
+          pointA: newPointKey,
+          shapeBIdx: snap.shapeIdx,
+          pointB: snap.pointKey,
+        };
+        const extras = existingConstraints
+          .filter((c) => c.type === "coincident")
+          .flatMap((c) => {
+            if (c.shapeAIdx === snap.shapeIdx && c.pointA === snap.pointKey) {
+              return [
+                {
+                  type: "coincident",
+                  shapeAIdx: newIdx,
+                  pointA: newPointKey,
+                  shapeBIdx: c.shapeBIdx,
+                  pointB: c.pointB,
+                },
+              ];
+            }
+            if (c.shapeBIdx === snap.shapeIdx && c.pointB === snap.pointKey) {
+              return [
+                {
+                  type: "coincident",
+                  shapeAIdx: newIdx,
+                  pointA: newPointKey,
+                  shapeBIdx: c.shapeAIdx,
+                  pointB: c.pointA,
+                },
+              ];
+            }
+            return [];
+          });
+        return [primary, ...extras];
+      });
     };
 
     if (!sketchDrawRef.current) {

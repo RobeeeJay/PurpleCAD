@@ -69,6 +69,10 @@ export const uiInitial = {
   // visible — without this, the source solid pops back to opaque for
   // a frame before the cut result replaces it.
   cutExtrudeInProgress: false,
+
+  // Transient message shown as a centered overlay (auto-dismissed by the
+  // consumer component after a short delay).  null = nothing visible.
+  notification: null,
 };
 
 export const createUiSlice = (set) => ({
@@ -138,4 +142,7 @@ export const createUiSlice = (set) => ({
 
   toggleAxisVisibility: () =>
     set((state) => ({ axisVisible: !state.axisVisible })),
+
+  showNotification: (message) => set({ notification: message }),
+  clearNotification: () => set({ notification: null }),
 });

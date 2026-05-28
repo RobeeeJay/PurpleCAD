@@ -12,6 +12,7 @@ const BevelSection = () => {
   const modifyItem = useStore((s) => s.modifyItem);
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const curveResolution = useStore((s) => s.curveResolution);
+  const showNotification = useStore((s) => s.showNotification);
 
   // User-controllable chamfer parameters.  Distance is in millimetres
   // (converted to scene units by MM_PER_UNIT before passing to OCC).
@@ -99,7 +100,12 @@ const BevelSection = () => {
         allItems: items,
         printPrecision,
       });
-      if (!result) return;
+      if (!result) {
+        showNotification(
+          "Could not apply — the distance may be too large for the selected geometry.",
+        );
+        return;
+      }
       const { geometryData, centerOffset } = result;
       const { cx, cy, cz } = centerOffset;
 
@@ -139,7 +145,7 @@ const BevelSection = () => {
       clearSelectedSubGeometry();
     } catch (err) {
       console.error("Chamfer operation failed:", err);
-      alert("Chamfer operation failed: " + err.message);
+      showNotification(err.message);
     }
   };
 

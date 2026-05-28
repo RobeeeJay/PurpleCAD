@@ -112,7 +112,7 @@ export function useViewportInit({
     const { dir1: shadowLight } = createLights(scene, camera);
     shadowLightRef.current = shadowLight;
     shadowGroundRef.current = createShadowGround(scene);
-    const { gridPlane, gridMaterial } = createGrid(scene);
+    const { gridPlane, gridMaterial, rulerGroup } = createGrid(scene);
     planeRef.current = gridPlane;
     axisGroupRef.current = createAxisGroup(scene);
     axisGroupRef.current.visible = useStore.getState().axisVisible;
@@ -194,6 +194,12 @@ export function useViewportInit({
       }
       if (transformDebounceRef.current)
         clearTimeout(transformDebounceRef.current);
+      rulerGroup.traverse((obj) => {
+        if (obj.material) {
+          if (obj.material.map) obj.material.map.dispose();
+          obj.material.dispose();
+        }
+      });
       saveCameraState(cameraRef, targetRef, cameraControlsRef);
       if (composerRef.current) {
         composerRef.current.dispose();
