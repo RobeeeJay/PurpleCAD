@@ -13,6 +13,14 @@ if (process.env.ELECTRON_RUN_AS_NODE) {
   process.exit(1);
 }
 
+// In dev mode, watch electron/*.cjs for changes and relaunch automatically.
+// watchRenderer: false because Vite HMR already handles renderer hot-reload.
+if (process.env.ELECTRON_START_URL) {
+  try {
+    require("electron-reloader")(module, { watchRenderer: false });
+  } catch (_) {}
+}
+
 const electron = require("electron");
 const { app, BrowserWindow, ipcMain, protocol } = electron;
 const fsMod = require("fs");

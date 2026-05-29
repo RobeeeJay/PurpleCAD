@@ -37,6 +37,9 @@ export const createSketchSlice = (set) => ({
   sketchMultiSelectedIndices: [],
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
+  sketchLongPressMenu: null, // { x, y, items: [{kind, label, ...}] } | null
+  setSketchLongPressMenu: (v) => set({ sketchLongPressMenu: v }),
+
   // --- Shape + constraint mutations ---
   addSketchConstraints: (sketchId, newConstraints) =>
     set((state) => {

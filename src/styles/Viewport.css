@@ -100,3 +100,39 @@
   border-color: rgba(255, 221, 68, 0.9);
   background: rgba(255, 255, 255, 0.15);
 }
+
+.sketch-long-press-menu {
+  position: fixed;
+  z-index: 2000;
+  background: rgba(18, 18, 28, 0.96);
+  border: 1px solid rgba(136, 170, 255, 0.28);
+  border-radius: 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
+  min-width: 160px;
+  padding: 4px 0;
+  font-size: 12px;
+  user-select: none;
+  pointer-events: all;
+}
+
+.sketch-long-press-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: #c8ccdd;
+  transition: background 0.1s;
+}
+
+.sketch-long-press-menu-item:hover {
+  background: rgba(100, 120, 200, 0.22);
+  color: #eef0ff;
+}
+
+.sketch-long-press-menu-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

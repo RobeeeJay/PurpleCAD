@@ -4,7 +4,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "concurrently -k -n vite,electron -c blue,magenta \"vite --port 3000\" \"wait-on http://localhost:3000 && ELECTRON_START_URL=http://localhost:3000 nodemon --watch electron --ext cjs --exec 'unset ELECTRON_RUN_AS_NODE; electron .'\"",
+    "dev": "concurrently -k -n vite,electron -c blue,magenta \"vite --port 3000\" \"wait-on http://localhost:3000 && unset ELECTRON_RUN_AS_NODE; ELECTRON_START_URL=http://localhost:3000 electron .\"",
     "build": "vite build",
     "format": "prettier --write \"src/**/*.{js,jsx}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx}\"",
@@ -59,7 +59,7 @@
     "concurrently": "^9.2.1",
     "electron": "^28.3.3",
     "electron-builder": "^26.8.1",
-    "nodemon": "^3.1.14",
+    "electron-reloader": "^1.2.3",
     "prettier": "^3.8.3",
     "vite": "^4.5.14",
     "vitest": "^4.1.5",

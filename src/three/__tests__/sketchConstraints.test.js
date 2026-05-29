@@ -1864,18 +1864,17 @@ describe("enforceConstraints", () => {
   // ══ DISTANCE + H/V + DIAGONAL ON CONSTRAINED RECTANGLE ══════════════════
   //
   // Same 90×60 mm rectangle as above, extended with a diagonal from TL to BR
-  // (shape 4).  Two coincident constraints anchor the diagonal:
+  // (shape 4).  Three coincident constraints anchor the diagonal:
   //   diag.start = TL  (via left.end)
-  //   diag.end   = BR  (via bottom.start)
+  //   diag.end   = BR  (via bottom.start)   -- coin(2,"start",4,"end")
+  //   diag.end   = BR  (via right.end)      -- coin(1,"end",4,"end")
   //
-  // The BR coincident uses bottom.start rather than right.end so that when
-  // the solver propagates the left-distance update through bottom, the
-  // diagonal's end is updated (to the correct new BR) before the diagonal
-  // is processed — avoiding a BFS ordering conflict where a stale diag.end
-  // would otherwise revert right.end back to the original position.
-  //
-  // Drag: top.start (TL) moves down 20 mm (2 scene units).
-  // Expected: diagonal still spans the new TL→BR; right=6; bottom=9.
+  // Both BR constraints are included because buildConstraints in the real app
+  // creates a coincident for every existing coincident point at the snap target,
+  // producing both constraints when snapping to the BR junction.  Having only
+  // the bottom.start path passes tests but leaves assertCoincidesHold blind to
+  // the right.end = diag.end relationship; adding coin(1,"end",4,"end") makes
+  // that relationship explicit so it is verified by the constraint checker.
 
   describe("constrained 90×60 rectangle with TL→BR diagonal: drag top edge 20mm down", () => {
     function makeConstrainedRectWithDiag() {
@@ -1899,7 +1898,8 @@ describe("enforceConstraints", () => {
           fixed(0, "start", 0, "end", 9), // top = 90 mm
           fixed(3, "start", 3, "end", 6), // left = 60 mm
           coin(3, "end", 4, "start"), // diag.start = TL (left.end)
-          coin(2, "start", 4, "end"), // diag.end = BR (bottom.start)
+          coin(2, "start", 4, "end"), // diag.end = BR (via bottom.start)
+          coin(1, "end", 4, "end"), // diag.end = BR (via right.end)
         ],
       };
     }
@@ -1936,6 +1936,123 @@ describe("enforceConstraints", () => {
       });
 
       // Edge lengths must be preserved.
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+
+    it("body-drag top line down 20 mm: diagonal spans new TL→BR, right stays 6 units, bottom stays 9 units", () => {
+      const { shapes, constraints } = makeConstrainedRectWithDiag();
+      // Translate both endpoints of top down 2 units (y: 6→4).
+      // applyHVEnforcement with null key on a horizontal line: y = (4+4)/2 = 4,
+      // so both endpoints stay at y=4 — same as the input, no-op here.
+      const draggedTop = { ...shapes[0], y1: 4, y2: 4 };
+      const preEnforced = applyHVEnforcement(draggedTop, null, constraints, 0);
+      const result = applyBody(shapes, constraints, 0, preEnforced);
+      // Note: this test does NOT use a preSeeded rigid set, so the left shape
+      // is placed only via coincident propagation.  See the preSeeded test below
+      // for the scenario that matches the real app's applySketchDragMove path.
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      // Diagonal must still connect TL to BR after the move.
+      const tl = pt(result, 0, "start");
+      const br = pt(result, 1, "end");
+      expect(pt(result, 4, "start"), "diag start = TL").toMatchObject({
+        x: expect.closeTo(tl.x),
+        y: expect.closeTo(tl.y),
+      });
+      expect(pt(result, 4, "end"), "diag end = BR").toMatchObject({
+        x: expect.closeTo(br.x),
+        y: expect.closeTo(br.y),
+      });
+
+      // Edge lengths must be preserved.
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+
+    it("body-drag top line with rigid-set pre-seeding: diagonal spans new TL→BR", () => {
+      // Matches applySketchDragMove's actual call path.  That function computes
+      // a rigid set of shapes sharing distance constraints, pre-translates them
+      // all by the drag delta, then calls enforceConstraints with preSeeded.
+      // Top (shape 0) and left (shape 3) both carry distance constraints, so
+      // both enter the rigid set and are translated together by dy = -2.
+      //
+      // The bug this test catches: shape 3 (left, pre-seeded) correctly places
+      // bottom.end=(0,-2) via H enforcement.  Shape 1 (right) then places
+      // bottom.start=(9,0) and without the fix, H enforcement uses the new
+      // start as anchor, resetting both y-coords to 0 and wiping out the
+      // already-correct bottom.end.
+      const { shapes, constraints } = makeConstrainedRectWithDiag();
+      const dy = -2; // drag delta: top moves from y=6 to y=4
+      const draggedTop = {
+        ...shapes[0],
+        y1: shapes[0].y1 + dy,
+        y2: shapes[0].y2 + dy,
+      };
+      const draggedLeft = {
+        ...shapes[3],
+        y1: shapes[3].y1 + dy,
+        y2: shapes[3].y2 + dy,
+      };
+      const preTop = applyHVEnforcement(draggedTop, null, constraints, 0);
+      // Left is V-constrained; dy doesn't change x, so H/V is already satisfied.
+      const preSeeded = new Map([
+        [0, preTop],
+        [3, draggedLeft],
+      ]);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preTop,
+        null,
+        preSeeded,
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      const tl = pt(result, 0, "start");
+      const br = pt(result, 1, "end");
+      expect(pt(result, 4, "start"), "diag start = TL").toMatchObject({
+        x: expect.closeTo(tl.x),
+        y: expect.closeTo(tl.y),
+      });
+      expect(pt(result, 4, "end"), "diag end = BR").toMatchObject({
+        x: expect.closeTo(br.x),
+        y: expect.closeTo(br.y),
+      });
+
       expect(
         Math.hypot(
           pt(result, 1, "end").x - pt(result, 1, "start").x,

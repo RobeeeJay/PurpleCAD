@@ -660,6 +660,8 @@ export function attachCameraControls(ctx) {
   let lastClickX = 0;
   let lastClickY = 0;
   let sketchClipboard = null; // { shapes: [...], constraints: [...] }
+  let longPressTimer = null;
+  let longPressMenuOpen = false;
 
   const clearSketchSelectionOverlay = () => {
     if (sketchSelectionOverlay) {
@@ -739,6 +741,64 @@ export function attachCameraControls(ctx) {
       scene.add(sketchSelectionOverlay);
     }
     useStore.getState().setSelectedSketchElement({ type: "line", shapeIdx });
+  };
+
+  // Exposed on cameraControlsRef so SketchOverlays can drive hover/select for
+  // the long-press context menu without duplicating these highlight functions.
+  controls.highlightForMenu = (item) => {
+    clearHoverLineHighlight();
+    clearHoverPointIndicator();
+    clearConstraintHoverHighlight();
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    if (item.kind === "point") {
+      showHoverPointIndicator({ x: item.localX, y: item.localY }, sketchMesh);
+    } else if (item.kind === "line") {
+      const g = sketchShapesGroupRef?.current;
+      if (g) {
+        const lineObj = g.children.find(
+          (c) =>
+            c.userData.shapeIdx === item.shapeIdx &&
+            !c.userData.isConstraintObj &&
+            c.material?.color,
+        );
+        if (lineObj) applyHoverLineHighlight(lineObj);
+      }
+    } else if (item.kind === "constraint") {
+      applyConstraintHoverHighlight(item.shapeIndices, item.constraintColor);
+    }
+  };
+  controls.clearMenuHighlight = () => {
+    clearHoverLineHighlight();
+    clearHoverPointIndicator();
+    clearConstraintHoverHighlight();
+  };
+  controls.selectMenuItem = (item) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    clearAllSketchHover();
+    if (item.kind === "point") {
+      sketchSelectPoint(
+        {
+          x: item.localX,
+          y: item.localY,
+          shapeIdx: item.shapeIdx,
+          pointKey: item.pointKey,
+        },
+        sketchMesh,
+      );
+    } else if (item.kind === "line") {
+      const shape = (selItem.shapes || [])[item.shapeIdx];
+      if (shape) sketchSelectLine(item.shapeIdx, shape, sketchMesh);
+    } else if (item.kind === "constraint") {
+      selectConstraint(item.constraintIdx);
+    }
   };
 
   const clearMarqueeRect = () => {
@@ -1451,6 +1511,115 @@ export function attachCameraControls(ctx) {
     clearCoincidentFirstOverlay();
   };
 
+  const SHAPE_TYPE_LABELS = {
+    line: "Line",
+    circle: "Circle",
+    arc: "Arc",
+    ellipse: "Ellipse",
+    bezier: "Bezier",
+    rect: "Rect",
+  };
+  const CONSTRAINT_TYPE_LABELS = {
+    coincident: "Coincident",
+    distance: "Distance",
+    onLine: "On Line",
+    horizontal: "Horizontal",
+    vertical: "Vertical",
+  };
+
+  const buildLongPressItems = (screenX, screenY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return [];
+    const shapes = selItem.shapes || [];
+    const result = [];
+    const rect = renderer.domElement.getBoundingClientRect();
+
+    // Points within 20px
+    const snapPts = getSnapPoints(shapes);
+    for (const pt of snapPts) {
+      const world = new THREE.Vector3(pt.x, pt.y, 0.003)
+        .applyQuaternion(sketchMesh.quaternion)
+        .add(sketchMesh.position);
+      const ndc = world.clone().project(cameraRef.current);
+      const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
+      const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+      if (Math.hypot(screenX - sx, screenY - sy) < 20) {
+        const shapeLabel =
+          SHAPE_TYPE_LABELS[shapes[pt.shapeIdx]?.type] ?? "Shape";
+        result.push({
+          kind: "point",
+          label: `${shapeLabel} ${pt.shapeIdx} — ${pt.pointKey}`,
+          shapeIdx: pt.shapeIdx,
+          pointKey: pt.pointKey,
+          localX: pt.x,
+          localY: pt.y,
+        });
+      }
+    }
+
+    // Lines via raycaster
+    const sketchGroup = sketchShapesGroupRef?.current;
+    if (sketchGroup) {
+      const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+      const lineObjs = sketchGroup.children.filter(
+        (c) => c.userData.shapeIdx != null,
+      );
+      const hits = hitTestSketchLines(ray, lineObjs);
+      for (const hit of hits) {
+        const shapeIdx = hit.object.userData.shapeIdx;
+        if (shapeIdx == null) continue;
+        if (result.some((i) => i.kind === "line" && i.shapeIdx === shapeIdx))
+          continue;
+        const shape = shapes[shapeIdx];
+        if (!shape) continue;
+        result.push({
+          kind: "line",
+          label: `${SHAPE_TYPE_LABELS[shape.type] ?? "Shape"} ${shapeIdx}`,
+          shapeIdx,
+        });
+      }
+    }
+
+    // Constraint icons within 20px
+    const seenConstraints = new Set();
+    if (sketchGroup) {
+      for (const cObj of sketchGroup.children) {
+        if (!cObj.userData.isConstraint) continue;
+        const ci = cObj.userData.constraintIdx;
+        if (seenConstraints.has(ci)) continue;
+        const lp = cObj.userData.constraintIconLocalPos;
+        if (!lp) continue;
+        const worldPt = new THREE.Vector3(lp.x, lp.y, 0.005)
+          .applyQuaternion(sketchMesh.quaternion)
+          .add(sketchMesh.position);
+        const ndc = worldPt.clone().project(cameraRef.current);
+        const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
+        const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+        if (Math.hypot(screenX - sx, screenY - sy) < 20) {
+          seenConstraints.add(ci);
+          result.push({
+            kind: "constraint",
+            label:
+              CONSTRAINT_TYPE_LABELS[cObj.userData.constraintType] ??
+              cObj.userData.constraintType,
+            constraintIdx: ci,
+            constraintType: cObj.userData.constraintType,
+            shapeIndices: cObj.userData.constraintShapeIndices,
+            constraintColor: cObj.userData.constraintColor,
+          });
+        }
+      }
+    }
+
+    return result;
+  };
+
   const startSketchDrag = (screenX, screenY, shiftKey) => {
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
@@ -1594,6 +1763,20 @@ export function attachCameraControls(ctx) {
         controls.mouseDownX = e.clientX;
         controls.mouseDownY = e.clientY;
         if (!useStore.getState().sketchModifyMode) {
+          const downX = e.clientX,
+            downY = e.clientY;
+          longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            const items = buildLongPressItems(downX, downY);
+            if (items.length > 0) {
+              sketchDrag = null;
+              renderer.domElement.style.cursor = "";
+              longPressMenuOpen = true;
+              useStore
+                .getState()
+                .setSketchLongPressMenu({ x: downX, y: downY, items });
+            }
+          }, 500);
           const didDrag = startSketchDrag(e.clientX, e.clientY, e.shiftKey);
           if (!didDrag) {
             clearMultiSelectOverlays();
@@ -1731,6 +1914,14 @@ export function attachCameraControls(ctx) {
       return;
     }
     if (sketchModeRef.current && !activeSketchToolRef.current) {
+      if (longPressTimer) {
+        const ddx = e.clientX - (controls.mouseDownX ?? e.clientX);
+        const ddy = e.clientY - (controls.mouseDownY ?? e.clientY);
+        if (Math.hypot(ddx, ddy) >= 5) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }
       if (sketchDrag) {
         applySketchDragMove(e.clientX, e.clientY, e.shiftKey);
       } else {
@@ -1962,6 +2153,17 @@ export function attachCameraControls(ctx) {
       !activeSketchToolRef.current &&
       e.button === 0
     ) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+      if (longPressMenuOpen) {
+        longPressMenuOpen = false;
+        useStore.getState().setSketchLongPressMenu(null);
+        sketchDrag = null;
+        renderer.domElement.style.cursor = "";
+        marqueeStartScreen = null;
+        marqueeActive = false;
+        return;
+      }
       if (marqueeActive) {
         marqueeActive = false;
         marqueeStartScreen = null;
@@ -2891,6 +3093,11 @@ export function attachCameraControls(ctx) {
     }
 
     if (e.key === "Escape") {
+      if (longPressMenuOpen) {
+        longPressMenuOpen = false;
+        useStore.getState().setSketchLongPressMenu(null);
+        return;
+      }
       if (selectedConstraintIdx !== null) {
         clearConstraintSelection();
         return;
