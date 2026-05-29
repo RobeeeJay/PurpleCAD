@@ -382,8 +382,11 @@ export function useSketchModeEffect({
       l.renderOrder = 990;
       return l;
     };
+    // Include i === 0: the minor grid is repositioned each frame to round(local)
+    // (≈ screen centre), so skipping the centre line left the two centre-most
+    // grid lines missing.  Where it coincides with the world axis (only near the
+    // origin) the higher-renderOrder axis line draws on top, so no double-up.
     for (let i = -GRID_HALF; i <= GRID_HALF; i++) {
-      if (i === 0) continue;
       minorGridGroup.add(
         makeGridLine(
           new THREE.Vector3(i, -GRID_HALF, 0),
