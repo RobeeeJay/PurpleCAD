@@ -165,6 +165,7 @@ export function useViewportInit({
       extrudeSelectModeRef,
       orbitIndicator,
       gridMaterial,
+      rulerGroup,
       composerRef,
       setRotationState,
       setHoveredId,

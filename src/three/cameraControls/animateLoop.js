@@ -5,6 +5,10 @@
 // the bloom composer (or the raw renderer when smooth mode is off).
 // Returns a `stop()` that cancelAnimationFrames the next tick.
 
+import * as THREE from "three";
+
+const _rulerPos = new THREE.Vector3();
+
 export function createAnimateLoop({
   scene,
   renderer,
@@ -19,6 +23,7 @@ export function createAnimateLoop({
   handlesRef,
   boundingBoxRef,
   gridMaterial,
+  rulerGroup,
   composerRef,
   setRotationState,
 }) {
@@ -36,6 +41,12 @@ export function createAnimateLoop({
         .lerpVectors(anim.startUp, anim.endUp, ease)
         .normalize();
       cameraRef.current.lookAt(targetRef.current);
+      // Orthographic "fit all" also tweens zoom so the bbox ends up framed.
+      if (anim.endZoom != null && anim.startZoom != null) {
+        cameraRef.current.zoom =
+          anim.startZoom + (anim.endZoom - anim.startZoom) * ease;
+        cameraRef.current.updateProjectionMatrix();
+      }
       setRotationState(cameraRef.current.quaternion.clone());
       if (t >= 1) {
         if (anim.onComplete) anim.onComplete();
@@ -111,6 +122,42 @@ export function createAnimateLoop({
           const b = sp.userData.baseScale;
           sp.scale.set(b.x * s, b.y * s, b.z * s);
         }
+      }
+      // Ruler labels: keep a constant on-screen size, and reveal/hide the
+      // finer tiers by how much world the camera shows.  viewHeight is in
+      // scene units (1 unit = 10 mm).  Tier thresholds are tuned so the
+      // 10 mm labels drop out once the view spans more than ~450 mm and the
+      // 1 mm labels only appear once it tightens below ~60 mm.
+      if (rulerGroup && sketchModeRef.current) {
+        // Sketch mode uses the screen-locked HTML rulers instead; the
+        // world-space ground ruler is hidden (it's off the sketch plane).
+        rulerGroup.visible = false;
+      } else if (rulerGroup) {
+        rulerGroup.visible = true;
+        // Tier visibility keys off the orbit-target view height (one value).
+        const viewHeight = gizmoScale(targetRef.current) * REFERENCE_HEIGHT;
+        const fineGroup = rulerGroup.userData.fineGroup;
+        const ultraGroup = rulerGroup.userData.ultraGroup;
+        if (fineGroup) fineGroup.visible = viewHeight < 45;
+        if (ultraGroup) ultraGroup.visible = viewHeight < 6;
+        // Fade the matching 1 mm ground grid in over a small band centred on
+        // the same threshold the 1 mm ruler tier toggles at (viewHeight 6).
+        if (gridMaterial.uniforms.uUltraFade) {
+          const t = Math.min(1, Math.max(0, (viewHeight - 5.5) / 1.0));
+          gridMaterial.uniforms.uUltraFade.value = 1 - t * t * (3 - 2 * t);
+        }
+        // Scale each label by ITS OWN distance to the camera so labels far
+        // across the ground plane stay the same on-screen size as near ones
+        // (a single target-distance factor would let far labels shrink under
+        // perspective).  Update the hierarchy once, then read each matrixWorld.
+        rulerGroup.updateWorldMatrix(false, true);
+        rulerGroup.traverse((o) => {
+          if (!o.userData.isRulerLabel) return;
+          const b = o.userData.baseScale;
+          _rulerPos.setFromMatrixPosition(o.matrixWorld);
+          const sp = gizmoScale(_rulerPos);
+          o.scale.set(b.x * sp, b.y * sp, b.z * sp);
+        });
       }
     }
     gridMaterial.uniforms.uCameraPos.value.copy(cameraRef.current.position);

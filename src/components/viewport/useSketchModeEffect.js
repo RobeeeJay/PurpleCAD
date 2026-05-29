@@ -15,6 +15,91 @@ import {
 } from "../../three/sceneObjects.js";
 import { useStore } from "../../store";
 
+// Quantize a world coord into a stable key so triangles that share a vertex
+// (even with tiny float drift, e.g. from CSG) map to the same edge. 1e4 → 1e-4
+// scene units ≈ 0.001 mm.
+function vKey(x, y, z) {
+  const q = 1e4;
+  return `${Math.round(x * q)},${Math.round(y * q)},${Math.round(z * q)}`;
+}
+
+// True outline (silhouette) of a mesh projected orthographically onto a plane.
+// An edge is on the silhouette if it's a boundary edge (one triangle) or it is
+// shared by a front-facing and a back-facing triangle relative to the plane
+// normal.  Unlike EdgesGeometry (facet boundaries — curved bodies come out
+// faceted/square), this traces the actual outline, so a sphere projects to a
+// circle and a cylinder to its real profile.  Returns a flat [x,y,z,…] segment
+// array already dropped onto the plane, or null when there's nothing to draw.
+function buildSilhouetteSegments(mesh, origin, normal) {
+  const geo = mesh.geometry;
+  const posAttr = geo?.getAttribute("position");
+  if (!posAttr) return null;
+  const index = geo.getIndex();
+  const triCount = (index ? index.count : posAttr.count) / 3;
+  const mw = mesh.matrixWorld;
+
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const fn = new THREE.Vector3();
+  const getVert = (target, t, corner) => {
+    const vi = index ? index.getX(t * 3 + corner) : t * 3 + corner;
+    target.fromBufferAttribute(posAttr, vi).applyMatrix4(mw);
+  };
+
+  // edgeKey -> { front, back, count, p1, p2 }
+  const edges = new Map();
+  const addEdge = (p, q, front) => {
+    const kp = vKey(p.x, p.y, p.z);
+    const kq = vKey(q.x, q.y, q.z);
+    const key = kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`;
+    let e = edges.get(key);
+    if (!e) {
+      e = {
+        front: false,
+        back: false,
+        count: 0,
+        p1: [p.x, p.y, p.z],
+        p2: [q.x, q.y, q.z],
+      };
+      edges.set(key, e);
+    }
+    e.count++;
+    if (front) e.front = true;
+    else e.back = true;
+  };
+
+  for (let t = 0; t < triCount; t++) {
+    getVert(a, t, 0);
+    getVert(b, t, 1);
+    getVert(c, t, 2);
+    ab.subVectors(b, a);
+    ac.subVectors(c, a);
+    fn.crossVectors(ab, ac); // world face normal (length irrelevant)
+    const front = fn.dot(normal) > 0;
+    addEdge(a, b, front);
+    addEdge(b, c, front);
+    addEdge(c, a, front);
+  }
+
+  const out = [];
+  const drop = (px, py, pz) => {
+    const d =
+      (px - origin.x) * normal.x +
+      (py - origin.y) * normal.y +
+      (pz - origin.z) * normal.z;
+    out.push(px - normal.x * d, py - normal.y * d, pz - normal.z * d);
+  };
+  edges.forEach((e) => {
+    if (e.count !== 1 && !(e.front && e.back)) return; // interior, not outline
+    drop(e.p1[0], e.p1[1], e.p1[2]);
+    drop(e.p2[0], e.p2[1], e.p2[2]);
+  });
+  return out.length ? new Float32Array(out) : null;
+}
+
 export function useSketchModeEffect({
   sceneRef,
   cameraRef,
@@ -329,5 +414,60 @@ export function useSketchModeEffect({
     gridGroup.quaternion.copy(mesh.quaternion);
     scene.add(gridGroup);
     sketchGridGroupRef.current = gridGroup;
+
+    // ── Flat projection of 3D geometry onto the sketch plane ──────────────
+    // Each visible solid's feature edges, projected orthographically along the
+    // plane normal, drawn as thin reference lines with zero depth (no
+    // perspective).  applyRenderMode hides the real 3D solids in sketch mode,
+    // so these projected outlines stand in for them.  A signature of the
+    // solids' geometry + world transforms (plus the plane pose) gates rebuilds
+    // so adding sketch shapes doesn't re-run EdgesGeometry on every change.
+    const solidsForGhost = itemsRef.current.filter(
+      (it) =>
+        it.type !== "sketch" &&
+        it.visible !== false &&
+        objectsRef.current[it.id]?.geometry,
+    );
+    let ghostSig = `p:${mesh.position.toArray().join(",")}|${mesh.quaternion.toArray().join(",")}`;
+    solidsForGhost.forEach((it) => {
+      const solid = objectsRef.current[it.id];
+      solid.updateMatrixWorld(true);
+      ghostSig += `;${it.id}:${solid.geometry.uuid}:${solid.matrixWorld.elements.join(",")}`;
+    });
+    if (sketchGhostGroupRef.current?.userData.sig !== ghostSig) {
+      if (sketchGhostGroupRef.current) {
+        scene.remove(sketchGhostGroupRef.current);
+        sketchGhostGroupRef.current.traverse((obj) => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+        });
+      }
+      const ghostGroup = new THREE.Group();
+      ghostGroup.userData.sig = ghostSig;
+      const normal = new THREE.Vector3(0, 0, 1)
+        .applyQuaternion(mesh.quaternion)
+        .normalize();
+      const origin = mesh.position;
+      solidsForGhost.forEach((it) => {
+        const solid = objectsRef.current[it.id];
+        const seg = buildSilhouetteSegments(solid, origin, normal);
+        if (!seg) return;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(seg, 3));
+        const line = new THREE.LineSegments(
+          g,
+          new THREE.LineBasicMaterial({
+            color: 0x8a93a6,
+            transparent: true,
+            opacity: 0.65,
+            depthTest: false,
+          }),
+        );
+        line.renderOrder = 994; // beneath sketch shapes (1001) and point dots
+        ghostGroup.add(line);
+      });
+      scene.add(ghostGroup);
+      sketchGhostGroupRef.current = ghostGroup;
+    }
   }, [selectedId, items]); // eslint-disable-line react-hooks/exhaustive-deps
 }

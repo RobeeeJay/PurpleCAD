@@ -156,6 +156,75 @@ const Viewport = () => {
     };
   }, []);
 
+  // Home button: orient isometric AND frame all visible models. Falls back to
+  // a pure reorient (current target + distance) when the scene is empty.
+  const handleHome = useCallback(() => {
+    const camera = cameraRef.current;
+    const controls = cameraControlsRef.current;
+    if (!camera || !controls) return;
+    const rotX = Math.asin(Math.sqrt(1 / 3));
+    const rotY = Math.PI / 4;
+    const dir = new THREE.Vector3(
+      Math.sin(rotY) * Math.cos(rotX),
+      Math.sin(rotX),
+      Math.cos(rotY) * Math.cos(rotX),
+    ).normalize();
+
+    const box = new THREE.Box3();
+    let any = false;
+    for (const item of itemsRef.current) {
+      if (item.type === "sketch" || item.visible === false) continue;
+      const mesh = objectsRef.current[item.id];
+      if (!mesh) continue;
+      mesh.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(mesh);
+      if (b.isEmpty()) continue;
+      box.union(b);
+      any = true;
+    }
+
+    let center, distance;
+    let endZoom = null;
+    if (any) {
+      center = box.getCenter(new THREE.Vector3());
+      const radius = box.getSize(new THREE.Vector3()).length() / 2 || 1;
+      const pad = 1.25;
+      if (camera.isOrthographicCamera) {
+        const fw = camera.right - camera.left;
+        const fh = camera.top - camera.bottom;
+        // zoom small enough that the tighter frustum dimension still spans the bbox
+        endZoom = Math.min(fw, fh) / (2 * radius * pad);
+        distance = radius * 4 + 5; // clear of the 0.1–1000 near/far planes
+      } else {
+        const vfov = (camera.fov * Math.PI) / 180;
+        const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+        const fitFov = Math.min(vfov, hfov);
+        distance = (radius * pad) / Math.sin(fitFov / 2);
+      }
+    } else {
+      center = targetRef.current.clone();
+      distance = camera.position.distanceTo(targetRef.current);
+    }
+
+    cameraAnimRef.current = {
+      startPos: camera.position.clone(),
+      endPos: center.clone().addScaledVector(dir, distance),
+      startTarget: targetRef.current.clone(),
+      endTarget: center,
+      startUp: camera.up.clone(),
+      endUp: new THREE.Vector3(0, 1, 0),
+      startZoom: camera.isOrthographicCamera ? camera.zoom : null,
+      endZoom,
+      startTime: Date.now(),
+      duration: 400,
+      onComplete: () => {
+        controls.targetRotationX = rotX;
+        controls.targetRotationY = rotY;
+        saveCameraState(cameraRef, targetRef, cameraControlsRef);
+      },
+    };
+  }, []);
+
   // ── Main Three.js setup ───────────────────────────────────────────────────
 
   useViewportInit({
@@ -291,6 +360,16 @@ const Viewport = () => {
     renderer.clear();
     renderer.render(sceneRef.current, newCamera);
   }, [projectionMode]);
+
+  // Sketch mode must stay orthographic so the 3D geometry seen behind the
+  // sketch plane is a parallel projection (no perspective foreshortening).
+  // useSketchModeEffect forces this once on entry; this keeps it enforced if
+  // the projection is toggled to perspective while a sketch is still active.
+  useEffect(() => {
+    if (isInSketchMode && projectionMode !== "isometric") {
+      useStore.getState().setProjectionMode("isometric");
+    }
+  }, [isInSketchMode, projectionMode]);
 
   // ── Camera reset ──────────────────────────────────────────────────────────
 
@@ -722,6 +801,9 @@ const Viewport = () => {
         selectedId={selectedId}
         variables={variables}
         cameraControlsRef={cameraControlsRef}
+        cameraRef={cameraRef}
+        rendererRef={rendererRef}
+        objectsRef={objectsRef}
         dimHintRef={dimHintRef}
         itemsRef={itemsRef}
         propagateConstraintsRef={propagateConstraintsRef}
@@ -731,6 +813,7 @@ const Viewport = () => {
         <RotationWidget
           rotationState={rotationState}
           onOrientationChange={sketchMode ? null : handleOrientationChange}
+          onHome={sketchMode ? null : handleHome}
           style={
             sketchMode ? { pointerEvents: "none", opacity: 0.35 } : undefined
           }

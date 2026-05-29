@@ -166,6 +166,7 @@ export function attachCameraControls(ctx) {
     extrudeSelectModeRef,
     orbitIndicator,
     gridMaterial,
+    rulerGroup,
     composerRef,
     setRotationState,
     setHoveredId,
@@ -3175,6 +3176,7 @@ export function attachCameraControls(ctx) {
     handlesRef,
     boundingBoxRef,
     gridMaterial,
+    rulerGroup,
     composerRef,
     setRotationState,
   });

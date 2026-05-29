@@ -170,12 +170,20 @@ export function applyRenderMode(renderMode, ctx) {
         }
         return;
       }
-      // Treat sketch-mode the same way as the explicit "transparent"
-      // render-mode for non-sketch meshes so 3D geometry is visible but
-      // see-through behind / through the active sketch plane.
+      // In sketch mode the 3D solids are hidden and represented instead by
+      // flat outlines projected onto the sketch plane (sketchGhostGroup, built
+      // in useSketchModeEffect) — that's a parallel projection with zero depth,
+      // which is what the sketch view wants.
       const inSketch = !!sketchModeRef.current;
-      const isTransparent = renderMode === "transparent" || inSketch;
-      const sketchOpacity = inSketch ? 0.4 : 0.5;
+      if (inSketch) {
+        mesh.visible = false;
+        mesh.children.forEach((child) => {
+          child.visible = false;
+        });
+        return;
+      }
+      const isTransparent = renderMode === "transparent";
+      const sketchOpacity = 0.5;
       if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
         if (renderMode === "wireframe") {
           // Wireframe is a DISPLAY overlay on the smooth shader render — it

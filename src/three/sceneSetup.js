@@ -95,18 +95,30 @@ export function createLights(scene, camera) {
   return { dir1 };
 }
 
-function makeRulerSprite(text, small = false) {
+// Three size tiers: "coarse" (50 mm labels), "fine" (10 mm), "ultra" (1 mm).
+// The authored scale is cached on userData.baseScale so the per-frame
+// constant-screen-size pass in animateLoop can multiply rather than compound.
+// ultra (1 mm) renders at the same size the fine (10 mm) tier used to, so the
+// 1 mm labels read as clearly as the 10 mm ones; fine is then enlarged 30% to
+// stay the more prominent of the two when both are visible.
+const RULER_TIERS = {
+  coarse: { fontSize: 26, lineWidth: 4, scaleX: 1.0, scaleY: 0.25 },
+  fine: { fontSize: 18, lineWidth: 3, scaleX: 1.365, scaleY: 0.34125 },
+  ultra: { fontSize: 18, lineWidth: 3, scaleX: 1.05, scaleY: 0.2625 },
+};
+
+function makeRulerSprite(text, tier = "coarse") {
+  const t = RULER_TIERS[tier];
   const canvas = document.createElement("canvas");
   canvas.width = 160;
   canvas.height = 40;
   const ctx = canvas.getContext("2d");
-  const fontSize = small ? 18 : 26;
-  ctx.font = `bold ${fontSize}px monospace`;
+  ctx.font = `bold ${t.fontSize}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   // White outline keeps text legible on dark backgrounds.
   ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
-  ctx.lineWidth = small ? 3 : 4;
+  ctx.lineWidth = t.lineWidth;
   ctx.strokeText(text, 80, 20);
   ctx.fillStyle = "rgba(40, 40, 40, 1.0)";
   ctx.fillText(text, 80, 20);
@@ -116,7 +128,9 @@ function makeRulerSprite(text, small = false) {
     transparent: true,
   });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(small ? 0.7 : 1.0, small ? 0.175 : 0.25, 1);
+  sprite.scale.set(t.scaleX, t.scaleY, 1);
+  sprite.userData.baseScale = { x: t.scaleX, y: t.scaleY, z: 1 };
+  sprite.userData.isRulerLabel = true;
   sprite.renderOrder = 1;
   return sprite;
 }
@@ -126,6 +140,9 @@ export function createGrid(scene) {
     uniforms: {
       uCameraPos: { value: new THREE.Vector3() },
       uGridColor: { value: new THREE.Vector3(0.45, 0.45, 0.45) },
+      // 0 → no 1 mm grid, 1 → fully shown; driven by animateLoop to match the
+      // 1 mm ruler tier's zoom threshold.
+      uUltraFade: { value: 0 },
     },
     vertexShader: `
       varying vec3 vWorldPos;
@@ -139,16 +156,21 @@ export function createGrid(scene) {
       varying vec3 vWorldPos;
       uniform vec3 uCameraPos;
       uniform vec3 uGridColor;
+      uniform float uUltraFade;
       void main() {
         vec2 coord = vWorldPos.xz;
         vec2 g1 = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
         float fine = 1.0 - min(min(g1.x, g1.y), 1.0);
         vec2 g5 = abs(fract(coord / 5.0 - 0.5) - 0.5) / fwidth(coord / 5.0);
         float coarse = 1.0 - min(min(g5.x, g5.y), 1.0);
+        vec2 g01 = abs(fract(coord / 0.1 - 0.5) - 0.5) / fwidth(coord / 0.1);
+        float ultra = 1.0 - min(min(g01.x, g01.y), 1.0);
         float dist = length(vWorldPos.xz - uCameraPos.xz);
         float fadeFine   = 1.0 - smoothstep(8.0,  45.0, dist);
         float fadeCoarse = 1.0 - smoothstep(20.0, 80.0, dist);
-        float alpha = max(coarse * fadeCoarse, fine * fadeFine * 0.6);
+        // Lighter than the 10 mm lines (0.3 vs 0.6), and only when zoomed in.
+        float ultraA = ultra * fadeFine * 0.3 * uUltraFade;
+        float alpha = max(max(coarse * fadeCoarse, fine * fadeFine * 0.6), ultraA);
         if (alpha < 0.01) discard;
         gl_FragColor = vec4(uGridColor, alpha);
       }
@@ -164,43 +186,51 @@ export function createGrid(scene) {
   gridPlane.rotation.x = -Math.PI / 2;
   scene.add(gridPlane);
 
-  // Ruler labels along X (at Z offset) and Z (at X offset) axes.
-  // Coarse labels every 5 units (50 mm) from ±50–500 mm; fine labels
-  // every 1 unit (10 mm) at the subdivisions between coarse lines.
+  // Ruler labels along X (at Z offset) and Z (at X offset) axes, split into
+  // three zoom tiers that animateLoop shows/hides by camera view height:
+  //   coarse — every 5 units (50 mm), ±500 mm: always visible
+  //   fine   — every 1 unit (10 mm), ±500 mm: hidden when zoomed far out
+  //   ultra  — every 0.1 unit (1 mm), ±50 mm: shown only when zoomed far in
+  // The ultra tier is range-limited to ±50 mm to keep the sprite count
+  // bounded (1 mm detail is only useful when zoomed tight near the origin).
   const rulerGroup = new THREE.Group();
+  const coarseGroup = new THREE.Group();
+  const fineGroup = new THREE.Group();
+  const ultraGroup = new THREE.Group();
+  ultraGroup.visible = false; // revealed by animateLoop on deep zoom-in
   const COARSE = 5; // scene units per coarse square
   const COUNT = 10; // coarse squares in each direction (±500 mm total)
   const FINE_TOTAL = COUNT * COARSE; // 50 units = 500 mm
+  const ULTRA_TOTAL = 50; // tenths of a unit = ±50 units of 0.1 → ±50 mm
   const AXIS_OFFSET = 0.7;
   const Y = 0.05;
 
-  for (let i = 1; i <= COUNT; i++) {
-    for (const sign of [1, -1]) {
-      const pos = sign * i * COARSE;
-      const labelText = `${pos * MM_PER_UNIT}mm`;
-      const sx = makeRulerSprite(labelText, false);
-      sx.position.set(pos, Y, AXIS_OFFSET);
-      rulerGroup.add(sx);
-      const sz = makeRulerSprite(labelText, false);
-      sz.position.set(AXIS_OFFSET, Y, pos);
-      rulerGroup.add(sz);
-    }
-  }
+  const addPair = (group, pos, tier) => {
+    const labelText = `${Math.round(pos * MM_PER_UNIT)}mm`;
+    const sx = makeRulerSprite(labelText, tier);
+    sx.position.set(pos, Y, AXIS_OFFSET);
+    group.add(sx);
+    const sz = makeRulerSprite(labelText, tier);
+    sz.position.set(AXIS_OFFSET, Y, pos);
+    group.add(sz);
+  };
 
+  for (let i = 1; i <= COUNT; i++) {
+    for (const sign of [1, -1])
+      addPair(coarseGroup, sign * i * COARSE, "coarse");
+  }
   for (let i = 1; i <= FINE_TOTAL; i++) {
     if (i % COARSE === 0) continue; // coarse lines already labelled above
-    for (const sign of [1, -1]) {
-      const pos = sign * i;
-      const labelText = `${pos * MM_PER_UNIT}mm`;
-      const sx = makeRulerSprite(labelText, true);
-      sx.position.set(pos, Y, AXIS_OFFSET);
-      rulerGroup.add(sx);
-      const sz = makeRulerSprite(labelText, true);
-      sz.position.set(AXIS_OFFSET, Y, pos);
-      rulerGroup.add(sz);
-    }
+    for (const sign of [1, -1]) addPair(fineGroup, sign * i, "fine");
+  }
+  for (let i = 1; i <= ULTRA_TOTAL; i++) {
+    if (i % 10 === 0) continue; // 10 mm multiples already in the fine tier
+    for (const sign of [1, -1]) addPair(ultraGroup, (sign * i) / 10, "ultra");
   }
 
+  rulerGroup.add(coarseGroup, fineGroup, ultraGroup);
+  rulerGroup.userData.fineGroup = fineGroup;
+  rulerGroup.userData.ultraGroup = ultraGroup;
   scene.add(rulerGroup);
 
   return { gridPlane, gridMaterial, rulerGroup };
