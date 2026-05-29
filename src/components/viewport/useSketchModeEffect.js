@@ -23,6 +23,23 @@ function vKey(x, y, z) {
   return `${Math.round(x * q)},${Math.round(y * q)},${Math.round(z * q)}`;
 }
 
+// Tessellated stand-in for the analytic primitives: their rendered mesh is only
+// a box hull (the shader raymarches the real shape inside it), so the box would
+// silhouette as a square.  Dims match the wireframe overlay in renderMode.js so
+// the outline lines up with what the shader draws.
+function analyticSilhouetteGeometry(type) {
+  switch (type) {
+    case "sphere":
+      return new THREE.SphereGeometry(1.5, 64, 48);
+    case "cylinder":
+      return new THREE.CylinderGeometry(1, 1, 2, 64);
+    case "torus":
+      return new THREE.TorusGeometry(1.0, 0.4, 36, 64);
+    default:
+      return null;
+  }
+}
+
 // True outline (silhouette) of a mesh projected orthographically onto a plane.
 // An edge is on the silhouette if it's a boundary edge (one triangle) or it is
 // shared by a front-facing and a back-facing triangle relative to the plane
@@ -30,13 +47,12 @@ function vKey(x, y, z) {
 // faceted/square), this traces the actual outline, so a sphere projects to a
 // circle and a cylinder to its real profile.  Returns a flat [x,y,z,…] segment
 // array already dropped onto the plane, or null when there's nothing to draw.
-function buildSilhouetteSegments(mesh, origin, normal) {
-  const geo = mesh.geometry;
-  const posAttr = geo?.getAttribute("position");
+function buildSilhouetteSegments(geometry, matrixWorld, origin, normal) {
+  const posAttr = geometry?.getAttribute("position");
   if (!posAttr) return null;
-  const index = geo.getIndex();
+  const index = geometry.getIndex();
   const triCount = (index ? index.count : posAttr.count) / 3;
-  const mw = mesh.matrixWorld;
+  const mw = matrixWorld;
 
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
@@ -450,7 +466,15 @@ export function useSketchModeEffect({
       const origin = mesh.position;
       solidsForGhost.forEach((it) => {
         const solid = objectsRef.current[it.id];
-        const seg = buildSilhouetteSegments(solid, origin, normal);
+        const analytic = analyticSilhouetteGeometry(it.type);
+        const geom = analytic || solid.geometry;
+        const seg = buildSilhouetteSegments(
+          geom,
+          solid.matrixWorld,
+          origin,
+          normal,
+        );
+        if (analytic) analytic.dispose();
         if (!seg) return;
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.BufferAttribute(seg, 3));
