@@ -7,7 +7,11 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { moveShapePoint, getSketchShapePoints } from "../sceneObjects.js";
-import { norm2, buildBevelArc } from "../sketchConstraints.js";
+import {
+  buildBevelArc,
+  computeChamfer,
+  chamferConstraints,
+} from "../sketchConstraints.js";
 
 const MODIFY_DIST = 0.25;
 
@@ -46,25 +50,12 @@ export function createSketchModifyHelpers(
     return null;
   };
 
-  const lineEndpoint = (shape, key) =>
-    key === "start"
-      ? { x: shape.x1, y: shape.y1 }
-      : { x: shape.x2, y: shape.y2 };
-
   const computeModify = (shapes, junc, dist) => {
     const { aIdx, aKey, bIdx, bKey } = junc;
     const sA = shapes[aIdx],
       sB = shapes[bIdx];
-    const P = lineEndpoint(sA, aKey);
-    const otherA =
-      aKey === "start" ? { x: sA.x2, y: sA.y2 } : { x: sA.x1, y: sA.y1 };
-    const otherB =
-      bKey === "start" ? { x: sB.x2, y: sB.y2 } : { x: sB.x1, y: sB.y1 };
-    const uA = norm2({ x: otherA.x - P.x, y: otherA.y - P.y });
-    const uB = norm2({ x: otherB.x - P.x, y: otherB.y - P.y });
-    const trimA = { x: P.x + uA.x * dist, y: P.y + uA.y * dist };
-    const trimB = { x: P.x + uB.x * dist, y: P.y + uB.y * dist };
-    return { P, uA, uB, trimA, trimB, sA, sB, aIdx, aKey, bIdx, bKey };
+    const geom = computeChamfer(sA, sB, aKey, bKey, dist);
+    return { ...geom, sA, sB, aIdx, aKey, bIdx, bKey };
   };
 
   const applyModify = (screenX, screenY, mode) => {
@@ -129,59 +120,27 @@ export function createSketchModifyHelpers(
       }
     }
     const newIdx = shapes.length;
-    const newConstraints = [
-      {
-        type: "coincident",
-        shapeAIdx: newIdx,
-        pointA: "start",
-        shapeBIdx: m.aIdx,
-        pointB: m.aKey,
-      },
-      {
-        type: "coincident",
-        shapeAIdx: newIdx,
-        pointA: "end",
-        shapeBIdx: m.bIdx,
-        pointB: m.bKey,
-      },
-    ];
-    // A chamfer makes two new corners (chamfer line ↔ each trimmed line).
-    // Lock each corner's angle so the chamfer holds its shape under edits.
-    if (mode === "chamfer") {
-      const angBetween = (v1, v2) => {
-        let d =
-          Math.abs(Math.atan2(v1.y, v1.x) - Math.atan2(v2.y, v2.x)) *
-          (180 / Math.PI);
-        if (d > 180) d = 360 - d;
-        return d;
-      };
-      const chamferDirAtA = {
-        x: m.trimB.x - m.trimA.x,
-        y: m.trimB.y - m.trimA.y,
-      };
-      const chamferDirAtB = {
-        x: m.trimA.x - m.trimB.x,
-        y: m.trimA.y - m.trimB.y,
-      };
-      newConstraints.push(
-        {
-          type: "angle",
-          shapeAIdx: newIdx,
-          pointA: "start",
-          shapeBIdx: m.aIdx,
-          pointB: m.aKey,
-          angle: angBetween(chamferDirAtA, m.uA),
-        },
-        {
-          type: "angle",
-          shapeAIdx: newIdx,
-          pointA: "end",
-          shapeBIdx: m.bIdx,
-          pointB: m.bKey,
-          angle: angBetween(chamferDirAtB, m.uB),
-        },
-      );
-    }
+    // A chamfer adds an angle lock at each of its two new corners (so it holds
+    // its shape under edits); a bevel arc keeps just the coincident joins.
+    const newConstraints =
+      mode === "chamfer"
+        ? chamferConstraints(newIdx, m.aIdx, m.aKey, m.bIdx, m.bKey, m)
+        : [
+            {
+              type: "coincident",
+              shapeAIdx: newIdx,
+              pointA: "start",
+              shapeBIdx: m.aIdx,
+              pointB: m.aKey,
+            },
+            {
+              type: "coincident",
+              shapeAIdx: newIdx,
+              pointA: "end",
+              shapeBIdx: m.bIdx,
+              pointB: m.bKey,
+            },
+          ];
     const juncConstraint = junc.constraint;
     useStore
       .getState()

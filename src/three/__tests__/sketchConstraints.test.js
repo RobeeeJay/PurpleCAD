@@ -3,6 +3,8 @@ import { getShapePoint, moveShapePoint } from "../sceneObjects.js";
 import {
   enforceConstraints,
   applyHVEnforcement,
+  computeChamfer,
+  chamferConstraints,
 } from "../sketchConstraints.js";
 
 // ── Mock sceneObjects.js ─────────────────────────────────────────────────────
@@ -2161,6 +2163,147 @@ describe("enforceConstraints", () => {
       const result = apply(shapes, constraints, 0, "end", { x: 0, y: 2 });
       assertCoincidesHold(result, constraints);
       expect(betweenDeg(result, 0, 1), "angle between lines").toBeCloseTo(60);
+    });
+  });
+
+  // ── Chamfer (sketch chamfer-modify geometry + resulting constraints) ─────
+  describe("chamfer", () => {
+    // Actual angle (deg) the angle-constraint c describes in `shapes`.
+    const constraintAngle = (shapes, c) => {
+      const P = getShapePoint(shapes[c.shapeAIdx], c.pointA);
+      const oA = getShapePoint(
+        shapes[c.shapeAIdx],
+        c.pointA === "start" ? "end" : "start",
+      );
+      const oB = getShapePoint(
+        shapes[c.shapeBIdx],
+        c.pointB === "start" ? "end" : "start",
+      );
+      let d =
+        Math.abs(
+          Math.atan2(oA.y - P.y, oA.x - P.x) -
+            Math.atan2(oB.y - P.y, oB.x - P.x),
+        ) *
+        (180 / Math.PI);
+      if (d > 180) d = 360 - d;
+      return d;
+    };
+
+    // Right-angle corner at the origin (legA +x, legB +y), chamfered at 0.25.
+    // Returns the post-chamfer fixture exactly as applyModify builds it:
+    // legs trimmed back to the corner, a chamfer line (idx 2), and the
+    // coincident + angle constraints from chamferConstraints.
+    function makeChamferedCorner(dist = 0.25) {
+      const legA = L(0, 0, 2, 0); // corner at start
+      const legB = L(0, 0, 0, 2); // corner at start
+      const geom = computeChamfer(legA, legB, "start", "start", dist);
+      const shapes = [
+        moveShapePoint(legA, "start", geom.trimA),
+        moveShapePoint(legB, "start", geom.trimB),
+        L(geom.trimA.x, geom.trimA.y, geom.trimB.x, geom.trimB.y),
+      ];
+      const constraints = chamferConstraints(2, 0, "start", 1, "start", geom);
+      return { shapes, constraints, geom };
+    }
+
+    it("computeChamfer trims `dist` along each leg from the corner", () => {
+      const geom = computeChamfer(
+        L(0, 0, 2, 0),
+        L(0, 0, 0, 2),
+        "start",
+        "start",
+        0.25,
+      );
+      expect(geom.P.x).toBeCloseTo(0);
+      expect(geom.P.y).toBeCloseTo(0);
+      expect(geom.trimA.x).toBeCloseTo(0.25);
+      expect(geom.trimA.y).toBeCloseTo(0);
+      expect(geom.trimB.x).toBeCloseTo(0);
+      expect(geom.trimB.y).toBeCloseTo(0.25);
+      expect(geom.uA.x).toBeCloseTo(1);
+      expect(geom.uB.y).toBeCloseTo(1);
+    });
+
+    it("computeChamfer handles a non-right (60°) corner and a non-origin vertex", () => {
+      // Corner at (1,1); legA along +x, legB 60° from +x.
+      const legA = L(1, 1, 3, 1); // corner at start
+      const legB = L(
+        1,
+        1,
+        1 + Math.cos(Math.PI / 3) * 2,
+        1 + Math.sin(Math.PI / 3) * 2,
+      );
+      const geom = computeChamfer(legA, legB, "start", "start", 0.5);
+      // trim points sit 0.5 from the corner along each unit leg direction
+      expect(Math.hypot(geom.trimA.x - 1, geom.trimA.y - 1)).toBeCloseTo(0.5);
+      expect(Math.hypot(geom.trimB.x - 1, geom.trimB.y - 1)).toBeCloseTo(0.5);
+      expect(geom.trimA.x).toBeCloseTo(1.5);
+      expect(geom.trimA.y).toBeCloseTo(1);
+      expect(geom.trimB.x).toBeCloseTo(1 + Math.cos(Math.PI / 3) * 0.5);
+      expect(geom.trimB.y).toBeCloseTo(1 + Math.sin(Math.PI / 3) * 0.5);
+    });
+
+    it("chamferConstraints: 2 coincidents joining the chamfer line + 2 angle locks", () => {
+      const geom = computeChamfer(
+        L(0, 0, 2, 0),
+        L(0, 0, 0, 2),
+        "start",
+        "start",
+        0.25,
+      );
+      const cs = chamferConstraints(2, 0, "start", 1, "start", geom);
+      const coincs = cs.filter((c) => c.type === "coincident");
+      const angles = cs.filter((c) => c.type === "angle");
+      expect(coincs).toHaveLength(2);
+      expect(angles).toHaveLength(2);
+      // chamfer line (idx 2) start↔legA.start and end↔legB.start
+      expect(coincs[0]).toMatchObject({
+        shapeAIdx: 2,
+        pointA: "start",
+        shapeBIdx: 0,
+        pointB: "start",
+      });
+      expect(coincs[1]).toMatchObject({
+        shapeAIdx: 2,
+        pointA: "end",
+        shapeBIdx: 1,
+        pointB: "start",
+      });
+      // symmetric 90° corner → chamfer makes 135° with each leg
+      expect(angles[0].angle).toBeCloseTo(135);
+      expect(angles[1].angle).toBeCloseTo(135);
+    });
+
+    it("the built chamfer fixture satisfies its own constraints", () => {
+      const { shapes, constraints } = makeChamferedCorner();
+      assertCoincidesHold(shapes, constraints);
+      // every angle lock matches the actual geometry it was built from
+      for (const c of constraints) {
+        if (c.type !== "angle") continue;
+        expect(constraintAngle(shapes, c)).toBeCloseTo(c.angle);
+      }
+    });
+
+    it("dragging a chamfered leg keeps the chamfer attached and its angle", () => {
+      const { shapes, constraints } = makeChamferedCorner();
+      // swing legA's far end; the corner endpoint (and chamfer.start) stays put
+      const result = apply(shapes, constraints, 0, "end", { x: 2.5, y: 0.6 });
+      // chamfer line stays joined to both legs
+      assertCoincidesHold(result, constraints);
+      // the chamfer↔legA angle (the dragged side) is restored to 135°
+      const angA = constraints.find(
+        (c) => c.type === "angle" && c.shapeBIdx === 0,
+      );
+      expect(constraintAngle(result, angA), "chamfer↔legA angle").toBeCloseTo(
+        angA.angle,
+      );
+      // the chamfer line keeps its length (it rotates about the corner)
+      const cLen = (s) =>
+        Math.hypot(
+          pt(s, 2, "end").x - pt(s, 2, "start").x,
+          pt(s, 2, "end").y - pt(s, 2, "start").y,
+        );
+      expect(cLen(result)).toBeCloseTo(cLen(shapes));
     });
   });
 });

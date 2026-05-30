@@ -128,6 +128,73 @@ export function norm2(v) {
   return l < 1e-10 ? v : { x: v.x / l, y: v.y / l };
 }
 
+// Chamfer/bevel corner geometry: the corner P (where the two lines meet), the
+// unit directions of each leg away from P, and the trim points `dist` along
+// each leg.  Pure — shared by the chamfer/bevel modify tools and their tests.
+export function computeChamfer(sA, sB, aKey, bKey, dist) {
+  const P = aKey === "start" ? { x: sA.x1, y: sA.y1 } : { x: sA.x2, y: sA.y2 };
+  const oA = aKey === "start" ? { x: sA.x2, y: sA.y2 } : { x: sA.x1, y: sA.y1 };
+  const oB = bKey === "start" ? { x: sB.x2, y: sB.y2 } : { x: sB.x1, y: sB.y1 };
+  const uA = norm2({ x: oA.x - P.x, y: oA.y - P.y });
+  const uB = norm2({ x: oB.x - P.x, y: oB.y - P.y });
+  const trimA = { x: P.x + uA.x * dist, y: P.y + uA.y * dist };
+  const trimB = { x: P.x + uB.x * dist, y: P.y + uB.y * dist };
+  return { P, uA, uB, trimA, trimB };
+}
+
+// Angle (degrees, 0–180) between two 2D direction vectors.
+function angleBetweenDeg(v1, v2) {
+  let d =
+    Math.abs(Math.atan2(v1.y, v1.x) - Math.atan2(v2.y, v2.x)) * (180 / Math.PI);
+  if (d > 180) d = 360 - d;
+  return d;
+}
+
+// Constraints a chamfer adds: the new chamfer line (newIdx) coincident to each
+// trimmed leg's corner endpoint, plus an angle lock on each of the two new
+// corners so the chamfer keeps its shape under edits.  `geom` is computeChamfer.
+export function chamferConstraints(newIdx, aIdx, aKey, bIdx, bKey, geom) {
+  const { uA, uB, trimA, trimB } = geom;
+  return [
+    {
+      type: "coincident",
+      shapeAIdx: newIdx,
+      pointA: "start",
+      shapeBIdx: aIdx,
+      pointB: aKey,
+    },
+    {
+      type: "coincident",
+      shapeAIdx: newIdx,
+      pointA: "end",
+      shapeBIdx: bIdx,
+      pointB: bKey,
+    },
+    {
+      type: "angle",
+      shapeAIdx: newIdx,
+      pointA: "start",
+      shapeBIdx: aIdx,
+      pointB: aKey,
+      angle: angleBetweenDeg(
+        { x: trimB.x - trimA.x, y: trimB.y - trimA.y },
+        uA,
+      ),
+    },
+    {
+      type: "angle",
+      shapeAIdx: newIdx,
+      pointA: "end",
+      shapeBIdx: bIdx,
+      pointB: bKey,
+      angle: angleBetweenDeg(
+        { x: trimA.x - trimB.x, y: trimA.y - trimB.y },
+        uB,
+      ),
+    },
+  ];
+}
+
 // Build the arc geometry for a bevel/fillet between two trimmed lines.
 export function buildBevelArc(P, uA, uB, trimA, trimB) {
   const toB = { x: trimB.x - trimA.x, y: trimB.y - trimA.y };
