@@ -7,10 +7,14 @@ import {
   withOrphanFlags,
   saveTimeline,
   withUndo,
-  UNDO_LIMIT,
 } from "./internals.js";
+import { createHistoryNavSlice } from "./historyNavSlice.js";
+import { createItemFlagsSlice } from "./itemFlagsSlice.js";
 
 export const createHistorySlice = (set) => ({
+  ...createHistoryNavSlice(set),
+  ...createItemFlagsSlice(set),
+
   reparentItem: (itemId, newParentId) =>
     set((state) => {
       if (itemId === newParentId) return {};
@@ -298,130 +302,6 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
-  reorderHistory: (fromId, beforeId) =>
-    set((state) => {
-      const fromIdx = state.history.findIndex((h) => h.id === fromId);
-      if (fromIdx <= 0) return {};
-
-      let toIdx =
-        beforeId === null
-          ? state.history.length
-          : state.history.findIndex((h) => h.id === beforeId);
-      if (toIdx === 0) return {};
-      if (toIdx === fromIdx || toIdx === fromIdx + 1) return {};
-
-      const rawHistory = [...state.history];
-      const [moved] = rawHistory.splice(fromIdx, 1);
-      const insertAt = toIdx > fromIdx ? toIdx - 1 : toIdx;
-      rawHistory.splice(insertAt, 0, moved);
-
-      const activeIdx =
-        state.activeHistoryId !== null
-          ? rawHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : rawHistory.length - 1;
-      const items = replayUpTo(
-        rawHistory,
-        activeIdx !== -1 ? activeIdx : rawHistory.length - 1,
-      );
-
-      saveTimeline(rawHistory, state.activeHistoryId);
-      return Object.assign(
-        { history: withOrphanFlags(rawHistory), items },
-        withUndo(state),
-      );
-    }),
-
-  deleteHistoryEntry: (historyId) =>
-    set((state) => {
-      if (state.history.length <= 1) return {};
-      const deletedIndex = state.history.findIndex((h) => h.id === historyId);
-      if (deletedIndex <= 0) return {};
-
-      const rawHistory = state.history.filter((h) => h.id !== historyId);
-
-      let newActiveId = state.activeHistoryId;
-      if (newActiveId === historyId) {
-        const fallback = rawHistory[Math.max(0, deletedIndex - 1)];
-        newActiveId = fallback ? fallback.id : null;
-      }
-      if (
-        rawHistory.length > 0 &&
-        newActiveId === rawHistory[rawHistory.length - 1].id
-      ) {
-        newActiveId = null;
-      }
-
-      const activeIdx =
-        newActiveId !== null
-          ? rawHistory.findIndex((h) => h.id === newActiveId)
-          : rawHistory.length - 1;
-      const items = replayUpTo(rawHistory, activeIdx);
-
-      saveTimeline(rawHistory, newActiveId);
-      return Object.assign(
-        {
-          history: withOrphanFlags(rawHistory),
-          activeHistoryId: newActiveId,
-          items,
-        },
-        withUndo(state),
-      );
-    }),
-
-  undo: () =>
-    set((state) => {
-      if (state.undoStack.length === 0) return {};
-      const snapshot = state.undoStack[state.undoStack.length - 1];
-      const idx =
-        snapshot.activeHistoryId !== null
-          ? snapshot.history.findIndex((h) => h.id === snapshot.activeHistoryId)
-          : snapshot.history.length - 1;
-      const items = replayUpTo(
-        snapshot.history,
-        idx !== -1 ? idx : snapshot.history.length - 1,
-      );
-      saveTimeline(snapshot.history, snapshot.activeHistoryId);
-      return {
-        history: snapshot.history,
-        activeHistoryId: snapshot.activeHistoryId,
-        items,
-        selectedId: null,
-        selectedIds: [],
-        undoStack: state.undoStack.slice(0, -1),
-        redoStack: [
-          ...state.redoStack,
-          { history: state.history, activeHistoryId: state.activeHistoryId },
-        ].slice(-UNDO_LIMIT),
-      };
-    }),
-
-  redo: () =>
-    set((state) => {
-      if (state.redoStack.length === 0) return {};
-      const snapshot = state.redoStack[state.redoStack.length - 1];
-      const idx =
-        snapshot.activeHistoryId !== null
-          ? snapshot.history.findIndex((h) => h.id === snapshot.activeHistoryId)
-          : snapshot.history.length - 1;
-      const items = replayUpTo(
-        snapshot.history,
-        idx !== -1 ? idx : snapshot.history.length - 1,
-      );
-      saveTimeline(snapshot.history, snapshot.activeHistoryId);
-      return {
-        history: snapshot.history,
-        activeHistoryId: snapshot.activeHistoryId,
-        items,
-        selectedId: null,
-        selectedIds: [],
-        redoStack: state.redoStack.slice(0, -1),
-        undoStack: [
-          ...state.undoStack,
-          { history: state.history, activeHistoryId: state.activeHistoryId },
-        ].slice(-UNDO_LIMIT),
-      };
-    }),
-
   renameItem: (id, newName) =>
     set((state) => {
       if (!newName.trim()) return {};
@@ -528,132 +408,5 @@ export const createHistorySlice = (set) => ({
         items: updatedItems,
         history: withOrphanFlags(newHistory),
       };
-    }),
-
-  toggleItemExpanded: (id) =>
-    set((state) => ({
-      items: state.items.map((item) =>
-        item.id === id
-          ? Object.assign({}, item, { expanded: !item.expanded })
-          : item,
-      ),
-    })),
-
-  // Show/hide an item.  Records the change as a `modify` history entry
-  // so navigating to an earlier point in the timeline restores whatever
-  // visibility state the scene had at that step.  Mirrors modifyItem's
-  // insert-at-active and replay logic so the new row sits next to the
-  // currently-selected step and undoable history is preserved.
-  toggleItemVisibility: (id) =>
-    set((state) => {
-      const item = state.items.find((i) => i.id === id);
-      if (!item) return {};
-      const newVisible = item.visible === false ? true : false;
-
-      // Find the step the new toggle would land immediately AFTER.
-      let insertIdx;
-      if (state.activeHistoryId !== null) {
-        const activeIdx = state.history.findIndex(
-          (h) => h.id === state.activeHistoryId,
-        );
-        insertIdx = activeIdx + 1;
-      } else {
-        insertIdx = state.history.length;
-      }
-
-      // If the immediately-previous step is an OPPOSITE visibility
-      // toggle on the same item, two consecutive toggles cancel out —
-      // remove the previous step instead of stacking a new one on top.
-      // This keeps the timeline free of "Hidden X / Shown X" noise when
-      // the user flips a row in the object browser back and forth.
-      const prev = insertIdx > 0 ? state.history[insertIdx - 1] : null;
-      const prevInst = prev?.instruction;
-      const cancels =
-        prevInst?.type === "modify" &&
-        prevInst.itemId === id &&
-        prevInst.patches &&
-        Object.keys(prevInst.patches).length === 1 &&
-        Object.prototype.hasOwnProperty.call(prevInst.patches, "visible") &&
-        prevInst.patches.visible === !newVisible;
-
-      let rawHistory;
-      let newActiveId;
-      if (cancels) {
-        rawHistory = [
-          ...state.history.slice(0, insertIdx - 1),
-          ...state.history.slice(insertIdx),
-        ];
-        const newActiveIdx = insertIdx - 2;
-        newActiveId =
-          newActiveIdx >= 0 && state.activeHistoryId !== null
-            ? (rawHistory[newActiveIdx]?.id ?? null)
-            : null;
-      } else {
-        const label = newVisible ? "Shown" : "Hidden";
-        const newEntry = makeEntry(label, id, {
-          type: "modify",
-          itemId: id,
-          patches: { visible: newVisible },
-        });
-        rawHistory = [
-          ...state.history.slice(0, insertIdx),
-          newEntry,
-          ...state.history.slice(insertIdx),
-        ];
-        newActiveId = state.activeHistoryId !== null ? newEntry.id : null;
-      }
-
-      const replayIdx =
-        newActiveId !== null
-          ? rawHistory.findIndex((h) => h.id === newActiveId)
-          : rawHistory.length - 1;
-      const items = replayUpTo(rawHistory, replayIdx);
-
-      saveTimeline(rawHistory, newActiveId);
-      return Object.assign(
-        {
-          items,
-          history: withOrphanFlags(rawHistory),
-          activeHistoryId: newActiveId,
-        },
-        withUndo(state),
-      );
-    }),
-
-  setItemsHidden: (ids) =>
-    set((state) => ({
-      items: state.items.map((item) =>
-        ids.includes(item.id)
-          ? Object.assign({}, item, { visible: false })
-          : item,
-      ),
-    })),
-
-  // Mark items as consumed by a boolean (cut extrude, combine, etc.) so
-  // they stay in the data model — the CSG result's regenerator still
-  // looks them up by id when rebuilding — but they no longer render and
-  // their hidden state survives a timeline replay.  Rewrites each
-  // consumed item's CREATE history entry in place rather than adding a
-  // new "modify" entry, so the timeline doesn't get cluttered with
-  // per-consumption "Hidden X" rows.
-  consumeItems: (ids) =>
-    set((state) => {
-      const idSet = new Set(ids);
-      const newHistory = state.history.map((entry) => {
-        const inst = entry.instruction;
-        if (inst?.type === "create" && idSet.has(inst.item?.id)) {
-          return Object.assign({}, entry, {
-            instruction: Object.assign({}, inst, {
-              item: Object.assign({}, inst.item, { visible: false }),
-            }),
-          });
-        }
-        return entry;
-      });
-      const items = state.items.map((item) =>
-        idSet.has(item.id) ? Object.assign({}, item, { visible: false }) : item,
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
-      return { items, history: withOrphanFlags(newHistory) };
     }),
 });
