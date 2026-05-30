@@ -25,7 +25,7 @@ const Toolbar = () => {
       <DocumentSection />
       {isSketchMode ? <SketchDrawSection /> : <ObjectCreateSection />}
       {isSketchMode && <SketchModifySection />}
-      <CombineSection />
+      {!isSketchMode && <CombineSection />}
       <BevelSection />
       {!isSketchMode && <ModifySection />}
       <ConstrainSection isSketchMode={isSketchMode} />
