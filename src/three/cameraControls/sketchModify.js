@@ -89,6 +89,18 @@ export function createSketchModifyHelpers(
       m.bKey,
     );
     const updates = new Map([...propA, ...propB]);
+    // The shared corner's coincident is still present during propagation, so
+    // propA/propB drag each other's corner endpoint to the wrong cut (and the
+    // merge lets one win). Re-pin each trimmed line's corner endpoint to its
+    // own cut; the junction constraint is removed below anyway.
+    updates.set(
+      m.aIdx,
+      moveShapePoint(updates.get(m.aIdx) ?? newSA, m.aKey, m.trimA),
+    );
+    updates.set(
+      m.bIdx,
+      moveShapePoint(updates.get(m.bIdx) ?? newSB, m.bKey, m.trimB),
+    );
     let newElement;
     if (mode === "chamfer") {
       newElement = {
