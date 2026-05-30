@@ -43,9 +43,9 @@ export { buildTransformHandles } from "./sceneObjects/transformHandles.js";
 export {
   buildAllSketchShapesGroup,
   buildExtrudeSelectGroup,
-  rebuildConstraintIconsForDrag,
   rebuildPointDotsForDrag,
   buildSketchShapesGroup,
 } from "./sceneObjects/sketchOverlays.js";
+export { rebuildConstraintIconsForDrag } from "./sceneObjects/constraintIcons.js";
 
 export { applyRenderMode } from "./sceneObjects/renderMode.js";
