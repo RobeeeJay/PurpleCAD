@@ -5,19 +5,9 @@ import BusyIndicator from "./BusyIndicator";
 import SketchOverlays from "./viewport/SketchOverlays";
 import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
-import { useSketchModeEffect } from "./viewport/useSketchModeEffect";
+import { useSceneSync } from "./viewport/useSceneSync";
 import "../styles/Viewport.css";
 import { useStore } from "../store";
-import {
-  buildSceneObjects,
-  buildTransformHandles,
-  buildSketchShapesGroup,
-  buildAllSketchShapesGroup,
-  buildExtrudeSelectGroup,
-  applyRenderMode,
-} from "../three/sceneObjects.js";
-import { updateEmissive } from "../three/objectMaterials.js";
-import { reconcileSelectionHighlight } from "../three/selectionHighlights.js";
 
 const Viewport = () => {
   const containerRef = useRef(null);
@@ -195,420 +185,62 @@ const Viewport = () => {
     setRotationState,
   });
 
-  useEffect(() => {
-    if (axisGroupRef.current)
-      axisGroupRef.current.visible = axisVisible && !sketchModeRef.current;
-  }, [axisVisible]);
-
-  // Toggle ground-plane shadows.  The directional light and the
-  // ShadowMaterial receiver-plane are both gated by the same flag so
-  // turning shadows off skips the shadow-map render and hides the
-  // tinted plane.  shadowMap on the renderer stays enabled — flipping
-  // that at runtime forces every material to recompile.
-  useEffect(() => {
-    if (shadowLightRef.current)
-      shadowLightRef.current.castShadow = shadowsEnabled;
-    if (shadowGroundRef.current)
-      shadowGroundRef.current.visible = shadowsEnabled;
-  }, [shadowsEnabled]);
-
-  // Global Escape → cancel any in-progress extrude.  Captures the event
-  // BEFORE the form input's own handler so the cancel fires even when
-  // the depth-overlay FormulaInput has focus and its autocomplete
-  // popup would otherwise swallow the Escape.
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.key !== "Escape") return;
-      if (!useStore.getState().extrudeSelectMode) return;
-      cameraControlsRef.current?.cancelExtrude?.();
-    };
-    document.addEventListener("keydown", handler, true); // capture phase
-    return () => document.removeEventListener("keydown", handler, true);
-  }, []);
-
-  // ── Sketch placement planes ───────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!sceneRef.current) return;
-    const scene = sceneRef.current;
-    const clearPlanes = () => {
-      sketchPlacementPlanesRef.current.forEach(({ mesh }) => {
-        scene.remove(mesh);
-        mesh.geometry.dispose();
-        mesh.material.dispose();
-      });
-      sketchPlacementPlanesRef.current = [];
-    };
-    clearPlanes();
-    if (!sketchPlacementMode) return;
-    const center = targetRef.current.clone();
-    const SIZE = 8;
-    [
-      { name: "XZ", rx: -Math.PI / 2, ry: 0, rz: 0, color: 0x4488ff },
-      { name: "XY", rx: 0, ry: 0, rz: 0, color: 0x44bb44 },
-      { name: "YZ", rx: 0, ry: Math.PI / 2, rz: 0, color: 0xff4444 },
-    ].forEach(({ name, rx, ry, rz, color }) => {
-      const mesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(SIZE, SIZE),
-        new THREE.MeshBasicMaterial({
-          color,
-          transparent: true,
-          opacity: 0.18,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
-      );
-      mesh.position.copy(center);
-      mesh.rotation.set(rx, ry, rz);
-      scene.add(mesh);
-      sketchPlacementPlanesRef.current.push({
-        mesh,
-        euler: { x: rx, y: ry, z: rz },
-        name,
-      });
-    });
-    return clearPlanes;
-  }, [sketchPlacementMode]);
-
-  // ── Regenerate CSG/bevel results at the current resolution ───────────────
-  // CSG and bevel items store a `regenerator` describing how they were made.
-  // When the user toggles preview/print, walk items and re-run any whose
-  // baked geometryData was computed at the old precision.  This is what
-  // makes the scene "recalculate to the current timeline position" — the
-  // baked geometryData gets refreshed for the current setting before the
-  // scene rebuild reads from items.
-  useEffect(() => {
-    // The orchestrator is a UI-only module that's never reachable from
-    // the OCC worker's transitive imports, so it can route per-item regen
-    // through occClient → worker without creating a bundling cycle.
-    import("../three/regenerateOrchestrator.js").then((m) => {
-      m.regenerateForResolution(printPrecision);
-    });
-    // Variables drive extrude depth and dimension distances via formula
-    // resolution; re-run when they change so geometry/labels reflect the
-    // new values.
-  }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Rebuild scene objects ─────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!sceneRef.current || !rendererRef.current) return;
-    buildSceneObjects(
-      items,
-      sceneRef.current,
-      objectsRef,
-      originalMaterialsRef,
-      curveSegments,
-      printPrecision,
-    );
-    applyRenderMode(renderMode, {
-      scene: sceneRef.current,
-      renderer: rendererRef.current,
-      cameraRef,
-      objectsRef,
-      originalMaterialsRef,
-      itemsRef,
-      axisGroupRef,
-      planeRef,
-      sketchPlacementPlanesRef,
-      composerRef,
-      envTextureRef,
-      sketchModeRef,
-      printPrecision,
-    });
-    // Variables drive extrude depth and dimension distances via formula
-    // resolution; re-run when they change so geometry/labels reflect the
-    // new values.
-  }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Persistent sub-geometry selection highlights ─────────────────────────
-  // Rebuild a darker-coloured overlay whenever the selected faces or edges
-  // change, so the user can see what they have committed to selection
-  // (distinct from the brighter hover highlight).
-
-  useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-    const renderer = rendererRef.current;
-    const resolution = renderer
-      ? renderer.getSize(new THREE.Vector2())
-      : undefined;
-    subGeoHighlightGroupRef.current = reconcileSelectionHighlight(
-      scene,
-      subGeoHighlightGroupRef.current,
-      selectedSubGeometry,
-      objectsRef.current,
-      items,
-      { resolution },
-    );
-  }, [selectedSubGeometry, items]);
-
-  // ── Transform handles + bounding box ─────────────────────────────────────
-
-  useEffect(() => {
-    if (!sceneRef.current) return;
-    const scene = sceneRef.current;
-
-    handlesRef.current.forEach(({ mesh }) => {
-      scene.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
-    });
-    handlesRef.current = [];
-    handleDragRef.current = null;
-
-    if (boundingBoxRef.current) {
-      const { boxMesh, labelX, labelY, labelZ } = boundingBoxRef.current;
-      scene.remove(boxMesh);
-      scene.remove(labelX.sprite);
-      scene.remove(labelY.sprite);
-      scene.remove(labelZ.sprite);
-      boxMesh.geometry.dispose();
-      boxMesh.material.dispose();
-      labelX.mat.map.dispose();
-      labelX.mat.dispose();
-      labelY.mat.map.dispose();
-      labelY.mat.dispose();
-      labelZ.mat.map.dispose();
-      labelZ.mat.dispose();
-      boundingBoxRef.current = null;
-    }
-
-    if (!selectedId) return;
-
-    const result = buildTransformHandles(selectedId, items, objectsRef);
-    if (!result) return;
-
-    const { handles, boundingBox } = result;
-    const isMultiSelect = selectedIdsRef.current.length > 1;
-    const visibleHandles = isMultiSelect
-      ? handles.filter(({ type }) => !type.startsWith("rot"))
-      : handles;
-    visibleHandles.forEach(({ mesh }) => scene.add(mesh));
-    scene.add(boundingBox.boxMesh);
-    scene.add(boundingBox.labelX.sprite);
-    scene.add(boundingBox.labelY.sprite);
-    scene.add(boundingBox.labelZ.sprite);
-    handlesRef.current = visibleHandles;
-    boundingBoxRef.current = boundingBox;
-
-    return () => {
-      handlesRef.current.forEach(({ mesh: hm }) => {
-        if (sceneRef.current) sceneRef.current.remove(hm);
-        hm.geometry.dispose();
-        hm.material.dispose();
-      });
-      handlesRef.current = [];
-      if (boundingBoxRef.current) {
-        const {
-          boxMesh,
-          labelX: lx,
-          labelY: ly,
-          labelZ: lz,
-        } = boundingBoxRef.current;
-        if (sceneRef.current) {
-          sceneRef.current.remove(boxMesh);
-          sceneRef.current.remove(lx.sprite);
-          sceneRef.current.remove(ly.sprite);
-          sceneRef.current.remove(lz.sprite);
-        }
-        boxMesh.geometry.dispose();
-        boxMesh.material.dispose();
-        lx.mat.map.dispose();
-        lx.mat.dispose();
-        ly.mat.map.dispose();
-        ly.mat.dispose();
-        lz.mat.map.dispose();
-        lz.mat.dispose();
-        boundingBoxRef.current = null;
-      }
-    };
-  }, [selectedId, selectedIds, items]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Sketch mode (top-down view + grid) ───────────────────────────────────
-
-  useSketchModeEffect({
+  useSceneSync({
     sceneRef,
     cameraRef,
     rendererRef,
     cameraControlsRef,
     objectsRef,
     originalMaterialsRef,
-    itemsRef,
-    axisGroupRef,
     planeRef,
-    sketchPlacementPlanesRef,
+    shadowGroundRef,
+    shadowLightRef,
+    targetRef,
+    axisGroupRef,
     composerRef,
     envTextureRef,
     sketchModeRef,
-    sketchDrawRef,
+    sketchPlacementPlanesRef,
+    subGeoHighlightGroupRef,
+    handlesRef,
+    handleDragRef,
+    boundingBoxRef,
     sketchShapesGroupRef,
+    allSketchGroupRef,
     sketchGhostGroupRef,
     sketchGridGroupRef,
+    extrudeSelectGroupRef,
+    preSketchProjectionRef,
+    preExtrudeRenderModeRef,
+    dimHintRef,
     savedCameraStateRef,
     cameraAnimRef,
-    targetRef,
-    dimHintRef,
-    preSketchProjectionRef,
-    setSketchMode,
-    setSketchDrawPhase,
-    setRotationState,
-    selectedId,
+    sketchDrawRef,
+    itemsRef,
+    selectedIdsRef,
     items,
-    projectionMode,
-    printPrecision,
-  });
-
-  // ── Sketch shape lines ────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!sceneRef.current) return;
-    const scene = sceneRef.current;
-    if (sketchShapesGroupRef.current) {
-      scene.remove(sketchShapesGroupRef.current);
-      sketchShapesGroupRef.current.traverse((obj) => {
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) obj.material.dispose();
-      });
-      sketchShapesGroupRef.current = null;
-    }
-    const group = buildSketchShapesGroup(
-      selectedId,
-      items,
-      objectsRef,
-      rendererRef.current,
-      constraintsVisible,
-      dimensionsVisible,
-      curveSegments,
-      printPrecision,
-    );
-    if (group) {
-      if (renderMode === "smooth") group.visible = false;
-      scene.add(group);
-      sketchShapesGroupRef.current = group;
-    }
-  }, [
+    variables,
+    renderMode,
     selectedId,
-    items,
+    selectedIds,
+    selectedSubGeometry,
     constraintsVisible,
     dimensionsVisible,
     curveResolution,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Object-view sketch construction lines ────────────────────────────────
-
-  useEffect(() => {
-    if (!sceneRef.current || !rendererRef.current) return;
-    const scene = sceneRef.current;
-    if (allSketchGroupRef.current) {
-      scene.remove(allSketchGroupRef.current);
-      allSketchGroupRef.current.traverse((obj) => {
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) obj.material.dispose();
-      });
-      allSketchGroupRef.current = null;
-    }
-    if (sketchMode) return;
-    const group = buildAllSketchShapesGroup(
-      items,
-      objectsRef,
-      rendererRef.current,
-    );
-    if (group) {
-      if (renderMode === "smooth") group.visible = false;
-      scene.add(group);
-      allSketchGroupRef.current = group;
-    }
-  }, [items, sketchMode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Extrude profile selection fills ──────────────────────────────────────
-
-  useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-    if (extrudeSelectGroupRef.current) {
-      scene.remove(extrudeSelectGroupRef.current);
-      extrudeSelectGroupRef.current.traverse((obj) => {
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) obj.material.dispose();
-      });
-      extrudeSelectGroupRef.current = null;
-    }
-    if (extrudeSelectMode === "profile") {
-      const group = buildExtrudeSelectGroup(
-        items,
-        objectsRef,
-        curveSegments,
-        printPrecision,
-      );
-      if (group) {
-        scene.add(group);
-        extrudeSelectGroupRef.current = group;
-      }
-    }
-  }, [extrudeSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Transparent during extrude ────────────────────────────────────────────
-  // While the user is choosing a profile, dragging the depth, OR the
-  // async CSG cut is still running, force the render mode to
-  // "transparent" so they can see through the source solid.  Stashes
-  // the prior mode in a ref and restores it once both flags clear —
-  // setExtrudeSelectMode(null) fires synchronously in finalizeExtrude,
-  // but the actual CSG difference runs after a microtask, so without
-  // the cutExtrudeInProgress flag the source solid would pop back to
-  // opaque for a frame before the cut result lands.
-  useEffect(() => {
-    const inExtrude = extrudeSelectMode != null || cutExtrudeInProgress;
-    if (inExtrude) {
-      if (preExtrudeRenderModeRef.current == null) {
-        preExtrudeRenderModeRef.current = renderMode;
-      }
-      if (renderMode !== "transparent") {
-        useStore.getState().setRenderMode("transparent");
-      }
-    } else if (preExtrudeRenderModeRef.current != null) {
-      const prev = preExtrudeRenderModeRef.current;
-      preExtrudeRenderModeRef.current = null;
-      if (prev !== renderMode) {
-        useStore.getState().setRenderMode(prev);
-      }
-    }
-  }, [extrudeSelectMode, cutExtrudeInProgress]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Emissive highlight ────────────────────────────────────────────────────
-
-  useEffect(() => {
-    updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
-  }, [hoveredId, selectedId, selectedIds]);
-
-  // ── Render mode ───────────────────────────────────────────────────────────
-  // Also re-runs on curveResolution changes so the wireframe (and the
-  // primitive shader vs. wireframe swap) picks up the new chord-deviation
-  // precision and matches the smooth shader / CSG / bevel resolution.
-
-  useEffect(() => {
-    if (!sceneRef.current || !rendererRef.current) return;
-    applyRenderMode(renderMode, {
-      scene: sceneRef.current,
-      renderer: rendererRef.current,
-      cameraRef,
-      objectsRef,
-      originalMaterialsRef,
-      itemsRef,
-      axisGroupRef,
-      planeRef,
-      sketchPlacementPlanesRef,
-      composerRef,
-      envTextureRef,
-      sketchModeRef,
-      printPrecision,
-    });
-    const isSmooth = renderMode === "smooth";
-    if (allSketchGroupRef.current)
-      allSketchGroupRef.current.visible = !isSmooth;
-    if (sketchShapesGroupRef.current)
-      sketchShapesGroupRef.current.visible = !isSmooth;
-  }, [renderMode, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+    sketchMode,
+    sketchPlacementMode,
+    extrudeSelectMode,
+    cutExtrudeInProgress,
+    hoveredId,
+    projectionMode,
+    axisVisible,
+    shadowsEnabled,
+    curveSegments,
+    printPrecision,
+    setSketchMode,
+    setSketchDrawPhase,
+    setRotationState,
+  });
 
   return (
     <div className="viewport-container">
