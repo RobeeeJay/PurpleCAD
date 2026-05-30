@@ -27,6 +27,7 @@ import {
   applyHVEnforcement,
   enforceConstraints,
 } from "../sketchConstraints.js";
+import { translateShape, collectConnectedShapes } from "../sketchGeometry.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
 import { createSketchDrawHelpers } from "./sketchDraw.js";
@@ -427,28 +428,6 @@ export function createSketchInteraction(
     },
   );
 
-  // BFS over coincident constraints to collect all shape indices reachable from startIdx
-  const collectConnectedShapes = (startIdx, shapes, constraints) => {
-    const visited = new Set([startIdx]);
-    const queue = [startIdx];
-    while (queue.length > 0) {
-      const idx = queue.shift();
-      for (const c of constraints) {
-        if (c.type !== "coincident") continue;
-        let other = -1;
-        if (c.shapeAIdx === idx && !visited.has(c.shapeBIdx))
-          other = c.shapeBIdx;
-        else if (c.shapeBIdx === idx && !visited.has(c.shapeAIdx))
-          other = c.shapeAIdx;
-        if (other >= 0 && shapes[other]) {
-          visited.add(other);
-          queue.push(other);
-        }
-      }
-    }
-    return [...visited];
-  };
-
   const trySelectSketchElement = (screenX, screenY) => {
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
@@ -563,43 +542,6 @@ export function createSketchInteraction(
     if (pts.length < 2) return;
     lineObj.geometry.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     lineObj.computeLineDistances();
-  };
-
-  const translateShape = (shape, dx, dy) => {
-    switch (shape.type) {
-      case "line":
-        return {
-          ...shape,
-          x1: shape.x1 + dx,
-          y1: shape.y1 + dy,
-          x2: shape.x2 + dx,
-          y2: shape.y2 + dy,
-        };
-      case "rect":
-        return {
-          ...shape,
-          x1: shape.x1 + dx,
-          y1: shape.y1 + dy,
-          x2: shape.x2 + dx,
-          y2: shape.y2 + dy,
-        };
-      case "circle":
-        return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy };
-      case "ellipse":
-        return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy };
-      case "arc":
-        return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy };
-      case "bezier":
-        return {
-          ...shape,
-          p0: { x: shape.p0.x + dx, y: shape.p0.y + dy },
-          p1: { x: shape.p1.x + dx, y: shape.p1.y + dy },
-          p2: { x: shape.p2.x + dx, y: shape.p2.y + dy },
-          p3: { x: shape.p3.x + dx, y: shape.p3.y + dy },
-        };
-      default:
-        return null;
-    }
   };
 
   // Wrapper: reads shapes/constraints from store, delegates to enforceConstraints.

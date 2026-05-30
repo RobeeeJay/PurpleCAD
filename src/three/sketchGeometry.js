@@ -128,3 +128,64 @@ export function buildBevelArc(P, uA, uB, trimA, trimB) {
   const endAngle = dCW < dCCW ? startAngle - cwSpan : startAngle + ccwSpan;
   return { type: "arc", cx, cy, r, startAngle, endAngle };
 }
+
+// Translate any sketch shape by (dx, dy).  Returns a new shape, or null for
+// unknown types.  Used by sketch-element body-drag and clipboard paste.
+export function translateShape(shape, dx, dy) {
+  switch (shape.type) {
+    case "line":
+      return {
+        ...shape,
+        x1: shape.x1 + dx,
+        y1: shape.y1 + dy,
+        x2: shape.x2 + dx,
+        y2: shape.y2 + dy,
+      };
+    case "rect":
+      return {
+        ...shape,
+        x1: shape.x1 + dx,
+        y1: shape.y1 + dy,
+        x2: shape.x2 + dx,
+        y2: shape.y2 + dy,
+      };
+    case "circle":
+      return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy };
+    case "ellipse":
+      return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy };
+    case "arc":
+      return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy };
+    case "bezier":
+      return {
+        ...shape,
+        p0: { x: shape.p0.x + dx, y: shape.p0.y + dy },
+        p1: { x: shape.p1.x + dx, y: shape.p1.y + dy },
+        p2: { x: shape.p2.x + dx, y: shape.p2.y + dy },
+        p3: { x: shape.p3.x + dx, y: shape.p3.y + dy },
+      };
+    default:
+      return null;
+  }
+}
+
+// BFS over coincident constraints to collect every shape index reachable from
+// startIdx (a connected cluster of joined shapes).
+export function collectConnectedShapes(startIdx, shapes, constraints) {
+  const visited = new Set([startIdx]);
+  const queue = [startIdx];
+  while (queue.length > 0) {
+    const idx = queue.shift();
+    for (const c of constraints) {
+      if (c.type !== "coincident") continue;
+      let other = -1;
+      if (c.shapeAIdx === idx && !visited.has(c.shapeBIdx)) other = c.shapeBIdx;
+      else if (c.shapeBIdx === idx && !visited.has(c.shapeAIdx))
+        other = c.shapeAIdx;
+      if (other >= 0 && shapes[other]) {
+        visited.add(other);
+        queue.push(other);
+      }
+    }
+  }
+  return [...visited];
+}
