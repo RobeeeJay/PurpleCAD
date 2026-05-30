@@ -86,6 +86,11 @@ files just to make these go away.
 - Prefer editing the existing file to creating a new one. New files have
   the burden of a name that fits, a place in the tree, and an import
   graph that doesn't break the worker bundle.
+- **500-line ceiling.** As soon as a file grows past ~500 lines of code,
+  look to split cohesive functionality into sibling modules (and re-export
+  from the original if it's an import hub). Don't let modules sprawl;
+  prefer a small focused file per concern. Test files are exempt from the
+  hard ceiling but still benefit from topic-based splitting when large.
 
 ## OCC execution boundary
 
