@@ -145,9 +145,9 @@ export function createAnimateLoop({
           viewHeight,
         );
         // Fade the matching 1 mm ground grid in over a small band centred on
-        // the same threshold the 1 mm ruler tier toggles at (viewHeight 6).
+        // the same threshold the 1 mm ruler tier toggles at (viewHeight 14).
         if (gridMaterial.uniforms.uUltraFade) {
-          const t = Math.min(1, Math.max(0, (viewHeight - 5.5) / 1.0));
+          const t = Math.min(1, Math.max(0, (viewHeight - 13) / 2));
           gridMaterial.uniforms.uUltraFade.value = 1 - t * t * (3 - 2 * t);
         }
         // Scale each label by ITS OWN distance to the camera so labels far

@@ -116,11 +116,12 @@ function makeRulerSprite(text, tier = "coarse") {
   ctx.font = `bold ${t.fontSize}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  // White outline keeps text legible on dark backgrounds.
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
+  // Dark outline keeps the blue text legible over the grid / either theme.
+  ctx.strokeStyle = "rgba(15, 18, 28, 0.85)";
   ctx.lineWidth = t.lineWidth;
   ctx.strokeText(text, 80, 20);
-  ctx.fillStyle = "rgba(40, 40, 40, 1.0)";
+  // Same blue as the 2D sketch-view ruler numbers.
+  ctx.fillStyle = "#6699ff";
   ctx.fillText(text, 80, 20);
   const mat = new THREE.SpriteMaterial({
     map: new THREE.CanvasTexture(canvas),
@@ -213,7 +214,7 @@ export function createGrid(scene) {
       pool: new Map(),
       step: 1,
       skipMod: 5,
-      showBelow: 45,
+      showBelow: 80,
       maxSpan: 50,
     },
     {
@@ -222,7 +223,7 @@ export function createGrid(scene) {
       pool: new Map(),
       step: 0.1,
       skipMod: 1,
-      showBelow: 6,
+      showBelow: 14,
       maxSpan: 8,
     },
   ];
@@ -257,7 +258,7 @@ export function updateRuler3D(rulerGroup, cx, cz, viewHeight) {
       needed.add(key);
       let sp = pool.get(key);
       if (!sp) {
-        sp = makeRulerSprite(`${Math.round(k * step * MM_PER_UNIT)}mm`, name);
+        sp = makeRulerSprite(`${Math.round(k * step * MM_PER_UNIT)}`, name);
         pool.set(key, sp);
         group.add(sp);
       }
