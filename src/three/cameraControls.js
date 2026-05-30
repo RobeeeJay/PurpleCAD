@@ -391,6 +391,7 @@ export function attachCameraControls(ctx) {
       onLine: 0x00aaff,
       horizontal: 0x00ddaa,
       vertical: 0x00ddaa,
+      angle: 0xff66cc,
     })[type] ?? 0xffffff;
 
   const CONSTRAINT_SEL_COLOR = 0xff4444;
@@ -575,6 +576,7 @@ export function attachCameraControls(ctx) {
               onLine: "On Line",
               horizontal: "Horizontal",
               vertical: "Vertical",
+              angle: "Angle",
             };
             const tipRect = renderer.domElement.getBoundingClientRect();
             dimHintRef.current.textContent =
@@ -1526,6 +1528,7 @@ export function attachCameraControls(ctx) {
     onLine: "On Line",
     horizontal: "Horizontal",
     vertical: "Vertical",
+    angle: "Angle",
   };
 
   const buildLongPressItems = (screenX, screenY) => {

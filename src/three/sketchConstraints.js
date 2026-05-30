@@ -458,6 +458,65 @@ export function enforceConstraints(
     if (!anyChange) break;
   }
 
+  // ── Angle enforcement ────────────────────────────────────────────────────────
+  // Keep a fixed angle between two straight lines that meet at a shared vertex.
+  // When exactly one of the pair moved, rotate the other about the vertex to
+  // restore the angle (preserving which side it's on).  Both-moved is treated
+  // as a rigid translation, which already preserves the angle, so it's skipped.
+  for (const c of constraints) {
+    if (c.type !== "angle") continue;
+    const target = typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
+    if (!Number.isFinite(target)) continue;
+    const aUp = updated.has(c.shapeAIdx);
+    const bUp = updated.has(c.shapeBIdx);
+    if (aUp === bUp) continue;
+    const fixedIdx = aUp ? c.shapeAIdx : c.shapeBIdx;
+    const fixedKey = aUp ? c.pointA : c.pointB;
+    const rotIdx = aUp ? c.shapeBIdx : c.shapeAIdx;
+    const rotKey = aUp ? c.pointB : c.pointA;
+    const fixedShape = shapes[fixedIdx];
+    const rotShape = shapes[rotIdx];
+    if (
+      !fixedShape ||
+      fixedShape.type !== "line" ||
+      !rotShape ||
+      rotShape.type !== "line"
+    )
+      continue;
+    const P = getShapePoint(fixedShape, fixedKey); // shared vertex
+    const fixedOther = getShapePoint(
+      fixedShape,
+      fixedKey === "start" ? "end" : "start",
+    );
+    const rotOtherKey = rotKey === "start" ? "end" : "start";
+    const rotOther = getShapePoint(rotShape, rotOtherKey);
+    if (!P || !fixedOther || !rotOther) continue;
+    const dirF = { x: fixedOther.x - P.x, y: fixedOther.y - P.y };
+    const dirR = { x: rotOther.x - P.x, y: rotOther.y - P.y };
+    const lenF = Math.hypot(dirF.x, dirF.y);
+    const lenR = Math.hypot(dirR.x, dirR.y);
+    if (lenF < 1e-9 || lenR < 1e-9) continue;
+    const dot = dirF.x * dirR.x + dirF.y * dirR.y;
+    const cross = dirF.x * dirR.y - dirF.y * dirR.x;
+    const signed = Math.atan2(cross, dot); // current signed angle F→R
+    const tgt = (target * Math.PI) / 180;
+    if (Math.abs(Math.abs(signed) - tgt) < 1e-6) continue;
+    const targetSigned = tgt * (signed >= 0 ? 1 : -1);
+    const fx = dirF.x / lenF,
+      fy = dirF.y / lenF;
+    const ca = Math.cos(targetSigned),
+      sa = Math.sin(targetSigned);
+    const ndx = fx * ca - fy * sa,
+      ndy = fx * sa + fy * ca;
+    const newOther = { x: P.x + ndx * lenR, y: P.y + ndy * lenR };
+    let moved = moveShapePoint(rotShape, rotOtherKey, newOther);
+    if (!moved) continue;
+    moved = applyHVEnforcement(moved, rotOtherKey, constraints, rotIdx);
+    shapes[rotIdx] = moved;
+    updated.set(rotIdx, moved);
+    propagateCoincidentFrom(rotIdx, shapes, updated, constraints);
+  }
+
   // ── Bevel arc recomputation ──────────────────────────────────────────────────
   for (let i = 0; i < shapes.length; i++) {
     const shape = shapes[i];

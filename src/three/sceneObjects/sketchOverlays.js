@@ -323,6 +323,65 @@ function addConstraintIconsToGroup(
       cLine.renderOrder = 1004;
       tag(cLine, { x: mx, y: my }, [c.shapeIdx], 0x00ddaa);
       group.add(cLine);
+    } else if (c.type === "angle") {
+      const sA = shapes[c.shapeAIdx],
+        sB = shapes[c.shapeBIdx];
+      if (!sA || sA.type !== "line" || !sB || sB.type !== "line") return;
+      const P = getShapePoint(sA, c.pointA);
+      const oA = getShapePoint(sA, c.pointA === "start" ? "end" : "start");
+      const oB = getShapePoint(sB, c.pointB === "start" ? "end" : "start");
+      if (!P || !oA || !oB) return;
+      const aF = Math.atan2(oA.y - P.y, oA.x - P.x);
+      let delta = Math.atan2(oB.y - P.y, oB.x - P.x) - aF;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      while (delta < -Math.PI) delta += 2 * Math.PI;
+      const AR = 0.45;
+      const arcPts = [];
+      for (let s = 0; s <= 16; s++) {
+        const ang = aF + delta * (s / 16);
+        arcPts.push(
+          toWorld(P.x + Math.cos(ang) * AR, P.y + Math.sin(ang) * AR, 0.005),
+        );
+      }
+      const arc = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(arcPts),
+        new THREE.LineBasicMaterial({ color: 0xff66cc, depthTest: false }),
+      );
+      arc.renderOrder = 1004;
+      tag(arc, { x: P.x, y: P.y }, [c.shapeAIdx, c.shapeBIdx], 0xff66cc);
+      group.add(arc);
+      if (showDimensions) {
+        const deg = typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
+        const labelText = `${Math.round(deg)}°`;
+        const canvas = document.createElement("canvas");
+        canvas.width = 96;
+        canvas.height = 32;
+        const ctx2d = canvas.getContext("2d");
+        ctx2d.fillStyle = "rgba(40,10,30,0.85)";
+        ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+        ctx2d.fillStyle = "#ff99dd";
+        ctx2d.font = "bold 18px sans-serif";
+        ctx2d.textAlign = "center";
+        ctx2d.textBaseline = "middle";
+        ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
+        const sprite = new THREE.Sprite(
+          new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(canvas),
+            depthTest: false,
+          }),
+        );
+        sprite.scale.set(0.45, 0.15, 1);
+        const midAng = aF + delta / 2;
+        sprite.position.copy(
+          toWorld(
+            P.x + Math.cos(midAng) * (AR + 0.3),
+            P.y + Math.sin(midAng) * (AR + 0.3),
+            0.006,
+          ),
+        );
+        sprite.renderOrder = 1009;
+        addTagged(sprite);
+      }
     }
   });
 }

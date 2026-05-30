@@ -2099,4 +2099,68 @@ describe("enforceConstraints", () => {
       assertCoincidesHold(result, constraints);
     });
   });
+
+  // ── Angle constraint between two straight lines ──────────────────────────
+  describe("angle constraint", () => {
+    const lineAngleDeg = (result, idx) => {
+      const a = pt(result, idx, "start");
+      const b = pt(result, idx, "end");
+      return Math.atan2(b.y - a.y, b.x - a.x);
+    };
+    const betweenDeg = (result, i, j) => {
+      let d = Math.abs(lineAngleDeg(result, i) - lineAngleDeg(result, j));
+      d = (d * 180) / Math.PI;
+      if (d > 180) d = 360 - d;
+      return d;
+    };
+
+    it("rotating one line rotates the other to keep the 90° angle", () => {
+      // L0 +x, L1 +y, sharing the vertex at the origin, locked at 90°.
+      const shapes = [L(0, 0, 2, 0), L(0, 0, 0, 2)];
+      const constraints = [
+        coin(0, "start", 1, "start"),
+        {
+          type: "angle",
+          shapeAIdx: 0,
+          pointA: "start",
+          shapeBIdx: 1,
+          pointB: "start",
+          angle: 90,
+        },
+      ];
+      // Swing L0 to 45°; L1 must rotate to 135° to keep the 90° between them.
+      const result = apply(shapes, constraints, 0, "end", { x: 2, y: 2 });
+      assertCoincidesHold(result, constraints);
+      expect(betweenDeg(result, 0, 1), "angle between lines").toBeCloseTo(90);
+      // L1 keeps its length and stays anchored at the shared vertex.
+      const d1 = {
+        x: pt(result, 1, "end").x - pt(result, 1, "start").x,
+        y: pt(result, 1, "end").y - pt(result, 1, "start").y,
+      };
+      expect(Math.hypot(d1.x, d1.y), "L1 length").toBeCloseTo(2);
+    });
+
+    it("holds a non-right (60°) angle", () => {
+      // L1 starts 60° CCW from L0 (+x). Move L0 to +y; L1 should follow to 150°.
+      const s60 = {
+        x: 2 * Math.cos(Math.PI / 3),
+        y: 2 * Math.sin(Math.PI / 3),
+      };
+      const shapes = [L(0, 0, 2, 0), L(0, 0, s60.x, s60.y)];
+      const constraints = [
+        coin(0, "start", 1, "start"),
+        {
+          type: "angle",
+          shapeAIdx: 0,
+          pointA: "start",
+          shapeBIdx: 1,
+          pointB: "start",
+          angle: 60,
+        },
+      ];
+      const result = apply(shapes, constraints, 0, "end", { x: 0, y: 2 });
+      assertCoincidesHold(result, constraints);
+      expect(betweenDeg(result, 0, 1), "angle between lines").toBeCloseTo(60);
+    });
+  });
 });

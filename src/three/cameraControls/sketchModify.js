@@ -145,6 +145,43 @@ export function createSketchModifyHelpers(
         pointB: m.bKey,
       },
     ];
+    // A chamfer makes two new corners (chamfer line ↔ each trimmed line).
+    // Lock each corner's angle so the chamfer holds its shape under edits.
+    if (mode === "chamfer") {
+      const angBetween = (v1, v2) => {
+        let d =
+          Math.abs(Math.atan2(v1.y, v1.x) - Math.atan2(v2.y, v2.x)) *
+          (180 / Math.PI);
+        if (d > 180) d = 360 - d;
+        return d;
+      };
+      const chamferDirAtA = {
+        x: m.trimB.x - m.trimA.x,
+        y: m.trimB.y - m.trimA.y,
+      };
+      const chamferDirAtB = {
+        x: m.trimA.x - m.trimB.x,
+        y: m.trimA.y - m.trimB.y,
+      };
+      newConstraints.push(
+        {
+          type: "angle",
+          shapeAIdx: newIdx,
+          pointA: "start",
+          shapeBIdx: m.aIdx,
+          pointB: m.aKey,
+          angle: angBetween(chamferDirAtA, m.uA),
+        },
+        {
+          type: "angle",
+          shapeAIdx: newIdx,
+          pointA: "end",
+          shapeBIdx: m.bIdx,
+          pointB: m.bKey,
+          angle: angBetween(chamferDirAtB, m.uB),
+        },
+      );
+    }
     const juncConstraint = junc.constraint;
     useStore
       .getState()
