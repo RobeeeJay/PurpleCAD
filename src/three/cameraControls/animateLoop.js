@@ -6,6 +6,7 @@
 // Returns a `stop()` that cancelAnimationFrames the next tick.
 
 import * as THREE from "three";
+import { updateRuler3D } from "../sceneSetup.js";
 
 const _rulerPos = new THREE.Vector3();
 
@@ -134,12 +135,15 @@ export function createAnimateLoop({
         rulerGroup.visible = false;
       } else if (rulerGroup) {
         rulerGroup.visible = true;
-        // Tier visibility keys off the orbit-target view height (one value).
         const viewHeight = gizmoScale(targetRef.current) * REFERENCE_HEIGHT;
-        const fineGroup = rulerGroup.userData.fineGroup;
-        const ultraGroup = rulerGroup.userData.ultraGroup;
-        if (fineGroup) fineGroup.visible = viewHeight < 45;
-        if (ultraGroup) ultraGroup.visible = viewHeight < 6;
+        // Recycle the labels around the camera target so they follow the view
+        // (tier visibility + which absolute mm labels are shown live here).
+        updateRuler3D(
+          rulerGroup,
+          targetRef.current.x,
+          targetRef.current.z,
+          viewHeight,
+        );
         // Fade the matching 1 mm ground grid in over a small band centred on
         // the same threshold the 1 mm ruler tier toggles at (viewHeight 6).
         if (gridMaterial.uniforms.uUltraFade) {

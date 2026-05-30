@@ -186,54 +186,101 @@ export function createGrid(scene) {
   gridPlane.rotation.x = -Math.PI / 2;
   scene.add(gridPlane);
 
-  // Ruler labels along X (at Z offset) and Z (at X offset) axes, split into
-  // three zoom tiers that animateLoop shows/hides by camera view height:
-  //   coarse — every 5 units (50 mm), ±500 mm: always visible
-  //   fine   — every 1 unit (10 mm), ±500 mm: hidden when zoomed far out
-  //   ultra  — every 0.1 unit (1 mm), ±50 mm: shown only when zoomed far in
-  // The ultra tier is range-limited to ±50 mm to keep the sprite count
-  // bounded (1 mm detail is only useful when zoomed tight near the origin).
+  // Ruler labels along world X and Z, in three zoom tiers.  The labels are
+  // recycled around the camera target each frame by updateRuler3D so they stay
+  // on-screen as the view pans/zooms while still reading true world mm.  Each
+  // tier is an empty group with a value→sprite pool; updateRuler3D fills it.
   const rulerGroup = new THREE.Group();
   const coarseGroup = new THREE.Group();
   const fineGroup = new THREE.Group();
   const ultraGroup = new THREE.Group();
-  ultraGroup.visible = false; // revealed by animateLoop on deep zoom-in
-  const COARSE = 5; // scene units per coarse square
-  const COUNT = 10; // coarse squares in each direction (±500 mm total)
-  const FINE_TOTAL = COUNT * COARSE; // 50 units = 500 mm
-  const ULTRA_TOTAL = 50; // tenths of a unit = ±50 units of 0.1 → ±50 mm
-  const AXIS_OFFSET = 0.7;
-  const Y = 0.05;
-
-  const addPair = (group, pos, tier) => {
-    const labelText = `${Math.round(pos * MM_PER_UNIT)}mm`;
-    const sx = makeRulerSprite(labelText, tier);
-    sx.position.set(pos, Y, AXIS_OFFSET);
-    group.add(sx);
-    const sz = makeRulerSprite(labelText, tier);
-    sz.position.set(AXIS_OFFSET, Y, pos);
-    group.add(sz);
-  };
-
-  for (let i = 1; i <= COUNT; i++) {
-    for (const sign of [1, -1])
-      addPair(coarseGroup, sign * i * COARSE, "coarse");
-  }
-  for (let i = 1; i <= FINE_TOTAL; i++) {
-    if (i % COARSE === 0) continue; // coarse lines already labelled above
-    for (const sign of [1, -1]) addPair(fineGroup, sign * i, "fine");
-  }
-  for (let i = 1; i <= ULTRA_TOTAL; i++) {
-    if (i % 10 === 0) continue; // 10 mm multiples already in the fine tier
-    for (const sign of [1, -1]) addPair(ultraGroup, (sign * i) / 10, "ultra");
-  }
-
   rulerGroup.add(coarseGroup, fineGroup, ultraGroup);
-  rulerGroup.userData.fineGroup = fineGroup;
-  rulerGroup.userData.ultraGroup = ultraGroup;
+  rulerGroup.userData.tiers = [
+    // step/skipMod in scene units; showBelow = view height (units) above which
+    // the tier hides; maxSpan caps how far from the target labels extend.
+    {
+      name: "coarse",
+      group: coarseGroup,
+      pool: new Map(),
+      step: 5,
+      skipMod: 0,
+      showBelow: Infinity,
+      maxSpan: 120,
+    },
+    {
+      name: "fine",
+      group: fineGroup,
+      pool: new Map(),
+      step: 1,
+      skipMod: 5,
+      showBelow: 45,
+      maxSpan: 50,
+    },
+    {
+      name: "ultra",
+      group: ultraGroup,
+      pool: new Map(),
+      step: 0.1,
+      skipMod: 1,
+      showBelow: 6,
+      maxSpan: 8,
+    },
+  ];
   scene.add(rulerGroup);
 
   return { gridPlane, gridMaterial, rulerGroup };
+}
+
+const RULER_Y = 0.05; // label height above the ground plane
+const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
+
+// Recycle ruler labels around the camera target (cx, cz on the ground) so they
+// follow the view.  Labels live at absolute world multiples of each tier's step
+// and read true mm; only labels entering the range get a fresh texture, the
+// rest are just repositioned, so this is cheap to call every frame.
+export function updateRuler3D(rulerGroup, cx, cz, viewHeight) {
+  const rowZ = Math.round(cz) + RULER_AXIS_OFFSET; // X-labels' row follows target Z
+  const rowX = Math.round(cx) + RULER_AXIS_OFFSET; // Z-labels' row follows target X
+  for (const tier of rulerGroup.userData.tiers) {
+    const visible = viewHeight < tier.showBelow;
+    tier.group.visible = visible;
+    if (!visible) continue;
+    const span = Math.min(viewHeight * 1.3, tier.maxSpan);
+    const { step, skipMod, pool, group, name } = tier;
+    // Skip label indices that belong to a coarser tier (work in integer step
+    // counts so 1/0.1 float error can't leak a 10 mm label into the 1 mm tier).
+    const skipEvery = skipMod > 0 ? Math.round(skipMod / step) : 0;
+    const needed = new Set();
+    const place = (axis, k, x, y, z) => {
+      if (skipEvery > 0 && k % skipEvery === 0) return;
+      const key = `${axis}:${k}`;
+      needed.add(key);
+      let sp = pool.get(key);
+      if (!sp) {
+        sp = makeRulerSprite(`${Math.round(k * step * MM_PER_UNIT)}mm`, name);
+        pool.set(key, sp);
+        group.add(sp);
+      }
+      sp.position.set(x, y, z);
+    };
+    const kxMin = Math.ceil((cx - span) / step);
+    const kxMax = Math.floor((cx + span) / step);
+    for (let k = kxMin; k <= kxMax; k++) {
+      place("x", k, k * step, RULER_Y, rowZ);
+    }
+    const kzMin = Math.ceil((cz - span) / step);
+    const kzMax = Math.floor((cz + span) / step);
+    for (let k = kzMin; k <= kzMax; k++) {
+      place("z", k, rowX, RULER_Y, k * step);
+    }
+    for (const [key, sp] of pool) {
+      if (needed.has(key)) continue;
+      group.remove(sp);
+      if (sp.material.map) sp.material.map.dispose();
+      sp.material.dispose();
+      pool.delete(key);
+    }
+  }
 }
 
 export function createAxisGroup(scene) {
