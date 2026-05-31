@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { buildBrushTransform } from "./csgUtils.js";
+import { buildBrushTransform, extrudeWithLivePolygon } from "./csgUtils.js";
 // Routed through occClient → the OCC worker.  This file is no longer
 // imported from the store (the orchestrator in regenerateOrchestrator.js
 // is what Viewport pulls in), so it's outside the worker's transitive
@@ -31,8 +31,22 @@ async function regenerateChamfer(
   const subGeo = regenerator.subGeo || { edges: [], faces: [] };
   if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
     return null;
+  // Re-derive the source extrude's profile from its sketch at the requested
+  // precision so curved holes/outlines tessellate finer at print resolution.
+  // The Electron OCC bridge (occ-bridge.cjs) can't import this ESM helper and
+  // otherwise builds the prism from the stored preview-resolution polygon, so
+  // toggling print resolution on a chamfered extrude appeared to do nothing.
+  // Mirrors occOps.js's buildItemShapeLocal, which calls this internally.
+  const source =
+    regenerator.source?.type === "extrude"
+      ? extrudeWithLivePolygon(
+          regenerator.source,
+          accumulatedItems,
+          printPrecision,
+        )
+      : regenerator.source;
   const result = await chamferOrFilletItem({
-    source: regenerator.source,
+    source,
     subGeo,
     amount: regenerator.amount ?? 0.05,
     angleRad: regenerator.angleRad ?? null,
