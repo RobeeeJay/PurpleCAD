@@ -19,6 +19,25 @@ function polyCentroid(poly) {
   return { x: cx / poly.length, y: cy / poly.length };
 }
 
+// Signed area (CCW positive) + winding normalisation, mirroring
+// sceneObjects/polygonUtil.js.  The renderer forces outer wires CCW / holes CW
+// before building the prism, so its top-cap normal is +Z.  The OCC bridge must
+// do the same or a clockwise-traced sketch yields a -Z top normal that no face
+// selection on the (correctly-wound) rendered mesh can match.
+function signedPolyAreaXY(poly) {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a / 2;
+}
+function withWinding(poly, wantCcw) {
+  if (!poly || poly.length < 3) return poly;
+  const isCcw = signedPolyAreaXY(poly) > 0;
+  return isCcw === wantCcw ? poly : [...poly].reverse();
+}
+
 // XYZ Euler rotation of a 3D vector, matching THREE.js applyEuler('XYZ').
 function applyEulerXYZ(vx, vy, vz, rx, ry, rz) {
   const a = Math.cos(rx), b = Math.sin(rx);
@@ -98,10 +117,12 @@ function buildItemShapeLocal(item, allItems, precision) {
     // the top then matched nothing.  Mirror occOps.js, which uses item.depth.
     const depth = resolveDepth(item.depth);
     const c = polyCentroid(poly);
-    const outerFlat = new Float64Array(poly.flatMap(p => [p.x, p.y]));
+    const outerFlat = new Float64Array(
+      withWinding(poly, true).flatMap(p => [p.x, p.y]),
+    );
     const holesFlat = holes
       .filter(h => h && h.length >= 3)
-      .map(h => new Float64Array(h.flatMap(p => [p.x, p.y])));
+      .map(h => new Float64Array(withWinding(h, false).flatMap(p => [p.x, p.y])));
     return occ.makeExtrude(outerFlat, holesFlat, c.x, c.y, depth);
   }
 
