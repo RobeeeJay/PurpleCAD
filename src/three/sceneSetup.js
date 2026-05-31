@@ -102,9 +102,9 @@ export function createLights(scene, camera) {
 // 1 mm labels read as clearly as the 10 mm ones; fine is then enlarged 30% to
 // stay the more prominent of the two when both are visible.
 const RULER_TIERS = {
-  coarse: { fontSize: 26, lineWidth: 4, scaleX: 1.0, scaleY: 0.25 },
-  fine: { fontSize: 18, lineWidth: 3, scaleX: 1.365, scaleY: 0.34125 },
-  ultra: { fontSize: 18, lineWidth: 3, scaleX: 1.05, scaleY: 0.2625 },
+  coarse: { fontSize: 26, scaleX: 1.0, scaleY: 0.25 },
+  fine: { fontSize: 18, scaleX: 1.365, scaleY: 0.34125 },
+  ultra: { fontSize: 18, scaleX: 1.05, scaleY: 0.2625 },
 };
 
 function makeRulerSprite(text, tier = "coarse") {
@@ -113,15 +113,12 @@ function makeRulerSprite(text, tier = "coarse") {
   canvas.width = 160;
   canvas.height = 40;
   const ctx = canvas.getContext("2d");
-  ctx.font = `bold ${t.fontSize}px monospace`;
+  // Match the 2D sketch-mode ruler font: plain (no outline), non-bold
+  // monospace in the same ink colour.
+  ctx.font = `${t.fontSize}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  // Dark outline keeps the blue text legible over the grid / either theme.
-  ctx.strokeStyle = "rgba(15, 18, 28, 0.85)";
-  ctx.lineWidth = t.lineWidth;
-  ctx.strokeText(text, 80, 20);
-  // Same blue as the 2D sketch-view ruler numbers.
-  ctx.fillStyle = "#6699ff";
+  ctx.fillStyle = "#0055ff";
   ctx.fillText(text, 80, 20);
   const mat = new THREE.SpriteMaterial({
     map: new THREE.CanvasTexture(canvas),
@@ -223,7 +220,9 @@ export function createGrid(scene) {
       pool: new Map(),
       step: 0.1,
       skipMod: 1,
-      showBelow: 14,
+      // 1 mm labels only appear once zoomed in twice as far as before
+      // (view height < 7 units ≈ 70 mm, was 14).
+      showBelow: 7,
       maxSpan: 8,
     },
   ];

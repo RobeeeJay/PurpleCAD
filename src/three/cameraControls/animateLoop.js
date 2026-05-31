@@ -96,7 +96,11 @@ export function createAnimateLoop({
         const center = centerHandle
           ? centerHandle.mesh.position
           : handlesRef.current[0].mesh.position;
-        const s = gizmoScale(center);
+        // Overall on-screen size of the rotation/resize/drag gizmo, as a
+        // fraction of the authored size (handles + ring radius + handle
+        // offset all scale together so the cluster stays coherent).
+        const GIZMO_SCALE = 0.25;
+        const s = gizmoScale(center) * GIZMO_SCALE;
         handlesRef.current.forEach(({ mesh: hm, dir }) => {
           // Each handle was authored at unit scale; reset rather than
           // multiply so we don't compound across frames.
@@ -157,9 +161,9 @@ export function createAnimateLoop({
           viewHeight,
         );
         // Fade the matching 1 mm ground grid in over a small band centred on
-        // the same threshold the 1 mm ruler tier toggles at (viewHeight 14).
+        // the same threshold the 1 mm ruler tier toggles at (viewHeight 7).
         if (gridMaterial.uniforms.uUltraFade) {
-          const t = Math.min(1, Math.max(0, (viewHeight - 13) / 2));
+          const t = Math.min(1, Math.max(0, (viewHeight - 6) / 2));
           gridMaterial.uniforms.uUltraFade.value = 1 - t * t * (3 - 2 * t);
         }
         // Scale each label by ITS OWN distance to the camera so labels far
