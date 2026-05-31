@@ -91,7 +91,12 @@ function buildItemShapeLocal(item, allItems, precision) {
     const poly = item.profile?.polygon2D;
     if (!poly || poly.length < 3) return null;
     const holes = item.profile?.holes || [];
-    const depth = resolveDepth(item.profile?.depth);
+    // Depth is stored on the item (a mm formula string), NOT on the profile —
+    // reading item.profile?.depth always fell through to the 1-unit fallback,
+    // so the OCC prism was built 10 mm tall regardless of the real depth. That
+    // put its top face at the wrong Z, and a chamfer/fillet face selection on
+    // the top then matched nothing.  Mirror occOps.js, which uses item.depth.
+    const depth = resolveDepth(item.depth);
     const c = polyCentroid(poly);
     const outerFlat = new Float64Array(poly.flatMap(p => [p.x, p.y]));
     const holesFlat = holes
