@@ -60,14 +60,36 @@ const BevelSection = () => {
         prior.segments === segments
       ) {
         source = prior.source;
+        // The newly-clicked face/edge was picked on THIS item's rendered mesh,
+        // whose geometry is bbox-centred (the prior chamfer subtracted its
+        // centerOffset).  prior.subGeo lives in the original source's frame, and
+        // we re-run the chamfer on that source — so shift the new selection back
+        // into the source frame by +centerOffset before merging, or it lands in
+        // the wrong place and matches no face (the second chamfer silently does
+        // nothing).  The centring is a pure translation, so normals are
+        // unchanged.
+        const off = prior.centerOffset || { cx: 0, cy: 0, cz: 0 };
+        const shiftFace = (f) =>
+          f.cx == null
+            ? f
+            : { ...f, cx: f.cx + off.cx, cy: f.cy + off.cy, cz: f.cz + off.cz };
+        const shiftEdge = (ed) => ({
+          ...ed,
+          ax: ed.ax + off.cx,
+          ay: ed.ay + off.cy,
+          az: ed.az + off.cz,
+          bx: ed.bx + off.cx,
+          by: ed.by + off.cy,
+          bz: ed.bz + off.cz,
+        });
         subGeo = {
           edges: [
             ...(prior.subGeo?.edges || []),
-            ...(selectedSubGeometry.edges || []),
+            ...(selectedSubGeometry.edges || []).map(shiftEdge),
           ],
           faces: [
             ...(prior.subGeo?.faces || []),
-            ...(selectedSubGeometry.faces || []),
+            ...(selectedSubGeometry.faces || []).map(shiftFace),
           ],
         };
       } else {
