@@ -20,12 +20,17 @@ const ObjectCreateSection = () => {
     });
     const id = maxId + 1;
     const label = type.charAt(0).toUpperCase() + type.slice(1);
+    // Spawn at the current view centre (camera target) so the object appears
+    // where the user is looking; fall back to a sensible default if the
+    // viewport handle isn't ready.
+    const t = useStore.getState()._cameraControls?.getViewTarget?.();
+    const position = t ? { x: t.x, y: t.y, z: t.z } : { x: 0, y: 2, z: 0 };
     addItem({
       id,
       name: `${label} ${id}`,
       type,
       children: [],
-      position: { x: 0, y: 2, z: 0 },
+      position,
       scale: { x: 1, y: 1, z: 1 },
     });
   };

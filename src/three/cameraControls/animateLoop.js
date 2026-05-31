@@ -90,15 +90,25 @@ export function createAnimateLoop({
         axisGroupRef.current.scale.setScalar(s);
       }
       if (handlesRef?.current && handlesRef.current.length > 0) {
-        // Use the first handle's position as a stand-in for "the gizmo
-        // cluster centre"; all handles belong to one selection.
-        const ref = handlesRef.current[0].mesh.position;
-        const s = gizmoScale(ref);
-        handlesRef.current.forEach(({ mesh: hm }) => {
+        // The rotation tori (dir === null) sit at the gizmo centre; use one as
+        // the cluster centre so the axis/scale handles can be re-offset from it.
+        const centerHandle = handlesRef.current.find((h) => h.dir === null);
+        const center = centerHandle
+          ? centerHandle.mesh.position
+          : handlesRef.current[0].mesh.position;
+        const s = gizmoScale(center);
+        handlesRef.current.forEach(({ mesh: hm, dir }) => {
           // Each handle was authored at unit scale; reset rather than
           // multiply so we don't compound across frames.
           if (hm.userData.baseScale == null) hm.userData.baseScale = 1;
           hm.scale.setScalar(hm.userData.baseScale * s);
+          // Scale the axis/scale handles' offset from the centre by the same
+          // factor so they ride on the (also-scaled) rings at every zoom
+          // instead of drifting off them.  Tori (dir null) stay at centre.
+          if (dir) {
+            const off = hm.userData.baseOffsetDist ?? 1.5;
+            hm.position.copy(center).addScaledVector(dir, off * s);
+          }
         });
       }
       // Bounding-box dimension labels (the "20mm" sprites at the
@@ -129,9 +139,11 @@ export function createAnimateLoop({
       // scene units (1 unit = 10 mm).  Tier thresholds are tuned so the
       // 10 mm labels drop out once the view spans more than ~450 mm and the
       // 1 mm labels only appear once it tightens below ~60 mm.
-      if (rulerGroup && sketchModeRef.current) {
+      if (rulerGroup && (sketchModeRef.current || composerRef.current)) {
         // Sketch mode uses the screen-locked HTML rulers instead; the
         // world-space ground ruler is hidden (it's off the sketch plane).
+        // Smooth (composer) render mode is a presentation view — hide the
+        // ground rulers there too so they don't clutter the rendered result.
         rulerGroup.visible = false;
       } else if (rulerGroup) {
         rulerGroup.visible = true;

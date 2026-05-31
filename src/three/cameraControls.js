@@ -313,6 +313,11 @@ export function attachCameraControls(ctx) {
     buildExtrudePreviewMesh(extrude.extrudeProfileData, d);
   };
 
+  // The current view centre (camera orbit target) in world coords — the
+  // toolbar reads this so a newly created primitive spawns where the user is
+  // looking instead of always at the world origin.
+  controls.getViewTarget = () => targetRef.current.clone();
+
   // Drop the selected non-sketch objects so their lowest world-Y point
   // sits on the ground plane (Y=0).  Computes the min Y across all
   // selected meshes' world-space bounding boxes, then dispatches a

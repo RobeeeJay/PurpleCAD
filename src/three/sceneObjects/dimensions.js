@@ -58,6 +58,43 @@ export function getObjectDimensions(itemType, uniformScale) {
   }
 }
 
+// Real dimensions (scene units) of a mesh from its geometry's bounding box,
+// scaled by the mesh's per-axis scale.  Use this instead of getObjectDimensions
+// for anything user-facing: the nominal per-type sizes are only correct for an
+// unscaled primitive and read a constant 20 mm for every extrude / CSG / chamfer.
+export function getMeshDimensions(mesh) {
+  if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+  const bb = mesh.geometry.boundingBox;
+  return {
+    w: (bb.max.x - bb.min.x) * Math.abs(mesh.scale.x || 1),
+    h: (bb.max.y - bb.min.y) * Math.abs(mesh.scale.y || 1),
+    d: (bb.max.z - bb.min.z) * Math.abs(mesh.scale.z || 1),
+  };
+}
+
+// World-space centre of a mesh's geometry bounding box (its local bbox centre
+// scaled + rotated + offset by the mesh position).  The bounding-box gizmo and
+// dimension labels sit here so they enclose geometry that isn't centred on the
+// mesh origin (e.g. extrudes).
+export function getMeshBBoxCenter(mesh) {
+  if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+  const bb = mesh.geometry.boundingBox;
+  const c = new THREE.Vector3(
+    ((bb.min.x + bb.max.x) / 2) * mesh.scale.x,
+    ((bb.min.y + bb.max.y) / 2) * mesh.scale.y,
+    ((bb.min.z + bb.max.z) / 2) * mesh.scale.z,
+  );
+  c.applyEuler(mesh.rotation);
+  return c.add(mesh.position);
+}
+
+// Half the mesh's largest real dimension — used to place the gizmo handles just
+// outside the object.
+export function getMeshExtent(mesh) {
+  const { w, h, d } = getMeshDimensions(mesh);
+  return Math.max(w, h, d) / 2;
+}
+
 export function getObjectExtent(itemType, uniformScale) {
   const s = uniformScale || 1;
   switch (itemType) {

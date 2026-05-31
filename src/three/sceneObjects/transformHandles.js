@@ -5,8 +5,9 @@ import * as THREE from "three";
 import {
   HANDLE_CONFIGS,
   MM_PER_UNIT,
-  getObjectDimensions,
-  getObjectExtent,
+  getMeshDimensions,
+  getMeshExtent,
+  getMeshBBoxCenter,
   makeDimSprite,
   placeDimLabels,
 } from "./dimensions.js";
@@ -18,7 +19,10 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   if (!item || item.type === "sketch") return null;
 
   const handles = [];
-  const ext = getObjectExtent(item.type, mesh.scale.x);
+  const ext = getMeshExtent(mesh);
+  // Centre the gizmo on the object's real bounding box so it encloses
+  // geometry that isn't centred on the mesh origin (e.g. extrudes).
+  const center = getMeshBBoxCenter(mesh);
 
   // `transparent: true` is REQUIRED (alongside depthTest:false +
   // renderOrder) so the gizmo lands in three.js's transparent render
@@ -38,7 +42,11 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
     const hMesh = new THREE.Mesh(geo, mat);
     hMesh.renderOrder = 999;
     hMesh.userData.isHandle = true;
-    hMesh.position.copy(mesh.position).addScaledVector(dir, ext + 0.5);
+    // Authored offset distance from the gizmo centre.  The per-frame scaler
+    // multiplies this by the on-screen-size factor so the handles ride on the
+    // (also-scaled) rotation rings at every zoom instead of drifting off them.
+    hMesh.userData.baseOffsetDist = ext + 0.5;
+    hMesh.position.copy(center).addScaledVector(dir, ext + 0.5);
     handles.push({ mesh: hMesh, type, dir: dir.clone() });
   });
 
@@ -58,12 +66,12 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
     const torus = new THREE.Mesh(geo, mat);
     torus.renderOrder = 998;
     torus.userData.isHandle = true;
-    torus.position.copy(mesh.position);
+    torus.position.copy(center);
     torus.rotation.set(rx, ry, rz);
     handles.push({ mesh: torus, type, dir: null });
   });
 
-  const dim = getObjectDimensions(item.type, mesh.scale.x);
+  const dim = getMeshDimensions(mesh);
   const boxMesh = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
     new THREE.LineBasicMaterial({
@@ -75,7 +83,7 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   );
   boxMesh.renderOrder = 998;
   boxMesh.scale.set(dim.w, dim.h, dim.d);
-  boxMesh.position.copy(mesh.position);
+  boxMesh.position.copy(center);
 
   const mmX = Math.round(dim.w * MM_PER_UNIT);
   const mmY = Math.round(dim.h * MM_PER_UNIT);
@@ -85,7 +93,7 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   const labelZ = makeDimSprite(mmZ + "mm", "#44ff44");
 
   const boundingBox = { boxMesh, labelX, labelY, labelZ };
-  placeDimLabels(boundingBox, mesh.position, dim);
+  placeDimLabels(boundingBox, center, dim);
 
   return { handles, boundingBox };
 }

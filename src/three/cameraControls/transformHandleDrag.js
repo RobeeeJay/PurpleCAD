@@ -8,8 +8,9 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import {
   MM_PER_UNIT,
-  getObjectExtent,
-  getObjectDimensions,
+  getMeshExtent,
+  getMeshDimensions,
+  getMeshBBoxCenter,
   redrawDimSprite,
   placeDimLabels,
 } from "../sceneObjects.js";
@@ -188,27 +189,26 @@ export function createTransformHandleDrag({
         }
       }
 
-      const item = itemsRef.current.find((i) => i.id === drag.itemId);
-      const ext = getObjectExtent(item ? item.type : "cube", mesh.scale.x);
+      const ext = getMeshExtent(mesh);
+      const center = getMeshBBoxCenter(mesh);
       handlesRef.current.forEach(({ mesh: hm, dir }) => {
-        if (dir)
-          hm.position.copy(mesh.position).addScaledVector(dir, ext + 0.5);
-        else hm.position.copy(mesh.position);
+        hm.userData.baseOffsetDist = ext + 0.5;
+        if (dir) hm.position.copy(center).addScaledVector(dir, ext + 0.5);
+        else hm.position.copy(center);
       });
 
       const bb = boundingBoxRef.current;
       if (bb) {
-        const itype = item ? item.type : "cube";
-        const dim = getObjectDimensions(itype, mesh.scale.x);
+        const dim = getMeshDimensions(mesh);
         bb.boxMesh.scale.set(dim.w, dim.h, dim.d);
-        bb.boxMesh.position.copy(mesh.position);
+        bb.boxMesh.position.copy(center);
         const mmX = Math.round(dim.w * MM_PER_UNIT);
         const mmY = Math.round(dim.h * MM_PER_UNIT);
         const mmZ = Math.round(dim.d * MM_PER_UNIT);
         redrawDimSprite(bb.labelX, mmX + "mm", "#ff4444");
         redrawDimSprite(bb.labelY, mmY + "mm", "#4488ff");
         redrawDimSprite(bb.labelZ, mmZ + "mm", "#44ff44");
-        placeDimLabels(bb, mesh.position, dim);
+        placeDimLabels(bb, center, dim);
       }
     }
     controls.mouseX = e.clientX;
