@@ -203,6 +203,10 @@ export function enforceConstraints(
     for (const k of SHAPE_KEYS) placedEP.add(epKey(primaryIdx, k));
   }
 
+  // The drag inputs (primary + pre-seeded shapes) are fixed: the final
+  // reconciliation pass must never move these, or it would undo the drag.
+  const anchored = new Set(placedEP);
+
   // ── Main coincident BFS ──────────────────────────────────────────────────────
   const queue = preSeeded
     ? [primaryIdx, ...[...preSeeded.keys()].filter((k) => k !== primaryIdx)]
@@ -517,6 +521,56 @@ export function enforceConstraints(
       shapes[bIdx] = newSB;
       updated.set(bIdx, newSB);
     }
+  }
+
+  // ── Final coincident reconciliation ──────────────────────────────────────────
+  // The main BFS places each endpoint once (placedEP), so a point coincident to
+  // two shapes can be placed from one before the other has settled — e.g. a
+  // rectangle-diagonal corner pinned to BOTH the vertical edge and the
+  // horizontal edge: it follows the vertical edge's X but the horizontal edge's
+  // later Y correction is then blocked, stranding it.  Sweep all coincidents to
+  // a fixed point, moving the less-constrained side (the free follower) onto the
+  // more-constrained one (an H/V- or distance-pinned edge), never the drag
+  // anchors.  No-op when every coincident already holds.
+  const rigidity = new Array(shapes.length).fill(0);
+  for (const c of constraints) {
+    if (c.type === "horizontal" || c.type === "vertical")
+      rigidity[c.shapeIdx]++;
+    else if (c.type === "distance" || c.type === "angle") {
+      rigidity[c.shapeAIdx]++;
+      if (c.shapeBIdx !== c.shapeAIdx) rigidity[c.shapeBIdx]++;
+    }
+  }
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = false;
+    for (const c of constraints) {
+      if (c.type !== "coincident") continue;
+      const sa = shapes[c.shapeAIdx];
+      const sb = shapes[c.shapeBIdx];
+      if (!sa || !sb) continue;
+      const pa = getShapePoint(sa, c.pointA);
+      const pb = getShapePoint(sb, c.pointB);
+      if (!pa || !pb) continue;
+      if (Math.hypot(pa.x - pb.x, pa.y - pb.y) < 1e-7) continue;
+      const aAnch = anchored.has(epKey(c.shapeAIdx, c.pointA));
+      const bAnch = anchored.has(epKey(c.shapeBIdx, c.pointB));
+      if (aAnch && bAnch) continue; // both fixed — can't reconcile
+      // Move the less-constrained (or non-anchored) endpoint onto the other.
+      let moveA;
+      if (aAnch) moveA = false;
+      else if (bAnch) moveA = true;
+      else moveA = rigidity[c.shapeAIdx] <= rigidity[c.shapeBIdx];
+      const tgtIdx = moveA ? c.shapeAIdx : c.shapeBIdx;
+      const tgtKey = moveA ? c.pointA : c.pointB;
+      const srcPos = moveA ? pb : pa;
+      let moved = moveShapePoint(shapes[tgtIdx], tgtKey, srcPos);
+      if (!moved) continue;
+      moved = applyHVEnforcement(moved, tgtKey, constraints, tgtIdx);
+      shapes[tgtIdx] = moved;
+      updated.set(tgtIdx, moved);
+      changed = true;
+    }
+    if (!changed) break;
   }
 
   return updated;
