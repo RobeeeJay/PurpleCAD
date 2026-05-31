@@ -11,6 +11,7 @@ import {
   saveTimeline,
 } from "./internals.js";
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
+import { enforceConstraints } from "../three/sketchConstraints.js";
 
 export const createSketchSlice = (set) => ({
   ...createSketchUndoSlice(set),
@@ -334,7 +335,18 @@ export const createSketchSlice = (set) => ({
           ),
           { type, shapeIdx },
         ];
-        return Object.assign({}, item, { shapes, constraints });
+        // Snapping the line to H/V moves both its endpoints; propagate so any
+        // geometry coincident/constrained to it follows instead of detaching.
+        const updated = enforceConstraints(
+          shapes,
+          constraints,
+          shapeIdx,
+          snapped,
+          null,
+        );
+        const finalShapes = shapes.slice();
+        for (const [i, s] of updated) finalShapes[i] = s;
+        return Object.assign({}, item, { shapes: finalShapes, constraints });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
