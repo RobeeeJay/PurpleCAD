@@ -8,7 +8,6 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import {
   MM_PER_UNIT,
-  getMeshExtent,
   getMeshDimensions,
   getMeshBBoxCenter,
   redrawDimSprite,
@@ -189,7 +188,9 @@ export function createTransformHandleDrag({
         }
       }
 
-      const ext = getMeshExtent(mesh);
+      // Fixed gizmo radius (keep in sync with GIZMO_EXT in transformHandles.js)
+      // so the widget keeps its size while the object is resized.
+      const ext = 1.0;
       const center = getMeshBBoxCenter(mesh);
       handlesRef.current.forEach(({ mesh: hm, dir }) => {
         hm.userData.baseOffsetDist = ext + 0.5;

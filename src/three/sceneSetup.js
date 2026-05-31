@@ -202,7 +202,9 @@ export function createGrid(scene) {
       pool: new Map(),
       step: 5,
       skipMod: 0,
-      showBelow: Infinity,
+      // Hide the 50 mm markers too once zoomed very far out (view height > 400
+      // units ≈ 4 m), leaving the ruler clear.
+      showBelow: 400,
       maxSpan: 120,
     },
     {

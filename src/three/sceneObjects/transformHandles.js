@@ -6,11 +6,15 @@ import {
   HANDLE_CONFIGS,
   MM_PER_UNIT,
   getMeshDimensions,
-  getMeshExtent,
   getMeshBBoxCenter,
   makeDimSprite,
   placeDimLabels,
 } from "./dimensions.js";
+
+// Fixed gizmo radius (scene units), used for the ring radius (ext + 0.85) and
+// the axis/scale handle offset (ext + 0.5).  Object-size-independent so the
+// widget doesn't grow/shrink as the object is resized.
+const GIZMO_EXT = 1.0;
 
 export function buildTransformHandles(selectedId, items, objectsRef) {
   const mesh = objectsRef.current[selectedId];
@@ -19,9 +23,13 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   if (!item || item.type === "sketch") return null;
 
   const handles = [];
-  const ext = getMeshExtent(mesh);
-  // Centre the gizmo on the object's real bounding box so it encloses
-  // geometry that isn't centred on the mesh origin (e.g. extrudes).
+  // Fixed gizmo radius (scene units) so the rotation/resize/drag widget stays
+  // a constant on-screen size regardless of how large the object is or how it
+  // is resized.  (It is still scaled per-frame for zoom + the GIZMO_SCALE
+  // factor in animateLoop.)  Only its CENTRE tracks the object.
+  const ext = GIZMO_EXT;
+  // Centre the gizmo on the object's real bounding box so it sits on geometry
+  // that isn't centred on the mesh origin (e.g. extrudes).
   const center = getMeshBBoxCenter(mesh);
 
   // `transparent: true` is REQUIRED (alongside depthTest:false +
@@ -33,7 +41,7 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   // overdrawn by it.  Marking the handle transparent puts it in the
   // same queue, where its renderOrder (998/999) keeps it on top.
   HANDLE_CONFIGS.forEach(({ type, color, dir }) => {
-    const geo = new THREE.SphereGeometry(0.12, 10, 10);
+    const geo = new THREE.SphereGeometry(0.24, 12, 12);
     const mat = new THREE.MeshBasicMaterial({
       color,
       depthTest: false,
@@ -56,7 +64,7 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
     { type: "rotY", color: 0x4488ff, rx: Math.PI / 2, ry: 0, rz: 0 },
     { type: "rotZ", color: 0x44ff44, rx: 0, ry: 0, rz: 0 },
   ].forEach(({ type, color, rx, ry, rz }) => {
-    const geo = new THREE.TorusGeometry(torusRadius, 0.045, 6, 64);
+    const geo = new THREE.TorusGeometry(torusRadius, 0.09, 8, 64);
     const mat = new THREE.MeshBasicMaterial({
       color,
       depthTest: false,
