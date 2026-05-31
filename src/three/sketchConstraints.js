@@ -570,6 +570,32 @@ export function enforceConstraints(
       updated.set(tgtIdx, moved);
       changed = true;
     }
+    // onLine points (e.g. a circle centre constrained to the diagonal) are
+    // re-projected here too: the standalone onLine pass above runs before the
+    // distance passes settle the line's endpoints, so a point projected onto a
+    // not-yet-final line drifts off it.  Re-projecting in this fixed-point loop
+    // keeps it on the line once everything has settled.
+    for (const c of constraints) {
+      if (c.type !== "onLine") continue;
+      const lineShape = shapes[c.lineShapeIdx];
+      const ptShape = shapes[c.pointShapeIdx];
+      if (!lineShape || lineShape.type !== "line" || !ptShape) continue;
+      const cur = getShapePoint(ptShape, c.pointKey);
+      if (!cur) continue;
+      const proj = projectOntoLine(cur, lineShape);
+      if (Math.hypot(proj.x - cur.x, proj.y - cur.y) < 1e-7) continue;
+      let moved = moveShapePoint(ptShape, c.pointKey, proj);
+      if (!moved) continue;
+      moved = applyHVEnforcement(
+        moved,
+        c.pointKey,
+        constraints,
+        c.pointShapeIdx,
+      );
+      shapes[c.pointShapeIdx] = moved;
+      updated.set(c.pointShapeIdx, moved);
+      changed = true;
+    }
     if (!changed) break;
   }
 
