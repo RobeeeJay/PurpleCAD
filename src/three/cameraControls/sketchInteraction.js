@@ -10,9 +10,6 @@
 // and are passed in — they are shared with the extrude and 3D-view paths.
 
 import * as THREE from "three";
-import { Line2 } from "three/addons/lines/Line2.js";
-import { LineMaterial } from "three/addons/lines/LineMaterial.js";
-import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { useStore } from "../../store";
 import {
   getSketchShapePoints,
@@ -28,6 +25,7 @@ import {
   enforceConstraints,
 } from "../sketchConstraints.js";
 import { translateShape, collectConnectedShapes } from "../sketchGeometry.js";
+import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
 import { createSketchDrawHelpers } from "./sketchDraw.js";
@@ -146,15 +144,7 @@ export function createSketchInteraction(
       c.visible = c === bestFill;
     });
   };
-  let sketchSelectionOverlay = null;
-  let coincidentFirstOverlay = null;
-  // Setter exposed to extracted modules that need to swap the ring overlay
-  // mesh (they can't reassign the closure-local `let` directly).
-  const setCoincidentFirstOverlay = (o) => {
-    coincidentFirstOverlay = o;
-  };
   let multiSelectedIndices = [];
-  let multiSelectOverlays = [];
   let marqueeStartScreen = null;
   let marqueeActive = false;
   let marqueeRectObj = null;
@@ -165,85 +155,27 @@ export function createSketchInteraction(
   let longPressTimer = null;
   let longPressMenuOpen = false;
 
-  const clearSketchSelectionOverlay = () => {
-    if (sketchSelectionOverlay) {
-      scene.remove(sketchSelectionOverlay);
-      if (sketchSelectionOverlay.geometry)
-        sketchSelectionOverlay.geometry.dispose();
-      if (sketchSelectionOverlay.material)
-        sketchSelectionOverlay.material.dispose();
-      sketchSelectionOverlay = null;
-    }
-  };
-
-  const clearCoincidentFirstOverlay = () => {
-    if (coincidentFirstOverlay) {
-      scene.remove(coincidentFirstOverlay);
-      coincidentFirstOverlay.geometry.dispose();
-      coincidentFirstOverlay.material.dispose();
-      coincidentFirstOverlay = null;
-    }
-  };
-
-  const makeRingOverlay = (
-    localPt,
-    sketchMesh,
-    color,
-    R = 0.25,
-    zOff = 0.009,
-  ) => {
-    const toW = (x, y) => {
-      const v = new THREE.Vector3(x, y, zOff);
-      v.applyQuaternion(sketchMesh.quaternion);
-      v.add(sketchMesh.position);
-      return v;
-    };
-    const pts = Array.from({ length: 17 }, (_, i) => {
-      const a = (i / 16) * Math.PI * 2;
-      return toW(localPt.x + Math.cos(a) * R, localPt.y + Math.sin(a) * R);
-    });
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color, depthTest: false }),
-    );
-    line.renderOrder = 1007;
-    return line;
-  };
-
-  const sketchSelectPoint = (snap, sketchMesh) => {
-    clearSketchSelectionOverlay();
-    sketchSelectionOverlay = makeRingOverlay(
-      { x: snap.x, y: snap.y },
-      sketchMesh,
-      0x00ff88,
-    );
-    scene.add(sketchSelectionOverlay);
-    useStore.getState().setSelectedSketchElement({
-      type: "point",
-      shapeIdx: snap.shapeIdx,
-      pointKey: snap.pointKey,
-    });
-  };
-
-  const sketchSelectLine = (shapeIdx, shape, sketchMesh) => {
-    clearSketchSelectionOverlay();
-    const pts = getSketchShapePoints(shape, sketchMesh);
-    if (pts.length >= 2) {
-      const geo = new LineGeometry();
-      geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
-      const mat = new LineMaterial({
-        color: 0x00ff88,
-        linewidth: 2.5,
-        depthTest: false,
-        resolution: renderer.getSize(new THREE.Vector2()),
-      });
-      sketchSelectionOverlay = new Line2(geo, mat);
-      sketchSelectionOverlay.computeLineDistances();
-      sketchSelectionOverlay.renderOrder = 1005;
-      scene.add(sketchSelectionOverlay);
-    }
-    useStore.getState().setSelectedSketchElement({ type: "line", shapeIdx });
-  };
+  // ── Selection / coincident-first / multi-select / drag overlay meshes ─────
+  const {
+    setCoincidentFirstOverlay,
+    clearSketchSelectionOverlay,
+    clearCoincidentFirstOverlay,
+    makeRingOverlay,
+    sketchSelectPoint,
+    sketchSelectLine,
+    clearMultiSelectOverlays,
+    showMultiSelectOverlays,
+    clearDragIndicator,
+    showDragIndicator,
+    hasSketchSelectionOverlay,
+    hasMultiSelectOverlays,
+  } = createSketchSelectionOverlays({
+    scene,
+    renderer,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+  });
 
   // Exposed on cameraControlsRef so SketchOverlays can drive hover/select for
   // the long-press context menu without duplicating these highlight functions.
@@ -312,46 +244,6 @@ export function createSketchInteraction(
     }
   };
 
-  const clearMultiSelectOverlays = () => {
-    useStore.getState().setSketchMultiSelectedIndices([]);
-    multiSelectOverlays.forEach((o) => {
-      scene.remove(o);
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) o.material.dispose();
-    });
-    multiSelectOverlays = [];
-  };
-
-  const showMultiSelectOverlays = (indices) => {
-    clearMultiSelectOverlays();
-    useStore.getState().setSketchMultiSelectedIndices([...indices]);
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!selItem || !sketchMesh) return;
-    const shapes = selItem.shapes || [];
-    indices.forEach((idx) => {
-      const shape = shapes[idx];
-      if (!shape) return;
-      const pts = getSketchShapePoints(shape, sketchMesh);
-      if (pts.length < 2) return;
-      const geo = new LineGeometry();
-      geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
-      const mat = new LineMaterial({
-        color: 0x44aaff,
-        linewidth: 2.5,
-        depthTest: false,
-        resolution: renderer.getSize(new THREE.Vector2()),
-      });
-      const line = new Line2(geo, mat);
-      line.computeLineDistances();
-      line.renderOrder = 1005;
-      scene.add(line);
-      multiSelectOverlays.push(line);
-    });
-  };
-
   const updateMarquee = (screenX, screenY) => {
     clearMarqueeRect();
     const selItem = itemsRef.current.find(
@@ -418,8 +310,8 @@ export function createSketchInteraction(
     (state) => state.items,
     () => {
       if (!sketchModeRef.current) return;
-      if (sketchSelectionOverlay) clearSketchSelectionOverlay();
-      if (multiSelectOverlays.length > 0) {
+      if (hasSketchSelectionOverlay()) clearSketchSelectionOverlay();
+      if (hasMultiSelectOverlays()) {
         clearMultiSelectOverlays();
         multiSelectedIndices = [];
       }
@@ -502,40 +394,6 @@ export function createSketchInteraction(
   };
   // ── Sketch element dragging ───────────────────────────────────────────────
   let sketchDrag = null; // { kind:"point"|"shape", shapeIdx, pointKey?, sketchMesh, selItemId, anchorLocal, origShape }
-
-  let currentDragIndicator = null;
-  const clearDragIndicator = () => {
-    if (currentDragIndicator) {
-      scene.remove(currentDragIndicator);
-      currentDragIndicator.geometry.dispose();
-      currentDragIndicator.material.dispose();
-      currentDragIndicator = null;
-    }
-  };
-  const showDragIndicator = (localPt, sketchMesh) => {
-    clearDragIndicator();
-    const R = 0.18;
-    const toW = (x, y) => {
-      const v = new THREE.Vector3(x, y, 0.008);
-      v.applyQuaternion(sketchMesh.quaternion);
-      v.add(sketchMesh.position);
-      return v;
-    };
-    const circlePts = Array.from({ length: 17 }, (_, i) => {
-      const a = (i / 16) * Math.PI * 2;
-      return toW(localPt.x + Math.cos(a) * R, localPt.y + Math.sin(a) * R);
-    });
-    const mat = new THREE.LineBasicMaterial({
-      color: 0x00ffcc,
-      depthTest: false,
-    });
-    currentDragIndicator = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(circlePts),
-      mat,
-    );
-    currentDragIndicator.renderOrder = 1006;
-    scene.add(currentDragIndicator);
-  };
 
   const updateSketchLineGeo = (lineObj, newShape, sketchMesh) => {
     const pts = getSketchShapePoints(newShape, sketchMesh);
