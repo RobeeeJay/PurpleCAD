@@ -1213,9 +1213,36 @@ export function createSketchInteraction(
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable)
       return;
 
+    // Debug export: copy the whole active sketch (shapes + constraints) to the
+    // clipboard as JSON, for sharing a reproducer.  Cmd/Ctrl+Shift+C.
     if (
       sketchModeRef.current &&
       (isMac ? e.metaKey : e.ctrlKey) &&
+      e.shiftKey &&
+      e.key.toLowerCase() === "c"
+    ) {
+      const selItem = itemsRef.current.find(
+        (i) => i.id === selectedIdRef.current,
+      );
+      if (!selItem) return;
+      e.preventDefault();
+      const dump = JSON.stringify(
+        {
+          shapes: selItem.shapes || [],
+          constraints: selItem.constraints || [],
+        },
+        null,
+        2,
+      );
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(dump);
+      console.warn("[SKETCH DUMP]\n" + dump);
+      return;
+    }
+
+    if (
+      sketchModeRef.current &&
+      (isMac ? e.metaKey : e.ctrlKey) &&
+      !e.shiftKey &&
       e.key === "c"
     ) {
       const selItem = itemsRef.current.find(
