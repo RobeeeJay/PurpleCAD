@@ -76,17 +76,32 @@ async function regenerateChamfer(
     printPrecision,
   });
   if (!result) return null;
-  const {
-    geometryData,
-    centerOffset: { cx, cy, cz },
-  } = result;
-  // World position = source's brush position + centroid offset rotated into
-  // world space.  Use the SAME (live) source as the shape build above so the
-  // polyCentroid terms cancel and the object doesn't shift on a resolution
-  // toggle.
+  // Anchor everything to the ORIGINAL centerOffset.  The mesh's bbox centre
+  // (centerOffset) shifts a little between tessellation precisions, and the
+  // position is mapped into world with the SOURCE's rotation while the rendered
+  // mesh is rotated by the item's (possibly gizmo-changed) rotation.  Once those
+  // two rotations differ (the user rotated the bevelled object after creating
+  // it), any change in centerOffset moves the object on a resolution toggle.
+  // Keeping the original centerOffset — and re-centring the refined geometry to
+  // it — keeps the position fixed, so only the mesh density changes.
+  const newCO = result.centerOffset;
+  const co = regenerator.centerOffset || newCO;
+  let geometryData = result.geometryData;
+  const sx = newCO.cx - co.cx,
+    sy = newCO.cy - co.cy,
+    sz = newCO.cz - co.cz;
+  if (Math.abs(sx) > 1e-9 || Math.abs(sy) > 1e-9 || Math.abs(sz) > 1e-9) {
+    const p = geometryData.positions.slice();
+    for (let i = 0; i < p.length; i += 3) {
+      p[i] += sx;
+      p[i + 1] += sy;
+      p[i + 2] += sz;
+    }
+    geometryData = { ...geometryData, positions: p };
+  }
   const brushPos = buildBrushTransform(source).position;
   const rot = source.rotation || { x: 0, y: 0, z: 0 };
-  const local = new THREE.Vector3(cx, cy, cz);
+  const local = new THREE.Vector3(co.cx, co.cy, co.cz);
   local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
   return {
     position: {
@@ -95,10 +110,7 @@ async function regenerateChamfer(
       z: brushPos.z + local.z,
     },
     geometryData,
-    // Propagated up so the regenerator gets the freshly-computed
-    // centerOffset stamped in (regen at a different precision can
-    // produce a slightly different bbox).
-    centerOffset: { cx, cy, cz },
+    centerOffset: co,
   };
 }
 
