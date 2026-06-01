@@ -679,6 +679,54 @@ describe("enforceConstraints", () => {
       assertCoincidesHold(result, constraints);
     });
 
+    it("dragging the circle keeps the length-locked square sides put", () => {
+      // Regression: top + left sides length-locked, circle pinned onLine the
+      // diagonal AND a fixed distance from TL.  Dragging the circle used to drag
+      // the (length-pinned) TL corner to satisfy that distance, breaking the
+      // side lengths.  Now it slides the circle back instead; the square holds.
+      const { shapes, constraints } = makeRectDiag();
+      shapes.push(C(1, 1, 0.2)); // shape 5: centre on the diagonal midpoint
+      constraints.push(
+        fixed(0, "start", 0, "end", 2), // top side length
+        fixed(3, "start", 3, "end", 2), // left side length
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 5,
+          pointKey: "center",
+        },
+        fixed(5, "center", 4, "start", Math.SQRT2),
+      );
+      // Drag the circle off the diagonal to a wrong distance.
+      const moved = moveShapePoint(shapes[5], "center", { x: 1.8, y: 0.8 });
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        5,
+        moved,
+        "center",
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+
+      const top = result[0];
+      const left = result[3];
+      expect(Math.hypot(top.x2 - top.x1, top.y2 - top.y1)).toBeCloseTo(2, 5);
+      expect(Math.hypot(left.x2 - left.x1, left.y2 - left.y1)).toBeCloseTo(
+        2,
+        5,
+      );
+      // TL corner held fixed.
+      expect(pt(result, 4, "start")).toMatchObject({
+        x: expect.closeTo(0),
+        y: expect.closeTo(2),
+      });
+      // Circle still its fixed distance from the corner.
+      const ds = pt(result, 4, "start");
+      const cc = pt(result, 5, "center");
+      expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
+    });
+
     it("whole translate (preSeeded) preserves all coincidents", () => {
       const { shapes, constraints } = makeRectDiag();
       const dx = 3,

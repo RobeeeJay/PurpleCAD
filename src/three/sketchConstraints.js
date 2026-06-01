@@ -346,6 +346,34 @@ export function enforceConstraints(
     propagateCoincidentFrom(c.pointShapeIdx, shapes, updated, constraints);
   }
 
+  // Endpoints a same-shape (line-length) distance constraint pins: moving them
+  // would change a locked length.  Include their coincident partners so a
+  // corner shared with a length-locked side (e.g. a diagonal's end) counts too.
+  // A point-to-point distance then prefers to move its OTHER, un-pinned end —
+  // so dragging a circle pinned to such a corner slides the circle, not the
+  // rigid square it's anchored to.
+  const lengthPinned = new Set();
+  for (const c of constraints) {
+    if (c.type === "distance" && c.shapeAIdx === c.shapeBIdx) {
+      lengthPinned.add(epKey(c.shapeAIdx, c.pointA));
+      lengthPinned.add(epKey(c.shapeBIdx, c.pointB));
+    }
+  }
+  let grewPinned = true;
+  while (grewPinned) {
+    grewPinned = false;
+    for (const c of constraints) {
+      if (c.type !== "coincident") continue;
+      const aK = epKey(c.shapeAIdx, c.pointA);
+      const bK = epKey(c.shapeBIdx, c.pointB);
+      if (lengthPinned.has(aK) !== lengthPinned.has(bK)) {
+        lengthPinned.add(aK);
+        lengthPinned.add(bK);
+        grewPinned = true;
+      }
+    }
+  }
+
   // ── Distance enforcement (up to 4 iterative passes) ─────────────────────────
   for (let pass = 0; pass < 4; pass++) {
     let anyChange = false;
@@ -403,8 +431,18 @@ export function enforceConstraints(
           dy = posB.y - posA.y;
         const curDist = Math.hypot(dx, dy);
         if (curDist < 1e-10 || Math.abs(curDist - d) < 1e-8) continue;
+        // Default: move the side that wasn't the source of movement.  But never
+        // move an endpoint a length constraint pins when the other side is free
+        // to move instead — otherwise the drag deforms the rigid body.
+        let moveB = aUp;
+        const aEP = epKey(ai, pA),
+          bEP = epKey(bi, pB);
+        if (moveB && lengthPinned.has(bEP) && !lengthPinned.has(aEP))
+          moveB = false;
+        else if (!moveB && lengthPinned.has(aEP) && !lengthPinned.has(bEP))
+          moveB = true;
         let targetIdx, targetKey, newX, newY;
-        if (aUp) {
+        if (moveB) {
           targetIdx = bi;
           targetKey = pB;
           newX = posA.x + (dx / curDist) * d;
