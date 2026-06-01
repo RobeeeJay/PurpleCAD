@@ -782,6 +782,50 @@ describe("enforceConstraints", () => {
       expect(towardBR).toBeGreaterThan(0);
     });
 
+    it("two circles pinned to opposite corners both hold on a corner drag", () => {
+      // Circle 5 is distance d from TL; circle 6 is distance d from BR; both
+      // onLine the diagonal.  Dragging a corner must preserve BOTH distances.
+      const { shapes, constraints } = makeRectDiag();
+      const D = Math.SQRT1_2; // 0.707
+      shapes.push(C(0.5, 1.5, 0.15)); // shape 5 near TL
+      shapes.push(C(1.5, 0.5, 0.15)); // shape 6 near BR
+      constraints.push(
+        fixed(0, "start", 0, "end", 2), // top length
+        fixed(3, "start", 3, "end", 2), // left length
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 5,
+          pointKey: "center",
+        },
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 6,
+          pointKey: "center",
+        },
+        fixed(5, "center", 4, "start", D), // circle 5 ↔ TL
+        fixed(6, "center", 4, "end", D), // circle 6 ↔ BR
+      );
+      const newRight = moveShapePoint(shapes[1], "end", { x: 3, y: 0 });
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        1,
+        newRight,
+        "end",
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+
+      const ds = pt(result, 4, "start");
+      const de = pt(result, 4, "end");
+      const c5 = pt(result, 5, "center");
+      const c6 = pt(result, 6, "center");
+      expect(Math.hypot(c5.x - ds.x, c5.y - ds.y)).toBeCloseTo(D, 5);
+      expect(Math.hypot(c6.x - de.x, c6.y - de.y)).toBeCloseTo(D, 5);
+    });
+
     it("whole translate (preSeeded) preserves all coincidents", () => {
       const { shapes, constraints } = makeRectDiag();
       const dx = 3,
