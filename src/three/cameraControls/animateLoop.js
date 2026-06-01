@@ -86,7 +86,8 @@ export function createAnimateLoop({
         return (2 * d * Math.tan((cam.fov * Math.PI) / 360)) / REFERENCE_HEIGHT;
       };
       if (axisGroupRef?.current && axisGroupRef.current.visible) {
-        const s = gizmoScale(axisGroupRef.current.position);
+        // 0.5: render the XYZ indicator at half the authored on-screen size.
+        const s = gizmoScale(axisGroupRef.current.position) * 0.5;
         axisGroupRef.current.scale.setScalar(s);
       }
       if (handlesRef?.current && handlesRef.current.length > 0) {
