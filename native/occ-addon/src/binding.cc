@@ -115,9 +115,15 @@ static gp_Trsf BuildTransform(double tx, double ty, double tz,
     t.SetTranslation(gp_Vec(tx, ty, tz));
     trsf.Multiply(t);
   }
-  if (rz != 0) {
+  // Apply rotations X, then Y, then Z so the composed rotation is Rx·Ry·Rz,
+  // matching THREE.Euler's default 'XYZ' order — which is how every
+  // item.rotation in the app is expressed.  The previous Z,Y,X order gave
+  // Rz·Ry·Rx, which only coincides for single-axis rotations; a compound
+  // gizmo rotation came out in a different orientation, so a boolean on a
+  // gizmo-rotated object appeared to reset its orientation.
+  if (rx != 0) {
     gp_Trsf r;
-    r.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), rz);
+    r.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)), rx);
     trsf.Multiply(r);
   }
   if (ry != 0) {
@@ -125,9 +131,9 @@ static gp_Trsf BuildTransform(double tx, double ty, double tz,
     r.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0)), ry);
     trsf.Multiply(r);
   }
-  if (rx != 0) {
+  if (rz != 0) {
     gp_Trsf r;
-    r.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)), rx);
+    r.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), rz);
     trsf.Multiply(r);
   }
   return trsf;

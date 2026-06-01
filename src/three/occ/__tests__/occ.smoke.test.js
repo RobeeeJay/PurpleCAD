@@ -10,6 +10,7 @@
 // timeout to 30 s for this reason.
 
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import * as THREE from "three";
 import {
   makeCube,
   makeSphere,
@@ -26,6 +27,7 @@ import {
   chamferShape,
   chamferShapeBy,
   filletShapeBy,
+  transformShape,
 } from "../operations.js";
 
 // The store + viewport pull in many three.js addons that need browser-only
@@ -1857,5 +1859,59 @@ describe("OCC chamfer", () => {
     expect(shape).toBeTruthy();
     const geo = tessellate(shape, null);
     expectSolidGeometry(geo);
+  });
+});
+
+describe("OCC transform rotation order", () => {
+  // The native BuildTransform must compose rotations as Rx·Ry·Rz to match
+  // THREE.Euler's default 'XYZ' order (every item.rotation in the app is in
+  // that order).  A wrong order only shows up for COMPOUND rotations — it made
+  // a boolean on a gizmo-rotated object appear to reset its orientation.
+  const bboxOfPositions = (pos) => {
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < pos.length; i += 3)
+      for (let a = 0; a < 3; a++) {
+        min[a] = Math.min(min[a], pos[i + a]);
+        max[a] = Math.max(max[a], pos[i + a]);
+      }
+    return { min, max };
+  };
+
+  it("transformShape compose matches THREE Euler XYZ for a compound rotation", () => {
+    const rot = { x: 0.3, y: 0.4, z: 0.5 };
+    const cube = makeCube();
+    const flat = (g) => g.getAttribute("position").array;
+
+    // Unrotated extent → 8 corners.
+    const u = bboxOfPositions(flat(tessellate(cube, 0.05)));
+    const corners = [];
+    for (const x of [u.min[0], u.max[0]])
+      for (const y of [u.min[1], u.max[1]])
+        for (const z of [u.min[2], u.max[2]]) corners.push([x, y, z]);
+
+    // Native rotated bbox.
+    const rotated = transformShape(cube, { x: 0, y: 0, z: 0 }, rot);
+    const nb = bboxOfPositions(flat(tessellate(rotated, 0.05)));
+
+    // Expected bbox from rotating the corners with THREE's XYZ Euler.
+    const q = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(rot.x, rot.y, rot.z, "XYZ"),
+    );
+    const tb = {
+      min: [Infinity, Infinity, Infinity],
+      max: [-Infinity, -Infinity, -Infinity],
+    };
+    for (const [x, y, z] of corners) {
+      const v = new THREE.Vector3(x, y, z).applyQuaternion(q);
+      for (let a = 0; a < 3; a++) {
+        tb.min[a] = Math.min(tb.min[a], v.getComponent(a));
+        tb.max[a] = Math.max(tb.max[a], v.getComponent(a));
+      }
+    }
+    for (let a = 0; a < 3; a++) {
+      expect(nb.min[a]).toBeCloseTo(tb.min[a], 3);
+      expect(nb.max[a]).toBeCloseTo(tb.max[a], 3);
+    }
   });
 });
