@@ -639,6 +639,46 @@ describe("enforceConstraints", () => {
       });
     });
 
+    it("dragging top edge keeps an onLine circle at its fixed distance from the corner", () => {
+      // Regression: circle centre pinned onLine the diagonal AND a fixed
+      // distance from the diagonal's top-left corner.  Dragging the top edge
+      // moves that corner; the distance pass used to bail (both sides "moved")
+      // and leave the circle at the wrong distance.
+      const { shapes, constraints } = makeRectDiag();
+      shapes.push(C(1, 1, 0.2)); // shape 5: centre on the diagonal midpoint
+      constraints.push(
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 5,
+          pointKey: "center",
+        },
+        fixed(5, "center", 4, "start", Math.SQRT2),
+      );
+      // Drag the whole top edge up by (0, +1): TL→(0,3), TR→(2,3).
+      const newTop = L(0, 3, 2, 3);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        newTop,
+        null,
+        new Map([[0, newTop]]),
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+
+      const ds = pt(result, 4, "start"); // diagonal TL after drag
+      const de = pt(result, 4, "end"); // diagonal BR
+      const cc = pt(result, 5, "center");
+      expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
+      // Centre still collinear with the diagonal (zero cross product).
+      const cross =
+        (cc.x - ds.x) * (de.y - ds.y) - (cc.y - ds.y) * (de.x - ds.x);
+      expect(cross).toBeCloseTo(0, 5);
+      assertCoincidesHold(result, constraints);
+    });
+
     it("whole translate (preSeeded) preserves all coincidents", () => {
       const { shapes, constraints } = makeRectDiag();
       const dx = 3,
