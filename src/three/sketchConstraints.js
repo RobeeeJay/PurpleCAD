@@ -177,6 +177,20 @@ export function enforceConstraints(
   if (preSeeded) {
     for (const [idx, s] of preSeeded) shapes[idx] = s;
   }
+  // Respect the primary shape's own H/V constraint.  An explicitly-placed
+  // endpoint (e.g. the corner moved to satisfy a distance constraint) can tilt
+  // an H/V-constrained edge; re-level it here, keeping that endpoint fixed, so
+  // the line stays horizontal/vertical and the freed endpoint propagates
+  // through the coincident BFS below.  The drag path already pre-levels, so
+  // this is idempotent there.
+  if (primaryPointKey) {
+    primaryShape = applyHVEnforcement(
+      primaryShape,
+      primaryPointKey,
+      constraints,
+      primaryIdx,
+    );
+  }
   shapes[primaryIdx] = primaryShape;
 
   const updated = preSeeded ? new Map(preSeeded) : new Map();

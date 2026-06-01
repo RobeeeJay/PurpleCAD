@@ -429,6 +429,18 @@ describe("enforceConstraints", () => {
       });
     });
 
+    it("moving a top-edge corner keeps the horizontal top edge level", () => {
+      // Regression: applying a distance constraint that drags a corner of an
+      // H/V-constrained edge used to tilt that edge — the placed-endpoint
+      // primary shape was never re-levelled.  The top stays horizontal now.
+      const { shapes, constraints } = makeRect();
+      constraints.push(hvC(0, "horizontal")); // top edge
+      const result = apply(shapes, constraints, 0, "end", { x: 3, y: 3 });
+      expect(result[0].y1).toBeCloseTo(result[0].y2, 6);
+      expect(result[0].y2).toBeCloseTo(3, 6);
+      assertCoincidesHold(result, constraints);
+    });
+
     it("whole-rectangle translate (preSeeded) preserves all constraints", () => {
       const { shapes, constraints } = makeRect();
       // Translate every shape by (+1, +1)
