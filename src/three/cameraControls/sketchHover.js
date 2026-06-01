@@ -22,6 +22,7 @@ export function createSketchHoverHelpers(
   // ── Sketch element hover highlights ──────────────────────────────────────
   let hoveredSketchLine = null;
   let hoveredSketchLineOrigColor = null;
+  let hoveredSketchLineColor = null;
 
   const clearHoverLineHighlight = () => {
     if (hoveredSketchLine) {
@@ -30,6 +31,7 @@ export function createSketchHoverHelpers(
       );
       hoveredSketchLine = null;
       hoveredSketchLineOrigColor = null;
+      hoveredSketchLineColor = null;
     }
   };
 
@@ -145,12 +147,17 @@ export function createSketchHoverHelpers(
     });
   };
 
-  const applyHoverLineHighlight = (lineObj) => {
-    if (hoveredSketchLine === lineObj) return;
+  // 0xffaa33 (amber) marks the line a hovered POINT belongs to, distinct from
+  // the 0xbbddff line-body hover so the two reads don't blur together.
+  const POINT_LINE_COLOR = 0xffaa33;
+  const applyHoverLineHighlight = (lineObj, color = 0xbbddff) => {
+    if (hoveredSketchLine === lineObj && hoveredSketchLineColor === color)
+      return;
     clearHoverLineHighlight();
     hoveredSketchLineOrigColor = lineObj.material.color.getHex();
-    lineObj.material.color.setHex(0xbbddff);
+    lineObj.material.color.setHex(color);
     hoveredSketchLine = lineObj;
+    hoveredSketchLineColor = color;
   };
 
   let currentHoverPointIndicator = null;
@@ -211,7 +218,13 @@ export function createSketchHoverHelpers(
     const snap = findSnap(screenX, screenY, selItem?.shapes || [], sketchMesh);
     if (snap) {
       showHoverPointIndicator(snap, sketchMesh);
-      clearHoverLineHighlight();
+      // Also highlight the line this point belongs to, in the distinct amber
+      // colour, so it's clear which segment the endpoint drives.
+      const ownerLine = sketchGroup?.children.find(
+        (c) => c.userData.shapeIdx === snap.shapeIdx && c.material?.color,
+      );
+      if (ownerLine) applyHoverLineHighlight(ownerLine, POINT_LINE_COLOR);
+      else clearHoverLineHighlight();
       clearConstraintHoverHighlight();
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
       renderer.domElement.style.cursor = "grab";
