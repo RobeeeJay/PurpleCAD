@@ -57,6 +57,7 @@ async function regenerateChamfer(
   regenerator,
   accumulatedItems,
   printPrecision,
+  currentPosition,
 ) {
   const subGeo = regenerator.subGeo || { edges: [], faces: [] };
   if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
@@ -76,41 +77,30 @@ async function regenerateChamfer(
     printPrecision,
   });
   if (!result) return null;
-  // Anchor everything to the ORIGINAL centerOffset.  The mesh's bbox centre
-  // (centerOffset) shifts a little between tessellation precisions, and the
-  // position is mapped into world with the SOURCE's rotation while the rendered
-  // mesh is rotated by the item's (possibly gizmo-changed) rotation.  Once those
-  // two rotations differ (the user rotated the bevelled object after creating
-  // it), any change in centerOffset moves the object on a resolution toggle.
-  // Keeping the original centerOffset — and re-centring the refined geometry to
-  // it — keeps the position fixed, so only the mesh density changes.
-  const newCO = result.centerOffset;
-  const co = regenerator.centerOffset || newCO;
-  let geometryData = result.geometryData;
-  const sx = newCO.cx - co.cx,
-    sy = newCO.cy - co.cy,
-    sz = newCO.cz - co.cz;
-  if (Math.abs(sx) > 1e-9 || Math.abs(sy) > 1e-9 || Math.abs(sz) > 1e-9) {
-    const p = geometryData.positions.slice();
-    for (let i = 0; i < p.length; i += 3) {
-      p[i] += sx;
-      p[i + 1] += sy;
-      p[i + 2] += sz;
-    }
-    geometryData = { ...geometryData, positions: p };
-  }
-  const brushPos = buildBrushTransform(source).position;
-  const rot = source.rotation || { x: 0, y: 0, z: 0 };
-  const local = new THREE.Vector3(co.cx, co.cy, co.cz);
-  local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-  return {
-    position: {
+  // Keep the item's existing position.  The re-tessellated geometry is centred
+  // on its own bbox (centerOffset), so the rendered centre is item.position
+  // regardless of precision — and that's exactly where the user already sees
+  // (and may have gizmo-rotated) the object.  Recomputing the position from the
+  // source's brush transform moves it: the source rotation no longer matches
+  // the item's once the bevelled object has been rotated independently.  Only
+  // the mesh density should change on a resolution toggle.
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
       x: brushPos.x + local.x,
       y: brushPos.y + local.y,
       z: brushPos.z + local.z,
-    },
-    geometryData,
-    centerOffset: co,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
   };
 }
 
@@ -173,7 +163,7 @@ export async function regenerateItemsForResolution(
     }
     let result = null;
     if (r.kind === "chamfer") {
-      result = await regenerateChamfer(r, out, printPrecision);
+      result = await regenerateChamfer(r, out, printPrecision, item.position);
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
     }
