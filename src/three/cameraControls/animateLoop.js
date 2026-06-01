@@ -99,7 +99,7 @@ export function createAnimateLoop({
         // Overall on-screen size of the rotation/resize/drag gizmo, as a
         // fraction of the authored size (handles + ring radius + handle
         // offset all scale together so the cluster stays coherent).
-        const GIZMO_SCALE = 0.25;
+        const GIZMO_SCALE = 0.5;
         const s = gizmoScale(center) * GIZMO_SCALE;
         handlesRef.current.forEach(({ mesh: hm, dir }) => {
           // Each handle was authored at unit scale; reset rather than
