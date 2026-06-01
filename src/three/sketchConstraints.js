@@ -685,7 +685,10 @@ export function enforceConstraints(
         pb = getShapePoint(sB, c.pointB);
       if (!pa || !pb) continue;
       const cur = Math.hypot(pb.x - pa.x, pb.y - pa.y);
-      if (cur < 1e-10 || Math.abs(cur - d) < 1e-7) continue;
+      // Don't bail on cur≈0 here: a point clamped onto its anchor (onLine
+      // projection lands past the segment end) still needs repositioning, and
+      // the line-direction branch below supplies a usable direction.
+      if (Math.abs(cur - d) < 1e-7) continue;
       // A side is "fixed" if it's a drag anchor (or coincident to one) or a
       // length-pinned corner — moving it would break a locked length.  Without
       // the lengthPinned guard a rigidity tie defaults to dragging the diagonal
@@ -702,15 +705,44 @@ export function enforceConstraints(
       else moveB = rigidity[c.shapeBIdx] <= rigidity[c.shapeAIdx];
       const anchorPos = moveB ? pa : pb;
       const movingPos = moveB ? pb : pa;
-      const vx = movingPos.x - anchorPos.x,
-        vy = movingPos.y - anchorPos.y;
-      const vlen = Math.hypot(vx, vy);
-      if (vlen < 1e-10) continue;
       const tgtIdx = moveB ? c.shapeBIdx : c.shapeAIdx;
       const tgtKey = moveB ? c.pointB : c.pointA;
+      // Direction from the anchor to where the moving point should sit.  When
+      // the moving point is onLine a line whose endpoint IS the anchor, take the
+      // line's direction toward its far end instead of the current offset: a big
+      // rotation can project the point past the anchor, and the offset-derived
+      // direction would then flip it to the wrong side (the "jumps to the far
+      // corner" symptom).  The line direction is unambiguous.
+      let dirX = movingPos.x - anchorPos.x,
+        dirY = movingPos.y - anchorPos.y;
+      const onLineC = constraints.find(
+        (oc) =>
+          oc.type === "onLine" &&
+          oc.pointShapeIdx === tgtIdx &&
+          oc.pointKey === tgtKey,
+      );
+      if (onLineC) {
+        const ln = shapes[onLineC.lineShapeIdx];
+        if (ln && ln.type === "line") {
+          const ls = getShapePoint(ln, "start");
+          const le = getShapePoint(ln, "end");
+          const far =
+            Math.hypot(ls.x - anchorPos.x, ls.y - anchorPos.y) < 1e-6
+              ? le
+              : Math.hypot(le.x - anchorPos.x, le.y - anchorPos.y) < 1e-6
+                ? ls
+                : null;
+          if (far) {
+            dirX = far.x - anchorPos.x;
+            dirY = far.y - anchorPos.y;
+          }
+        }
+      }
+      const dlen = Math.hypot(dirX, dirY);
+      if (dlen < 1e-10) continue;
       const newPos = {
-        x: anchorPos.x + (vx / vlen) * d,
-        y: anchorPos.y + (vy / vlen) * d,
+        x: anchorPos.x + (dirX / dlen) * d,
+        y: anchorPos.y + (dirY / dlen) * d,
       };
       let moved = moveShapePoint(shapes[tgtIdx], tgtKey, newPos);
       if (!moved) continue;

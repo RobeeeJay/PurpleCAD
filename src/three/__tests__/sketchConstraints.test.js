@@ -727,13 +727,13 @@ describe("enforceConstraints", () => {
       expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
     });
 
-    it("dragging the far (BR) corner settles the circle in one solve", () => {
-      // Regression: dragging BR rotates the diagonal, so both the diagonal end
-      // (coincident BFS) and the onLine circle (projection) look "moved" and the
-      // main distance pass skips.  The reconciliation step then broke a rigidity
-      // tie by dragging the length-pinned TL corner, lurching the circle toward
-      // it until a second drag settled it.  Now TL is held and the circle lands
-      // on the new diagonal at the right distance immediately.
+    it("dragging the far (BR) corner far around keeps the circle on the BR side", () => {
+      // Regression: a LARGE BR drag swings the diagonal so the old circle
+      // projects PAST the TL corner.  Holding TL was not enough — the distance
+      // step took its direction from that flipped projection and snapped the
+      // circle to the wrong side of TL (the "jumps to the top-left" symptom,
+      // self-correcting on a second drag).  Now the direction comes from the
+      // line itself, so the circle stays between TL and BR in one solve.
       const { shapes, constraints } = makeRectDiag();
       shapes.push(C(1, 1, 0.2)); // shape 5
       constraints.push(
@@ -747,8 +747,9 @@ describe("enforceConstraints", () => {
         },
         fixed(5, "center", 4, "start", Math.SQRT2),
       );
-      // Drag BR (right.end) out to (3, 0): the diagonal becomes (0,2)→(3,0).
-      const newRight = moveShapePoint(shapes[1], "end", { x: 3, y: 0 });
+      // Drag BR (right.end) up and across to (1, 4): the diagonal swings so the
+      // old circle at (1,1) projects behind TL.
+      const newRight = moveShapePoint(shapes[1], "end", { x: 1, y: 4 });
       const updated = enforceConstraints(
         shapes,
         constraints,
@@ -763,6 +764,7 @@ describe("enforceConstraints", () => {
       const de = pt(result, 4, "end"); // new BR
       const cc = pt(result, 5, "center");
       expect(ds).toMatchObject({ x: expect.closeTo(0), y: expect.closeTo(2) });
+      // Side lengths intact.
       const top = result[0],
         left = result[3];
       expect(Math.hypot(top.x2 - top.x1, top.y2 - top.y1)).toBeCloseTo(2, 5);
@@ -770,11 +772,14 @@ describe("enforceConstraints", () => {
         2,
         5,
       );
-      // Circle on the new diagonal at its fixed distance from TL (not at TL).
+      // Fixed distance from TL, on the diagonal, and on the BR side (not TL).
       expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
       const cross =
         (cc.x - ds.x) * (de.y - ds.y) - (cc.y - ds.y) * (de.x - ds.x);
       expect(cross).toBeCloseTo(0, 5);
+      const towardBR =
+        (cc.x - ds.x) * (de.x - ds.x) + (cc.y - ds.y) * (de.y - ds.y);
+      expect(towardBR).toBeGreaterThan(0);
     });
 
     it("whole translate (preSeeded) preserves all coincidents", () => {
