@@ -204,7 +204,7 @@ export function createGrid(scene) {
       skipMod: 0,
       // Hide the 50 mm markers too once zoomed very far out (view height > 400
       // units ≈ 4 m), leaving the ruler clear.
-      showBelow: 400,
+      showBelow: 40,
       maxSpan: 120,
     },
     {
@@ -213,7 +213,7 @@ export function createGrid(scene) {
       pool: new Map(),
       step: 1,
       skipMod: 5,
-      showBelow: 80,
+      showBelow: 25,
       maxSpan: 50,
     },
     {
@@ -224,7 +224,7 @@ export function createGrid(scene) {
       skipMod: 1,
       // 1 mm labels only appear once zoomed in twice as far as before
       // (view height < 7 units ≈ 70 mm, was 14).
-      showBelow: 7,
+      showBelow: 3,
       maxSpan: 8,
     },
   ];

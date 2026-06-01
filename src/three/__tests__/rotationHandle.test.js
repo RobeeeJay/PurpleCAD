@@ -17,11 +17,13 @@ import {
 const identity = () => new THREE.Quaternion();
 
 describe("rotation-handle drag sign convention", () => {
-  it("rotX: drag right yields a negative angle about world +X", () => {
-    expect(rotationSignForHandle("rotX")).toBe(-1);
+  it("rotX: drag right yields a POSITIVE angle about world +X", () => {
+    // Was -1 (negated like rotZ), which rotated the object the opposite
+    // way the user dragged — reported as "X rotation inverted".
+    expect(rotationSignForHandle("rotX")).toBe(1);
     const delta = rotationDeltaFromDrag("rotX", 100);
-    expect(delta).toBeLessThan(0);
-    expect(delta).toBeCloseTo(-1.0, 6);
+    expect(delta).toBeGreaterThan(0);
+    expect(delta).toBeCloseTo(1.0, 6);
   });
 
   it("rotY: drag right yields a POSITIVE angle about world +Y (clockwise from above)", () => {
@@ -58,17 +60,17 @@ describe("rotation-handle drag sign convention", () => {
     expect(probe.z).toBeGreaterThan(0);
   });
 
-  it("rotX drag right rotates +Y toward -Z (clockwise looking down +X)", () => {
+  it("rotX drag right rotates +Y toward +Z (matches the drag direction)", () => {
     const q = rotationQuaternionForDrag("rotX", identity(), 50);
     const probe = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-    expect(probe.z).toBeLessThan(0);
+    expect(probe.z).toBeGreaterThan(0);
     expect(probe.y).toBeCloseTo(Math.cos(0.5), 6);
   });
 
-  it("rotX drag LEFT rotates +Y toward +Z (anticlockwise from down +X)", () => {
+  it("rotX drag LEFT rotates +Y toward -Z", () => {
     const q = rotationQuaternionForDrag("rotX", identity(), -50);
     const probe = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-    expect(probe.z).toBeGreaterThan(0);
+    expect(probe.z).toBeLessThan(0);
   });
 
   it("rotZ drag right rotates +X toward -Y (clockwise looking down +Z)", () => {

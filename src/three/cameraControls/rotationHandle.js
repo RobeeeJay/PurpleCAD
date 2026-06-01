@@ -9,13 +9,14 @@ import * as THREE from "three";
 // direction" for every axis — but the raw right-hand-rule sign about
 // each world axis isn't the same, so we negate selectively.
 //
-// X / Z: dxPx > 0 → negative angle about +axis (CW from camera POV).
-// Y:     dxPx > 0 → positive angle about +Y    (CW from above when
-//        looking down -Y); the unflipped sign gave CCW, which the
-//        user reported as "dragged clockwise but went anticlockwise".
+// Drag right (dxPx > 0) should rotate each handle the way the user expects.
+// Z: dxPx > 0 → negative angle about +Z (CW looking down +Z).
+// X / Y: dxPx > 0 → positive angle about the +axis.  X was previously negated
+//        like Z, but that rotated the object the opposite way the user dragged
+//        ("X rotation inverted"); Y was fixed earlier for the same reason.
 export function rotationSignForHandle(handleType) {
-  if (handleType === "rotY") return 1;
-  return -1;
+  if (handleType === "rotZ") return -1;
+  return 1;
 }
 
 export function rotationAxisForHandle(handleType) {
