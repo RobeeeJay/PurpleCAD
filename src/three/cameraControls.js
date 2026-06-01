@@ -220,6 +220,7 @@ export function attachCameraControls(ctx) {
     showHoverPointIndicator,
     updateSketchHover,
     clearAllSketchHover,
+    POINT_LINE_COLOR,
   } = createSketchHoverHelpers(
     {
       scene,
@@ -450,6 +451,7 @@ export function attachCameraControls(ctx) {
       applyHoverLineHighlight,
       showHoverPointIndicator,
       clearHoverPointIndicator,
+      POINT_LINE_COLOR,
       clearConstraintHoverHighlight,
       applyConstraintHoverHighlight,
       clearConstraintSelection,

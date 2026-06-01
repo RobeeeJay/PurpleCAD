@@ -326,5 +326,6 @@ export function createSketchHoverHelpers(
     showHoverPointIndicator,
     updateSketchHover,
     clearAllSketchHover,
+    POINT_LINE_COLOR,
   };
 }

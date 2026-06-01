@@ -63,6 +63,7 @@ export function createSketchInteraction(
     applyHoverLineHighlight,
     showHoverPointIndicator,
     clearHoverPointIndicator,
+    POINT_LINE_COLOR,
     clearConstraintHoverHighlight,
     applyConstraintHoverHighlight,
     clearConstraintSelection,
@@ -191,6 +192,15 @@ export function createSketchInteraction(
     if (!selItem || !sketchMesh) return;
     if (item.kind === "point") {
       showHoverPointIndicator({ x: item.localX, y: item.localY }, sketchMesh);
+      // Match the cursor-hover behaviour: tint the point's owner line amber.
+      const g = sketchShapesGroupRef?.current;
+      const ownerLine = g?.children.find(
+        (c) =>
+          c.userData.shapeIdx === item.shapeIdx &&
+          !c.userData.isConstraintObj &&
+          c.material?.color,
+      );
+      if (ownerLine) applyHoverLineHighlight(ownerLine, POINT_LINE_COLOR);
     } else if (item.kind === "line") {
       const g = sketchShapesGroupRef?.current;
       if (g) {
