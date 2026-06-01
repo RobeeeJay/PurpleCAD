@@ -415,6 +415,7 @@ export function attachCameraControls(ctx) {
     onSketchMouseUp,
     onKeyDown,
     clearSketchVisualsFor3D,
+    refreshSketchSelectionOverlay,
     unsubItems,
   } = createSketchInteraction(
     {
@@ -460,6 +461,10 @@ export function attachCameraControls(ctx) {
       isMac,
     },
   );
+
+  // Let React (the dimension-input overlay) re-anchor the green selection
+  // highlight after a dimension edit moves the selected line.
+  controls.refreshSketchSelectionOverlay = refreshSketchSelectionOverlay;
 
   // ── Mouse event handlers ───────────────────────────────────────────────────
 

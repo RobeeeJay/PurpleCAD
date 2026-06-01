@@ -158,6 +158,7 @@ export function createSketchInteraction(
   // ── Selection / coincident-first / multi-select / drag overlay meshes ─────
   const {
     setCoincidentFirstOverlay,
+    refreshSketchSelectionOverlay,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,
     makeRingOverlay,
@@ -1379,6 +1380,7 @@ export function createSketchInteraction(
     onSketchMouseUp,
     onKeyDown,
     clearSketchVisualsFor3D,
+    refreshSketchSelectionOverlay,
     unsubItems,
   };
 }

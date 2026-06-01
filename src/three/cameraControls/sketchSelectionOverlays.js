@@ -10,7 +10,7 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { useStore } from "../../store";
-import { getSketchShapePoints } from "../sceneObjects.js";
+import { getSketchShapePoints, getShapePoint } from "../sceneObjects.js";
 
 export function createSketchSelectionOverlays({
   scene,
@@ -182,8 +182,38 @@ export function createSketchSelectionOverlays({
     scene.add(currentDragIndicator);
   };
 
+  // Rebuild the green selection overlay at the selected element's CURRENT
+  // geometry.  The overlay is a standalone scene mesh — not part of the sketch
+  // shapes group that React rebuilds on every shape change — so without this it
+  // lingers at the pre-edit position when a dimension or variable edit moves
+  // the line.  No-op unless something is actually selected.
+  const refreshSketchSelectionOverlay = () => {
+    if (!sketchSelectionOverlay) return;
+    const state = useStore.getState();
+    const sel = state.selectedSketchElement;
+    if (!sel) return;
+    // Read items from the store, not itemsRef: this runs synchronously right
+    // after a store update, before React re-renders and re-syncs itemsRef.
+    const selItem = state.items.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const shape = (selItem.shapes || [])[sel.shapeIdx];
+    if (!shape) return;
+    if (sel.type === "line") {
+      sketchSelectLine(sel.shapeIdx, shape, sketchMesh);
+    } else if (sel.type === "point") {
+      const p = getShapePoint(shape, sel.pointKey);
+      if (p)
+        sketchSelectPoint(
+          { x: p.x, y: p.y, shapeIdx: sel.shapeIdx, pointKey: sel.pointKey },
+          sketchMesh,
+        );
+    }
+  };
+
   return {
     setCoincidentFirstOverlay,
+    refreshSketchSelectionOverlay,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,
     makeRingOverlay,

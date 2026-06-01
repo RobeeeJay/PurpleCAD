@@ -334,6 +334,10 @@ export default function SketchOverlays({
                     }
                   }
                 }
+                // The line just moved to satisfy the new dimension; re-anchor
+                // the green selection highlight (a standalone scene mesh) so it
+                // doesn't linger at the old position.
+                cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
                 useStore.getState().setSketchDistanceInput(null);
                 useStore.getState().setSketchConstraintMode(null);
               } else if (e.key === "Escape") {
