@@ -23,6 +23,36 @@ import { chamferOrFilletItem, performCsg } from "./occClient.js";
 // Regeneration is async because both branches go through occClient, which
 // posts to the OCC Web Worker in the browser and runs in-process in node.
 
+// Re-derive any extrude profile in an item (or, recursively, in a chamfer's
+// source) from its sketch at the requested precision, so curved holes/outlines
+// tessellate finer at print resolution.  The Electron OCC bridge can't import
+// this ESM helper and otherwise builds prisms from the stored preview polygon;
+// occOps.js does this inside buildItemShapeLocal.  CRUCIAL: the SAME live
+// polygon must feed both the OCC shape AND the brush position
+// (buildBrushTransform adds R·polyCentroid, which buildItemShapeLocal subtracts
+// — they only cancel if both use the same polygon, else the object shifts when
+// print resolution is toggled).
+function withLivePolygons(item, allItems, precision) {
+  if (!item) return item;
+  if (item.type === "extrude") {
+    return extrudeWithLivePolygon(item, allItems, precision);
+  }
+  if (
+    item.type === "csg" &&
+    item.regenerator?.kind === "chamfer" &&
+    item.regenerator.source
+  ) {
+    return {
+      ...item,
+      regenerator: {
+        ...item.regenerator,
+        source: withLivePolygons(item.regenerator.source, allItems, precision),
+      },
+    };
+  }
+  return item;
+}
+
 async function regenerateChamfer(
   regenerator,
   accumulatedItems,
@@ -31,20 +61,11 @@ async function regenerateChamfer(
   const subGeo = regenerator.subGeo || { edges: [], faces: [] };
   if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
     return null;
-  // Re-derive the source extrude's profile from its sketch at the requested
-  // precision so curved holes/outlines tessellate finer at print resolution.
-  // The Electron OCC bridge (occ-bridge.cjs) can't import this ESM helper and
-  // otherwise builds the prism from the stored preview-resolution polygon, so
-  // toggling print resolution on a chamfered extrude appeared to do nothing.
-  // Mirrors occOps.js's buildItemShapeLocal, which calls this internally.
-  const source =
-    regenerator.source?.type === "extrude"
-      ? extrudeWithLivePolygon(
-          regenerator.source,
-          accumulatedItems,
-          printPrecision,
-        )
-      : regenerator.source;
+  const source = withLivePolygons(
+    regenerator.source,
+    accumulatedItems,
+    printPrecision,
+  );
   const result = await chamferOrFilletItem({
     source,
     subGeo,
@@ -59,10 +80,12 @@ async function regenerateChamfer(
     geometryData,
     centerOffset: { cx, cy, cz },
   } = result;
-  // World position = source's brush position + centroid offset rotated
-  // into world space (so chained chamfers stay anchored to their source).
-  const brushPos = buildBrushTransform(regenerator.source).position;
-  const rot = regenerator.source.rotation || { x: 0, y: 0, z: 0 };
+  // World position = source's brush position + centroid offset rotated into
+  // world space.  Use the SAME (live) source as the shape build above so the
+  // polyCentroid terms cancel and the object doesn't shift on a resolution
+  // toggle.
+  const brushPos = buildBrushTransform(source).position;
+  const rot = source.rotation || { x: 0, y: 0, z: 0 };
   const local = new THREE.Vector3(cx, cy, cz);
   local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
   return {
@@ -88,8 +111,15 @@ async function regenerateBoolean(
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean);
   if (inputs.length < 2) return null;
+  // Rebuild each input from its live (current-precision) polygon so the OCC
+  // shapes match the positions the chamfer regen just stamped — otherwise a
+  // chamfered-extrude input goes in with a coarse-polygon shape but a
+  // fine-polygon position and the boolean result jumps on a resolution toggle.
+  const liveInputs = inputs.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
   return performCsg({
-    selectedItems: inputs,
+    selectedItems: liveInputs,
     operation: regenerator.op,
     printPrecision,
     allItems: accumulatedItems,
