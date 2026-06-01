@@ -201,9 +201,47 @@ export function createSketchHoverHelpers(
       return;
     }
 
-    // ── Constraint icon hover (screen-space distance check) ──────────────────
-    const CONSTRAINT_HIT_PX = 14;
+    // Hover priority: points / circle centers first, then lines, then
+    // constraint icons.  Snap points (endpoints + circle/arc/ellipse centres)
+    // are the smallest targets and the ones a user reaches for most, so they
+    // win even when a constraint icon or line sits under the same cursor.
     const sketchGroup = sketchShapesGroupRef?.current;
+
+    // ── Point / circle-center hover (highest priority) ───────────────────────
+    const snap = findSnap(screenX, screenY, selItem?.shapes || [], sketchMesh);
+    if (snap) {
+      showHoverPointIndicator(snap, sketchMesh);
+      clearHoverLineHighlight();
+      clearConstraintHoverHighlight();
+      if (dimHintRef.current) dimHintRef.current.style.display = "none";
+      renderer.domElement.style.cursor = "grab";
+      return;
+    }
+    clearHoverPointIndicator();
+
+    // ── Line hover (second priority) ─────────────────────────────────────────
+    if (sketchGroup) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+      const lineObjs = sketchGroup.children.filter(
+        (c) => c.userData.shapeIdx != null,
+      );
+      const hits = hitTestSketchLines(ray, lineObjs);
+      if (hits.length > 0) {
+        applyHoverLineHighlight(hits[0].object);
+        clearConstraintHoverHighlight();
+        if (dimHintRef.current) dimHintRef.current.style.display = "none";
+        renderer.domElement.style.cursor = "grab";
+        return;
+      }
+    }
+    clearHoverLineHighlight();
+
+    // ── Constraint icon hover (lowest priority) ──────────────────────────────
+    const CONSTRAINT_HIT_PX = 14;
     if (sketchGroup) {
       const rect = renderer.domElement.getBoundingClientRect();
       for (const cObj of sketchGroup.children) {
@@ -221,7 +259,6 @@ export function createSketchHoverHelpers(
             cObj.userData.constraintShapeIndices,
             cObj.userData.constraintColor,
           );
-          clearHoverPointIndicator();
           renderer.domElement.style.cursor = "default";
           if (dimHintRef.current) {
             const CONSTRAINT_LABELS = {
@@ -246,35 +283,6 @@ export function createSketchHoverHelpers(
     }
     clearConstraintHoverHighlight();
     if (dimHintRef.current) dimHintRef.current.style.display = "none";
-
-    // ── Point hover takes priority over line hover ────────────────────────────
-    const snap = findSnap(screenX, screenY, selItem?.shapes || [], sketchMesh);
-    if (snap) {
-      showHoverPointIndicator(snap, sketchMesh);
-      clearHoverLineHighlight();
-      renderer.domElement.style.cursor = "grab";
-      return;
-    }
-    clearHoverPointIndicator();
-
-    // ── Line hover ────────────────────────────────────────────────────────────
-    if (sketchGroup) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
-      const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
-      const ray = new THREE.Raycaster();
-      ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
-      const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null,
-      );
-      const hits = hitTestSketchLines(ray, lineObjs);
-      if (hits.length > 0) {
-        applyHoverLineHighlight(hits[0].object);
-        renderer.domElement.style.cursor = "grab";
-        return;
-      }
-    }
-    clearHoverLineHighlight();
     renderer.domElement.style.cursor = "";
   };
 
