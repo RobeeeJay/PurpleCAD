@@ -686,12 +686,19 @@ export function enforceConstraints(
       if (!pa || !pb) continue;
       const cur = Math.hypot(pb.x - pa.x, pb.y - pa.y);
       if (cur < 1e-10 || Math.abs(cur - d) < 1e-7) continue;
-      const aAnch = effAnchored.has(epKey(c.shapeAIdx, c.pointA));
-      const bAnch = effAnchored.has(epKey(c.shapeBIdx, c.pointB));
-      if (aAnch && bAnch) continue;
+      // A side is "fixed" if it's a drag anchor (or coincident to one) or a
+      // length-pinned corner — moving it would break a locked length.  Without
+      // the lengthPinned guard a rigidity tie defaults to dragging the diagonal
+      // corner, so dragging the far corner lurched the circle toward it before a
+      // second drag settled it.
+      const aEP = epKey(c.shapeAIdx, c.pointA);
+      const bEP = epKey(c.shapeBIdx, c.pointB);
+      const aFixed = effAnchored.has(aEP) || lengthPinned.has(aEP);
+      const bFixed = effAnchored.has(bEP) || lengthPinned.has(bEP);
+      if (aFixed && bFixed) continue;
       let moveB;
-      if (aAnch) moveB = true;
-      else if (bAnch) moveB = false;
+      if (aFixed) moveB = true;
+      else if (bFixed) moveB = false;
       else moveB = rigidity[c.shapeBIdx] <= rigidity[c.shapeAIdx];
       const anchorPos = moveB ? pa : pb;
       const movingPos = moveB ? pb : pa;

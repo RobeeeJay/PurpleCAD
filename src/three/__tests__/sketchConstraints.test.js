@@ -727,6 +727,56 @@ describe("enforceConstraints", () => {
       expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
     });
 
+    it("dragging the far (BR) corner settles the circle in one solve", () => {
+      // Regression: dragging BR rotates the diagonal, so both the diagonal end
+      // (coincident BFS) and the onLine circle (projection) look "moved" and the
+      // main distance pass skips.  The reconciliation step then broke a rigidity
+      // tie by dragging the length-pinned TL corner, lurching the circle toward
+      // it until a second drag settled it.  Now TL is held and the circle lands
+      // on the new diagonal at the right distance immediately.
+      const { shapes, constraints } = makeRectDiag();
+      shapes.push(C(1, 1, 0.2)); // shape 5
+      constraints.push(
+        fixed(0, "start", 0, "end", 2), // top side length
+        fixed(3, "start", 3, "end", 2), // left side length
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 5,
+          pointKey: "center",
+        },
+        fixed(5, "center", 4, "start", Math.SQRT2),
+      );
+      // Drag BR (right.end) out to (3, 0): the diagonal becomes (0,2)→(3,0).
+      const newRight = moveShapePoint(shapes[1], "end", { x: 3, y: 0 });
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        1,
+        newRight,
+        "end",
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+
+      const ds = pt(result, 4, "start"); // TL
+      const de = pt(result, 4, "end"); // new BR
+      const cc = pt(result, 5, "center");
+      expect(ds).toMatchObject({ x: expect.closeTo(0), y: expect.closeTo(2) });
+      const top = result[0],
+        left = result[3];
+      expect(Math.hypot(top.x2 - top.x1, top.y2 - top.y1)).toBeCloseTo(2, 5);
+      expect(Math.hypot(left.x2 - left.x1, left.y2 - left.y1)).toBeCloseTo(
+        2,
+        5,
+      );
+      // Circle on the new diagonal at its fixed distance from TL (not at TL).
+      expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
+      const cross =
+        (cc.x - ds.x) * (de.y - ds.y) - (cc.y - ds.y) * (de.x - ds.x);
+      expect(cross).toBeCloseTo(0, 5);
+    });
+
     it("whole translate (preSeeded) preserves all coincidents", () => {
       const { shapes, constraints } = makeRectDiag();
       const dx = 3,
