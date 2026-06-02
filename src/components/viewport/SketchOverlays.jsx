@@ -10,15 +10,8 @@ import SketchRulers from "./SketchRulers";
 import SketchLongPressMenu from "./SketchLongPressMenu";
 import { useStore } from "../../store";
 import { evaluateFormula, variablesToMap } from "../../utils/formulas.js";
-import {
-  MM_PER_UNIT,
-  getShapePoint,
-  moveShapePoint,
-} from "../../three/sceneObjects.js";
-import {
-  enforceConstraints,
-  allConstraintsSatisfied,
-} from "../../three/sketchConstraints.js";
+import { MM_PER_UNIT } from "../../three/sceneObjects.js";
+import { solveConstraints, fieldsForPoint } from "../../three/sketchSolver.js";
 
 export default function SketchOverlays({
   // store-derived state
@@ -216,9 +209,8 @@ export default function SketchOverlays({
                     constraintIdx,
                   } = sketchDistanceInput;
                   // Store the formula string so future edits can reference
-                  // variables; geometry resolution converts mm → scene units.
+                  // variables; the solver resolves it to scene units.
                   const formula = raw;
-                  const d = mm / MM_PER_UNIT;
                   const store = useStore.getState();
                   const freshItem = store.items.find(
                     (i) => i.id === selectedId,
@@ -242,38 +234,23 @@ export default function SketchOverlays({
                             : c,
                         )
                       : [...(freshItem?.constraints || []), newDistC];
-                  const sA = freshItem?.shapes[shapeAIdx];
-                  const sB = freshItem?.shapes[shapeBIdx];
-                  const pA = sA && getShapePoint(sA, pointA);
-                  const pB = sB && getShapePoint(sB, pointB);
-                  let movedSB = null;
-                  if (pA && pB) {
-                    const ddx = pB.x - pA.x,
-                      ddy = pB.y - pA.y;
-                    const cur = Math.hypot(ddx, ddy);
-                    if (cur > 1e-10)
-                      movedSB = moveShapePoint(sB, pointB, {
-                        x: pA.x + (ddx / cur) * d,
-                        y: pA.y + (ddy / cur) * d,
-                      });
-                  }
-                  if (freshItem && movedSB) {
-                    const updatedMap = enforceConstraints(
+                  if (freshItem) {
+                    // Numerically solve the WHOLE constraint system for the new
+                    // dimension, anchoring the dimension's reference point so the
+                    // change grows from there.  If it can't satisfy every
+                    // constraint the transformation is rejected.
+                    const fixedSet = new Set();
+                    for (const f of fieldsForPoint(
+                      freshItem.shapes[shapeAIdx],
+                      pointA,
+                    ))
+                      fixedSet.add(`${shapeAIdx}:${f}`);
+                    const { shapes: solved, ok } = solveConstraints(
                       freshItem.shapes,
                       proposed,
-                      shapeBIdx,
-                      movedSB,
-                      pointB,
+                      { variables: variablesMap, fixed: fixedSet },
                     );
-                    const resultShapes = freshItem.shapes.slice();
-                    for (const [i, s] of updatedMap) resultShapes[i] = s;
-                    if (
-                      allConstraintsSatisfied(
-                        resultShapes,
-                        proposed,
-                        variablesMap,
-                      )
-                    ) {
+                    if (ok) {
                       if (constraintIdx != null)
                         store.updateSketchConstraintDistance(
                           selectedId,
@@ -281,7 +258,9 @@ export default function SketchOverlays({
                           formula,
                         );
                       else store.addSketchConstraints(selectedId, [newDistC]);
-                      store.updateSketchShapes(selectedId, updatedMap);
+                      const map = new Map();
+                      solved.forEach((s, i) => map.set(i, s));
+                      store.updateSketchShapes(selectedId, map);
                       itemsRef.current = useStore.getState().items;
                     } else {
                       store.showNotification(
