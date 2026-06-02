@@ -550,8 +550,17 @@ export function createSketchInteraction(
     // ── Multi-shape drag ───────────────────────────────────────────────────
     if (kind === "multi") {
       const { multiIndices, multiOrigShapes } = sketchDrag;
-      const dx = localPt.x - anchorLocal.x;
-      const dy = localPt.y - anchorLocal.y;
+      // Snap the dragged anchor to the grid so the whole group lands on it.
+      const snapCfg = useStore.getState();
+      const anchorNow =
+        snapCfg.snapEnabled && snapCfg.snapDistanceMm > 0
+          ? {
+              x: snapUnitToIntervalMm(localPt.x, snapCfg.snapDistanceMm),
+              y: snapUnitToIntervalMm(localPt.y, snapCfg.snapDistanceMm),
+            }
+          : localPt;
+      const dx = anchorNow.x - anchorLocal.x;
+      const dy = anchorNow.y - anchorLocal.y;
       const pendingShapes = new Map();
       multiIndices.forEach((idx, i) => {
         const moved = translateShape(multiOrigShapes[i], dx, dy);
