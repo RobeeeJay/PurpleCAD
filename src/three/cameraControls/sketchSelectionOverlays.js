@@ -97,11 +97,15 @@ export function createSketchSelectionOverlays({
       const geo = new LineGeometry();
       geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
       // Match the blue used for multi-selected lines so selection reads
-      // consistently whether one line or several are picked.
+      // consistently whether one line or several are picked.  Dash the overlay
+      // for construction lines so the highlight reads as dotted like the line.
       const mat = new LineMaterial({
         color: 0x44aaff,
         linewidth: 2.5,
         depthTest: false,
+        dashed: !!shape.dashed,
+        dashSize: shape.dashed ? 0.1 : 0,
+        gapSize: shape.dashed ? 0.06 : 0,
         resolution: renderer.getSize(new THREE.Vector2()),
       });
       sketchSelectionOverlay = new Line2(geo, mat);
@@ -149,6 +153,9 @@ export function createSketchSelectionOverlays({
         color: 0x44aaff,
         linewidth: 2.5,
         depthTest: false,
+        dashed: !!shape.dashed,
+        dashSize: shape.dashed ? 0.1 : 0,
+        gapSize: shape.dashed ? 0.06 : 0,
         resolution: renderer.getSize(new THREE.Vector2()),
       });
       const line = new Line2(geo, mat);
