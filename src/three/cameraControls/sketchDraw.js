@@ -10,7 +10,20 @@ import {
   buildSketchShape,
   getSketchShapePoints,
   sketchDimText,
+  snapUnitToIntervalMm,
 } from "../sceneObjects.js";
+
+// Snap a local sketch point to the world-space grid interval when the snap
+// option is on.  Geometry snapping (findSnap) takes precedence and is applied
+// before this.
+const gridSnapLocal = (pt) => {
+  const s = useStore.getState();
+  if (!pt || !s.snapEnabled || !(s.snapDistanceMm > 0)) return pt;
+  return {
+    x: snapUnitToIntervalMm(pt.x, s.snapDistanceMm),
+    y: snapUnitToIntervalMm(pt.y, s.snapDistanceMm),
+  };
+};
 
 export function createSketchDrawHelpers(
   {
@@ -66,6 +79,8 @@ export function createSketchDrawHelpers(
       if (snap) {
         effectiveCur = { x: snap.x, y: snap.y };
         activeSnap = snap;
+      } else {
+        effectiveCur = gridSnapLocal(cur);
       }
     }
     draw.currentSnap = activeSnap;
@@ -161,6 +176,7 @@ export function createSketchDrawHelpers(
     if (!shiftKey) {
       clickSnap = findSnap(screenX, screenY, shapes, sketchMesh);
       if (clickSnap) localPt = { x: clickSnap.x, y: clickSnap.y };
+      else localPt = gridSnapLocal(localPt);
     }
 
     // Helper: build constraints from recorded snaps for a completed shape.
