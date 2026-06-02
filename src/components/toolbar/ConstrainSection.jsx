@@ -129,12 +129,17 @@ const ConstrainSection = ({ isSketchMode }) => {
             title="Horizontal — force the selected line to be horizontal"
             disabled={selectedSketchElement?.type !== "line"}
             onClick={() => {
-              if (selectedSketchElement?.type === "line")
+              if (selectedSketchElement?.type === "line") {
                 applySketchHVConstraint(
                   selectedId,
                   selectedSketchElement.shapeIdx,
                   "horizontal",
                 );
+                // The line may have moved; re-anchor the selection highlight.
+                useStore
+                  .getState()
+                  ._cameraControls?.refreshSketchSelectionOverlay?.();
+              }
             }}
           >
             <svg viewBox="0 0 24 24" width="20" height="20">
@@ -155,12 +160,16 @@ const ConstrainSection = ({ isSketchMode }) => {
             title="Vertical — force the selected line to be vertical"
             disabled={selectedSketchElement?.type !== "line"}
             onClick={() => {
-              if (selectedSketchElement?.type === "line")
+              if (selectedSketchElement?.type === "line") {
                 applySketchHVConstraint(
                   selectedId,
                   selectedSketchElement.shapeIdx,
                   "vertical",
                 );
+                useStore
+                  .getState()
+                  ._cameraControls?.refreshSketchSelectionOverlay?.();
+              }
             }}
           >
             <svg viewBox="0 0 24 24" width="20" height="20">

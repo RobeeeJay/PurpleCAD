@@ -96,8 +96,10 @@ export function createSketchSelectionOverlays({
     if (pts.length >= 2) {
       const geo = new LineGeometry();
       geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
+      // Match the blue used for multi-selected lines so selection reads
+      // consistently whether one line or several are picked.
       const mat = new LineMaterial({
-        color: 0x00ff88,
+        color: 0x44aaff,
         linewidth: 2.5,
         depthTest: false,
         resolution: renderer.getSize(new THREE.Vector2()),
