@@ -354,7 +354,15 @@ export function enforceConstraints(
   // rigid square it's anchored to.
   const lengthPinned = new Set();
   for (const c of constraints) {
-    if (c.type === "distance" && c.shapeAIdx === c.shapeBIdx) {
+    // Only a LINE's length pins its endpoints.  A circle's same-shape distance
+    // is its radius (centre↔edge) — moving the centre carries the edge along, so
+    // the centre is free, not pinned.  Treating it as pinned wrongly froze the
+    // circle and made its centre↔corner distance unsolvable.
+    if (
+      c.type === "distance" &&
+      c.shapeAIdx === c.shapeBIdx &&
+      shapes[c.shapeAIdx]?.type === "line"
+    ) {
       lengthPinned.add(epKey(c.shapeAIdx, c.pointA));
       lengthPinned.add(epKey(c.shapeBIdx, c.pointB));
     }
@@ -372,6 +380,15 @@ export function enforceConstraints(
         grewPinned = true;
       }
     }
+  }
+
+  // Points constrained to slide along a line.  In a point-to-point distance the
+  // slider is the flexible side, so it yields (moves) while a rigid corner on
+  // the other end stays put — even when only H/V (not a length) pins that
+  // corner, which lengthPinned alone can't see.
+  const onLinePts = new Set();
+  for (const c of constraints) {
+    if (c.type === "onLine") onLinePts.add(epKey(c.pointShapeIdx, c.pointKey));
   }
 
   // ── Distance enforcement (up to 4 iterative passes) ─────────────────────────
@@ -431,16 +448,22 @@ export function enforceConstraints(
           dy = posB.y - posA.y;
         const curDist = Math.hypot(dx, dy);
         if (curDist < 1e-10 || Math.abs(curDist - d) < 1e-8) continue;
-        // Default: move the side that wasn't the source of movement.  But never
-        // move an endpoint a length constraint pins when the other side is free
-        // to move instead — otherwise the drag deforms the rigid body.
-        let moveB = aUp;
+        // Default: move the side that wasn't the source of movement.  Prefer to
+        // move an onLine slider (it yields along its line); failing that, never
+        // move a length-pinned endpoint when the other side is free — otherwise
+        // the drag deforms the rigid body the constraint is anchored to.
         const aEP = epKey(ai, pA),
           bEP = epKey(bi, pB);
-        if (moveB && lengthPinned.has(bEP) && !lengthPinned.has(aEP))
+        const aSlider = onLinePts.has(aEP),
+          bSlider = onLinePts.has(bEP);
+        let moveB = aUp;
+        if (aSlider !== bSlider) {
+          moveB = bSlider;
+        } else if (moveB && lengthPinned.has(bEP) && !lengthPinned.has(aEP)) {
           moveB = false;
-        else if (!moveB && lengthPinned.has(aEP) && !lengthPinned.has(bEP))
+        } else if (!moveB && lengthPinned.has(aEP) && !lengthPinned.has(bEP)) {
           moveB = true;
+        }
         let targetIdx, targetKey, newX, newY;
         if (moveB) {
           targetIdx = bi;
@@ -696,13 +719,20 @@ export function enforceConstraints(
       // second drag settled it.
       const aEP = epKey(c.shapeAIdx, c.pointA);
       const bEP = epKey(c.shapeBIdx, c.pointB);
-      const aFixed = effAnchored.has(aEP) || lengthPinned.has(aEP);
-      const bFixed = effAnchored.has(bEP) || lengthPinned.has(bEP);
-      if (aFixed && bFixed) continue;
+      const aSlider = onLinePts.has(aEP);
+      const bSlider = onLinePts.has(bEP);
       let moveB;
-      if (aFixed) moveB = true;
-      else if (bFixed) moveB = false;
-      else moveB = rigidity[c.shapeBIdx] <= rigidity[c.shapeAIdx];
+      if (aSlider !== bSlider) {
+        // Exactly one side slides along a line: move it, hold the rigid side.
+        moveB = bSlider;
+      } else {
+        const aFixed = effAnchored.has(aEP) || lengthPinned.has(aEP);
+        const bFixed = effAnchored.has(bEP) || lengthPinned.has(bEP);
+        if (aFixed && bFixed) continue;
+        if (aFixed) moveB = true;
+        else if (bFixed) moveB = false;
+        else moveB = rigidity[c.shapeBIdx] <= rigidity[c.shapeAIdx];
+      }
       const anchorPos = moveB ? pa : pb;
       const movingPos = moveB ? pb : pa;
       const tgtIdx = moveB ? c.shapeBIdx : c.shapeAIdx;

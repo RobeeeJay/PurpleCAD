@@ -826,6 +826,62 @@ describe("enforceConstraints", () => {
       expect(Math.hypot(c6.x - de.x, c6.y - de.y)).toBeCloseTo(D, 5);
     });
 
+    it("two circles WITH radius + H/V constraints hold on any corner drag", () => {
+      // The real reported case: each circle also has a radius constraint
+      // (centre↔edge, a same-shape distance) and the square has H/V on every
+      // side.  The radius wrongly marked the circle centre as length-pinned, so
+      // circle↔corner was skipped; and a corner pinned only by H/V (BR, no
+      // length) was dragged to satisfy the distance.  Both circles must hold.
+      const D = Math.SQRT1_2;
+      const tlRef = [0, "start"]; // TL via top.start, like the dump
+      const brRef = [1, "end"]; // BR via right.end, like the dump
+      const drags = [
+        ["TR", 0, "end", { x: 2.5, y: 2.4 }],
+        ["BL", 2, "end", { x: -0.5, y: -0.4 }],
+        ["TL", 3, "end", { x: -0.5, y: 2.4 }],
+        ["BR", 1, "end", { x: 2.5, y: -0.4 }],
+      ];
+      for (const [, pi, pk, np] of drags) {
+        const { shapes, constraints } = makeRectDiag();
+        shapes.push(C(0.5, 1.5, 0.15)); // shape 5 near TL
+        shapes.push(C(1.5, 0.5, 0.15)); // shape 6 near BR
+        constraints.push(
+          hvC(0, "horizontal"),
+          hvC(1, "vertical"),
+          hvC(2, "horizontal"),
+          hvC(3, "vertical"),
+          fixed(0, "start", 0, "end", 2), // top length
+          fixed(3, "start", 3, "end", 2), // left length
+          {
+            type: "onLine",
+            lineShapeIdx: 4,
+            pointShapeIdx: 5,
+            pointKey: "center",
+          },
+          {
+            type: "onLine",
+            lineShapeIdx: 4,
+            pointShapeIdx: 6,
+            pointKey: "center",
+          },
+          fixed(5, "center", 5, "edge", 0.15), // circle 5 radius
+          fixed(6, "center", 6, "edge", 0.15), // circle 6 radius
+          fixed(5, "center", tlRef[0], tlRef[1], D), // circle 5 ↔ TL
+          fixed(6, "center", brRef[0], brRef[1], D), // circle 6 ↔ BR
+        );
+        const moved = moveShapePoint(shapes[pi], pk, np);
+        const updated = enforceConstraints(shapes, constraints, pi, moved, pk);
+        const result = shapes.slice();
+        for (const [i, s] of updated) result[i] = s;
+        const tl = pt(result, tlRef[0], tlRef[1]);
+        const br = pt(result, brRef[0], brRef[1]);
+        const c5 = pt(result, 5, "center");
+        const c6 = pt(result, 6, "center");
+        expect(Math.hypot(c5.x - tl.x, c5.y - tl.y)).toBeCloseTo(D, 4);
+        expect(Math.hypot(c6.x - br.x, c6.y - br.y)).toBeCloseTo(D, 4);
+      }
+    });
+
     it("whole translate (preSeeded) preserves all coincidents", () => {
       const { shapes, constraints } = makeRectDiag();
       const dx = 3,
