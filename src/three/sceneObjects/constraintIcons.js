@@ -36,6 +36,16 @@ export function addConstraintIconsToGroup(
       obj.userData.constraintType = c.type;
       group.add(obj);
     };
+    // Recenter a small glyph's geometry on a world anchor and park the object
+    // there, so the animate loop can scale it about that point to a constant
+    // on-screen size (the geometry is otherwise baked in absolute world coords).
+    // Only for fixed-size marks — NOT the dimension/leader lines, which must
+    // keep spanning the measured geometry.
+    const markFixedSize = (obj, anchor) => {
+      if (obj.geometry) obj.geometry.translate(-anchor.x, -anchor.y, -anchor.z);
+      obj.position.copy(anchor);
+      obj.userData.constraintMark = true;
+    };
 
     if (c.type === "coincident") {
       const shapeA = shapes[c.shapeAIdx];
@@ -55,6 +65,7 @@ export function addConstraintIconsToGroup(
       cLine.renderOrder = 1004;
       tag(cLine, { x: pt.x, y: pt.y }, [c.shapeAIdx, c.shapeBIdx], 0xffaa00);
       group.add(cLine);
+      markFixedSize(cLine, toWorld(pt.x, pt.y, 0.005));
     } else if (c.type === "distance") {
       if (!showDimensions) return;
       const sA = shapes[c.shapeAIdx],
@@ -100,6 +111,7 @@ export function addConstraintIconsToGroup(
         );
         t.renderOrder = 1004;
         addTagged(t);
+        markFixedSize(t, pt);
       }
       // Label position: radius → outside circle edge; linear → offset from midpoint.
       // c.distance may be a number or a formula string; evaluate before display.
@@ -178,6 +190,7 @@ export function addConstraintIconsToGroup(
         0x00aaff,
       );
       group.add(tLine);
+      markFixedSize(tLine, toWorld(pt.x, pt.y, 0.005));
     } else if (c.type === "horizontal" || c.type === "vertical") {
       const shape = shapes[c.shapeIdx];
       if (!shape || shape.type !== "line") return;
@@ -196,6 +209,7 @@ export function addConstraintIconsToGroup(
       cLine.renderOrder = 1004;
       tag(cLine, { x: mx, y: my }, [c.shapeIdx], 0x00ddaa);
       group.add(cLine);
+      markFixedSize(cLine, toWorld(mx, my, 0.005));
     } else if (c.type === "angle") {
       const sA = shapes[c.shapeAIdx],
         sB = shapes[c.shapeBIdx];
@@ -223,6 +237,7 @@ export function addConstraintIconsToGroup(
       arc.renderOrder = 1004;
       tag(arc, { x: P.x, y: P.y }, [c.shapeAIdx, c.shapeBIdx], 0xff66cc);
       group.add(arc);
+      markFixedSize(arc, toWorld(P.x, P.y, 0.005));
       if (showDimensions) {
         const deg = typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
         const labelText = `${Math.round(deg)}°`;

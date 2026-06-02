@@ -140,22 +140,35 @@ export function createAnimateLoop({
           sp.scale.set(b.x * s, b.y * s, b.z * s);
         }
       }
-      // Constraint label sprites (dimension values, angle readouts): keep a
-      // constant on-screen size like the bounding-box labels, so they don't
-      // balloon when zooming in or shrink away when zooming out.  Each caches
-      // its authored scale on first sight so we multiply rather than compound.
+      // Constraint annotations: keep a constant on-screen size so they don't
+      // balloon on zoom-in or vanish on zoom-out.  Value/angle LABEL sprites
+      // multiply their authored scale; the small indicator MARKS (rings, ticks,
+      // arcs — recentered on a local anchor at build time) scale from unit about
+      // that anchor.  The dimension/leader LINES are left alone so they keep
+      // spanning the measured geometry.  CONSTRAINT_LABEL_SCALE sets the size.
       if (sketchModeRef.current && sketchShapesGroupRef?.current) {
+        const CONSTRAINT_LABEL_SCALE = 2;
         const g = sketchShapesGroupRef.current;
         g.updateWorldMatrix(false, true);
         g.traverse((o) => {
-          if (!o.isSprite || !o.userData.isConstraintObj) return;
-          if (o.userData.baseScale == null) {
-            o.userData.baseScale = { x: o.scale.x, y: o.scale.y, z: o.scale.z };
-          }
-          const b = o.userData.baseScale;
+          const isLabel = o.isSprite && o.userData.isConstraintObj;
+          const isMark = o.userData.constraintMark;
+          if (!isLabel && !isMark) return;
           _rulerPos.setFromMatrixPosition(o.matrixWorld);
-          const s = gizmoScale(_rulerPos);
-          o.scale.set(b.x * s, b.y * s, b.z * s);
+          const s = gizmoScale(_rulerPos) * CONSTRAINT_LABEL_SCALE;
+          if (isLabel) {
+            if (o.userData.baseScale == null) {
+              o.userData.baseScale = {
+                x: o.scale.x,
+                y: o.scale.y,
+                z: o.scale.z,
+              };
+            }
+            const b = o.userData.baseScale;
+            o.scale.set(b.x * s, b.y * s, b.z * s);
+          } else {
+            o.scale.setScalar(s);
+          }
         });
       }
       // Ruler labels: keep a constant on-screen size, and reveal/hide the
