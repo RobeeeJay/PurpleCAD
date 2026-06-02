@@ -30,6 +30,11 @@ import {
   rotateShape,
   collectConnectedShapes,
 } from "../sketchGeometry.js";
+import {
+  solveConstraints,
+  fieldsForPoint,
+  varFields,
+} from "../sketchSolver.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
@@ -441,6 +446,33 @@ export function createSketchInteraction(
     );
   };
 
+  // Drag propagation via the full numerical solver: the dragged point(s) are
+  // pinned at their target and the whole constraint system is solved around
+  // them.  Handles coupled cases the propagation rules can't (e.g. dragging a
+  // corner of an angle-constrained square keeps every angle 90°).  Returns a
+  // Map<idx, shape> of the solved geometry.  `placed` is a Map<idx, shape> of
+  // shapes whose listed point(s) are explicitly placed (pinned); `pointKeys` is
+  // a Map<idx, pointKey|null> — null pins the whole shape (a rigid translate).
+  const solveDrag = (selItemId, placed, pointKeys) => {
+    const selItem = itemsRef.current.find((i) => i.id === selItemId);
+    if (!selItem) return placed;
+    const input = (selItem.shapes || []).slice();
+    const fixed = new Set();
+    for (const [idx, s] of placed) {
+      input[idx] = s;
+      const key = pointKeys.get(idx);
+      const fields = key ? fieldsForPoint(s, key) : varFields(s);
+      for (const f of fields) fixed.add(`${idx}:${f}`);
+    }
+    const { shapes } = solveConstraints(input, selItem.constraints || [], {
+      fixed,
+      maxIter: 60,
+    });
+    const out = new Map();
+    shapes.forEach((s, i) => out.set(i, s));
+    return out;
+  };
+
   // Expose propagateConstraints so Viewport can enforce constraints immediately
   // after adding or editing them (outside a drag operation).
   if (propagateConstraintsRef)
@@ -567,27 +599,10 @@ export function createSketchInteraction(
         if (moved) pendingShapes.set(idx, moved);
       });
       sketchDrag.pendingShapes = pendingShapes;
-      // Propagate constraints from all moving shapes to adjacent shapes,
-      // using the same propagateConstraints path as single-shape drag.
-      let multiPrimIdx = multiIndices[0];
-      let multiPrimShape = pendingShapes.get(multiPrimIdx);
-      if (!multiPrimShape) {
-        for (const [i, s] of pendingShapes) {
-          multiPrimIdx = i;
-          multiPrimShape = s;
-          break;
-        }
-      }
-      let allMoved = pendingShapes;
-      if (multiPrimShape) {
-        allMoved = propagateConstraints(
-          selItemId,
-          multiPrimIdx,
-          multiPrimShape,
-          null,
-          new Map(pendingShapes),
-        );
-      }
+      // Pin the whole moved group and solve the rest of the system around it.
+      const multiKeys = new Map();
+      for (const idx of pendingShapes.keys()) multiKeys.set(idx, null);
+      const allMoved = solveDrag(selItemId, new Map(pendingShapes), multiKeys);
       sketchDrag.multiPropagated = allMoved;
       const sketchGroup = sketchShapesGroupRef?.current;
       if (sketchGroup) {
@@ -699,13 +714,20 @@ export function createSketchInteraction(
     }
     if (!newShape) return;
 
-    const propagated = propagateConstraints(
-      selItemId,
-      shapeIdx,
-      newShape,
-      draggedPointKey,
-      preSeeded,
-    );
+    // Pin the dragged point (or the whole rigid set for a body drag) and solve
+    // the full system around it.
+    const placed = new Map();
+    const pointKeys = new Map();
+    if (preSeeded) {
+      for (const [idx, s] of preSeeded) {
+        placed.set(idx, s);
+        pointKeys.set(idx, null);
+      }
+    } else {
+      placed.set(shapeIdx, newShape);
+      pointKeys.set(shapeIdx, draggedPointKey);
+    }
+    const propagated = solveDrag(selItemId, placed, pointKeys);
     sketchDrag.pendingShape = newShape;
     sketchDrag.propagatedShapes = propagated;
 

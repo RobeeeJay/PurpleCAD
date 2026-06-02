@@ -11,7 +11,7 @@
 import { resolveConstraintDistance } from "./geometryParams.js";
 
 // Which scalar fields of a shape the solver may move, in a stable order.
-function varFields(s) {
+export function varFields(s) {
   switch (s?.type) {
     case "line":
     case "rect":

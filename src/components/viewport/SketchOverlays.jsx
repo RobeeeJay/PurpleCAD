@@ -10,7 +10,11 @@ import SketchRulers from "./SketchRulers";
 import SketchLongPressMenu from "./SketchLongPressMenu";
 import { useStore } from "../../store";
 import { evaluateFormula, variablesToMap } from "../../utils/formulas.js";
-import { MM_PER_UNIT } from "../../three/sceneObjects.js";
+import {
+  MM_PER_UNIT,
+  getShapePoint,
+  moveShapePoint,
+} from "../../three/sceneObjects.js";
 import { solveConstraints, fieldsForPoint } from "../../three/sketchSolver.js";
 
 export default function SketchOverlays({
@@ -236,17 +240,40 @@ export default function SketchOverlays({
                       : [...(freshItem?.constraints || []), newDistC];
                   if (freshItem) {
                     // Numerically solve the WHOLE constraint system for the new
-                    // dimension, anchoring the dimension's reference point so the
-                    // change grows from there.  If it can't satisfy every
-                    // constraint the transformation is rejected.
+                    // dimension.  Anchor the dimension's endpoints so the change
+                    // grows from the reference point WITHOUT rotating: for a
+                    // line-length the far end is pinned along the current
+                    // direction (pins translation + orientation); a two-point
+                    // distance pins only the reference end.  Reject if the result
+                    // can't satisfy every constraint.
+                    const d = mm / MM_PER_UNIT;
                     const fixedSet = new Set();
-                    for (const f of fieldsForPoint(
-                      freshItem.shapes[shapeAIdx],
-                      pointA,
-                    ))
+                    const aShape = freshItem.shapes[shapeAIdx];
+                    for (const f of fieldsForPoint(aShape, pointA))
                       fixedSet.add(`${shapeAIdx}:${f}`);
+                    let inputShapes = freshItem.shapes;
+                    if (shapeAIdx === shapeBIdx) {
+                      const pA = getShapePoint(aShape, pointA);
+                      const pB = getShapePoint(aShape, pointB);
+                      if (pA && pB) {
+                        const dx = pB.x - pA.x,
+                          dy = pB.y - pA.y;
+                        const cur = Math.hypot(dx, dy) || 1;
+                        inputShapes = freshItem.shapes.slice();
+                        inputShapes[shapeBIdx] = moveShapePoint(
+                          aShape,
+                          pointB,
+                          {
+                            x: pA.x + (dx / cur) * d,
+                            y: pA.y + (dy / cur) * d,
+                          },
+                        );
+                        for (const f of fieldsForPoint(aShape, pointB))
+                          fixedSet.add(`${shapeBIdx}:${f}`);
+                      }
+                    }
                     const { shapes: solved, ok } = solveConstraints(
-                      freshItem.shapes,
+                      inputShapes,
                       proposed,
                       { variables: variablesMap, fixed: fixedSet },
                     );
