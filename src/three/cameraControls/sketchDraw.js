@@ -335,10 +335,41 @@ export function createSketchDrawHelpers(
               shapeBIdx: n,
               pointB: "start",
             },
-            { type: "horizontal", shapeIdx: n },
-            { type: "vertical", shapeIdx: n + 1 },
-            { type: "horizontal", shapeIdx: n + 2 },
-            { type: "vertical", shapeIdx: n + 3 },
+            // 90° angle at each corner keeps the rectangle's right angles while
+            // still allowing the whole shape to rotate (which H/V constraints
+            // would forbid).  pointA/pointB are the shared-corner endpoints.
+            {
+              type: "angle",
+              shapeAIdx: n,
+              pointA: "end",
+              shapeBIdx: n + 1,
+              pointB: "start",
+              angle: 90,
+            },
+            {
+              type: "angle",
+              shapeAIdx: n + 1,
+              pointA: "end",
+              shapeBIdx: n + 2,
+              pointB: "start",
+              angle: 90,
+            },
+            {
+              type: "angle",
+              shapeAIdx: n + 2,
+              pointA: "end",
+              shapeBIdx: n + 3,
+              pointB: "start",
+              angle: 90,
+            },
+            {
+              type: "angle",
+              shapeAIdx: n + 3,
+              pointA: "end",
+              shapeBIdx: n,
+              pointB: "start",
+              angle: 90,
+            },
           ],
         );
       }

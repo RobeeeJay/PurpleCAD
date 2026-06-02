@@ -361,18 +361,17 @@ export function createSketchSelectionOverlays({
 
   // Build the rotation handle around the bbox of the given selected shapes.
   // Suppressed when the selection is orientation-locked: a horizontal/vertical
-  // or angle constraint on a selected shape makes rotation impossible without
-  // breaking a constraint, so no handle is offered (the geometry can't rotate).
+  // constraint pins a side to a world axis, so rotation would break it.  Angle
+  // constraints are RELATIVE (rotation-invariant), so they don't lock — a square
+  // built from 90° angle constraints can still rotate as a rigid body.
   const buildRotationHandleFor = (shapes, indices, sketchMesh) => {
     const state = useStore.getState();
     const selItem = state.items.find((i) => i.id === selectedIdRef.current);
     const idxSet = new Set(indices);
     const locked = (selItem?.constraints || []).some(
       (c) =>
-        ((c.type === "horizontal" || c.type === "vertical") &&
-          idxSet.has(c.shapeIdx)) ||
-        (c.type === "angle" &&
-          (idxSet.has(c.shapeAIdx) || idxSet.has(c.shapeBIdx))),
+        (c.type === "horizontal" || c.type === "vertical") &&
+        idxSet.has(c.shapeIdx),
     );
     if (locked) {
       clearRotationHandle();

@@ -469,6 +469,65 @@ describe("enforceConstraints", () => {
         y: expect.closeTo(1),
       });
     });
+
+    it("a square built from 90° angle constraints rotates rigidly", () => {
+      // The rect tool now uses 90° angle constraints (not H/V) so the square can
+      // rotate.  A rigid rotation of all four sides must keep the corners joined
+      // and the side lengths intact (the angles are preserved, not enforced).
+      const shapes = [
+        L(0, 1, 1, 1), // top
+        L(1, 1, 1, 0), // right
+        L(1, 0, 0, 0), // bottom
+        L(0, 0, 0, 1), // left
+      ];
+      const ang90 = (ai, bi) => ({
+        type: "angle",
+        shapeAIdx: ai,
+        pointA: "end",
+        shapeBIdx: bi,
+        pointB: "start",
+        angle: 90,
+      });
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(1, "end", 2, "start"),
+        coin(2, "end", 3, "start"),
+        coin(3, "end", 0, "start"),
+        ang90(0, 1),
+        ang90(1, 2),
+        ang90(2, 3),
+        ang90(3, 0),
+      ];
+      const a = Math.PI / 6,
+        cx = 0.5,
+        cy = 0.5;
+      const rot = (x, y) => ({
+        x: cx + (x - cx) * Math.cos(a) - (y - cy) * Math.sin(a),
+        y: cy + (x - cx) * Math.sin(a) + (y - cy) * Math.cos(a),
+      });
+      const preSeeded = new Map(
+        shapes.map((s, i) => {
+          const p = rot(s.x1, s.y1);
+          const q = rot(s.x2, s.y2);
+          return [i, { type: "line", x1: p.x, y1: p.y, x2: q.x, y2: q.y }];
+        }),
+      );
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preSeeded.get(0),
+        null,
+        preSeeded,
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+      assertCoincidesHold(result, constraints);
+      for (let i = 0; i < 4; i++) {
+        const s = result[i];
+        expect(Math.hypot(s.x2 - s.x1, s.y2 - s.y1)).toBeCloseTo(1, 5);
+      }
+    });
   });
 
   // ══ RECTANGLE WITH DIAGONAL (COMPLEX) ════════════════════════════════════
