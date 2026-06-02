@@ -23,6 +23,7 @@ export function createSketchSelectionOverlays({
   let coincidentFirstOverlay = null;
   let multiSelectOverlays = [];
   let currentDragIndicator = null;
+  let rotationHandle = null; // { center:{x,y}, grip:{x,y}, objects:[...] }
 
   const setCoincidentFirstOverlay = (o) => {
     coincidentFirstOverlay = o;
@@ -37,6 +38,7 @@ export function createSketchSelectionOverlays({
         sketchSelectionOverlay.material.dispose();
       sketchSelectionOverlay = null;
     }
+    clearRotationHandle();
   };
 
   const clearCoincidentFirstOverlay = () => {
@@ -106,6 +108,16 @@ export function createSketchSelectionOverlays({
       scene.add(sketchSelectionOverlay);
     }
     useStore.getState().setSelectedSketchElement({ type: "line", shapeIdx });
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    if (selItem)
+      buildRotationHandleFor(
+        selItem.shapes || [],
+        selItem.constraints,
+        [shapeIdx],
+        sketchMesh,
+      );
   };
 
   const clearMultiSelectOverlays = () => {
@@ -116,6 +128,7 @@ export function createSketchSelectionOverlays({
       if (o.material) o.material.dispose();
     });
     multiSelectOverlays = [];
+    clearRotationHandle();
   };
 
   const showMultiSelectOverlays = (indices) => {
@@ -127,6 +140,7 @@ export function createSketchSelectionOverlays({
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     const shapes = selItem.shapes || [];
+    buildRotationHandleFor(shapes, selItem.constraints, indices, sketchMesh);
     indices.forEach((idx) => {
       const shape = shapes[idx];
       if (!shape) return;
@@ -211,9 +225,122 @@ export function createSketchSelectionOverlays({
     }
   };
 
+  // ── Rotation handle (for rotating the sketch selection about its centre) ──
+  const clearRotationHandle = () => {
+    if (rotationHandle) {
+      rotationHandle.objects.forEach((o) => {
+        scene.remove(o);
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) o.material.dispose();
+      });
+      rotationHandle = null;
+    }
+  };
+
+  // center/grip are local sketch coords; the grip is the grabbable knob and the
+  // ring marks the pivot.  A faint line joins them so the affordance reads as a
+  // rotation lever.
+  const showRotationHandle = (center, grip, sketchMesh) => {
+    clearRotationHandle();
+    const toW = (x, y) =>
+      new THREE.Vector3(x, y, 0.008)
+        .applyQuaternion(sketchMesh.quaternion)
+        .add(sketchMesh.position);
+    const objects = [];
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        toW(center.x, center.y),
+        toW(grip.x, grip.y),
+      ]),
+      new THREE.LineBasicMaterial({ color: 0x00ddff, depthTest: false }),
+    );
+    line.renderOrder = 1006;
+    scene.add(line);
+    objects.push(line);
+    const pivot = makeRingOverlay(center, sketchMesh, 0x00ddff, 0.12, 0.008);
+    pivot.renderOrder = 1006;
+    scene.add(pivot);
+    objects.push(pivot);
+    const knob = makeRingOverlay(grip, sketchMesh, 0x00ddff, 0.22, 0.008);
+    knob.renderOrder = 1006;
+    scene.add(knob);
+    objects.push(knob);
+    rotationHandle = { center: { ...center }, grip: { ...grip }, objects };
+  };
+
+  const getRotationHandle = () => rotationHandle;
+
+  // Local-space points that bound a shape, for the rotation pivot + extent.
+  const localExtentPoints = (s) => {
+    if (!s) return [];
+    if (s.type === "line")
+      return [
+        { x: s.x1, y: s.y1 },
+        { x: s.x2, y: s.y2 },
+      ];
+    if (s.type === "rect")
+      return [
+        { x: s.x1, y: s.y1 },
+        { x: s.x2, y: s.y2 },
+      ];
+    if (s.type === "circle")
+      return [
+        { x: s.cx - s.r, y: s.cy },
+        { x: s.cx + s.r, y: s.cy },
+        { x: s.cx, y: s.cy - s.r },
+        { x: s.cx, y: s.cy + s.r },
+      ];
+    if (s.type === "arc" || s.type === "ellipse") return [{ x: s.cx, y: s.cy }];
+    if (s.type === "bezier") return [s.p0, s.p1, s.p2, s.p3];
+    return [];
+  };
+
+  // Build the rotation handle around the bbox of the given selected shapes.
+  // Restriction: a selection that includes a horizontal/vertical or angle
+  // constraint can't be rotated without violating it, so no handle is shown.
+  const buildRotationHandleFor = (shapes, constraints, indices, sketchMesh) => {
+    const idxSet = new Set(indices);
+    const orientationLocked = (constraints || []).some(
+      (c) =>
+        ((c.type === "horizontal" || c.type === "vertical") &&
+          idxSet.has(c.shapeIdx)) ||
+        (c.type === "angle" &&
+          (idxSet.has(c.shapeAIdx) || idxSet.has(c.shapeBIdx))),
+    );
+    if (orientationLocked) {
+      clearRotationHandle();
+      return;
+    }
+    const pts = [];
+    indices.forEach((idx) => {
+      for (const p of localExtentPoints(shapes[idx])) pts.push(p);
+    });
+    if (pts.length < 2) {
+      clearRotationHandle();
+      return;
+    }
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const p of pts) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    const margin = Math.max((maxY - minY) / 2, (maxX - minX) / 2, 1) * 0.25 + 1;
+    const grip = { x: center.x, y: maxY + margin };
+    showRotationHandle(center, grip, sketchMesh);
+  };
+
   return {
     setCoincidentFirstOverlay,
     refreshSketchSelectionOverlay,
+    showRotationHandle,
+    clearRotationHandle,
+    getRotationHandle,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,
     makeRingOverlay,

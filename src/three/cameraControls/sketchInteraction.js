@@ -25,7 +25,11 @@ import {
   applyHVEnforcement,
   enforceConstraints,
 } from "../sketchConstraints.js";
-import { translateShape, collectConnectedShapes } from "../sketchGeometry.js";
+import {
+  translateShape,
+  rotateShape,
+  collectConnectedShapes,
+} from "../sketchGeometry.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
@@ -172,6 +176,7 @@ export function createSketchInteraction(
     showDragIndicator,
     hasSketchSelectionOverlay,
     hasMultiSelectOverlays,
+    getRotationHandle,
   } = createSketchSelectionOverlays({
     scene,
     renderer,
@@ -479,6 +484,65 @@ export function createSketchInteraction(
     let localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
     if (!localPt) return;
 
+    // ── Rotation drag: rotate the selection about its centre ────────────────
+    if (kind === "rotate") {
+      const { indices, origShapes, center } = sketchDrag;
+      let angle =
+        Math.atan2(localPt.y - center.y, localPt.x - center.x) -
+        sketchDrag.startAngle;
+      const snapCfg = useStore.getState();
+      if (snapCfg.snapEnabled && snapCfg.snapAngleDeg > 0) {
+        const step = (snapCfg.snapAngleDeg * Math.PI) / 180;
+        angle = Math.round(angle / step) * step;
+      }
+      const pendingShapes = new Map();
+      indices.forEach((idx, i) => {
+        const r = rotateShape(origShapes[i], center.x, center.y, angle);
+        if (r) pendingShapes.set(idx, r);
+      });
+      sketchDrag.pendingShapes = pendingShapes;
+      // Propagate from the rotated shapes (kept as preSeeded) so constraints to
+      // adjacent geometry stay satisfied — the same path as a multi-shape drag.
+      const primIdx = indices[0];
+      const primShape = pendingShapes.get(primIdx);
+      let allMoved = pendingShapes;
+      if (primShape) {
+        allMoved = propagateConstraints(
+          selItemId,
+          primIdx,
+          primShape,
+          null,
+          new Map(pendingShapes),
+        );
+      }
+      sketchDrag.multiPropagated = allMoved;
+      const sketchGroup = sketchShapesGroupRef?.current;
+      if (sketchGroup) {
+        allMoved.forEach((shape, idx) => {
+          const lineObj = sketchGroup.children.find(
+            (c) => c.userData.shapeIdx === idx && c.geometry?.setPositions,
+          );
+          if (lineObj) updateSketchLineGeo(lineObj, shape, sketchMesh);
+        });
+        const tempShapes = (selItem.shapes || []).slice();
+        allMoved.forEach((s, i) => {
+          tempShapes[i] = s;
+        });
+        rebuildConstraintIconsForDrag(
+          sketchGroup,
+          selItem.constraints || [],
+          tempShapes,
+          sketchMesh,
+          renderer,
+          useStore.getState().dimensionsVisible,
+        );
+        rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
+        reapplyConstraintSelectionVisual();
+      }
+      clearHoverFills();
+      return;
+    }
+
     // ── Multi-shape drag ───────────────────────────────────────────────────
     if (kind === "multi") {
       const { multiIndices, multiOrigShapes } = sketchDrag;
@@ -657,7 +721,7 @@ export function createSketchInteraction(
 
   const commitSketchDrag = () => {
     const store = useStore.getState();
-    if (sketchDrag?.kind === "multi") {
+    if (sketchDrag?.kind === "multi" || sketchDrag?.kind === "rotate") {
       const toSave = sketchDrag.multiPropagated ?? sketchDrag.pendingShapes;
       if (toSave?.size > 0) {
         store.updateSketchShapes(sketchDrag.selItemId, toSave);
@@ -795,6 +859,46 @@ export function createSketchInteraction(
     if (!selItem || !sketchMesh) return false;
     const shapes = selItem.shapes || [];
     clearAllSketchHover();
+
+    // Rotation handle: grab the knob to rotate the whole selection about its
+    // centre.  Hit-test it first — it sits off the geometry, so it can't be
+    // confused with a point/line drag.
+    const rh = getRotationHandle();
+    if (rh) {
+      const gw = new THREE.Vector3(rh.grip.x, rh.grip.y, 0.008)
+        .applyQuaternion(sketchMesh.quaternion)
+        .add(sketchMesh.position)
+        .project(cameraRef.current);
+      const rect = renderer.domElement.getBoundingClientRect();
+      const sx = ((gw.x + 1) / 2) * rect.width + rect.left;
+      const sy = ((-gw.y + 1) / 2) * rect.height + rect.top;
+      if (Math.hypot(screenX - sx, screenY - sy) < 16) {
+        const sel = useStore.getState().selectedSketchElement;
+        const indices =
+          multiSelectedIndices.length > 0
+            ? [...multiSelectedIndices]
+            : sel?.type === "line"
+              ? [sel.shapeIdx]
+              : [];
+        const start = screenToSketchLocal(screenX, screenY, sketchMesh);
+        if (indices.length > 0 && start) {
+          sketchDrag = {
+            kind: "rotate",
+            sketchMesh,
+            selItemId: selItem.id,
+            center: { ...rh.center },
+            indices,
+            origShapes: indices.map((i) => shapes[i]),
+            startAngle: Math.atan2(
+              start.y - rh.center.y,
+              start.x - rh.center.x,
+            ),
+          };
+          renderer.domElement.style.cursor = "grabbing";
+          return true;
+        }
+      }
+    }
 
     // Point drag — check snap points first (higher priority, smaller target).
     if (!shiftKey) {

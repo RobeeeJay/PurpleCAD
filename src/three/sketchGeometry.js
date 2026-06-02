@@ -168,6 +168,58 @@ export function translateShape(shape, dx, dy) {
   }
 }
 
+// Rotate every defining point of a shape about (cx, cy) by `angle` radians.
+// Rects are returned unchanged (they can't represent a non-axis-aligned box).
+export function rotateShape(shape, cx, cy, angle) {
+  const ca = Math.cos(angle),
+    sa = Math.sin(angle);
+  const rot = (x, y) => {
+    const dx = x - cx,
+      dy = y - cy;
+    return { x: cx + dx * ca - dy * sa, y: cy + dx * sa + dy * ca };
+  };
+  switch (shape.type) {
+    case "line": {
+      const a = rot(shape.x1, shape.y1);
+      const b = rot(shape.x2, shape.y2);
+      return { ...shape, x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+    }
+    case "circle": {
+      const c = rot(shape.cx, shape.cy);
+      return { ...shape, cx: c.x, cy: c.y };
+    }
+    case "ellipse": {
+      const c = rot(shape.cx, shape.cy);
+      return {
+        ...shape,
+        cx: c.x,
+        cy: c.y,
+        rotation: (shape.rotation || 0) + angle,
+      };
+    }
+    case "arc": {
+      const c = rot(shape.cx, shape.cy);
+      return {
+        ...shape,
+        cx: c.x,
+        cy: c.y,
+        startAngle: shape.startAngle + angle,
+        endAngle: shape.endAngle + angle,
+      };
+    }
+    case "bezier":
+      return {
+        ...shape,
+        p0: rot(shape.p0.x, shape.p0.y),
+        p1: rot(shape.p1.x, shape.p1.y),
+        p2: rot(shape.p2.x, shape.p2.y),
+        p3: rot(shape.p3.x, shape.p3.y),
+      };
+    default:
+      return { ...shape };
+  }
+}
+
 // BFS over coincident constraints to collect every shape index reachable from
 // startIdx (a connected cluster of joined shapes).
 export function collectConnectedShapes(startIdx, shapes, constraints) {
