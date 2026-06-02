@@ -360,10 +360,24 @@ export function createSketchSelectionOverlays({
   };
 
   // Build the rotation handle around the bbox of the given selected shapes.
-  // The handle is always offered; orientation-locking constraints (H/V, angle)
-  // restrict the rotation at drag time (the locked lines won't tilt) rather than
-  // hiding the affordance.
+  // Suppressed when the selection is orientation-locked: a horizontal/vertical
+  // or angle constraint on a selected shape makes rotation impossible without
+  // breaking a constraint, so no handle is offered (the geometry can't rotate).
   const buildRotationHandleFor = (shapes, indices, sketchMesh) => {
+    const state = useStore.getState();
+    const selItem = state.items.find((i) => i.id === selectedIdRef.current);
+    const idxSet = new Set(indices);
+    const locked = (selItem?.constraints || []).some(
+      (c) =>
+        ((c.type === "horizontal" || c.type === "vertical") &&
+          idxSet.has(c.shapeIdx)) ||
+        (c.type === "angle" &&
+          (idxSet.has(c.shapeAIdx) || idxSet.has(c.shapeBIdx))),
+    );
+    if (locked) {
+      clearRotationHandle();
+      return;
+    }
     const pts = [];
     indices.forEach((idx) => {
       for (const p of localExtentPoints(shapes[idx])) pts.push(p);

@@ -499,10 +499,7 @@ export function createSketchInteraction(
       }
       const pendingShapes = new Map();
       indices.forEach((idx, i) => {
-        let r = rotateShape(origShapes[i], center.x, center.y, angle);
-        // Re-apply any H/V constraint so a locked line stays axis-aligned —
-        // rotation is restricted by the constraint instead of breaking it.
-        if (r) r = applyHVEnforcement(r, null, selItem.constraints || [], idx);
+        const r = rotateShape(origShapes[i], center.x, center.y, angle);
         if (r) pendingShapes.set(idx, r);
       });
       sketchDrag.pendingShapes = pendingShapes;
