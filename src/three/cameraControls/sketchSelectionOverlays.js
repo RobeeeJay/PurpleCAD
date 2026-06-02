@@ -152,6 +152,7 @@ export function createSketchSelectionOverlays({
       const line = new Line2(geo, mat);
       line.computeLineDistances();
       line.renderOrder = 1005;
+      line.userData.shapeIdx = idx;
       scene.add(line);
       multiSelectOverlays.push(line);
     });
@@ -265,14 +266,48 @@ export function createSketchSelectionOverlays({
 
   const getRotationHandle = () => rotationHandle;
 
-  // Hide the static selection overlays (multi-select highlights, green line/point,
-  // rotation handle) during a drag so they don't ghost at the pre-drag position
-  // while the live geometry moves.  The next selection rebuilds them.
-  const setSelectionVisualsVisible = (visible) => {
-    multiSelectOverlays.forEach((o) => (o.visible = visible));
-    if (sketchSelectionOverlay) sketchSelectionOverlay.visible = visible;
-    if (rotationHandle)
-      rotationHandle.objects.forEach((o) => (o.visible = visible));
+  // Move the static selection overlays (multi-select highlights, green line,
+  // rotation handle) to follow the live drag geometry instead of ghosting at the
+  // pre-drag position.  `shapes` is the in-flight (un-committed) shapes array.
+  // rebuildHandle=false keeps the rotation pivot put during a rotation drag.
+  const updateSelectionForDrag = (shapes, sketchMesh, rebuildHandle) => {
+    const toPos = (s) => {
+      const pts = getSketchShapePoints(s, sketchMesh);
+      return pts.length >= 2 ? pts.flatMap((p) => [p.x, p.y, p.z]) : null;
+    };
+    multiSelectOverlays.forEach((o) => {
+      const s = shapes[o.userData.shapeIdx];
+      if (!s || !o.geometry?.setPositions) return;
+      const pos = toPos(s);
+      if (pos) {
+        o.geometry.setPositions(pos);
+        o.computeLineDistances?.();
+      }
+    });
+    const sel = useStore.getState().selectedSketchElement;
+    if (
+      sketchSelectionOverlay?.geometry?.setPositions &&
+      sel?.type === "line" &&
+      shapes[sel.shapeIdx]
+    ) {
+      const pos = toPos(shapes[sel.shapeIdx]);
+      if (pos) {
+        sketchSelectionOverlay.geometry.setPositions(pos);
+        sketchSelectionOverlay.computeLineDistances?.();
+      }
+    }
+    if (rebuildHandle) {
+      const indices = multiSelectOverlays
+        .map((o) => o.userData.shapeIdx)
+        .filter((i) => i != null);
+      const rotIdx =
+        indices.length > 0
+          ? indices
+          : sel?.type === "line"
+            ? [sel.shapeIdx]
+            : [];
+      if (rotIdx.length > 0) buildRotationHandleFor(shapes, rotIdx, sketchMesh);
+    }
   };
 
   // Local-space points that bound a shape, for the rotation pivot + extent.
@@ -335,7 +370,7 @@ export function createSketchSelectionOverlays({
     showRotationHandle,
     clearRotationHandle,
     getRotationHandle,
-    setSelectionVisualsVisible,
+    updateSelectionForDrag,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,
     makeRingOverlay,

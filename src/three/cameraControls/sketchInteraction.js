@@ -177,7 +177,7 @@ export function createSketchInteraction(
     hasSketchSelectionOverlay,
     hasMultiSelectOverlays,
     getRotationHandle,
-    setSelectionVisualsVisible,
+    updateSelectionForDrag,
   } = createSketchSelectionOverlays({
     scene,
     renderer,
@@ -481,9 +481,6 @@ export function createSketchInteraction(
     const { kind, sketchMesh, selItemId, anchorLocal } = sketchDrag;
     const selItem = itemsRef.current.find((i) => i.id === selItemId);
     if (!selItem) return;
-    // Hide the static selection overlays so they don't ghost while the live
-    // geometry moves under the drag.
-    setSelectionVisualsVisible(false);
 
     let localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
     if (!localPt) return;
@@ -545,6 +542,8 @@ export function createSketchInteraction(
         );
         rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
         reapplyConstraintSelectionVisual();
+        // Highlights follow the rotation; keep the pivot put (rebuildHandle=false).
+        updateSelectionForDrag(tempShapes, sketchMesh, false);
       }
       clearHoverFills();
       return;
@@ -605,6 +604,7 @@ export function createSketchInteraction(
         );
         rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
         reapplyConstraintSelectionVisual();
+        updateSelectionForDrag(tempShapes, sketchMesh, true);
       }
       clearHoverFills();
       return;
@@ -722,6 +722,7 @@ export function createSketchInteraction(
         renderer,
       );
       rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
+      updateSelectionForDrag(tempShapes, sketchMesh, true);
     }
     clearHoverFills();
   };
