@@ -112,12 +112,7 @@ export function createSketchSelectionOverlays({
       (i) => i.id === selectedIdRef.current,
     );
     if (selItem)
-      buildRotationHandleFor(
-        selItem.shapes || [],
-        selItem.constraints,
-        [shapeIdx],
-        sketchMesh,
-      );
+      buildRotationHandleFor(selItem.shapes || [], [shapeIdx], sketchMesh);
   };
 
   const clearMultiSelectOverlays = () => {
@@ -140,7 +135,7 @@ export function createSketchSelectionOverlays({
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     const shapes = selItem.shapes || [];
-    buildRotationHandleFor(shapes, selItem.constraints, indices, sketchMesh);
+    buildRotationHandleFor(shapes, indices, sketchMesh);
     indices.forEach((idx) => {
       const shape = shapes[idx];
       if (!shape) return;
@@ -270,6 +265,16 @@ export function createSketchSelectionOverlays({
 
   const getRotationHandle = () => rotationHandle;
 
+  // Hide the static selection overlays (multi-select highlights, green line/point,
+  // rotation handle) during a drag so they don't ghost at the pre-drag position
+  // while the live geometry moves.  The next selection rebuilds them.
+  const setSelectionVisualsVisible = (visible) => {
+    multiSelectOverlays.forEach((o) => (o.visible = visible));
+    if (sketchSelectionOverlay) sketchSelectionOverlay.visible = visible;
+    if (rotationHandle)
+      rotationHandle.objects.forEach((o) => (o.visible = visible));
+  };
+
   // Local-space points that bound a shape, for the rotation pivot + extent.
   const localExtentPoints = (s) => {
     if (!s) return [];
@@ -296,21 +301,10 @@ export function createSketchSelectionOverlays({
   };
 
   // Build the rotation handle around the bbox of the given selected shapes.
-  // Restriction: a selection that includes a horizontal/vertical or angle
-  // constraint can't be rotated without violating it, so no handle is shown.
-  const buildRotationHandleFor = (shapes, constraints, indices, sketchMesh) => {
-    const idxSet = new Set(indices);
-    const orientationLocked = (constraints || []).some(
-      (c) =>
-        ((c.type === "horizontal" || c.type === "vertical") &&
-          idxSet.has(c.shapeIdx)) ||
-        (c.type === "angle" &&
-          (idxSet.has(c.shapeAIdx) || idxSet.has(c.shapeBIdx))),
-    );
-    if (orientationLocked) {
-      clearRotationHandle();
-      return;
-    }
+  // The handle is always offered; orientation-locking constraints (H/V, angle)
+  // restrict the rotation at drag time (the locked lines won't tilt) rather than
+  // hiding the affordance.
+  const buildRotationHandleFor = (shapes, indices, sketchMesh) => {
     const pts = [];
     indices.forEach((idx) => {
       for (const p of localExtentPoints(shapes[idx])) pts.push(p);
@@ -341,6 +335,7 @@ export function createSketchSelectionOverlays({
     showRotationHandle,
     clearRotationHandle,
     getRotationHandle,
+    setSelectionVisualsVisible,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,
     makeRingOverlay,

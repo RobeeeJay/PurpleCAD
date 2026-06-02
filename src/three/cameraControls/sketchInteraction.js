@@ -177,6 +177,7 @@ export function createSketchInteraction(
     hasSketchSelectionOverlay,
     hasMultiSelectOverlays,
     getRotationHandle,
+    setSelectionVisualsVisible,
   } = createSketchSelectionOverlays({
     scene,
     renderer,
@@ -480,6 +481,9 @@ export function createSketchInteraction(
     const { kind, sketchMesh, selItemId, anchorLocal } = sketchDrag;
     const selItem = itemsRef.current.find((i) => i.id === selItemId);
     if (!selItem) return;
+    // Hide the static selection overlays so they don't ghost while the live
+    // geometry moves under the drag.
+    setSelectionVisualsVisible(false);
 
     let localPt = screenToSketchLocal(screenX, screenY, sketchMesh);
     if (!localPt) return;
@@ -497,7 +501,10 @@ export function createSketchInteraction(
       }
       const pendingShapes = new Map();
       indices.forEach((idx, i) => {
-        const r = rotateShape(origShapes[i], center.x, center.y, angle);
+        let r = rotateShape(origShapes[i], center.x, center.y, angle);
+        // Re-apply any H/V constraint so a locked line stays axis-aligned —
+        // rotation is restricted by the constraint instead of breaking it.
+        if (r) r = applyHVEnforcement(r, null, selItem.constraints || [], idx);
         if (r) pendingShapes.set(idx, r);
       });
       sketchDrag.pendingShapes = pendingShapes;
