@@ -15,6 +15,7 @@ import {
   getSketchShapePoints,
   getSnapPoints,
   getShapeLength,
+  getShapePoint,
   moveShapePoint,
   rebuildConstraintIconsForDrag,
   rebuildPointDotsForDrag,
@@ -446,6 +447,12 @@ export function createSketchInteraction(
     );
   };
 
+  const mapToArray = (map) => {
+    const a = [];
+    map.forEach((s, i) => (a[i] = s));
+    return a;
+  };
+
   // Drag propagation via the full numerical solver: the dragged point(s) are
   // pinned at their target and the whole constraint system is solved around
   // them.  Handles coupled cases the propagation rules can't (e.g. dragging a
@@ -453,20 +460,31 @@ export function createSketchInteraction(
   // Map<idx, shape> of the solved geometry.  `placed` is a Map<idx, shape> of
   // shapes whose listed point(s) are explicitly placed (pinned); `pointKeys` is
   // a Map<idx, pointKey|null> — null pins the whole shape (a rigid translate).
-  const solveDrag = (selItemId, placed, pointKeys) => {
+  // `warm` (an array of the previous frame's solved shapes) is the starting
+  // configuration: solving incrementally from it keeps each drag frame cheap.
+  const solveDrag = (selItemId, placed, pointKeys, warm) => {
     const selItem = itemsRef.current.find((i) => i.id === selItemId);
     if (!selItem) return placed;
-    const input = (selItem.shapes || []).slice();
+    const warmed = warm && warm.length > 0;
+    const input = (warmed ? warm : selItem.shapes || []).slice();
     const fixed = new Set();
     for (const [idx, s] of placed) {
-      input[idx] = s;
       const key = pointKeys.get(idx);
-      const fields = key ? fieldsForPoint(s, key) : varFields(s);
-      for (const f of fields) fixed.add(`${idx}:${f}`);
+      if (key) {
+        // Pin only the placed point; the rest of this shape keeps its warm
+        // position so the solve stays incremental.
+        const target = getShapePoint(s, key);
+        input[idx] =
+          target && input[idx] ? moveShapePoint(input[idx], key, target) : s;
+        for (const f of fieldsForPoint(s, key)) fixed.add(`${idx}:${f}`);
+      } else {
+        input[idx] = s; // whole shape placed (rigid translate / rotate)
+        for (const f of varFields(s)) fixed.add(`${idx}:${f}`);
+      }
     }
     const { shapes } = solveConstraints(input, selItem.constraints || [], {
       fixed,
-      maxIter: 60,
+      maxIter: warmed ? 30 : 60,
     });
     const out = new Map();
     shapes.forEach((s, i) => out.set(i, s));
@@ -535,20 +553,17 @@ export function createSketchInteraction(
         if (r) pendingShapes.set(idx, r);
       });
       sketchDrag.pendingShapes = pendingShapes;
-      // Propagate from the rotated shapes (kept as preSeeded) so constraints to
-      // adjacent geometry stay satisfied — the same path as a multi-shape drag.
-      const primIdx = indices[0];
-      const primShape = pendingShapes.get(primIdx);
-      let allMoved = pendingShapes;
-      if (primShape) {
-        allMoved = propagateConstraints(
-          selItemId,
-          primIdx,
-          primShape,
-          null,
-          new Map(pendingShapes),
-        );
-      }
+      // Pin the rotated shapes and solve the rest of the system around them, so
+      // any geometry connected to the selection (but not selected) follows.
+      const rotKeys = new Map();
+      for (const idx of pendingShapes.keys()) rotKeys.set(idx, null);
+      const allMoved = solveDrag(
+        selItemId,
+        new Map(pendingShapes),
+        rotKeys,
+        sketchDrag.solverWarm,
+      );
+      sketchDrag.solverWarm = mapToArray(allMoved);
       sketchDrag.multiPropagated = allMoved;
       const sketchGroup = sketchShapesGroupRef?.current;
       if (sketchGroup) {
@@ -602,7 +617,13 @@ export function createSketchInteraction(
       // Pin the whole moved group and solve the rest of the system around it.
       const multiKeys = new Map();
       for (const idx of pendingShapes.keys()) multiKeys.set(idx, null);
-      const allMoved = solveDrag(selItemId, new Map(pendingShapes), multiKeys);
+      const allMoved = solveDrag(
+        selItemId,
+        new Map(pendingShapes),
+        multiKeys,
+        sketchDrag.solverWarm,
+      );
+      sketchDrag.solverWarm = mapToArray(allMoved);
       sketchDrag.multiPropagated = allMoved;
       const sketchGroup = sketchShapesGroupRef?.current;
       if (sketchGroup) {
@@ -727,7 +748,13 @@ export function createSketchInteraction(
       placed.set(shapeIdx, newShape);
       pointKeys.set(shapeIdx, draggedPointKey);
     }
-    const propagated = solveDrag(selItemId, placed, pointKeys);
+    const propagated = solveDrag(
+      selItemId,
+      placed,
+      pointKeys,
+      sketchDrag.solverWarm,
+    );
+    sketchDrag.solverWarm = mapToArray(propagated);
     sketchDrag.pendingShape = newShape;
     sketchDrag.propagatedShapes = propagated;
 
