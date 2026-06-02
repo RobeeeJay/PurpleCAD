@@ -15,6 +15,10 @@ import {
   getShapePoint,
   moveShapePoint,
 } from "../../three/sceneObjects.js";
+import {
+  enforceConstraints,
+  allConstraintsSatisfied,
+} from "../../three/sketchConstraints.js";
 
 export default function SketchOverlays({
   // store-derived state
@@ -215,122 +219,74 @@ export default function SketchOverlays({
                   // variables; geometry resolution converts mm → scene units.
                   const formula = raw;
                   const d = mm / MM_PER_UNIT;
-                  if (constraintIdx != null) {
-                    useStore
-                      .getState()
-                      .updateSketchConstraintDistance(
-                        selectedId,
-                        constraintIdx,
-                        formula,
-                      );
-                  } else {
-                    useStore.getState().addSketchConstraints(selectedId, [
-                      {
-                        type: "distance",
-                        shapeAIdx,
-                        pointA,
-                        shapeBIdx,
-                        pointB,
-                        distance: formula,
-                      },
-                    ]);
+                  const store = useStore.getState();
+                  const freshItem = store.items.find(
+                    (i) => i.id === selectedId,
+                  );
+                  const newDistC = {
+                    type: "distance",
+                    shapeAIdx,
+                    pointA,
+                    shapeBIdx,
+                    pointB,
+                    distance: formula,
+                  };
+                  // Resolve the change in-memory FIRST and only commit it if the
+                  // result keeps every constraint satisfied — otherwise the
+                  // transformation is rejected rather than distorting geometry.
+                  const proposed =
+                    constraintIdx != null
+                      ? (freshItem?.constraints || []).map((c, i) =>
+                          i === constraintIdx && c.type === "distance"
+                            ? { ...c, distance: formula }
+                            : c,
+                        )
+                      : [...(freshItem?.constraints || []), newDistC];
+                  const sA = freshItem?.shapes[shapeAIdx];
+                  const sB = freshItem?.shapes[shapeBIdx];
+                  const pA = sA && getShapePoint(sA, pointA);
+                  const pB = sB && getShapePoint(sB, pointB);
+                  let movedSB = null;
+                  if (pA && pB) {
+                    const ddx = pB.x - pA.x,
+                      ddy = pB.y - pA.y;
+                    const cur = Math.hypot(ddx, ddy);
+                    if (cur > 1e-10)
+                      movedSB = moveShapePoint(sB, pointB, {
+                        x: pA.x + (ddx / cur) * d,
+                        y: pA.y + (ddy / cur) * d,
+                      });
                   }
-                  // Enforce the new/changed distance immediately.
-                  // Key: use B (the shape being moved) as the primary, not A.
-                  // Using A as primary causes the coincident BFS to mark B as "updated"
-                  // before the distance enforcement pass runs, which makes it skip.
-                  itemsRef.current = useStore.getState().items;
-                  if (propagateConstraintsRef.current) {
-                    const freshItem = itemsRef.current.find(
-                      (i) => i.id === selectedId,
+                  if (freshItem && movedSB) {
+                    const updatedMap = enforceConstraints(
+                      freshItem.shapes,
+                      proposed,
+                      shapeBIdx,
+                      movedSB,
+                      pointB,
                     );
-                    if (freshItem) {
-                      if (shapeAIdx === shapeBIdx) {
-                        // Same shape: line-length — keep pointA end fixed, slide pointB end.
-                        const shape = freshItem.shapes[shapeAIdx];
-                        if (shape) {
-                          const pA = getShapePoint(shape, pointA);
-                          const pB = getShapePoint(shape, pointB);
-                          if (pA && pB) {
-                            const ddx = pB.x - pA.x,
-                              ddy = pB.y - pA.y;
-                            const curLen = Math.hypot(ddx, ddy);
-                            if (curLen > 1e-10) {
-                              const newEnd = {
-                                x: pA.x + (ddx / curLen) * d,
-                                y: pA.y + (ddy / curLen) * d,
-                              };
-                              const newShape = moveShapePoint(
-                                shape,
-                                pointB,
-                                newEnd,
-                              );
-                              if (newShape) {
-                                const propagated =
-                                  propagateConstraintsRef.current(
-                                    selectedId,
-                                    shapeAIdx,
-                                    newShape,
-                                    pointB,
-                                  );
-                                if (propagated.size > 1)
-                                  useStore
-                                    .getState()
-                                    .updateSketchShapes(selectedId, propagated);
-                                else
-                                  useStore
-                                    .getState()
-                                    .updateSketchShape(
-                                      selectedId,
-                                      shapeAIdx,
-                                      newShape,
-                                    );
-                              }
-                            }
-                          }
-                        }
-                      } else {
-                        // Two shapes: keep A fixed, move B's constrained point to distance d from A.
-                        const sA = freshItem.shapes[shapeAIdx];
-                        const sB = freshItem.shapes[shapeBIdx];
-                        if (sA && sB) {
-                          const pA = getShapePoint(sA, pointA);
-                          const pB = getShapePoint(sB, pointB);
-                          if (pA && pB) {
-                            const ddx = pB.x - pA.x,
-                              ddy = pB.y - pA.y;
-                            const curDist = Math.hypot(ddx, ddy);
-                            if (curDist > 1e-10) {
-                              const newPt = {
-                                x: pA.x + (ddx / curDist) * d,
-                                y: pA.y + (ddy / curDist) * d,
-                              };
-                              const newSB = moveShapePoint(sB, pointB, newPt);
-                              if (newSB) {
-                                const propagated =
-                                  propagateConstraintsRef.current(
-                                    selectedId,
-                                    shapeBIdx,
-                                    newSB,
-                                    pointB,
-                                  );
-                                if (propagated.size > 1)
-                                  useStore
-                                    .getState()
-                                    .updateSketchShapes(selectedId, propagated);
-                                else
-                                  useStore
-                                    .getState()
-                                    .updateSketchShape(
-                                      selectedId,
-                                      shapeBIdx,
-                                      newSB,
-                                    );
-                              }
-                            }
-                          }
-                        }
-                      }
+                    const resultShapes = freshItem.shapes.slice();
+                    for (const [i, s] of updatedMap) resultShapes[i] = s;
+                    if (
+                      allConstraintsSatisfied(
+                        resultShapes,
+                        proposed,
+                        variablesMap,
+                      )
+                    ) {
+                      if (constraintIdx != null)
+                        store.updateSketchConstraintDistance(
+                          selectedId,
+                          constraintIdx,
+                          formula,
+                        );
+                      else store.addSketchConstraints(selectedId, [newDistC]);
+                      store.updateSketchShapes(selectedId, updatedMap);
+                      itemsRef.current = useStore.getState().items;
+                    } else {
+                      store.showNotification(
+                        "Can't apply that dimension — it would break another constraint",
+                      );
                     }
                   }
                 }

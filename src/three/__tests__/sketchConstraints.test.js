@@ -3,6 +3,7 @@ import { getShapePoint, moveShapePoint } from "../sceneObjects.js";
 import {
   enforceConstraints,
   applyHVEnforcement,
+  allConstraintsSatisfied,
   computeChamfer,
   chamferConstraints,
 } from "../sketchConstraints.js";
@@ -213,7 +214,57 @@ function makeRectDiag() {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+describe("allConstraintsSatisfied", () => {
+  const ang90 = (ai, bi) => ({
+    type: "angle",
+    shapeAIdx: ai,
+    pointA: "end",
+    shapeBIdx: bi,
+    pointB: "start",
+    angle: 90,
+  });
+  const squareCs = [
+    coin(0, "end", 1, "start"),
+    coin(1, "end", 2, "start"),
+    coin(2, "end", 3, "start"),
+    coin(3, "end", 0, "start"),
+    ang90(0, 1),
+    ang90(1, 2),
+    ang90(2, 3),
+    ang90(3, 0),
+    fixed(0, "start", 0, "end", 2), // top side length 2
+  ];
+
+  it("accepts a clean rectangle that satisfies all constraints", () => {
+    // 2-wide, 1-tall rectangle: right angles, top length 2, corners joined.
+    const shapes = [L(0, 1, 2, 1), L(2, 1, 2, 0), L(2, 0, 0, 0), L(0, 0, 0, 1)];
+    expect(allConstraintsSatisfied(shapes, squareCs)).toBe(true);
+  });
+
+  it("rejects a distorted result that breaks the angle/coincident constraints", () => {
+    // The kind of distortion the resize used to produce (non-right angles).
+    const shapes = [
+      L(0, 1, 2, 1),
+      L(2, 1, 1, 0),
+      L(1, 0, 0.29, 0.71),
+      L(0.29, 0.71, 0, 1),
+    ];
+    expect(allConstraintsSatisfied(shapes, squareCs)).toBe(false);
+  });
+
+  it("rejects when a length constraint is off", () => {
+    const shapes = [
+      L(0, 1, 2.5, 1), // top length 2.5, but constrained to 2
+      L(2.5, 1, 2.5, 0),
+      L(2.5, 0, 0, 0),
+      L(0, 0, 0, 1),
+    ];
+    expect(allConstraintsSatisfied(shapes, squareCs)).toBe(false);
+  });
+});
+
 describe("enforceConstraints", () => {
+  // ══ TWO-LINE JUNCTION ════════════════════════════════════════════════════
   // ══ TWO-LINE JUNCTION ════════════════════════════════════════════════════
 
   describe("two-line junction (L0.end = L1.start)", () => {

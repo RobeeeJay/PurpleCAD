@@ -65,6 +65,66 @@ export function resolveDistanceConstraints(
   return anyChange ? shapes : null;
 }
 
+// True only if EVERY constraint holds in `shapes` (within tolerance).  Used to
+// validate a proposed transformation: resolve the constraints, then check the
+// result — if any constraint is broken the caller rejects the change rather
+// than committing distorted geometry.
+export function allConstraintsSatisfied(shapes, constraints, variables = null) {
+  const POS_TOL = 1e-3; // scene units
+  const ANG_TOL = 0.05 * (Math.PI / 180); // radians (~0.05°)
+  for (const c of constraints || []) {
+    if (c.type === "coincident") {
+      const a = getShapePoint(shapes[c.shapeAIdx], c.pointA);
+      const b = getShapePoint(shapes[c.shapeBIdx], c.pointB);
+      if (!a || !b || Math.hypot(a.x - b.x, a.y - b.y) > POS_TOL) return false;
+    } else if (c.type === "distance") {
+      const target = resolveConstraintDistance(c, variables);
+      if (!(target > 0)) continue;
+      const a = getShapePoint(shapes[c.shapeAIdx], c.pointA);
+      const b = getShapePoint(shapes[c.shapeBIdx], c.pointB);
+      if (!a || !b) return false;
+      if (Math.abs(Math.hypot(a.x - b.x, a.y - b.y) - target) > POS_TOL)
+        return false;
+    } else if (c.type === "horizontal") {
+      const s = shapes[c.shapeIdx];
+      if (!s || s.type !== "line" || Math.abs(s.y1 - s.y2) > POS_TOL)
+        return false;
+    } else if (c.type === "vertical") {
+      const s = shapes[c.shapeIdx];
+      if (!s || s.type !== "line" || Math.abs(s.x1 - s.x2) > POS_TOL)
+        return false;
+    } else if (c.type === "onLine") {
+      const line = shapes[c.lineShapeIdx];
+      const p = getShapePoint(shapes[c.pointShapeIdx], c.pointKey);
+      if (!line || line.type !== "line" || !p) return false;
+      const dx = line.x2 - line.x1,
+        dy = line.y2 - line.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) return false;
+      // Perpendicular distance to the infinite line.
+      const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
+      if (d > POS_TOL) return false;
+    } else if (c.type === "angle") {
+      const target =
+        typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
+      if (!Number.isFinite(target)) continue;
+      const sA = shapes[c.shapeAIdx],
+        sB = shapes[c.shapeBIdx];
+      if (!sA || sA.type !== "line" || !sB || sB.type !== "line") return false;
+      const P = getShapePoint(sA, c.pointA);
+      const oA = getShapePoint(sA, c.pointA === "start" ? "end" : "start");
+      const oB = getShapePoint(sB, c.pointB === "start" ? "end" : "start");
+      if (!P || !oA || !oB) return false;
+      const fa = Math.atan2(oA.y - P.y, oA.x - P.x);
+      const fb = Math.atan2(oB.y - P.y, oB.x - P.x);
+      let d = Math.abs(fb - fa);
+      while (d > Math.PI) d = Math.abs(d - 2 * Math.PI);
+      if (Math.abs(d - (target * Math.PI) / 180) > ANG_TOL) return false;
+    }
+  }
+  return true;
+}
+
 // All valid endpoint key names across all sketch shape types.
 export const SHAPE_KEYS = [
   "start",
