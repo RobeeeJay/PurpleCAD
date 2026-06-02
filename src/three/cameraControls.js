@@ -604,6 +604,7 @@ export function attachCameraControls(ctx) {
     cameraAnimRef,
     sketchModeRef,
     sketchGridGroupRef,
+    sketchShapesGroupRef,
     objectsRef,
     selectedIdRef,
     axisGroupRef,

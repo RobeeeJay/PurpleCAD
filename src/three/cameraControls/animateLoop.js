@@ -18,6 +18,7 @@ export function createAnimateLoop({
   cameraAnimRef,
   sketchModeRef,
   sketchGridGroupRef,
+  sketchShapesGroupRef,
   objectsRef,
   selectedIdRef,
   axisGroupRef,
@@ -138,6 +139,24 @@ export function createAnimateLoop({
           const b = sp.userData.baseScale;
           sp.scale.set(b.x * s, b.y * s, b.z * s);
         }
+      }
+      // Constraint label sprites (dimension values, angle readouts): keep a
+      // constant on-screen size like the bounding-box labels, so they don't
+      // balloon when zooming in or shrink away when zooming out.  Each caches
+      // its authored scale on first sight so we multiply rather than compound.
+      if (sketchModeRef.current && sketchShapesGroupRef?.current) {
+        const g = sketchShapesGroupRef.current;
+        g.updateWorldMatrix(false, true);
+        g.traverse((o) => {
+          if (!o.isSprite || !o.userData.isConstraintObj) return;
+          if (o.userData.baseScale == null) {
+            o.userData.baseScale = { x: o.scale.x, y: o.scale.y, z: o.scale.z };
+          }
+          const b = o.userData.baseScale;
+          _rulerPos.setFromMatrixPosition(o.matrixWorld);
+          const s = gizmoScale(_rulerPos);
+          o.scale.set(b.x * s, b.y * s, b.z * s);
+        });
       }
       // Ruler labels: keep a constant on-screen size, and reveal/hide the
       // finer tiers by how much world the camera shows.  viewHeight is in
