@@ -101,6 +101,34 @@ describe("solveConstraints", () => {
     expect(sideLen(r[1])).toBeCloseTo(1, 4);
   });
 
+  it("applying a horizontal constraint to a side resolves the angles", () => {
+    // A 30°-rotated angle-square: making one side horizontal must rotate the
+    // whole square axis-aligned while keeping every corner at 90°.
+    const a = Math.PI / 6,
+      ca = Math.cos(a),
+      sa = Math.sin(a);
+    const rot = (x, y) => [x * ca - y * sa, x * sa + y * ca];
+    const base = squareWithAngles();
+    const shapes = base.shapes.map((s) => {
+      const [x1, y1] = rot(s.x1, s.y1);
+      const [x2, y2] = rot(s.x2, s.y2);
+      return L(x1, y1, x2, y2);
+    });
+    const my = (shapes[0].y1 + shapes[0].y2) / 2;
+    shapes[0] = { ...shapes[0], y1: my, y2: my };
+    const constraints = [
+      ...base.constraints,
+      { type: "horizontal", shapeIdx: 0 },
+    ];
+    const { shapes: r, ok } = solveConstraints(shapes, constraints);
+    expect(ok).toBe(true);
+    expect(r[0].y2 - r[0].y1).toBeCloseTo(0, 4); // top is horizontal
+    const dot =
+      (r[0].x2 - r[0].x1) * (r[1].x2 - r[1].x1) +
+      (r[0].y2 - r[0].y1) * (r[1].y2 - r[1].y1);
+    expect(dot).toBeCloseTo(0, 3); // top ⟂ right
+  });
+
   it("reports failure for a contradictory system", () => {
     // The two endpoints are coincident (distance 0) AND constrained to distance
     // 5 — impossible, so the solver must report not-ok.

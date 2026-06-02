@@ -11,7 +11,7 @@ import {
   saveTimeline,
 } from "./internals.js";
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
-import { enforceConstraints } from "../three/sketchConstraints.js";
+import { solveConstraints } from "../three/sketchSolver.js";
 
 export const createSketchSlice = (set) => ({
   ...createSketchUndoSlice(set),
@@ -309,45 +309,43 @@ export const createSketchSlice = (set) => ({
 
   applySketchHVConstraint: (sketchId, shapeIdx, type) =>
     set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const shape = item && (item.shapes || [])[shapeIdx];
+      if (!item || !shape || shape.type !== "line") return {};
+      // Replace any existing H/V on this shape with the requested one.
+      const constraints = [
+        ...(item.constraints || []).filter(
+          (c) =>
+            !(
+              (c.type === "horizontal" || c.type === "vertical") &&
+              c.shapeIdx === shapeIdx
+            ),
+        ),
+        { type, shapeIdx },
+      ];
+      // Pre-level the line as a hint, then numerically solve the WHOLE system so
+      // connected geometry (angles, coincidents, …) is resolved together.  If
+      // the constraint can't be satisfied the whole change is rejected.
+      const my = (shape.y1 + shape.y2) / 2;
+      const mx = (shape.x1 + shape.x2) / 2;
+      const snapped =
+        type === "horizontal"
+          ? { ...shape, y1: my, y2: my }
+          : { ...shape, x1: mx, x2: mx };
+      const inputShapes = (item.shapes || []).slice();
+      inputShapes[shapeIdx] = snapped;
+      const { shapes: solved, ok } = solveConstraints(inputShapes, constraints);
+      if (!ok)
+        return {
+          notification:
+            "Can't apply that constraint — it would break another constraint",
+        };
       pushSketchSnapshot(state, sketchId);
-      const updatedItems = state.items.map((item) => {
-        if (item.id !== sketchId) return item;
-        const shape = (item.shapes || [])[shapeIdx];
-        if (!shape || shape.type !== "line") return item;
-        const mid =
-          type === "horizontal"
-            ? { y: (shape.y1 + shape.y2) / 2 }
-            : { x: (shape.x1 + shape.x2) / 2 };
-        const snapped =
-          type === "horizontal"
-            ? { ...shape, y1: mid.y, y2: mid.y }
-            : { ...shape, x1: mid.x, x2: mid.x };
-        const shapes = (item.shapes || []).map((s, i) =>
-          i === shapeIdx ? snapped : s,
-        );
-        const constraints = [
-          ...(item.constraints || []).filter(
-            (c) =>
-              !(
-                (c.type === "horizontal" || c.type === "vertical") &&
-                c.shapeIdx === shapeIdx
-              ),
-          ),
-          { type, shapeIdx },
-        ];
-        // Snapping the line to H/V moves both its endpoints; propagate so any
-        // geometry coincident/constrained to it follows instead of detaching.
-        const updated = enforceConstraints(
-          shapes,
-          constraints,
-          shapeIdx,
-          snapped,
-          null,
-        );
-        const finalShapes = shapes.slice();
-        for (const [i, s] of updated) finalShapes[i] = s;
-        return Object.assign({}, item, { shapes: finalShapes, constraints });
-      });
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, { shapes: solved, constraints })
+          : it,
+      );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
         if (
