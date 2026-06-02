@@ -19,6 +19,7 @@ import {
   rebuildConstraintIconsForDrag,
   rebuildPointDotsForDrag,
   polyArea,
+  snapUnitToIntervalMm,
 } from "../sceneObjects.js";
 import {
   applyHVEnforcement,
@@ -539,10 +540,23 @@ export function createSketchInteraction(
     }
 
     const { shapeIdx, pointKey, origShape } = sketchDrag;
+    let pointSnapped = false;
     if (!shiftKey) {
       const others = selItem.shapes.filter((_, i) => i !== shapeIdx);
       const snap = findSnap(screenX, screenY, others, sketchMesh);
-      if (snap) localPt = { x: snap.x, y: snap.y };
+      if (snap) {
+        localPt = { x: snap.x, y: snap.y };
+        pointSnapped = true;
+      }
+    }
+    // Snap-to-grid: when enabled and not already snapped to existing geometry,
+    // round the in-plane position to the configured world-space interval.
+    const snapCfg = useStore.getState();
+    if (!pointSnapped && snapCfg.snapEnabled && snapCfg.snapDistanceMm > 0) {
+      localPt = {
+        x: snapUnitToIntervalMm(localPt.x, snapCfg.snapDistanceMm),
+        y: snapUnitToIntervalMm(localPt.y, snapCfg.snapDistanceMm),
+      };
     }
 
     let newShape;

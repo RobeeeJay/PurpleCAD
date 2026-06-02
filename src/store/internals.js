@@ -132,6 +132,42 @@ export const saveVariables = (variables) => {
   }
 };
 
+const SNAP_DEFAULTS = {
+  snapEnabled: false,
+  snapDistanceMm: 5,
+  snapAngleDeg: 9,
+};
+
+export const loadSnapSettings = () => {
+  try {
+    const raw = localStorage.getItem("cad-snap");
+    if (!raw) return { ...SNAP_DEFAULTS };
+    const parsed = JSON.parse(raw);
+    return {
+      snapEnabled: !!parsed.snapEnabled,
+      snapDistanceMm: parsed.snapDistanceMm > 0 ? parsed.snapDistanceMm : 5,
+      snapAngleDeg: parsed.snapAngleDeg > 0 ? parsed.snapAngleDeg : 9,
+    };
+  } catch {
+    return { ...SNAP_DEFAULTS };
+  }
+};
+
+export const saveSnapSettings = (snap) => {
+  try {
+    localStorage.setItem(
+      "cad-snap",
+      JSON.stringify({
+        snapEnabled: snap.snapEnabled,
+        snapDistanceMm: snap.snapDistanceMm,
+        snapAngleDeg: snap.snapAngleDeg,
+      }),
+    );
+  } catch (e) {
+    console.warn("Failed to save snap settings to localStorage:", e);
+  }
+};
+
 export const loadVariables = () => {
   try {
     const raw = localStorage.getItem("cad-variables");

@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import {
   MM_PER_UNIT,
+  snapUnitToIntervalMm,
   getMeshDimensions,
   getMeshBBoxCenter,
   redrawDimSprite,
@@ -127,6 +128,7 @@ export function createTransformHandleDrag({
       const rect = renderer.domElement.getBoundingClientRect();
       const dxPx = e.clientX - drag.startMouseX;
       const dyPx = e.clientY - drag.startMouseY;
+      const { snapEnabled, snapDistanceMm, snapAngleDeg } = useStore.getState();
 
       if (drag.handleType.startsWith("rot")) {
         // See cameraControls/rotationHandle.js for the per-axis sign
@@ -134,10 +136,13 @@ export function createTransformHandleDrag({
         // represents (premultiplied with the orientation captured at
         // drag start) so each handle stays decoupled from any other
         // axis the object is already rotated on.
+        const snapRad =
+          snapEnabled && snapAngleDeg > 0 ? (snapAngleDeg * Math.PI) / 180 : 0;
         const newQuat = rotationQuaternionForDrag(
           drag.handleType,
           drag.startParentQuaternion,
           dxPx,
+          snapRad,
         );
         if (newQuat) mesh.quaternion.copy(newQuat);
         const bb = boundingBoxRef.current;
@@ -173,6 +178,22 @@ export function createTransformHandleDrag({
         mesh.position
           .copy(drag.startPos)
           .addScaledVector(drag.dir, projected * drag.worldPerNDC);
+
+        // Snap the moved world coordinate(s) to the interval.  The translate
+        // handles are world-axis aligned, so snap each axis the handle drives.
+        if (snapEnabled && snapDistanceMm > 0) {
+          for (let a = 0; a < 3; a++) {
+            if (Math.abs(drag.dir.getComponent(a)) > 0.5) {
+              mesh.position.setComponent(
+                a,
+                snapUnitToIntervalMm(
+                  mesh.position.getComponent(a),
+                  snapDistanceMm,
+                ),
+              );
+            }
+          }
+        }
 
         if (drag.startDescendantPositions) {
           const delta = new THREE.Vector3().subVectors(

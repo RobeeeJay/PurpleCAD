@@ -7,6 +7,7 @@
 
 export {
   MM_PER_UNIT,
+  snapUnitToIntervalMm,
   DISPLAY_PRECISION_MM,
   HANDLE_CONFIGS,
   fullCircleSegments,

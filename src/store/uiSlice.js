@@ -3,7 +3,11 @@
 // Nothing here touches history or persistence — these are all
 // runtime-only setters.
 
-import { getSystemTheme } from "./internals.js";
+import {
+  getSystemTheme,
+  loadSnapSettings,
+  saveSnapSettings,
+} from "./internals.js";
 
 export const uiInitial = {
   selectedId: null,
@@ -73,6 +77,12 @@ export const uiInitial = {
   // Transient message shown as a centered overlay (auto-dismissed by the
   // consumer component after a short delay).  null = nothing visible.
   notification: null,
+
+  // Snap-to-grid: when enabled, dragged/moved objects (3D gizmo translate and
+  // sketch drags) snap to snapDistanceMm in world space, and gizmo rotations
+  // snap to snapAngleDeg.  Persisted to localStorage so the user's interval
+  // survives a reload.
+  ...loadSnapSettings(),
 };
 
 export const createUiSlice = (set) => ({
@@ -145,4 +155,25 @@ export const createUiSlice = (set) => ({
 
   showNotification: (message) => set({ notification: message }),
   clearNotification: () => set({ notification: null }),
+
+  toggleSnap: () =>
+    set((state) => {
+      const next = { ...state, snapEnabled: !state.snapEnabled };
+      saveSnapSettings(next);
+      return { snapEnabled: next.snapEnabled };
+    }),
+  setSnapDistanceMm: (v) =>
+    set((state) => {
+      const n = Number(v);
+      const snapDistanceMm = Number.isFinite(n) && n > 0 ? n : 5;
+      saveSnapSettings({ ...state, snapDistanceMm });
+      return { snapDistanceMm };
+    }),
+  setSnapAngleDeg: (v) =>
+    set((state) => {
+      const n = Number(v);
+      const snapAngleDeg = Number.isFinite(n) && n > 0 ? n : 9;
+      saveSnapSettings({ ...state, snapAngleDeg });
+      return { snapAngleDeg };
+    }),
 });

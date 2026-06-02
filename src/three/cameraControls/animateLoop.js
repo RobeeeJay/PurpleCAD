@@ -147,7 +147,7 @@ export function createAnimateLoop({
       // that anchor.  The dimension/leader LINES are left alone so they keep
       // spanning the measured geometry.  CONSTRAINT_LABEL_SCALE sets the size.
       if (sketchModeRef.current && sketchShapesGroupRef?.current) {
-        const CONSTRAINT_LABEL_SCALE = 2;
+        const CONSTRAINT_LABEL_SCALE = 1.5;
         const g = sketchShapesGroupRef.current;
         g.updateWorldMatrix(false, true);
         g.traverse((o) => {

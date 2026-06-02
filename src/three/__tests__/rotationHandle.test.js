@@ -43,6 +43,16 @@ describe("rotation-handle drag sign convention", () => {
     expect(delta).toBeCloseTo(-1.0, 6);
   });
 
+  it("snaps the rotation increment to the nearest multiple of snapRad", () => {
+    const step = (9 * Math.PI) / 180; // 9 degrees
+    // rotX raw delta for 100px is 1.0 rad ≈ 57.3° → snaps to 54° (6 steps).
+    const snapped = rotationDeltaFromDrag("rotX", 100, step);
+    expect(snapped).toBeCloseTo(6 * step, 6);
+    // A tiny drag (0.3 rad) snaps toward the nearest step, not 0 here (2 steps).
+    const small = rotationDeltaFromDrag("rotX", 30, step);
+    expect(small).toBeCloseTo(Math.round(0.3 / step) * step, 6);
+  });
+
   // The three checks below pin down "drag right" as a CONSISTENT
   // clockwise rotation from the natural viewing direction of each
   // axis.  rotX/rotZ were already correct in the existing UX;

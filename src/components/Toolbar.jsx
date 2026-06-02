@@ -12,6 +12,7 @@ import ModifySection from "./toolbar/ModifySection";
 import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
 import OptionsSection from "./toolbar/OptionsSection";
+import SnapSection from "./toolbar/SnapSection";
 
 const Toolbar = () => {
   const selectedId = useStore((s) => s.selectedId);
@@ -31,6 +32,7 @@ const Toolbar = () => {
       <ConstrainSection isSketchMode={isSketchMode} />
       <RenderSection />
       <OptionsSection />
+      <SnapSection />
     </div>
   );
 };

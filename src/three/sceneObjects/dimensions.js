@@ -7,6 +7,14 @@ import * as THREE from "three";
 
 export const MM_PER_UNIT = 10;
 
+// Snap a scene-unit coordinate to the nearest multiple of `intervalMm`
+// (converted to scene units).  Used by the snap-to-grid drag option.
+export function snapUnitToIntervalMm(value, intervalMm) {
+  if (!(intervalMm > 0)) return value;
+  const step = intervalMm / MM_PER_UNIT;
+  return Math.round(value / step) * step;
+}
+
 // Display-quality precision for wireframe & selection overlays.  The
 // smooth shader render is analytic (perfectly smooth), so wireframe /
 // hover / selection should ALWAYS look smooth to match — independently

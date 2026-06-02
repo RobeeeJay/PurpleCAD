@@ -28,19 +28,27 @@ export function rotationAxisForHandle(handleType) {
 
 export const ROTATION_PIXELS_TO_RADIANS = 0.01;
 
-export function rotationDeltaFromDrag(handleType, dxPx) {
+// snapRad > 0 snaps the drag's rotation increment to the nearest multiple
+// (the snap-to-grid angle), so the object rotates in fixed steps.
+export function rotationDeltaFromDrag(handleType, dxPx, snapRad = 0) {
   const sign = rotationSignForHandle(handleType);
-  return sign * dxPx * ROTATION_PIXELS_TO_RADIANS;
+  const raw = sign * dxPx * ROTATION_PIXELS_TO_RADIANS;
+  return snapRad > 0 ? Math.round(raw / snapRad) * snapRad : raw;
 }
 
 // Compose a new world quaternion for the dragged mesh: the delta
 // rotation about the handle's world axis premultiplied with the
 // orientation captured when the drag began.  Returns null for an
 // unknown handle.
-export function rotationQuaternionForDrag(handleType, startQuat, dxPx) {
+export function rotationQuaternionForDrag(
+  handleType,
+  startQuat,
+  dxPx,
+  snapRad = 0,
+) {
   const axis = rotationAxisForHandle(handleType);
   if (!axis) return null;
-  const delta = rotationDeltaFromDrag(handleType, dxPx);
+  const delta = rotationDeltaFromDrag(handleType, dxPx, snapRad);
   const dq = new THREE.Quaternion().setFromAxisAngle(axis, delta);
   return new THREE.Quaternion().copy(startQuat).premultiply(dq);
 }
