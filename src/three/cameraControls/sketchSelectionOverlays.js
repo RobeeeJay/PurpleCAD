@@ -266,6 +266,30 @@ export function createSketchSelectionOverlays({
 
   const getRotationHandle = () => rotationHandle;
 
+  // Rebuild the rotation handle from the CURRENT store selection + committed
+  // shapes — used after a drag commits so the handle sits correctly on the
+  // settled geometry (read from the store, since itemsRef hasn't re-synced yet).
+  const refreshRotationHandle = () => {
+    const state = useStore.getState();
+    const selItem = state.items.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) {
+      clearRotationHandle();
+      return;
+    }
+    const multiIdx = state.sketchMultiSelectedIndices || [];
+    const sel = state.selectedSketchElement;
+    const indices =
+      multiIdx.length > 0
+        ? multiIdx
+        : sel?.type === "line"
+          ? [sel.shapeIdx]
+          : [];
+    if (indices.length > 0)
+      buildRotationHandleFor(selItem.shapes || [], indices, sketchMesh);
+    else clearRotationHandle();
+  };
+
   // Move the static selection overlays (multi-select highlights, green line,
   // rotation handle) to follow the live drag geometry instead of ghosting at the
   // pre-drag position.  `shapes` is the in-flight (un-committed) shapes array.
@@ -370,6 +394,7 @@ export function createSketchSelectionOverlays({
     showRotationHandle,
     clearRotationHandle,
     getRotationHandle,
+    refreshRotationHandle,
     updateSelectionForDrag,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,

@@ -177,6 +177,7 @@ export function createSketchInteraction(
     hasSketchSelectionOverlay,
     hasMultiSelectOverlays,
     getRotationHandle,
+    refreshRotationHandle,
     updateSelectionForDrag,
   } = createSketchSelectionOverlays({
     scene,
@@ -734,7 +735,9 @@ export function createSketchInteraction(
       if (toSave?.size > 0) {
         store.updateSketchShapes(sketchDrag.selItemId, toSave);
       }
-      clearSketchSelectionOverlay();
+      // Keep the (live-positioned) selection highlights; just re-seat the
+      // rotation handle on the settled geometry so the selection persists.
+      refreshRotationHandle();
       clearCoincidentFirstOverlay();
       return;
     }
@@ -745,7 +748,7 @@ export function createSketchInteraction(
     } else {
       store.updateSketchShape(selItemId, shapeIdx, pendingShape);
     }
-    clearSketchSelectionOverlay();
+    refreshRotationHandle();
     clearCoincidentFirstOverlay();
   };
 
