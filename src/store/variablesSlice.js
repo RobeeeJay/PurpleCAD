@@ -7,8 +7,19 @@
 // rewrites the CREATE history entry for each touched sketch so the new
 // shape positions survive reload + replay.
 
-import { resolveDistanceConstraints } from "../three/sketchConstraints.js";
+import { solveConstraints, varFields } from "../three/sketchSolver.js";
 import { variablesToMap } from "../utils/formulas.js";
+
+// Whether two shape arrays differ beyond floating-point noise.
+const shapesDiffer = (a, b) => {
+  if (!a || !b || a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    for (const f of varFields(a[i])) {
+      if (Math.abs((a[i][f] ?? 0) - (b[i][f] ?? 0)) > 1e-6) return true;
+    }
+  }
+  return false;
+};
 import {
   loadVariables,
   saveVariables,
@@ -33,14 +44,21 @@ export const createVariablesSlice = (set) => ({
       // store, which still holds the old variables until this set()
       // returns.
       const newVarsMap = variablesToMap(variables);
+      let anyFailed = false;
       const updatedItems = state.items.map((item) => {
         if (item.type === "sketch" && item.constraints?.length) {
-          const newShapes = resolveDistanceConstraints(
-            item.shapes || [],
+          // Numerically re-solve the WHOLE sketch with the new variable values
+          // so every constraint (angles, coincidents, …) is respected.  Leave
+          // the sketch untouched if the new value can't be satisfied.
+          const orig = item.shapes || [];
+          const { shapes: solved, ok } = solveConstraints(
+            orig,
             item.constraints,
-            newVarsMap,
+            { variables: newVarsMap },
           );
-          if (newShapes) return { ...item, shapes: newShapes };
+          if (ok && shapesDiffer(orig, solved))
+            return { ...item, shapes: solved };
+          if (!ok) anyFailed = true;
           return item;
         }
         // Booleans and chamfers cache their tessellated `geometryData`
@@ -92,6 +110,12 @@ export const createVariablesSlice = (set) => ({
           changedSketchIds.length > 0
             ? withOrphanFlags(newHistory)
             : state.history,
+        ...(anyFailed
+          ? {
+              notification:
+                "Some sketch dimensions couldn't update to the new value without breaking a constraint",
+            }
+          : {}),
       };
     }),
 });
