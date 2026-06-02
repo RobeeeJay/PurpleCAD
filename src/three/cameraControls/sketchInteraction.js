@@ -1281,7 +1281,10 @@ export function createSketchInteraction(
       trySelectSketchElement(sx, sy);
     };
     if (sketchDrag) {
-      const wasDrag = !!sketchDrag.pendingShape;
+      // Single drags stamp pendingShape; multi / rotate drags stamp
+      // pendingShapes.  Either means a real drag happened (vs a bare click),
+      // so it must commit — otherwise doClick() runs and clears the selection.
+      const wasDrag = !!sketchDrag.pendingShape || !!sketchDrag.pendingShapes;
       if (wasDrag) commitSketchDrag();
       sketchDrag = null;
       clearDragIndicator();
