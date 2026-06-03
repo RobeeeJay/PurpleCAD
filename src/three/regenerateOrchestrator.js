@@ -13,6 +13,11 @@
 // through the worker like the live BevelSection / CombineSection flows.
 
 import { useStore } from "../store";
+import {
+  replayUpTo,
+  saveTimeline,
+  withOrphanFlags,
+} from "../store/internals.js";
 import { regenerateItemsForResolution } from "./regenerateItems.js";
 
 export async function regenerateForResolution(printPrecision) {
@@ -31,32 +36,104 @@ export async function regenerateForResolution(printPrecision) {
   }
 }
 
-// Force every CSG / chamfer regenerator in the current scene to re-run
-// from scratch — used by the Timeline's "Recalculate" button.  The
-// current items array already reflects every create / transform /
-// delete / modify history step (the store's reducers replay history on
-// every mutation), so the only thing that can be stale is the cached
-// `geometryData` on regenerator items.  Clearing both `regeneratedAt`
-// and `geometryData` forces regenerateItemsForResolution to rebuild
-// each one via the OCC worker.
+// Force every CSG / chamfer regenerator to re-run from scratch — used by
+// the Timeline's "Recalculate" button.  This must process the ENTIRE
+// timeline, not just the steps up to the currently-selected entry, so we
+// replay the full history (every create / transform / delete / modify)
+// rather than working off `state.items` (which only reflects the scene up
+// to the active step).  After rebuilding, the recomputed geometry is
+// written back into the history entry that produced each item's final
+// geometry, so navigating the timeline or reloading stays consistent.
 export async function recalculateTimeline() {
   const state = useStore.getState();
-  const dirtied = state.items.map((item) => {
-    if (item.type !== "csg" || !item.regenerator) return item;
-    return {
-      ...item,
-      regenerator: { ...item.regenerator, regeneratedAt: "dirty" },
-      geometryData: null,
-    };
-  });
-  useStore.setState({ items: dirtied });
-  const printPrecision =
-    useStore.getState().curveResolution === "print" ? 0.01 : null;
-  const newItems = await regenerateItemsForResolution(
-    dirtied,
+  const history = state.history;
+  const printPrecision = state.curveResolution === "print" ? 0.01 : null;
+
+  // Replay every entry to get the full final scene, then clear the cached
+  // tessellation so the regen pass rebuilds each regenerator via OCC.
+  const fullItems = replayUpTo(history, history.length - 1).map((item) =>
+    item.type === "csg" && item.regenerator
+      ? {
+          ...item,
+          regenerator: { ...item.regenerator, regeneratedAt: "dirty" },
+          geometryData: null,
+        }
+      : item,
+  );
+
+  const regenerated = await regenerateItemsForResolution(
+    fullItems,
     printPrecision,
     (p) => useStore.getState().setRegenProgress(p),
   );
   useStore.getState().setRegenProgress(null);
-  if (newItems !== dirtied) useStore.setState({ items: newItems });
+
+  // Map each item id to its rebuilt geometry, and find the last history
+  // entry that sets that item's geometry (its create, or the last modify
+  // carrying a geometryData/regenerator patch — e.g. a chamfer).  That
+  // entry is the one whose cache must be refreshed.
+  const regenMap = new Map(regenerated.map((it) => [it.id, it]));
+  const lastGeomEntry = new Map();
+  history.forEach((entry, idx) => {
+    const inst = entry.instruction;
+    if (inst.type === "create" && inst.item?.type === "csg")
+      lastGeomEntry.set(inst.item.id, idx);
+    else if (
+      inst.type === "modify" &&
+      (inst.patches?.geometryData !== undefined ||
+        inst.patches?.regenerator !== undefined)
+    )
+      lastGeomEntry.set(inst.itemId, idx);
+  });
+
+  const newHistory = history.map((entry, idx) => {
+    const inst = entry.instruction;
+    let id = null;
+    if (inst.type === "create" && lastGeomEntry.get(inst.item?.id) === idx)
+      id = inst.item.id;
+    else if (inst.type === "modify" && lastGeomEntry.get(inst.itemId) === idx)
+      id = inst.itemId;
+    const reg = id != null ? regenMap.get(id) : null;
+    // If a regenerator failed it comes back without geometry — keep the
+    // entry's existing cache rather than blanking it out.
+    if (!reg || !reg.geometryData) return entry;
+    if (inst.type === "create")
+      return {
+        ...entry,
+        instruction: {
+          ...inst,
+          item: {
+            ...inst.item,
+            position: reg.position,
+            regenerator: reg.regenerator,
+            geometryData: reg.geometryData,
+          },
+        },
+      };
+    return {
+      ...entry,
+      instruction: {
+        ...inst,
+        patches: {
+          ...inst.patches,
+          position: reg.position,
+          regenerator: reg.regenerator,
+          geometryData: reg.geometryData,
+        },
+      },
+    };
+  });
+
+  // Re-derive the visible scene from the refreshed history at whatever
+  // step the user is currently parked on.
+  const activeIdx =
+    state.activeHistoryId !== null
+      ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+      : newHistory.length - 1;
+  const items = replayUpTo(
+    newHistory,
+    activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+  );
+  saveTimeline(newHistory, state.activeHistoryId);
+  useStore.setState({ history: withOrphanFlags(newHistory), items });
 }
