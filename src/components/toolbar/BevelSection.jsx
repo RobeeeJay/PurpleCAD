@@ -3,7 +3,10 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
-import { buildBrushTransform } from "../../three/csgUtils.js";
+import {
+  buildBrushTransform,
+  extrudeWithLivePolygon,
+} from "../../three/csgUtils.js";
 import { chamferOrFilletItem } from "../../three/occClient.js";
 
 const BevelSection = () => {
@@ -100,7 +103,12 @@ const BevelSection = () => {
         // TopoDS_Shape — chamferOrFilletItem then returned null and the
         // chamfer / bevel silently did nothing on any object that had a
         // boolean operation applied.
-        source = { ...item };
+        // Re-derive the extrude's profile from its CURRENT sketch so the
+        // chamfer is built (and positioned via buildBrushTransform) from the
+        // live polygon — not the stale one captured when the extrude was made.
+        // Otherwise a sketch-variable resize leaves the chamfer using the old
+        // size/centroid and the object jumps in position and size.
+        source = extrudeWithLivePolygon({ ...item }, items, printPrecision);
         subGeo = {
           edges: selectedSubGeometry.edges || [],
           faces: selectedSubGeometry.faces || [],
