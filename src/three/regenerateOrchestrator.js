@@ -84,15 +84,25 @@ export async function recalculateTimeline() {
     }
     // Dirty only this step's item; everything upstream keeps the cache an
     // earlier iteration already stamped, so the regen rebuilds just this one.
-    accItems = accItems.map((it) =>
-      it.id === targetId && it.type === "csg" && it.regenerator
-        ? {
-            ...it,
-            regenerator: { ...it.regenerator, regeneratedAt: "dirty" },
-            geometryData: null,
-          }
-        : it,
-    );
+    // For a chamfer built directly on an extrude, also drop the stored
+    // position so regenerateChamfer recomputes it from the live polygon
+    // centroid — otherwise a step whose source was resized keeps its old
+    // position (only the final step's regen would otherwise be re-centred).
+    // Chained chamfers (source is a CSG snapshot) keep their position: there
+    // buildBrushTransform has no live centroid to recompute from, and any
+    // gizmo move lives in a separate later transform entry anyway.
+    accItems = accItems.map((it) => {
+      if (it.id !== targetId || it.type !== "csg" || !it.regenerator) return it;
+      const recenter =
+        it.regenerator.kind === "chamfer" &&
+        it.regenerator.source?.type === "extrude";
+      return {
+        ...it,
+        regenerator: { ...it.regenerator, regeneratedAt: "dirty" },
+        geometryData: null,
+        ...(recenter ? { position: undefined } : {}),
+      };
+    });
     accItems = await regenerateItemsForResolution(accItems, printPrecision);
     done += 1;
     useStore.getState().setRegenProgress({ current: done, total });
