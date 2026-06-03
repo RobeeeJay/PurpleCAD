@@ -62,7 +62,16 @@ const BevelSection = () => {
         prior.amount === amount &&
         prior.segments === segments
       ) {
-        source = prior.source;
+        // prior.source is the extrude snapshot captured at the FIRST chamfer.
+        // After a sketch / variable / depth edit it's stale, so re-derive its
+        // live polygon and pull the current depth off the item — otherwise the
+        // appended chamfer is built (and positioned via buildBrushTransform)
+        // at the old size and the object jumps in height.
+        source = extrudeWithLivePolygon(
+          { ...prior.source, depth: item.depth ?? prior.source.depth },
+          items,
+          printPrecision,
+        );
         // The newly-clicked face/edge was picked on THIS item's rendered mesh,
         // whose geometry is bbox-centred (the prior chamfer subtracted its
         // centerOffset).  prior.subGeo lives in the original source's frame, and
