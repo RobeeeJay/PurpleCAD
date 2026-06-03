@@ -233,11 +233,22 @@ async function chamferOrFilletItem({
 
   const kind = segments === 1 ? "Chamfer" : "Fillet";
   let resultId;
+  // Resolve each selected edge's adjacent-face normals on the current source
+  // so the selection can be re-matched after a parametric resize moves the
+  // endpoint coordinates.  The caller persists resolvedSubGeo on the
+  // regenerator; on later regens it already carries normals and enrichSubGeo
+  // is a no-op.
+  let resolvedSubGeo = subGeo;
   try {
+    try {
+      resolvedSubGeo = occ.enrichSubGeo(sourceId, subGeo) || subGeo;
+    } catch {
+      resolvedSubGeo = subGeo;
+    }
     resultId =
       segments === 1
-        ? occ.chamferShape(sourceId, subGeo, amount, angleRad ?? null)
-        : occ.filletShape(sourceId, subGeo, amount);
+        ? occ.chamferShape(sourceId, resolvedSubGeo, amount, angleRad ?? null)
+        : occ.filletShape(sourceId, resolvedSubGeo, amount);
   } finally {
     occ.releaseShape(sourceId);
   }
@@ -279,6 +290,7 @@ async function chamferOrFilletItem({
       indices: Array.from(tess.indices),
     },
     centerOffset: { cx, cy, cz },
+    resolvedSubGeo,
   };
 }
 

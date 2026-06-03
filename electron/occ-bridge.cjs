@@ -294,10 +294,18 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
 
   const kind = segments === 1 ? "Chamfer" : "Fillet";
   let resultId;
+  // Resolve each selected edge's adjacent-face normals on the current source
+  // so the selection survives a parametric resize (see occOps.js).
+  let resolvedSubGeo = subGeo;
   try {
+    try {
+      resolvedSubGeo = occ.enrichSubGeo(sourceId, subGeo) || subGeo;
+    } catch {
+      resolvedSubGeo = subGeo;
+    }
     resultId = segments === 1
-      ? occ.chamferShape(sourceId, subGeo, amount, angleRad ?? null)
-      : occ.filletShape(sourceId, subGeo, amount);
+      ? occ.chamferShape(sourceId, resolvedSubGeo, amount, angleRad ?? null)
+      : occ.filletShape(sourceId, resolvedSubGeo, amount);
   } finally {
     occ.releaseShape(sourceId);
   }
@@ -331,6 +339,7 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
   return {
     geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx, cy, cz },
+    resolvedSubGeo,
   };
 }
 

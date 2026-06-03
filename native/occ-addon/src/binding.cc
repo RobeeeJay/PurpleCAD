@@ -32,6 +32,10 @@
 
 // ── Topology traversal ──────────────────────────────────────────────────
 #include <TopExp_Explorer.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopAbs_Orientation.hxx>
 #include <TopoDS.hxx>
@@ -260,8 +264,15 @@ static FaceNormal ComputeFaceNormal(const TopoDS_Face& face) {
 }
 
 struct EdgeFaceSpec {
-  // Edge endpoints (for edge selection)
-  struct EdgeEp { double ax, ay, az, bx, by, bz; };
+  // Edge endpoints (for edge selection), plus an optional resize-invariant
+  // identifier: the two adjacent face normals (n1, n2).  When present these
+  // are matched in preference to the endpoints, so a chamfer/fillet follows
+  // its edge through a parametric resize that moves the endpoint coordinates.
+  struct EdgeEp {
+    double ax, ay, az, bx, by, bz;
+    bool hasNormals;
+    double n1x, n1y, n1z, n2x, n2y, n2z;
+  };
   // Face normal + optional centroid (for face selection)
   struct FaceNorm {
     double nx, ny, nz;
@@ -272,6 +283,20 @@ struct EdgeFaceSpec {
   std::vector<FaceNorm> faces;
 };
 
+// Read a [x,y,z] array (or {x,y,z} object) into three doubles.  Returns
+// false if the value is missing / not a 3-vector.
+static bool ReadVec3(const Napi::Value& v, double& x, double& y, double& z) {
+  if (v.IsArray()) {
+    Napi::Array a = v.As<Napi::Array>();
+    if (a.Length() < 3) return false;
+    x = GetDouble(a.Get(uint32_t(0)));
+    y = GetDouble(a.Get(uint32_t(1)));
+    z = GetDouble(a.Get(uint32_t(2)));
+    return true;
+  }
+  return false;
+}
+
 // Parse the edges/faces arrays passed from JS.
 static EdgeFaceSpec ParseSubGeo(const Napi::Object& subGeo) {
   EdgeFaceSpec spec;
@@ -279,10 +304,17 @@ static EdgeFaceSpec ParseSubGeo(const Napi::Object& subGeo) {
     Napi::Array arr = subGeo.Get("edges").As<Napi::Array>();
     for (uint32_t i = 0; i < arr.Length(); i++) {
       Napi::Object e = arr.Get(i).As<Napi::Object>();
-      spec.edges.push_back({
+      EdgeFaceSpec::EdgeEp ep{
         GetDouble(e.Get("ax")), GetDouble(e.Get("ay")), GetDouble(e.Get("az")),
-        GetDouble(e.Get("bx")), GetDouble(e.Get("by")), GetDouble(e.Get("bz"))
-      });
+        GetDouble(e.Get("bx")), GetDouble(e.Get("by")), GetDouble(e.Get("bz")),
+        false, 0, 0, 0, 0, 0, 0
+      };
+      if (e.Has("n1") && e.Has("n2")) {
+        ep.hasNormals =
+          ReadVec3(e.Get("n1"), ep.n1x, ep.n1y, ep.n1z) &&
+          ReadVec3(e.Get("n2"), ep.n2x, ep.n2y, ep.n2z);
+      }
+      spec.edges.push_back(ep);
     }
   }
   if (subGeo.Has("faces")) {
@@ -300,6 +332,145 @@ static EdgeFaceSpec ParseSubGeo(const Napi::Object& subGeo) {
     }
   }
   return spec;
+}
+
+// The (up to two) planar face normals adjacent to an edge.  These are
+// resize-invariant for prismatic geometry, so they uniquely and stably name
+// an edge across a parametric resize that moves its endpoints.
+static std::vector<FaceNormal> EdgeAdjacentNormals(
+    const TopoDS_Edge& edge,
+    const TopTools_IndexedDataMapOfShapeListOfShape& edgeFaceMap) {
+  std::vector<FaceNormal> normals;
+  if (!edgeFaceMap.Contains(edge)) return normals;
+  const TopTools_ListOfShape& faces = edgeFaceMap.FindFromKey(edge);
+  for (TopTools_ListIteratorOfListOfShape it(faces); it.More(); it.Next()) {
+    FaceNormal n = ComputeFaceNormal(TopoDS::Face(it.Value()));
+    if (n.valid) normals.push_back(n);
+  }
+  return normals;
+}
+
+// Does an edge's adjacent-normal set contain both of the spec's stored
+// normals (order-independent)?  Normals are unit vectors, so an absolute eps
+// is scale-free.
+static bool NormalSetMatches(const std::vector<FaceNormal>& edgeNormals,
+                             const EdgeFaceSpec::EdgeEp& ep,
+                             double eps = 0.05) {
+  auto present = [&](double x, double y, double z) {
+    for (const auto& n : edgeNormals)
+      if (std::abs(n.x - x) < eps && std::abs(n.y - y) < eps &&
+          std::abs(n.z - z) < eps)
+        return true;
+    return false;
+  };
+  return present(ep.n1x, ep.n1y, ep.n1z) && present(ep.n2x, ep.n2y, ep.n2z);
+}
+
+// Match a shape edge against a stored edge spec: by adjacent-face-normals
+// when the spec carries them (resize-invariant), otherwise by endpoint
+// coordinates (legacy chamfers saved before topological naming existed).
+static bool EdgeMatchesSpec(
+    const TopoDS_Edge& edge, const EdgeFaceSpec::EdgeEp& ep,
+    const TopTools_IndexedDataMapOfShapeListOfShape& edgeFaceMap) {
+  if (ep.hasNormals)
+    return NormalSetMatches(EdgeAdjacentNormals(edge, edgeFaceMap), ep);
+  return EdgeMatchesEndpoints(edge, {ep.ax, ep.ay, ep.az},
+                              {ep.bx, ep.by, ep.bz});
+}
+
+// One selected edge plus an adjacent reference face (used only by the angle
+// chamfer's AddDA; null for fillets / symmetric chamfers).
+struct SelectedEdge {
+  TopoDS_Edge edge;
+  TopoDS_Face refFace;
+};
+
+// Resolve every edge a subGeo spec selects on a shape.  Edges are matched
+// topologically (adjacent face normals) when the spec carries them — so a
+// selection survives a parametric resize — falling back to endpoint
+// coordinates for legacy specs.  Faces match by normal, with a stored
+// centroid used only to pick the nearest among same-normal faces (a
+// tie-break, not a hard cutoff, so a resized face still matches).  Shared by
+// ChamferShape and FilletShape so the two never drift apart.
+static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
+                                                   const EdgeFaceSpec& spec) {
+  std::vector<SelectedEdge> out;
+  std::set<std::string> addedKeys;
+
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaceMap);
+
+  auto faceTouchingEdge = [&](const TopoDS_Edge& edge) -> TopoDS_Face {
+    if (edgeFaceMap.Contains(edge)) {
+      const TopTools_ListOfShape& fs = edgeFaceMap.FindFromKey(edge);
+      if (!fs.IsEmpty()) return TopoDS::Face(fs.First());
+    }
+    return TopoDS_Face();
+  };
+
+  auto addEdge = [&](const TopoDS_Edge& edge, const TopoDS_Face& refFace) {
+    std::string key = EdgeKey(edge);
+    if (addedKeys.count(key)) return;
+    out.push_back({edge, refFace});
+    addedKeys.insert(key);
+  };
+
+  if (!spec.edges.empty()) {
+    TopExp_Explorer eexp(shape, TopAbs_EDGE);
+    for (; eexp.More(); eexp.Next()) {
+      TopoDS_Edge edge = TopoDS::Edge(eexp.Current());
+      for (const auto& ep : spec.edges) {
+        if (EdgeMatchesSpec(edge, ep, edgeFaceMap)) {
+          addEdge(edge, faceTouchingEdge(edge));
+          break;
+        }
+      }
+    }
+  }
+
+  const double eps = 0.05;
+  for (const auto& req : spec.faces) {
+    TopoDS_Face best;
+    double bestDist = 1e300;
+    bool found = false;
+    std::vector<TopoDS_Face> allNormalMatches;
+    TopExp_Explorer fexp(shape, TopAbs_FACE);
+    for (; fexp.More(); fexp.Next()) {
+      TopoDS_Face face = TopoDS::Face(fexp.Current());
+      auto n = ComputeFaceNormal(face);
+      if (!n.valid) continue;
+      if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
+          std::abs(req.nz - n.z) >= eps)
+        continue;
+      if (!req.hasCentroid) {
+        allNormalMatches.push_back(face);
+        continue;
+      }
+      gp_Pnt pnt(req.cx, req.cy, req.cz);
+      BRepBuilderAPI_MakeVertex vMk(pnt);
+      BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
+                                      Extrema_ExtAlgo_Grad);
+      dist.Perform();
+      double d = (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
+      if (!found || d < bestDist) {
+        best = face;
+        bestDist = d;
+        found = true;
+      }
+    }
+    std::vector<TopoDS_Face> chosen;
+    if (req.hasCentroid) {
+      if (found) chosen.push_back(best);
+    } else {
+      chosen = allNormalMatches;
+    }
+    for (const auto& face : chosen) {
+      TopExp_Explorer eexp(face, TopAbs_EDGE);
+      for (; eexp.More(); eexp.Next())
+        addEdge(TopoDS::Edge(eexp.Current()), face);
+    }
+  }
+  return out;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -526,96 +697,17 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
 
     try {
       BRepFilletAPI_MakeChamfer mk(shape);
-      std::set<std::string> addedKeys;
-      int added = 0;
-
-      auto addEdge = [&](const TopoDS_Edge& edge, const TopoDS_Face& refFace) {
-        if (useAngle && !refFace.IsNull()) {
-          mk.AddDA(amount, angleRad, edge, refFace);
+      auto selected = SelectSubGeoEdges(shape, spec);
+      for (const auto& se : selected) {
+        if (useAngle && !se.refFace.IsNull()) {
+          mk.AddDA(amount, angleRad, se.edge, se.refFace);
         } else {
-          mk.Add(amount, edge);
-        }
-      };
-
-      // 1. Edge-endpoint selection
-      if (!spec.edges.empty()) {
-        TopExp_Explorer eexp(shape, TopAbs_EDGE);
-        for (; eexp.More(); eexp.Next()) {
-          TopoDS_Edge edge = TopoDS::Edge(eexp.Current());
-          for (const auto& ep : spec.edges) {
-            Vec3d posA{ep.ax, ep.ay, ep.az};
-            Vec3d posB{ep.bx, ep.by, ep.bz};
-            if (EdgeMatchesEndpoints(edge, posA, posB)) {
-              std::string key = EdgeKey(edge);
-              if (!addedKeys.count(key)) {
-                TopoDS_Face nullFace;
-                // Find adjacent face for angle chamfer
-                if (useAngle) {
-                  TopExp_Explorer fexp(shape, TopAbs_FACE);
-                  for (; fexp.More(); fexp.Next()) {
-                    TopoDS_Face candidate = TopoDS::Face(fexp.Current());
-                    TopExp_Explorer eexp2(candidate, TopAbs_EDGE);
-                    for (; eexp2.More(); eexp2.Next()) {
-                      if (EdgeKey(TopoDS::Edge(eexp2.Current())) == key) {
-                        nullFace = candidate;
-                        break;
-                      }
-                    }
-                    if (!nullFace.IsNull()) break;
-                  }
-                }
-                addEdge(edge, nullFace);
-                addedKeys.insert(key);
-                added++;
-              }
-              break;
-            }
-          }
-        }
-      }
-
-      // 2. Face-normal selection
-      if (!spec.faces.empty()) {
-        TopExp_Explorer fexp(shape, TopAbs_FACE);
-        for (; fexp.More(); fexp.Next()) {
-          TopoDS_Face face = TopoDS::Face(fexp.Current());
-          auto n = ComputeFaceNormal(face);
-          if (!n.valid) continue;
-          const double eps = 0.05;
-          bool matched = false;
-          for (const auto& req : spec.faces) {
-            if (std::abs(req.nx - n.x) >= eps ||
-                std::abs(req.ny - n.y) >= eps ||
-                std::abs(req.nz - n.z) >= eps) continue;
-            if (req.hasCentroid) {
-              gp_Pnt pnt(req.cx, req.cy, req.cz);
-              BRepBuilderAPI_MakeVertex vMk(pnt);
-              BRepExtrema_DistShapeShape dist(vMk.Vertex(), face,
-                                              Extrema_ExtFlag_MIN,
-                                              Extrema_ExtAlgo_Grad);
-              dist.Perform();
-              if (!dist.IsDone() || dist.NbSolution() < 1 ||
-                  dist.Value() >= 0.05) continue;
-            }
-            matched = true;
-            break;
-          }
-          if (!matched) continue;
-          TopExp_Explorer eexp(face, TopAbs_EDGE);
-          for (; eexp.More(); eexp.Next()) {
-            TopoDS_Edge edge = TopoDS::Edge(eexp.Current());
-            std::string key = EdgeKey(edge);
-            if (!addedKeys.count(key)) {
-              addEdge(edge, face);
-              addedKeys.insert(key);
-              added++;
-            }
-          }
+          mk.Add(amount, se.edge);
         }
       }
 
       // 0 = sentinel "no edges matched" — bridge throws a descriptive error.
-      if (added == 0) return Napi::Number::New(env, 0);
+      if (selected.empty()) return Napi::Number::New(env, 0);
       mk.Build();
       if (!mk.IsDone())
         throw std::runtime_error("chamfer computation failed (geometry rejected the operation)");
@@ -645,65 +737,10 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
 
     try {
       BRepFilletAPI_MakeFillet mk(shape, ChFi3d_Rational);
-      std::set<std::string> addedKeys;
-      int added = 0;
+      auto selected = SelectSubGeoEdges(shape, spec);
+      for (const auto& se : selected) mk.Add(radius, se.edge);
 
-      auto addEdge = [&](const TopoDS_Edge& edge) {
-        mk.Add(radius, edge);
-      };
-
-      if (!spec.edges.empty()) {
-        TopExp_Explorer eexp(shape, TopAbs_EDGE);
-        for (; eexp.More(); eexp.Next()) {
-          TopoDS_Edge edge = TopoDS::Edge(eexp.Current());
-          for (const auto& ep : spec.edges) {
-            Vec3d posA{ep.ax, ep.ay, ep.az};
-            Vec3d posB{ep.bx, ep.by, ep.bz};
-            if (EdgeMatchesEndpoints(edge, posA, posB)) {
-              std::string key = EdgeKey(edge);
-              if (!addedKeys.count(key)) { addEdge(edge); addedKeys.insert(key); added++; }
-              break;
-            }
-          }
-        }
-      }
-
-      if (!spec.faces.empty()) {
-        const double eps = 0.05;
-        TopExp_Explorer fexp(shape, TopAbs_FACE);
-        for (; fexp.More(); fexp.Next()) {
-          TopoDS_Face face = TopoDS::Face(fexp.Current());
-          auto n = ComputeFaceNormal(face);
-          if (!n.valid) continue;
-          bool matched = false;
-          for (const auto& req : spec.faces) {
-            if (std::abs(req.nx - n.x) >= eps ||
-                std::abs(req.ny - n.y) >= eps ||
-                std::abs(req.nz - n.z) >= eps) continue;
-            if (req.hasCentroid) {
-              gp_Pnt pnt(req.cx, req.cy, req.cz);
-              BRepBuilderAPI_MakeVertex vMk(pnt);
-              BRepExtrema_DistShapeShape dist(vMk.Vertex(), face,
-                                              Extrema_ExtFlag_MIN,
-                                              Extrema_ExtAlgo_Grad);
-              dist.Perform();
-              if (!dist.IsDone() || dist.NbSolution() < 1 ||
-                  dist.Value() >= 0.05) continue;
-            }
-            matched = true;
-            break;
-          }
-          if (!matched) continue;
-          TopExp_Explorer eexp(face, TopAbs_EDGE);
-          for (; eexp.More(); eexp.Next()) {
-            TopoDS_Edge edge = TopoDS::Edge(eexp.Current());
-            std::string key = EdgeKey(edge);
-            if (!addedKeys.count(key)) { addEdge(edge); addedKeys.insert(key); added++; }
-          }
-        }
-      }
-
-      if (added == 0) return Napi::Number::New(env, 0);
+      if (selected.empty()) return Napi::Number::New(env, 0);
       mk.Build();
       if (!mk.IsDone())
         throw std::runtime_error("fillet computation failed (geometry rejected the operation)");
@@ -713,6 +750,73 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
         std::string("Fillet failed — try a smaller radius or a different "
                     "edge / face (") + e.what() + ")");
     }
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// enrichSubGeo(shapeId, subGeo) → subGeo with each edge's two adjacent face
+// normals resolved (n1, n2).  Called once at chamfer/fillet creation — when
+// the stored endpoint coordinates still line up with the (pre-resize) shape —
+// so later regens can re-find the edge by its resize-invariant normals after
+// a parametric resize moves the endpoints.  Edges that already carry normals
+// pass through untouched; faces are returned unchanged.
+Napi::Value EnrichSubGeo(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id = info[0].As<Napi::Number>().Int32Value();
+    Napi::Object sg = info[1].As<Napi::Object>();
+    TopoDS_Shape shape = FetchShape(id);
+    EdgeFaceSpec spec = ParseSubGeo(sg);
+
+    TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
+    TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaceMap);
+
+    Napi::Array outEdges = Napi::Array::New(env, spec.edges.size());
+    for (size_t i = 0; i < spec.edges.size(); i++) {
+      const auto& ep = spec.edges[i];
+      Napi::Object eo = Napi::Object::New(env);
+      eo.Set("ax", ep.ax); eo.Set("ay", ep.ay); eo.Set("az", ep.az);
+      eo.Set("bx", ep.bx); eo.Set("by", ep.by); eo.Set("bz", ep.bz);
+
+      double n1[3], n2[3];
+      bool have = false;
+      if (ep.hasNormals) {
+        n1[0] = ep.n1x; n1[1] = ep.n1y; n1[2] = ep.n1z;
+        n2[0] = ep.n2x; n2[1] = ep.n2y; n2[2] = ep.n2z;
+        have = true;
+      } else {
+        TopExp_Explorer eexp(shape, TopAbs_EDGE);
+        for (; eexp.More(); eexp.Next()) {
+          TopoDS_Edge edge = TopoDS::Edge(eexp.Current());
+          if (EdgeMatchesEndpoints(edge, {ep.ax, ep.ay, ep.az},
+                                   {ep.bx, ep.by, ep.bz})) {
+            auto norms = EdgeAdjacentNormals(edge, edgeFaceMap);
+            if (norms.size() >= 2) {
+              n1[0] = norms[0].x; n1[1] = norms[0].y; n1[2] = norms[0].z;
+              n2[0] = norms[1].x; n2[1] = norms[1].y; n2[2] = norms[1].z;
+              have = true;
+            }
+            break;
+          }
+        }
+      }
+      if (have) {
+        Napi::Array a1 = Napi::Array::New(env, 3);
+        Napi::Array a2 = Napi::Array::New(env, 3);
+        for (int k = 0; k < 3; k++) {
+          a1.Set(uint32_t(k), n1[k]);
+          a2.Set(uint32_t(k), n2[k]);
+        }
+        eo.Set("n1", a1);
+        eo.Set("n2", a2);
+      }
+      outEdges.Set(uint32_t(i), eo);
+    }
+
+    Napi::Object out = Napi::Object::New(env);
+    out.Set("edges", outEdges);
+    if (sg.Has("faces")) out.Set("faces", sg.Get("faces"));
+    else out.Set("faces", Napi::Array::New(env, 0));
+    return out;
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -864,6 +968,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   // Chamfer / fillet
   exports.Set("chamferShape",       Napi::Function::New(env, ChamferShape));
   exports.Set("filletShape",        Napi::Function::New(env, FilletShape));
+  exports.Set("enrichSubGeo",       Napi::Function::New(env, EnrichSubGeo));
 
   // Tessellation
   exports.Set("tessellate",         Napi::Function::New(env, TessellateShape));

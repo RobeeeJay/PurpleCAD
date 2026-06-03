@@ -138,6 +138,10 @@ const BevelSection = () => {
       }
       const { geometryData, centerOffset } = result;
       const { cx, cy, cz } = centerOffset;
+      // Store the topologically-resolved selection (edges carry their adjacent
+      // face normals) so the chamfer re-matches its edges after a sketch /
+      // variable resize moves their coordinates.
+      const storedSubGeo = result.resolvedSubGeo || subGeo;
 
       const brushPos = buildBrushTransform(source).position;
       const rot = source.rotation || { x: 0, y: 0, z: 0 };
@@ -156,7 +160,7 @@ const BevelSection = () => {
           regenerator: {
             kind: "chamfer",
             source,
-            subGeo,
+            subGeo: storedSubGeo,
             amount,
             segments,
             angleRad,
