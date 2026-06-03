@@ -65,12 +65,13 @@ export function chamferCenterOffset(regenerator, item) {
   return { x: v.x, y: v.y, z: v.z };
 }
 
-// Re-tessellate an extrude's profile polygon at the current curve precision
-// so that OCC shapes used for CSG / chamfer / cut reflect the live mesh.
+// Re-derive an extrude's profile polygon from its CURRENT sketch geometry (at
+// the given curve precision) so OCC shapes used for CSG / chamfer / cut reflect
+// live sketch edits — not the polygon captured when the extrude was created.
+// `precision` null means preview tessellation (curve segments only).
 export function extrudeWithLivePolygon(item, allItems, precision) {
   const profile = item.profile;
   if (!profile || profile.sketchId == null) return item;
-  if (precision == null) return item;
   const sketch = allItems.find((i) => i.id === profile.sketchId);
   if (!sketch || !Array.isArray(sketch.shapes) || sketch.shapes.length === 0)
     return item;

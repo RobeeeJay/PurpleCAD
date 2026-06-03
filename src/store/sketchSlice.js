@@ -9,6 +9,7 @@ import {
   pushSketchSnapshot,
   withOrphanFlags,
   saveTimeline,
+  markCsgDirty,
 } from "./internals.js";
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { solveConstraints } from "../three/sketchSolver.js";
@@ -70,7 +71,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   updateSketchShapes: (sketchId, updatesMap) =>
@@ -101,7 +105,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   updateSketchShape: (sketchId, shapeIdx, newShape) =>
@@ -133,7 +140,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   addSketchShapes: (sketchId, newShapes, newConstraints = []) =>
@@ -165,7 +175,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   addSketchShape: (sketchId, shape, newConstraints = []) =>
@@ -197,7 +210,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   applySketchModify: (
@@ -239,7 +255,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   deleteSketchShapes: (sketchId, indicesToDelete) =>
@@ -304,7 +323,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   applySketchHVConstraint: (sketchId, shapeIdx, type) =>
@@ -364,7 +386,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   deleteSketchConstraint: (sketchId, constraintIdx) =>
@@ -395,7 +420,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   toggleSketchShapesDashed: (sketchId, indices) =>
@@ -429,7 +457,10 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   updateSketchConstraintDistance: (sketchId, constraintIdx, newDistance) =>
@@ -461,6 +492,9 @@ export const createSketchSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 });

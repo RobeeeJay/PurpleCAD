@@ -132,6 +132,24 @@ export const saveVariables = (variables) => {
   }
 };
 
+// Mark every CSG/chamfer regenerator stale so the next regenerate pass rebuilds
+// it from its (now-changed) inputs.  Called after a sketch edit so downstream
+// extruded/cut/bevelled geometry recalculates to the current sketch.  Returns
+// the same array reference when nothing changed (no regenerators present).
+export const markCsgDirty = (items) => {
+  let changed = false;
+  const out = items.map((item) => {
+    if (item.type !== "csg" || !item.regenerator) return item;
+    if (item.regenerator.regeneratedAt === "dirty") return item;
+    changed = true;
+    return {
+      ...item,
+      regenerator: { ...item.regenerator, regeneratedAt: "dirty" },
+    };
+  });
+  return changed ? out : items;
+};
+
 const SNAP_DEFAULTS = {
   snapEnabled: false,
   snapDistanceMm: 5,
