@@ -7,6 +7,7 @@ import {
   withOrphanFlags,
   saveTimeline,
   withUndo,
+  markCsgDirty,
 } from "./internals.js";
 import { createHistoryNavSlice } from "./historyNavSlice.js";
 import { createItemFlagsSlice } from "./itemFlagsSlice.js";
@@ -402,6 +403,35 @@ export const createHistorySlice = (set) => ({
         }
         return entry;
       });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        ...withUndo(state),
+        items: updatedItems,
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Edit an extrude's depth in place: rewrite its CREATE entry rather than
+  // appending a "Modified" step, and dirty downstream CSG so the regen pass
+  // recalculates the timeline at the new depth (mirrors how setVariables
+  // edits a sketch's create entry).
+  setExtrudeDepth: (id, depth) =>
+    set((state) => {
+      const updatedItems = markCsgDirty(
+        state.items.map((item) =>
+          item.id === id ? Object.assign({}, item, { depth }) : item,
+        ),
+      );
+      const newHistory = state.history.map((entry) =>
+        entry.instruction?.type === "create" &&
+        entry.instruction.item?.id === id
+          ? Object.assign({}, entry, {
+              instruction: Object.assign({}, entry.instruction, {
+                item: Object.assign({}, entry.instruction.item, { depth }),
+              }),
+            })
+          : entry,
+      );
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         ...withUndo(state),

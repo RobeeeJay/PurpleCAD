@@ -20,7 +20,7 @@ const ExtrudeLengthDialog = () => {
   const setTarget = useStore((s) => s.setExtrudeEditTarget);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
-  const modifyItem = useStore((s) => s.modifyItem);
+  const setExtrudeDepth = useStore((s) => s.setExtrudeDepth);
 
   const item =
     target?.itemId != null ? items.find((i) => i.id === target.itemId) : null;
@@ -43,7 +43,9 @@ const ExtrudeLengthDialog = () => {
   const commit = () => {
     if (!valid) return;
     // Store as mm formula string so future evaluations can resolve variables.
-    modifyItem(item.id, { depth: formula.trim() });
+    // Edits the original extrude's create entry in place (no new timeline
+    // step) and recalculates downstream geometry.
+    setExtrudeDepth(item.id, formula.trim());
     close();
   };
 
