@@ -6,6 +6,7 @@ import {
   withUndo,
   withOrphanFlags,
   saveTimeline,
+  markCsgDirty,
   UNDO_LIMIT,
 } from "./internals.js";
 
@@ -31,9 +32,11 @@ export const createHistoryNavSlice = (set) => ({
         state.activeHistoryId !== null
           ? rawHistory.findIndex((h) => h.id === state.activeHistoryId)
           : rawHistory.length - 1;
-      const items = replayUpTo(
-        rawHistory,
-        activeIdx !== -1 ? activeIdx : rawHistory.length - 1,
+      const items = markCsgDirty(
+        replayUpTo(
+          rawHistory,
+          activeIdx !== -1 ? activeIdx : rawHistory.length - 1,
+        ),
       );
 
       saveTimeline(rawHistory, state.activeHistoryId);
@@ -67,7 +70,7 @@ export const createHistoryNavSlice = (set) => ({
         newActiveId !== null
           ? rawHistory.findIndex((h) => h.id === newActiveId)
           : rawHistory.length - 1;
-      const items = replayUpTo(rawHistory, activeIdx);
+      const items = markCsgDirty(replayUpTo(rawHistory, activeIdx));
 
       saveTimeline(rawHistory, newActiveId);
       return Object.assign(
@@ -88,9 +91,11 @@ export const createHistoryNavSlice = (set) => ({
         snapshot.activeHistoryId !== null
           ? snapshot.history.findIndex((h) => h.id === snapshot.activeHistoryId)
           : snapshot.history.length - 1;
-      const items = replayUpTo(
-        snapshot.history,
-        idx !== -1 ? idx : snapshot.history.length - 1,
+      const items = markCsgDirty(
+        replayUpTo(
+          snapshot.history,
+          idx !== -1 ? idx : snapshot.history.length - 1,
+        ),
       );
       saveTimeline(snapshot.history, snapshot.activeHistoryId);
       return {
@@ -115,9 +120,11 @@ export const createHistoryNavSlice = (set) => ({
         snapshot.activeHistoryId !== null
           ? snapshot.history.findIndex((h) => h.id === snapshot.activeHistoryId)
           : snapshot.history.length - 1;
-      const items = replayUpTo(
-        snapshot.history,
-        idx !== -1 ? idx : snapshot.history.length - 1,
+      const items = markCsgDirty(
+        replayUpTo(
+          snapshot.history,
+          idx !== -1 ? idx : snapshot.history.length - 1,
+        ),
       );
       saveTimeline(snapshot.history, snapshot.activeHistoryId);
       return {

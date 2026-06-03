@@ -7,6 +7,7 @@ import {
   sketchUndoStacks,
   withOrphanFlags,
   saveTimeline,
+  markCsgDirty,
   UNDO_LIMIT,
 } from "./internals.js";
 
@@ -52,7 +53,10 @@ export const createSketchUndoSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   redoSketch: (sketchId) =>
@@ -96,6 +100,9 @@ export const createSketchUndoSlice = (set) => ({
         return entry;
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 });
