@@ -72,6 +72,7 @@ export function createSketchInteraction(
     updateSketchHover,
     clearHoverLineHighlight,
     applyHoverLineHighlight,
+    applyHoverLineChainHighlight,
     showHoverPointIndicator,
     clearHoverPointIndicator,
     POINT_LINE_COLOR,
@@ -217,15 +218,8 @@ export function createSketchInteraction(
       if (ownerLine) applyHoverLineHighlight(ownerLine, POINT_LINE_COLOR);
     } else if (item.kind === "line") {
       const g = sketchShapesGroupRef?.current;
-      if (g) {
-        const lineObj = g.children.find(
-          (c) =>
-            c.userData.shapeIdx === item.shapeIdx &&
-            !c.userData.isConstraintObj &&
-            c.material?.color,
-        );
-        if (lineObj) applyHoverLineHighlight(lineObj);
-      }
+      if (g)
+        applyHoverLineChainHighlight(item.shapeIdx, selItem.shapes || [], g);
     } else if (item.kind === "constraint") {
       applyConstraintHoverHighlight(item.shapeIndices, item.constraintColor);
     }

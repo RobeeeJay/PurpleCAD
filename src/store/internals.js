@@ -153,11 +153,17 @@ export const markCsgDirty = (items) => {
 // Viewport + snap preferences (the Settings dialog).  `fov` is the perspective
 // camera's vertical field of view in degrees — lower = flatter / less
 // perspective.  Persisted alongside snap under the same `cad-snap` key.
+// Viewport + snap preferences (the Settings dialog).  `fov` is the perspective
+// camera's vertical field of view in degrees — lower = flatter / less
+// perspective.  `curveDetectionAngleDeg` is the max bend between consecutive
+// connected lines for them to be treated as one smooth curve when highlighting.
+// Persisted alongside snap under the same `cad-snap` key.
 const SNAP_DEFAULTS = {
   snapEnabled: false,
   snapDistanceMm: 5,
   snapAngleDeg: 9,
   fov: 35,
+  curveDetectionAngleDeg: 5,
 };
 
 export const loadSnapSettings = () => {
@@ -170,6 +176,8 @@ export const loadSnapSettings = () => {
       snapDistanceMm: parsed.snapDistanceMm > 0 ? parsed.snapDistanceMm : 5,
       snapAngleDeg: parsed.snapAngleDeg > 0 ? parsed.snapAngleDeg : 9,
       fov: parsed.fov > 0 ? parsed.fov : 35,
+      curveDetectionAngleDeg:
+        parsed.curveDetectionAngleDeg >= 0 ? parsed.curveDetectionAngleDeg : 5,
     };
   } catch {
     return { ...SNAP_DEFAULTS };
@@ -185,6 +193,7 @@ export const saveSnapSettings = (snap) => {
         snapDistanceMm: snap.snapDistanceMm,
         snapAngleDeg: snap.snapAngleDeg,
         fov: snap.fov,
+        curveDetectionAngleDeg: snap.curveDetectionAngleDeg,
       }),
     );
   } catch (e) {

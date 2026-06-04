@@ -14,6 +14,10 @@ const SettingsDialog = () => {
   const setSnapDistanceMm = useStore((s) => s.setSnapDistanceMm);
   const snapAngleDeg = useStore((s) => s.snapAngleDeg);
   const setSnapAngleDeg = useStore((s) => s.setSnapAngleDeg);
+  const curveDetectionAngleDeg = useStore((s) => s.curveDetectionAngleDeg);
+  const setCurveDetectionAngleDeg = useStore(
+    (s) => s.setCurveDetectionAngleDeg,
+  );
 
   if (!open) return null;
 
@@ -119,6 +123,27 @@ const SettingsDialog = () => {
                 step="1"
                 value={snapAngleDeg}
                 onChange={(e) => setSnapAngleDeg(e.target.value)}
+                onKeyDown={stop}
+                style={numStyle}
+              />
+              <span style={{ fontSize: 10, opacity: 0.7 }}>&deg;</span>
+            </span>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
+              <span>Curve detection</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                max bend between connected lines to highlight as one curve
+              </span>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={curveDetectionAngleDeg}
+                onChange={(e) => setCurveDetectionAngleDeg(e.target.value)}
                 onKeyDown={stop}
                 style={numStyle}
               />

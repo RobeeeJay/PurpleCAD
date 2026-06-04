@@ -187,5 +187,14 @@ export const createUiSlice = (set) => ({
       return { fov };
     }),
 
+  setCurveDetectionAngleDeg: (v) =>
+    set((state) => {
+      const n = Number(v);
+      const curveDetectionAngleDeg =
+        Number.isFinite(n) && n >= 0 ? Math.min(90, n) : 5;
+      saveSnapSettings({ ...state, curveDetectionAngleDeg });
+      return { curveDetectionAngleDeg };
+    }),
+
   setSettingsDialogOpen: (open) => set({ settingsDialogOpen: !!open }),
 });
