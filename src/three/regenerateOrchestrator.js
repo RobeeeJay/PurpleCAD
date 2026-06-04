@@ -144,6 +144,10 @@ export async function recalculateTimeline() {
     newHistory,
     activeIdx !== -1 ? activeIdx : newHistory.length - 1,
   );
+  // If another edit committed a new history while this (async) recalc was
+  // running, don't clobber it with the stale result — that newer edit triggers
+  // its own recalc.
+  if (useStore.getState().history !== history) return;
   saveTimeline(newHistory, state.activeHistoryId);
   useStore.setState({ history: withOrphanFlags(newHistory), items });
 }

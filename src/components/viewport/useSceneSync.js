@@ -4,7 +4,7 @@
 // handles, the sketch-mode lifecycle, and the sketch/extrude overlay groups.
 // Effect order here matches the original Viewport.jsx ordering exactly.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useStore } from "../../store";
 import {
@@ -157,16 +157,34 @@ export function useSceneSync({
   // makes the scene "recalculate to the current timeline position" — the
   // baked geometryData gets refreshed for the current setting before the
   // scene rebuild reads from items.
+  const upstreamSigRef = useRef(null);
   useEffect(() => {
+    // Editing a sketch (or a variable) changes geometry that LATER timeline
+    // steps were built from, so every subsequent step has to be rebuilt — not
+    // just the items in the current view.  Detect those upstream edits by
+    // signature and run the full per-step recalc (replays the whole history,
+    // regenerates each step, writes results back) rather than the lightweight
+    // current-view regen.  A resolution toggle or an object add/move leaves the
+    // signature unchanged and keeps the cheap path.
+    const sig =
+      items
+        .filter((i) => i.type === "sketch")
+        .map(
+          (i) =>
+            `${i.id}:${JSON.stringify(i.shapes)}:${JSON.stringify(i.constraints)}`,
+        )
+        .join("|") + `##${JSON.stringify(variables)}`;
+    const isFirst = upstreamSigRef.current === null;
+    const upstreamChanged = !isFirst && sig !== upstreamSigRef.current;
+    upstreamSigRef.current = sig;
+
     // The orchestrator is a UI-only module that's never reachable from
     // the OCC worker's transitive imports, so it can route per-item regen
     // through occClient → worker without creating a bundling cycle.
     import("../../three/regenerateOrchestrator.js").then((m) => {
-      m.regenerateForResolution(printPrecision);
+      if (upstreamChanged) m.recalculateTimeline();
+      else m.regenerateForResolution(printPrecision);
     });
-    // Variables drive extrude depth and dimension distances via formula
-    // resolution; re-run when they change so geometry/labels reflect the
-    // new values.
   }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Rebuild scene objects ─────────────────────────────────────────────────
