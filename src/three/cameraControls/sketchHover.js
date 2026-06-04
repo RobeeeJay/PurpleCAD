@@ -5,82 +5,6 @@
 // cameraControls.js.
 
 import * as THREE from "three";
-import { useStore } from "../../store";
-
-// Walk the chain of connected straight lines that continue smoothly through
-// `startIdx` — at each shared endpoint, follow the connected line whose bend
-// (turn angle) is within `maxAngleDeg`, in both directions.  Used so hovering
-// one segment of a many-segment curve highlights the whole curve.
-export function computeLineChain(shapes, startIdx, maxAngleDeg) {
-  const start = shapes?.[startIdx];
-  if (!start || start.type !== "line") return [startIdx];
-  const maxAngle = (Math.max(0, maxAngleDeg) * Math.PI) / 180;
-  const EPS = 1e-4;
-  const close = (ax, ay, bx, by) =>
-    Math.abs(ax - bx) < EPS && Math.abs(ay - by) < EPS;
-  const visited = new Set([startIdx]);
-  const chain = [startIdx];
-
-  // From the endpoint (ex,ey), with the chain currently travelling in unit
-  // direction (dx,dy), greedily extend along the smoothest connected line.
-  const walk = (ex, ey, dx, dy) => {
-    let curEx = ex,
-      curEy = ey,
-      curDx = dx,
-      curDy = dy;
-    for (;;) {
-      let best = null;
-      let bestAngle = Infinity;
-      for (let i = 0; i < shapes.length; i++) {
-        if (visited.has(i)) continue;
-        const s = shapes[i];
-        if (!s || s.type !== "line") continue;
-        let ox, oy;
-        if (close(s.x1, s.y1, curEx, curEy)) {
-          ox = s.x2;
-          oy = s.y2;
-        } else if (close(s.x2, s.y2, curEx, curEy)) {
-          ox = s.x1;
-          oy = s.y1;
-        } else continue;
-        let lx = ox - curEx,
-          ly = oy - curEy;
-        const len = Math.hypot(lx, ly);
-        if (len < EPS) continue;
-        lx /= len;
-        ly /= len;
-        const dot = Math.max(-1, Math.min(1, curDx * lx + curDy * ly));
-        const angle = Math.acos(dot);
-        if (angle < bestAngle) {
-          bestAngle = angle;
-          best = { i, ox, oy, lx, ly };
-        }
-      }
-      if (!best || bestAngle > maxAngle) break;
-      visited.add(best.i);
-      chain.push(best.i);
-      curEx = best.ox;
-      curEy = best.oy;
-      curDx = best.lx;
-      curDy = best.ly;
-    }
-  };
-
-  const dForward = Math.hypot(start.x2 - start.x1, start.y2 - start.y1) || 1;
-  walk(
-    start.x2,
-    start.y2,
-    (start.x2 - start.x1) / dForward,
-    (start.y2 - start.y1) / dForward,
-  );
-  walk(
-    start.x1,
-    start.y1,
-    (start.x1 - start.x2) / dForward,
-    (start.y1 - start.y2) / dForward,
-  );
-  return chain;
-}
 
 export function createSketchHoverHelpers(
   {
@@ -96,61 +20,19 @@ export function createSketchHoverHelpers(
   { findSnap, hitTestSketchLines },
 ) {
   // ── Sketch element hover highlights ──────────────────────────────────────
-  // A hover highlight can cover a CHAIN of connected lines (curve detection),
-  // so track a list of { lineObj, origColor } rather than a single line.
-  let hoveredSketchLineRefs = [];
+  let hoveredSketchLine = null;
+  let hoveredSketchLineOrigColor = null;
   let hoveredSketchLineColor = null;
 
   const clearHoverLineHighlight = () => {
-    hoveredSketchLineRefs.forEach(({ lineObj, origColor }) => {
-      if (lineObj.material?.color) lineObj.material.color.setHex(origColor);
-    });
-    hoveredSketchLineRefs = [];
-    hoveredSketchLineColor = null;
-  };
-
-  const applyHoverLineHighlights = (lineObjs, color = 0xbbddff) => {
-    const objs = lineObjs.filter((o) => o?.material?.color);
-    // No-op if the exact same set + colour is already highlighted (so moving
-    // within one chain doesn't churn the materials every pointer move).
-    const cur = new Set(hoveredSketchLineRefs.map((r) => r.lineObj.uuid));
-    if (
-      hoveredSketchLineColor === color &&
-      objs.length === cur.size &&
-      objs.every((o) => cur.has(o.uuid))
-    )
-      return;
-    clearHoverLineHighlight();
-    objs.forEach((lineObj) => {
-      hoveredSketchLineRefs.push({
-        lineObj,
-        origColor: lineObj.material.color.getHex(),
-      });
-      lineObj.material.color.setHex(color);
-    });
-    hoveredSketchLineColor = color;
-  };
-
-  // Highlight the smooth chain of connected lines through `startShapeIdx`.
-  const applyHoverLineChainHighlight = (
-    startShapeIdx,
-    shapes,
-    sketchGroup,
-    color = 0xbbddff,
-  ) => {
-    const maxAngle = useStore.getState().curveDetectionAngleDeg ?? 5;
-    const chainIdx = computeLineChain(shapes || [], startShapeIdx, maxAngle);
-    const objs = chainIdx
-      .map((idx) =>
-        sketchGroup?.children.find(
-          (c) =>
-            c.userData.shapeIdx === idx &&
-            !c.userData.isConstraintObj &&
-            c.material?.color,
-        ),
-      )
-      .filter(Boolean);
-    applyHoverLineHighlights(objs, color);
+    if (hoveredSketchLine) {
+      hoveredSketchLine.material.color.setHex(
+        hoveredSketchLineOrigColor ?? 0x88aaff,
+      );
+      hoveredSketchLine = null;
+      hoveredSketchLineOrigColor = null;
+      hoveredSketchLineColor = null;
+    }
   };
 
   // ── Constraint icon hover highlights ─────────────────────────────────────
@@ -268,8 +150,15 @@ export function createSketchHoverHelpers(
   // 0xffaa33 (amber) marks the line a hovered POINT belongs to, distinct from
   // the 0xbbddff line-body hover so the two reads don't blur together.
   const POINT_LINE_COLOR = 0xffaa33;
-  const applyHoverLineHighlight = (lineObj, color = 0xbbddff) =>
-    applyHoverLineHighlights([lineObj], color);
+  const applyHoverLineHighlight = (lineObj, color = 0xbbddff) => {
+    if (hoveredSketchLine === lineObj && hoveredSketchLineColor === color)
+      return;
+    clearHoverLineHighlight();
+    hoveredSketchLineOrigColor = lineObj.material.color.getHex();
+    lineObj.material.color.setHex(color);
+    hoveredSketchLine = lineObj;
+    hoveredSketchLineColor = color;
+  };
 
   let currentHoverPointIndicator = null;
   const clearHoverPointIndicator = () => {
@@ -355,11 +244,7 @@ export function createSketchHoverHelpers(
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0) {
-        applyHoverLineChainHighlight(
-          hits[0].object.userData.shapeIdx,
-          selItem?.shapes || [],
-          sketchGroup,
-        );
+        applyHoverLineHighlight(hits[0].object);
         clearConstraintHoverHighlight();
         if (dimHintRef.current) dimHintRef.current.style.display = "none";
         renderer.domElement.style.cursor = "grab";
@@ -430,7 +315,6 @@ export function createSketchHoverHelpers(
   return {
     clearHoverLineHighlight,
     applyHoverLineHighlight,
-    applyHoverLineChainHighlight,
     clearConstraintSelection,
     applyConstraintSelectionVisual,
     reapplyConstraintSelectionVisual,

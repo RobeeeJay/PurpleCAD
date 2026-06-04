@@ -158,6 +158,7 @@ export function useSceneSync({
   // baked geometryData gets refreshed for the current setting before the
   // scene rebuild reads from items.
   const upstreamSigRef = useRef(null);
+  const pendingRecalcRef = useRef(false);
   useEffect(() => {
     // Editing a sketch (or a variable) changes geometry that LATER timeline
     // steps were built from, so every subsequent step has to be rebuilt — not
@@ -185,14 +186,36 @@ export function useSceneSync({
     const upstreamChanged = !isFirst && sig !== upstreamSigRef.current;
     upstreamSigRef.current = sig;
 
+    // While a sketch is open, defer the full timeline recalc until it's closed
+    // — recomputing every downstream step on each point drag is wasteful (and
+    // the 3D solids are hidden behind the sketch anyway).  The deferred recalc
+    // runs in the sketch-close effect below.
+    if (upstreamChanged && sketchMode) {
+      pendingRecalcRef.current = true;
+      return;
+    }
+
     // The orchestrator is a UI-only module that's never reachable from
     // the OCC worker's transitive imports, so it can route per-item regen
     // through occClient → worker without creating a bundling cycle.
     import("../../three/regenerateOrchestrator.js").then((m) => {
-      if (upstreamChanged) m.recalculateTimeline();
-      else m.regenerateForResolution(printPrecision);
+      if (upstreamChanged) {
+        pendingRecalcRef.current = false;
+        m.recalculateTimeline();
+      } else {
+        m.regenerateForResolution(printPrecision);
+      }
     });
   }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Run a sketch edit's deferred timeline recalc once the sketch is closed.
+  useEffect(() => {
+    if (sketchMode || !pendingRecalcRef.current) return;
+    pendingRecalcRef.current = false;
+    import("../../three/regenerateOrchestrator.js").then((m) =>
+      m.recalculateTimeline(),
+    );
+  }, [sketchMode]);
 
   // ── Rebuild scene objects ─────────────────────────────────────────────────
 
