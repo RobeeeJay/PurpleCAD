@@ -313,6 +313,9 @@ export function attachCameraControls(ctx) {
     const d = Math.max(0.05, depth);
     buildExtrudePreviewMesh(extrude.extrudeProfileData, d);
   };
+  // Extrude the selected solid face directly (the React extrude button calls
+  // this when a face is selected).  Returns true if a face extrude started.
+  controls.extrudeSelectedFace = () => extrude.startFaceExtrudeFromSelection();
 
   // The current view centre (camera orbit target) in world coords — the
   // toolbar reads this so a newly created primitive spawns where the user is

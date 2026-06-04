@@ -8,6 +8,25 @@ const ObjectCreateSection = () => {
   const setSketchPlacementMode = useStore((s) => s.setSketchPlacementMode);
   const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
   const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
+  const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
+
+  const hasFaceSelected = (selectedSubGeometry?.faces?.length ?? 0) > 0;
+
+  const handleExtrudeClick = () => {
+    if (extrudeSelectMode) {
+      setExtrudeSelectMode(null);
+      return;
+    }
+    // A selected solid face extrudes directly along its normal — no need to
+    // re-pick it in profile-select mode.
+    if (hasFaceSelected) {
+      const started = useStore
+        .getState()
+        ._cameraControls?.extrudeSelectedFace?.();
+      if (started) return;
+    }
+    setExtrudeSelectMode("profile");
+  };
 
   const createItem = (type) => {
     let maxId = 0;
@@ -181,10 +200,12 @@ const ObjectCreateSection = () => {
       </button>
       <button
         className={`toolbar-btn ${extrudeSelectMode ? "active" : ""}`}
-        title="Extrude — click an enclosed sketch region or flat face"
-        onClick={() =>
-          setExtrudeSelectMode(extrudeSelectMode ? null : "profile")
+        title={
+          hasFaceSelected
+            ? "Extrude the selected face along its normal"
+            : "Extrude — click an enclosed sketch region or flat face"
         }
+        onClick={handleExtrudeClick}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <rect

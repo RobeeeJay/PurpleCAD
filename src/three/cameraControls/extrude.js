@@ -106,6 +106,59 @@ export function createExtrudeHelpers(
     renderer.domElement.style.cursor = "crosshair";
   };
 
+  // Enter the depth-drag phase for a captured face profile (shared by the
+  // click-a-face path and the extrude-the-selected-face shortcut).
+  const beginFaceDepthExtrude = (profile) => {
+    extrudeProfileData = profile;
+    extrudeDepthOriginV3 = new THREE.Vector3(
+      profile.position.x,
+      profile.position.y,
+      profile.position.z,
+    );
+    extrudeNormalV3 = new THREE.Vector3(
+      profile.normalWorld.x,
+      profile.normalWorld.y,
+      profile.normalWorld.z,
+    );
+    const retargetItem = itemsRef.current.find(
+      (i) => i.id === useStore.getState().extrudeRetargetId,
+    );
+    const retargetDepth = retargetItem ? resolveItemDepth(retargetItem) : 1.0;
+    const retargetIsCut = !!retargetItem?.isCut;
+    buildExtrudePreviewMesh(profile, retargetDepth);
+    useStore.getState().setExtrudeSelectMode("depth");
+    useStore.getState().setExtrudeDepthInput({
+      defaultDepth: retargetDepth,
+      currentDepth: retargetDepth,
+      cut: retargetIsCut,
+    });
+    renderer.domElement.style.cursor = "ns-resize";
+  };
+
+  // Extrude the currently-selected solid face along its normal — the
+  // shortcut the React extrude button takes when a face is selected, so the
+  // user doesn't have to re-click the face in profile-select mode.  Builds a
+  // synthetic hit from the stored face normal + centroid so extractFaceProfile
+  // can capture the face outline.  Returns true if it started a face extrude.
+  const startFaceExtrudeFromSelection = () => {
+    const sub = useStore.getState().selectedSubGeometry;
+    const face = sub?.faces?.[0];
+    if (!face || face.cx == null) return false;
+    const mesh = objectsRef.current[sub.itemId];
+    if (!mesh) return false;
+    mesh.updateMatrixWorld(true);
+    const hit = {
+      object: mesh,
+      face: { normal: new THREE.Vector3(face.nx, face.ny, face.nz) },
+      point: mesh.localToWorld(new THREE.Vector3(face.cx, face.cy, face.cz)),
+    };
+    const profile = extractFaceProfile(hit);
+    if (!profile) return false;
+    useStore.getState().clearSelectedSubGeometry();
+    beginFaceDepthExtrude(profile);
+    return true;
+  };
+
   const handleExtrudeProfileClick = (screenX, screenY) => {
     const fills = extrudeSelectGroupRef?.current?.children ?? [];
     if (fills.length > 0) {
@@ -182,34 +235,7 @@ export function createExtrudeHelpers(
     const solidHits = ray.intersectObjects(solids, false);
     if (solidHits.length > 0) {
       const profile = extractFaceProfile(solidHits[0]);
-      if (profile) {
-        extrudeProfileData = profile;
-        extrudeDepthOriginV3 = new THREE.Vector3(
-          profile.position.x,
-          profile.position.y,
-          profile.position.z,
-        );
-        extrudeNormalV3 = new THREE.Vector3(
-          profile.normalWorld.x,
-          profile.normalWorld.y,
-          profile.normalWorld.z,
-        );
-        const retargetItem = itemsRef.current.find(
-          (i) => i.id === useStore.getState().extrudeRetargetId,
-        );
-        const retargetDepth = retargetItem
-          ? resolveItemDepth(retargetItem)
-          : 1.0;
-        const retargetIsCut = !!retargetItem?.isCut;
-        buildExtrudePreviewMesh(profile, retargetDepth);
-        useStore.getState().setExtrudeSelectMode("depth");
-        useStore.getState().setExtrudeDepthInput({
-          defaultDepth: retargetDepth,
-          currentDepth: retargetDepth,
-          cut: retargetIsCut,
-        });
-        renderer.domElement.style.cursor = "ns-resize";
-      }
+      if (profile) beginFaceDepthExtrude(profile);
     }
   };
 
@@ -485,6 +511,7 @@ export function createExtrudeHelpers(
     buildExtrudePreviewMesh,
     handleExtrudeHover,
     handleExtrudeProfileClick,
+    startFaceExtrudeFromSelection,
     handleExtrudeDepthMove,
     finalizeExtrude,
     cancelExtrude,
