@@ -160,31 +160,38 @@ export function useSceneSync({
   const upstreamSigRef = useRef(null);
   const pendingRecalcRef = useRef(false);
   useEffect(() => {
-    // Editing a sketch (or a variable) changes geometry that LATER timeline
-    // steps were built from, so every subsequent step has to be rebuilt — not
-    // just the items in the current view.  Detect those upstream edits by
-    // signature and run the full per-step recalc (replays the whole history,
-    // regenerates each step, writes results back) rather than the lightweight
-    // current-view regen.  A resolution toggle or an object add/move leaves the
-    // signature unchanged and keeps the cheap path.
-    const sig =
-      items
-        .filter((i) => i.type === "sketch")
-        .map(
-          (i) =>
-            `${i.id}:${JSON.stringify(i.shapes)}:${JSON.stringify(i.constraints)}`,
-        )
-        .join("|") +
-      // Extrude depth too: a depth edit must rebuild — and re-centre — every
-      // downstream cut/chamfer/bevel, not just refresh the current view.
-      `##${items
-        .filter((i) => i.depth !== undefined)
-        .map((i) => `${i.id}:${i.depth}`)
-        .join(",")}` +
-      `##${JSON.stringify(variables)}`;
-    const isFirst = upstreamSigRef.current === null;
-    const upstreamChanged = !isFirst && sig !== upstreamSigRef.current;
-    upstreamSigRef.current = sig;
+    // Editing an EXISTING sketch / extrude-depth (or a variable) changes
+    // geometry that later timeline steps were built from, so every subsequent
+    // step has to be rebuilt — not just the items in the current view.  Run the
+    // full per-step recalc only for such edits.  Crucially, ADDING a new item
+    // (a fresh sketch plane, an extrusion) must NOT recalc — nothing existing
+    // changed — so compare per-item signatures and trigger only when an id
+    // present both before and after differs (plus variable changes).  Object
+    // add/move and resolution toggles keep the cheap current-view regen.
+    const itemSig = new Map();
+    for (const i of items) {
+      if (i.type === "sketch")
+        itemSig.set(
+          i.id,
+          `s:${JSON.stringify(i.shapes)}:${JSON.stringify(i.constraints)}`,
+        );
+      else if (i.depth !== undefined) itemSig.set(i.id, `d:${i.depth}`);
+    }
+    const varsSig = JSON.stringify(variables);
+    const prev = upstreamSigRef.current;
+    const isFirst = prev === null;
+    let upstreamChanged = false;
+    if (!isFirst) {
+      if (varsSig !== prev.varsSig) upstreamChanged = true;
+      else
+        for (const [id, s] of itemSig) {
+          if (prev.map.has(id) && prev.map.get(id) !== s) {
+            upstreamChanged = true;
+            break;
+          }
+        }
+    }
+    upstreamSigRef.current = { map: itemSig, varsSig };
 
     // While a sketch is open, defer the full timeline recalc until it's closed
     // — recomputing every downstream step on each point drag is wasteful (and
