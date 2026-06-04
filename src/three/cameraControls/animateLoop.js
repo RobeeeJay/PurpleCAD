@@ -19,6 +19,7 @@ export function createAnimateLoop({
   sketchModeRef,
   sketchGridGroupRef,
   sketchShapesGroupRef,
+  sketchPlacementPlanesRef,
   objectsRef,
   selectedIdRef,
   axisGroupRef,
@@ -90,6 +91,14 @@ export function createAnimateLoop({
         // 0.5: render the XYZ indicator at half the authored on-screen size.
         const s = gizmoScale(axisGroupRef.current.position) * 0.5;
         axisGroupRef.current.scale.setScalar(s);
+      }
+      // Sketch-placement plane previews: keep them a constant on-screen size so
+      // they're equally easy to click whatever the zoom (they're authored as
+      // fixed-world 4×4 meshes).
+      if (sketchPlacementPlanesRef?.current?.length) {
+        for (const { mesh } of sketchPlacementPlanesRef.current) {
+          mesh.scale.setScalar(gizmoScale(mesh.position) * 0.7);
+        }
       }
       if (handlesRef?.current && handlesRef.current.length > 0) {
         // The rotation tori (dir === null) sit at the gizmo centre; use one as
