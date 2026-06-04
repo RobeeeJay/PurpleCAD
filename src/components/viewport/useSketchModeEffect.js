@@ -445,6 +445,12 @@ export function useSketchModeEffect({
       (it) =>
         it.type !== "sketch" &&
         it.visible !== false &&
+        // Skip geometry derived from the sketch being edited (an extrude or a
+        // chamfered extrude keeps its profile.sketchId).  The live sketch lines
+        // already draw that outline, so its projected silhouette is redundant —
+        // and because the silhouette only refreshes on a store commit it lags a
+        // point drag, showing up as a lighter-grey duplicate offset by the drag.
+        it.profile?.sketchId !== selectedId &&
         objectsRef.current[it.id]?.geometry,
     );
     let ghostSig = `p:${mesh.position.toArray().join(",")}|${mesh.quaternion.toArray().join(",")}`;
