@@ -86,6 +86,7 @@ const Viewport = () => {
   const renderMode = useStore((state) => state.renderMode);
   const shadowsEnabled = useStore((state) => state.shadowsEnabled);
   const projectionMode = useStore((state) => state.projectionMode);
+  const fov = useStore((state) => state.fov);
   const widgetVisible = useStore((state) => state.widgetVisible);
   const axisVisible = useStore((state) => state.axisVisible);
   const cameraResetTrigger = useStore((state) => state.cameraResetTrigger);
@@ -129,6 +130,7 @@ const Viewport = () => {
     objectsRef,
     itemsRef,
     projectionMode,
+    fov,
     isInSketchMode,
     cameraResetTrigger,
     setRotationState,

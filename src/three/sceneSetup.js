@@ -7,7 +7,13 @@ export function createScene(theme) {
   return scene;
 }
 
-export function createCamera(projectionMode, aspect, savedState, targetRef) {
+export function createCamera(
+  projectionMode,
+  aspect,
+  savedState,
+  targetRef,
+  fov = 35,
+) {
   const frustumSize = 20;
   let camera;
   if (projectionMode === "isometric") {
@@ -20,7 +26,7 @@ export function createCamera(projectionMode, aspect, savedState, targetRef) {
       1000,
     );
   } else {
-    camera = new THREE.PerspectiveCamera(35, aspect, 0.1, 1000);
+    camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 1000);
   }
   camera.position.set(
     savedState.positionX,

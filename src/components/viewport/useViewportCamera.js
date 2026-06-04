@@ -20,6 +20,7 @@ export function useViewportCamera({
   objectsRef,
   itemsRef,
   projectionMode,
+  fov,
   isInSketchMode,
   cameraResetTrigger,
   setRotationState,
@@ -156,7 +157,7 @@ export function useViewportCamera({
           Math.cos(currentRotY) * Math.cos(currentRotX) * distance,
       );
     } else {
-      newCamera = new THREE.PerspectiveCamera(30, aspect, 0.1, 1000);
+      newCamera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 1000);
       newCamera.position.copy(currentPosition);
     }
     newCamera.lookAt(targetRef.current);
@@ -174,6 +175,16 @@ export function useViewportCamera({
     renderer.clear();
     renderer.render(sceneRef.current, newCamera);
   }, [projectionMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live-update the perspective field of view (the Settings dialog) without
+  // recreating the camera.  Orthographic / sketch mode has no FOV to set.
+  useEffect(() => {
+    const cam = cameraRef.current;
+    if (cam?.isPerspectiveCamera) {
+      cam.fov = fov;
+      cam.updateProjectionMatrix();
+    }
+  }, [fov]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sketch mode must stay orthographic so the 3D geometry seen behind the
   // sketch plane is a parallel projection (no perspective foreshortening).

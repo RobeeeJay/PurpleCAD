@@ -11,7 +11,7 @@ import {
 } from "../../three/csgUtils.js";
 import { chamferOrFilletItem } from "../../three/occClient.js";
 
-const BevelSection = () => {
+const BevelSection = ({ bare = false }) => {
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
   const items = useStore((s) => s.items);
   const modifyItem = useStore((s) => s.modifyItem);
@@ -202,8 +202,8 @@ const BevelSection = () => {
     }
   };
 
-  return (
-    <ToolbarSection label="Modify">
+  const body = (
+    <>
       <label
         title="Chamfer/Bevel distance in mm"
         style={{
@@ -291,8 +291,9 @@ const BevelSection = () => {
           />
         </svg>
       </button>
-    </ToolbarSection>
+    </>
   );
+  return bare ? body : <ToolbarSection label="Modify">{body}</ToolbarSection>;
 };
 
 export default BevelSection;

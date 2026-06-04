@@ -3,7 +3,7 @@ import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { performCsg } from "../../three/occClient.js";
 
-const CombineSection = () => {
+const CombineSection = ({ bare = false }) => {
   const selectedIds = useStore((s) => s.selectedIds);
   const items = useStore((s) => s.items);
   const history = useStore((s) => s.history);
@@ -83,8 +83,8 @@ const CombineSection = () => {
     }
   };
 
-  return (
-    <ToolbarSection label="Boolean">
+  const body = (
+    <>
       <button
         className="toolbar-btn"
         title="Union"
@@ -162,8 +162,9 @@ const CombineSection = () => {
           <path d="M 11 9 Q 13 12 11 15" fill="currentColor" />
         </svg>
       </button>
-    </ToolbarSection>
+    </>
   );
+  return bare ? body : <ToolbarSection label="Boolean">{body}</ToolbarSection>;
 };
 
 export default CombineSection;

@@ -78,10 +78,12 @@ export const uiInitial = {
   // consumer component after a short delay).  null = nothing visible.
   notification: null,
 
-  // Snap-to-grid: when enabled, dragged/moved objects (3D gizmo translate and
-  // sketch drags) snap to snapDistanceMm in world space, and gizmo rotations
-  // snap to snapAngleDeg.  Persisted to localStorage so the user's interval
-  // survives a reload.
+  settingsDialogOpen: false,
+
+  // Snap-to-grid + perspective FOV: when snap is enabled, dragged/moved objects
+  // (3D gizmo translate and sketch drags) snap to snapDistanceMm in world space,
+  // and gizmo rotations snap to snapAngleDeg.  `fov` is the perspective camera's
+  // field of view.  Persisted to localStorage so they survive a reload.
   ...loadSnapSettings(),
 };
 
@@ -176,4 +178,14 @@ export const createUiSlice = (set) => ({
       saveSnapSettings({ ...state, snapAngleDeg });
       return { snapAngleDeg };
     }),
+  setFov: (v) =>
+    set((state) => {
+      const n = Number(v);
+      // Clamp to a sane perspective range; very low = nearly orthographic.
+      const fov = Number.isFinite(n) ? Math.min(90, Math.max(5, n)) : 35;
+      saveSnapSettings({ ...state, fov });
+      return { fov };
+    }),
+
+  setSettingsDialogOpen: (open) => set({ settingsDialogOpen: !!open }),
 });

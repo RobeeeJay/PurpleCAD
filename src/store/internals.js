@@ -150,10 +150,14 @@ export const markCsgDirty = (items) => {
   return changed ? out : items;
 };
 
+// Viewport + snap preferences (the Settings dialog).  `fov` is the perspective
+// camera's vertical field of view in degrees — lower = flatter / less
+// perspective.  Persisted alongside snap under the same `cad-snap` key.
 const SNAP_DEFAULTS = {
   snapEnabled: false,
   snapDistanceMm: 5,
   snapAngleDeg: 9,
+  fov: 35,
 };
 
 export const loadSnapSettings = () => {
@@ -165,6 +169,7 @@ export const loadSnapSettings = () => {
       snapEnabled: !!parsed.snapEnabled,
       snapDistanceMm: parsed.snapDistanceMm > 0 ? parsed.snapDistanceMm : 5,
       snapAngleDeg: parsed.snapAngleDeg > 0 ? parsed.snapAngleDeg : 9,
+      fov: parsed.fov > 0 ? parsed.fov : 35,
     };
   } catch {
     return { ...SNAP_DEFAULTS };
@@ -179,6 +184,7 @@ export const saveSnapSettings = (snap) => {
         snapEnabled: snap.snapEnabled,
         snapDistanceMm: snap.snapDistanceMm,
         snapAngleDeg: snap.snapAngleDeg,
+        fov: snap.fov,
       }),
     );
   } catch (e) {

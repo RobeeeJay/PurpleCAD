@@ -15,9 +15,33 @@ const OptionsSection = () => {
   const toggleConstraintsVisible = useStore((s) => s.toggleConstraintsVisible);
   const dimensionsVisible = useStore((s) => s.dimensionsVisible);
   const toggleDimensionsVisible = useStore((s) => s.toggleDimensionsVisible);
+  const setSettingsDialogOpen = useStore((s) => s.setSettingsDialogOpen);
 
   return (
     <ToolbarSection label="Options">
+      <button
+        className="toolbar-btn"
+        title="Settings — field of view and snap"
+        onClick={() => setSettingsDialogOpen(true)}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <circle
+            cx="12"
+            cy="12"
+            r="3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          <path
+            d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
       <button
         className="toolbar-btn"
         title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}

@@ -12,7 +12,7 @@ import ModifySection from "./toolbar/ModifySection";
 import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
 import OptionsSection from "./toolbar/OptionsSection";
-import SnapSection from "./toolbar/SnapSection";
+import ToolbarSection from "./toolbar/ToolbarSection";
 
 const Toolbar = () => {
   const selectedId = useStore((s) => s.selectedId);
@@ -26,13 +26,18 @@ const Toolbar = () => {
       <DocumentSection />
       {isSketchMode ? <SketchDrawSection /> : <ObjectCreateSection />}
       {isSketchMode && <SketchModifySection />}
-      {!isSketchMode && <CombineSection />}
-      <BevelSection />
-      {!isSketchMode && <ModifySection />}
+      {/* Boolean, chamfer/bevel, and drop-to-ground combined into one
+          object-editing section. */}
+      {!isSketchMode && (
+        <ToolbarSection label="Modify">
+          <CombineSection bare />
+          <BevelSection bare />
+          <ModifySection bare />
+        </ToolbarSection>
+      )}
       <ConstrainSection isSketchMode={isSketchMode} />
       <RenderSection />
       <OptionsSection />
-      <SnapSection />
     </div>
   );
 };

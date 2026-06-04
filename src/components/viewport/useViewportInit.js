@@ -89,7 +89,13 @@ export function useViewportInit({
     );
     targetRef.current.copy(savedTarget);
 
-    const camera = createCamera(projectionMode, aspect, savedState, targetRef);
+    const camera = createCamera(
+      projectionMode,
+      aspect,
+      savedState,
+      targetRef,
+      useStore.getState().fov,
+    );
     cameraRef.current = camera;
     scene.add(camera);
 
