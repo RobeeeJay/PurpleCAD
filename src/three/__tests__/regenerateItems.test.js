@@ -17,7 +17,32 @@ vi.mock("../occClient.js", () => ({
   })),
 }));
 
-import { regenerateItemsForResolution } from "../regenerateItems.js";
+import {
+  regenerateItemsForResolution,
+  withLiveDepth,
+} from "../regenerateItems.js";
+
+describe("withLiveDepth — chamfer/bevel source tracks a later extrude depth edit", () => {
+  it("refreshes an extrude source's depth", () => {
+    const src = { type: "extrude", depth: "20", profile: {} };
+    expect(withLiveDepth(src, "60").depth).toBe("60");
+    // Unchanged depth returns the same object (no needless rebuild).
+    expect(withLiveDepth(src, "20")).toBe(src);
+    // Undefined depth is a no-op.
+    expect(withLiveDepth(src, undefined)).toBe(src);
+  });
+  it("pushes depth down to a chained chamfer's nested extrude", () => {
+    const src = {
+      type: "csg",
+      regenerator: {
+        kind: "chamfer",
+        source: { type: "extrude", depth: "20" },
+      },
+    };
+    const out = withLiveDepth(src, "60");
+    expect(out.regenerator.source.depth).toBe("60");
+  });
+});
 
 describe("regenerateItemsForResolution onProgress", () => {
   it("fires onProgress with the count of items that actually need regen — skipping items already at the requested precision", async () => {

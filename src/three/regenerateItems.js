@@ -53,17 +53,36 @@ function withLivePolygons(item, allItems, precision) {
   return item;
 }
 
+// The chamfer/bevel source is a snapshot taken when the op was applied, with
+// its extrude depth baked in.  withLivePolygons re-derives its profile from the
+// sketch, but not the depth — so editing the extrude's depth afterwards would
+// rebuild the op at the old height.  Push the live depth down to the (possibly
+// nested) extrude source so chamfers and bevels both track a depth edit.
+export function withLiveDepth(src, depth) {
+  if (!src || depth === undefined) return src;
+  if (src.type === "extrude")
+    return src.depth === depth ? src : { ...src, depth };
+  if (src.regenerator?.source) {
+    const inner = withLiveDepth(src.regenerator.source, depth);
+    return inner === src.regenerator.source
+      ? src
+      : { ...src, regenerator: { ...src.regenerator, source: inner } };
+  }
+  return src;
+}
+
 async function regenerateChamfer(
   regenerator,
   accumulatedItems,
   printPrecision,
   currentPosition,
+  currentDepth,
 ) {
   const subGeo = regenerator.subGeo || { edges: [], faces: [] };
   if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
     return null;
   const source = withLivePolygons(
-    regenerator.source,
+    withLiveDepth(regenerator.source, currentDepth),
     accumulatedItems,
     printPrecision,
   );
@@ -163,7 +182,13 @@ export async function regenerateItemsForResolution(
     }
     let result = null;
     if (r.kind === "chamfer") {
-      result = await regenerateChamfer(r, out, printPrecision, item.position);
+      result = await regenerateChamfer(
+        r,
+        out,
+        printPrecision,
+        item.position,
+        item.depth,
+      );
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
     }

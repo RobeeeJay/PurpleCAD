@@ -173,7 +173,14 @@ export function useSceneSync({
           (i) =>
             `${i.id}:${JSON.stringify(i.shapes)}:${JSON.stringify(i.constraints)}`,
         )
-        .join("|") + `##${JSON.stringify(variables)}`;
+        .join("|") +
+      // Extrude depth too: a depth edit must rebuild — and re-centre — every
+      // downstream cut/chamfer/bevel, not just refresh the current view.
+      `##${items
+        .filter((i) => i.depth !== undefined)
+        .map((i) => `${i.id}:${i.depth}`)
+        .join(",")}` +
+      `##${JSON.stringify(variables)}`;
     const isFirst = upstreamSigRef.current === null;
     const upstreamChanged = !isFirst && sig !== upstreamSigRef.current;
     upstreamSigRef.current = sig;
