@@ -54,16 +54,20 @@ export function createViewInteraction(
       sketchPlacementPlanesRef.current.forEach(({ mesh }) => {
         mesh.material.opacity = 0.18;
       });
-      if (intersects.length > 0) {
+      // Prioritise the three main sketch planes; highlight an object face only
+      // when the cursor isn't over a plane.
+      const planeMeshes = sketchPlacementPlanesRef.current.map((p) => p.mesh);
+      const planeHits = raycasterRef.current.intersectObjects(
+        planeMeshes,
+        false,
+      );
+      if (planeHits.length > 0) {
+        clearFaceHighlight();
+        planeHits[0].object.material.opacity = 0.45;
+      } else if (intersects.length > 0) {
         applyFaceHighlight(intersects[0], 0xff8833);
       } else {
         clearFaceHighlight();
-        const planeMeshes = sketchPlacementPlanesRef.current.map((p) => p.mesh);
-        const planeHits = raycasterRef.current.intersectObjects(
-          planeMeshes,
-          false,
-        );
-        if (planeHits.length > 0) planeHits[0].object.material.opacity = 0.45;
       }
     } else {
       // Modifier-key scheme:
@@ -127,67 +131,62 @@ export function createViewInteraction(
           const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
           raycasterRef.current.setFromCamera({ x: nx, y: ny }, currentCamera);
 
-          const objHits = raycasterRef.current.intersectObjects(
-            Object.values(objectsRef.current).filter(
-              (m) => m.visible !== false,
-            ),
+          // Prioritise the three main sketch planes; only fall back to an
+          // object face when the cursor isn't over a plane.
+          const planeMeshes = sketchPlacementPlanesRef.current.map(
+            (p) => p.mesh,
+          );
+          const planeHits = raycasterRef.current.intersectObjects(
+            planeMeshes,
             false,
           );
           let position, rotation;
           let hostSolidId = null;
-          if (objHits.length > 0) {
-            const hit = objHits[0];
-            const normalMatrix = new THREE.Matrix3().getNormalMatrix(
-              hit.object.matrixWorld,
+          if (planeHits.length > 0) {
+            const hitPlane = sketchPlacementPlanesRef.current.find(
+              (p) => p.mesh === planeHits[0].object,
             );
-            const worldNormal = hit.face.normal
-              .clone()
-              .applyMatrix3(normalMatrix)
-              .normalize();
-            const q = new THREE.Quaternion().setFromUnitVectors(
-              new THREE.Vector3(0, 0, 1),
-              worldNormal,
-            );
-            const euler = new THREE.Euler().setFromQuaternion(q);
-            position = { x: hit.point.x, y: hit.point.y, z: hit.point.z };
-            rotation = { x: euler.x, y: euler.y, z: euler.z };
-            // Remember which solid this sketch was placed on so a later
-            // cut-extrude from the sketch's loops targets only that
-            // solid.  Without this, sketch-loop cuts fall back to
-            // "every visible non-sketch solid", which silently turns
-            // unrelated primitives into csg items at the same world
-            // position (the visible appearance changes from analytic
-            // shader to tessellated mesh — the user perceives this as
-            // the cut having a wrong origin).
-            hostSolidId = hit.object.userData?.itemId ?? null;
+            if (hitPlane) {
+              const hp = planeHits[0].point;
+              // The placement-plane meshes are drawn at the current camera
+              // target so they stay visible to the user, but the canonical
+              // XZ/XY/YZ planes themselves pass through the world origin.
+              // Zero out the axis perpendicular to the selected plane so a
+              // sketch created on (e.g.) XZ lands at world Y=0 rather than
+              // wherever the camera happened to be focused.
+              const onAxis = { x: hp.x, y: hp.y, z: hp.z };
+              if (hitPlane.name === "XZ") onAxis.y = 0;
+              else if (hitPlane.name === "XY") onAxis.z = 0;
+              else if (hitPlane.name === "YZ") onAxis.x = 0;
+              position = onAxis;
+              rotation = hitPlane.euler;
+            }
           } else {
-            const planeMeshes = sketchPlacementPlanesRef.current.map(
-              (p) => p.mesh,
-            );
-            const planeHits = raycasterRef.current.intersectObjects(
-              planeMeshes,
+            const objHits = raycasterRef.current.intersectObjects(
+              Object.values(objectsRef.current).filter(
+                (m) => m.visible !== false,
+              ),
               false,
             );
-            if (planeHits.length > 0) {
-              const hitPlane = sketchPlacementPlanesRef.current.find(
-                (p) => p.mesh === planeHits[0].object,
+            if (objHits.length > 0) {
+              const hit = objHits[0];
+              const normalMatrix = new THREE.Matrix3().getNormalMatrix(
+                hit.object.matrixWorld,
               );
-              if (hitPlane) {
-                const hp = planeHits[0].point;
-                // The placement-plane meshes are drawn at the current
-                // camera target so they stay visible to the user, but the
-                // canonical XZ/XY/YZ planes themselves pass through the
-                // world origin.  Zero out the axis perpendicular to the
-                // selected plane so a sketch created on (e.g.) XZ lands
-                // at world Y=0 rather than wherever the camera happened
-                // to be focused (often on top of the most recent solid).
-                const onAxis = { x: hp.x, y: hp.y, z: hp.z };
-                if (hitPlane.name === "XZ") onAxis.y = 0;
-                else if (hitPlane.name === "XY") onAxis.z = 0;
-                else if (hitPlane.name === "YZ") onAxis.x = 0;
-                position = onAxis;
-                rotation = hitPlane.euler;
-              }
+              const worldNormal = hit.face.normal
+                .clone()
+                .applyMatrix3(normalMatrix)
+                .normalize();
+              const q = new THREE.Quaternion().setFromUnitVectors(
+                new THREE.Vector3(0, 0, 1),
+                worldNormal,
+              );
+              const euler = new THREE.Euler().setFromQuaternion(q);
+              position = { x: hit.point.x, y: hit.point.y, z: hit.point.z };
+              rotation = { x: euler.x, y: euler.y, z: euler.z };
+              // Remember which solid this sketch was placed on so a later
+              // cut-extrude from the sketch's loops targets only that solid.
+              hostSolidId = hit.object.userData?.itemId ?? null;
             }
           }
 
