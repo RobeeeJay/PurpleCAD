@@ -122,7 +122,7 @@ export function useSceneSync({
     clearPlanes();
     if (!sketchPlacementMode) return;
     const center = targetRef.current.clone();
-    const SIZE = 8;
+    const SIZE = 4;
     [
       { name: "XZ", rx: -Math.PI / 2, ry: 0, rz: 0, color: 0x4488ff },
       { name: "XY", rx: 0, ry: 0, rz: 0, color: 0x44bb44 },

@@ -18,6 +18,10 @@ const SettingsDialog = () => {
   const setCurveDetectionAngleDeg = useStore(
     (s) => s.setCurveDetectionAngleDeg,
   );
+  const theme = useStore((s) => s.theme);
+  const toggleTheme = useStore((s) => s.toggleTheme);
+  const widgetVisible = useStore((s) => s.widgetVisible);
+  const toggleWidgetVisibility = useStore((s) => s.toggleWidgetVisibility);
 
   if (!open) return null;
 
@@ -149,6 +153,28 @@ const SettingsDialog = () => {
               />
               <span style={{ fontSize: 10, opacity: 0.7 }}>&deg;</span>
             </span>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>Dark mode</span>
+            <button
+              className="variables-btn"
+              onClick={toggleTheme}
+              style={{ minWidth: 56 }}
+            >
+              {theme === "dark" ? "On" : "Off"}
+            </button>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>Orientation widget</span>
+            <button
+              className="variables-btn"
+              onClick={toggleWidgetVisibility}
+              style={{ minWidth: 56 }}
+            >
+              {widgetVisible ? "On" : "Off"}
+            </button>
           </div>
         </div>
       </div>
