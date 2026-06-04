@@ -17,10 +17,8 @@ vi.mock("../occClient.js", () => ({
   })),
 }));
 
-import {
-  regenerateItemsForResolution,
-  withLiveDepth,
-} from "../regenerateItems.js";
+import { regenerateItemsForResolution } from "../regenerateItems.js";
+import { withLiveDepth } from "../csgUtils.js";
 
 describe("withLiveDepth — chamfer/bevel source tracks a later extrude depth edit", () => {
   it("refreshes an extrude source's depth", () => {

@@ -6,6 +6,8 @@ import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 import {
   buildBrushTransform,
   extrudeWithLivePolygon,
+  withLivePolygons,
+  withLiveDepth,
 } from "../../three/csgUtils.js";
 import { chamferOrFilletItem } from "../../three/occClient.js";
 
@@ -117,7 +119,15 @@ const BevelSection = () => {
         // live polygon — not the stale one captured when the extrude was made.
         // Otherwise a sketch-variable resize leaves the chamfer using the old
         // size/centroid and the object jumps in position and size.
-        source = extrudeWithLivePolygon({ ...item }, items, printPrecision);
+        // withLivePolygons recurses: when `item` is already a CSG (chaining a
+        // bevel onto a chamfer), it refreshes the NESTED extrude too, so the
+        // Electron bridge — which can't re-derive — doesn't build the chained
+        // source from a stale nested polygon and shift the object.
+        source = withLivePolygons(
+          withLiveDepth({ ...item }, item.depth),
+          items,
+          printPrecision,
+        );
         subGeo = {
           edges: selectedSubGeometry.edges || [],
           faces: selectedSubGeometry.faces || [],

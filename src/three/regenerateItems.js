@@ -1,5 +1,9 @@
 import * as THREE from "three";
-import { buildBrushTransform, extrudeWithLivePolygon } from "./csgUtils.js";
+import {
+  buildBrushTransform,
+  withLivePolygons,
+  withLiveDepth,
+} from "./csgUtils.js";
 // Routed through occClient → the OCC worker.  This file is no longer
 // imported from the store (the orchestrator in regenerateOrchestrator.js
 // is what Viewport pulls in), so it's outside the worker's transitive
@@ -22,54 +26,6 @@ import { chamferOrFilletItem, performCsg } from "./occClient.js";
 //
 // Regeneration is async because both branches go through occClient, which
 // posts to the OCC Web Worker in the browser and runs in-process in node.
-
-// Re-derive any extrude profile in an item (or, recursively, in a chamfer's
-// source) from its sketch at the requested precision, so curved holes/outlines
-// tessellate finer at print resolution.  The Electron OCC bridge can't import
-// this ESM helper and otherwise builds prisms from the stored preview polygon;
-// occOps.js does this inside buildItemShapeLocal.  CRUCIAL: the SAME live
-// polygon must feed both the OCC shape AND the brush position
-// (buildBrushTransform adds R·polyCentroid, which buildItemShapeLocal subtracts
-// — they only cancel if both use the same polygon, else the object shifts when
-// print resolution is toggled).
-function withLivePolygons(item, allItems, precision) {
-  if (!item) return item;
-  if (item.type === "extrude") {
-    return extrudeWithLivePolygon(item, allItems, precision);
-  }
-  if (
-    item.type === "csg" &&
-    item.regenerator?.kind === "chamfer" &&
-    item.regenerator.source
-  ) {
-    return {
-      ...item,
-      regenerator: {
-        ...item.regenerator,
-        source: withLivePolygons(item.regenerator.source, allItems, precision),
-      },
-    };
-  }
-  return item;
-}
-
-// The chamfer/bevel source is a snapshot taken when the op was applied, with
-// its extrude depth baked in.  withLivePolygons re-derives its profile from the
-// sketch, but not the depth — so editing the extrude's depth afterwards would
-// rebuild the op at the old height.  Push the live depth down to the (possibly
-// nested) extrude source so chamfers and bevels both track a depth edit.
-export function withLiveDepth(src, depth) {
-  if (!src || depth === undefined) return src;
-  if (src.type === "extrude")
-    return src.depth === depth ? src : { ...src, depth };
-  if (src.regenerator?.source) {
-    const inner = withLiveDepth(src.regenerator.source, depth);
-    return inner === src.regenerator.source
-      ? src
-      : { ...src, regenerator: { ...src.regenerator, source: inner } };
-  }
-  return src;
-}
 
 async function regenerateChamfer(
   regenerator,

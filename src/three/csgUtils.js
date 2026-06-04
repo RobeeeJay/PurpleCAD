@@ -107,3 +107,43 @@ export function extrudeWithLivePolygon(item, allItems, precision) {
     }),
   });
 }
+
+// Re-derive every extrude profile in an item AND, recursively, in a chamfer/
+// bevel source's nested source — so the live sketch geometry feeds the OCC
+// shape (the Electron bridge can't import this ESM helper and otherwise builds
+// from the stored polygon).  extrudeWithLivePolygon alone only touches the top
+// item; a chained op (bevel on a chamfer) keeps a stale nested extrude, which
+// the bridge then builds at the old size — shifting the object.
+export function withLivePolygons(item, allItems, precision) {
+  if (!item) return item;
+  if (item.type === "extrude") {
+    return extrudeWithLivePolygon(item, allItems, precision);
+  }
+  if (item.type === "csg" && item.regenerator?.source) {
+    return {
+      ...item,
+      regenerator: {
+        ...item.regenerator,
+        source: withLivePolygons(item.regenerator.source, allItems, precision),
+      },
+    };
+  }
+  return item;
+}
+
+// The chamfer/bevel source is a snapshot with its extrude depth baked in.
+// withLivePolygons re-derives the profile but not the depth, so push the live
+// depth down to the (possibly nested) extrude source — otherwise a depth edit
+// rebuilds the op at the old height.
+export function withLiveDepth(src, depth) {
+  if (!src || depth === undefined) return src;
+  if (src.type === "extrude")
+    return src.depth === depth ? src : { ...src, depth };
+  if (src.regenerator?.source) {
+    const inner = withLiveDepth(src.regenerator.source, depth);
+    return inner === src.regenerator.source
+      ? src
+      : { ...src, regenerator: { ...src.regenerator, source: inner } };
+  }
+  return src;
+}
