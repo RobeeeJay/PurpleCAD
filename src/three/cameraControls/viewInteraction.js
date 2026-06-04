@@ -318,40 +318,38 @@ export function createViewInteraction(
               ? [...prev.edges]
               : [];
           const ed = highlights.pendingEdgeSelection;
-          const already = edges.some(
-            (e2) =>
-              Math.abs(e2.ax - ed.ax) < 0.001 &&
-              Math.abs(e2.ay - ed.ay) < 0.001 &&
-              Math.abs(e2.az - ed.az) < 0.001 &&
-              Math.abs(e2.bx - ed.bx) < 0.001 &&
-              Math.abs(e2.by - ed.by) < 0.001 &&
-              Math.abs(e2.bz - ed.bz) < 0.001,
-          );
+          // Curve detection selects the whole connected chain at once; a plain
+          // edge is a one-element chain.
+          const chain = ed.edges?.length ? ed.edges : [ed];
+          const eqEdge = (a, b) =>
+            Math.abs(a.ax - b.ax) < 0.001 &&
+            Math.abs(a.ay - b.ay) < 0.001 &&
+            Math.abs(a.az - b.az) < 0.001 &&
+            Math.abs(a.bx - b.bx) < 0.001 &&
+            Math.abs(a.by - b.by) < 0.001 &&
+            Math.abs(a.bz - b.bz) < 0.001;
+          // Toggle off the whole chain when its primary edge is already in.
+          const primaryPresent = edges.some((e2) => eqEdge(e2, ed));
+          let newEdges;
+          if (primaryPresent) {
+            newEdges = edges.filter((e2) => !chain.some((c) => eqEdge(e2, c)));
+          } else {
+            newEdges = [...edges];
+            chain.forEach((c) => {
+              if (!newEdges.some((e2) => eqEdge(e2, c)))
+                newEdges.push({
+                  ax: c.ax,
+                  ay: c.ay,
+                  az: c.az,
+                  bx: c.bx,
+                  by: c.by,
+                  bz: c.bz,
+                });
+            });
+          }
           useStore.getState().setSelectedSubGeometry({
             itemId: clickedId,
-            edges: already
-              ? edges.filter(
-                  (e2) =>
-                    !(
-                      Math.abs(e2.ax - ed.ax) < 0.001 &&
-                      Math.abs(e2.ay - ed.ay) < 0.001 &&
-                      Math.abs(e2.az - ed.az) < 0.001 &&
-                      Math.abs(e2.bx - ed.bx) < 0.001 &&
-                      Math.abs(e2.by - ed.by) < 0.001 &&
-                      Math.abs(e2.bz - ed.bz) < 0.001
-                    ),
-                )
-              : [
-                  ...edges,
-                  {
-                    ax: ed.ax,
-                    ay: ed.ay,
-                    az: ed.az,
-                    bx: ed.bx,
-                    by: ed.by,
-                    bz: ed.bz,
-                  },
-                ],
+            edges: newEdges,
             faces: [],
           });
           // Sub-geometry selection is exclusive with multi-object selection.

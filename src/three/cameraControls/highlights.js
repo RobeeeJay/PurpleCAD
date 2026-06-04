@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "../sceneObjects.js";
+import { computeSegmentChain } from "../segmentChain.js";
 
 export function createHighlightHelpers({
   scene,
@@ -352,65 +353,86 @@ export function createHighlightHelpers({
     const edgesGeo = new THREE.EdgesGeometry(srcGeo);
     if (primitiveType) srcGeo.dispose();
     const posAttr = edgesGeo.getAttribute("position");
-    let minDist = Infinity,
-      bestA = null,
-      bestB = null;
+    const segs = [];
     for (let i = 0; i < posAttr.count; i += 2) {
-      const a = new THREE.Vector3(
-        posAttr.getX(i),
-        posAttr.getY(i),
-        posAttr.getZ(i),
-      );
-      const b = new THREE.Vector3(
-        posAttr.getX(i + 1),
-        posAttr.getY(i + 1),
-        posAttr.getZ(i + 1),
-      );
-      const d = distToSeg(localHit, a, b);
-      if (d < minDist) {
-        minDist = d;
-        bestA = a;
-        bestB = b;
-      }
+      segs.push({
+        ax: posAttr.getX(i),
+        ay: posAttr.getY(i),
+        az: posAttr.getZ(i),
+        bx: posAttr.getX(i + 1),
+        by: posAttr.getY(i + 1),
+        bz: posAttr.getZ(i + 1),
+      });
     }
     edgesGeo.dispose();
-    if (bestA) {
-      const hlGeo = new THREE.BufferGeometry();
-      hlGeo.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-          new Float32Array([
-            bestA.x,
-            bestA.y,
-            bestA.z,
-            bestB.x,
-            bestB.y,
-            bestB.z,
-          ]),
-          3,
-        ),
-      );
-      const hlLine = new THREE.LineSegments(
-        hlGeo,
-        new THREE.LineBasicMaterial({ color: 0xffdd00, depthTest: false }),
-      );
-      hlLine.position.copy(hitMesh.position);
-      hlLine.rotation.copy(hitMesh.rotation);
-      hlLine.scale.copy(hitMesh.scale);
-      hlLine.renderOrder = 998;
-      scene.add(hlLine);
-      edgeHighlightRef.current = hlLine;
-      // Record for click-to-select
-      pendingEdgeSelection = {
-        itemId: hitMesh.userData.itemId,
-        ax: bestA.x,
-        ay: bestA.y,
-        az: bestA.z,
-        bx: bestB.x,
-        by: bestB.y,
-        bz: bestB.z,
-      };
+
+    // Nearest feature-edge segment to the cursor.
+    let minDist = Infinity;
+    let bestIdx = -1;
+    const va = new THREE.Vector3();
+    const vb = new THREE.Vector3();
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      va.set(s.ax, s.ay, s.az);
+      vb.set(s.bx, s.by, s.bz);
+      const d = distToSeg(localHit, va, vb);
+      if (d < minDist) {
+        minDist = d;
+        bestIdx = i;
+      }
     }
+    if (bestIdx < 0) return;
+
+    // Curve detection: highlight (and select) the whole smooth chain of
+    // connected edges, so a tessellated curve reads/selects as one edge.
+    const maxAngle = useStore.getState().curveDetectionAngleDeg ?? 5;
+    const chainIdx = computeSegmentChain(segs, bestIdx, maxAngle);
+    const positions = [];
+    chainIdx.forEach((i) => {
+      const s = segs[i];
+      positions.push(s.ax, s.ay, s.az, s.bx, s.by, s.bz);
+    });
+
+    const hlGeo = new THREE.BufferGeometry();
+    hlGeo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positions), 3),
+    );
+    const hlLine = new THREE.LineSegments(
+      hlGeo,
+      new THREE.LineBasicMaterial({ color: 0xffdd00, depthTest: false }),
+    );
+    hlLine.position.copy(hitMesh.position);
+    hlLine.rotation.copy(hitMesh.rotation);
+    hlLine.scale.copy(hitMesh.scale);
+    hlLine.renderOrder = 998;
+    scene.add(hlLine);
+    edgeHighlightRef.current = hlLine;
+
+    // Record for click-to-select.  Keep the nearest segment as the primary
+    // (ax..bz, for any single-edge consumer) and carry the full chain in
+    // `edges` so committing the selection chamfers/fillets the whole curve.
+    const best = segs[bestIdx];
+    pendingEdgeSelection = {
+      itemId: hitMesh.userData.itemId,
+      ax: best.ax,
+      ay: best.ay,
+      az: best.az,
+      bx: best.bx,
+      by: best.by,
+      bz: best.bz,
+      edges: chainIdx.map((i) => {
+        const s = segs[i];
+        return {
+          ax: s.ax,
+          ay: s.ay,
+          az: s.az,
+          bx: s.bx,
+          by: s.by,
+          bz: s.bz,
+        };
+      }),
+    };
   };
 
   const applyPointHighlight = (hit) => {
