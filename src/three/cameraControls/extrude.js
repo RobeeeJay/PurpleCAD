@@ -381,6 +381,56 @@ export function createExtrudeHelpers(
     }
   };
 
+  // Boss extrusion from a solid face: union the freshly-created extrude with
+  // the source solid, replacing both with a single CSG union (mirrors the cut
+  // path, but adds material instead of subtracting).
+  const runUnionExtrusion = async (extrudeItemId, sourceItemId) => {
+    try {
+      const { performCsg } = await import("../occClient.js");
+      const freshStore = useStore.getState();
+      const items = freshStore.items;
+      const target = items.find(
+        (i) => i.id === sourceItemId && i.type !== "sketch",
+      );
+      const extrude = items.find((i) => i.id === extrudeItemId);
+      if (!target || !extrude) return;
+      const precision = freshStore.curveResolution === "print" ? 0.01 : null;
+      const result = await performCsg({
+        selectedItems: [target, extrude],
+        operation: "union",
+        printPrecision: precision,
+        allItems: items,
+      });
+      if (!result) return;
+      let maxId = 0;
+      useStore.getState().history.forEach((e) => {
+        if (e.instruction?.type === "create" && e.instruction.item.id > maxId)
+          maxId = e.instruction.item.id;
+      });
+      const id = maxId + 1;
+      useStore.getState().addItem({
+        id,
+        name: `Union ${id}`,
+        type: "csg",
+        children: [],
+        position: result.position,
+        scale: { x: 1, y: 1, z: 1 },
+        rotation: { x: 0, y: 0, z: 0 },
+        geometryData: result.geometryData,
+        regenerator: {
+          kind: "boolean",
+          op: "union",
+          inputIds: [target.id, extrudeItemId],
+          originalCenter: result.position,
+          regeneratedAt: precision,
+        },
+      });
+      useStore.getState().consumeItems([extrudeItemId, target.id]);
+    } catch (err) {
+      console.error("Union extrusion failed:", err);
+    }
+  };
+
   const finalizeExtrude = (
     screenX,
     screenY,
@@ -412,6 +462,10 @@ export function createExtrudeHelpers(
         : formatAsFormula(depth);
     const sourceItemId = extrudeProfileData?.sourceItemId ?? null;
     const profileSnapshot = extrudeProfileData;
+    // Extruding a solid face (not a sketch) and not cutting → boss: union the
+    // prism back into the source solid.
+    const isFaceBoss =
+      !isCut && profileSnapshot?.type === "face" && sourceItemId != null;
     let newExtrudeId = null;
     if (retargetId != null) {
       store.retargetExtrude(retargetId, extrudeProfileData, depthStored);
@@ -447,15 +501,15 @@ export function createExtrudeHelpers(
         rotation: extrudeProfileData.rotation,
         scale: { x: 1, y: 1, z: 1 },
       });
-      if (isCut) {
-        // addItem auto-selects the prism, but a cut extrude exists for
-        // only ~200ms before runCutExtrusion replaces it with a CSG
-        // item at the TARGET's position.  Leaving the prism selected
-        // attaches the transform-handle bbox to the prism's mesh
-        // origin (item.position + R·polyCentroid) — visibly different
-        // from the target's centre — so the handles jump in X / Z when
-        // the cut lands.  Clearing the selection here keeps the gizmo
-        // invisible until addItem(csg) reselects at the right spot.
+      if (isCut || isFaceBoss) {
+        // addItem auto-selects the prism, but a cut/boss extrude exists for
+        // only ~200ms before the boolean replaces it with a CSG item at the
+        // result's position.  Leaving the prism selected attaches the
+        // transform-handle bbox to the prism's mesh origin (item.position +
+        // R·polyCentroid) — visibly different from the result's centre — so
+        // the handles jump when the boolean lands.  Clearing the selection
+        // here keeps the gizmo invisible until addItem(csg) reselects at the
+        // right spot.
         store.selectItem(null);
       }
     }
@@ -474,6 +528,13 @@ export function createExtrudeHelpers(
         profileSnapshot,
         store,
       ).finally(() => {
+        useStore.getState().setCutExtrudeInProgress(false);
+      });
+    } else if (isFaceBoss && newExtrudeId != null) {
+      // Keep the source solid see-through until the union lands (same
+      // rationale as the cut path).
+      store.setCutExtrudeInProgress(true);
+      void runUnionExtrusion(newExtrudeId, sourceItemId).finally(() => {
         useStore.getState().setCutExtrudeInProgress(false);
       });
     }
