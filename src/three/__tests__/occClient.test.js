@@ -38,11 +38,39 @@ vi.mock("../../store", () => {
 });
 
 import { ensureOcc } from "../occ/init.js";
-import { chamferOrFilletItem } from "../occClient.js";
+import { chamferOrFilletItem, deepResolveDepth } from "../occClient.js";
 
 beforeAll(async () => {
   await ensureOcc();
 }, 60_000);
+
+describe("deepResolveDepth (formula -> scene units before the IPC boundary)", () => {
+  const vars = { height: 60, width: 5 };
+  it("resolves a variable depth to scene units (mm / 10)", () => {
+    const ex = { type: "extrude", depth: "height", profile: {} };
+    // 60 mm -> 6.0 scene units, NOT the bridge's 1-unit (10 mm) fallback.
+    expect(deepResolveDepth(ex, vars).depth).toBe(6);
+  });
+  it("resolves a formula depth and leaves numbers / non-extrudes untouched", () => {
+    expect(
+      deepResolveDepth({ type: "extrude", depth: "height * 2" }, vars).depth,
+    ).toBe(12);
+    const num = { type: "extrude", depth: 4 };
+    expect(deepResolveDepth(num, vars)).toBe(num);
+    const sketch = { type: "sketch", shapes: [] };
+    expect(deepResolveDepth(sketch, vars)).toBe(sketch);
+  });
+  it("resolves a chamfer regenerator's nested extrude source", () => {
+    const csg = {
+      type: "csg",
+      regenerator: {
+        kind: "chamfer",
+        source: { type: "extrude", depth: "height" },
+      },
+    };
+    expect(deepResolveDepth(csg, vars).regenerator.source.depth).toBe(6);
+  });
+});
 
 describe("occClient (in-process fallback)", () => {
   it("chamferOrFilletItem produces non-empty geometry and toggles the busy counter", async () => {

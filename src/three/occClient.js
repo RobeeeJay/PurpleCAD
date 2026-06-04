@@ -11,8 +11,42 @@
 // Inputs/outputs are always plain JS so no special marshalling is needed.
 
 import { useStore } from "../store";
+import { resolveValue } from "./geometryParams.js";
+import { variablesToMap } from "../utils/formulas.js";
 
 const isElectron = typeof window !== "undefined" && window.electronAPI != null;
+
+// The Electron main-process bridge can't evaluate variable formulas (it has no
+// store), so an extrude depth like "height" parses to NaN there and falls back
+// to 1 unit (10 mm).  Resolve every extrude depth to a concrete scene-unit
+// number here — where the store and the formula evaluator live — before the
+// args cross the IPC boundary, so the bridge only ever sees numbers.
+export function deepResolveDepth(item, varsMap) {
+  if (!item || typeof item !== "object") return item;
+  let out = item;
+  if (item.type === "extrude" && typeof item.depth === "string") {
+    out = { ...item, depth: resolveValue(item.depth, 1.0, varsMap) };
+  }
+  const r = out.regenerator;
+  if (r?.source) {
+    const src = deepResolveDepth(r.source, varsMap);
+    if (src !== r.source) out = { ...out, regenerator: { ...r, source: src } };
+  }
+  return out;
+}
+
+function resolveArgDepths(args) {
+  if (!args || typeof args !== "object") return args;
+  const varsMap = variablesToMap(useStore.getState().variables);
+  const mapArr = (arr) =>
+    Array.isArray(arr) ? arr.map((i) => deepResolveDepth(i, varsMap)) : arr;
+  const out = { ...args };
+  if (args.source) out.source = deepResolveDepth(args.source, varsMap);
+  if (args.allItems) out.allItems = mapArr(args.allItems);
+  if (args.selectedItems) out.selectedItems = mapArr(args.selectedItems);
+  if (args.items) out.items = mapArr(args.items);
+  return out;
+}
 
 let inProcessOps = null;
 async function getInProcessOps() {
@@ -34,7 +68,7 @@ function dec() {
 
 async function callOp(op, args) {
   if (isElectron) {
-    return window.electronAPI.invokeOcc(op, args);
+    return window.electronAPI.invokeOcc(op, resolveArgDepths(args));
   }
   const ops = await getInProcessOps();
   const fn = ops[op];
