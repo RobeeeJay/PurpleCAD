@@ -11,15 +11,25 @@ const SketchModifySection = () => {
   );
   const toggleSketchShapesDashed = useStore((s) => s.toggleSketchShapesDashed);
   const selectedSketchElement = useStore((s) => s.selectedSketchElement);
+  const offsetSketchGeometry = useStore((s) => s.offsetSketchGeometry);
+
+  const selectedIndices =
+    sketchMultiSelectedIndices.length > 0
+      ? sketchMultiSelectedIndices
+      : selectedSketchElement?.type === "line"
+        ? [selectedSketchElement.shapeIdx]
+        : [];
 
   const handleToggleDashed = () => {
-    const indices =
-      sketchMultiSelectedIndices.length > 0
-        ? sketchMultiSelectedIndices
-        : selectedSketchElement?.type === "line"
-          ? [selectedSketchElement.shapeIdx]
-          : [];
-    if (indices.length > 0) toggleSketchShapesDashed(selectedId, indices);
+    if (selectedIndices.length > 0)
+      toggleSketchShapesDashed(selectedId, selectedIndices);
+  };
+
+  // Offset is a 5 mm parallel copy linked to each source line; hold Shift to
+  // offset to the other (negative) side.
+  const handleOffset = (e) => {
+    if (selectedIndices.length === 0) return;
+    offsetSketchGeometry(selectedId, selectedIndices, e.shiftKey ? "-5" : "5");
   };
 
   return (
@@ -98,6 +108,30 @@ const SketchModifySection = () => {
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeDasharray="4 3"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title="Offset — parallel copy of the selected lines, linked by a distance constraint (hold Shift for the other side)"
+        disabled={selectedIndices.length === 0}
+        onClick={handleOffset}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <path
+            d="M4 18 L8 6 L16 6 L20 18"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M7.5 20.5 L11 10 L13 10 L16.5 20.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+            opacity="0.55"
           />
         </svg>
       </button>

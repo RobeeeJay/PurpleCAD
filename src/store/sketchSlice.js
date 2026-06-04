@@ -12,7 +12,8 @@ import {
   markCsgDirty,
 } from "./internals.js";
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
-import { solveConstraints } from "../three/sketchSolver.js";
+import { solveConstraints, varFields } from "../three/sketchSolver.js";
+import { resolveValue } from "../three/geometryParams.js";
 
 export const createSketchSlice = (set) => ({
   ...createSketchUndoSlice(set),
@@ -366,6 +367,137 @@ export const createSketchSlice = (set) => ({
       const updatedItems = state.items.map((it) =>
         it.id === sketchId
           ? Object.assign({}, it, { shapes: solved, constraints })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Offset the selected lines: create parallel copies at a signed distance,
+  // each linked to its original by an `offset` constraint (so edits to the
+  // original flow through the solver to the copy), with coincident constraints
+  // where the originals shared a corner.  `distance` is an mm formula; its
+  // sign picks the side.
+  offsetSketchGeometry: (sketchId, lineIndices, distance) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const shapes = item.shapes || [];
+      const sel = (lineIndices || []).filter(
+        (idx) => shapes[idx]?.type === "line",
+      );
+      if (sel.length === 0) return {};
+      const dScene = resolveValue(distance, 0.5);
+      if (!Number.isFinite(dScene) || dScene === 0) return {};
+
+      const base = shapes.length;
+      const newShapes = [];
+      const newConstraints = [];
+      const newIdxOf = new Map();
+      sel.forEach((origIdx) => {
+        const o = shapes[origIdx];
+        const odx = o.x2 - o.x1,
+          ody = o.y2 - o.y1;
+        const len = Math.hypot(odx, ody) || 1e-9;
+        // Right normal: placing at +dScene here makes the signed perpendicular
+        // distance the solver measures equal +dScene (see the offset residual).
+        const nx = ody / len,
+          ny = -odx / len;
+        const newIdx = base + newShapes.length;
+        newIdxOf.set(origIdx, newIdx);
+        newShapes.push({
+          type: "line",
+          x1: o.x1 + dScene * nx,
+          y1: o.y1 + dScene * ny,
+          x2: o.x2 + dScene * nx,
+          y2: o.y2 + dScene * ny,
+          ...(o.dashed ? { dashed: true } : null),
+        });
+        newConstraints.push({
+          type: "offset",
+          shapeIdx: newIdx,
+          origIdx,
+          distance,
+        });
+      });
+
+      // Carry shared corners over to the copies: group the originals' endpoints
+      // by position and chain a coincident between the matching new endpoints.
+      const EPS = 1e-4;
+      const key = (x, y) => `${Math.round(x / EPS)},${Math.round(y / EPS)}`;
+      const groups = new Map();
+      sel.forEach((origIdx) => {
+        const o = shapes[origIdx];
+        [
+          ["start", o.x1, o.y1],
+          ["end", o.x2, o.y2],
+        ].forEach(([pk, x, y]) => {
+          const k = key(x, y);
+          if (!groups.has(k)) groups.set(k, []);
+          groups.get(k).push({ origIdx, pk });
+        });
+      });
+      groups.forEach((grp) => {
+        for (let i = 1; i < grp.length; i++) {
+          const a = grp[0];
+          const b = grp[i];
+          if (a.origIdx === b.origIdx) continue;
+          newConstraints.push({
+            type: "coincident",
+            shapeAIdx: newIdxOf.get(a.origIdx),
+            pointA: a.pk,
+            shapeBIdx: newIdxOf.get(b.origIdx),
+            pointB: b.pk,
+          });
+        }
+      });
+
+      const allShapes = [...shapes, ...newShapes];
+      const allConstraints = [...(item.constraints || []), ...newConstraints];
+      // Pin every existing shape so ONLY the new copies move — the offset is
+      // measured relative to the originals, so without this the solver could
+      // satisfy it by nudging the originals instead.
+      const fixed = new Set();
+      for (let i = 0; i < base; i++)
+        for (const f of varFields(shapes[i])) fixed.add(`${i}:${f}`);
+      // Solve so the offset corners meet (line lengths adjust to the new
+      // intersections); keep the raw placement if it can't converge.
+      const { shapes: solved, ok } = solveConstraints(
+        allShapes,
+        allConstraints,
+        {
+          fixed,
+        },
+      );
+      const finalShapes = ok ? solved : allShapes;
+
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: finalShapes,
+              constraints: allConstraints,
+            })
           : it,
       );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);

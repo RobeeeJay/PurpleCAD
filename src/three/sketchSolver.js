@@ -117,6 +117,27 @@ function residuals(shapes, constraints, variables) {
         const len = Math.hypot(dx, dy) || 1e-9;
         out.push(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len);
       } else out.push(0);
+    } else if (c.type === "offset") {
+      // Parametric offset of a NEW line from its ORIGINAL: keep them parallel
+      // and at a fixed signed perpendicular distance.  Two residuals: the
+      // direction cross-product (parallel) and the start point's perpendicular
+      // distance to the original (= the offset).  The corner coincident
+      // constraints supply the remaining DOF, so the offset follows edits to
+      // the original.
+      const nl = shapes[c.shapeIdx];
+      const ol = shapes[c.origIdx];
+      if (nl?.type === "line" && ol?.type === "line") {
+        const ndx = nl.x2 - nl.x1,
+          ndy = nl.y2 - nl.y1;
+        const odx = ol.x2 - ol.x1,
+          ody = ol.y2 - ol.y1;
+        const nlen = Math.hypot(ndx, ndy) || 1e-9;
+        const olen = Math.hypot(odx, ody) || 1e-9;
+        // sin of the angle between the two directions → 0 when parallel.
+        out.push((ndx * ody - ndy * odx) / (nlen * olen));
+        const d = resolveConstraintDistance(c, variables);
+        out.push(((nl.x1 - ol.x1) * ody - (nl.y1 - ol.y1) * odx) / olen - d);
+      } else out.push(0, 0);
     } else if (c.type === "angle") {
       const target =
         ((typeof c.angle === "number" ? c.angle : parseFloat(c.angle)) *
