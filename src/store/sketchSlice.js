@@ -410,6 +410,15 @@ export const createSketchSlice = (set) => ({
       const dScene = resolveValue(distance, 0.5);
       if (!Number.isFinite(dScene) || dScene === 0) return {};
 
+      // One group id for this whole offset so editing its dimension changes
+      // every copy together.
+      const offsetGroup =
+        1 +
+        (item.constraints || []).reduce(
+          (m, c) => (c.type === "offset" ? Math.max(m, c.offsetGroup ?? 0) : m),
+          0,
+        );
+
       const base = shapes.length;
       const newShapes = [];
       const newConstraints = [];
@@ -438,6 +447,7 @@ export const createSketchSlice = (set) => ({
           shapeIdx: newIdx,
           origIdx,
           distance,
+          offsetGroup,
         });
       });
 
@@ -498,6 +508,67 @@ export const createSketchSlice = (set) => ({
               shapes: finalShapes,
               constraints: allConstraints,
             })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Change the offset distance (whole group, or one constraint) and re-solve so
+  // only the offset copies move.  `formula` is a signed mm string.
+  updateSketchOffsetDistance: (sketchId, offsetGroup, constraintIdx, formula) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const constraints = (item.constraints || []).map((c, i) => {
+        if (c.type !== "offset") return c;
+        const inGroup =
+          offsetGroup != null
+            ? c.offsetGroup === offsetGroup
+            : i === constraintIdx;
+        return inGroup ? { ...c, distance: formula } : c;
+      });
+      const offsetTargets = new Set(
+        constraints.filter((c) => c.type === "offset").map((c) => c.shapeIdx),
+      );
+      const fixed = new Set();
+      (item.shapes || []).forEach((s, i) => {
+        if (offsetTargets.has(i)) return;
+        for (const f of varFields(s)) fixed.add(`${i}:${f}`);
+      });
+      const { shapes: solved, ok } = solveConstraints(
+        item.shapes,
+        constraints,
+        {
+          fixed,
+        },
+      );
+      const finalShapes = ok ? solved : item.shapes;
+
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, { shapes: finalShapes, constraints })
           : it,
       );
       const updatedItem = updatedItems.find((i) => i.id === sketchId);

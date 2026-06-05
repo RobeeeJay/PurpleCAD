@@ -288,10 +288,13 @@ export function attachCameraControls(ctx) {
     },
   );
   const {
-    buildExtrudePreviewMesh,
+    rebuildPreviews,
     handleExtrudeHover,
     handleExtrudeProfileClick,
-    handleExtrudeDepthMove,
+    beginExtrudeStartPick,
+    handleExtrudeStartHover,
+    handleExtrudeStartClick,
+    clearStartHighlight,
     finalizeExtrude,
     cancelExtrude,
   } = extrude;
@@ -303,16 +306,18 @@ export function attachCameraControls(ctx) {
   //                                           `d` for the preview/profile.
   //   • updateExtrudePreview(d)             — re-render the live preview
   //                                           mesh at depth `d`.
-  controls.finalizeExtrudeWithDepth = (depth) =>
-    finalizeExtrude(null, null, depth);
+  controls.finalizeExtrudeWithDepth = (depth) => finalizeExtrude(depth);
   controls.finalizeExtrudeWithFormula = (formula, depth) =>
-    finalizeExtrude(null, null, depth, formula);
+    finalizeExtrude(depth, formula);
   controls.cancelExtrude = () => cancelExtrude();
   controls.updateExtrudePreview = (depth) => {
-    if (!extrude.extrudeProfileData) return;
-    const d = Math.max(0.05, depth);
-    buildExtrudePreviewMesh(extrude.extrudeProfileData, d);
+    if (!extrude.hasProfiles) return;
+    // Preserve the sign so a negative (backward) depth previews in the -Z
+    // direction; makeExtrudePreviewMesh clamps the magnitude to ≥ 0.05.
+    rebuildPreviews(depth);
   };
+  // Enter the "pick a face / sketch plane to offset the extrude start" mode.
+  controls.beginExtrudeStartPick = () => beginExtrudeStartPick();
   // Extrude the selected solid face directly (the React extrude button calls
   // this when a face is selected).  Returns true if a face extrude started.
   controls.extrudeSelectedFace = () => extrude.startFaceExtrudeFromSelection();
@@ -462,6 +467,7 @@ export function attachCameraControls(ctx) {
       selectConstraint,
       getSelectedConstraintIdx,
       cancelExtrude,
+      clearStartHighlight,
       setSketchDrawPhase,
       isMac,
     },
@@ -513,8 +519,8 @@ export function attachCameraControls(ctx) {
     if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
       if (extrudeSelectModeRef.current === "profile")
         handleExtrudeHover(e.clientX, e.clientY);
-      else if (extrudeSelectModeRef.current === "depth")
-        handleExtrudeDepthMove(e.clientX, e.clientY);
+      else if (extrudeSelectModeRef.current === "start")
+        handleExtrudeStartHover(e.clientX, e.clientY);
       controls.mouseX = e.clientX;
       controls.mouseY = e.clientY;
       return;
@@ -539,8 +545,8 @@ export function attachCameraControls(ctx) {
       if (Math.hypot(dx, dy) < 5) {
         if (extrudeSelectModeRef.current === "profile")
           handleExtrudeProfileClick(e.clientX, e.clientY);
-        else if (extrudeSelectModeRef.current === "depth")
-          finalizeExtrude(e.clientX, e.clientY);
+        else if (extrudeSelectModeRef.current === "start")
+          handleExtrudeStartClick(e.clientX, e.clientY);
       }
       return;
     }

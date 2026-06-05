@@ -165,6 +165,40 @@ describe("OCC extrude", () => {
     expectSolidGeometry(tessellate(shape, null));
   });
 
+  it("startOffset slides the prism along the normal (+Z) without changing its height", () => {
+    const square = {
+      type: "extrude",
+      profile: {
+        polygon2D: [
+          { x: -1, y: -1 },
+          { x: 1, y: -1 },
+          { x: 1, y: 1 },
+          { x: -1, y: 1 },
+        ],
+        holes: [],
+      },
+      depth: 2,
+    };
+    const zRange = (item) => {
+      const pos = tessellate(makeExtrude(item), null).getAttribute("position");
+      let min = Infinity,
+        max = -Infinity;
+      for (let i = 0; i < pos.count; i++) {
+        const z = pos.getZ(i);
+        if (z < min) min = z;
+        if (z > max) max = z;
+      }
+      return { min, max };
+    };
+    const base = zRange(square);
+    const shifted = zRange({ ...square, startOffset: 3 });
+    // Base spans z=0..2; a +3 offset puts it at z=3..5 — same height, slid up.
+    expect(base.min).toBeCloseTo(0);
+    expect(base.max).toBeCloseTo(2);
+    expect(shifted.min).toBeCloseTo(3);
+    expect(shifted.max).toBeCloseTo(5);
+  });
+
   it("polygon with a hole extrudes correctly (more boundary edges than solid disc)", () => {
     const outer = [
       { x: -2, y: -2 },

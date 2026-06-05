@@ -14,7 +14,11 @@ const ObjectCreateSection = () => {
 
   const handleExtrudeClick = () => {
     if (extrudeSelectMode) {
-      setExtrudeSelectMode(null);
+      // Toggling the tool off mid-extrude must also clear the live preview +
+      // selection, not just the mode flag.
+      const cc = useStore.getState()._cameraControls;
+      if (cc?.cancelExtrude) cc.cancelExtrude();
+      else setExtrudeSelectMode(null);
       return;
     }
     // A selected solid face extrudes directly along its normal — no need to

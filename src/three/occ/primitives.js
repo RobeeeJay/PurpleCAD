@@ -43,7 +43,16 @@ export function makeExtrude(item) {
     .map(
       (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
     );
-  return occ.makeExtrude(outerFlat, holesFlat, c.x, c.y, depth);
+  const prismId = occ.makeExtrude(outerFlat, holesFlat, c.x, c.y, depth);
+  // startOffset slides the prism base along the extrude normal (local +Z) so
+  // the OCC shape matches the rendered mesh (mirrors occOps.buildItemShapeLocal).
+  const startOffset = item.startOffset || 0;
+  if (prismId != null && startOffset) {
+    const shifted = occ.transformShape(prismId, 0, 0, startOffset, 0, 0, 0);
+    occ.releaseShape(prismId);
+    return shifted;
+  }
+  return prismId;
 }
 
 export function makePrimitiveShape(item) {

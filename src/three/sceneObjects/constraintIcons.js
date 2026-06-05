@@ -20,6 +20,9 @@ export function addConstraintIconsToGroup(
   showDimensions = true,
 ) {
   const R = 0.14;
+  // Offset constraints created together share an offsetGroup; render only one
+  // editable dimension label per group (they all carry the same distance).
+  const seenOffsetGroups = new Set();
   constraints.forEach((c, ci) => {
     const tag = (obj, iconLocalPos, shapeIndices, color) => {
       obj.userData.isConstraintObj = true;
@@ -270,6 +273,55 @@ export function addConstraintIconsToGroup(
         sprite.renderOrder = 1009;
         addTagged(sprite);
       }
+    } else if (c.type === "offset") {
+      if (!showDimensions) return;
+      if (c.offsetGroup != null) {
+        if (seenOffsetGroups.has(c.offsetGroup)) return;
+        seenOffsetGroups.add(c.offsetGroup);
+      }
+      const nl = shapes[c.shapeIdx];
+      if (!nl || nl.type !== "line") return;
+      const midLocal = { x: (nl.x1 + nl.x2) / 2, y: (nl.y1 + nl.y2) / 2 };
+      // Signed value: the sign of the offset distance is meaningful (which
+      // side the copy sits on), so keep it on the label.
+      const resolvedDist = resolveConstraintDistance(c);
+      const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
+      const formulaSrc =
+        typeof c.distance === "string" &&
+        !/^-?\d+(\.\d+)?$/.test(c.distance.trim())
+          ? c.distance.trim()
+          : null;
+      const labelText = formulaSrc
+        ? `${formulaSrc} = ${valueMm}mm`
+        : `${valueMm}mm`;
+      const canvas = document.createElement("canvas");
+      const tmpCtx = canvas.getContext("2d");
+      const labelFont = "bold 18px sans-serif";
+      tmpCtx.font = labelFont;
+      const measured = tmpCtx.measureText(labelText).width;
+      canvas.width = Math.max(160, Math.ceil(measured) + 24);
+      canvas.height = 32;
+      const ctx2d = canvas.getContext("2d");
+      ctx2d.fillStyle = "rgba(40,30,0,0.85)";
+      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+      ctx2d.fillStyle = "#ffee88";
+      ctx2d.font = labelFont;
+      ctx2d.textAlign = "center";
+      ctx2d.textBaseline = "middle";
+      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: new THREE.CanvasTexture(canvas),
+          depthTest: false,
+        }),
+      );
+      sprite.scale.set(0.7 * (canvas.width / 160), 0.175, 1);
+      sprite.position.copy(toWorld(midLocal.x, midLocal.y, 0.006));
+      sprite.renderOrder = 1009;
+      // Tag with the icon's local position so the double-click hit-test can
+      // find it and open the edit overlay.
+      tag(sprite, midLocal, [c.shapeIdx, c.origIdx], 0xffdd44);
+      group.add(sprite);
     }
   });
 }

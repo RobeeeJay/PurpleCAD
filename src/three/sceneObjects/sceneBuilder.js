@@ -197,7 +197,12 @@ export function buildSceneObjects(
           depth: absDepth,
           bevelEnabled: false,
         });
-        if (depth < 0) geometry.translate(0, 0, -absDepth);
+        // startOffset slides the prism's base along the profile normal (local
+        // +Z) so the extrude can begin at a picked face / plane instead of the
+        // sketch plane.  Combine it with the negative-depth back-shift.
+        const startOffset = item.startOffset || 0;
+        const baseZ = (depth < 0 ? -absDepth : 0) + startOffset;
+        if (baseZ !== 0) geometry.translate(0, 0, baseZ);
         geometry.computeVertexNormals();
         // The prism's base face sits at z=0 in the sketch's local
         // frame (positive depth extends to +depth, negative to

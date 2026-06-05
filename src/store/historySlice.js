@@ -378,13 +378,16 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
-  retargetExtrude: (extrudeId, newProfile, newDepth) =>
+  retargetExtrude: (extrudeId, newProfile, newDepth, startOffset = 0) =>
     set((state) => {
       const updatedItems = state.items.map((item) => {
         if (item.id !== extrudeId) return item;
         return Object.assign({}, item, {
           profile: newProfile,
           depth: newDepth,
+          // A zero offset is the default; persist it so retargeting can also
+          // clear a previously-set start offset.
+          startOffset: startOffset || undefined,
           position: newProfile.position,
           rotation: newProfile.rotation,
         });

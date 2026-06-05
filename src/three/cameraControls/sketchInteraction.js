@@ -82,6 +82,7 @@ export function createSketchInteraction(
     selectConstraint,
     getSelectedConstraintIdx,
     cancelExtrude,
+    clearStartHighlight,
     setSketchDrawPhase,
     isMac,
   },
@@ -1225,7 +1226,8 @@ export function createSketchInteraction(
           for (const cObj of dblG.children) {
             if (
               !cObj.userData.isConstraint ||
-              cObj.userData.constraintType !== "distance"
+              (cObj.userData.constraintType !== "distance" &&
+                cObj.userData.constraintType !== "offset")
             )
               continue;
             const lp = cObj.userData.constraintIconLocalPos;
@@ -1248,6 +1250,13 @@ export function createSketchInteraction(
                   // number) so the input shows what the user typed.
                   defaultDistance: c.distance,
                   constraintIdx: cObj.userData.constraintIdx,
+                });
+                useStore.getState().setSketchConstraintMode("distance");
+              } else if (c && c.type === "offset") {
+                useStore.getState().setSketchDistanceInput({
+                  offsetConstraintIdx: cObj.userData.constraintIdx,
+                  offsetGroup: c.offsetGroup,
+                  defaultDistance: c.distance,
                 });
                 useStore.getState().setSketchConstraintMode("distance");
               }
@@ -1535,6 +1544,13 @@ export function createSketchInteraction(
         return;
       }
       if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
+        // Esc from the start-pick sub-mode backs out to depth (keeping the
+        // captured profiles + depth) rather than cancelling the whole extrude.
+        if (extrudeSelectModeRef.current === "start") {
+          clearStartHighlight();
+          useStore.getState().setExtrudeSelectMode("depth");
+          return;
+        }
         cancelExtrude();
         return;
       }

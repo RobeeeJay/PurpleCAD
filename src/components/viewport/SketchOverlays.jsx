@@ -42,6 +42,27 @@ export default function SketchOverlays({
   propagateConstraintsRef,
   selectItem,
 }) {
+  // Commit the extrude at the typed distance (shared by Enter and the Confirm
+  // button).  Distance is read from the input state — never from the mouse.
+  const confirmExtrude = () => {
+    const di = useStore.getState().extrudeDepthInput;
+    if (!di) return;
+    const raw =
+      di.formula != null
+        ? di.formula.trim()
+        : String((di.currentDepth ?? di.defaultDepth) * MM_PER_UNIT);
+    const mm = evaluateFormula(
+      raw,
+      variablesToMap(useStore.getState().variables),
+    );
+    if (!(Number.isFinite(mm) && mm !== 0)) return;
+    const depth = mm / MM_PER_UNIT;
+    // A non-numeric formula is stored as-is so variable edits re-resolve it;
+    // a bare number goes through the numeric path.
+    if (/^-?\d+(\.\d+)?$/.test(raw))
+      cameraControlsRef.current?.finalizeExtrudeWithDepth?.(depth);
+    else cameraControlsRef.current?.finalizeExtrudeWithFormula?.(raw, depth);
+  };
   return (
     <>
       {sketchPlacementMode && (
@@ -51,16 +72,16 @@ export default function SketchOverlays({
       )}
       {extrudeSelectMode === "profile" && (
         <div className="sketch-placement-hint">
-          Click an enclosed sketch region or flat object face · Esc to cancel
+          Click regions or faces to add / remove · set the distance below, then
+          Confirm · Esc to cancel
         </div>
       )}
-      {extrudeSelectMode === "depth" && (
+      {extrudeSelectMode === "start" && (
         <div className="sketch-placement-hint">
-          Move mouse to set depth, or type below · Click to confirm · Esc to
-          cancel
+          Click a face or sketch plane to start the extrude from · Esc to cancel
         </div>
       )}
-      {extrudeSelectMode === "depth" && extrudeDepthInput && (
+      {extrudeSelectMode === "profile" && extrudeDepthInput && (
         <div className="sketch-distance-input-overlay">
           <span>Depth (mm):</span>
           <label
@@ -82,18 +103,46 @@ export default function SketchOverlays({
                   ...extrudeDepthInput,
                   cut: e.target.checked,
                 });
+                // Recolour the preview (red for cut, blue for add) — there's no
+                // mouse-driven rebuild to pick the change up otherwise.
+                cameraControlsRef.current?.updateExtrudePreview?.(
+                  extrudeDepthInput.currentDepth ??
+                    extrudeDepthInput.defaultDepth,
+                );
               }}
             />
             Cut
           </label>
+          <button
+            type="button"
+            onClick={() => cameraControlsRef.current?.beginExtrudeStartPick?.()}
+            title="Start from… — pick a face or sketch plane to offset where the extrude begins"
+            style={{
+              fontSize: 11,
+              padding: "2px 6px",
+              marginRight: 8,
+              borderRadius: 3,
+              border: "1px solid var(--border-color)",
+              background: extrudeDepthInput.startOffset
+                ? "var(--accent, #4488ff)"
+                : "var(--bg-tertiary)",
+              color: extrudeDepthInput.startOffset
+                ? "#fff"
+                : "var(--text-primary)",
+              cursor: "pointer",
+            }}
+          >
+            {extrudeDepthInput.startOffset
+              ? `Start ${extrudeDepthInput.startOffset > 0 ? "+" : ""}${(
+                  extrudeDepthInput.startOffset * MM_PER_UNIT
+                ).toFixed(1)}mm`
+              : "Start from…"}
+          </button>
           <FormulaInput
             type="text"
             autoFocus
             variables={variables}
             // Accept either a bare number or a formula like "width * 2".
-            // The mouse-drag path clears `formula` and updates `currentDepth`
-            // so the field reverts to a numeric mm value as the user drags;
-            // typing replaces both with the user's text and its evaluation.
             value={
               extrudeDepthInput.formula ??
               (
@@ -111,6 +160,7 @@ export default function SketchOverlays({
               // plane).  Reject only zero / NaN.
               const validNum = Number.isFinite(mm) && mm !== 0;
               const depth = validNum ? mm / MM_PER_UNIT : undefined;
+              // Live-update the preview prisms as the distance is typed.
               if (validNum) {
                 cameraControlsRef.current?.updateExtrudePreview?.(depth);
               }
@@ -122,38 +172,30 @@ export default function SketchOverlays({
             }}
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === "Enter") {
-                const raw = e.target.value.trim();
-                const variablesMap = variablesToMap(
-                  useStore.getState().variables,
-                );
-                const mm = evaluateFormula(raw, variablesMap);
-                if (Number.isFinite(mm) && mm !== 0) {
-                  const depth = mm / MM_PER_UNIT;
-                  // If the user typed a non-numeric formula, preserve it as
-                  // the stored value; otherwise the bare numeric path
-                  // (formatAsFormula) handles it inside finalizeExtrude.
-                  const isFormula = !/^-?\d+(\.\d+)?$/.test(raw);
-                  if (isFormula) {
-                    cameraControlsRef.current?.finalizeExtrudeWithFormula?.(
-                      raw,
-                      depth,
-                    );
-                  } else {
-                    cameraControlsRef.current?.finalizeExtrudeWithDepth?.(
-                      depth,
-                    );
-                  }
-                }
-              } else if (e.key === "Escape") {
-                // cancelExtrude clears BOTH the preview mesh and the
-                // store state, then resets cursor / face highlights —
-                // the store-only path would leave the preview hovering
-                // in the scene.
+              if (e.key === "Enter") confirmExtrude();
+              else if (e.key === "Escape")
+                // cancelExtrude clears BOTH the preview mesh and the store
+                // state, then resets cursor / face highlights.
                 cameraControlsRef.current?.cancelExtrude?.();
-              }
             }}
           />
+          <button
+            type="button"
+            onClick={confirmExtrude}
+            title="Confirm — create the extrude at this distance"
+            style={{
+              fontSize: 11,
+              padding: "3px 10px",
+              marginLeft: 8,
+              borderRadius: 3,
+              border: "1px solid var(--accent, #4488ff)",
+              background: "var(--accent, #4488ff)",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            Confirm
+          </button>
         </div>
       )}
       {activeSketchTool && sketchDrawPhase !== "second" && (
@@ -180,9 +222,11 @@ export default function SketchOverlays({
       {sketchMode && sketchDistanceInput && (
         <div className="sketch-distance-input-overlay">
           <span>
-            {sketchDistanceInput.constraintIdx != null
-              ? "Edit distance (mm):"
-              : "Distance (mm):"}
+            {sketchDistanceInput.offsetConstraintIdx != null
+              ? "Offset (mm):"
+              : sketchDistanceInput.constraintIdx != null
+                ? "Edit distance (mm):"
+                : "Distance (mm):"}
           </span>
           <FormulaInput
             type="text"
@@ -204,6 +248,25 @@ export default function SketchOverlays({
                   useStore.getState().variables,
                 );
                 const mm = evaluateFormula(raw, variablesMap);
+                // Offset edit: the distance is signed (which side the copy sits
+                // on), so any non-zero value is valid.  Re-solve happens inside
+                // the reducer; only the offset copies move.
+                if (sketchDistanceInput.offsetConstraintIdx != null) {
+                  if (Number.isFinite(mm) && mm !== 0) {
+                    useStore
+                      .getState()
+                      .updateSketchOffsetDistance(
+                        selectedId,
+                        sketchDistanceInput.offsetGroup,
+                        sketchDistanceInput.offsetConstraintIdx,
+                        raw,
+                      );
+                    cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
+                  }
+                  useStore.getState().setSketchDistanceInput(null);
+                  useStore.getState().setSketchConstraintMode(null);
+                  return;
+                }
                 if (Number.isFinite(mm) && mm > 0) {
                   const {
                     shapeAIdx,

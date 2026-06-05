@@ -7,8 +7,15 @@ import * as THREE from "three";
 
 // Build the translucent preview prism for a profile + depth.  Returns the mesh
 // (positioned/oriented in world space); the caller owns adding/removing it from
-// the scene.  cutMode tints it red (subtracts) vs blue (adds).
-export function makeExtrudePreviewMesh(profile, depth, cutMode) {
+// the scene.  cutMode tints it red (subtracts) vs blue (adds).  startOffset
+// shifts the prism's base along the profile normal (local +Z) so the extrude
+// can begin from a face / plane other than the sketch plane.
+export function makeExtrudePreviewMesh(
+  profile,
+  depth,
+  cutMode,
+  startOffset = 0,
+) {
   const poly = profile.polygon2D;
   if (!poly || poly.length < 3) return null;
   const shape = new THREE.Shape(poly.map((p) => new THREE.Vector2(p.x, p.y)));
@@ -26,7 +33,10 @@ export function makeExtrudePreviewMesh(profile, depth, cutMode) {
     depth: absDepth,
     bevelEnabled: false,
   });
-  if (depth < 0) geo.translate(0, 0, -absDepth);
+  // Base sits at local z=0; negative depth pushes it to -absDepth.  startOffset
+  // then slides the whole prism along the normal.
+  const baseZ = (depth < 0 ? -absDepth : 0) + (startOffset || 0);
+  if (baseZ !== 0) geo.translate(0, 0, baseZ);
   const mat = new THREE.MeshBasicMaterial({
     color: cutMode ? 0xff4444 : 0x4488ff,
     transparent: true,

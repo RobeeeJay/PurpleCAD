@@ -16,6 +16,7 @@ import {
   applyRenderMode,
 } from "../../three/sceneObjects.js";
 import { updateEmissive } from "../../three/objectMaterials.js";
+import { resolveItemDepth } from "../../three/geometryParams.js";
 import { reconcileSelectionHighlight } from "../../three/selectionHighlights.js";
 import { useSketchModeEffect } from "./useSketchModeEffect";
 
@@ -461,15 +462,23 @@ export function useSceneSync({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    if (extrudeSelectGroupRef.current) {
-      scene.remove(extrudeSelectGroupRef.current);
-      extrudeSelectGroupRef.current.traverse((obj) => {
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) obj.material.dispose();
-      });
-      extrudeSelectGroupRef.current = null;
+    // The region fills are needed for the whole extrude flow, not just profile
+    // selection: the "Start from…" offset picker raycasts them as candidate
+    // sketch planes.  Keep the group alive through depth + start, building it
+    // once on entry and disposing only when the extrude ends.
+    const active = ["profile", "start"].includes(extrudeSelectMode);
+    if (!active) {
+      if (extrudeSelectGroupRef.current) {
+        scene.remove(extrudeSelectGroupRef.current);
+        extrudeSelectGroupRef.current.traverse((obj) => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+        });
+        extrudeSelectGroupRef.current = null;
+      }
+      return;
     }
-    if (extrudeSelectMode === "profile") {
+    if (!extrudeSelectGroupRef.current) {
       const group = buildExtrudeSelectGroup(
         items,
         objectsRef,
@@ -482,6 +491,28 @@ export function useSceneSync({
       }
     }
   }, [extrudeSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Extrude depth input init ──────────────────────────────────────────────
+  // The distance overlay + Confirm button appear as soon as the unified
+  // select-and-extrude phase begins, so seed the input here (the face-pick
+  // shortcut sets it first; the guard avoids clobbering that).  A retarget
+  // pre-fills from the extrude being re-pointed; a fresh extrude uses a 10 mm
+  // default.
+  useEffect(() => {
+    if (extrudeSelectMode !== "profile") return;
+    const st = useStore.getState();
+    if (st.extrudeDepthInput) return;
+    const retargetId = st.extrudeRetargetId;
+    const retarget =
+      retargetId != null ? items.find((i) => i.id === retargetId) : null;
+    const depth = retarget ? resolveItemDepth(retarget) : 1.0;
+    st.setExtrudeDepthInput({
+      defaultDepth: depth,
+      currentDepth: depth,
+      cut: !!retarget?.isCut,
+      startOffset: retarget?.startOffset ?? 0,
+    });
+  }, [extrudeSelectMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Transparent during extrude ────────────────────────────────────────────
   // While the user is choosing a profile, dragging the depth, OR the

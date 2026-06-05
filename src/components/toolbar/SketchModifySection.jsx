@@ -12,6 +12,8 @@ const SketchModifySection = () => {
   const toggleSketchShapesDashed = useStore((s) => s.toggleSketchShapesDashed);
   const selectedSketchElement = useStore((s) => s.selectedSketchElement);
   const offsetSketchGeometry = useStore((s) => s.offsetSketchGeometry);
+  const setSketchDistanceInput = useStore((s) => s.setSketchDistanceInput);
+  const setSketchConstraintMode = useStore((s) => s.setSketchConstraintMode);
 
   const selectedIndices =
     sketchMultiSelectedIndices.length > 0
@@ -25,11 +27,31 @@ const SketchModifySection = () => {
       toggleSketchShapesDashed(selectedId, selectedIndices);
   };
 
-  // Offset is a 5 mm parallel copy linked to each source line; hold Shift to
-  // offset to the other (negative) side.
+  // Offset creates a parallel copy linked to each source line; hold Shift to
+  // offset to the other (negative) side.  We seed it at 5 mm, then immediately
+  // open the dimension editor so the user is prompted for the real distance
+  // (window.prompt isn't usable inside Electron).
   const handleOffset = (e) => {
     if (selectedIndices.length === 0) return;
     offsetSketchGeometry(selectedId, selectedIndices, e.shiftKey ? "-5" : "5");
+    const item = useStore.getState().items.find((i) => i.id === selectedId);
+    const constraints = item?.constraints || [];
+    let lastIdx = -1;
+    let lastGroup = -1;
+    constraints.forEach((c, i) => {
+      if (c.type === "offset" && (c.offsetGroup ?? 0) >= lastGroup) {
+        lastGroup = c.offsetGroup ?? 0;
+        lastIdx = i;
+      }
+    });
+    if (lastIdx >= 0) {
+      setSketchDistanceInput({
+        offsetConstraintIdx: lastIdx,
+        offsetGroup: constraints[lastIdx].offsetGroup,
+        defaultDistance: constraints[lastIdx].distance,
+      });
+      setSketchConstraintMode("distance");
+    }
   };
 
   return (
