@@ -6,6 +6,7 @@ import {
   polyContainsPoint,
   polyArea,
 } from "./sceneObjects.js";
+import { withWinding } from "./sceneObjects/closedLoops.js";
 
 // World-space transform for placing a CSG input.  Extruded items keep
 // their original centroid-offset behaviour so the solid sits on the sketch
@@ -129,6 +130,89 @@ export function withLivePolygons(item, allItems, precision) {
     };
   }
   return item;
+}
+
+// A chamfered SIDE face of an extrude is the wall grown from one polygon edge.
+// When the sketch is edited, that edge — and so the face's outward normal and
+// centroid — move.  The face selection stored at chamfer time still carries the
+// OLD normal/centroid, so OCC can't find the face on the rebuilt shape: the
+// chamfer fails and the object keeps its stale pre-edit geometry.  Re-map each
+// side-face selection onto the matching edge of the LIVE polygon (paired by
+// index, the old edge nearest the stored centroid), so the chamfer tracks the
+// sketch.  Top/bottom faces (Z normals) don't move and are left untouched; if
+// the polygon's vertex count changed there's no index correspondence, so the
+// selection is left as-is (the caller's graceful fallback then applies).
+export function remapExtrudeFaceSelections(subGeo, oldSource, newSource) {
+  const faces = subGeo?.faces || [];
+  if (faces.length === 0) return subGeo;
+  if (oldSource?.type !== "extrude" || newSource?.type !== "extrude")
+    return subGeo;
+  const oldRaw = oldSource.profile?.polygon2D;
+  const newRaw = newSource.profile?.polygon2D;
+  if (!Array.isArray(oldRaw) || !Array.isArray(newRaw)) return subGeo;
+  if (oldRaw.length !== newRaw.length || oldRaw.length < 3) return subGeo;
+  // Match the winding makeExtrude uses (CCW) so the computed normals and the
+  // edge indices agree with the OCC shape.
+  const oldPoly = withWinding(oldRaw, true);
+  const newPoly = withWinding(newRaw, true);
+  const oldC = polyCentroid(oldPoly);
+  const newC = polyCentroid(newPoly);
+  const n = oldPoly.length;
+  const mid = (poly, i) => {
+    const a = poly[i],
+      b = poly[(i + 1) % poly.length];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+  // Outward normal of edge i, oriented away from the polygon centroid.
+  const outward = (poly, c, i) => {
+    const a = poly[i],
+      b = poly[(i + 1) % poly.length];
+    let nx = b.y - a.y,
+      ny = -(b.x - a.x);
+    const len = Math.hypot(nx, ny) || 1;
+    nx /= len;
+    ny /= len;
+    const m = mid(poly, i);
+    if ((m.x - c.x) * nx + (m.y - c.y) * ny < 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    return { nx, ny };
+  };
+  let changed = false;
+  const mapped = faces.map((f) => {
+    if (Math.abs(f.nz ?? 0) >= 0.9) return f; // top / bottom: unaffected
+    // Which old edge did this face come from?  Prefer the stored centroid (in
+    // the same local frame), else the stored normal direction.
+    let bestI = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < n; i++) {
+      let d;
+      if (f.cx != null) {
+        const m = mid(oldPoly, i);
+        d = Math.hypot(m.x - oldC.x - f.cx, m.y - oldC.y - f.cy);
+      } else {
+        const on = outward(oldPoly, oldC, i);
+        d = Math.hypot(on.nx - f.nx, on.ny - f.ny);
+      }
+      if (d < bestD) {
+        bestD = d;
+        bestI = i;
+      }
+    }
+    if (bestI < 0) return f;
+    const on = outward(newPoly, newC, bestI);
+    const m = mid(newPoly, bestI);
+    changed = true;
+    return {
+      ...f,
+      nx: on.nx,
+      ny: on.ny,
+      nz: 0,
+      ...(f.cx != null ? { cx: m.x - newC.x, cy: m.y - newC.y } : null),
+    };
+  });
+  return changed ? { ...subGeo, faces: mapped } : subGeo;
 }
 
 // The chamfer/bevel source is a snapshot with its extrude depth baked in.

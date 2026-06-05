@@ -3,6 +3,7 @@ import {
   buildBrushTransform,
   withLivePolygons,
   withLiveDepth,
+  remapExtrudeFaceSelections,
 } from "./csgUtils.js";
 // Routed through occClient → the OCC worker.  This file is no longer
 // imported from the store (the orchestrator in regenerateOrchestrator.js
@@ -34,23 +35,54 @@ async function regenerateChamfer(
   currentPosition,
   currentDepth,
 ) {
-  const subGeo = regenerator.subGeo || { edges: [], faces: [] };
-  if ((subGeo.edges?.length || 0) === 0 && (subGeo.faces?.length || 0) === 0)
+  const rawSubGeo = regenerator.subGeo || { edges: [], faces: [] };
+  if (
+    (rawSubGeo.edges?.length || 0) === 0 &&
+    (rawSubGeo.faces?.length || 0) === 0
+  )
     return null;
+  // In Electron the OCC bridge can't re-derive an extrude's profile from its
+  // sketch, so it builds whatever polygon2D each item carries.  When the
+  // chamfer's source is a union/boolean, its extrude inputs are looked up by id
+  // in `allItems` on the bridge — so pre-bake the live polygon into EVERY item,
+  // not just the source, or the union rebuilds at the OLD sketch size and the
+  // chamfer stays stale after a dimension change. (occOps re-derives in-process,
+  // which is why this only bit the packaged app.)
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
   const source = withLivePolygons(
     withLiveDepth(regenerator.source, currentDepth),
-    accumulatedItems,
+    liveItems,
     printPrecision,
   );
-  const result = await chamferOrFilletItem({
+  // A sketch edit moves the polygon edges a side-face chamfer was bound to —
+  // re-point the face selections at the live edges so OCC can still find them.
+  const subGeo = remapExtrudeFaceSelections(
+    rawSubGeo,
+    regenerator.source,
     source,
-    subGeo,
-    amount: regenerator.amount ?? 0.05,
-    angleRad: regenerator.angleRad ?? null,
-    segments: regenerator.segments,
-    allItems: accumulatedItems,
-    printPrecision,
-  });
+  );
+  // A no-match throws inside chamferOrFilletItem; swallow it so one
+  // un-resolvable chamfer keeps its last-good geometry instead of aborting the
+  // whole timeline recalc (which left every downstream step stale).
+  let result;
+  try {
+    result = await chamferOrFilletItem({
+      source,
+      subGeo,
+      amount: regenerator.amount ?? 0.05,
+      angleRad: regenerator.angleRad ?? null,
+      segments: regenerator.segments,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Chamfer/fillet regen couldn't re-match its selection (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
   if (!result) return null;
   // Keep the item's existing position.  The re-tessellated geometry is centred
   // on its own bbox (centerOffset), so the rendered centre is item.position

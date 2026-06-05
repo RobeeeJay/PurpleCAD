@@ -84,18 +84,21 @@ export async function recalculateTimeline() {
     }
     // Dirty only this step's item; everything upstream keeps the cache an
     // earlier iteration already stamped, so the regen rebuilds just this one.
-    // For a chamfer built directly on an extrude, also drop the stored
-    // position so regenerateChamfer recomputes it from the live polygon
-    // centroid — otherwise a step whose source was resized keeps its old
-    // position (only the final step's regen would otherwise be re-centred).
-    // Chained chamfers (source is a CSG snapshot) keep their position: there
-    // buildBrushTransform has no live centroid to recompute from, and any
-    // gizmo move lives in a separate later transform entry anyway.
+    // For a chamfer whose source tracks a sketch, also drop the stored position
+    // so regenerateChamfer recomputes it (source brushPos + the fresh bbox
+    // centerOffset) — otherwise a resized source keeps its old position and the
+    // body shifts by the bbox-centre delta.  This applies to a direct extrude
+    // source AND a union/boolean source (a boss): the union is re-localised by
+    // its frozen originalCentre, so its bbox centre moves as the sketch grows.
+    // Chained chamfers (source is itself a chamfer CSG) keep their position —
+    // buildBrushTransform has no live centroid there and any gizmo move lives in
+    // a separate later transform entry.
     accItems = accItems.map((it) => {
       if (it.id !== targetId || it.type !== "csg" || !it.regenerator) return it;
+      const src = it.regenerator.source;
       const recenter =
         it.regenerator.kind === "chamfer" &&
-        it.regenerator.source?.type === "extrude";
+        (src?.type === "extrude" || src?.regenerator?.kind === "boolean");
       return {
         ...it,
         regenerator: { ...it.regenerator, regeneratedAt: "dirty" },
