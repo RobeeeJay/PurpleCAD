@@ -20,6 +20,14 @@ export function addConstraintIconsToGroup(
   showDimensions = true,
 ) {
   const R = 0.14;
+  // The sketch plane's normal in world space (toWorld maps sketch-local → world,
+  // so local +Z is the normal).  Dimension offsets take the perpendicular IN the
+  // plane via cross(normal, dir) — a world-XY perpendicular only works when the
+  // sketch sits on the world XY plane and otherwise pushes the dimension out of
+  // the plane (or to NaN for a line along world Z).
+  const sketchNormal = toWorld(0, 0, 1)
+    .sub(toWorld(0, 0, 0))
+    .normalize();
   // Offset constraints created together share an offsetGroup; render only one
   // editable dimension label per group (they all carry the same distance).
   const seenOffsetGroups = new Set();
@@ -32,11 +40,16 @@ export function addConstraintIconsToGroup(
       obj.userData.constraintIconLocalPos = iconLocalPos;
       obj.userData.constraintShapeIndices = shapeIndices;
       obj.userData.constraintColor = color;
+      // Annotations are overlays: never frustum-cull them, or an offset
+      // dimension whose line/arrows sit outside a tight settled view gets the
+      // whole object dropped and the dimension vanishes.
+      obj.frustumCulled = false;
     };
     const addTagged = (obj) => {
       obj.userData.isConstraintObj = true;
       obj.userData.constraintIdx = ci;
       obj.userData.constraintType = c.type;
+      obj.frustumCulled = false;
       group.add(obj);
     };
     // Recenter a small glyph's geometry on a world anchor and park the object
@@ -47,6 +60,7 @@ export function addConstraintIconsToGroup(
     const markFixedSize = (obj, anchor) => {
       if (obj.geometry) obj.geometry.translate(-anchor.x, -anchor.y, -anchor.z);
       obj.position.copy(anchor);
+      obj.frustumCulled = false;
       obj.userData.constraintMark = true;
     };
 
@@ -84,39 +98,96 @@ export function addConstraintIconsToGroup(
       const wA = toWorld(posA.x, posA.y, 0.006),
         wB = toWorld(posB.x, posB.y, 0.006);
       const dir = new THREE.Vector3().subVectors(wB, wA).normalize();
-      const perp = new THREE.Vector3(-dir.y, dir.x, 0)
-        .normalize()
-        .multiplyScalar(0.1);
+      // In-plane perpendicular (works on any sketch plane, not just world XY).
+      const perpU = sketchNormal.clone().cross(dir).normalize();
       const distShapes =
         c.shapeAIdx === c.shapeBIdx
           ? [c.shapeAIdx]
           : [c.shapeAIdx, c.shapeBIdx];
-      // For radius: extend line beyond circle edge; label sits outside the circle.
-      // For linear: standard midpoint label with ticks at both ends.
-      const wLineTo = isRadius ? wB.clone().addScaledVector(dir, 0.35) : wB;
-      const dimLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([wA, wLineTo]),
-        new THREE.LineBasicMaterial({ color: 0xffdd44, depthTest: false }),
-      );
-      dimLine.renderOrder = 1004;
-      const midLocal = { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 };
-      tag(dimLine, midLocal, distShapes, 0xffdd44);
-      group.add(dimLine);
-      // Tick marks: radius gets one at edge only; linear gets one at each endpoint.
-      const tickPts = isRadius ? [wB] : [wA, wB];
-      for (const pt of tickPts) {
-        const t = new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints([
-            pt.clone().sub(perp),
-            pt.clone().add(perp),
-          ]),
-          new THREE.LineBasicMaterial({ color: 0xffdd44, depthTest: false }),
+      const DIM_COLOR = 0xffdd44;
+      // A plain world-space dimension/extension line (scales with zoom so it
+      // keeps spanning the measured geometry — not a fixed-size mark).
+      const addSeg = (p0, p1) => {
+        const l = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([p0, p1]),
+          new THREE.LineBasicMaterial({ color: DIM_COLOR, depthTest: false }),
         );
-        t.renderOrder = 1004;
-        addTagged(t);
-        markFixedSize(t, pt);
+        l.renderOrder = 1004;
+        addTagged(l);
+        return l;
+      };
+      // A filled triangular arrowhead, tip at `tip`, opening toward `toward`.
+      // markFixedSize keeps it a constant on-screen size like a real dimension.
+      const addArrow = (tip, toward) => {
+        const HEAD_LEN = 0.2,
+          HEAD_W = 0.07;
+        const base = tip.clone().addScaledVector(toward, HEAD_LEN);
+        const geo = new THREE.BufferGeometry().setFromPoints([
+          tip.clone(),
+          base.clone().addScaledVector(perpU, HEAD_W),
+          base.clone().addScaledVector(perpU, -HEAD_W),
+        ]);
+        const head = new THREE.Mesh(
+          geo,
+          new THREE.MeshBasicMaterial({
+            color: DIM_COLOR,
+            depthTest: false,
+            side: THREE.DoubleSide,
+          }),
+        );
+        head.renderOrder = 1005;
+        addTagged(head);
+        markFixedSize(head, tip);
+      };
+
+      let labelPos;
+      if (isRadius) {
+        // Radius: leader from the centre out past the arc, arrowhead at the arc.
+        const wLineTo = wB.clone().addScaledVector(dir, 0.35);
+        const leader = addSeg(wA, wLineTo);
+        tag(
+          leader,
+          { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
+          distShapes,
+          DIM_COLOR,
+        );
+        addArrow(wB, dir.clone().negate());
+        labelPos = wLineTo.clone().addScaledVector(dir, 0.45);
+      } else {
+        // Linear: a dimension line offset from the geometry, bounded by two
+        // extension (witness) lines, with an arrowhead at each end pointing out
+        // to the witnesses — the value breaks the line at the middle.
+        const OFF = 0.55,
+          GAP = 0.06,
+          OVER = 0.14;
+        const A2 = wA.clone().addScaledVector(perpU, OFF);
+        const B2 = wB.clone().addScaledVector(perpU, OFF);
+        addSeg(
+          wA.clone().addScaledVector(perpU, GAP),
+          A2.clone().addScaledVector(perpU, OVER),
+        );
+        addSeg(
+          wB.clone().addScaledVector(perpU, GAP),
+          B2.clone().addScaledVector(perpU, OVER),
+        );
+        const dimLine = addSeg(A2, B2);
+        // Hotspot for double-click sits on the dimension line, in sketch-local.
+        const llen = Math.hypot(posB.x - posA.x, posB.y - posA.y) || 1;
+        const lpx = -(posB.y - posA.y) / llen,
+          lpy = (posB.x - posA.x) / llen;
+        tag(
+          dimLine,
+          {
+            x: (posA.x + posB.x) / 2 + lpx * OFF,
+            y: (posA.y + posB.y) / 2 + lpy * OFF,
+          },
+          distShapes,
+          DIM_COLOR,
+        );
+        addArrow(A2, dir);
+        addArrow(B2, dir.clone().negate());
+        labelPos = new THREE.Vector3().addVectors(A2, B2).multiplyScalar(0.5);
       }
-      // Label position: radius → outside circle edge; linear → offset from midpoint.
       // c.distance may be a number or a formula string; evaluate before display.
       const resolvedDist = resolveConstraintDistance(c);
       // When the constraint's value is a formula (any string that isn't a
@@ -158,12 +229,7 @@ export function addConstraintIconsToGroup(
       const baseW = isRadius ? 0.85 : 0.7;
       const aspect = canvas.width / 160;
       sprite.scale.set(baseW * aspect, 0.175, 1);
-      if (isRadius) {
-        sprite.position.copy(wLineTo.clone().addScaledVector(dir, 0.45));
-      } else {
-        const mid = new THREE.Vector3().addVectors(wA, wB).multiplyScalar(0.5);
-        sprite.position.copy(mid.clone().addScaledVector(perp, 3));
-      }
+      sprite.position.copy(labelPos);
       sprite.renderOrder = 1009;
       addTagged(sprite);
     } else if (c.type === "onLine") {
