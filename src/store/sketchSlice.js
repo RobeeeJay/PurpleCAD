@@ -609,6 +609,54 @@ export const createSketchSlice = (set) => ({
       };
     }),
 
+  // Live preview of an offset-distance edit: re-solve and update ONLY the live
+  // items (geometry + the shown constraint value) — no snapshot, history, or CSG
+  // dirtying.  Enter commits via updateSketchOffsetDistance; Escape restores by
+  // previewing the original value.
+  previewSketchOffsetDistance: (
+    sketchId,
+    offsetGroup,
+    constraintIdx,
+    formula,
+  ) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const constraints = (item.constraints || []).map((c, i) => {
+        if (c.type !== "offset") return c;
+        const inGroup =
+          offsetGroup != null
+            ? c.offsetGroup === offsetGroup
+            : i === constraintIdx;
+        return inGroup ? { ...c, distance: formula } : c;
+      });
+      const offsetTargets = new Set(
+        constraints.filter((c) => c.type === "offset").map((c) => c.shapeIdx),
+      );
+      const fixed = new Set();
+      (item.shapes || []).forEach((s, i) => {
+        if (offsetTargets.has(i)) return;
+        for (const f of varFields(s)) fixed.add(`${i}:${f}`);
+      });
+      const { shapes: solved, ok } = solveConstraints(
+        item.shapes,
+        constraints,
+        {
+          fixed,
+        },
+      );
+      return {
+        items: state.items.map((it) =>
+          it.id === sketchId
+            ? Object.assign({}, it, {
+                shapes: ok ? solved : item.shapes,
+                constraints,
+              })
+            : it,
+        ),
+      };
+    }),
+
   deleteSketchConstraint: (sketchId, constraintIdx) =>
     set((state) => {
       pushSketchSnapshot(state, sketchId);

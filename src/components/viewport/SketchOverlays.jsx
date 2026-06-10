@@ -284,6 +284,25 @@ export default function SketchOverlays({
                 ? sketchDistanceInput.defaultDistance
                 : (sketchDistanceInput.defaultDistance * MM_PER_UNIT).toFixed(2)
             }
+            onChange={(e) => {
+              // Offset edits update live as you type: re-solve the copies (no
+              // history/undo churn) so the geometry follows the typed value.
+              if (sketchDistanceInput.offsetConstraintIdx == null) return;
+              const raw = e.target.value.trim();
+              const mm = evaluateFormula(
+                raw,
+                variablesToMap(useStore.getState().variables),
+              );
+              if (Number.isFinite(mm) && mm !== 0)
+                useStore
+                  .getState()
+                  .previewSketchOffsetDistance(
+                    selectedId,
+                    sketchDistanceInput.offsetGroup,
+                    sketchDistanceInput.offsetConstraintIdx,
+                    raw,
+                  );
+            }}
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter") {
@@ -413,6 +432,16 @@ export default function SketchOverlays({
                 useStore.getState().setSketchDistanceInput(null);
                 useStore.getState().setSketchConstraintMode(null);
               } else if (e.key === "Escape") {
+                // Discard a live offset preview by re-solving to the original.
+                if (sketchDistanceInput.offsetConstraintIdx != null)
+                  useStore
+                    .getState()
+                    .previewSketchOffsetDistance(
+                      selectedId,
+                      sketchDistanceInput.offsetGroup,
+                      sketchDistanceInput.offsetConstraintIdx,
+                      String(sketchDistanceInput.defaultDistance),
+                    );
                 useStore.getState().setSketchDistanceInput(null);
                 useStore.getState().setSketchConstraintMode(null);
               }
