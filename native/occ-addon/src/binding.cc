@@ -18,6 +18,7 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 
 // ── Chamfer / fillet ────────────────────────────────────────────────────
 #include <BRepFilletAPI_MakeChamfer.hxx>
@@ -649,11 +650,19 @@ Napi::Number BooleanOp(const Napi::CallbackInfo& info) {
     if (ids.Length() < 2)
       throw std::runtime_error("booleanOp requires at least 2 shape ids");
 
+    // A small fuzzy value lets the fuse weld hairline gaps where independently
+    // built solids touch (e.g. several extruded parts that abut) — each prism is
+    // built in its own centroid-local frame and transformed back, so shared
+    // faces aren't bit-for-bit coincident.  Value is in scene units (1 = 10 mm),
+    // i.e. ~1e-4 mm: far above float round-off, far below any real feature.
+    const Standard_Real kFuzzy = 1.0e-5;
+
     TopoDS_Shape result = FetchShape(ids.Get(0u).As<Napi::Number>().Int32Value());
     for (uint32_t i = 1; i < ids.Length(); i++) {
       TopoDS_Shape tool = FetchShape(ids.Get(i).As<Napi::Number>().Int32Value());
       if (op == "union") {
         BRepAlgoAPI_Fuse fuse(result, tool);
+        fuse.SetFuzzyValue(kFuzzy);
         fuse.Build();
         result = fuse.Shape();
       } else if (op == "difference") {
@@ -666,6 +675,22 @@ Napi::Number BooleanOp(const Napi::CallbackInfo& info) {
         result = common.Shape();
       } else {
         throw std::runtime_error("unknown boolean operation: " + op);
+      }
+    }
+
+    // After fusing, the seams where the parts met are left as pairs of coplanar
+    // faces split by sliver edges — exactly what a later chamfer/fillet chokes
+    // on ("geometry rejected the operation").  Unify the same-domain faces/edges
+    // so the body has clean single faces.  Only for union (the case that creates
+    // those internal seams); fall back to the raw result if unification rejects.
+    if (op == "union") {
+      try {
+        ShapeUpgrade_UnifySameDomain unifier(
+          result, Standard_True, Standard_True, Standard_True);
+        unifier.Build();
+        result = unifier.Shape();
+      } catch (const std::exception&) {
+        // keep the un-unified fuse result
       }
     }
     return Napi::Number::New(env, StoreShape(result));
