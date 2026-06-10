@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import {
+  polyContainsPoint,
   polyCentroid,
+  polyArea,
+} from "./sceneObjects/polygonUtil.js";
+import {
   findClosedLoops,
   groupLoopsWithHoles,
-  polyContainsPoint,
-  polyArea,
-} from "./sceneObjects.js";
-import { withWinding } from "./sceneObjects/closedLoops.js";
+  withWinding,
+} from "./sceneObjects/closedLoops.js";
 
 // World-space transform for placing a CSG input.  Extruded items keep
 // their original centroid-offset behaviour so the solid sits on the sketch
@@ -230,4 +232,51 @@ export function withLiveDepth(src, depth) {
       : { ...src, regenerator: { ...src.regenerator, source: inner } };
   }
   return src;
+}
+
+const addDelta = (pos, delta) => ({
+  x: (pos?.x || 0) + delta.x,
+  y: (pos?.y || 0) + delta.y,
+  z: (pos?.z || 0) + delta.z,
+});
+
+// Retargeting an extrude that anchors a union (buildItemShapeLocal's boolean
+// branch re-localises by `regenerator.originalCenter || item.position`, and
+// performCsg anchors a fresh union on its FIRST input's brush position) moves
+// that anchor by `delta` — the change in the retargeted extrude's
+// buildBrushTransform position.  Without updating the frozen anchor, the
+// anchor input's own geometry shifts inside the union's local frame, dragging
+// any chamfer/fillet `subGeo` selections (and the rendered result) off the
+// shape.  Shift `originalCenter` by the same delta so the anchor input's local
+// geometry — and selections on it — stay put; with that, the union/chamfer's
+// LOCAL geometry is unchanged and the whole result simply translates by
+// `delta` in world space, so `position` shifts by `delta` too.  Recurses into
+// a chamfer/bevel's nested `source` (chained ops keep their own copy of the
+// union snapshot) and propagates the position shift outward through wrappers.
+export function shiftUnionAnchorForRetarget(item, extrudeId, delta) {
+  if (!item?.regenerator) return item;
+  const r = item.regenerator;
+  let shifted = r.kind === "boolean" && r.inputIds?.[0] === extrudeId;
+
+  let newSource = r.source;
+  if (r.source) {
+    newSource = shiftUnionAnchorForRetarget(r.source, extrudeId, delta);
+    if (newSource !== r.source) shifted = true;
+  }
+  if (!shifted) return item;
+
+  return {
+    ...item,
+    position: addDelta(item.position, delta),
+    regenerator: {
+      ...r,
+      ...(r.kind === "boolean" && r.inputIds?.[0] === extrudeId
+        ? {
+            originalCenter: addDelta(r.originalCenter || item.position, delta),
+          }
+        : null),
+      ...(newSource !== r.source ? { source: newSource } : null),
+      regeneratedAt: "dirty",
+    },
+  };
 }

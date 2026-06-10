@@ -12,6 +12,10 @@ import {
 } from "./internals.js";
 import { createHistoryNavSlice } from "./historyNavSlice.js";
 import { createItemFlagsSlice } from "./itemFlagsSlice.js";
+import {
+  buildBrushTransform,
+  shiftUnionAnchorForRetarget,
+} from "../three/csgUtils.js";
 
 export const createHistorySlice = (set) => ({
   ...createHistoryNavSlice(set),
@@ -425,6 +429,43 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Update an existing chamfer-or-fillet history entry's patches in place
+  // (position/regenerator/geometryData), without inserting a new entry —
+  // used by BevelSection's retarget(), which has already rebuilt the
+  // geometry and just needs the timeline step to point at the new result.
+  retargetChamferEntry: (entryId, patches) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        if (inst.patches?.regenerator?.kind !== "chamfer") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches,
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(newHistory),
+        },
+        withUndo(state),
+      );
+    }),
+
   retargetExtrude: (extrudeId, newProfile, newDepth, startOffset = 0) =>
     set((state) => {
       const apply = (item) =>
@@ -437,14 +478,47 @@ export const createHistorySlice = (set) => ({
           position: newProfile.position,
           rotation: newProfile.rotation,
         });
+      // If this prism anchors a union (it's `inputIds[0]` of a boolean
+      // regenerator), the union's re-localisation anchor must move with it —
+      // see shiftUnionAnchorForRetarget.
+      const oldExtrude = state.items.find((item) => item.id === extrudeId);
+      const delta =
+        oldExtrude?.type === "extrude"
+          ? (() => {
+              const before = buildBrushTransform(oldExtrude).position;
+              const after = buildBrushTransform(apply(oldExtrude)).position;
+              return {
+                x: after.x - before.x,
+                y: after.y - before.y,
+                z: after.z - before.z,
+              };
+            })()
+          : null;
+      const shiftAnchors = (item) =>
+        delta ? shiftUnionAnchorForRetarget(item, extrudeId, delta) : item;
       // markCsgDirty: a retargeted prism may feed a union (a boss, or one of a
       // multi-area extrude's prisms), which must rebuild against the new profile.
       const updatedItems = markCsgDirty(
-        state.items.map((item) => (item.id === extrudeId ? apply(item) : item)),
+        state.items.map((item) =>
+          item.id === extrudeId ? apply(item) : shiftAnchors(item),
+        ),
       );
-      const newHistory = state.history.map((entry) =>
-        rewriteCreatedItem(entry, extrudeId, apply),
-      );
+      const newHistory = state.history.map((entry) => {
+        const rewritten = rewriteCreatedItem(entry, extrudeId, apply);
+        if (rewritten !== entry) return rewritten;
+        const inst = entry.instruction;
+        if (inst?.type === "create" && inst.item?.regenerator) {
+          const next = shiftAnchors(inst.item);
+          if (next !== inst.item)
+            return { ...entry, instruction: { ...inst, item: next } };
+        }
+        if (inst?.type === "modify" && inst.patches?.regenerator) {
+          const next = shiftAnchors(inst.patches);
+          if (next !== inst.patches)
+            return { ...entry, instruction: { ...inst, patches: next } };
+        }
+        return entry;
+      });
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         ...withUndo(state),

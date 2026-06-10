@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import * as THREE from "three";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
@@ -14,10 +14,14 @@ import { chamferOrFilletItem } from "../../three/occClient.js";
 const BevelSection = ({ bare = false }) => {
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
   const items = useStore((s) => s.items);
+  const history = useStore((s) => s.history);
   const modifyItem = useStore((s) => s.modifyItem);
+  const retargetChamferEntry = useStore((s) => s.retargetChamferEntry);
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const curveResolution = useStore((s) => s.curveResolution);
   const showNotification = useStore((s) => s.showNotification);
+  const chamferRetargetTarget = useStore((s) => s.chamferRetargetTarget);
+  const setChamferRetargetTarget = useStore((s) => s.setChamferRetargetTarget);
 
   // User-controllable chamfer parameters.  Distance is in millimetres
   // (converted to scene units by MM_PER_UNIT before passing to OCC).
@@ -31,6 +35,84 @@ const BevelSection = ({ bare = false }) => {
     selectedSubGeometry &&
     ((selectedSubGeometry.edges?.length ?? 0) > 0 ||
       (selectedSubGeometry.faces?.length ?? 0) > 0);
+
+  const selectedItem = items.find((i) => i.id === selectedSubGeometry?.itemId);
+  const canRetarget = !!(
+    hasSelection && selectedItem?.regenerator?.kind === "chamfer"
+  );
+
+  // The newly-clicked face/edge selection is in the rendered (bbox-centred)
+  // mesh's frame; prior.subGeo lives in the source's frame, offset by
+  // -centerOffset.  Shift the new picks back into the source frame so they
+  // line up with the geometry chamferOrFilletItem will search.
+  const shiftSelectionToSource = (sel, centerOffset) => {
+    const off = centerOffset || { cx: 0, cy: 0, cz: 0 };
+    const shiftFace = (f) =>
+      f.cx == null
+        ? f
+        : { ...f, cx: f.cx + off.cx, cy: f.cy + off.cy, cz: f.cz + off.cz };
+    const shiftEdge = (ed) => ({
+      ...ed,
+      ax: ed.ax + off.cx,
+      ay: ed.ay + off.cy,
+      az: ed.az + off.cz,
+      bx: ed.bx + off.cx,
+      by: ed.by + off.cy,
+      bz: ed.bz + off.cz,
+    });
+    return {
+      edges: (sel.edges || []).map(shiftEdge),
+      faces: (sel.faces || []).map(shiftFace),
+    };
+  };
+
+  // Shared tail for apply()/retarget(): turn a chamferOrFilletItem result into
+  // the item's new position + regenerator and commit it.
+  const commitChamferResult = (
+    item,
+    source,
+    result,
+    subGeo,
+    regenBase,
+    label,
+    entryId,
+  ) => {
+    const { geometryData, centerOffset } = result;
+    const { cx, cy, cz } = centerOffset;
+    // Store the topologically-resolved selection (edges carry their adjacent
+    // face normals) so the chamfer re-matches its edges after a sketch /
+    // variable resize moves their coordinates.
+    const storedSubGeo = result.resolvedSubGeo || subGeo;
+
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+
+    const patches = {
+      type: "csg",
+      position: {
+        x: brushPos.x + local.x,
+        y: brushPos.y + local.y,
+        z: brushPos.z + local.z,
+      },
+      regenerator: {
+        ...regenBase,
+        source,
+        subGeo: storedSubGeo,
+        // bbox-centre offset in the source's LOCAL frame.
+        centerOffset: { cx, cy, cz },
+      },
+      geometryData,
+    };
+
+    // Retargeting an existing chamfer/fillet updates that step's patches
+    // in place; a first-time apply() inserts a new "Chamfered"/"Filleted"
+    // history entry.
+    if (entryId) retargetChamferEntry(entryId, patches);
+    else modifyItem(item.id, patches, label);
+    clearSelectedSubGeometry();
+  };
 
   // `segments` here is preserved from the old (custom-mesh) chamfer API:
   // segments=1 → chamfer (flat); segments>1 → bevel (rounded).  OCC
@@ -82,29 +164,13 @@ const BevelSection = ({ bare = false }) => {
         // the wrong place and matches no face (the second chamfer silently does
         // nothing).  The centring is a pure translation, so normals are
         // unchanged.
-        const off = prior.centerOffset || { cx: 0, cy: 0, cz: 0 };
-        const shiftFace = (f) =>
-          f.cx == null
-            ? f
-            : { ...f, cx: f.cx + off.cx, cy: f.cy + off.cy, cz: f.cz + off.cz };
-        const shiftEdge = (ed) => ({
-          ...ed,
-          ax: ed.ax + off.cx,
-          ay: ed.ay + off.cy,
-          az: ed.az + off.cz,
-          bx: ed.bx + off.cx,
-          by: ed.by + off.cy,
-          bz: ed.bz + off.cz,
-        });
+        const shifted = shiftSelectionToSource(
+          selectedSubGeometry,
+          prior.centerOffset,
+        );
         subGeo = {
-          edges: [
-            ...(prior.subGeo?.edges || []),
-            ...(selectedSubGeometry.edges || []).map(shiftEdge),
-          ],
-          faces: [
-            ...(prior.subGeo?.faces || []),
-            ...(selectedSubGeometry.faces || []).map(shiftFace),
-          ],
+          edges: [...(prior.subGeo?.edges || []), ...shifted.edges],
+          faces: [...(prior.subGeo?.faces || []), ...shifted.faces],
         };
       } else {
         // KEEP the source's existing regenerator: buildItemShapeLocal
@@ -155,52 +221,109 @@ const BevelSection = ({ bare = false }) => {
         );
         return;
       }
-      const { geometryData, centerOffset } = result;
-      const { cx, cy, cz } = centerOffset;
-      // Store the topologically-resolved selection (edges carry their adjacent
-      // face normals) so the chamfer re-matches its edges after a sketch /
-      // variable resize moves their coordinates.
-      const storedSubGeo = result.resolvedSubGeo || subGeo;
-
-      const brushPos = buildBrushTransform(source).position;
-      const rot = source.rotation || { x: 0, y: 0, z: 0 };
-      const local = new THREE.Vector3(cx, cy, cz);
-      local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-
-      modifyItem(
-        item.id,
+      commitChamferResult(
+        item,
+        source,
+        result,
+        subGeo,
         {
-          type: "csg",
-          position: {
-            x: brushPos.x + local.x,
-            y: brushPos.y + local.y,
-            z: brushPos.z + local.z,
-          },
-          regenerator: {
-            kind: "chamfer",
-            source,
-            subGeo: storedSubGeo,
-            amount,
-            segments,
-            angleRad,
-            // bbox-centre offset in the source's LOCAL frame.
-            // buildItemShapeLocal uses this to translate the rebuilt
-            // chamfer OCC shape into the same frame as the visible
-            // mesh — without it, a later cut on this chamfer lands
-            // R*centerOffset away from where the mesh is rendered.
-            centerOffset: { cx, cy, cz },
-            regeneratedAt: printPrecision,
-          },
-          geometryData,
+          kind: "chamfer",
+          amount,
+          segments,
+          angleRad,
+          regeneratedAt: printPrecision,
         },
         segments === 1 ? "Chamfered" : "Filleted",
       );
-      clearSelectedSubGeometry();
     } catch (err) {
       console.error("Chamfer operation failed:", err);
       showNotification(err.message);
     }
   };
+
+  // Re-run an existing chamfer/fillet against a NEWLY-picked face/edge
+  // selection — same amount/segments/angle, but the OLD subGeo is replaced
+  // entirely (not appended to), so the result tracks the new geometry instead
+  // of growing to cover both.
+  const retarget = async () => {
+    if (!canRetarget) return;
+    const item = selectedItem;
+    const prior = item.regenerator;
+    // The history entry whose patches describe this item's current
+    // chamfer/fillet — found via chamferRetargetTarget when the Timeline's
+    // Retarget button armed this, or by scanning for the latest "modify"
+    // entry on this item when retargeting via the toolbar button directly.
+    const entryId =
+      chamferRetargetTarget?.itemId === item.id
+        ? chamferRetargetTarget.entryId
+        : [...history]
+            .reverse()
+            .find(
+              (h) =>
+                h.instruction?.type === "modify" &&
+                h.instruction.itemId === item.id &&
+                h.instruction.patches?.regenerator?.kind === "chamfer",
+            )?.id;
+    if (!entryId) return;
+    try {
+      const printPrecision = curveResolution === "print" ? 0.01 : null;
+      const source = withLivePolygons(
+        withLiveDepth({ ...prior.source }, item.depth ?? prior.source.depth),
+        items,
+        printPrecision,
+      );
+      const subGeo = shiftSelectionToSource(
+        selectedSubGeometry,
+        prior.centerOffset,
+      );
+      if (subGeo.edges.length === 0 && subGeo.faces.length === 0) return;
+
+      const result = await chamferOrFilletItem({
+        source,
+        subGeo,
+        amount: prior.amount,
+        angleRad: prior.angleRad ?? null,
+        segments: prior.segments,
+        allItems: items,
+        printPrecision,
+      });
+      if (!result) {
+        showNotification(
+          "Could not retarget — the distance may be too large for the selected geometry.",
+        );
+        return;
+      }
+      commitChamferResult(
+        item,
+        source,
+        result,
+        subGeo,
+        {
+          kind: "chamfer",
+          amount: prior.amount,
+          segments: prior.segments,
+          angleRad: prior.angleRad ?? null,
+          regeneratedAt: printPrecision,
+        },
+        prior.segments === 1 ? "Chamfered" : "Filleted",
+        entryId,
+      );
+    } catch (err) {
+      console.error("Chamfer retarget failed:", err);
+      showNotification(err.message);
+    }
+  };
+
+  // The Timeline's "Retarget" button arms chamferRetargetTarget; the next
+  // face/edge picked on that same item re-applies the chamfer/fillet there
+  // automatically — picking new geometry IS the confirmation, no second
+  // button click needed.
+  useEffect(() => {
+    if (!chamferRetargetTarget || !hasSelection) return;
+    if (selectedSubGeometry.itemId !== chamferRetargetTarget.itemId) return;
+    setChamferRetargetTarget(null);
+    retarget();
+  }, [selectedSubGeometry, chamferRetargetTarget]);
 
   const body = (
     <>
@@ -289,6 +412,41 @@ const BevelSection = ({ bare = false }) => {
             strokeWidth="2"
             strokeLinejoin="round"
           />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title="Retarget — rebuild the selected chamfer/fillet from the newly picked face(s)/edge(s)"
+        disabled={!canRetarget}
+        onClick={retarget}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <rect
+            x="3"
+            y="14"
+            width="12"
+            height="7"
+            rx="1"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          <polygon
+            points="3,14 6,9 18,9 18,14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            opacity="0.6"
+          />
+          <circle
+            cx="19"
+            cy="5"
+            r="3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <circle cx="19" cy="5" r="1" fill="currentColor" />
         </svg>
       </button>
     </>

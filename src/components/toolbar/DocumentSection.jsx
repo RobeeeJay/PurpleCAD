@@ -1,4 +1,5 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { exportSTL, exportSTEP } from "../../three/occClient.js";
@@ -13,6 +14,32 @@ const DocumentSection = () => {
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
 
   const fileInputRef = useRef(null);
+  const saveBtnRef = useRef(null);
+  const saveMenuRef = useRef(null);
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const [saveMenuPos, setSaveMenuPos] = useState(null);
+
+  useEffect(() => {
+    if (!saveMenuOpen) return;
+    const rect = saveBtnRef.current?.getBoundingClientRect();
+    if (rect) setSaveMenuPos({ top: rect.bottom + 4, left: rect.left });
+    const onPointerDown = (e) => {
+      if (
+        !saveMenuRef.current?.contains(e.target) &&
+        !saveBtnRef.current?.contains(e.target)
+      )
+        setSaveMenuOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setSaveMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [saveMenuOpen]);
 
   const handleNew = () => {
     if (
@@ -40,6 +67,7 @@ const DocumentSection = () => {
     a.download = "scene.cad.json";
     a.click();
     URL.revokeObjectURL(url);
+    setSaveMenuOpen(false);
   };
 
   const handleLoadClick = () => {
@@ -82,6 +110,7 @@ const DocumentSection = () => {
   };
 
   const handleExportSTL = async () => {
+    setSaveMenuOpen(false);
     if (items.length === 0) {
       alert("No objects to export.");
       return;
@@ -103,6 +132,7 @@ const DocumentSection = () => {
   };
 
   const handleExportSTEP = async () => {
+    setSaveMenuOpen(false);
     if (items.length === 0) {
       alert("No objects to export.");
       return;
@@ -155,9 +185,10 @@ const DocumentSection = () => {
         </svg>
       </button>
       <button
+        ref={saveBtnRef}
         className="toolbar-btn"
-        title="Save document"
-        onClick={handleSave}
+        title="Save / Export"
+        onClick={() => setSaveMenuOpen((open) => !open)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <rect
@@ -191,6 +222,29 @@ const DocumentSection = () => {
           />
         </svg>
       </button>
+      {saveMenuOpen &&
+        saveMenuPos &&
+        createPortal(
+          <div
+            className="toolbar-dropdown-menu"
+            ref={saveMenuRef}
+            style={{ top: saveMenuPos.top, left: saveMenuPos.left }}
+          >
+            <button className="toolbar-dropdown-item" onClick={handleSave}>
+              Save document (.cad.json)
+            </button>
+            <button className="toolbar-dropdown-item" onClick={handleExportSTL}>
+              Export as STL
+            </button>
+            <button
+              className="toolbar-dropdown-item"
+              onClick={handleExportSTEP}
+            >
+              Export as STEP
+            </button>
+          </div>,
+          document.body,
+        )}
       <button
         className="toolbar-btn"
         title="Load document"
@@ -213,74 +267,6 @@ const DocumentSection = () => {
             stroke="currentColor"
             strokeWidth="2"
           />
-        </svg>
-      </button>
-      <button
-        className="toolbar-btn"
-        title="Export as STL"
-        onClick={handleExportSTL}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M12 3v11m0 0l-4-4m4 4l4-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M3 17v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <text
-            x="12"
-            y="10"
-            textAnchor="middle"
-            fontSize="5.5"
-            fontWeight="bold"
-            fill="currentColor"
-            fontFamily="monospace"
-          >
-            STL
-          </text>
-        </svg>
-      </button>
-      <button
-        className="toolbar-btn"
-        title="Export as STEP"
-        onClick={handleExportSTEP}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M12 3v11m0 0l-4-4m4 4l4-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M3 17v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <text
-            x="12"
-            y="10"
-            textAnchor="middle"
-            fontSize="5"
-            fontWeight="bold"
-            fill="currentColor"
-            fontFamily="monospace"
-          >
-            STP
-          </text>
         </svg>
       </button>
       <button

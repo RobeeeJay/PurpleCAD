@@ -195,6 +195,17 @@ const Timeline = () => {
   const deleteHistoryEntry = useStore((state) => state.deleteHistoryEntry);
   const reorderHistory = useStore((state) => state.reorderHistory);
   const setChamferEditTarget = useStore((state) => state.setChamferEditTarget);
+  const chamferRetargetTarget = useStore(
+    (state) => state.chamferRetargetTarget,
+  );
+  const setChamferRetargetTarget = useStore(
+    (state) => state.setChamferRetargetTarget,
+  );
+  const selectItem = useStore((state) => state.selectItem);
+  const clearSelectedSubGeometry = useStore(
+    (state) => state.clearSelectedSubGeometry,
+  );
+  const showNotification = useStore((state) => state.showNotification);
   const undoCount = useStore((state) => state.undoStack.length);
   const redoCount = useStore((state) => state.redoStack.length);
 
@@ -408,46 +419,102 @@ const Timeline = () => {
                   return ids.length ? <ExtrudeActions groupIds={ids} /> : null;
                 })()}
               {chamferInfo(entry) && (
-                <button
-                  className="timeline-action-btn"
-                  title={`Edit ${
-                    chamferInfo(entry).isFillet ? "fillet" : "chamfer"
-                  } parameters`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setChamferEditTarget({ entryId: entry.id });
-                  }}
-                >
-                  <svg viewBox="0 0 24 24" width="14" height="14">
-                    {chamferInfo(entry).isFillet ? (
-                      <path
-                        d="M4 4 L13 4 Q20 4 20 11 L20 20 L4 20 Z"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinejoin="round"
-                      />
-                    ) : (
-                      <>
+                <>
+                  <button
+                    className="timeline-action-btn"
+                    title={`Edit ${
+                      chamferInfo(entry).isFillet ? "fillet" : "chamfer"
+                    } parameters`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setChamferEditTarget({ entryId: entry.id });
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                      {chamferInfo(entry).isFillet ? (
                         <path
-                          d="M4 4 L14 4 L20 10 L20 20 L4 20 Z"
+                          d="M4 4 L13 4 Q20 4 20 11 L20 20 L4 20 Z"
                           fill="none"
                           stroke="currentColor"
                           strokeWidth="2"
                           strokeLinejoin="round"
                         />
-                        <line
-                          x1="14"
-                          y1="4"
-                          x2="20"
-                          y2="10"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        />
-                      </>
-                    )}
-                  </svg>
-                </button>
+                      ) : (
+                        <>
+                          <path
+                            d="M4 4 L14 4 L20 10 L20 20 L4 20 Z"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinejoin="round"
+                          />
+                          <line
+                            x1="14"
+                            y1="4"
+                            x2="20"
+                            y2="10"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          />
+                        </>
+                      )}
+                    </svg>
+                  </button>
+                  <button
+                    className={`timeline-action-btn${
+                      chamferRetargetTarget?.itemId === entry.itemId
+                        ? " active"
+                        : ""
+                    }`}
+                    title={`Retarget ${
+                      chamferInfo(entry).isFillet ? "fillet" : "chamfer"
+                    } — alt/ctrl-click the new face(s)/edge(s) on the model to rebuild it there`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      restoreToHistory(entry.id);
+                      clearSelectedSubGeometry();
+                      selectItem(entry.itemId);
+                      setChamferRetargetTarget({
+                        itemId: entry.itemId,
+                        entryId: entry.id,
+                      });
+                      showNotification(
+                        "Alt/Ctrl-click the new face(s) or edge(s) on the model to rebuild this " +
+                          (chamferInfo(entry).isFillet ? "fillet" : "chamfer") +
+                          " there.",
+                      );
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                      <rect
+                        x="3"
+                        y="14"
+                        width="12"
+                        height="7"
+                        rx="1"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      />
+                      <polygon
+                        points="3,14 6,9 18,9 18,14"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        opacity="0.6"
+                      />
+                      <circle
+                        cx="19"
+                        cy="5"
+                        r="3"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <circle cx="19" cy="5" r="1" fill="currentColor" />
+                    </svg>
+                  </button>
+                </>
               )}
               {canDelete(index) && (
                 <button

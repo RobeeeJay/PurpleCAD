@@ -45,6 +45,14 @@ export const uiInitial = {
   extrudeEditTarget: null,
   chamferEditTarget: null,
 
+  // Set by the Timeline's chamfer/fillet "Retarget" button:
+  // { itemId, entryId }. While set, BevelSection watches
+  // selectedSubGeometry and automatically re-applies that chamfer/fillet
+  // to the next face/edge picked on this item — updating entryId's
+  // history entry in place rather than appending a new step — then
+  // clears this back to null.
+  chamferRetargetTarget: null,
+
   // Whether the Y=0 ground plane shows shadows for scene objects.
   shadowsEnabled: false,
 
@@ -113,6 +121,7 @@ export const createUiSlice = (set) => ({
   setExtrudeDepthInput: (v) => set({ extrudeDepthInput: v }),
   setExtrudeEditTarget: (target) => set({ extrudeEditTarget: target }),
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
+  setChamferRetargetTarget: (target) => set({ chamferRetargetTarget: target }),
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   setCameraControls: (controls) => set({ _cameraControls: controls }),
 
