@@ -177,8 +177,14 @@ export function useSceneSync({
     // body's geometry would follow but its position would jump.
     const regenSig = (r) => {
       if (!r) return "";
-      const base =
-        r.kind === "boolean" ? `b${JSON.stringify(r.inputIds || [])}` : r.kind;
+      let base;
+      if (r.kind === "boolean") base = `b${JSON.stringify(r.inputIds || [])}`;
+      // Include a chamfer/fillet's params so editing them takes the full recalc
+      // (writes history) — needed so a failed step's bad flag clears once the
+      // edit makes it rebuild, not just in the cheap items-only pass.
+      else if (r.kind === "chamfer")
+        base = `c${r.amount ?? ""}:${r.angleRad ?? ""}:${r.segments ?? ""}`;
+      else base = r.kind;
       return r.source?.regenerator
         ? `${base}>${regenSig(r.source.regenerator)}`
         : base;

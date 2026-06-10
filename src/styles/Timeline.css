@@ -106,6 +106,26 @@
   opacity: 0.7;
 }
 
+/* A chamfer/fillet whose regen failed after the geometry changed — flagged bad
+   (amber) until the user retargets / re-applies it. */
+.timeline-entry.failed {
+  color: #ffa94d;
+}
+
+.timeline-entry.failed .timeline-dot {
+  border-color: #ffa94d;
+  color: #ffa94d;
+}
+
+.timeline-failed-badge {
+  color: #ffa94d;
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: help;
+  margin-left: 2px;
+}
+
 .timeline-track {
   display: flex;
   flex-direction: column;

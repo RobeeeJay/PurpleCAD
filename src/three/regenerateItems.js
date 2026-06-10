@@ -186,14 +186,35 @@ export async function regenerateItemsForResolution(
     progressed += 1;
     if (onProgress) onProgress({ current: progressed, total });
     if (!result) {
-      out.push(item);
+      // A chamfer/fillet that was asked to rebuild but produced nothing — the
+      // selection couldn't be re-matched or OCC rejected it after the geometry
+      // changed.  Keep its last-good mesh but flag it so the timeline marks the
+      // step bad until the user retargets / re-applies it.  Stop re-attempting
+      // (settle regeneratedAt) so a clean pass doesn't spam OCC every recalc.
+      if (r.kind === "chamfer") {
+        changed = true;
+        out.push({
+          ...item,
+          regenerator: {
+            ...r,
+            regeneratedAt: printPrecision,
+            regenFailed: true,
+          },
+        });
+      } else {
+        out.push(item);
+      }
       continue;
     }
     changed = true;
     // Carry the freshly-computed centerOffset back onto the chamfer
     // regenerator so buildItemShapeLocal stays in sync with the bbox
-    // a re-tessellation just produced.
-    const nextRegen = { ...r, regeneratedAt: printPrecision };
+    // a re-tessellation just produced.  Clear any prior failure flag.
+    const nextRegen = {
+      ...r,
+      regeneratedAt: printPrecision,
+      regenFailed: false,
+    };
     if (r.kind === "chamfer" && result.centerOffset) {
       nextRegen.centerOffset = result.centerOffset;
     }

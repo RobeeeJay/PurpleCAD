@@ -13,6 +13,14 @@ const chamferInfo = (entry) => {
   return { isFillet: r.segments !== 1 };
 };
 
+// A chamfer/fillet whose regen couldn't rebuild after the geometry changed (the
+// selected edge/face vanished or OCC rejected it).  The step keeps its stale
+// mesh and is flagged bad until the user retargets / re-applies it.
+const chamferFailed = (entry) => {
+  const r = entry?.instruction?.patches?.regenerator;
+  return r?.kind === "chamfer" && r.regenFailed === true;
+};
+
 const entryIcon = (label) => {
   if (label.startsWith("Added")) return "+";
   if (label.startsWith("Deleted")) return "−";
@@ -336,6 +344,7 @@ const Timeline = () => {
           const isDragging = entry.id === draggedId;
           const isDropTarget = dropBeforeId === entry.id;
           const isDraggable = index > 0;
+          const failed = chamferFailed(entry);
 
           return (
             <div
@@ -345,6 +354,7 @@ const Timeline = () => {
                 isActive ? "active" : "",
                 isFuture ? "future" : "",
                 entry._orphaned ? "orphaned" : "",
+                failed ? "failed" : "",
                 isDragging ? "dragging" : "",
                 isDropTarget ? "drop-before" : "",
               ]
@@ -378,6 +388,14 @@ const Timeline = () => {
               <span className="timeline-label">
                 {getDisplayLabel(entry, history)}
               </span>
+              {failed && (
+                <span
+                  className="timeline-failed-badge"
+                  title="This chamfer/fillet couldn't rebuild after the geometry changed — its edge/face is gone or OCC rejected it. Retarget (re-apply) or edit it to fix; the shown shape is stale."
+                >
+                  ⚠
+                </span>
+              )}
               {entry.instruction?.type === "create" &&
                 entry.instruction.item?.type === "extrude" && (
                   <ExtrudeActions itemId={entry.instruction.item.id} />
