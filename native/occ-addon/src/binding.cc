@@ -35,7 +35,6 @@
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
-#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopAbs_Orientation.hxx>
 #include <TopoDS.hxx>
@@ -343,8 +342,10 @@ static std::vector<FaceNormal> EdgeAdjacentNormals(
   std::vector<FaceNormal> normals;
   if (!edgeFaceMap.Contains(edge)) return normals;
   const TopTools_ListOfShape& faces = edgeFaceMap.FindFromKey(edge);
-  for (TopTools_ListIteratorOfListOfShape it(faces); it.More(); it.Next()) {
-    FaceNormal n = ComputeFaceNormal(TopoDS::Face(it.Value()));
+  // OCC 8.0.0 removed the legacy TopTools_ListIteratorOfListOfShape header;
+  // iterate the list (an NCollection_List) directly.
+  for (const TopoDS_Shape& f : faces) {
+    FaceNormal n = ComputeFaceNormal(TopoDS::Face(f));
     if (n.valid) normals.push_back(n);
   }
   return normals;

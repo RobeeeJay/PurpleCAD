@@ -20,6 +20,7 @@ string(REPLACE "\"" "" NODE_ADDON_API_DIR "${NODE_ADDON_API_DIR}")
 # back to whatever find_package would find on a system-wide install.
 find_package(OpenCASCADE REQUIRED
   HINTS
+    "$ENV{HOME}/occ-8.0-arm64/lib/cmake/opencascade"
     "$ENV{HOME}/occ-arm64/lib/cmake/opencascade"
     /opt/homebrew/opt/opencascade/lib/cmake/opencascade
     /usr/local/opt/opencascade/lib/cmake/opencascade
