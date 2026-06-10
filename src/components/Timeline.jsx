@@ -31,6 +31,10 @@ const getItemName = (history, itemId) => {
     if (inst.type === "create" && inst.item && inst.item.id === itemId) {
       return inst.item.name;
     }
+    if (inst.type === "createGroup" && inst.items) {
+      const m = inst.items.find((it) => it.id === itemId);
+      if (m) return m.name;
+    }
   }
   return `#${itemId}`;
 };
@@ -46,11 +50,135 @@ const getDisplayLabel = (entry, history) => {
         ? "Filleted"
         : "Chamfered"
       : entry.label;
+  // A createGroup step makes several items at once (a multi-area extrude's
+  // prisms); name it by count rather than one arbitrary member.
+  if (entry.instruction?.type === "createGroup") {
+    const n = entry.instruction.items?.length || 0;
+    return `${label} ${n} extrusions`;
+  }
   if (entry.itemId != null) {
     return `${label} ${getItemName(history, entry.itemId)}`;
   }
   return label;
 };
+
+// Retarget + edit-length controls for an extrude entry.  With `groupIds` the
+// controls act on a whole multi-area group as one unit; otherwise on the single
+// `itemId`.
+function ExtrudeActions({ itemId, groupIds }) {
+  const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
+  const extrudeRetargetId = useStore((s) => s.extrudeRetargetId);
+  const extrudeRetargetGroup = useStore((s) => s.extrudeRetargetGroup);
+  const setExtrudeRetargetId = useStore((s) => s.setExtrudeRetargetId);
+  const setExtrudeRetargetGroup = useStore((s) => s.setExtrudeRetargetGroup);
+  const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
+  const setExtrudeEditTarget = useStore((s) => s.setExtrudeEditTarget);
+  const isGroup = !!groupIds;
+  const retargetActive =
+    extrudeSelectMode === "profile" &&
+    (isGroup
+      ? !!extrudeRetargetGroup && extrudeRetargetGroup[0] === groupIds[0]
+      : !extrudeRetargetGroup && extrudeRetargetId === itemId);
+  return (
+    <>
+      <button
+        className={`timeline-action-btn${retargetActive ? " active" : ""}`}
+        title="Retarget Profile — pick the face(s) or sketch region(s) to extrude from"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExtrudeRetargetGroup(isGroup ? groupIds : null);
+          setExtrudeRetargetId(isGroup ? groupIds[0] : itemId);
+          setExtrudeSelectMode("profile");
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14">
+          <rect
+            x="3"
+            y="14"
+            width="12"
+            height="7"
+            rx="1"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          <polygon
+            points="3,14 6,9 18,9 18,14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            opacity="0.6"
+          />
+          <circle
+            cx="19"
+            cy="5"
+            r="3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <circle cx="19" cy="5" r="1" fill="currentColor" />
+        </svg>
+      </button>
+      <button
+        className="timeline-action-btn"
+        title="Edit extrusion length"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExtrudeEditTarget(
+            isGroup ? { groupItemIds: groupIds } : { itemId },
+          );
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14">
+          <line
+            x1="4"
+            y1="12"
+            x2="20"
+            y2="12"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          <line
+            x1="4"
+            y1="8"
+            x2="4"
+            y2="16"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          <line
+            x1="20"
+            y1="8"
+            x2="20"
+            y2="16"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          <polyline
+            points="9,9 12,12 9,15"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <polyline
+            points="15,9 12,12 15,15"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    </>
+  );
+}
 
 const Timeline = () => {
   const history = useStore((state) => state.history);
@@ -58,11 +186,6 @@ const Timeline = () => {
   const restoreToHistory = useStore((state) => state.restoreToHistory);
   const deleteHistoryEntry = useStore((state) => state.deleteHistoryEntry);
   const reorderHistory = useStore((state) => state.reorderHistory);
-  const setExtrudeRetargetId = useStore((state) => state.setExtrudeRetargetId);
-  const setExtrudeSelectMode = useStore((state) => state.setExtrudeSelectMode);
-  const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
-  const extrudeRetargetId = useStore((state) => state.extrudeRetargetId);
-  const setExtrudeEditTarget = useStore((state) => state.setExtrudeEditTarget);
   const setChamferEditTarget = useStore((state) => state.setChamferEditTarget);
   const undoCount = useStore((state) => state.undoStack.length);
   const redoCount = useStore((state) => state.redoStack.length);
@@ -257,108 +380,15 @@ const Timeline = () => {
               </span>
               {entry.instruction?.type === "create" &&
                 entry.instruction.item?.type === "extrude" && (
-                  <>
-                    <button
-                      className={`timeline-action-btn${
-                        extrudeSelectMode === "profile" &&
-                        extrudeRetargetId === entry.instruction.item.id
-                          ? " active"
-                          : ""
-                      }`}
-                      title="Retarget Profile — pick a new face or sketch region to extrude from"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExtrudeRetargetId(entry.instruction.item.id);
-                        setExtrudeSelectMode("profile");
-                      }}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14">
-                        <rect
-                          x="3"
-                          y="14"
-                          width="12"
-                          height="7"
-                          rx="1"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        />
-                        <polygon
-                          points="3,14 6,9 18,9 18,14"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          opacity="0.6"
-                        />
-                        <circle
-                          cx="19"
-                          cy="5"
-                          r="3"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        />
-                        <circle cx="19" cy="5" r="1" fill="currentColor" />
-                      </svg>
-                    </button>
-                    <button
-                      className="timeline-action-btn"
-                      title="Edit extrusion length"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExtrudeEditTarget({
-                          itemId: entry.instruction.item.id,
-                        });
-                      }}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14">
-                        <line
-                          x1="4"
-                          y1="12"
-                          x2="20"
-                          y2="12"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                        />
-                        <line
-                          x1="4"
-                          y1="8"
-                          x2="4"
-                          y2="16"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                        />
-                        <line
-                          x1="20"
-                          y1="8"
-                          x2="20"
-                          y2="16"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                        />
-                        <polyline
-                          points="9,9 12,12 9,15"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <polyline
-                          points="15,9 12,12 15,15"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </button>
-                  </>
+                  <ExtrudeActions itemId={entry.instruction.item.id} />
                 )}
+              {entry.instruction?.type === "createGroup" &&
+                (() => {
+                  const ids = entry.instruction.items
+                    .filter((p) => p.type === "extrude")
+                    .map((p) => p.id);
+                  return ids.length ? <ExtrudeActions groupIds={ids} /> : null;
+                })()}
               {chamferInfo(entry) && (
                 <button
                   className="timeline-action-btn"

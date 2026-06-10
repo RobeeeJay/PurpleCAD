@@ -21,9 +21,12 @@ const ExtrudeLengthDialog = () => {
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const setExtrudeDepth = useStore((s) => s.setExtrudeDepth);
+  const setExtrudeGroupDepth = useStore((s) => s.setExtrudeGroupDepth);
 
-  const item =
-    target?.itemId != null ? items.find((i) => i.id === target.itemId) : null;
+  // A group edit (groupItemIds) shows the first prism's length and applies the
+  // new length to every prism; a single edit targets one extrude by id.
+  const editId = target?.groupItemIds ? target.groupItemIds[0] : target?.itemId;
+  const item = editId != null ? items.find((i) => i.id === editId) : null;
 
   const [formula, setFormula] = useState("");
   useEffect(() => {
@@ -43,9 +46,11 @@ const ExtrudeLengthDialog = () => {
   const commit = () => {
     if (!valid) return;
     // Store as mm formula string so future evaluations can resolve variables.
-    // Edits the original extrude's create entry in place (no new timeline
-    // step) and recalculates downstream geometry.
-    setExtrudeDepth(item.id, formula.trim());
+    // Edits the create entry in place (no new timeline step) and recalculates
+    // downstream geometry.  A group edit sets the same length on every prism.
+    if (target.groupItemIds)
+      setExtrudeGroupDepth(target.groupItemIds, formula.trim());
+    else setExtrudeDepth(item.id, formula.trim());
     close();
   };
 

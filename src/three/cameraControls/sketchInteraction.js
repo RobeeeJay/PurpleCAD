@@ -41,6 +41,13 @@ import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
 import { createSketchDrawHelpers } from "./sketchDraw.js";
 
+// An offset copy is inert while its offset constraint exists — driven by its
+// original, it must not be selectable/draggable on its own.
+const isOffsetShapeIdx = (selItem, idx) =>
+  (selItem?.constraints || []).some(
+    (c) => c.type === "offset" && c.shapeIdx === idx,
+  );
+
 export function createSketchInteraction(
   {
     scene,
@@ -315,7 +322,13 @@ export function createSketchInteraction(
     const shapes = selItem.shapes || [];
     const inRect = new Set();
     getSnapPoints(shapes).forEach((pt) => {
-      if (pt.x >= minX && pt.x <= maxX && pt.y >= minY && pt.y <= maxY)
+      if (
+        pt.x >= minX &&
+        pt.x <= maxX &&
+        pt.y >= minY &&
+        pt.y <= maxY &&
+        !isOffsetShapeIdx(selItem, pt.shapeIdx)
+      )
         inRect.add(pt.shapeIdx);
     });
     multiSelectedIndices = [...inRect];
@@ -353,9 +366,9 @@ export function createSketchInteraction(
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     const shapes = selItem.shapes || [];
-    // Point hit first
+    // Point hit first (ignore offset-copy points — they're inert).
     const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-    if (snap) {
+    if (snap && !isOffsetShapeIdx(selItem, snap.shapeIdx)) {
       sketchSelectPoint(snap, sketchMesh);
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
       return;
@@ -369,7 +382,7 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null,
+        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -866,7 +879,7 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null,
+        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       for (const hit of hits) {
@@ -968,9 +981,10 @@ export function createSketchInteraction(
     }
 
     // Point drag — check snap points first (higher priority, smaller target).
+    // An offset copy's points are inert, so skip dragging by them.
     if (!shiftKey) {
       const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-      if (snap) {
+      if (snap && !isOffsetShapeIdx(selItem, snap.shapeIdx)) {
         // If the snapped shape is part of a multi-selection, drag them all together
         // (the snap point acts as the anchor instead of a single-point drag).
         if (
@@ -1012,7 +1026,7 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null,
+        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1275,7 +1289,7 @@ export function createSketchInteraction(
         const sketchGroup = sketchShapesGroupRef?.current;
         if (selItem && sketchMesh && sketchGroup) {
           const lineObjs = sketchGroup.children.filter(
-            (c) => c.userData.shapeIdx != null,
+            (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
           );
           const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
           if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1296,7 +1310,7 @@ export function createSketchInteraction(
         const sketchGroup = sketchShapesGroupRef?.current;
         if (!sketchGroup) return;
         const lineObjs = sketchGroup.children.filter(
-          (c) => c.userData.shapeIdx != null,
+          (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
         );
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
         if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {

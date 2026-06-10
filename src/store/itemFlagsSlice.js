@@ -129,6 +129,23 @@ export const createItemFlagsSlice = (set) => ({
             }),
           });
         }
+        // Prisms of a multi-area extrude live inside a createGroup step; hide
+        // just the consumed ones so a replay doesn't resurrect them alongside
+        // the union that swallowed them.
+        if (
+          inst?.type === "createGroup" &&
+          inst.items?.some((it) => idSet.has(it.id))
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, inst, {
+              items: inst.items.map((it) =>
+                idSet.has(it.id)
+                  ? Object.assign({}, it, { visible: false })
+                  : it,
+              ),
+            }),
+          });
+        }
         return entry;
       });
       const items = state.items.map((item) =>

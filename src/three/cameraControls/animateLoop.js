@@ -126,17 +126,32 @@ export function createAnimateLoop({
           }
         });
       }
-      // Bounding-box dimension labels (the "20mm" sprites at the
-      // selection's edges) are world-scaled sprites — they shrink to
-      // nothing on zoom-out and dominate the viewport on zoom-in
-      // without this pass.  Each sprite caches its authored scale on
-      // userData.baseScale on first sight so we can multiply rather
-      // than compound.
+      // Bounding-box dimension labels (the "20mm" W/H/D sprites): place them at
+      // FIXED screen positions around the rotation gizmo (the gizmo sits at the
+      // selection centre) so they don't swing around as the camera orbits.  We
+      // offset along the camera's right/up axes — a screen-space ring of three
+      // slots 120° apart (W top, then H, D) — instead of world directions, which
+      // would rotate with the view.  Restamped every frame; constant on-screen
+      // size; each sprite caches its authored scale so we multiply not compound.
       if (boundingBoxRef?.current) {
         const bbox = boundingBoxRef.current;
-        const s = gizmoScale(bbox.boxMesh.position);
-        for (const label of [bbox.labelX, bbox.labelY, bbox.labelZ]) {
-          if (!label?.sprite) continue;
+        const center = bbox.boxMesh.position;
+        const s = gizmoScale(center);
+        const RAD = s * 1.85; // beyond the on-screen ring radius (~0.93·s)
+        const right = new THREE.Vector3()
+          .setFromMatrixColumn(cam.matrixWorld, 0)
+          .normalize();
+        const up = new THREE.Vector3()
+          .setFromMatrixColumn(cam.matrixWorld, 1)
+          .normalize();
+        const TWO_PI = Math.PI * 2;
+        const angles = [
+          Math.PI / 2, // W: top
+          Math.PI / 2 + TWO_PI / 3, // H: lower-left
+          Math.PI / 2 + (2 * TWO_PI) / 3, // D: lower-right
+        ];
+        [bbox.labelX, bbox.labelY, bbox.labelZ].forEach((label, i) => {
+          if (!label?.sprite) return;
           const sp = label.sprite;
           if (sp.userData.baseScale == null) {
             sp.userData.baseScale = {
@@ -147,7 +162,12 @@ export function createAnimateLoop({
           }
           const b = sp.userData.baseScale;
           sp.scale.set(b.x * s, b.y * s, b.z * s);
-        }
+          const a = angles[i];
+          sp.position
+            .copy(center)
+            .addScaledVector(right, Math.cos(a) * RAD)
+            .addScaledVector(up, Math.sin(a) * RAD);
+        });
       }
       // Constraint annotations: keep a constant on-screen size so they don't
       // balloon on zoom-in or vanish on zoom-out.  Value/angle LABEL sprites

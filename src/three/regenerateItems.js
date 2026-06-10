@@ -116,10 +116,13 @@ async function regenerateBoolean(
   accumulatedItems,
   printPrecision,
 ) {
-  const inputs = regenerator.inputIds
+  const inputs = (regenerator.inputIds || [])
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean);
-  if (inputs.length < 2) return null;
+  // 0 inputs → nothing to rebuild (keep last geometry).  1 input is valid: a
+  // multi-area union reduced to a single region fuses to just that prism, so
+  // the dropped region's geometry actually disappears instead of lingering.
+  if (inputs.length < 1) return null;
   // Rebuild each input from its live (current-precision) polygon so the OCC
   // shapes match the positions the chamfer regen just stamped — otherwise a
   // chamfered-extrude input goes in with a coarse-polygon shape but a

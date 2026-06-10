@@ -403,9 +403,10 @@ export const createSketchSlice = (set) => ({
       const item = state.items.find((i) => i.id === sketchId);
       if (!item) return {};
       const shapes = item.shapes || [];
-      const sel = (lineIndices || []).filter(
-        (idx) => shapes[idx]?.type === "line",
-      );
+      const sel = (lineIndices || []).filter((idx) => {
+        const t = shapes[idx]?.type;
+        return t === "line" || t === "circle";
+      });
       if (sel.length === 0) return {};
       const dScene = resolveValue(distance, 0.5);
       if (!Number.isFinite(dScene) || dScene === 0) return {};
@@ -425,23 +426,35 @@ export const createSketchSlice = (set) => ({
       const newIdxOf = new Map();
       sel.forEach((origIdx) => {
         const o = shapes[origIdx];
-        const odx = o.x2 - o.x1,
-          ody = o.y2 - o.y1;
-        const len = Math.hypot(odx, ody) || 1e-9;
-        // Right normal: placing at +dScene here makes the signed perpendicular
-        // distance the solver measures equal +dScene (see the offset residual).
-        const nx = ody / len,
-          ny = -odx / len;
         const newIdx = base + newShapes.length;
         newIdxOf.set(origIdx, newIdx);
-        newShapes.push({
-          type: "line",
-          x1: o.x1 + dScene * nx,
-          y1: o.y1 + dScene * ny,
-          x2: o.x2 + dScene * nx,
-          y2: o.y2 + dScene * ny,
-          ...(o.dashed ? { dashed: true } : null),
-        });
+        if (o.type === "circle") {
+          // Concentric copy: radius grows by the signed offset (clamped to stay
+          // positive when offsetting inward past the centre).
+          newShapes.push({
+            type: "circle",
+            cx: o.cx,
+            cy: o.cy,
+            r: Math.max(1e-4, (o.r ?? 0) + dScene),
+            ...(o.dashed ? { dashed: true } : null),
+          });
+        } else {
+          const odx = o.x2 - o.x1,
+            ody = o.y2 - o.y1;
+          const len = Math.hypot(odx, ody) || 1e-9;
+          // Right normal: placing at +dScene here makes the signed perpendicular
+          // distance the solver measures equal +dScene (see the offset residual).
+          const nx = ody / len,
+            ny = -odx / len;
+          newShapes.push({
+            type: "line",
+            x1: o.x1 + dScene * nx,
+            y1: o.y1 + dScene * ny,
+            x2: o.x2 + dScene * nx,
+            y2: o.y2 + dScene * ny,
+            ...(o.dashed ? { dashed: true } : null),
+          });
+        }
         newConstraints.push({
           type: "offset",
           shapeIdx: newIdx,
@@ -458,6 +471,7 @@ export const createSketchSlice = (set) => ({
       const groups = new Map();
       sel.forEach((origIdx) => {
         const o = shapes[origIdx];
+        if (o.type !== "line") return; // circles share no corners
         [
           ["start", o.x1, o.y1],
           ["end", o.x2, o.y2],

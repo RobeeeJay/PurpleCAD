@@ -27,6 +27,9 @@ export const uiInitial = {
   sketchPlacementMode: false,
   extrudeSelectMode: null, // null | "profile" | "depth"
   extrudeRetargetId: null, // id of the extrude being retargeted, or null
+  // When retargeting a whole multi-area extrude, the ids of every prism in its
+  // createGroup step (the selection is rebuilt as one unit).  null otherwise.
+  extrudeRetargetGroup: null,
 
   // Sub-geometry selection used by the 3D Bevel/Chamfer toolbar buttons.
   selectedSubGeometry: null,
@@ -135,6 +138,7 @@ export const createUiSlice = (set) => ({
   setExtrudeSelectMode: (mode) => set({ extrudeSelectMode: mode }),
   setCutExtrudeInProgress: (v) => set({ cutExtrudeInProgress: !!v }),
   setExtrudeRetargetId: (id) => set({ extrudeRetargetId: id }),
+  setExtrudeRetargetGroup: (ids) => set({ extrudeRetargetGroup: ids }),
   setRenderMode: (mode) => set({ renderMode: mode }),
   setProjectionMode: (mode) => set({ projectionMode: mode }),
 

@@ -126,7 +126,14 @@ function residuals(shapes, constraints, variables) {
       // the original.
       const nl = shapes[c.shapeIdx];
       const ol = shapes[c.origIdx];
-      if (nl?.type === "line" && ol?.type === "line") {
+      if (nl?.type === "circle" && ol?.type === "circle") {
+        // Concentric offset: the copy shares the original's centre and its
+        // radius differs by the signed offset (positive = larger / outward).
+        const d = resolveConstraintDistance(c, variables);
+        out.push(nl.cx - ol.cx);
+        out.push(nl.cy - ol.cy);
+        out.push((nl.r ?? 0) - ((ol.r ?? 0) + d));
+      } else if (nl?.type === "line" && ol?.type === "line") {
         const ndx = nl.x2 - nl.x1,
           ndy = nl.y2 - nl.y1;
         const odx = ol.x2 - ol.x1,

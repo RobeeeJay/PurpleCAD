@@ -189,16 +189,19 @@ function buildItemShapeLocal(item, allItems, precision) {
         })
         .filter(id => id != null);
 
-      if (inputShapeIds.length < 2) {
-        inputShapeIds.forEach(id => occ.releaseShape(id));
-        return null;
-      }
+      if (inputShapeIds.length === 0) return null;
 
       let worldId;
-      try {
-        worldId = occ.booleanOp(inputShapeIds, regen.op || "difference");
-      } finally {
-        inputShapeIds.forEach(id => occ.releaseShape(id));
+      if (inputShapeIds.length === 1) {
+        // A single remaining input fuses to just that shape (re-localised
+        // below); don't release it — it's the result.
+        worldId = inputShapeIds[0];
+      } else {
+        try {
+          worldId = occ.booleanOp(inputShapeIds, regen.op || "difference");
+        } finally {
+          inputShapeIds.forEach(id => occ.releaseShape(id));
+        }
       }
       if (!worldId) return null;
 
@@ -250,16 +253,20 @@ function performCsg({ selectedItems, allItems, operation, printPrecision }) {
     worldAnchors.push(t.position);
   }
 
-  if (shapeIds.length < 2) {
-    shapeIds.forEach(id => occ.releaseShape(id));
-    return null;
-  }
+  if (shapeIds.length === 0) return null;
 
   let resultId;
-  try {
-    resultId = occ.booleanOp(shapeIds, operation);
-  } finally {
-    shapeIds.forEach(id => occ.releaseShape(id));
+  if (shapeIds.length === 1) {
+    // A boolean with a single remaining input is just that input — e.g. a
+    // multi-area union after all but one region was removed.  Without this the
+    // op returns nothing and the item keeps its stale (larger) geometry.
+    resultId = shapeIds[0];
+  } else {
+    try {
+      resultId = occ.booleanOp(shapeIds, operation);
+    } finally {
+      shapeIds.forEach(id => occ.releaseShape(id));
+    }
   }
   if (!resultId) return null;
 

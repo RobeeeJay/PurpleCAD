@@ -98,19 +98,27 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
   }
 }
 
-// Union the freshly-created extrude prisms into one solid, optionally fusing
-// them with existing host solids (`solidIds` — a face boss's source, the sketch
-// host, or the "Start from" solid).  Falls back to leaving the prisms separate
-// if the boolean can't produce a result (e.g. fewer than two valid inputs).
-export async function runUnionExtrudes(extrudeIds, solidIds = []) {
+// Fuse a batch of fresh extrude prisms into ONE solid.  The prisms already
+// exist as store items (created together in a single "createGroup" timeline
+// step) and are passed by id in `extrudeIds`; this union is its own next
+// timeline entry.  Any existing solids to merge with (a face boss's source, the
+// sketch host, the "Start from" solid, or a retargeted extrude) come in by id in
+// `solidIds`.  All inputs are consumed.  `unionId` is pre-allocated by the
+// caller so it can't collide with the just-created prisms (whose createGroup
+// step the local max-id scans here don't see).  No-op if the boolean can't
+// produce a result (< 2 valid inputs).
+export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
   try {
     const { performCsg } = await import("../occClient.js");
     const freshStore = useStore.getState();
     const items = freshStore.items;
-    const inputIds = [...extrudeIds, ...solidIds];
-    const inputs = inputIds
+    const extrudes = extrudeIds
+      .map((id) => items.find((i) => i.id === id))
+      .filter(Boolean);
+    const solids = solidIds
       .map((id) => items.find((i) => i.id === id && i.type !== "sketch"))
       .filter(Boolean);
+    const inputs = [...extrudes, ...solids];
     if (inputs.length < 2) return;
     const precision = freshStore.curveResolution === "print" ? 0.01 : null;
     const result = await performCsg({
@@ -120,15 +128,9 @@ export async function runUnionExtrudes(extrudeIds, solidIds = []) {
       allItems: items,
     });
     if (!result) return;
-    let maxId = 0;
-    useStore.getState().history.forEach((e) => {
-      if (e.instruction?.type === "create" && e.instruction.item.id > maxId)
-        maxId = e.instruction.item.id;
-    });
-    const id = maxId + 1;
     useStore.getState().addItem({
-      id,
-      name: `Union ${id}`,
+      id: unionId,
+      name: `Union ${unionId}`,
       type: "csg",
       children: [],
       position: result.position,

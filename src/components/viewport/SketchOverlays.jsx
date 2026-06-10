@@ -83,36 +83,38 @@ export default function SketchOverlays({
       )}
       {extrudeSelectMode === "profile" && extrudeDepthInput && (
         <div className="sketch-distance-input-overlay">
-          <span>Depth (mm):</span>
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 11,
-              color: "#aaa",
-              marginRight: 8,
+          <button
+            type="button"
+            onClick={() => {
+              useStore.getState().setExtrudeDepthInput({
+                ...extrudeDepthInput,
+                cut: !extrudeDepthInput.cut,
+              });
+              // Recolour the preview (red for cut, blue for add) — there's no
+              // mouse-driven rebuild to pick the change up otherwise.
+              cameraControlsRef.current?.updateExtrudePreview?.(
+                extrudeDepthInput.currentDepth ??
+                  extrudeDepthInput.defaultDepth,
+              );
             }}
-            title="Cut extrusion — subtract this solid from the target instead of adding it"
+            title="Cut — subtract this solid from the target instead of adding it"
+            style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              marginRight: 8,
+              borderRadius: 3,
+              border: `1px solid ${
+                extrudeDepthInput.cut ? "#e8754f" : "var(--border-color)"
+              }`,
+              background: extrudeDepthInput.cut
+                ? "#e8754f"
+                : "var(--bg-tertiary)",
+              color: extrudeDepthInput.cut ? "#fff" : "var(--text-primary)",
+              cursor: "pointer",
+            }}
           >
-            <input
-              type="checkbox"
-              checked={!!extrudeDepthInput.cut}
-              onChange={(e) => {
-                useStore.getState().setExtrudeDepthInput({
-                  ...extrudeDepthInput,
-                  cut: e.target.checked,
-                });
-                // Recolour the preview (red for cut, blue for add) — there's no
-                // mouse-driven rebuild to pick the change up otherwise.
-                cameraControlsRef.current?.updateExtrudePreview?.(
-                  extrudeDepthInput.currentDepth ??
-                    extrudeDepthInput.defaultDepth,
-                );
-              }}
-            />
             Cut
-          </label>
+          </button>
           <button
             type="button"
             onClick={() => cameraControlsRef.current?.beginExtrudeStartPick?.()}
@@ -138,6 +140,51 @@ export default function SketchOverlays({
                 ).toFixed(1)}mm`
               : "Start from…"}
           </button>
+          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+            Offset:
+          </span>
+          <FormulaInput
+            type="text"
+            variables={variables}
+            title="Offset the extrude start ± from the sketch plane (or the picked Start-from face)"
+            // ± distance the prism base is slid along the profile normal.  A
+            // bare number or a formula; negative slides the opposite way, 0
+            // starts flush with the sketch plane / picked face.
+            value={
+              extrudeDepthInput.offsetFormula ??
+              ((extrudeDepthInput.startOffset ?? 0) * MM_PER_UNIT).toFixed(2)
+            }
+            onChange={(e) => {
+              const raw = e.target.value;
+              const mm = evaluateFormula(
+                raw,
+                variablesToMap(useStore.getState().variables),
+              );
+              const valid = Number.isFinite(mm);
+              const offset = valid
+                ? mm / MM_PER_UNIT
+                : (extrudeDepthInput.startOffset ?? 0);
+              useStore.getState().setExtrudeDepthInput({
+                ...extrudeDepthInput,
+                offsetFormula: raw,
+                startOffset: offset,
+              });
+              cameraControlsRef.current?.updateExtrudePreview?.(
+                extrudeDepthInput.currentDepth ??
+                  extrudeDepthInput.defaultDepth,
+              );
+            }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") confirmExtrude();
+              else if (e.key === "Escape")
+                cameraControlsRef.current?.cancelExtrude?.();
+            }}
+            style={{ width: 64, marginRight: 8 }}
+          />
+          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+            Distance (mm):
+          </span>
           <FormulaInput
             type="text"
             autoFocus

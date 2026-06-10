@@ -16,6 +16,18 @@ import {
   polyCentroid,
 } from "./closedLoops.js";
 
+// Offset copies (driven by an offset constraint) render purple to set them
+// apart from ordinary blue sketch geometry — and are made non-interactive so
+// they can't be edited/dragged on their own while the constraint holds.
+const OFFSET_COLOR = 0xb266ff;
+
+const offsetShapeIdxSet = (item) =>
+  new Set(
+    (item.constraints || [])
+      .filter((c) => c.type === "offset")
+      .map((c) => c.shapeIdx),
+  );
+
 // ── Object-view sketch lines (all sketches, lines only) ──────────────────────
 
 export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
@@ -35,14 +47,19 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
   sketchItems.forEach((item) => {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
-    item.shapes.forEach((shape) => {
+    const offsetIdxs = offsetShapeIdxSet(item);
+    item.shapes.forEach((shape, shapeIdx) => {
       if (shape.kind === "bevel") return; // bevel arcs not shown in object view
       const pts = getSketchShapePoints(shape, sketchMesh);
       if (pts.length < 2) return;
       const geo = new LineGeometry();
       geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
       const mat = new LineMaterial({
-        color: shape.dashed ? 0x6688cc : 0x88aaff,
+        color: offsetIdxs.has(shapeIdx)
+          ? OFFSET_COLOR
+          : shape.dashed
+            ? 0x6688cc
+            : 0x88aaff,
         linewidth: 1.5,
         depthTest: false,
         resolution: res,
@@ -203,6 +220,7 @@ export function buildSketchShapesGroup(
   };
 
   // ── Shape lines (Line2 for actual pixel-width thickness) ──────────────────
+  const offsetIdxs = offsetShapeIdxSet(selItem);
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
     const pts = getSketchShapePoints(shape, sketchMesh);
@@ -210,10 +228,11 @@ export function buildSketchShapesGroup(
 
     const isBevel = shape.kind === "bevel";
     const isDashed = !!shape.dashed;
+    const isOffset = offsetIdxs.has(shapeIdx);
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     const mat = new LineMaterial({
-      color: isBevel ? 0xffaa44 : 0x88aaff,
+      color: isBevel ? 0xffaa44 : isOffset ? OFFSET_COLOR : 0x88aaff,
       linewidth: isBevel ? 1.0 : 1.5,
       depthTest: false,
       resolution: res,
@@ -227,12 +246,17 @@ export function buildSketchShapesGroup(
     line.computeLineDistances();
     line.renderOrder = 1001;
     line.userData.shapeIdx = shapeIdx;
+    // Offset copies are inert while constrained: tag so the drag / select
+    // hit-tests skip them (they're driven by their original).
+    if (isOffset) line.userData.isOffset = true;
     group.add(line);
 
-    // Collect key points for dots
-    getSnapPoints([shape]).forEach((sp) =>
-      dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)),
-    );
+    // Collect key points for dots — not for offset copies, whose points are
+    // inert (a dot would imply a draggable handle that does nothing).
+    if (!isOffset)
+      getSnapPoints([shape]).forEach((sp) =>
+        dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)),
+      );
   });
 
   // ── Point dots ────────────────────────────────────────────────────────────

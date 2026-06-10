@@ -187,3 +187,9 @@
 .variables-btn.primary:hover {
   filter: brightness(1.1);
 }
+
+.variables-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}

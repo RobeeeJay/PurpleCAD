@@ -291,6 +291,7 @@ export function attachCameraControls(ctx) {
     rebuildPreviews,
     handleExtrudeHover,
     handleExtrudeProfileClick,
+    preselectRetargetProfile,
     beginExtrudeStartPick,
     handleExtrudeStartHover,
     handleExtrudeStartClick,
@@ -321,6 +322,8 @@ export function attachCameraControls(ctx) {
   // Extrude the selected solid face directly (the React extrude button calls
   // this when a face is selected).  Returns true if a face extrude started.
   controls.extrudeSelectedFace = () => extrude.startFaceExtrudeFromSelection();
+  // Pre-select the original profile region when retargeting an extrude.
+  controls.preselectRetargetProfile = () => preselectRetargetProfile();
 
   // The current view centre (camera orbit target) in world coords — the
   // toolbar reads this so a newly created primitive spawns where the user is

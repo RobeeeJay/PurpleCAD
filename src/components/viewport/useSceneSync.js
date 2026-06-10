@@ -169,6 +169,20 @@ export function useSceneSync({
     // changed — so compare per-item signatures and trigger only when an id
     // present both before and after differs (plus variable changes).  Object
     // add/move and resolution toggles keep the cheap current-view regen.
+    // Capture a boolean's inputIds (and those nested in a chamfer/fillet's
+    // source snapshot, recursively) so a RETARGET — which re-points a union, and
+    // any chamfer fused onto it, at a different prism set — counts as an upstream
+    // change and takes the full recalc.  That path recomputes a chamfer-on-union
+    // anchor; the cheap regen keeps the stale (old-region-count) position, so the
+    // body's geometry would follow but its position would jump.
+    const regenSig = (r) => {
+      if (!r) return "";
+      const base =
+        r.kind === "boolean" ? `b${JSON.stringify(r.inputIds || [])}` : r.kind;
+      return r.source?.regenerator
+        ? `${base}>${regenSig(r.source.regenerator)}`
+        : base;
+    };
     const itemSig = new Map();
     for (const i of items) {
       if (i.type === "sketch")
@@ -176,6 +190,8 @@ export function useSceneSync({
           i.id,
           `s:${JSON.stringify(i.shapes)}:${JSON.stringify(i.constraints)}`,
         );
+      else if (i.regenerator)
+        itemSig.set(i.id, `r:${regenSig(i.regenerator)}:${i.depth ?? ""}`);
       else if (i.depth !== undefined) itemSig.set(i.id, `d:${i.depth}`);
     }
     const varsSig = JSON.stringify(variables);
@@ -488,6 +504,12 @@ export function useSceneSync({
       if (group) {
         scene.add(group);
         extrudeSelectGroupRef.current = group;
+        // Retargeting an extrude: now that the region fills exist, start the
+        // selection on the extrude's original profile so the user begins from
+        // the existing geometry rather than an empty selection.
+        if (useStore.getState().extrudeRetargetId != null) {
+          cameraControlsRef.current?.preselectRetargetProfile?.();
+        }
       }
     }
   }, [extrudeSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps

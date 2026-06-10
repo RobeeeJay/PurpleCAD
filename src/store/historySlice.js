@@ -8,6 +8,7 @@ import {
   saveTimeline,
   withUndo,
   markCsgDirty,
+  rewriteCreatedItem,
 } from "./internals.js";
 import { createHistoryNavSlice } from "./historyNavSlice.js";
 import { createItemFlagsSlice } from "./itemFlagsSlice.js";
@@ -117,6 +118,52 @@ export const createHistorySlice = (set) => ({
           activeHistoryId: newActiveId,
           selectedId: fullItem.id,
           selectedIds: [fullItem.id],
+        },
+        withUndo(state),
+      );
+    }),
+
+  // Create several items in ONE history entry (a "createGroup" step).  Used for
+  // a multi-area extrude so its prisms are a single timeline entry rather than N
+  // separate ones; the union that fuses them is recorded as its own next entry.
+  // Selection is left untouched — the prisms are intermediate (the union that
+  // follows consumes them), so we don't yank the gizmo onto a transient prism.
+  addItems: (newItems, label = "Added") =>
+    set((state) => {
+      const fullItems = newItems.map((it) =>
+        Object.assign({ parentId: null }, it),
+      );
+      const newEntry = makeEntry(label, fullItems[0]?.id ?? null, {
+        type: "createGroup",
+        items: fullItems,
+      });
+
+      let insertIdx;
+      let newActiveId;
+      if (state.activeHistoryId !== null) {
+        const activeIdx = state.history.findIndex(
+          (h) => h.id === state.activeHistoryId,
+        );
+        insertIdx = activeIdx + 1;
+        newActiveId = newEntry.id;
+      } else {
+        insertIdx = state.history.length;
+        newActiveId = null;
+      }
+
+      const rawHistory = [
+        ...state.history.slice(0, insertIdx),
+        newEntry,
+        ...state.history.slice(insertIdx),
+      ];
+      const items = replayUpTo(rawHistory, insertIdx);
+
+      saveTimeline(rawHistory, newActiveId);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(rawHistory),
+          activeHistoryId: newActiveId,
         },
         withUndo(state),
       );
@@ -380,9 +427,8 @@ export const createHistorySlice = (set) => ({
 
   retargetExtrude: (extrudeId, newProfile, newDepth, startOffset = 0) =>
     set((state) => {
-      const updatedItems = state.items.map((item) => {
-        if (item.id !== extrudeId) return item;
-        return Object.assign({}, item, {
+      const apply = (item) =>
+        Object.assign({}, item, {
           profile: newProfile,
           depth: newDepth,
           // A zero offset is the default; persist it so retargeting can also
@@ -391,21 +437,14 @@ export const createHistorySlice = (set) => ({
           position: newProfile.position,
           rotation: newProfile.rotation,
         });
-      });
-      const updatedItem = updatedItems.find((i) => i.id === extrudeId);
-      const newHistory = state.history.map((entry) => {
-        if (
-          entry.instruction?.type === "create" &&
-          entry.instruction.item?.id === extrudeId
-        ) {
-          return Object.assign({}, entry, {
-            instruction: Object.assign({}, entry.instruction, {
-              item: updatedItem,
-            }),
-          });
-        }
-        return entry;
-      });
+      // markCsgDirty: a retargeted prism may feed a union (a boss, or one of a
+      // multi-area extrude's prisms), which must rebuild against the new profile.
+      const updatedItems = markCsgDirty(
+        state.items.map((item) => (item.id === extrudeId ? apply(item) : item)),
+      );
+      const newHistory = state.history.map((entry) =>
+        rewriteCreatedItem(entry, extrudeId, apply),
+      );
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         ...withUndo(state),
@@ -426,19 +465,162 @@ export const createHistorySlice = (set) => ({
         ),
       );
       const newHistory = state.history.map((entry) =>
-        entry.instruction?.type === "create" &&
-        entry.instruction.item?.id === id
-          ? Object.assign({}, entry, {
-              instruction: Object.assign({}, entry.instruction, {
-                item: Object.assign({}, entry.instruction.item, { depth }),
-              }),
-            })
-          : entry,
+        rewriteCreatedItem(entry, id, (item) =>
+          Object.assign({}, item, { depth }),
+        ),
       );
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         ...withUndo(state),
         items: updatedItems,
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Set ONE distance on every prism of a multi-area extrude group at once —
+  // the group is resized as a unit, not per-prism.
+  setExtrudeGroupDepth: (ids, depth) =>
+    set((state) => {
+      const idSet = new Set(ids);
+      const updatedItems = markCsgDirty(
+        state.items.map((item) =>
+          idSet.has(item.id) ? Object.assign({}, item, { depth }) : item,
+        ),
+      );
+      const newHistory = state.history.map((entry) => {
+        const inst = entry.instruction;
+        if (
+          inst?.type === "createGroup" &&
+          inst.items?.some((it) => idSet.has(it.id))
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, inst, {
+              items: inst.items.map((it) =>
+                idSet.has(it.id) ? Object.assign({}, it, { depth }) : it,
+              ),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        ...withUndo(state),
+        items: updatedItems,
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Retarget a whole multi-area extrude group to a new set of profiles.  The
+  // group's createGroup step is rebuilt to one prism per new profile (reusing
+  // the old prism ids where possible, allocating fresh ones for added regions),
+  // and the downstream union's inputIds are swapped to the new prisms (host
+  // solids in its inputs are kept).  Marking it dirty makes the regen pass
+  // rebuild the fused body.  Replaying the rewritten history reconciles
+  // added/removed prisms in the live scene without leaving orphans.
+  retargetGroup: (oldPrismIds, newProfiles, depth, startOffset = 0) =>
+    set((state) => {
+      const oldSet = new Set(oldPrismIds);
+      let maxId = 0;
+      state.history.forEach((e) => {
+        const inst = e.instruction;
+        if (inst?.type === "create" && inst.item?.id > maxId)
+          maxId = inst.item.id;
+        if (inst?.type === "createGroup")
+          inst.items?.forEach((it) => {
+            if (it.id > maxId) maxId = it.id;
+          });
+      });
+      const newPrisms = newProfiles.map((profile, i) => {
+        const id = i < oldPrismIds.length ? oldPrismIds[i] : ++maxId;
+        return {
+          id,
+          name: `Extrude ${id}`,
+          type: "extrude",
+          children: [],
+          parentId: null,
+          profile,
+          depth,
+          ...(startOffset ? { startOffset } : null),
+          position: profile.position,
+          rotation: profile.rotation,
+          scale: { x: 1, y: 1, z: 1 },
+          // Consumed by the union, like the originals.
+          visible: false,
+        };
+      });
+      const newIds = newPrisms.map((p) => p.id);
+      // Swap the dropped prism ids for the kept set inside ANY boolean inputIds
+      // reachable from a regenerator — the union itself, but also the boolean
+      // buried in a chamfer / fillet's frozen `source` snapshot (and chained
+      // chamfers, which nest source-within-source).  Without this a chamfer on
+      // the union rebuilds its source at the OLD region count and keeps showing
+      // the dropped region.  Returns the same ref when nothing changed.
+      const rewriteRegen = (regen) => {
+        if (!regen) return regen;
+        let next = regen;
+        if (
+          regen.kind === "boolean" &&
+          (regen.inputIds || []).some((id) => oldSet.has(id))
+        ) {
+          const hosts = (regen.inputIds || []).filter((id) => !oldSet.has(id));
+          next = {
+            ...next,
+            inputIds: [...newIds, ...hosts],
+            regeneratedAt: "dirty",
+          };
+        }
+        if (next.source?.regenerator) {
+          const srcRegen = rewriteRegen(next.source.regenerator);
+          if (srcRegen !== next.source.regenerator) {
+            next = {
+              ...next,
+              source: { ...next.source, regenerator: srcRegen },
+              regeneratedAt: "dirty",
+            };
+          }
+        }
+        return next;
+      };
+      const newHistory = state.history.map((entry) => {
+        const inst = entry.instruction;
+        if (
+          inst?.type === "createGroup" &&
+          inst.items?.some((it) => oldSet.has(it.id))
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, inst, { items: newPrisms }),
+          });
+        }
+        if (inst?.type === "create" && inst.item?.regenerator) {
+          const nr = rewriteRegen(inst.item.regenerator);
+          if (nr !== inst.item.regenerator)
+            return Object.assign({}, entry, {
+              instruction: Object.assign({}, inst, {
+                item: Object.assign({}, inst.item, { regenerator: nr }),
+              }),
+            });
+        }
+        if (inst?.type === "modify" && inst.patches?.regenerator) {
+          const nr = rewriteRegen(inst.patches.regenerator);
+          if (nr !== inst.patches.regenerator)
+            return Object.assign({}, entry, {
+              instruction: Object.assign({}, inst, {
+                patches: Object.assign({}, inst.patches, { regenerator: nr }),
+              }),
+            });
+        }
+        return entry;
+      });
+      const activeIdx =
+        state.activeHistoryId !== null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = markCsgDirty(replayUpTo(newHistory, activeIdx));
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        ...withUndo(state),
+        items,
         history: withOrphanFlags(newHistory),
       };
     }),

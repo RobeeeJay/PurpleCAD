@@ -16,6 +16,10 @@ export const applyInstruction = (items, instruction) => {
       return [];
     case "create":
       return [...items, instruction.item];
+    // A single timeline step that creates several items at once (e.g. the
+    // prisms of a multi-area extrude, before they fuse into one union).
+    case "createGroup":
+      return [...items, ...(instruction.items || [])];
     case "delete":
       return items.filter((i) => i.id !== instruction.itemId);
     case "transform":
@@ -136,6 +140,18 @@ export const saveVariables = (variables) => {
 // it from its (now-changed) inputs.  Called after a sketch edit so downstream
 // extruded/cut/bevelled geometry recalculates to the current sketch.  Returns
 // the same array reference when nothing changed (no regenerators present).
+// Rewrite the stored CREATE record of a single item `id` in a history entry.
+// `apply(item)` returns the replacement; non-matching entries pass through.
+// (Multi-area groups are edited as a unit via dedicated group actions, so this
+// only needs to cover the standalone `create` case.)
+export const rewriteCreatedItem = (entry, id, apply) => {
+  const inst = entry.instruction;
+  if (inst?.type === "create" && inst.item?.id === id) {
+    return { ...entry, instruction: { ...inst, item: apply(inst.item) } };
+  }
+  return entry;
+};
+
 export const markCsgDirty = (items) => {
   let changed = false;
   const out = items.map((item) => {
