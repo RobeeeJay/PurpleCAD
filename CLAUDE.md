@@ -111,6 +111,27 @@ files just to make these go away.
   `regenerateOrchestrator.js` exists separately from the store (same
   reason: avoid creating a bundling cycle through `occClient`).
 
+## Native OCC addon (native/occ-addon)
+
+- Built against OpenCASCADE 8.0.0 at `~/occ-8.0-arm64`. CMakeLists' `find_package`
+  HINTS list that path first, falling back to `~/occ-arm64` (7.9.0, the prior
+  install) and then system Homebrew paths — the same source builds against
+  either version.
+- OCC 8.0.0 removed `TopTools_ListIteratorOfListOfShape.hxx`. Iterate
+  `TopTools_ListOfShape` (an `NCollection_List`) with a range-based `for` loop
+  instead of that iterator. If a future OCC bump reintroduces a similar
+  removed-header break, prefer the range-based-for fix over re-adding the old
+  header.
+- `BooleanOp`'s union path (`binding.cc`) sets `SetFuzzyValue(1e-5)` on the
+  `BRepAlgoAPI_Fuse` and then runs `ShapeUpgrade_UnifySameDomain` on the
+  result (falling back to the raw fuse if unification throws). This is
+  required so independently-built abutting solids (e.g. multiple extruded
+  prisms) don't leave hairline-gap seams / sliver coplanar faces that a later
+  chamfer or fillet rejects with "geometry rejected the operation". Scoped to
+  `union` only — `cut`/`intersection` are unaffected and must stay that way.
+  Preserve both the fuzzy value and the unify step in any rewrite of this
+  function.
+
 ## Variables / formulas
 
 - Dimension distances, extrude depths, and chamfer/fillet parameters can
