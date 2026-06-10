@@ -4,6 +4,7 @@
 // file stays focused on the hover/click/commit pipeline.
 
 import * as THREE from "three";
+import { CUT_FACE_HIGHLIGHT, EXTRUDE_FACE_HIGHLIGHT } from "../theme.js";
 
 // Build the translucent preview prism for a profile + depth.  Returns the mesh
 // (positioned/oriented in world space); the caller owns adding/removing it from
@@ -38,7 +39,7 @@ export function makeExtrudePreviewMesh(
   const baseZ = (depth < 0 ? -absDepth : 0) + (startOffset || 0);
   if (baseZ !== 0) geo.translate(0, 0, baseZ);
   const mat = new THREE.MeshBasicMaterial({
-    color: cutMode ? 0xff4444 : 0x4488ff,
+    color: cutMode ? CUT_FACE_HIGHLIGHT : EXTRUDE_FACE_HIGHLIGHT,
     transparent: true,
     opacity: cutMode ? 0.5 : 0.35,
     side: THREE.DoubleSide,

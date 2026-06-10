@@ -7,6 +7,7 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { getSnapPoints } from "../sceneObjects.js";
+import { SNAP_POINT_COLOR, SNAP_PREVIEW_COLOR } from "../theme.js";
 
 export function createSnapHelpers({ scene, renderer, cameraRef }) {
   let currentSnapIndicator = null;
@@ -38,7 +39,7 @@ export function createSnapHelpers({ scene, renderer, cameraRef }) {
     });
     const geo = new THREE.BufferGeometry().setFromPoints(circlePts);
     const mat = new THREE.LineBasicMaterial({
-      color: 0xcc44ff,
+      color: SNAP_POINT_COLOR,
       depthTest: false,
     });
     currentSnapIndicator = new THREE.Line(geo, mat);
@@ -68,7 +69,11 @@ export function createSnapHelpers({ scene, renderer, cameraRef }) {
     return best;
   };
 
-  const makePreviewLine2 = (pts, color = 0x88ccff, opacity = 0.75) => {
+  const makePreviewLine2 = (
+    pts,
+    color = SNAP_PREVIEW_COLOR,
+    opacity = 0.75,
+  ) => {
     if (pts.length < 2) return null;
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));

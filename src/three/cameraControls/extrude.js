@@ -18,6 +18,10 @@ import {
   extractFaceProfile,
 } from "./extrudeGeometry.js";
 import { runCutExtrusion, runUnionExtrudes } from "./extrudeBoolean.js";
+import {
+  EXTRUDE_FACE_HIGHLIGHT,
+  EXTRUDE_FACE_HIGHLIGHT_ALT,
+} from "../theme.js";
 
 export function createExtrudeHelpers(
   { scene, renderer, objectsRef, itemsRef, extrudeSelectGroupRef },
@@ -176,7 +180,7 @@ export function createExtrudeHelpers(
         solidHits[0].point,
       );
       if (ok) {
-        applyFaceHighlight(solidHits[0], 0x4488ff);
+        applyFaceHighlight(solidHits[0], EXTRUDE_FACE_HIGHLIGHT);
         renderer.domElement.style.cursor = "pointer";
       } else {
         clearFaceHighlight();
@@ -662,7 +666,8 @@ export function createExtrudeHelpers(
     // Light up the surface under the cursor so the user sees what the extrude
     // will start from: the face-overlay highlight for a solid face, a
     // translucent fill for a sketch plane.
-    if (picked.isFace) applyFaceHighlight(picked.hit, 0x44ddff);
+    if (picked.isFace)
+      applyFaceHighlight(picked.hit, EXTRUDE_FACE_HIGHLIGHT_ALT);
     else picked.hit.object.material.opacity = 0.3;
     renderer.domElement.style.cursor = "pointer";
   };

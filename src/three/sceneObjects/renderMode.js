@@ -12,6 +12,11 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { useStore } from "../../store";
 import { DISPLAY_PRECISION_MM, fullCircleSegments } from "./dimensions.js";
+import {
+  DEFAULT_MESH_COLOR,
+  WIREFRAME_DISPLAY_COLOR,
+  sceneBackgroundFor,
+} from "../theme.js";
 
 export function applyRenderMode(renderMode, ctx) {
   const {
@@ -110,7 +115,9 @@ export function applyRenderMode(renderMode, ctx) {
         return;
       }
       const orig = originalMaterialsRef.current[mesh.userData.itemId];
-      const col = orig ? orig.color.clone() : new THREE.Color(0xe0e0e0);
+      const col = orig
+        ? orig.color.clone()
+        : new THREE.Color(DEFAULT_MESH_COLOR);
       if (mesh.material) mesh.material.dispose();
       mesh.material = new THREE.MeshPhysicalMaterial({
         color: col,
@@ -133,7 +140,7 @@ export function applyRenderMode(renderMode, ctx) {
       composerRef.current = null;
     }
 
-    const bgColor = useStore.getState().theme === "light" ? 0xe8e8e8 : 0x1a1a1a;
+    const bgColor = sceneBackgroundFor(useStore.getState().theme);
     scene.background = new THREE.Color(bgColor);
 
     if (axisGroupRef.current)
@@ -215,7 +222,7 @@ export function applyRenderMode(renderMode, ctx) {
           if (mesh.material !== mesh.userData.shaderMat)
             mesh.material.dispose();
           mesh.material = new THREE.MeshBasicMaterial({
-            color: 0xaaaaaa,
+            color: WIREFRAME_DISPLAY_COLOR,
             wireframe: true,
           });
         } else {
@@ -247,7 +254,9 @@ export function applyRenderMode(renderMode, ctx) {
         return;
       }
       const orig = originalMaterialsRef.current[mesh.userData.itemId];
-      const col = orig ? orig.color.clone() : new THREE.Color(0xe0e0e0);
+      const col = orig
+        ? orig.color.clone()
+        : new THREE.Color(DEFAULT_MESH_COLOR);
       if (mesh.material) mesh.material.dispose();
       mesh.material = new THREE.MeshStandardMaterial({
         color: col,

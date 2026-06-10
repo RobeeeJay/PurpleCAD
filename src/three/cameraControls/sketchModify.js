@@ -12,6 +12,7 @@ import {
   computeChamfer,
   chamferConstraints,
 } from "../sketchConstraints.js";
+import { SKETCH_MODIFY_HIGHLIGHT } from "../theme.js";
 
 const MODIFY_DIST = 0.25;
 
@@ -199,7 +200,7 @@ export function createSketchModifyHelpers(
       return v;
     };
     const previewMat = new THREE.LineBasicMaterial({
-      color: 0xffcc44,
+      color: SKETCH_MODIFY_HIGHLIGHT,
       depthTest: false,
     });
     const addPreview = (pts) => {

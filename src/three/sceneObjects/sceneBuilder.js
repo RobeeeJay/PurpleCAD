@@ -17,6 +17,11 @@ import {
   polyArea,
   withWinding,
 } from "./closedLoops.js";
+import {
+  DEFAULT_MESH_COLOR,
+  WIREFRAME_EDGE_COLOR,
+  NO_EMISSIVE,
+} from "../theme.js";
 
 export function buildSceneObjects(
   items,
@@ -219,7 +224,7 @@ export function buildSceneObjects(
         return;
     }
 
-    const color = 0xe0e0e0;
+    const color = DEFAULT_MESH_COLOR;
     const material = createMaterial(item, color);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = item.type !== "sketch";
@@ -371,7 +376,10 @@ export function buildSceneObjects(
       mesh.add(
         new THREE.LineSegments(
           new THREE.EdgesGeometry(geometry),
-          new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 2 }),
+          new THREE.LineBasicMaterial({
+            color: WIREFRAME_EDGE_COLOR,
+            linewidth: 2,
+          }),
         ),
       );
     }
@@ -383,7 +391,7 @@ export function buildSceneObjects(
       color: new THREE.Color(color),
       metalness: 0.2,
       roughness: 0.2,
-      emissive: new THREE.Color(0x000000),
+      emissive: new THREE.Color(NO_EMISSIVE),
     };
   });
 }

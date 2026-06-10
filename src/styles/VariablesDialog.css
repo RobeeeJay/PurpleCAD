@@ -1,7 +1,7 @@
 .variables-dialog-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(var(--black-rgb), 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -18,7 +18,7 @@
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 10px 40px rgba(var(--black-rgb), 0.4);
 }
 
 .variables-dialog-header {
@@ -31,8 +31,8 @@
 
 .variables-dialog-header h2 {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -42,7 +42,7 @@
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 18px;
+  font-size: var(--font-size-3xl);
   line-height: 1;
   padding: 0 4px;
 }
@@ -54,15 +54,15 @@
 .variables-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--font-size-base);
   overflow-y: auto;
 }
 
 .variables-table thead th {
   text-align: left;
   padding: 8px 12px;
-  font-weight: 600;
-  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
   text-transform: uppercase;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
@@ -96,8 +96,8 @@
   color: var(--text-primary);
   padding: 4px 6px;
   border-radius: 3px;
-  font-family: monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
   box-sizing: border-box;
 }
 
@@ -107,16 +107,16 @@
 }
 
 .variables-table input.invalid {
-  border-color: #e87575;
+  border-color: var(--color-danger-light);
 }
 
 .variables-value {
-  font-family: monospace;
+  font-family: var(--font-mono);
   color: var(--text-secondary);
 }
 
 .variables-value.invalid {
-  color: #e87575;
+  color: var(--color-danger-light);
 }
 
 .variables-row-remove {
@@ -126,13 +126,13 @@
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   line-height: 1;
   border-radius: 3px;
 }
 
 .variables-row-remove:hover {
-  color: #e87575;
+  color: var(--color-danger-light);
   background-color: var(--bg-tertiary);
 }
 
@@ -151,7 +151,7 @@
   padding: 4px 10px;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-base);
 }
 
 .variables-add-row:hover {
@@ -171,7 +171,7 @@
   padding: 5px 14px;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-base);
 }
 
 .variables-btn:hover {
@@ -180,7 +180,7 @@
 
 .variables-btn.primary {
   background-color: var(--selected-bg);
-  color: #fff;
+  color: var(--color-white);
   border-color: var(--selected-bg);
 }
 

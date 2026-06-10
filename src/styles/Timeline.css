@@ -12,8 +12,8 @@
 
 .timeline-header {
   padding: 12px 16px;
-  font-weight: 600;
-  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-base);
   text-transform: uppercase;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
@@ -62,7 +62,7 @@
 }
 
 .timeline-content:focus-visible {
-  outline: 1px solid rgba(91, 141, 232, 0.5);
+  outline: 1px solid rgba(var(--accent-rgb), 0.5);
   outline-offset: -1px;
 }
 
@@ -82,7 +82,7 @@
 
 .timeline-entry.active {
   background-color: var(--selected-bg);
-  color: #ffffff;
+  color: var(--color-white);
 }
 
 .timeline-entry.future {
@@ -91,35 +91,35 @@
 }
 
 .timeline-entry.orphaned {
-  color: #ff6b6b;
+  color: var(--color-danger);
   opacity: 0.6;
 }
 
 .timeline-entry.orphaned .timeline-dot {
-  border-color: #ff6b6b;
-  color: #ff6b6b;
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 .timeline-entry.orphaned .timeline-label::after {
   content: ' (ignored)';
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   opacity: 0.7;
 }
 
 /* A chamfer/fillet whose regen failed after the geometry changed — flagged bad
    (amber) until the user retargets / re-applies it. */
 .timeline-entry.failed {
-  color: #ffa94d;
+  color: var(--color-warning);
 }
 
 .timeline-entry.failed .timeline-dot {
-  border-color: #ffa94d;
-  color: #ffa94d;
+  border-color: var(--color-warning);
+  color: var(--color-warning);
 }
 
 .timeline-failed-badge {
-  color: #ffa94d;
-  font-size: 13px;
+  color: var(--color-warning);
+  font-size: var(--font-size-md);
   line-height: 1;
   flex-shrink: 0;
   cursor: help;
@@ -143,15 +143,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: var(--font-size-2xs);
   color: var(--text-secondary);
   flex-shrink: 0;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .timeline-dot.active {
-  background-color: #ffffff;
-  border-color: #ffffff;
+  background-color: var(--color-white);
+  border-color: var(--color-white);
   color: var(--selected-bg);
 }
 
@@ -164,7 +164,7 @@
 }
 
 .timeline-label {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   padding: 2px 0;
   white-space: nowrap;
   overflow: hidden;
@@ -181,7 +181,7 @@
   border: none;
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   line-height: 1;
   display: flex;
   align-items: center;
@@ -196,15 +196,15 @@
 }
 
 .timeline-delete-btn:hover {
-  color: #ff6b6b;
+  color: var(--color-danger);
 }
 
 .timeline-entry.active .timeline-delete-btn {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(var(--white-rgb), 0.7);
 }
 
 .timeline-entry.active .timeline-delete-btn:hover {
-  color: #ff9999;
+  color: var(--color-danger-soft);
 }
 
 .timeline-action-btn {
@@ -237,21 +237,21 @@
 }
 
 .timeline-action-btn.active {
-  color: #ffffff;
+  color: var(--color-white);
   background-color: var(--selected-bg);
 }
 
 .timeline-entry.active .timeline-action-btn {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(var(--white-rgb), 0.7);
 }
 
 .timeline-entry.active .timeline-action-btn:hover {
-  color: #ffffff;
+  color: var(--color-white);
 }
 
 .timeline-entry.active .timeline-action-btn.active {
-  color: #ffffff;
-  background-color: rgba(255, 255, 255, 0.2);
+  color: var(--color-white);
+  background-color: rgba(var(--white-rgb), 0.2);
 }
 
 /* When an action button is present, the delete button no longer needs
@@ -273,21 +273,15 @@
   background: transparent;
 }
 .timeline-content::-webkit-scrollbar-thumb {
-  background: #444444;
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 .timeline-content::-webkit-scrollbar-thumb:hover {
-  background: #555555;
-}
-html[data-theme="light"] .timeline-content::-webkit-scrollbar-thumb {
-  background: #cccccc;
-}
-html[data-theme="light"] .timeline-content::-webkit-scrollbar-thumb:hover {
-  background: #bbbbbb;
+  background: var(--scrollbar-thumb-hover);
 }
 
 .timeline-drag-handle {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--text-secondary);
   opacity: 0;
   cursor: grab;
@@ -324,7 +318,7 @@ html[data-theme="light"] .timeline-content::-webkit-scrollbar-thumb:hover {
 
 .timeline-undo-status {
   padding: 6px 12px;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;

@@ -5,6 +5,7 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
+import { START_FACE_HIGHLIGHT, FACE_HOVER_COLOR } from "../theme.js";
 
 export function createViewInteraction(
   {
@@ -65,7 +66,7 @@ export function createViewInteraction(
         clearFaceHighlight();
         planeHits[0].object.material.opacity = 0.45;
       } else if (intersects.length > 0) {
-        applyFaceHighlight(intersects[0], 0xff8833);
+        applyFaceHighlight(intersects[0], START_FACE_HIGHLIGHT);
       } else {
         clearFaceHighlight();
       }
@@ -97,7 +98,8 @@ export function createViewInteraction(
         setHoveredId(null);
         clearEdgeHighlight();
         clearPointHighlight();
-        if (intersects.length > 0) applyFaceHighlight(intersects[0], 0x88ccff);
+        if (intersects.length > 0)
+          applyFaceHighlight(intersects[0], FACE_HOVER_COLOR);
         else clearFaceHighlight();
       } else {
         clearFaceHighlight();

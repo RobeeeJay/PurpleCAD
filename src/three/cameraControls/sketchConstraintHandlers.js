@@ -13,6 +13,7 @@ import {
   getSnapPoints,
   moveShapePoint,
 } from "../sceneObjects.js";
+import { CONSTRAINT_PARALLEL_PERP_COLOR } from "../theme.js";
 
 export function createSketchConstraintHandlers(
   {
@@ -94,7 +95,7 @@ export function createSketchConstraintHandlers(
       const overlay = makeRingOverlay(
         { x: snap.x, y: snap.y },
         sketchMesh,
-        0xff8800,
+        CONSTRAINT_PARALLEL_PERP_COLOR,
       );
       setCoincidentFirstOverlay(overlay);
       scene.add(overlay);
@@ -199,7 +200,7 @@ export function createSketchConstraintHandlers(
       const overlay = makeRingOverlay(
         { x: snap.x, y: snap.y },
         sketchMesh,
-        0xff8800,
+        CONSTRAINT_PARALLEL_PERP_COLOR,
       );
       setCoincidentFirstOverlay(overlay);
       scene.add(overlay);

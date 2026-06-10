@@ -4,6 +4,12 @@
 // can pull from here without creating cycles.
 
 import * as THREE from "three";
+import {
+  AXIS_X_COLOR,
+  AXIS_Y_COLOR,
+  AXIS_Z_COLOR,
+  LIGHT_COLOR,
+} from "../theme.js";
 
 export const MM_PER_UNIT = 10;
 
@@ -25,12 +31,12 @@ export function snapUnitToIntervalMm(value, intervalMm) {
 export const DISPLAY_PRECISION_MM = 0.01;
 
 export const HANDLE_CONFIGS = [
-  { type: "axisX", color: 0xff4444, dir: new THREE.Vector3(1, 0, 0) },
-  { type: "axisY", color: 0x4488ff, dir: new THREE.Vector3(0, 1, 0) },
-  { type: "axisZ", color: 0x44ff44, dir: new THREE.Vector3(0, 0, 1) },
+  { type: "axisX", color: AXIS_X_COLOR, dir: new THREE.Vector3(1, 0, 0) },
+  { type: "axisY", color: AXIS_Y_COLOR, dir: new THREE.Vector3(0, 1, 0) },
+  { type: "axisZ", color: AXIS_Z_COLOR, dir: new THREE.Vector3(0, 0, 1) },
   {
     type: "scale",
-    color: 0xffffff,
+    color: LIGHT_COLOR,
     dir: new THREE.Vector3(1, 1, 1).normalize(),
   },
 ];

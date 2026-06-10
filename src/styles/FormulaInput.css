@@ -18,11 +18,11 @@
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 24px rgba(var(--black-rgb), 0.35);
   z-index: 10001;
   overflow: hidden;
-  font-family: monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
 }
 
 .formula-suggestion {
@@ -42,11 +42,11 @@
 
 .formula-suggestion.active {
   background-color: var(--selected-bg);
-  color: #ffffff;
+  color: var(--color-white);
 }
 
 .formula-suggestion-name {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .formula-suggestion-value {
@@ -54,5 +54,5 @@
 }
 
 .formula-suggestion.active .formula-suggestion-value {
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(var(--white-rgb), 0.85);
 }

@@ -3,6 +3,7 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "./sceneObjects.js";
+import { FACE_SELECT_COLOR, EDGE_SELECT_COLOR } from "./theme.js";
 
 // Returns a geometry to source overlay triangles from.  For primitive types
 // (sphere/cylinder/torus) the on-mesh geometry is just a BoxGeometry stand-in
@@ -53,15 +54,16 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
   const edges = subGeo.edges || [];
   if (!faces.length && !edges.length) return null;
 
-  // Face-select hover uses light blue 0x88ccff; the selected colour is a
-  // visibly darker version of the same blue so the user recognises this as
-  // "selected" (and not a different selection mode).
-  const faceColor = options.faceColor ?? 0x3377cc;
-  // Edge-select hover uses bright yellow 0xffdd00; the selected colour is a
-  // saturated orange so the line stays unmistakably visible on top of the
-  // mesh after the hover is cleared. (WebGL line widths are clamped to 1px,
-  // so colour saturation — not stroke weight — is what makes the line read.)
-  const edgeColor = options.edgeColor ?? 0xff5500;
+  // Face-select hover uses FACE_HOVER_COLOR (light blue); the selected colour
+  // is a visibly darker version of the same blue so the user recognises this
+  // as "selected" (and not a different selection mode).
+  const faceColor = options.faceColor ?? FACE_SELECT_COLOR;
+  // Edge-select hover uses CHAMFER_EDGE_HOVER (bright yellow); the selected
+  // colour is a saturated orange so the line stays unmistakably visible on
+  // top of the mesh after the hover is cleared. (WebGL line widths are
+  // clamped to 1px, so colour saturation — not stroke weight — is what makes
+  // the line read.)
+  const edgeColor = options.edgeColor ?? EDGE_SELECT_COLOR;
 
   const group = new THREE.Group();
 

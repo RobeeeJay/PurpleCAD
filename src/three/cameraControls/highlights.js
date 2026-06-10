@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "../sceneObjects.js";
 import { computeSegmentChain } from "../segmentChain.js";
+import { CHAMFER_EDGE_HOVER, CHAMFER_PREVIEW_COLOR } from "../theme.js";
 
 export function createHighlightHelpers({
   scene,
@@ -400,7 +401,10 @@ export function createHighlightHelpers({
     );
     const hlLine = new THREE.LineSegments(
       hlGeo,
-      new THREE.LineBasicMaterial({ color: 0xffdd00, depthTest: false }),
+      new THREE.LineBasicMaterial({
+        color: CHAMFER_EDGE_HOVER,
+        depthTest: false,
+      }),
     );
     hlLine.position.copy(hitMesh.position);
     hlLine.rotation.copy(hitMesh.rotation);
@@ -474,7 +478,10 @@ export function createHighlightHelpers({
       bestV.applyMatrix4(hitMesh.matrixWorld);
       const hlMesh = new THREE.Mesh(
         new THREE.SphereGeometry(0.06, 10, 8),
-        new THREE.MeshBasicMaterial({ color: 0xff44aa, depthTest: false }),
+        new THREE.MeshBasicMaterial({
+          color: CHAMFER_PREVIEW_COLOR,
+          depthTest: false,
+        }),
       );
       hlMesh.position.copy(bestV);
       hlMesh.renderOrder = 999;

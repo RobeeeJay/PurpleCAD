@@ -2,8 +2,8 @@
   position: fixed;
   right: 8px;
   bottom: 6px;
-  font-family: monospace;
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   opacity: 0.55;
   pointer-events: none;
@@ -18,5 +18,5 @@
 }
 
 .version-tag-commit {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }

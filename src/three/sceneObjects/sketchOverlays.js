@@ -15,12 +15,18 @@ import {
   groupLoopsWithHoles,
   polyCentroid,
 } from "./closedLoops.js";
+import {
+  BEVEL_COLOR,
+  OFFSET_COLOR,
+  SKETCH_FACE_HIGHLIGHT,
+  SKETCH_LINE_COLOR,
+  SKETCH_PLANE_HOVER_COLOR,
+  SKETCH_POINT_COLOR,
+} from "../theme.js";
 
-// Offset copies (driven by an offset constraint) render purple to set them
-// apart from ordinary blue sketch geometry — and are made non-interactive so
-// they can't be edited/dragged on their own while the constraint holds.
-const OFFSET_COLOR = 0xb266ff;
-
+// Offset copies (driven by an offset constraint) render in OFFSET_COLOR to
+// set them apart from ordinary sketch geometry — and are made non-interactive
+// so they can't be edited/dragged on their own while the constraint holds.
 const offsetShapeIdxSet = (item) =>
   new Set(
     (item.constraints || [])
@@ -58,8 +64,8 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
         color: offsetIdxs.has(shapeIdx)
           ? OFFSET_COLOR
           : shape.dashed
-            ? 0x6688cc
-            : 0x88aaff,
+            ? SKETCH_PLANE_HOVER_COLOR
+            : SKETCH_LINE_COLOR,
         linewidth: 1.5,
         depthTest: false,
         resolution: res,
@@ -118,7 +124,7 @@ export function buildExtrudeSelectGroup(
       const fill = new THREE.Mesh(
         new THREE.ShapeGeometry(shape),
         new THREE.MeshBasicMaterial({
-          color: 0x4488ff,
+          color: SKETCH_FACE_HIGHLIGHT,
           transparent: true,
           opacity: 0,
           side: THREE.DoubleSide,
@@ -179,7 +185,7 @@ export function rebuildPointDotsForDrag(group, shapes, sketchMesh) {
   if (pts.length === 0) return;
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const mat = new THREE.PointsMaterial({
-    color: 0xaabbff,
+    color: SKETCH_POINT_COLOR,
     size: 5,
     sizeAttenuation: false,
     depthTest: false,
@@ -232,7 +238,11 @@ export function buildSketchShapesGroup(
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     const mat = new LineMaterial({
-      color: isBevel ? 0xffaa44 : isOffset ? OFFSET_COLOR : 0x88aaff,
+      color: isBevel
+        ? BEVEL_COLOR
+        : isOffset
+          ? OFFSET_COLOR
+          : SKETCH_LINE_COLOR,
       linewidth: isBevel ? 1.0 : 1.5,
       depthTest: false,
       resolution: res,
@@ -263,7 +273,7 @@ export function buildSketchShapesGroup(
   if (dotWorldPts.length > 0) {
     const ptGeo = new THREE.BufferGeometry().setFromPoints(dotWorldPts);
     const ptMat = new THREE.PointsMaterial({
-      color: 0xaabbff,
+      color: SKETCH_POINT_COLOR,
       size: 5,
       sizeAttenuation: false,
       depthTest: false,
@@ -318,7 +328,7 @@ export function buildSketchShapesGroup(
       const fillMesh = new THREE.Mesh(
         new THREE.ShapeGeometry(shape2D),
         new THREE.MeshBasicMaterial({
-          color: 0x4488ff,
+          color: SKETCH_FACE_HIGHLIGHT,
           transparent: true,
           opacity: 0.18,
           side: THREE.DoubleSide,

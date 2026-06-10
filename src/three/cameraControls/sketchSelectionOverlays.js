@@ -11,6 +11,12 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { useStore } from "../../store";
 import { getSketchShapePoints, getShapePoint } from "../sceneObjects.js";
+import {
+  SKETCH_SELECTION_GREEN,
+  SKETCH_SELECTION_BLUE,
+  SKETCH_SELECTION_TEAL,
+  SKETCH_PIVOT_COLOR,
+} from "../theme.js";
 
 export function createSketchSelectionOverlays({
   scene,
@@ -80,7 +86,7 @@ export function createSketchSelectionOverlays({
     sketchSelectionOverlay = makeRingOverlay(
       { x: snap.x, y: snap.y },
       sketchMesh,
-      0x00ff88,
+      SKETCH_SELECTION_GREEN,
     );
     scene.add(sketchSelectionOverlay);
     useStore.getState().setSelectedSketchElement({
@@ -100,7 +106,7 @@ export function createSketchSelectionOverlays({
       // consistently whether one line or several are picked.  Dash the overlay
       // for construction lines so the highlight reads as dotted like the line.
       const mat = new LineMaterial({
-        color: 0x44aaff,
+        color: SKETCH_SELECTION_BLUE,
         linewidth: 2.5,
         depthTest: false,
         dashed: !!shape.dashed,
@@ -150,7 +156,7 @@ export function createSketchSelectionOverlays({
       const geo = new LineGeometry();
       geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
       const mat = new LineMaterial({
-        color: 0x44aaff,
+        color: SKETCH_SELECTION_BLUE,
         linewidth: 2.5,
         depthTest: false,
         dashed: !!shape.dashed,
@@ -190,7 +196,7 @@ export function createSketchSelectionOverlays({
       return toW(localPt.x + Math.cos(a) * R, localPt.y + Math.sin(a) * R);
     });
     const mat = new THREE.LineBasicMaterial({
-      color: 0x00ffcc,
+      color: SKETCH_SELECTION_TEAL,
       depthTest: false,
     });
     currentDragIndicator = new THREE.Line(
@@ -257,16 +263,31 @@ export function createSketchSelectionOverlays({
         toW(center.x, center.y),
         toW(grip.x, grip.y),
       ]),
-      new THREE.LineBasicMaterial({ color: 0x00ddff, depthTest: false }),
+      new THREE.LineBasicMaterial({
+        color: SKETCH_PIVOT_COLOR,
+        depthTest: false,
+      }),
     );
     line.renderOrder = 1006;
     scene.add(line);
     objects.push(line);
-    const pivot = makeRingOverlay(center, sketchMesh, 0x00ddff, 0.12, 0.008);
+    const pivot = makeRingOverlay(
+      center,
+      sketchMesh,
+      SKETCH_PIVOT_COLOR,
+      0.12,
+      0.008,
+    );
     pivot.renderOrder = 1006;
     scene.add(pivot);
     objects.push(pivot);
-    const knob = makeRingOverlay(grip, sketchMesh, 0x00ddff, 0.22, 0.008);
+    const knob = makeRingOverlay(
+      grip,
+      sketchMesh,
+      SKETCH_PIVOT_COLOR,
+      0.22,
+      0.008,
+    );
     knob.renderOrder = 1006;
     scene.add(knob);
     objects.push(knob);

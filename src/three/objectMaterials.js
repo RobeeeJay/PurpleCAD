@@ -1,4 +1,11 @@
 import * as THREE from "three";
+import {
+  DEFAULT_OBJECT_COLOR,
+  EMISSIVE_HOVERED,
+  EMISSIVE_MULTI_SELECTED,
+  EMISSIVE_SELECTED,
+  NO_EMISSIVE,
+} from "./theme.js";
 
 export const SPHERE_VERTEX_SHADER = `
   varying vec3 vViewPos;
@@ -204,7 +211,7 @@ export function createMaterial(item, color) {
   });
   if (item.type === "sketch") {
     return new THREE.MeshStandardMaterial({
-      color: 0xcccccc,
+      color: DEFAULT_OBJECT_COLOR,
       transparent: true,
       opacity: 0.18,
       side: THREE.DoubleSide,
@@ -244,12 +251,12 @@ export function updateEmissive(objectsRef, selectedId, selectedIds, hoveredId) {
     const id = parseInt(itemId);
     const hex =
       id === selectedId
-        ? 0x006666
+        ? EMISSIVE_SELECTED
         : selectedIds.includes(id)
-          ? 0x550011
+          ? EMISSIVE_MULTI_SELECTED
           : id === hoveredId
-            ? 0x444444
-            : 0x000000;
+            ? EMISSIVE_HOVERED
+            : NO_EMISSIVE;
     if (mesh.material.uniforms?.uEmissive) {
       mesh.material.uniforms.uEmissive.value.setHex(hex);
     } else if (mesh.material.emissive) {

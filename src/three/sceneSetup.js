@@ -1,9 +1,17 @@
 import * as THREE from "three";
 import { MM_PER_UNIT } from "./sceneObjects/dimensions.js";
+import {
+  AXIS_X_COLOR,
+  AXIS_Y_COLOR,
+  AXIS_Z_COLOR,
+  LIGHT_COLOR,
+  sceneBackgroundFor,
+  toCssHex,
+} from "./theme.js";
 
 export function createScene(theme) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(theme === "light" ? 0xe8e8e8 : 0x1a1a1a);
+  scene.background = new THREE.Color(sceneBackgroundFor(theme));
   return scene;
 }
 
@@ -73,8 +81,8 @@ export function createShadowGround(scene) {
 }
 
 export function createLights(scene, camera) {
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  const dir1 = new THREE.DirectionalLight(0xffffff, 1.0);
+  scene.add(new THREE.AmbientLight(LIGHT_COLOR, 0.4));
+  const dir1 = new THREE.DirectionalLight(LIGHT_COLOR, 1.0);
   dir1.position.set(10, 15, 10);
   // Disabled by default — the Render-section shadow toggle flips this on.
   // Without these orthographic-camera frustum settings the default shadow
@@ -91,10 +99,10 @@ export function createLights(scene, camera) {
   dir1.shadow.bias = -0.0005;
   dir1.shadow.normalBias = 0.02;
   camera.add(dir1);
-  const dir2 = new THREE.DirectionalLight(0xffffff, 0.5);
+  const dir2 = new THREE.DirectionalLight(LIGHT_COLOR, 0.5);
   dir2.position.set(-10, 10, -10);
   camera.add(dir2);
-  const pt = new THREE.PointLight(0xffffff, 0.3, 50);
+  const pt = new THREE.PointLight(LIGHT_COLOR, 0.3, 50);
   pt.position.set(0, 10, 0);
   camera.add(pt);
   // Return dir1 so the Viewport can toggle castShadow at runtime.
@@ -321,19 +329,19 @@ export function createAxisGroup(scene) {
   };
 
   addAxisArrow(
-    0xff4444,
+    AXIS_X_COLOR,
     new THREE.Euler(0, 0, -Math.PI / 2),
     new THREE.Vector3(AXIS_LEN / 2, 0, 0),
     new THREE.Vector3(AXIS_LEN + CONE_H / 2, 0, 0),
   );
   addAxisArrow(
-    0x4488ff,
+    AXIS_Y_COLOR,
     new THREE.Euler(0, 0, 0),
     new THREE.Vector3(0, AXIS_LEN / 2, 0),
     new THREE.Vector3(0, AXIS_LEN + CONE_H / 2, 0),
   );
   addAxisArrow(
-    0x44ff44,
+    AXIS_Z_COLOR,
     new THREE.Euler(Math.PI / 2, 0, 0),
     new THREE.Vector3(0, 0, AXIS_LEN / 2),
     new THREE.Vector3(0, 0, AXIS_LEN + CONE_H / 2),
@@ -359,13 +367,13 @@ export function createAxisGroup(scene) {
     return sprite;
   };
 
-  const xLabel = makeAxisLabel("X", "#ff4444");
+  const xLabel = makeAxisLabel("X", toCssHex(AXIS_X_COLOR));
   xLabel.position.set(LABEL_DIST, 0, 0);
   axisGroup.add(xLabel);
-  const yLabel = makeAxisLabel("Y", "#4488ff");
+  const yLabel = makeAxisLabel("Y", toCssHex(AXIS_Y_COLOR));
   yLabel.position.set(0, LABEL_DIST, 0);
   axisGroup.add(yLabel);
-  const zLabel = makeAxisLabel("Z", "#44ff44");
+  const zLabel = makeAxisLabel("Z", toCssHex(AXIS_Z_COLOR));
   zLabel.position.set(0, 0, LABEL_DIST);
   axisGroup.add(zLabel);
 
@@ -376,7 +384,7 @@ export function createAxisGroup(scene) {
 export function createOrbitIndicator(scene) {
   const geo = new THREE.SphereGeometry(0.07, 16, 12);
   const mat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
+    color: LIGHT_COLOR,
     depthTest: false,
     transparent: true,
     opacity: 0.9,

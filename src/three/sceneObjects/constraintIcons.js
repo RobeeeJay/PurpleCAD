@@ -8,6 +8,17 @@ import * as THREE from "three";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
+import {
+  ANGLE_LABEL_BG,
+  ANGLE_LABEL_TEXT,
+  CONSTRAINT_ANGLE_COLOR,
+  CONSTRAINT_COINCIDENT_COLOR,
+  CONSTRAINT_HORIZONTAL_COLOR,
+  CONSTRAINT_ON_LINE_COLOR,
+  DIM_COLOR,
+  DIM_LABEL_BG,
+  DIM_LABEL_TEXT,
+} from "../theme.js";
 
 // Builds constraint icon THREE.js objects into `group`. All objects are tagged
 // with userData.isConstraintObj so they can be found and replaced during drag.
@@ -66,7 +77,6 @@ export function addConstraintIconsToGroup(
 
     // ── Shared technical-drawing dimension primitives (grey, with tick-mark
     // ends instead of arrowheads) used by both distance and offset dimensions.
-    const DIM_COLOR = 0x808080;
     // A world-space dimension / extension / witness line (scales with zoom so it
     // keeps spanning the measured geometry — not a fixed-size mark).
     const addDimSeg = (p0, p1) => {
@@ -108,10 +118,18 @@ export function addConstraintIconsToGroup(
           toWorld(pt.x - R, pt.y, 0.005),
           toWorld(pt.x, pt.y + R, 0.005),
         ]),
-        new THREE.LineBasicMaterial({ color: 0xffaa00, depthTest: false }),
+        new THREE.LineBasicMaterial({
+          color: CONSTRAINT_COINCIDENT_COLOR,
+          depthTest: false,
+        }),
       );
       cLine.renderOrder = 1004;
-      tag(cLine, { x: pt.x, y: pt.y }, [c.shapeAIdx, c.shapeBIdx], 0xffaa00);
+      tag(
+        cLine,
+        { x: pt.x, y: pt.y },
+        [c.shapeAIdx, c.shapeBIdx],
+        CONSTRAINT_COINCIDENT_COLOR,
+      );
       group.add(cLine);
       markFixedSize(cLine, toWorld(pt.x, pt.y, 0.005));
     } else if (c.type === "distance") {
@@ -208,9 +226,9 @@ export function addConstraintIconsToGroup(
       canvas.width = Math.max(160, Math.ceil(measured) + 24);
       canvas.height = 32;
       const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = "rgba(35,35,35,0.85)";
+      ctx2d.fillStyle = DIM_LABEL_BG;
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = "#dddddd";
+      ctx2d.fillStyle = DIM_LABEL_TEXT;
       ctx2d.font = labelFont;
       ctx2d.textAlign = "center";
       ctx2d.textBaseline = "middle";
@@ -244,14 +262,17 @@ export function addConstraintIconsToGroup(
           toWorld(pt.x + nx, pt.y + ny, 0.005),
           toWorld(pt.x - nx, pt.y - ny, 0.005),
         ]),
-        new THREE.LineBasicMaterial({ color: 0x00aaff, depthTest: false }),
+        new THREE.LineBasicMaterial({
+          color: CONSTRAINT_ON_LINE_COLOR,
+          depthTest: false,
+        }),
       );
       tLine.renderOrder = 1004;
       tag(
         tLine,
         { x: pt.x, y: pt.y },
         [c.pointShapeIdx, c.lineShapeIdx],
-        0x00aaff,
+        CONSTRAINT_ON_LINE_COLOR,
       );
       group.add(tLine);
       markFixedSize(tLine, toWorld(pt.x, pt.y, 0.005));
@@ -268,10 +289,13 @@ export function addConstraintIconsToGroup(
           toWorld(mx - R, my, 0.005),
           toWorld(mx, my + R, 0.005),
         ]),
-        new THREE.LineBasicMaterial({ color: 0x00ddaa, depthTest: false }),
+        new THREE.LineBasicMaterial({
+          color: CONSTRAINT_HORIZONTAL_COLOR,
+          depthTest: false,
+        }),
       );
       cLine.renderOrder = 1004;
-      tag(cLine, { x: mx, y: my }, [c.shapeIdx], 0x00ddaa);
+      tag(cLine, { x: mx, y: my }, [c.shapeIdx], CONSTRAINT_HORIZONTAL_COLOR);
       group.add(cLine);
       markFixedSize(cLine, toWorld(mx, my, 0.005));
     } else if (c.type === "angle") {
@@ -296,10 +320,18 @@ export function addConstraintIconsToGroup(
       }
       const arc = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints(arcPts),
-        new THREE.LineBasicMaterial({ color: 0xff66cc, depthTest: false }),
+        new THREE.LineBasicMaterial({
+          color: CONSTRAINT_ANGLE_COLOR,
+          depthTest: false,
+        }),
       );
       arc.renderOrder = 1004;
-      tag(arc, { x: P.x, y: P.y }, [c.shapeAIdx, c.shapeBIdx], 0xff66cc);
+      tag(
+        arc,
+        { x: P.x, y: P.y },
+        [c.shapeAIdx, c.shapeBIdx],
+        CONSTRAINT_ANGLE_COLOR,
+      );
       group.add(arc);
       markFixedSize(arc, toWorld(P.x, P.y, 0.005));
       if (showDimensions) {
@@ -309,9 +341,9 @@ export function addConstraintIconsToGroup(
         canvas.width = 96;
         canvas.height = 32;
         const ctx2d = canvas.getContext("2d");
-        ctx2d.fillStyle = "rgba(40,10,30,0.85)";
+        ctx2d.fillStyle = ANGLE_LABEL_BG;
         ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-        ctx2d.fillStyle = "#ff99dd";
+        ctx2d.fillStyle = ANGLE_LABEL_TEXT;
         ctx2d.font = "bold 18px sans-serif";
         ctx2d.textAlign = "center";
         ctx2d.textBaseline = "middle";
@@ -417,9 +449,9 @@ export function addConstraintIconsToGroup(
       canvas.width = Math.max(160, Math.ceil(measured) + 24);
       canvas.height = 32;
       const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = "rgba(35,35,35,0.85)";
+      ctx2d.fillStyle = DIM_LABEL_BG;
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = "#dddddd";
+      ctx2d.fillStyle = DIM_LABEL_TEXT;
       ctx2d.font = labelFont;
       ctx2d.textAlign = "center";
       ctx2d.textBaseline = "middle";

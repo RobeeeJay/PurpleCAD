@@ -5,6 +5,14 @@
 // cameraControls.js.
 
 import * as THREE from "three";
+import {
+  CONSTRAINT_SELECTED_COLOR,
+  SKETCH_HOVER_LINE_COLOR,
+  SKETCH_HOVER_POINT_LINE_COLOR,
+  SKETCH_LINE_COLOR,
+  SKETCH_PIVOT_COLOR,
+  constraintColor,
+} from "../theme.js";
 
 export function createSketchHoverHelpers(
   {
@@ -27,7 +35,7 @@ export function createSketchHoverHelpers(
   const clearHoverLineHighlight = () => {
     if (hoveredSketchLine) {
       hoveredSketchLine.material.color.setHex(
-        hoveredSketchLineOrigColor ?? 0x88aaff,
+        hoveredSketchLineOrigColor ?? SKETCH_LINE_COLOR,
       );
       hoveredSketchLine = null;
       hoveredSketchLineOrigColor = null;
@@ -39,18 +47,6 @@ export function createSketchHoverHelpers(
   let hoveredConstraintLines = []; // [{ lineObj, origColor }]
   let selectedConstraintIdx = null;
   let selectedConstraintLineRefs = []; // [{ lineObj, origColor }]
-
-  const constraintTypeColor = (type) =>
-    ({
-      coincident: 0xffaa00,
-      distance: 0xffdd44,
-      onLine: 0x00aaff,
-      horizontal: 0x00ddaa,
-      vertical: 0x00ddaa,
-      angle: 0xff66cc,
-    })[type] ?? 0xffffff;
-
-  const CONSTRAINT_SEL_COLOR = 0xff4444;
 
   const clearConstraintSelection = () => {
     selectedConstraintLineRefs.forEach(({ lineObj, origColor }) => {
@@ -67,9 +63,7 @@ export function createSketchHoverHelpers(
             o.material?.color &&
             !o.isSprite
           ) {
-            o.material.color.setHex(
-              constraintTypeColor(o.userData.constraintType),
-            );
+            o.material.color.setHex(constraintColor(o.userData.constraintType));
           }
         }
       }
@@ -88,7 +82,7 @@ export function createSketchHoverHelpers(
         o.material?.color &&
         !o.isSprite
       ) {
-        o.material.color.setHex(CONSTRAINT_SEL_COLOR);
+        o.material.color.setHex(CONSTRAINT_SELECTED_COLOR);
       }
     }
     const taggedObj = g.children.find(
@@ -108,7 +102,7 @@ export function createSketchHoverHelpers(
         lineObj,
         origColor: lineObj.material.color.getHex(),
       });
-      lineObj.material.color.setHex(CONSTRAINT_SEL_COLOR);
+      lineObj.material.color.setHex(CONSTRAINT_SELECTED_COLOR);
     });
   };
 
@@ -147,10 +141,10 @@ export function createSketchHoverHelpers(
     });
   };
 
-  // 0xffaa33 (amber) marks the line a hovered POINT belongs to, distinct from
-  // the 0xbbddff line-body hover so the two reads don't blur together.
-  const POINT_LINE_COLOR = 0xffaa33;
-  const applyHoverLineHighlight = (lineObj, color = 0xbbddff) => {
+  const applyHoverLineHighlight = (
+    lineObj,
+    color = SKETCH_HOVER_LINE_COLOR,
+  ) => {
     if (hoveredSketchLine === lineObj && hoveredSketchLineColor === color)
       return;
     clearHoverLineHighlight();
@@ -184,7 +178,7 @@ export function createSketchHoverHelpers(
       return toW(snapPt.x + Math.cos(a) * R, snapPt.y + Math.sin(a) * R);
     });
     const mat = new THREE.LineBasicMaterial({
-      color: 0x00ddff,
+      color: SKETCH_PIVOT_COLOR,
       depthTest: false,
     });
     currentHoverPointIndicator = new THREE.Line(
@@ -223,7 +217,8 @@ export function createSketchHoverHelpers(
       const ownerLine = sketchGroup?.children.find(
         (c) => c.userData.shapeIdx === snap.shapeIdx && c.material?.color,
       );
-      if (ownerLine) applyHoverLineHighlight(ownerLine, POINT_LINE_COLOR);
+      if (ownerLine)
+        applyHoverLineHighlight(ownerLine, SKETCH_HOVER_POINT_LINE_COLOR);
       else clearHoverLineHighlight();
       clearConstraintHoverHighlight();
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
@@ -326,6 +321,5 @@ export function createSketchHoverHelpers(
     showHoverPointIndicator,
     updateSketchHover,
     clearAllSketchHover,
-    POINT_LINE_COLOR,
   };
 }

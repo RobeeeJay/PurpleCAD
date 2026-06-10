@@ -12,6 +12,7 @@ import {
   sketchDimText,
   snapUnitToIntervalMm,
 } from "../sceneObjects.js";
+import { SKETCH_DRAW_PREVIEW_COLOR } from "../theme.js";
 
 // Snap a local sketch point to the world-space grid interval when the snap
 // option is on.  Geometry snapping (findSnap) takes precedence and is applied
@@ -101,7 +102,7 @@ export function createSketchDrawHelpers(
       const ctrlLine = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints(ctrlWorldPts),
         new THREE.LineBasicMaterial({
-          color: 0x556677,
+          color: SKETCH_DRAW_PREVIEW_COLOR,
           transparent: true,
           opacity: 0.4,
           depthTest: false,

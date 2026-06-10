@@ -36,6 +36,7 @@ import {
   fieldsForPoint,
   varFields,
 } from "../sketchSolver.js";
+import { SKETCH_LINE_COLOR, SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
@@ -81,7 +82,6 @@ export function createSketchInteraction(
     applyHoverLineHighlight,
     showHoverPointIndicator,
     clearHoverPointIndicator,
-    POINT_LINE_COLOR,
     clearConstraintHoverHighlight,
     applyConstraintHoverHighlight,
     clearConstraintSelection,
@@ -222,7 +222,8 @@ export function createSketchInteraction(
           !c.userData.isConstraintObj &&
           c.material?.color,
       );
-      if (ownerLine) applyHoverLineHighlight(ownerLine, POINT_LINE_COLOR);
+      if (ownerLine)
+        applyHoverLineHighlight(ownerLine, SKETCH_HOVER_POINT_LINE_COLOR);
     } else if (item.kind === "line") {
       const g = sketchShapesGroupRef?.current;
       if (g) {
@@ -306,7 +307,7 @@ export function createSketchInteraction(
     ];
     const geo = new THREE.BufferGeometry().setFromPoints(corners);
     const mat = new THREE.LineBasicMaterial({
-      color: 0x88aaff,
+      color: SKETCH_LINE_COLOR,
       depthTest: false,
       transparent: true,
       opacity: 0.8,

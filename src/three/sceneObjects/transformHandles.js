@@ -10,6 +10,13 @@ import {
   makeDimSprite,
   placeDimLabels,
 } from "./dimensions.js";
+import {
+  AXIS_X_COLOR,
+  AXIS_Y_COLOR,
+  AXIS_Z_COLOR,
+  FACE_HOVER_COLOR,
+  toCssHex,
+} from "../theme.js";
 
 // Fixed gizmo radius (scene units), used for the ring radius (ext + 0.85) and
 // the axis/scale handle offset (ext + 0.5).  Object-size-independent so the
@@ -60,9 +67,9 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
 
   const torusRadius = ext + 0.85;
   [
-    { type: "rotX", color: 0xff4444, rx: 0, ry: Math.PI / 2, rz: 0 },
-    { type: "rotY", color: 0x4488ff, rx: Math.PI / 2, ry: 0, rz: 0 },
-    { type: "rotZ", color: 0x44ff44, rx: 0, ry: 0, rz: 0 },
+    { type: "rotX", color: AXIS_X_COLOR, rx: 0, ry: Math.PI / 2, rz: 0 },
+    { type: "rotY", color: AXIS_Y_COLOR, rx: Math.PI / 2, ry: 0, rz: 0 },
+    { type: "rotZ", color: AXIS_Z_COLOR, rx: 0, ry: 0, rz: 0 },
   ].forEach(({ type, color, rx, ry, rz }) => {
     const geo = new THREE.TorusGeometry(torusRadius, 0.09, 8, 64);
     const mat = new THREE.MeshBasicMaterial({
@@ -83,7 +90,7 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   const boxMesh = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
     new THREE.LineBasicMaterial({
-      color: 0x88ccff,
+      color: FACE_HOVER_COLOR,
       depthTest: false,
       transparent: true,
       opacity: 0.7,
@@ -96,9 +103,9 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   const mmX = Math.round(dim.w * MM_PER_UNIT);
   const mmY = Math.round(dim.h * MM_PER_UNIT);
   const mmZ = Math.round(dim.d * MM_PER_UNIT);
-  const labelX = makeDimSprite(mmX + "mm", "#ff4444");
-  const labelY = makeDimSprite(mmY + "mm", "#4488ff");
-  const labelZ = makeDimSprite(mmZ + "mm", "#44ff44");
+  const labelX = makeDimSprite(mmX + "mm", toCssHex(AXIS_X_COLOR));
+  const labelY = makeDimSprite(mmY + "mm", toCssHex(AXIS_Y_COLOR));
+  const labelZ = makeDimSprite(mmZ + "mm", toCssHex(AXIS_Z_COLOR));
 
   const boundingBox = { boxMesh, labelX, labelY, labelZ };
   placeDimLabels(boundingBox, center, dim);
