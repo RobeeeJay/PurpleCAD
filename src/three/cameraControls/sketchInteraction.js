@@ -1611,6 +1611,51 @@ export function createSketchInteraction(
       }
     }
 
+    // 3D-view render mode shortcuts: 1-4 switch the shaded/wireframe/etc.
+    // mode, 5-8 toggle the remaining Render-section buttons (shadows,
+    // cross-section, path tracer, curve resolution) — same left-to-right
+    // order they appear in RenderSection.jsx.
+    if (
+      !sketchModeRef.current &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey
+    ) {
+      const store = useStore.getState();
+      const renderModeKeys = {
+        1: "wireframe",
+        2: "shaded",
+        3: "transparent",
+        4: "smooth",
+      };
+      if (renderModeKeys[e.key]) {
+        e.preventDefault();
+        store.setRenderMode(renderModeKeys[e.key]);
+        return;
+      }
+      if (e.key === "5") {
+        e.preventDefault();
+        store.setShadowsEnabled(!store.shadowsEnabled);
+        return;
+      }
+      if (e.key === "6") {
+        e.preventDefault();
+        store.toggleCrossSectionView();
+        return;
+      }
+      if (e.key === "7") {
+        e.preventDefault();
+        store.togglePathTraceView();
+        return;
+      }
+      if (e.key === "8") {
+        e.preventDefault();
+        store.toggleCurveResolution();
+        return;
+      }
+    }
+
     if (sketchModeRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const key = e.key.toLowerCase();
       const store = useStore.getState();

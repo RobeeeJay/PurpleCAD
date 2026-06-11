@@ -18,7 +18,7 @@ const RenderSection = () => {
     <ToolbarSection label="Render">
       <button
         className={`toolbar-btn ${renderMode === "wireframe" ? "active" : ""}`}
-        title="Wireframe"
+        title="Wireframe (1)"
         onClick={() => setRenderMode("wireframe")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
@@ -32,7 +32,7 @@ const RenderSection = () => {
       </button>
       <button
         className={`toolbar-btn ${renderMode === "shaded" ? "active" : ""}`}
-        title="Shaded"
+        title="Shaded (2)"
         onClick={() => setRenderMode("shaded")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
@@ -47,7 +47,7 @@ const RenderSection = () => {
       </button>
       <button
         className={`toolbar-btn ${renderMode === "transparent" ? "active" : ""}`}
-        title="Transparent (50%)"
+        title="Transparent (50%) (3)"
         onClick={() => setRenderMode("transparent")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
@@ -63,7 +63,7 @@ const RenderSection = () => {
       </button>
       <button
         className={`toolbar-btn ${renderMode === "smooth" ? "active" : ""}`}
-        title="Smooth"
+        title="Smooth (4)"
         onClick={() => setRenderMode("smooth")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
@@ -85,8 +85,8 @@ const RenderSection = () => {
         className={`toolbar-btn ${shadowsEnabled ? "active" : ""}`}
         title={
           shadowsEnabled
-            ? "Shadows on — click to disable"
-            : "Shadows off — click to enable ground-plane shadows"
+            ? "Shadows on — click to disable (5)"
+            : "Shadows off — click to enable ground-plane shadows (5)"
         }
         onClick={() => setShadowsEnabled(!shadowsEnabled)}
       >
@@ -123,8 +123,8 @@ const RenderSection = () => {
         className={`toolbar-btn ${crossSectionView ? "active" : ""}`}
         title={
           crossSectionView
-            ? "Cross section view on — click to disable"
-            : "Cross section view — hide everything in front of the section plane (tracks the camera)"
+            ? "Cross section view on — click to disable (6)"
+            : "Cross section view — hide everything in front of the section plane (tracks the camera) (6)"
         }
         onClick={toggleCrossSectionView}
       >
@@ -179,8 +179,8 @@ const RenderSection = () => {
         className={`toolbar-btn ${pathTraceView ? "active" : ""}`}
         title={
           pathTraceView
-            ? "Path-traced render on — click to return to the raster view"
-            : "Path-traced render (prototype) — progressive GPU ray tracing"
+            ? "Path-traced render on — click to return to the raster view (7)"
+            : "Path-traced render (prototype) — progressive GPU ray tracing (7)"
         }
         onClick={togglePathTraceView}
       >
@@ -226,8 +226,8 @@ const RenderSection = () => {
         className={`toolbar-btn ${curveResolution === "print" ? "active" : ""}`}
         title={
           curveResolution === "print"
-            ? "High resolution (3D print) — click for preview"
-            : "Preview resolution — click for high (3D print)"
+            ? "High resolution (3D print) — click for preview (8)"
+            : "Preview resolution — click for high (3D print) (8)"
         }
         onClick={toggleCurveResolution}
       >
