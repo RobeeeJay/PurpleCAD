@@ -68,7 +68,7 @@ function createWindow() {
     width: 1400,
     height: 900,
     backgroundColor: "#101013",
-    title: "untitled-cad",
+    title: "PurpleCAD",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

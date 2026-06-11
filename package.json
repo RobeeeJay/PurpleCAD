@@ -1,5 +1,5 @@
 {
-  "name": "untitled-cad",
+  "name": "PurpleCAD",
   "version": "0.1.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -16,8 +16,8 @@
     "electron:build": "vite build && electron-builder --config.mac.target=dmg"
   },
   "build": {
-    "appId": "com.untitled-cad",
-    "productName": "untitled-cad",
+    "appId": "com.purplecad",
+    "productName": "PurpleCAD",
     "directories": {
       "output": "release"
     },
