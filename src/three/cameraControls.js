@@ -367,6 +367,12 @@ export function attachCameraControls(ctx) {
   // looking instead of always at the world origin.
   controls.getViewTarget = () => targetRef.current.clone();
 
+  // Capture the current viewport canvas as a PNG blob, for the Save menu's
+  // "Save image" option.  Relies on preserveDrawingBuffer (sceneSetup.js) so
+  // the buffer is still readable after the frame has been composited.
+  controls.captureScreenshot = () =>
+    new Promise((resolve) => renderer.domElement.toBlob(resolve, "image/png"));
+
   // Drop the selected non-sketch objects so their lowest world-Y point
   // sits on the ground plane (Y=0).  Computes the min Y across all
   // selected meshes' world-space bounding boxes, then dispatches a

@@ -12,6 +12,7 @@ const DocumentSection = () => {
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
+  const cameraControls = useStore((s) => s._cameraControls);
 
   const fileInputRef = useRef(null);
   const saveBtnRef = useRef(null);
@@ -150,6 +151,16 @@ const DocumentSection = () => {
     }
   };
 
+  const handleSaveImage = async () => {
+    setSaveMenuOpen(false);
+    const blob = await cameraControls?.captureScreenshot?.();
+    if (!blob) {
+      alert("Couldn't capture the viewport.");
+      return;
+    }
+    download(blob, "scene.png");
+  };
+
   return (
     <ToolbarSection label="Document">
       <button className="toolbar-btn" title="New document" onClick={handleNew}>
@@ -241,6 +252,9 @@ const DocumentSection = () => {
               onClick={handleExportSTEP}
             >
               Export as STEP
+            </button>
+            <button className="toolbar-dropdown-item" onClick={handleSaveImage}>
+              Save image (.png)
             </button>
           </div>,
           document.body,

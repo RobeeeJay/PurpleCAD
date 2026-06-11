@@ -47,7 +47,13 @@ export function createCamera(
 
 export function createRenderer(container) {
   // stencil: true so the cross-section view can cap cut faces (stencil mask).
-  const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
+  // preserveDrawingBuffer: true so "Save image" can read the canvas after the
+  // frame has been composited (otherwise the buffer may already be cleared).
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    stencil: true,
+    preserveDrawingBuffer: true,
+  });
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   // Compile shadow-aware shaders up-front; the runtime toggle controls

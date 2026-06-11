@@ -5,18 +5,22 @@
 // triangle geometry + standard PBR materials.  So we build a dedicated "render
 // scene": real geometry for every solid (primitives substituted with three.js
 // primitive geometries at the same transform), MeshPhysicalMaterial from each
-// item's material, a ground plane, and a gradient equirect environment for
-// lighting.  The WebGLPathTracer accumulates samples while the camera is still
-// and resets when it moves.  Module-singleton, like the cross-section helpers.
+// item's material, a ground plane, and a procedural studio-lighting equirect
+// environment.  The WebGLPathTracer accumulates samples while the camera is
+// still and resets when it moves, and a denoise pass smooths the result before
+// it hits the canvas.  Module-singleton, like the cross-section helpers.
 
 import * as THREE from "three";
-import { WebGLPathTracer, GradientEquirectTexture } from "three-gpu-pathtracer";
+import { WebGLPathTracer, DenoiseMaterial } from "three-gpu-pathtracer";
+import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
 import { useStore } from "../store";
 import { DEFAULT_MESH_COLOR } from "./theme.js";
+import { buildStudioEnvTexture } from "./pathTraceEnv.js";
 
 let pathTracer = null;
 let renderScene = null;
 let envTexture = null;
+let denoiseQuad = null;
 let activeCamera = null;
 let rafId = null;
 const lastCamMatrix = new THREE.Matrix4();
@@ -147,11 +151,7 @@ export function isPathTracing() {
 // rebuilds from scratch each call (cheap relative to tracing).
 export function enablePathTracer(renderer, camera, { objectsRef, itemsRef }) {
   if (!envTexture) {
-    const grad = new GradientEquirectTexture();
-    grad.topColor.set(0xbfd4ff); // soft sky
-    grad.bottomColor.set(0x2a2a30); // dim ground bounce
-    grad.update();
-    envTexture = grad;
+    envTexture = buildStudioEnvTexture();
   }
 
   disposeRenderScene();
@@ -169,6 +169,18 @@ export function enablePathTracer(renderer, camera, { objectsRef, itemsRef }) {
       pathTracer = new WebGLPathTracer(renderer);
       pathTracer.renderScale = 0.75; // a touch faster; raise to 1 for final
       pathTracer.bounces = 5;
+      // Replace the default canvas blit with the bundled smart-denoise pass —
+      // smooths the still-converging accumulation buffer so early samples
+      // don't look as grainy.
+      denoiseQuad = new FullScreenQuad(new DenoiseMaterial());
+      denoiseQuad.material.sigma = 2;
+      pathTracer.renderToCanvasCallback = (target, r, quad) => {
+        denoiseQuad.material.map = target.texture;
+        const currentAutoClear = r.autoClear;
+        r.autoClear = false;
+        denoiseQuad.render(r);
+        r.autoClear = currentAutoClear;
+      };
     }
     pathTracer.setScene(renderScene, camera);
     activeCamera = camera;
@@ -236,6 +248,11 @@ export function disablePathTracer() {
     rafId = null;
   }
   disposeRenderScene();
+  if (denoiseQuad) {
+    denoiseQuad.material.dispose();
+    denoiseQuad.dispose();
+    denoiseQuad = null;
+  }
   pathTracer = null;
   activeCamera = null;
   useStore.setState({ pathTracerActive: false });
