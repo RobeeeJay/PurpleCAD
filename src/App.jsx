@@ -3,6 +3,12 @@ import Toolbar from "./components/Toolbar";
 import Viewport from "./components/Viewport";
 import TreeView from "./components/TreeView";
 import Timeline from "./components/Timeline";
+import VariablesDialog from "./components/VariablesDialog";
+import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
+import ChamferEditDialog from "./components/ChamferEditDialog";
+import MaterialDialog from "./components/MaterialDialog";
+import SettingsDialog from "./components/SettingsDialog";
+import VersionTag from "./components/VersionTag";
 import "./styles/App.css";
 import { useStore } from "./store";
 
@@ -13,6 +19,14 @@ function App() {
   const redo = useStore((state) => state.redo);
   const undoSketch = useStore((state) => state.undoSketch);
   const redoSketch = useStore((state) => state.redoSketch);
+  const notification = useStore((state) => state.notification);
+  const clearNotification = useStore((state) => state.clearNotification);
+
+  useEffect(() => {
+    if (!notification) return;
+    const t = setTimeout(clearNotification, 4000);
+    return () => clearTimeout(t);
+  }, [notification, clearNotification]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -56,6 +70,34 @@ function App() {
         </div>
         <Viewport />
       </div>
+      <VariablesDialog />
+      <ExtrudeLengthDialog />
+      <ChamferEditDialog />
+      <MaterialDialog />
+      <SettingsDialog />
+      <VersionTag />
+      {notification && (
+        <div
+          style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "rgba(30, 10, 10, 0.92)",
+            color: "#ffaaaa",
+            padding: "12px 20px",
+            borderRadius: 6,
+            fontSize: 13,
+            maxWidth: 340,
+            textAlign: "center",
+            zIndex: 9999,
+            pointerEvents: "none",
+            lineHeight: 1.45,
+          }}
+        >
+          {notification}
+        </div>
+      )}
     </div>
   );
 }

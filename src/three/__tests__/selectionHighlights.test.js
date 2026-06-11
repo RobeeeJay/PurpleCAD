@@ -12,14 +12,39 @@ vi.mock("../../store", () => ({ useStore: () => null }));
 // overlay behaves like a real THREE.Object3D (traversable, disposable,
 // .isLineSegments2 etc.). The other Line2/LineGeometry imports are still
 // mocked because they're only pulled in transitively for unrelated tests.
-vi.mock("three/addons/lines/Line2.js", () => ({ Line2: class { computeLineDistances() {} } }));
-vi.mock("three/addons/lines/LineGeometry.js", () => ({ LineGeometry: class { setPositions() {} } }));
-vi.mock("three/addons/environments/RoomEnvironment.js", () => ({ RoomEnvironment: class { dispose() {} } }));
-vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({ EffectComposer: class { dispose() {} addPass() {} } }));
-vi.mock("three/addons/postprocessing/RenderPass.js", () => ({ RenderPass: class {} }));
-vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({ UnrealBloomPass: class {} }));
-vi.mock("three/addons/postprocessing/OutputPass.js", () => ({ OutputPass: class {} }));
-vi.mock("../objectMaterials.js", () => ({ createMaterial: () => ({ dispose() {} }) }));
+vi.mock("three/addons/lines/Line2.js", () => ({
+  Line2: class {
+    computeLineDistances() {}
+  },
+}));
+vi.mock("three/addons/lines/LineGeometry.js", () => ({
+  LineGeometry: class {
+    setPositions() {}
+  },
+}));
+vi.mock("three/addons/environments/RoomEnvironment.js", () => ({
+  RoomEnvironment: class {
+    dispose() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/EffectComposer.js", () => ({
+  EffectComposer: class {
+    dispose() {}
+    addPass() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/RenderPass.js", () => ({
+  RenderPass: class {},
+}));
+vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({
+  UnrealBloomPass: class {},
+}));
+vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
+  OutputPass: class {},
+}));
+vi.mock("../objectMaterials.js", () => ({
+  createMaterial: () => ({ dispose() {} }),
+}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,9 +100,7 @@ describe("buildSelectionHighlight – face overlay", () => {
     };
     const group = buildSelectionHighlight(mesh, subGeo);
     expect(group).not.toBeNull();
-    const faceMesh = group.children.find(
-      (c) => c.userData.kind === "face",
-    );
+    const faceMesh = group.children.find((c) => c.userData.kind === "face");
     expect(faceMesh).toBeDefined();
     // Top face of a 2×2×2 cube has 2 triangles → 6 vertices.
     expect(faceMesh.geometry.getAttribute("position").count).toBe(6);
@@ -122,6 +145,40 @@ describe("buildSelectionHighlight – face overlay", () => {
     const faceMesh = group.children[0];
     expect(faceMesh.material.depthTest).toBe(false);
     expect(faceMesh.renderOrder).toBeGreaterThan(0);
+  });
+
+  it("BFS-by-centroid: picks the face under the clicked point, not the other coplanar face", () => {
+    // Regression for: "With the previous highlight face fix, that
+    // worked for hover but when selecting it would select the wrong
+    // face."  Two coplanar +Y plateaus on the same mesh — face A at
+    // X∈[0,1], face B at X∈[3,4].  A stored face entry with
+    // `{nx:0, ny:1, nz:0, cx:0.5, cy:1, cz:0.5}` (a point on face A)
+    // must produce an overlay that covers ONLY A.
+    const positions = new Float32Array([
+      // Plateau A at y=1, X∈[0,1], Z∈[0,1].  Two triangles, +Y normal.
+      0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0,
+      // Plateau B at y=1, X∈[3,4], Z∈[0,1].  Disconnected from A.
+      3, 1, 0, 3, 1, 1, 4, 1, 1, 3, 1, 0, 4, 1, 1, 4, 1, 0,
+    ]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial());
+    const subGeo = {
+      faces: [{ nx: 0, ny: 1, nz: 0, cx: 0.5, cy: 1, cz: 0.5 }],
+      edges: [],
+    };
+    const group = buildSelectionHighlight(mesh, subGeo);
+    expect(group).not.toBeNull();
+    const faceMesh = group.children.find((c) => c.userData.kind === "face");
+    expect(faceMesh).toBeDefined();
+    const pos = faceMesh.geometry.getAttribute("position");
+    // Plateau A: 2 triangles → 6 vertices.  If the seed picking
+    // landed on B (X∈[3,4]) the overlay would either come from B or
+    // include both plateaus (12 vertices).
+    expect(pos.count).toBe(6);
+    for (let i = 0; i < pos.count; i++) {
+      expect(pos.getX(i)).toBeLessThanOrEqual(1.0001);
+    }
   });
 
   it("creates one overlay covering all triangles when multiple faces selected", () => {
@@ -246,7 +303,10 @@ describe("buildSelectionHighlight – matches hit mesh transform", () => {
   it("copies scale from the hit mesh", () => {
     const mesh = makeCubeMesh();
     mesh.scale.set(2.5, 2.5, 2.5);
-    const subGeo = { faces: [], edges: [{ ax: 0, ay: 0, az: 0, bx: 1, by: 0, bz: 0 }] };
+    const subGeo = {
+      faces: [],
+      edges: [{ ax: 0, ay: 0, az: 0, bx: 1, by: 0, bz: 0 }],
+    };
     const group = buildSelectionHighlight(mesh, subGeo);
     expect(group.scale.x).toBeCloseTo(2.5);
     expect(group.scale.y).toBeCloseTo(2.5);
@@ -513,7 +573,9 @@ describe("buildSelectionHighlight – primitive item types", () => {
     for (const { type, minVerts } of types) {
       const mesh = makePrimitiveMesh(type);
       const normal =
-        type === "torus" ? { nx: 0, ny: 1, nz: 0 } : { nx: 0.577, ny: 0.577, nz: 0.577 };
+        type === "torus"
+          ? { nx: 0, ny: 1, nz: 0 }
+          : { nx: 0.577, ny: 0.577, nz: 0.577 };
       const group = buildSelectionHighlight(
         mesh,
         { faces: [normal], edges: [] },

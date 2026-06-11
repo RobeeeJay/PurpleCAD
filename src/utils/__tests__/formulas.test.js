@@ -1,0 +1,81 @@
+import { describe, it, expect } from "vitest";
+import { evaluateFormula, variablesToMap } from "../formulas.js";
+
+describe("evaluateFormula", () => {
+  it("evaluates bare numbers", () => {
+    expect(evaluateFormula("0")).toBe(0);
+    expect(evaluateFormula("12.5")).toBe(12.5);
+    expect(evaluateFormula("-3")).toBe(-3);
+    expect(evaluateFormula(7)).toBe(7);
+  });
+
+  it("evaluates basic arithmetic", () => {
+    expect(evaluateFormula("1 + 2")).toBe(3);
+    expect(evaluateFormula("10 - 4")).toBe(6);
+    expect(evaluateFormula("3 * 5")).toBe(15);
+    expect(evaluateFormula("20 / 4")).toBe(5);
+  });
+
+  it("respects operator precedence", () => {
+    expect(evaluateFormula("1 + 2 * 3")).toBe(7);
+    expect(evaluateFormula("(1 + 2) * 3")).toBe(9);
+    expect(evaluateFormula("12 / 4 - 1")).toBe(2);
+    expect(evaluateFormula("2 + 3 * 4 - 5")).toBe(9);
+  });
+
+  it("handles unary minus", () => {
+    expect(evaluateFormula("-5 + 2")).toBe(-3);
+    expect(evaluateFormula("3 * -2")).toBe(-6);
+    expect(evaluateFormula("-(2 + 3)")).toBe(-5);
+  });
+
+  it("resolves variable references", () => {
+    const vars = { width: "10", height: "5" };
+    expect(evaluateFormula("width", vars)).toBe(10);
+    expect(evaluateFormula("width + height", vars)).toBe(15);
+    expect(evaluateFormula("width * 2 + height", vars)).toBe(25);
+  });
+
+  it("resolves nested variable references", () => {
+    const vars = { a: "2", b: "a * 3", c: "b + a" };
+    expect(evaluateFormula("c", vars)).toBe(8);
+    expect(evaluateFormula("c * 2", vars)).toBe(16);
+  });
+
+  it("returns NaN for direct cycles", () => {
+    const vars = { a: "a + 1" };
+    expect(Number.isNaN(evaluateFormula("a", vars))).toBe(true);
+  });
+
+  it("returns NaN for indirect cycles", () => {
+    const vars = { a: "b", b: "c", c: "a" };
+    expect(Number.isNaN(evaluateFormula("a", vars))).toBe(true);
+  });
+
+  it("returns NaN for unknown identifiers", () => {
+    expect(Number.isNaN(evaluateFormula("missing"))).toBe(true);
+    expect(Number.isNaN(evaluateFormula("1 + missing"))).toBe(true);
+  });
+
+  it("returns NaN for syntax errors", () => {
+    expect(Number.isNaN(evaluateFormula("1 +"))).toBe(true);
+    expect(Number.isNaN(evaluateFormula("1 + 2)"))).toBe(true);
+    expect(Number.isNaN(evaluateFormula("(1 + 2"))).toBe(true);
+    expect(Number.isNaN(evaluateFormula("1 2"))).toBe(true);
+  });
+
+  it("accepts Map and array-of-entries inputs", () => {
+    const arr = [
+      { name: "x", formula: "4" },
+      { name: "y", formula: "x + 1" },
+    ];
+    const map = variablesToMap(arr);
+    expect(evaluateFormula("y * 2", map)).toBe(10);
+  });
+
+  it("treats empty / null formulas as NaN", () => {
+    expect(Number.isNaN(evaluateFormula(""))).toBe(true);
+    expect(Number.isNaN(evaluateFormula(null))).toBe(true);
+    expect(Number.isNaN(evaluateFormula(undefined))).toBe(true);
+  });
+});

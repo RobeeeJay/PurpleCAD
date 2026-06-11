@@ -1,4 +1,129 @@
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
+import { resolveConstraintDistance } from "./geometryParams.js";
+// Used by the solver internals (onLine projection + bevel recompute); also
+// re-exported below for consumers that import them from this module.
+import { norm2, projectOntoLine, buildBevelArc } from "./sketchGeometry.js";
+
+// Force-re-solve a sketch's distance constraints when their evaluated
+// values may have changed (e.g. after a variable edit).  For every
+// distance constraint whose current geometry doesn't match the resolved
+// distance, treat pointA as the anchor and move pointB to the correct
+// distance, then propagate through coincident constraints.  Returns the
+// new shapes array; returns `null` if nothing changed.  Pass an explicit
+// `variables` Map when the store's globally-active variables haven't yet
+// been updated (e.g. inside a setVariables set() callback).
+export function resolveDistanceConstraints(
+  inputShapes,
+  constraints,
+  variables = null,
+) {
+  if (!constraints || constraints.length === 0) return null;
+  let shapes = inputShapes.slice();
+  let anyChange = false;
+  const tol = 1e-5;
+  for (const c of constraints) {
+    if (c.type !== "distance") continue;
+    const target = resolveConstraintDistance(c, variables);
+    if (!(target > 0)) continue;
+    const sA = shapes[c.shapeAIdx];
+    const sB = shapes[c.shapeBIdx];
+    if (!sA || !sB) continue;
+    const pA = getShapePoint(sA, c.pointA);
+    const pB = getShapePoint(sB, c.pointB);
+    if (!pA || !pB) continue;
+    const dx = pB.x - pA.x,
+      dy = pB.y - pA.y;
+    const cur = Math.hypot(dx, dy);
+    if (cur < 1e-10) continue;
+    if (Math.abs(cur - target) < tol) continue;
+    const newPt = {
+      x: pA.x + (dx / cur) * target,
+      y: pA.y + (dy / cur) * target,
+    };
+    // Same-shape (line-length / radius): slide pointB endpoint on the
+    // same shape.  Two-shape: move pointB on shapeB.
+    const targetIdx = c.shapeBIdx;
+    const targetKey = c.pointB;
+    const baseShape = shapes[targetIdx];
+    let moved = moveShapePoint(baseShape, targetKey, newPt);
+    if (!moved) continue;
+    if (moved.type === "circle" && targetKey === "center") {
+      moved = { ...moved, r: target };
+    }
+    moved = applyHVEnforcement(moved, targetKey, constraints, targetIdx);
+    // Propagate via enforceConstraints with this as the primary move.
+    const after = enforceConstraints(
+      shapes,
+      constraints,
+      targetIdx,
+      moved,
+      targetKey,
+    );
+    for (const [idx, s] of after) shapes[idx] = s;
+    anyChange = true;
+  }
+  return anyChange ? shapes : null;
+}
+
+// True only if EVERY constraint holds in `shapes` (within tolerance).  Used to
+// validate a proposed transformation: resolve the constraints, then check the
+// result — if any constraint is broken the caller rejects the change rather
+// than committing distorted geometry.
+export function allConstraintsSatisfied(shapes, constraints, variables = null) {
+  const POS_TOL = 1e-3; // scene units
+  const ANG_TOL = 0.05 * (Math.PI / 180); // radians (~0.05°)
+  for (const c of constraints || []) {
+    if (c.type === "coincident") {
+      const a = getShapePoint(shapes[c.shapeAIdx], c.pointA);
+      const b = getShapePoint(shapes[c.shapeBIdx], c.pointB);
+      if (!a || !b || Math.hypot(a.x - b.x, a.y - b.y) > POS_TOL) return false;
+    } else if (c.type === "distance") {
+      const target = resolveConstraintDistance(c, variables);
+      if (!(target > 0)) continue;
+      const a = getShapePoint(shapes[c.shapeAIdx], c.pointA);
+      const b = getShapePoint(shapes[c.shapeBIdx], c.pointB);
+      if (!a || !b) return false;
+      if (Math.abs(Math.hypot(a.x - b.x, a.y - b.y) - target) > POS_TOL)
+        return false;
+    } else if (c.type === "horizontal") {
+      const s = shapes[c.shapeIdx];
+      if (!s || s.type !== "line" || Math.abs(s.y1 - s.y2) > POS_TOL)
+        return false;
+    } else if (c.type === "vertical") {
+      const s = shapes[c.shapeIdx];
+      if (!s || s.type !== "line" || Math.abs(s.x1 - s.x2) > POS_TOL)
+        return false;
+    } else if (c.type === "onLine") {
+      const line = shapes[c.lineShapeIdx];
+      const p = getShapePoint(shapes[c.pointShapeIdx], c.pointKey);
+      if (!line || line.type !== "line" || !p) return false;
+      const dx = line.x2 - line.x1,
+        dy = line.y2 - line.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) return false;
+      // Perpendicular distance to the infinite line.
+      const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
+      if (d > POS_TOL) return false;
+    } else if (c.type === "angle") {
+      const target =
+        typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
+      if (!Number.isFinite(target)) continue;
+      const sA = shapes[c.shapeAIdx],
+        sB = shapes[c.shapeBIdx];
+      if (!sA || sA.type !== "line" || !sB || sB.type !== "line") return false;
+      const P = getShapePoint(sA, c.pointA);
+      const oA = getShapePoint(sA, c.pointA === "start" ? "end" : "start");
+      const oB = getShapePoint(sB, c.pointB === "start" ? "end" : "start");
+      if (!P || !oA || !oB) return false;
+      const fa = Math.atan2(oA.y - P.y, oA.x - P.x);
+      const fb = Math.atan2(oB.y - P.y, oB.x - P.x);
+      let d = Math.abs(fb - fa);
+      while (d > Math.PI) d = Math.abs(d - 2 * Math.PI);
+      if (Math.abs(d - (target * Math.PI) / 180) > ANG_TOL) return false;
+    }
+  }
+  return true;
+}
 
 // All valid endpoint key names across all sketch shape types.
 export const SHAPE_KEYS = [
@@ -43,82 +168,37 @@ export function applyHVEnforcement(shape, movedKey, constraints, shapeIdx) {
   return result;
 }
 
-// Project a 2D point onto the line segment defined by a line shape.
-// t is clamped to [0,1] so the result always lies between the two endpoints.
-export function projectOntoLine(pt, lineShape) {
-  const ABx = lineShape.x2 - lineShape.x1,
-    ABy = lineShape.y2 - lineShape.y1;
-  const len2 = ABx * ABx + ABy * ABy;
-  if (len2 < 1e-10) return { x: lineShape.x1, y: lineShape.y1 };
-  const t = Math.max(
-    0,
-    Math.min(
-      1,
-      ((pt.x - lineShape.x1) * ABx + (pt.y - lineShape.y1) * ABy) / len2,
-    ),
-  );
-  return { x: lineShape.x1 + t * ABx, y: lineShape.y1 + t * ABy };
-}
-
-// Normalize a 2D vector, returning the original if it has near-zero length.
-export function norm2(v) {
-  const l = Math.hypot(v.x, v.y);
-  return l < 1e-10 ? v : { x: v.x / l, y: v.y / l };
-}
-
-// Build the arc geometry for a bevel/fillet between two trimmed lines.
-export function buildBevelArc(P, uA, uB, trimA, trimB) {
-  const toB = { x: trimB.x - trimA.x, y: trimB.y - trimA.y };
-  const pA1 = { x: -uA.y, y: uA.x },
-    pA2 = { x: uA.y, y: -uA.x };
-  const pA = pA1.x * toB.x + pA1.y * toB.y > 0 ? pA1 : pA2;
-  const toA = { x: trimA.x - trimB.x, y: trimA.y - trimB.y };
-  const pB1 = { x: -uB.y, y: uB.x },
-    pB2 = { x: uB.y, y: -uB.x };
-  const pB = pB1.x * toA.x + pB1.y * toA.y > 0 ? pB1 : pB2;
-  const dx = trimB.x - trimA.x,
-    dy = trimB.y - trimA.y;
-  const denom = pA.x * pB.y - pA.y * pB.x;
-  if (Math.abs(denom) < 1e-10) return null;
-  const t = (dx * pB.y - dy * pB.x) / denom;
-  const cx = trimA.x + t * pA.x,
-    cy = trimA.y + t * pA.y;
-  const r = Math.hypot(cx - trimA.x, cy - trimA.y);
-  const startAngle = Math.atan2(trimA.y - cy, trimA.x - cx);
-  const rawEnd = Math.atan2(trimB.y - cy, trimB.x - cx);
-  const ccwSpan = (rawEnd - startAngle + 2 * Math.PI) % (2 * Math.PI);
-  const cwSpan = 2 * Math.PI - ccwSpan;
-  const midCW = startAngle - cwSpan / 2;
-  const midCCW = startAngle + ccwSpan / 2;
-  const dCW = Math.hypot(
-    cx + r * Math.cos(midCW) - P.x,
-    cy + r * Math.sin(midCW) - P.y,
-  );
-  const dCCW = Math.hypot(
-    cx + r * Math.cos(midCCW) - P.x,
-    cy + r * Math.sin(midCCW) - P.y,
-  );
-  const endAngle = dCW < dCCW ? startAngle - cwSpan : startAngle + ccwSpan;
-  return { type: "arc", cx, cy, r, startAngle, endAngle };
-}
+// Pure geometry helpers live in sketchGeometry.js.  Re-export the ones other
+// modules import from here so their import paths stay unchanged.
+export {
+  norm2,
+  projectOntoLine,
+  computeChamfer,
+  chamferConstraints,
+  buildBevelArc,
+} from "./sketchGeometry.js";
 
 // BFS over coincident constraints from startIdx to propagate a newly placed position
-// to all connected shapes not yet in `updated`. Uses per-shape guard — safe for
-// post-enforcement cleanup passes where we just need to keep attached shapes in sync.
+// to all connected shapes.  Uses a local `visited` set (not the global `updated` map)
+// so that shapes already processed by the main BFS can still be re-synchronised here
+// after distance enforcement shifts an endpoint they share.
 function propagateCoincidentFrom(startIdx, shapes, updated, constraints) {
+  const visited = new Set();
   const queue = [startIdx];
   while (queue.length > 0) {
     const idx = queue.shift();
+    if (visited.has(idx)) continue;
+    visited.add(idx);
     const cur = shapes[idx];
     if (!cur) continue;
     for (const c of constraints) {
       if (c.type !== "coincident") continue;
       let oIdx, oKey, tKey;
-      if (c.shapeAIdx === idx && !updated.has(c.shapeBIdx)) {
+      if (c.shapeAIdx === idx && !visited.has(c.shapeBIdx)) {
         oIdx = c.shapeBIdx;
         oKey = c.pointB;
         tKey = c.pointA;
-      } else if (c.shapeBIdx === idx && !updated.has(c.shapeAIdx)) {
+      } else if (c.shapeBIdx === idx && !visited.has(c.shapeAIdx)) {
         oIdx = c.shapeAIdx;
         oKey = c.pointA;
         tKey = c.pointB;
@@ -157,6 +237,20 @@ export function enforceConstraints(
   if (preSeeded) {
     for (const [idx, s] of preSeeded) shapes[idx] = s;
   }
+  // Respect the primary shape's own H/V constraint.  An explicitly-placed
+  // endpoint (e.g. the corner moved to satisfy a distance constraint) can tilt
+  // an H/V-constrained edge; re-level it here, keeping that endpoint fixed, so
+  // the line stays horizontal/vertical and the freed endpoint propagates
+  // through the coincident BFS below.  The drag path already pre-levels, so
+  // this is idempotent there.
+  if (primaryPointKey) {
+    primaryShape = applyHVEnforcement(
+      primaryShape,
+      primaryPointKey,
+      constraints,
+      primaryIdx,
+    );
+  }
   shapes[primaryIdx] = primaryShape;
 
   const updated = preSeeded ? new Map(preSeeded) : new Map();
@@ -182,6 +276,10 @@ export function enforceConstraints(
   } else {
     for (const k of SHAPE_KEYS) placedEP.add(epKey(primaryIdx, k));
   }
+
+  // The drag inputs (primary + pre-seeded shapes) are fixed: the final
+  // reconciliation pass must never move these, or it would undo the drag.
+  const anchored = new Set(placedEP);
 
   // ── Main coincident BFS ──────────────────────────────────────────────────────
   const queue = preSeeded
@@ -274,6 +372,7 @@ export function enforceConstraints(
             const wasInUpdated = updated.has(sOtherIdx);
             shapes[sOtherIdx] = sMoved;
             updated.set(sOtherIdx, sMoved);
+            movedKeys.set(sOtherIdx, sOtherKey);
             placedEP.add(epKey(sOtherIdx, sOtherKey));
             if (!wasInUpdated) queue.push(sOtherIdx);
           }
@@ -307,18 +406,59 @@ export function enforceConstraints(
     propagateCoincidentFrom(c.pointShapeIdx, shapes, updated, constraints);
   }
 
+  // Endpoints a same-shape (line-length) distance constraint pins: moving them
+  // would change a locked length.  Include their coincident partners so a
+  // corner shared with a length-locked side (e.g. a diagonal's end) counts too.
+  // A point-to-point distance then prefers to move its OTHER, un-pinned end —
+  // so dragging a circle pinned to such a corner slides the circle, not the
+  // rigid square it's anchored to.
+  const lengthPinned = new Set();
+  for (const c of constraints) {
+    // Only a LINE's length pins its endpoints.  A circle's same-shape distance
+    // is its radius (centre↔edge) — moving the centre carries the edge along, so
+    // the centre is free, not pinned.  Treating it as pinned wrongly froze the
+    // circle and made its centre↔corner distance unsolvable.
+    if (
+      c.type === "distance" &&
+      c.shapeAIdx === c.shapeBIdx &&
+      shapes[c.shapeAIdx]?.type === "line"
+    ) {
+      lengthPinned.add(epKey(c.shapeAIdx, c.pointA));
+      lengthPinned.add(epKey(c.shapeBIdx, c.pointB));
+    }
+  }
+  let grewPinned = true;
+  while (grewPinned) {
+    grewPinned = false;
+    for (const c of constraints) {
+      if (c.type !== "coincident") continue;
+      const aK = epKey(c.shapeAIdx, c.pointA);
+      const bK = epKey(c.shapeBIdx, c.pointB);
+      if (lengthPinned.has(aK) !== lengthPinned.has(bK)) {
+        lengthPinned.add(aK);
+        lengthPinned.add(bK);
+        grewPinned = true;
+      }
+    }
+  }
+
+  // Points constrained to slide along a line.  In a point-to-point distance the
+  // slider is the flexible side, so it yields (moves) while a rigid corner on
+  // the other end stays put — even when only H/V (not a length) pins that
+  // corner, which lengthPinned alone can't see.
+  const onLinePts = new Set();
+  for (const c of constraints) {
+    if (c.type === "onLine") onLinePts.add(epKey(c.pointShapeIdx, c.pointKey));
+  }
+
   // ── Distance enforcement (up to 4 iterative passes) ─────────────────────────
   for (let pass = 0; pass < 4; pass++) {
     let anyChange = false;
     for (const c of constraints) {
       if (c.type !== "distance") continue;
-      const {
-        shapeAIdx: ai,
-        pointA: pA,
-        shapeBIdx: bi,
-        pointB: pB,
-        distance: d,
-      } = c;
+      const { shapeAIdx: ai, pointA: pA, shapeBIdx: bi, pointB: pB } = c;
+      const d = resolveConstraintDistance(c);
+      if (!(d > 0)) continue;
 
       if (ai === bi) {
         // Same-shape: line-length or radius. The placed endpoint is the anchor;
@@ -368,8 +508,24 @@ export function enforceConstraints(
           dy = posB.y - posA.y;
         const curDist = Math.hypot(dx, dy);
         if (curDist < 1e-10 || Math.abs(curDist - d) < 1e-8) continue;
+        // Default: move the side that wasn't the source of movement.  Prefer to
+        // move an onLine slider (it yields along its line); failing that, never
+        // move a length-pinned endpoint when the other side is free — otherwise
+        // the drag deforms the rigid body the constraint is anchored to.
+        const aEP = epKey(ai, pA),
+          bEP = epKey(bi, pB);
+        const aSlider = onLinePts.has(aEP),
+          bSlider = onLinePts.has(bEP);
+        let moveB = aUp;
+        if (aSlider !== bSlider) {
+          moveB = bSlider;
+        } else if (moveB && lengthPinned.has(bEP) && !lengthPinned.has(aEP)) {
+          moveB = false;
+        } else if (!moveB && lengthPinned.has(aEP) && !lengthPinned.has(bEP)) {
+          moveB = true;
+        }
         let targetIdx, targetKey, newX, newY;
-        if (aUp) {
+        if (moveB) {
           targetIdx = bi;
           targetKey = pB;
           newX = posA.x + (dx / curDist) * d;
@@ -393,6 +549,65 @@ export function enforceConstraints(
       }
     }
     if (!anyChange) break;
+  }
+
+  // ── Angle enforcement ────────────────────────────────────────────────────────
+  // Keep a fixed angle between two straight lines that meet at a shared vertex.
+  // When exactly one of the pair moved, rotate the other about the vertex to
+  // restore the angle (preserving which side it's on).  Both-moved is treated
+  // as a rigid translation, which already preserves the angle, so it's skipped.
+  for (const c of constraints) {
+    if (c.type !== "angle") continue;
+    const target = typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
+    if (!Number.isFinite(target)) continue;
+    const aUp = updated.has(c.shapeAIdx);
+    const bUp = updated.has(c.shapeBIdx);
+    if (aUp === bUp) continue;
+    const fixedIdx = aUp ? c.shapeAIdx : c.shapeBIdx;
+    const fixedKey = aUp ? c.pointA : c.pointB;
+    const rotIdx = aUp ? c.shapeBIdx : c.shapeAIdx;
+    const rotKey = aUp ? c.pointB : c.pointA;
+    const fixedShape = shapes[fixedIdx];
+    const rotShape = shapes[rotIdx];
+    if (
+      !fixedShape ||
+      fixedShape.type !== "line" ||
+      !rotShape ||
+      rotShape.type !== "line"
+    )
+      continue;
+    const P = getShapePoint(fixedShape, fixedKey); // shared vertex
+    const fixedOther = getShapePoint(
+      fixedShape,
+      fixedKey === "start" ? "end" : "start",
+    );
+    const rotOtherKey = rotKey === "start" ? "end" : "start";
+    const rotOther = getShapePoint(rotShape, rotOtherKey);
+    if (!P || !fixedOther || !rotOther) continue;
+    const dirF = { x: fixedOther.x - P.x, y: fixedOther.y - P.y };
+    const dirR = { x: rotOther.x - P.x, y: rotOther.y - P.y };
+    const lenF = Math.hypot(dirF.x, dirF.y);
+    const lenR = Math.hypot(dirR.x, dirR.y);
+    if (lenF < 1e-9 || lenR < 1e-9) continue;
+    const dot = dirF.x * dirR.x + dirF.y * dirR.y;
+    const cross = dirF.x * dirR.y - dirF.y * dirR.x;
+    const signed = Math.atan2(cross, dot); // current signed angle F→R
+    const tgt = (target * Math.PI) / 180;
+    if (Math.abs(Math.abs(signed) - tgt) < 1e-6) continue;
+    const targetSigned = tgt * (signed >= 0 ? 1 : -1);
+    const fx = dirF.x / lenF,
+      fy = dirF.y / lenF;
+    const ca = Math.cos(targetSigned),
+      sa = Math.sin(targetSigned);
+    const ndx = fx * ca - fy * sa,
+      ndy = fx * sa + fy * ca;
+    const newOther = { x: P.x + ndx * lenR, y: P.y + ndy * lenR };
+    let moved = moveShapePoint(rotShape, rotOtherKey, newOther);
+    if (!moved) continue;
+    moved = applyHVEnforcement(moved, rotOtherKey, constraints, rotIdx);
+    shapes[rotIdx] = moved;
+    updated.set(rotIdx, moved);
+    propagateCoincidentFrom(rotIdx, shapes, updated, constraints);
   }
 
   // ── Bevel arc recomputation ──────────────────────────────────────────────────
@@ -441,6 +656,193 @@ export function enforceConstraints(
       shapes[bIdx] = newSB;
       updated.set(bIdx, newSB);
     }
+  }
+
+  // ── Final coincident reconciliation ──────────────────────────────────────────
+  // The main BFS places each endpoint once (placedEP), so a point coincident to
+  // two shapes can be placed from one before the other has settled — e.g. a
+  // rectangle-diagonal corner pinned to BOTH the vertical edge and the
+  // horizontal edge: it follows the vertical edge's X but the horizontal edge's
+  // later Y correction is then blocked, stranding it.  Sweep all coincidents to
+  // a fixed point, moving the less-constrained side (the free follower) onto the
+  // more-constrained one (an H/V- or distance-pinned edge), never the drag
+  // anchors.  No-op when every coincident already holds.
+  const rigidity = new Array(shapes.length).fill(0);
+  for (const c of constraints) {
+    if (c.type === "horizontal" || c.type === "vertical")
+      rigidity[c.shapeIdx]++;
+    else if (c.type === "distance" || c.type === "angle") {
+      rigidity[c.shapeAIdx]++;
+      if (c.shapeBIdx !== c.shapeAIdx) rigidity[c.shapeBIdx]++;
+    }
+  }
+  // An endpoint coincident (transitively) to a drag anchor is itself pinned —
+  // e.g. the diagonal's corner that shares the dragged square corner.  Treat
+  // those as fixed so a distance constraint slides the OTHER (free) endpoint,
+  // rather than the distance pass bailing because both sides look "moved".
+  const effAnchored = new Set(anchored);
+  let grewAnchor = true;
+  while (grewAnchor) {
+    grewAnchor = false;
+    for (const c of constraints) {
+      if (c.type !== "coincident") continue;
+      const aK = epKey(c.shapeAIdx, c.pointA);
+      const bK = epKey(c.shapeBIdx, c.pointB);
+      if (effAnchored.has(aK) !== effAnchored.has(bK)) {
+        effAnchored.add(aK);
+        effAnchored.add(bK);
+        grewAnchor = true;
+      }
+    }
+  }
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = false;
+    for (const c of constraints) {
+      if (c.type !== "coincident") continue;
+      const sa = shapes[c.shapeAIdx];
+      const sb = shapes[c.shapeBIdx];
+      if (!sa || !sb) continue;
+      const pa = getShapePoint(sa, c.pointA);
+      const pb = getShapePoint(sb, c.pointB);
+      if (!pa || !pb) continue;
+      if (Math.hypot(pa.x - pb.x, pa.y - pb.y) < 1e-7) continue;
+      const aAnch = anchored.has(epKey(c.shapeAIdx, c.pointA));
+      const bAnch = anchored.has(epKey(c.shapeBIdx, c.pointB));
+      if (aAnch && bAnch) continue; // both fixed — can't reconcile
+      // Move the less-constrained (or non-anchored) endpoint onto the other.
+      let moveA;
+      if (aAnch) moveA = false;
+      else if (bAnch) moveA = true;
+      else moveA = rigidity[c.shapeAIdx] <= rigidity[c.shapeBIdx];
+      const tgtIdx = moveA ? c.shapeAIdx : c.shapeBIdx;
+      const tgtKey = moveA ? c.pointA : c.pointB;
+      const srcPos = moveA ? pb : pa;
+      let moved = moveShapePoint(shapes[tgtIdx], tgtKey, srcPos);
+      if (!moved) continue;
+      moved = applyHVEnforcement(moved, tgtKey, constraints, tgtIdx);
+      shapes[tgtIdx] = moved;
+      updated.set(tgtIdx, moved);
+      changed = true;
+    }
+    // onLine points (e.g. a circle centre constrained to the diagonal) are
+    // re-projected here too: the standalone onLine pass above runs before the
+    // distance passes settle the line's endpoints, so a point projected onto a
+    // not-yet-final line drifts off it.  Re-projecting in this fixed-point loop
+    // keeps it on the line once everything has settled.
+    for (const c of constraints) {
+      if (c.type !== "onLine") continue;
+      const lineShape = shapes[c.lineShapeIdx];
+      const ptShape = shapes[c.pointShapeIdx];
+      if (!lineShape || lineShape.type !== "line" || !ptShape) continue;
+      const cur = getShapePoint(ptShape, c.pointKey);
+      if (!cur) continue;
+      const proj = projectOntoLine(cur, lineShape);
+      if (Math.hypot(proj.x - cur.x, proj.y - cur.y) < 1e-7) continue;
+      let moved = moveShapePoint(ptShape, c.pointKey, proj);
+      if (!moved) continue;
+      moved = applyHVEnforcement(
+        moved,
+        c.pointKey,
+        constraints,
+        c.pointShapeIdx,
+      );
+      shapes[c.pointShapeIdx] = moved;
+      updated.set(c.pointShapeIdx, moved);
+      changed = true;
+    }
+    // Re-assert two-shape distances after coincident/onLine settle.  The main
+    // distance passes skip when both endpoints look moved (here the diagonal
+    // corner moved via coincident and the onLine circle via projection), so a
+    // circle pinned to the line + a fixed distance from the corner is left at
+    // the wrong distance.  Keep the (effectively) anchored side, slide the
+    // other along the current direction — which, after onLine projection, runs
+    // along the line, so the freed point lands on the line at the right gap.
+    for (const c of constraints) {
+      if (c.type !== "distance" || c.shapeAIdx === c.shapeBIdx) continue;
+      const d = resolveConstraintDistance(c);
+      if (!(d > 0)) continue;
+      const sA = shapes[c.shapeAIdx],
+        sB = shapes[c.shapeBIdx];
+      if (!sA || !sB) continue;
+      const pa = getShapePoint(sA, c.pointA),
+        pb = getShapePoint(sB, c.pointB);
+      if (!pa || !pb) continue;
+      const cur = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+      // Don't bail on cur≈0 here: a point clamped onto its anchor (onLine
+      // projection lands past the segment end) still needs repositioning, and
+      // the line-direction branch below supplies a usable direction.
+      if (Math.abs(cur - d) < 1e-7) continue;
+      // A side is "fixed" if it's a drag anchor (or coincident to one) or a
+      // length-pinned corner — moving it would break a locked length.  Without
+      // the lengthPinned guard a rigidity tie defaults to dragging the diagonal
+      // corner, so dragging the far corner lurched the circle toward it before a
+      // second drag settled it.
+      const aEP = epKey(c.shapeAIdx, c.pointA);
+      const bEP = epKey(c.shapeBIdx, c.pointB);
+      const aSlider = onLinePts.has(aEP);
+      const bSlider = onLinePts.has(bEP);
+      let moveB;
+      if (aSlider !== bSlider) {
+        // Exactly one side slides along a line: move it, hold the rigid side.
+        moveB = bSlider;
+      } else {
+        const aFixed = effAnchored.has(aEP) || lengthPinned.has(aEP);
+        const bFixed = effAnchored.has(bEP) || lengthPinned.has(bEP);
+        if (aFixed && bFixed) continue;
+        if (aFixed) moveB = true;
+        else if (bFixed) moveB = false;
+        else moveB = rigidity[c.shapeBIdx] <= rigidity[c.shapeAIdx];
+      }
+      const anchorPos = moveB ? pa : pb;
+      const movingPos = moveB ? pb : pa;
+      const tgtIdx = moveB ? c.shapeBIdx : c.shapeAIdx;
+      const tgtKey = moveB ? c.pointB : c.pointA;
+      // Direction from the anchor to where the moving point should sit.  When
+      // the moving point is onLine a line whose endpoint IS the anchor, take the
+      // line's direction toward its far end instead of the current offset: a big
+      // rotation can project the point past the anchor, and the offset-derived
+      // direction would then flip it to the wrong side (the "jumps to the far
+      // corner" symptom).  The line direction is unambiguous.
+      let dirX = movingPos.x - anchorPos.x,
+        dirY = movingPos.y - anchorPos.y;
+      const onLineC = constraints.find(
+        (oc) =>
+          oc.type === "onLine" &&
+          oc.pointShapeIdx === tgtIdx &&
+          oc.pointKey === tgtKey,
+      );
+      if (onLineC) {
+        const ln = shapes[onLineC.lineShapeIdx];
+        if (ln && ln.type === "line") {
+          const ls = getShapePoint(ln, "start");
+          const le = getShapePoint(ln, "end");
+          const far =
+            Math.hypot(ls.x - anchorPos.x, ls.y - anchorPos.y) < 1e-6
+              ? le
+              : Math.hypot(le.x - anchorPos.x, le.y - anchorPos.y) < 1e-6
+                ? ls
+                : null;
+          if (far) {
+            dirX = far.x - anchorPos.x;
+            dirY = far.y - anchorPos.y;
+          }
+        }
+      }
+      const dlen = Math.hypot(dirX, dirY);
+      if (dlen < 1e-10) continue;
+      const newPos = {
+        x: anchorPos.x + (dirX / dlen) * d,
+        y: anchorPos.y + (dirY / dlen) * d,
+      };
+      let moved = moveShapePoint(shapes[tgtIdx], tgtKey, newPos);
+      if (!moved) continue;
+      moved = applyHVEnforcement(moved, tgtKey, constraints, tgtIdx);
+      shapes[tgtIdx] = moved;
+      updated.set(tgtIdx, moved);
+      propagateCoincidentFrom(tgtIdx, shapes, updated, constraints);
+      changed = true;
+    }
+    if (!changed) break;
   }
 
   return updated;

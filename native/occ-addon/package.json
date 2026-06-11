@@ -1,0 +1,22 @@
+{
+  "name": "occ-addon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "N-API addon wrapping Open CASCADE Technology for PurpleCAD",
+  "main": "build/Release/occ_addon.node",
+  "scripts": {
+    "build": "cmake-js compile --CDCMAKE_BUILD_TYPE=Release",
+    "build:debug": "cmake-js compile --CDCMAKE_BUILD_TYPE=Debug",
+    "clean": "cmake-js clean",
+    "test": "node test/ping.mjs"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.1"
+  },
+  "devDependencies": {
+    "cmake-js": "^7.3.0"
+  },
+  "cmake-js": {
+    "std": "c++17"
+  }
+}

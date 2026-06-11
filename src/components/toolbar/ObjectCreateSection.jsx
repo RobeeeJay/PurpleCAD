@@ -1,5 +1,6 @@
 import React from "react";
 import { useStore } from "../../store";
+import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
 
 const ObjectCreateSection = () => {
@@ -8,24 +9,44 @@ const ObjectCreateSection = () => {
   const setSketchPlacementMode = useStore((s) => s.setSketchPlacementMode);
   const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
   const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
+  const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
+
+  const hasFaceSelected = (selectedSubGeometry?.faces?.length ?? 0) > 0;
+
+  const handleExtrudeClick = () => {
+    if (extrudeSelectMode) {
+      // Toggling the tool off mid-extrude must also clear the live preview +
+      // selection, not just the mode flag.
+      const cc = useStore.getState()._cameraControls;
+      if (cc?.cancelExtrude) cc.cancelExtrude();
+      else setExtrudeSelectMode(null);
+      return;
+    }
+    // A selected solid face extrudes directly along its normal — no need to
+    // re-pick it in profile-select mode.
+    if (hasFaceSelected) {
+      const started = useStore
+        .getState()
+        ._cameraControls?.extrudeSelectedFace?.();
+      if (started) return;
+    }
+    setExtrudeSelectMode("profile");
+  };
 
   const createItem = (type) => {
-    let maxId = 0;
-    history.forEach((entry) => {
-      if (
-        entry.instruction?.type === "create" &&
-        entry.instruction.item.id > maxId
-      )
-        maxId = entry.instruction.item.id;
-    });
-    const id = maxId + 1;
+    const id = maxItemId(history) + 1;
     const label = type.charAt(0).toUpperCase() + type.slice(1);
+    // Spawn at the current view centre (camera target) so the object appears
+    // where the user is looking; fall back to a sensible default if the
+    // viewport handle isn't ready.
+    const t = useStore.getState()._cameraControls?.getViewTarget?.();
+    const position = t ? { x: t.x, y: t.y, z: t.z } : { x: 0, y: 2, z: 0 };
     addItem({
       id,
       name: `${label} ${id}`,
       type,
       children: [],
-      position: { x: 0, y: 2, z: 0 },
+      position,
       scale: { x: 1, y: 1, z: 1 },
     });
   };
@@ -176,10 +197,12 @@ const ObjectCreateSection = () => {
       </button>
       <button
         className={`toolbar-btn ${extrudeSelectMode ? "active" : ""}`}
-        title="Extrude — click an enclosed sketch region or flat face"
-        onClick={() =>
-          setExtrudeSelectMode(extrudeSelectMode ? null : "profile")
+        title={
+          hasFaceSelected
+            ? "Extrude the selected face along its normal"
+            : "Extrude — click an enclosed sketch region or flat face"
         }
+        onClick={handleExtrudeClick}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <rect

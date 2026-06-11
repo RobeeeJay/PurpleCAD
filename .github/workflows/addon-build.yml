@@ -1,0 +1,78 @@
+name: OCC Addon
+
+on:
+  push:
+    paths:
+      - 'native/occ-addon/**'
+      - '.github/workflows/addon-build.yml'
+  pull_request:
+    paths:
+      - 'native/occ-addon/**'
+      - '.github/workflows/addon-build.yml'
+
+jobs:
+  build:
+    runs-on: macos-14  # arm64 (Apple Silicon) runner
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install cmake + ninja
+        run: brew install cmake ninja
+
+      - name: Cache OCC arm64 build
+        id: cache-occ
+        uses: actions/cache@v4
+        with:
+          path: ~/occ-arm64
+          # Cache key includes OCC version.  Bump the version string to
+          # invalidate and rebuild (takes ~12 min on first run).
+          key: occ-7.9.0-arm64-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Clone OCC source
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch V7_9_0 \
+            https://github.com/Open-Cascade-Technology/OCCT.git /tmp/occt
+
+      - name: Build and install OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        run: |
+          cmake -S /tmp/occt -B /tmp/occt-build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=$HOME/occ-arm64 \
+            -DBUILD_MODULE_FoundationClasses=ON \
+            -DBUILD_MODULE_ModelingData=ON \
+            -DBUILD_MODULE_ModelingAlgorithms=ON \
+            -DBUILD_MODULE_DataExchange=ON \
+            -DBUILD_MODULE_Visualization=OFF \
+            -DBUILD_MODULE_Draw=OFF \
+            -DBUILD_MODULE_ApplicationFramework=OFF \
+            -DBUILD_MODULE_DETools=ON \
+            -DUSE_FREETYPE=OFF \
+            -DUSE_TK=OFF \
+            -DUSE_OPENGL=OFF
+          cmake --build /tmp/occt-build --parallel $(sysctl -n hw.logicalcpu)
+          cmake --install /tmp/occt-build
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build addon
+        run: npm run addon:build
+
+      - name: Test addon
+        run: npm run addon:test
+
+      - name: Upload addon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: occ-addon-arm64
+          path: native/occ-addon/build/Release/occ_addon.node
+          retention-days: 7

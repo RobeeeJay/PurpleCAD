@@ -700,23 +700,23 @@ describe("buildSceneObjects: regular item positioning", () => {
 });
 
 describe("buildSceneObjects: extrude positioning (no rotation)", () => {
-  it("extrude at (0,0,0): mesh.position = (centroid.x, centroid.y, depth/2)", () => {
+  it("extrude at (0,0,0): mesh.position = (centroid.x, centroid.y, 0)", () => {
     const poly = rectPoly(0, 0, 4, 4); // centroid (2,2)
     const depth = 2;
     const mesh = buildAndGetMesh([mkExtrude(1, poly, depth, pos(0, 0, 0))], 1);
     expect(mesh.position.x).toBeCloseTo(2);
     expect(mesh.position.y).toBeCloseTo(2);
-    expect(mesh.position.z).toBeCloseTo(1); // depth/2 = 1
+    expect(mesh.position.z).toBeCloseTo(0); // base sits on sketch plane
   });
 
-  it("extrude at item.position (P): mesh.position = (P.x+cx, P.y+cy, P.z+d/2)", () => {
+  it("extrude at item.position (P): mesh.position = (P.x+cx, P.y+cy, P.z)", () => {
     const poly = rectPoly(0, 0, 4, 4); // centroid (2,2)
     const depth = 2;
     const p = pos(5, 3, 1);
     const mesh = buildAndGetMesh([mkExtrude(1, poly, depth, p)], 1);
     expect(mesh.position.x).toBeCloseTo(5 + 2);
     expect(mesh.position.y).toBeCloseTo(3 + 2);
-    expect(mesh.position.z).toBeCloseTo(1 + 1);
+    expect(mesh.position.z).toBeCloseTo(1);
   });
 
   it("moving item.position shifts mesh.position by exactly the same delta", () => {
@@ -735,16 +735,16 @@ describe("buildSceneObjects: extrude positioning (no rotation)", () => {
     const mesh = buildAndGetMesh([mkExtrude(1, poly, depth, pos(0, 0, 0))], 1);
     expect(mesh.position.x).toBeCloseTo(4);
     expect(mesh.position.y).toBeCloseTo(5);
-    expect(mesh.position.z).toBeCloseTo(2); // depth/2 = 2
+    expect(mesh.position.z).toBeCloseTo(0); // base sits on sketch plane
   });
 
-  it("depth change only affects the Z component of mesh.position", () => {
+  it("depth change does not affect mesh.position (base stays at sketch plane)", () => {
     const poly = rectPoly(0, 0, 4, 4); // centroid (2,2)
     const m1 = buildAndGetMesh([mkExtrude(1, poly, 2, pos(0, 0, 0))], 1);
     const m2 = buildAndGetMesh([mkExtrude(1, poly, 6, pos(0, 0, 0))], 1);
     expect(m1.position.x).toBeCloseTo(m2.position.x);
     expect(m1.position.y).toBeCloseTo(m2.position.y);
-    expect(m2.position.z).toBeCloseTo(3); // depth/2 = 3
+    expect(m2.position.z).toBeCloseTo(0);
   });
 
   it("solid base face is at item.position.z, top face is at item.position.z + depth", () => {
@@ -752,12 +752,10 @@ describe("buildSceneObjects: extrude positioning (no rotation)", () => {
     const depth = 3;
     const pz = 2;
     const mesh = buildAndGetMesh([mkExtrude(1, poly, depth, pos(0, 0, pz))], 1);
-    // Geometry is translated -depth/2 so local Z ∈ [-1.5, 1.5].
-    // mesh.position.z = pz + depth/2 = 3.5
-    // World Z of bottom face = 3.5 - 1.5 = 2 = pz  ✓
-    // World Z of top face    = 3.5 + 1.5 = 5 = pz+depth ✓
-    expect(mesh.position.z - depth / 2).toBeCloseTo(pz);
-    expect(mesh.position.z + depth / 2).toBeCloseTo(pz + depth);
+    // Base at item.position.z = pz; geometry extends from local z=0 to
+    // z=depth so the top face is at pz + depth.
+    expect(mesh.position.z).toBeCloseTo(pz);
+    expect(mesh.position.z + depth).toBeCloseTo(pz + depth);
   });
 
   it("circle extrude: mesh.position.xy ≈ circle centre", () => {
@@ -767,7 +765,7 @@ describe("buildSceneObjects: extrude positioning (no rotation)", () => {
     const mesh = buildAndGetMesh([mkExtrude(1, poly, depth, pos(0, 0, 0))], 1);
     expect(mesh.position.x).toBeCloseTo(3, 1);
     expect(mesh.position.y).toBeCloseTo(5, 1);
-    expect(mesh.position.z).toBeCloseTo(0.5);
+    expect(mesh.position.z).toBeCloseTo(0);
   });
 });
 
@@ -783,10 +781,10 @@ describe("buildSceneObjects: extrude positioning with rotation", () => {
       [mkExtrude(1, poly, depth, pos(0, 0, 0), rot(0, 0, Math.PI / 2))],
       1,
     );
-    // Raw offset = (2,2,1). After Rz(90°): x'=-y=-2, y'=x=2, z'=z=1
+    // Raw offset = (2,2,0).  After Rz(90°): x' = -y = -2, y' = x = 2, z' = 0.
     expect(mesh.position.x).toBeCloseTo(-2);
     expect(mesh.position.y).toBeCloseTo(2);
-    expect(mesh.position.z).toBeCloseTo(1);
+    expect(mesh.position.z).toBeCloseTo(0);
   });
 
   it("90° Z rotation with non-zero item.position: result = rotatedOffset + item.position", () => {
@@ -797,10 +795,10 @@ describe("buildSceneObjects: extrude positioning with rotation", () => {
       [mkExtrude(1, poly, depth, p, rot(0, 0, Math.PI / 2))],
       1,
     );
-    // Rotated offset: (-2, 2, 1)
+    // Rotated offset: (-2, 2, 0)
     expect(mesh.position.x).toBeCloseTo(10 + -2);
     expect(mesh.position.y).toBeCloseTo(5 + 2);
-    expect(mesh.position.z).toBeCloseTo(0 + 1);
+    expect(mesh.position.z).toBeCloseTo(0);
   });
 
   it("180° Z rotation: offset (cx,cy) → (-cx,-cy)", () => {
@@ -812,7 +810,7 @@ describe("buildSceneObjects: extrude positioning with rotation", () => {
     );
     expect(mesh.position.x).toBeCloseTo(-2, 5);
     expect(mesh.position.y).toBeCloseTo(-2, 5);
-    expect(mesh.position.z).toBeCloseTo(1);
+    expect(mesh.position.z).toBeCloseTo(0);
   });
 
   it("zero rotation is identical to no-rotation baseline", () => {
@@ -958,7 +956,7 @@ describe("extrude drag-commit round-trip (no offset drift)", () => {
     expect(mesh.userData.extrudeLocalOffset).toBeDefined();
     expect(mesh.userData.extrudeLocalOffset.x).toBeCloseTo(2); // centroid.x
     expect(mesh.userData.extrudeLocalOffset.y).toBeCloseTo(2); // centroid.y
-    expect(mesh.userData.extrudeLocalOffset.z).toBeCloseTo(1); // depth/2
+    expect(mesh.userData.extrudeLocalOffset.z).toBeCloseTo(0); // base on sketch plane
   });
 
   it("committing raw mesh.position as item.position would double the offset (regression)", () => {

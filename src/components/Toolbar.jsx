@@ -6,12 +6,14 @@ import DocumentSection from "./toolbar/DocumentSection";
 import SketchDrawSection from "./toolbar/SketchDrawSection";
 import ObjectCreateSection from "./toolbar/ObjectCreateSection";
 import SketchModifySection from "./toolbar/SketchModifySection";
-import ExtrudeSection from "./toolbar/ExtrudeSection";
 import CombineSection from "./toolbar/CombineSection";
 import BevelSection from "./toolbar/BevelSection";
+import ModifySection from "./toolbar/ModifySection";
 import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
+import MaterialSection from "./toolbar/MaterialSection";
 import OptionsSection from "./toolbar/OptionsSection";
+import ToolbarSection from "./toolbar/ToolbarSection";
 
 const Toolbar = () => {
   const selectedId = useStore((s) => s.selectedId);
@@ -19,18 +21,24 @@ const Toolbar = () => {
 
   const selectedItem = items.find((i) => i.id === selectedId);
   const isSketchMode = selectedItem?.type === "sketch";
-  const isExtrudeSelected = !isSketchMode && selectedItem?.type === "extrude";
 
   return (
     <div className="toolbar">
       <DocumentSection />
       {isSketchMode ? <SketchDrawSection /> : <ObjectCreateSection />}
       {isSketchMode && <SketchModifySection />}
-      {isExtrudeSelected && <ExtrudeSection />}
-      <CombineSection />
-      <BevelSection />
+      {/* Boolean, chamfer/bevel, and drop-to-ground combined into one
+          object-editing section. */}
+      {!isSketchMode && (
+        <ToolbarSection label="Modify">
+          <CombineSection bare />
+          <BevelSection bare />
+          <ModifySection bare />
+        </ToolbarSection>
+      )}
       <ConstrainSection isSketchMode={isSketchMode} />
       <RenderSection />
+      <MaterialSection />
       <OptionsSection />
     </div>
   );

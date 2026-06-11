@@ -3,6 +3,9 @@ import { getShapePoint, moveShapePoint } from "../sceneObjects.js";
 import {
   enforceConstraints,
   applyHVEnforcement,
+  allConstraintsSatisfied,
+  computeChamfer,
+  chamferConstraints,
 } from "../sketchConstraints.js";
 
 // ── Mock sceneObjects.js ─────────────────────────────────────────────────────
@@ -211,7 +214,57 @@ function makeRectDiag() {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+describe("allConstraintsSatisfied", () => {
+  const ang90 = (ai, bi) => ({
+    type: "angle",
+    shapeAIdx: ai,
+    pointA: "end",
+    shapeBIdx: bi,
+    pointB: "start",
+    angle: 90,
+  });
+  const squareCs = [
+    coin(0, "end", 1, "start"),
+    coin(1, "end", 2, "start"),
+    coin(2, "end", 3, "start"),
+    coin(3, "end", 0, "start"),
+    ang90(0, 1),
+    ang90(1, 2),
+    ang90(2, 3),
+    ang90(3, 0),
+    fixed(0, "start", 0, "end", 2), // top side length 2
+  ];
+
+  it("accepts a clean rectangle that satisfies all constraints", () => {
+    // 2-wide, 1-tall rectangle: right angles, top length 2, corners joined.
+    const shapes = [L(0, 1, 2, 1), L(2, 1, 2, 0), L(2, 0, 0, 0), L(0, 0, 0, 1)];
+    expect(allConstraintsSatisfied(shapes, squareCs)).toBe(true);
+  });
+
+  it("rejects a distorted result that breaks the angle/coincident constraints", () => {
+    // The kind of distortion the resize used to produce (non-right angles).
+    const shapes = [
+      L(0, 1, 2, 1),
+      L(2, 1, 1, 0),
+      L(1, 0, 0.29, 0.71),
+      L(0.29, 0.71, 0, 1),
+    ];
+    expect(allConstraintsSatisfied(shapes, squareCs)).toBe(false);
+  });
+
+  it("rejects when a length constraint is off", () => {
+    const shapes = [
+      L(0, 1, 2.5, 1), // top length 2.5, but constrained to 2
+      L(2.5, 1, 2.5, 0),
+      L(2.5, 0, 0, 0),
+      L(0, 0, 0, 1),
+    ];
+    expect(allConstraintsSatisfied(shapes, squareCs)).toBe(false);
+  });
+});
+
 describe("enforceConstraints", () => {
+  // ══ TWO-LINE JUNCTION ════════════════════════════════════════════════════
   // ══ TWO-LINE JUNCTION ════════════════════════════════════════════════════
 
   describe("two-line junction (L0.end = L1.start)", () => {
@@ -427,6 +480,18 @@ describe("enforceConstraints", () => {
       });
     });
 
+    it("moving a top-edge corner keeps the horizontal top edge level", () => {
+      // Regression: applying a distance constraint that drags a corner of an
+      // H/V-constrained edge used to tilt that edge — the placed-endpoint
+      // primary shape was never re-levelled.  The top stays horizontal now.
+      const { shapes, constraints } = makeRect();
+      constraints.push(hvC(0, "horizontal")); // top edge
+      const result = apply(shapes, constraints, 0, "end", { x: 3, y: 3 });
+      expect(result[0].y1).toBeCloseTo(result[0].y2, 6);
+      expect(result[0].y2).toBeCloseTo(3, 6);
+      assertCoincidesHold(result, constraints);
+    });
+
     it("whole-rectangle translate (preSeeded) preserves all constraints", () => {
       const { shapes, constraints } = makeRect();
       // Translate every shape by (+1, +1)
@@ -454,6 +519,65 @@ describe("enforceConstraints", () => {
         x: expect.closeTo(3),
         y: expect.closeTo(1),
       });
+    });
+
+    it("a square built from 90° angle constraints rotates rigidly", () => {
+      // The rect tool now uses 90° angle constraints (not H/V) so the square can
+      // rotate.  A rigid rotation of all four sides must keep the corners joined
+      // and the side lengths intact (the angles are preserved, not enforced).
+      const shapes = [
+        L(0, 1, 1, 1), // top
+        L(1, 1, 1, 0), // right
+        L(1, 0, 0, 0), // bottom
+        L(0, 0, 0, 1), // left
+      ];
+      const ang90 = (ai, bi) => ({
+        type: "angle",
+        shapeAIdx: ai,
+        pointA: "end",
+        shapeBIdx: bi,
+        pointB: "start",
+        angle: 90,
+      });
+      const constraints = [
+        coin(0, "end", 1, "start"),
+        coin(1, "end", 2, "start"),
+        coin(2, "end", 3, "start"),
+        coin(3, "end", 0, "start"),
+        ang90(0, 1),
+        ang90(1, 2),
+        ang90(2, 3),
+        ang90(3, 0),
+      ];
+      const a = Math.PI / 6,
+        cx = 0.5,
+        cy = 0.5;
+      const rot = (x, y) => ({
+        x: cx + (x - cx) * Math.cos(a) - (y - cy) * Math.sin(a),
+        y: cy + (x - cx) * Math.sin(a) + (y - cy) * Math.cos(a),
+      });
+      const preSeeded = new Map(
+        shapes.map((s, i) => {
+          const p = rot(s.x1, s.y1);
+          const q = rot(s.x2, s.y2);
+          return [i, { type: "line", x1: p.x, y1: p.y, x2: q.x, y2: q.y }];
+        }),
+      );
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preSeeded.get(0),
+        null,
+        preSeeded,
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+      assertCoincidesHold(result, constraints);
+      for (let i = 0; i < 4; i++) {
+        const s = result[i];
+        expect(Math.hypot(s.x2 - s.x1, s.y2 - s.y1)).toBeCloseTo(1, 5);
+      }
     });
   });
 
@@ -623,6 +747,249 @@ describe("enforceConstraints", () => {
         x: expect.closeTo(2),
         y: expect.closeTo(0),
       });
+    });
+
+    it("dragging top edge keeps an onLine circle at its fixed distance from the corner", () => {
+      // Regression: circle centre pinned onLine the diagonal AND a fixed
+      // distance from the diagonal's top-left corner.  Dragging the top edge
+      // moves that corner; the distance pass used to bail (both sides "moved")
+      // and leave the circle at the wrong distance.
+      const { shapes, constraints } = makeRectDiag();
+      shapes.push(C(1, 1, 0.2)); // shape 5: centre on the diagonal midpoint
+      constraints.push(
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 5,
+          pointKey: "center",
+        },
+        fixed(5, "center", 4, "start", Math.SQRT2),
+      );
+      // Drag the whole top edge up by (0, +1): TL→(0,3), TR→(2,3).
+      const newTop = L(0, 3, 2, 3);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        newTop,
+        null,
+        new Map([[0, newTop]]),
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+
+      const ds = pt(result, 4, "start"); // diagonal TL after drag
+      const de = pt(result, 4, "end"); // diagonal BR
+      const cc = pt(result, 5, "center");
+      expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
+      // Centre still collinear with the diagonal (zero cross product).
+      const cross =
+        (cc.x - ds.x) * (de.y - ds.y) - (cc.y - ds.y) * (de.x - ds.x);
+      expect(cross).toBeCloseTo(0, 5);
+      assertCoincidesHold(result, constraints);
+    });
+
+    it("dragging the circle keeps the length-locked square sides put", () => {
+      // Regression: top + left sides length-locked, circle pinned onLine the
+      // diagonal AND a fixed distance from TL.  Dragging the circle used to drag
+      // the (length-pinned) TL corner to satisfy that distance, breaking the
+      // side lengths.  Now it slides the circle back instead; the square holds.
+      const { shapes, constraints } = makeRectDiag();
+      shapes.push(C(1, 1, 0.2)); // shape 5: centre on the diagonal midpoint
+      constraints.push(
+        fixed(0, "start", 0, "end", 2), // top side length
+        fixed(3, "start", 3, "end", 2), // left side length
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 5,
+          pointKey: "center",
+        },
+        fixed(5, "center", 4, "start", Math.SQRT2),
+      );
+      // Drag the circle off the diagonal to a wrong distance.
+      const moved = moveShapePoint(shapes[5], "center", { x: 1.8, y: 0.8 });
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        5,
+        moved,
+        "center",
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+
+      const top = result[0];
+      const left = result[3];
+      expect(Math.hypot(top.x2 - top.x1, top.y2 - top.y1)).toBeCloseTo(2, 5);
+      expect(Math.hypot(left.x2 - left.x1, left.y2 - left.y1)).toBeCloseTo(
+        2,
+        5,
+      );
+      // TL corner held fixed.
+      expect(pt(result, 4, "start")).toMatchObject({
+        x: expect.closeTo(0),
+        y: expect.closeTo(2),
+      });
+      // Circle still its fixed distance from the corner.
+      const ds = pt(result, 4, "start");
+      const cc = pt(result, 5, "center");
+      expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
+    });
+
+    it("dragging the far (BR) corner far around keeps the circle on the BR side", () => {
+      // Regression: a LARGE BR drag swings the diagonal so the old circle
+      // projects PAST the TL corner.  Holding TL was not enough — the distance
+      // step took its direction from that flipped projection and snapped the
+      // circle to the wrong side of TL (the "jumps to the top-left" symptom,
+      // self-correcting on a second drag).  Now the direction comes from the
+      // line itself, so the circle stays between TL and BR in one solve.
+      const { shapes, constraints } = makeRectDiag();
+      shapes.push(C(1, 1, 0.2)); // shape 5
+      constraints.push(
+        fixed(0, "start", 0, "end", 2), // top side length
+        fixed(3, "start", 3, "end", 2), // left side length
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 5,
+          pointKey: "center",
+        },
+        fixed(5, "center", 4, "start", Math.SQRT2),
+      );
+      // Drag BR (right.end) up and across to (1, 4): the diagonal swings so the
+      // old circle at (1,1) projects behind TL.
+      const newRight = moveShapePoint(shapes[1], "end", { x: 1, y: 4 });
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        1,
+        newRight,
+        "end",
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+
+      const ds = pt(result, 4, "start"); // TL
+      const de = pt(result, 4, "end"); // new BR
+      const cc = pt(result, 5, "center");
+      expect(ds).toMatchObject({ x: expect.closeTo(0), y: expect.closeTo(2) });
+      // Side lengths intact.
+      const top = result[0],
+        left = result[3];
+      expect(Math.hypot(top.x2 - top.x1, top.y2 - top.y1)).toBeCloseTo(2, 5);
+      expect(Math.hypot(left.x2 - left.x1, left.y2 - left.y1)).toBeCloseTo(
+        2,
+        5,
+      );
+      // Fixed distance from TL, on the diagonal, and on the BR side (not TL).
+      expect(Math.hypot(cc.x - ds.x, cc.y - ds.y)).toBeCloseTo(Math.SQRT2, 5);
+      const cross =
+        (cc.x - ds.x) * (de.y - ds.y) - (cc.y - ds.y) * (de.x - ds.x);
+      expect(cross).toBeCloseTo(0, 5);
+      const towardBR =
+        (cc.x - ds.x) * (de.x - ds.x) + (cc.y - ds.y) * (de.y - ds.y);
+      expect(towardBR).toBeGreaterThan(0);
+    });
+
+    it("two circles pinned to opposite corners both hold on a corner drag", () => {
+      // Circle 5 is distance d from TL; circle 6 is distance d from BR; both
+      // onLine the diagonal.  Dragging a corner must preserve BOTH distances.
+      const { shapes, constraints } = makeRectDiag();
+      const D = Math.SQRT1_2; // 0.707
+      shapes.push(C(0.5, 1.5, 0.15)); // shape 5 near TL
+      shapes.push(C(1.5, 0.5, 0.15)); // shape 6 near BR
+      constraints.push(
+        fixed(0, "start", 0, "end", 2), // top length
+        fixed(3, "start", 3, "end", 2), // left length
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 5,
+          pointKey: "center",
+        },
+        {
+          type: "onLine",
+          lineShapeIdx: 4,
+          pointShapeIdx: 6,
+          pointKey: "center",
+        },
+        fixed(5, "center", 4, "start", D), // circle 5 ↔ TL
+        fixed(6, "center", 4, "end", D), // circle 6 ↔ BR
+      );
+      const newRight = moveShapePoint(shapes[1], "end", { x: 3, y: 0 });
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        1,
+        newRight,
+        "end",
+      );
+      const result = shapes.slice();
+      for (const [i, s] of updated) result[i] = s;
+
+      const ds = pt(result, 4, "start");
+      const de = pt(result, 4, "end");
+      const c5 = pt(result, 5, "center");
+      const c6 = pt(result, 6, "center");
+      expect(Math.hypot(c5.x - ds.x, c5.y - ds.y)).toBeCloseTo(D, 5);
+      expect(Math.hypot(c6.x - de.x, c6.y - de.y)).toBeCloseTo(D, 5);
+    });
+
+    it("two circles WITH radius + H/V constraints hold on any corner drag", () => {
+      // The real reported case: each circle also has a radius constraint
+      // (centre↔edge, a same-shape distance) and the square has H/V on every
+      // side.  The radius wrongly marked the circle centre as length-pinned, so
+      // circle↔corner was skipped; and a corner pinned only by H/V (BR, no
+      // length) was dragged to satisfy the distance.  Both circles must hold.
+      const D = Math.SQRT1_2;
+      const tlRef = [0, "start"]; // TL via top.start, like the dump
+      const brRef = [1, "end"]; // BR via right.end, like the dump
+      const drags = [
+        ["TR", 0, "end", { x: 2.5, y: 2.4 }],
+        ["BL", 2, "end", { x: -0.5, y: -0.4 }],
+        ["TL", 3, "end", { x: -0.5, y: 2.4 }],
+        ["BR", 1, "end", { x: 2.5, y: -0.4 }],
+      ];
+      for (const [, pi, pk, np] of drags) {
+        const { shapes, constraints } = makeRectDiag();
+        shapes.push(C(0.5, 1.5, 0.15)); // shape 5 near TL
+        shapes.push(C(1.5, 0.5, 0.15)); // shape 6 near BR
+        constraints.push(
+          hvC(0, "horizontal"),
+          hvC(1, "vertical"),
+          hvC(2, "horizontal"),
+          hvC(3, "vertical"),
+          fixed(0, "start", 0, "end", 2), // top length
+          fixed(3, "start", 3, "end", 2), // left length
+          {
+            type: "onLine",
+            lineShapeIdx: 4,
+            pointShapeIdx: 5,
+            pointKey: "center",
+          },
+          {
+            type: "onLine",
+            lineShapeIdx: 4,
+            pointShapeIdx: 6,
+            pointKey: "center",
+          },
+          fixed(5, "center", 5, "edge", 0.15), // circle 5 radius
+          fixed(6, "center", 6, "edge", 0.15), // circle 6 radius
+          fixed(5, "center", tlRef[0], tlRef[1], D), // circle 5 ↔ TL
+          fixed(6, "center", brRef[0], brRef[1], D), // circle 6 ↔ BR
+        );
+        const moved = moveShapePoint(shapes[pi], pk, np);
+        const updated = enforceConstraints(shapes, constraints, pi, moved, pk);
+        const result = shapes.slice();
+        for (const [i, s] of updated) result[i] = s;
+        const tl = pt(result, tlRef[0], tlRef[1]);
+        const br = pt(result, brRef[0], brRef[1]);
+        const c5 = pt(result, 5, "center");
+        const c6 = pt(result, 6, "center");
+        expect(Math.hypot(c5.x - tl.x, c5.y - tl.y)).toBeCloseTo(D, 4);
+        expect(Math.hypot(c6.x - br.x, c6.y - br.y)).toBeCloseTo(D, 4);
+      }
     });
 
     it("whole translate (preSeeded) preserves all coincidents", () => {
@@ -1366,7 +1733,12 @@ describe("enforceConstraints", () => {
 
     it("mixed ordering across a rectangle still solves", () => {
       // Same rectangle but every coincident defined "backwards" from makeRect.
-      const shapes = [L(0, 2, 2, 2), L(2, 2, 2, 0), L(2, 0, 0, 0), L(0, 0, 0, 2)];
+      const shapes = [
+        L(0, 2, 2, 2),
+        L(2, 2, 2, 0),
+        L(2, 0, 0, 0),
+        L(0, 0, 0, 2),
+      ];
       const constraints = [
         coin(0, "start", 3, "end"), // reversed
         coin(1, "start", 0, "end"), // reversed
@@ -1477,10 +1849,11 @@ describe("enforceConstraints", () => {
       const shapes = V.map((_, i) =>
         L(V[i].x, V[i].y, V[(i + 1) % 5].x, V[(i + 1) % 5].y),
       );
-      const constraints = V.map((_, i) =>
-        coin(i, "end", (i + 1) % 5, "start"),
-      );
-      const result = apply(shapes, constraints, 0, "start", { x: -0.5, y: -0.3 });
+      const constraints = V.map((_, i) => coin(i, "end", (i + 1) % 5, "start"));
+      const result = apply(shapes, constraints, 0, "start", {
+        x: -0.5,
+        y: -0.3,
+      });
       assertCoincidesHold(result, constraints);
       // Verify other 4 vertices unchanged: a buggy cycle-walk could drag every
       // vertex in lock-step around the loop.
@@ -1742,6 +2115,329 @@ describe("enforceConstraints", () => {
     });
   });
 
+  // ══ DISTANCE + H/V ON CONSTRAINED RECTANGLE ══════════════════════════════
+  //
+  // Simulates a realistic sketch workflow: 90×60 mm rectangle (9×6 scene
+  // units; MM_PER_UNIT=10) with horizontal/vertical constraints on all
+  // sides, a distance constraint on the top edge (=9) and on the left edge
+  // (=6).  Dragging the TL corner 20 mm left and 20 mm up should keep
+  // right=6 and bottom=9 — the same dimensions as the original rectangle.
+  //
+  // Shapes: 0=top, 1=right, 2=bottom, 3=left (same winding as makeRect)
+  //   TL=(0,6), TR=(9,6), BR=(9,0), BL=(0,0)
+
+  describe("constrained 90×60 rectangle: drag TL keeps right=60mm and bottom=90mm", () => {
+    function makeConstrainedRect() {
+      return {
+        shapes: [
+          L(0, 6, 9, 6), // 0: top   TL→TR
+          L(9, 6, 9, 0), // 1: right TR→BR
+          L(9, 0, 0, 0), // 2: bottom BR→BL
+          L(0, 0, 0, 6), // 3: left  BL→TL
+        ],
+        constraints: [
+          coin(3, "end", 0, "start"), // TL
+          coin(0, "end", 1, "start"), // TR
+          coin(1, "end", 2, "start"), // BR
+          coin(2, "end", 3, "start"), // BL
+          hvC(0, "horizontal"),
+          hvC(1, "vertical"),
+          hvC(2, "horizontal"),
+          hvC(3, "vertical"),
+          fixed(0, "start", 0, "end", 9), // top = 90 mm
+          fixed(3, "start", 3, "end", 6), // left = 60 mm
+        ],
+      };
+    }
+
+    it("drag TL 20 mm left+up: right edge stays 6 units, bottom stays 9 units", () => {
+      const { shapes, constraints } = makeConstrainedRect();
+      // Simulate cameraControls: pre-apply H/V to the dragged shape (top,
+      // primaryIdx=0, "start"=TL), then let enforceConstraints propagate.
+      // 20 mm left/up = 2 scene units each direction.
+      const movedTop = moveShapePoint(shapes[0], "start", { x: -2, y: 8 });
+      const preEnforced = applyHVEnforcement(movedTop, "start", constraints, 0);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preEnforced,
+        "start",
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      // Right edge length must remain 60 mm (6 scene units).
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      // Bottom edge length must remain 90 mm (9 scene units).
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+
+    it("drag BR 20 mm right+down: right edge stays 6 units, bottom stays 9 units", () => {
+      const { shapes, constraints } = makeConstrainedRect();
+      // Drag right.end (BR) from (9,0) to (11,-2). Pre-apply V enforcement
+      // (shape 1 is V-constrained). 20 mm right/down = 2 scene units each.
+      const movedRight = moveShapePoint(shapes[1], "end", { x: 11, y: -2 });
+      const preEnforced = applyHVEnforcement(movedRight, "end", constraints, 1);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        1,
+        preEnforced,
+        "end",
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      // Right edge length must remain 60 mm (6 scene units).
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      // Bottom edge length must remain 90 mm (9 scene units).
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+  });
+
+  // ══ DISTANCE + H/V + DIAGONAL ON CONSTRAINED RECTANGLE ══════════════════
+  //
+  // Same 90×60 mm rectangle as above, extended with a diagonal from TL to BR
+  // (shape 4).  Three coincident constraints anchor the diagonal:
+  //   diag.start = TL  (via left.end)
+  //   diag.end   = BR  (via bottom.start)   -- coin(2,"start",4,"end")
+  //   diag.end   = BR  (via right.end)      -- coin(1,"end",4,"end")
+  //
+  // Both BR constraints are included because buildConstraints in the real app
+  // creates a coincident for every existing coincident point at the snap target,
+  // producing both constraints when snapping to the BR junction.  Having only
+  // the bottom.start path passes tests but leaves assertCoincidesHold blind to
+  // the right.end = diag.end relationship; adding coin(1,"end",4,"end") makes
+  // that relationship explicit so it is verified by the constraint checker.
+
+  describe("constrained 90×60 rectangle with TL→BR diagonal: drag top edge 20mm down", () => {
+    function makeConstrainedRectWithDiag() {
+      return {
+        shapes: [
+          L(0, 6, 9, 6), // 0: top    TL→TR
+          L(9, 6, 9, 0), // 1: right  TR→BR
+          L(9, 0, 0, 0), // 2: bottom BR→BL
+          L(0, 0, 0, 6), // 3: left   BL→TL
+          L(0, 6, 9, 0), // 4: diag   TL→BR
+        ],
+        constraints: [
+          coin(3, "end", 0, "start"), // TL
+          coin(0, "end", 1, "start"), // TR
+          coin(1, "end", 2, "start"), // BR
+          coin(2, "end", 3, "start"), // BL
+          hvC(0, "horizontal"),
+          hvC(1, "vertical"),
+          hvC(2, "horizontal"),
+          hvC(3, "vertical"),
+          fixed(0, "start", 0, "end", 9), // top = 90 mm
+          fixed(3, "start", 3, "end", 6), // left = 60 mm
+          coin(3, "end", 4, "start"), // diag.start = TL (left.end)
+          coin(2, "start", 4, "end"), // diag.end = BR (via bottom.start)
+          coin(1, "end", 4, "end"), // diag.end = BR (via right.end)
+        ],
+      };
+    }
+
+    it("drag top edge down 20 mm: diagonal spans new TL→BR, right stays 6 units, bottom stays 9 units", () => {
+      const { shapes, constraints } = makeConstrainedRectWithDiag();
+      // Drag top.start (TL) from (0,6) to (0,4): 20 mm down = 2 scene units.
+      // Pre-apply H enforcement on top before passing to enforceConstraints.
+      const movedTop = moveShapePoint(shapes[0], "start", { x: 0, y: 4 });
+      const preEnforced = applyHVEnforcement(movedTop, "start", constraints, 0);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preEnforced,
+        "start",
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      // Diagonal must still connect TL to BR after the move.
+      const tl = pt(result, 0, "start");
+      const br = pt(result, 1, "end");
+      expect(pt(result, 4, "start"), "diag start = TL").toMatchObject({
+        x: expect.closeTo(tl.x),
+        y: expect.closeTo(tl.y),
+      });
+      expect(pt(result, 4, "end"), "diag end = BR").toMatchObject({
+        x: expect.closeTo(br.x),
+        y: expect.closeTo(br.y),
+      });
+
+      // Edge lengths must be preserved.
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+
+    it("body-drag top line down 20 mm: diagonal spans new TL→BR, right stays 6 units, bottom stays 9 units", () => {
+      const { shapes, constraints } = makeConstrainedRectWithDiag();
+      // Translate both endpoints of top down 2 units (y: 6→4).
+      // applyHVEnforcement with null key on a horizontal line: y = (4+4)/2 = 4,
+      // so both endpoints stay at y=4 — same as the input, no-op here.
+      const draggedTop = { ...shapes[0], y1: 4, y2: 4 };
+      const preEnforced = applyHVEnforcement(draggedTop, null, constraints, 0);
+      const result = applyBody(shapes, constraints, 0, preEnforced);
+      // Note: this test does NOT use a preSeeded rigid set, so the left shape
+      // is placed only via coincident propagation.  See the preSeeded test below
+      // for the scenario that matches the real app's applySketchDragMove path.
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      // Diagonal must still connect TL to BR after the move.
+      const tl = pt(result, 0, "start");
+      const br = pt(result, 1, "end");
+      expect(pt(result, 4, "start"), "diag start = TL").toMatchObject({
+        x: expect.closeTo(tl.x),
+        y: expect.closeTo(tl.y),
+      });
+      expect(pt(result, 4, "end"), "diag end = BR").toMatchObject({
+        x: expect.closeTo(br.x),
+        y: expect.closeTo(br.y),
+      });
+
+      // Edge lengths must be preserved.
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+
+    it("body-drag top line with rigid-set pre-seeding: diagonal spans new TL→BR", () => {
+      // Matches applySketchDragMove's actual call path.  That function computes
+      // a rigid set of shapes sharing distance constraints, pre-translates them
+      // all by the drag delta, then calls enforceConstraints with preSeeded.
+      // Top (shape 0) and left (shape 3) both carry distance constraints, so
+      // both enter the rigid set and are translated together by dy = -2.
+      //
+      // The bug this test catches: shape 3 (left, pre-seeded) correctly places
+      // bottom.end=(0,-2) via H enforcement.  Shape 1 (right) then places
+      // bottom.start=(9,0) and without the fix, H enforcement uses the new
+      // start as anchor, resetting both y-coords to 0 and wiping out the
+      // already-correct bottom.end.
+      const { shapes, constraints } = makeConstrainedRectWithDiag();
+      const dy = -2; // drag delta: top moves from y=6 to y=4
+      const draggedTop = {
+        ...shapes[0],
+        y1: shapes[0].y1 + dy,
+        y2: shapes[0].y2 + dy,
+      };
+      const draggedLeft = {
+        ...shapes[3],
+        y1: shapes[3].y1 + dy,
+        y2: shapes[3].y2 + dy,
+      };
+      const preTop = applyHVEnforcement(draggedTop, null, constraints, 0);
+      // Left is V-constrained; dy doesn't change x, so H/V is already satisfied.
+      const preSeeded = new Map([
+        [0, preTop],
+        [3, draggedLeft],
+      ]);
+      const updated = enforceConstraints(
+        shapes,
+        constraints,
+        0,
+        preTop,
+        null,
+        preSeeded,
+      );
+      const result = shapes.slice();
+      for (const [idx, s] of updated) result[idx] = s;
+
+      assertCoincidesHold(result, constraints);
+      assertDistancesHold(result, constraints);
+
+      const tl = pt(result, 0, "start");
+      const br = pt(result, 1, "end");
+      expect(pt(result, 4, "start"), "diag start = TL").toMatchObject({
+        x: expect.closeTo(tl.x),
+        y: expect.closeTo(tl.y),
+      });
+      expect(pt(result, 4, "end"), "diag end = BR").toMatchObject({
+        x: expect.closeTo(br.x),
+        y: expect.closeTo(br.y),
+      });
+
+      expect(
+        Math.hypot(
+          pt(result, 1, "end").x - pt(result, 1, "start").x,
+          pt(result, 1, "end").y - pt(result, 1, "start").y,
+        ),
+        "right edge length",
+      ).toBeCloseTo(6);
+
+      expect(
+        Math.hypot(
+          pt(result, 2, "end").x - pt(result, 2, "start").x,
+          pt(result, 2, "end").y - pt(result, 2, "start").y,
+        ),
+        "bottom edge length",
+      ).toBeCloseTo(9);
+    });
+  });
+
   // ── Same-endpoint redundant coincidents (chain forms a clique) ───────────
   describe("redundant coincidents on the same endpoint", () => {
     it("duplicated coincident has no extra effect", () => {
@@ -1768,6 +2464,211 @@ describe("enforceConstraints", () => {
       ];
       const result = apply(shapes, constraints, 0, "end", { x: 1.3, y: -0.2 });
       assertCoincidesHold(result, constraints);
+    });
+  });
+
+  // ── Angle constraint between two straight lines ──────────────────────────
+  describe("angle constraint", () => {
+    const lineAngleDeg = (result, idx) => {
+      const a = pt(result, idx, "start");
+      const b = pt(result, idx, "end");
+      return Math.atan2(b.y - a.y, b.x - a.x);
+    };
+    const betweenDeg = (result, i, j) => {
+      let d = Math.abs(lineAngleDeg(result, i) - lineAngleDeg(result, j));
+      d = (d * 180) / Math.PI;
+      if (d > 180) d = 360 - d;
+      return d;
+    };
+
+    it("rotating one line rotates the other to keep the 90° angle", () => {
+      // L0 +x, L1 +y, sharing the vertex at the origin, locked at 90°.
+      const shapes = [L(0, 0, 2, 0), L(0, 0, 0, 2)];
+      const constraints = [
+        coin(0, "start", 1, "start"),
+        {
+          type: "angle",
+          shapeAIdx: 0,
+          pointA: "start",
+          shapeBIdx: 1,
+          pointB: "start",
+          angle: 90,
+        },
+      ];
+      // Swing L0 to 45°; L1 must rotate to 135° to keep the 90° between them.
+      const result = apply(shapes, constraints, 0, "end", { x: 2, y: 2 });
+      assertCoincidesHold(result, constraints);
+      expect(betweenDeg(result, 0, 1), "angle between lines").toBeCloseTo(90);
+      // L1 keeps its length and stays anchored at the shared vertex.
+      const d1 = {
+        x: pt(result, 1, "end").x - pt(result, 1, "start").x,
+        y: pt(result, 1, "end").y - pt(result, 1, "start").y,
+      };
+      expect(Math.hypot(d1.x, d1.y), "L1 length").toBeCloseTo(2);
+    });
+
+    it("holds a non-right (60°) angle", () => {
+      // L1 starts 60° CCW from L0 (+x). Move L0 to +y; L1 should follow to 150°.
+      const s60 = {
+        x: 2 * Math.cos(Math.PI / 3),
+        y: 2 * Math.sin(Math.PI / 3),
+      };
+      const shapes = [L(0, 0, 2, 0), L(0, 0, s60.x, s60.y)];
+      const constraints = [
+        coin(0, "start", 1, "start"),
+        {
+          type: "angle",
+          shapeAIdx: 0,
+          pointA: "start",
+          shapeBIdx: 1,
+          pointB: "start",
+          angle: 60,
+        },
+      ];
+      const result = apply(shapes, constraints, 0, "end", { x: 0, y: 2 });
+      assertCoincidesHold(result, constraints);
+      expect(betweenDeg(result, 0, 1), "angle between lines").toBeCloseTo(60);
+    });
+  });
+
+  // ── Chamfer (sketch chamfer-modify geometry + resulting constraints) ─────
+  describe("chamfer", () => {
+    // Actual angle (deg) the angle-constraint c describes in `shapes`.
+    const constraintAngle = (shapes, c) => {
+      const P = getShapePoint(shapes[c.shapeAIdx], c.pointA);
+      const oA = getShapePoint(
+        shapes[c.shapeAIdx],
+        c.pointA === "start" ? "end" : "start",
+      );
+      const oB = getShapePoint(
+        shapes[c.shapeBIdx],
+        c.pointB === "start" ? "end" : "start",
+      );
+      let d =
+        Math.abs(
+          Math.atan2(oA.y - P.y, oA.x - P.x) -
+            Math.atan2(oB.y - P.y, oB.x - P.x),
+        ) *
+        (180 / Math.PI);
+      if (d > 180) d = 360 - d;
+      return d;
+    };
+
+    // Right-angle corner at the origin (legA +x, legB +y), chamfered at 0.25.
+    // Returns the post-chamfer fixture exactly as applyModify builds it:
+    // legs trimmed back to the corner, a chamfer line (idx 2), and the
+    // coincident + angle constraints from chamferConstraints.
+    function makeChamferedCorner(dist = 0.25) {
+      const legA = L(0, 0, 2, 0); // corner at start
+      const legB = L(0, 0, 0, 2); // corner at start
+      const geom = computeChamfer(legA, legB, "start", "start", dist);
+      const shapes = [
+        moveShapePoint(legA, "start", geom.trimA),
+        moveShapePoint(legB, "start", geom.trimB),
+        L(geom.trimA.x, geom.trimA.y, geom.trimB.x, geom.trimB.y),
+      ];
+      const constraints = chamferConstraints(2, 0, "start", 1, "start", geom);
+      return { shapes, constraints, geom };
+    }
+
+    it("computeChamfer trims `dist` along each leg from the corner", () => {
+      const geom = computeChamfer(
+        L(0, 0, 2, 0),
+        L(0, 0, 0, 2),
+        "start",
+        "start",
+        0.25,
+      );
+      expect(geom.P.x).toBeCloseTo(0);
+      expect(geom.P.y).toBeCloseTo(0);
+      expect(geom.trimA.x).toBeCloseTo(0.25);
+      expect(geom.trimA.y).toBeCloseTo(0);
+      expect(geom.trimB.x).toBeCloseTo(0);
+      expect(geom.trimB.y).toBeCloseTo(0.25);
+      expect(geom.uA.x).toBeCloseTo(1);
+      expect(geom.uB.y).toBeCloseTo(1);
+    });
+
+    it("computeChamfer handles a non-right (60°) corner and a non-origin vertex", () => {
+      // Corner at (1,1); legA along +x, legB 60° from +x.
+      const legA = L(1, 1, 3, 1); // corner at start
+      const legB = L(
+        1,
+        1,
+        1 + Math.cos(Math.PI / 3) * 2,
+        1 + Math.sin(Math.PI / 3) * 2,
+      );
+      const geom = computeChamfer(legA, legB, "start", "start", 0.5);
+      // trim points sit 0.5 from the corner along each unit leg direction
+      expect(Math.hypot(geom.trimA.x - 1, geom.trimA.y - 1)).toBeCloseTo(0.5);
+      expect(Math.hypot(geom.trimB.x - 1, geom.trimB.y - 1)).toBeCloseTo(0.5);
+      expect(geom.trimA.x).toBeCloseTo(1.5);
+      expect(geom.trimA.y).toBeCloseTo(1);
+      expect(geom.trimB.x).toBeCloseTo(1 + Math.cos(Math.PI / 3) * 0.5);
+      expect(geom.trimB.y).toBeCloseTo(1 + Math.sin(Math.PI / 3) * 0.5);
+    });
+
+    it("chamferConstraints: 2 coincidents joining the chamfer line + 2 angle locks", () => {
+      const geom = computeChamfer(
+        L(0, 0, 2, 0),
+        L(0, 0, 0, 2),
+        "start",
+        "start",
+        0.25,
+      );
+      const cs = chamferConstraints(2, 0, "start", 1, "start", geom);
+      const coincs = cs.filter((c) => c.type === "coincident");
+      const angles = cs.filter((c) => c.type === "angle");
+      expect(coincs).toHaveLength(2);
+      expect(angles).toHaveLength(2);
+      // chamfer line (idx 2) start↔legA.start and end↔legB.start
+      expect(coincs[0]).toMatchObject({
+        shapeAIdx: 2,
+        pointA: "start",
+        shapeBIdx: 0,
+        pointB: "start",
+      });
+      expect(coincs[1]).toMatchObject({
+        shapeAIdx: 2,
+        pointA: "end",
+        shapeBIdx: 1,
+        pointB: "start",
+      });
+      // symmetric 90° corner → chamfer makes 135° with each leg
+      expect(angles[0].angle).toBeCloseTo(135);
+      expect(angles[1].angle).toBeCloseTo(135);
+    });
+
+    it("the built chamfer fixture satisfies its own constraints", () => {
+      const { shapes, constraints } = makeChamferedCorner();
+      assertCoincidesHold(shapes, constraints);
+      // every angle lock matches the actual geometry it was built from
+      for (const c of constraints) {
+        if (c.type !== "angle") continue;
+        expect(constraintAngle(shapes, c)).toBeCloseTo(c.angle);
+      }
+    });
+
+    it("dragging a chamfered leg keeps the chamfer attached and its angle", () => {
+      const { shapes, constraints } = makeChamferedCorner();
+      // swing legA's far end; the corner endpoint (and chamfer.start) stays put
+      const result = apply(shapes, constraints, 0, "end", { x: 2.5, y: 0.6 });
+      // chamfer line stays joined to both legs
+      assertCoincidesHold(result, constraints);
+      // the chamfer↔legA angle (the dragged side) is restored to 135°
+      const angA = constraints.find(
+        (c) => c.type === "angle" && c.shapeBIdx === 0,
+      );
+      expect(constraintAngle(result, angA), "chamfer↔legA angle").toBeCloseTo(
+        angA.angle,
+      );
+      // the chamfer line keeps its length (it rotates about the corner)
+      const cLen = (s) =>
+        Math.hypot(
+          pt(s, 2, "end").x - pt(s, 2, "start").x,
+          pt(s, 2, "end").y - pt(s, 2, "start").y,
+        );
+      expect(cLen(result)).toBeCloseTo(cLen(shapes));
     });
   });
 });

@@ -1,0 +1,54 @@
+// Pure helpers for the transform-handle rotation drag — kept out of
+// cameraControls.js so the sign convention per axis is unit-testable
+// without driving the full canvas event pipeline.
+
+import * as THREE from "three";
+
+// Mouse-drag sign per axis.  Horizontal drag (dxPx > 0) feels like
+// "rotate clockwise from above / from the object's natural viewing
+// direction" for every axis — but the raw right-hand-rule sign about
+// each world axis isn't the same, so we negate selectively.
+//
+// Drag right (dxPx > 0) should rotate each handle the way the user expects.
+// Z: dxPx > 0 → negative angle about +Z (CW looking down +Z).
+// X / Y: dxPx > 0 → positive angle about the +axis.  X was previously negated
+//        like Z, but that rotated the object the opposite way the user dragged
+//        ("X rotation inverted"); Y was fixed earlier for the same reason.
+export function rotationSignForHandle(handleType) {
+  if (handleType === "rotZ") return -1;
+  return 1;
+}
+
+export function rotationAxisForHandle(handleType) {
+  if (handleType === "rotX") return new THREE.Vector3(1, 0, 0);
+  if (handleType === "rotY") return new THREE.Vector3(0, 1, 0);
+  if (handleType === "rotZ") return new THREE.Vector3(0, 0, 1);
+  return null;
+}
+
+export const ROTATION_PIXELS_TO_RADIANS = 0.01;
+
+// snapRad > 0 snaps the drag's rotation increment to the nearest multiple
+// (the snap-to-grid angle), so the object rotates in fixed steps.
+export function rotationDeltaFromDrag(handleType, dxPx, snapRad = 0) {
+  const sign = rotationSignForHandle(handleType);
+  const raw = sign * dxPx * ROTATION_PIXELS_TO_RADIANS;
+  return snapRad > 0 ? Math.round(raw / snapRad) * snapRad : raw;
+}
+
+// Compose a new world quaternion for the dragged mesh: the delta
+// rotation about the handle's world axis premultiplied with the
+// orientation captured when the drag began.  Returns null for an
+// unknown handle.
+export function rotationQuaternionForDrag(
+  handleType,
+  startQuat,
+  dxPx,
+  snapRad = 0,
+) {
+  const axis = rotationAxisForHandle(handleType);
+  if (!axis) return null;
+  const delta = rotationDeltaFromDrag(handleType, dxPx, snapRad);
+  const dq = new THREE.Quaternion().setFromAxisAngle(axis, delta);
+  return new THREE.Quaternion().copy(startQuat).premultiply(dq);
+}

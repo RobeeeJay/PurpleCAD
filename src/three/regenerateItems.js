@@ -1,91 +1,166 @@
 import * as THREE from "three";
-import { buildItemGeometry, buildBrushTransform, performCsg } from "./csgUtils.js";
-import { applyBevelToSubGeometry } from "./bevelUtils.js";
+import {
+  buildBrushTransform,
+  withLivePolygons,
+  withLiveDepth,
+  remapExtrudeFaceSelections,
+} from "./csgUtils.js";
+// Routed through occClient → the OCC worker.  This file is no longer
+// imported from the store (the orchestrator in regenerateOrchestrator.js
+// is what Viewport pulls in), so it's outside the worker's transitive
+// graph and the previous cycle no longer applies.
+import { chamferOrFilletItem, performCsg } from "./occClient.js";
 
-// Items that came from CSG / bevel operations store a `regenerator` field
-// describing how to re-run the operation.  This lets us recompute their
-// geometry whenever the user toggles the resolution setting — so primitives
-// (sphere / cylinder / torus) baked into a boolean or bevel at preview
-// resolution can be refreshed to print quality and back without redoing the
-// edit.
+// Items that came from CSG or chamfer operations store a `regenerator`
+// field describing how to re-run the operation.  This lets us recompute
+// their geometry whenever the user toggles the resolution setting — so
+// primitives (sphere/cylinder/torus) baked into a boolean or chamfer at
+// preview resolution can be refreshed to print quality and back without
+// redoing the edit.
 //
 // Shape of the regenerator field:
 //   • Boolean op:  { kind: "boolean", op: "union"|..., inputIds: [a, b, …] }
-//   • Bevel:       { kind: "bevel",   source: {...preBevelItem},
-//                    subGeo, amount, segments }
+//   • Chamfer:     { kind: "chamfer", source: {...preChamferItem},
+//                    subGeo: { edges, faces }, amount, segments }
+//   • (Legacy "bevel" entries from before the OCC migration are ignored —
+//     callers should regenerate the item via the new chamfer flow.)
 //
-// We also stamp `regeneratedAt` (a value matching printPrecision) on the
-// regenerator so we can skip work when the setting hasn't actually changed.
+// Regeneration is async because both branches go through occClient, which
+// posts to the OCC Web Worker in the browser and runs in-process in node.
 
-// Bevel result → centred geometryData + world position, mirroring
-// BevelSection.jsx so a regenerated bevel produces an identical item.
-function regenerateBevel(regenerator, printPrecision) {
-  const sourceGeo = buildItemGeometry(regenerator.source, { printPrecision });
-  if (!sourceGeo) return null;
-  const result = applyBevelToSubGeometry(
-    sourceGeo,
-    regenerator.subGeo,
-    regenerator.amount,
-    regenerator.segments,
+async function regenerateChamfer(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+  currentDepth,
+) {
+  const rawSubGeo = regenerator.subGeo || { edges: [], faces: [] };
+  if (
+    (rawSubGeo.edges?.length || 0) === 0 &&
+    (rawSubGeo.faces?.length || 0) === 0
+  )
+    return null;
+  // In Electron the OCC bridge can't re-derive an extrude's profile from its
+  // sketch, so it builds whatever polygon2D each item carries.  When the
+  // chamfer's source is a union/boolean, its extrude inputs are looked up by id
+  // in `allItems` on the bridge — so pre-bake the live polygon into EVERY item,
+  // not just the source, or the union rebuilds at the OLD sketch size and the
+  // chamfer stays stale after a dimension change. (occOps re-derives in-process,
+  // which is why this only bit the packaged app.)
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
   );
-  if (!result) return null;
-  const posAttr = result.getAttribute("position");
-  const normAttr = result.getAttribute("normal");
-  const idxAttr = result.index;
-
-  const bbox = new THREE.Box3().setFromBufferAttribute(posAttr);
-  const localCentre = new THREE.Vector3();
-  bbox.getCenter(localCentre);
-  for (let i = 0; i < posAttr.count; i++) {
-    posAttr.setXYZ(
-      i,
-      posAttr.getX(i) - localCentre.x,
-      posAttr.getY(i) - localCentre.y,
-      posAttr.getZ(i) - localCentre.z,
+  const source = withLivePolygons(
+    withLiveDepth(regenerator.source, currentDepth),
+    liveItems,
+    printPrecision,
+  );
+  // A sketch edit moves the polygon edges a side-face chamfer was bound to —
+  // re-point the face selections at the live edges so OCC can still find them.
+  const subGeo = remapExtrudeFaceSelections(
+    rawSubGeo,
+    regenerator.source,
+    source,
+  );
+  // A no-match throws inside chamferOrFilletItem; swallow it so one
+  // un-resolvable chamfer keeps its last-good geometry instead of aborting the
+  // whole timeline recalc (which left every downstream step stale).
+  let result;
+  try {
+    result = await chamferOrFilletItem({
+      source,
+      subGeo,
+      amount: regenerator.amount ?? 0.05,
+      angleRad: regenerator.angleRad ?? null,
+      segments: regenerator.segments,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Chamfer/fillet regen couldn't re-match its selection (${err.message}); keeping previous geometry.`,
     );
+    return null;
   }
-  posAttr.needsUpdate = true;
-
-  const brushPos = buildBrushTransform(regenerator.source).position;
-  const rot = regenerator.source.rotation || { x: 0, y: 0, z: 0 };
-  localCentre.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-
+  if (!result) return null;
+  // Keep the item's existing position.  The re-tessellated geometry is centred
+  // on its own bbox (centerOffset), so the rendered centre is item.position
+  // regardless of precision — and that's exactly where the user already sees
+  // (and may have gizmo-rotated) the object.  Recomputing the position from the
+  // source's brush transform moves it: the source rotation no longer matches
+  // the item's once the bevelled object has been rotated independently.  Only
+  // the mesh density should change on a resolution toggle.
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
   return {
-    position: {
-      x: brushPos.x + localCentre.x,
-      y: brushPos.y + localCentre.y,
-      z: brushPos.z + localCentre.z,
-    },
-    geometryData: {
-      positions: Array.from(posAttr.array),
-      normals: normAttr ? Array.from(normAttr.array) : null,
-      indices: idxAttr ? Array.from(idxAttr.array) : null,
-    },
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
   };
 }
 
-function regenerateBoolean(regenerator, accumulatedItems, printPrecision) {
-  // Inputs are looked up in the ALREADY-regenerated `accumulatedItems`, so a
-  // boolean of two CSG inputs picks up their refreshed geometry too.
-  const inputs = regenerator.inputIds
+async function regenerateBoolean(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+) {
+  const inputs = (regenerator.inputIds || [])
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean);
-  if (inputs.length < 2) return null;
-  return performCsg(inputs, regenerator.op, { printPrecision });
+  // 0 inputs → nothing to rebuild (keep last geometry).  1 input is valid: a
+  // multi-area union reduced to a single region fuses to just that prism, so
+  // the dropped region's geometry actually disappears instead of lingering.
+  if (inputs.length < 1) return null;
+  // Rebuild each input from its live (current-precision) polygon so the OCC
+  // shapes match the positions the chamfer regen just stamped — otherwise a
+  // chamfered-extrude input goes in with a coarse-polygon shape but a
+  // fine-polygon position and the boolean result jumps on a resolution toggle.
+  const liveInputs = inputs.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  return performCsg({
+    selectedItems: liveInputs,
+    operation: regenerator.op,
+    printPrecision,
+    allItems: accumulatedItems,
+  });
 }
 
-// Walks items in order (which is dependency-safe because new items reference
-// only earlier ids in this codebase), regenerating any with a `regenerator`
-// at the requested precision.  Items without a regenerator pass through
-// untouched.  An item whose `regenerator.regeneratedAt === printPrecision` is
-// skipped — its cached geometryData is already current.
-//
-// Returns the new items array (a fresh top-level reference if anything
-// changed, the original array if nothing did).
-export function regenerateItemsForResolution(items, printPrecision) {
+// `onProgress({ current, total })` fires after each item that ACTUALLY
+// needed regeneration completes — used by the orchestrator to drive the
+// busy-indicator's timeline-recalculation progress bar.  Items that
+// skip the regen path (no regenerator, or already at the requested
+// precision) are NOT counted: there's nothing to wait for there.
+export async function regenerateItemsForResolution(
+  items,
+  printPrecision,
+  onProgress = null,
+) {
   if (!items || items.length === 0) return items;
+  const total = items.reduce((n, item) => {
+    const r = item.regenerator;
+    if (!r) return n;
+    if (r.regeneratedAt === printPrecision && item.geometryData) return n;
+    return n + 1;
+  }, 0);
+  if (onProgress) onProgress({ current: 0, total });
+  let progressed = 0;
   const out = [];
   let changed = false;
+  // Sequential: each iteration can depend on earlier results in `out`
+  // (e.g. a boolean whose inputIds reference items we just regenerated).
   for (const item of items) {
     const r = item.regenerator;
     if (!r) {
@@ -93,26 +168,61 @@ export function regenerateItemsForResolution(items, printPrecision) {
       continue;
     }
     if (r.regeneratedAt === printPrecision && item.geometryData) {
-      // Cache hit — geometry is already at the right resolution.
       out.push(item);
       continue;
     }
     let result = null;
-    if (r.kind === "bevel") {
-      result = regenerateBevel(r, printPrecision);
+    if (r.kind === "chamfer") {
+      result = await regenerateChamfer(
+        r,
+        out,
+        printPrecision,
+        item.position,
+        item.depth,
+      );
     } else if (r.kind === "boolean") {
-      result = regenerateBoolean(r, out, printPrecision);
+      result = await regenerateBoolean(r, out, printPrecision);
     }
+    progressed += 1;
+    if (onProgress) onProgress({ current: progressed, total });
     if (!result) {
-      out.push(item);
+      // A chamfer/fillet that was asked to rebuild but produced nothing — the
+      // selection couldn't be re-matched or OCC rejected it after the geometry
+      // changed.  Keep its last-good mesh but flag it so the timeline marks the
+      // step bad until the user retargets / re-applies it.  Stop re-attempting
+      // (settle regeneratedAt) so a clean pass doesn't spam OCC every recalc.
+      if (r.kind === "chamfer") {
+        changed = true;
+        out.push({
+          ...item,
+          regenerator: {
+            ...r,
+            regeneratedAt: printPrecision,
+            regenFailed: true,
+          },
+        });
+      } else {
+        out.push(item);
+      }
       continue;
     }
     changed = true;
+    // Carry the freshly-computed centerOffset back onto the chamfer
+    // regenerator so buildItemShapeLocal stays in sync with the bbox
+    // a re-tessellation just produced.  Clear any prior failure flag.
+    const nextRegen = {
+      ...r,
+      regeneratedAt: printPrecision,
+      regenFailed: false,
+    };
+    if (r.kind === "chamfer" && result.centerOffset) {
+      nextRegen.centerOffset = result.centerOffset;
+    }
     out.push({
       ...item,
       position: result.position,
       geometryData: result.geometryData,
-      regenerator: { ...r, regeneratedAt: printPrecision },
+      regenerator: nextRegen,
     });
   }
   return changed ? out : items;

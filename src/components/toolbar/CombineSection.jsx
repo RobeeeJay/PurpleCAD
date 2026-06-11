@@ -1,14 +1,14 @@
 import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
-import { performCsg } from "../../three/csgUtils.js";
+import { performCsg } from "../../three/occClient.js";
 
-const CombineSection = () => {
+const CombineSection = ({ bare = false }) => {
   const selectedIds = useStore((s) => s.selectedIds);
   const items = useStore((s) => s.items);
   const history = useStore((s) => s.history);
   const addItem = useStore((s) => s.addItem);
-  const setItemsHidden = useStore((s) => s.setItemsHidden);
+  const consumeItems = useStore((s) => s.consumeItems);
   const curveResolution = useStore((s) => s.curveResolution);
 
   // Non-sketch items from the current selection.
@@ -19,7 +19,7 @@ const CombineSection = () => {
   // Require 2+ selected non-sketch items.
   const canCsg = selectedEligible.length >= 2;
 
-  const handleCsg = (operation) => {
+  const handleCsg = async (operation) => {
     if (!canCsg) return;
     const selectedItems = selectedEligible;
 
@@ -27,7 +27,12 @@ const CombineSection = () => {
       // Tessellate primitives at the high-resolution setting so the CSG
       // result inherits the chord-deviation precision the user selected.
       const printPrecision = curveResolution === "print" ? 0.01 : null;
-      const result = performCsg(selectedItems, operation, { printPrecision });
+      const result = await performCsg({
+        selectedItems,
+        operation,
+        printPrecision,
+        allItems: items,
+      });
       if (!result) {
         // Fewer than two items produced usable geometry (e.g. all were sketches
         // or extrudes without a valid profile).  Nothing to combine.
@@ -62,18 +67,22 @@ const CombineSection = () => {
           kind: "boolean",
           op: operation,
           inputIds: selectedItems.map((i) => i.id),
+          originalCenter: result.position,
           regeneratedAt: printPrecision,
         },
       });
-      setItemsHidden(selectedItems.map((i) => i.id));
+      // Hide the boolean's inputs from this step onward so a timeline
+      // replay doesn't resurrect both the inputs and the result, leaving
+      // overlapping geometry.
+      consumeItems(selectedItems.map((i) => i.id));
     } catch (err) {
       console.error("CSG operation failed:", err);
       alert("Boolean operation failed: " + err.message);
     }
   };
 
-  return (
-    <ToolbarSection label="Boolean">
+  const body = (
+    <>
       <button
         className="toolbar-btn"
         title="Union"
@@ -151,8 +160,9 @@ const CombineSection = () => {
           <path d="M 11 9 Q 13 12 11 15" fill="currentColor" />
         </svg>
       </button>
-    </ToolbarSection>
+    </>
   );
+  return bare ? body : <ToolbarSection label="Boolean">{body}</ToolbarSection>;
 };
 
 export default CombineSection;

@@ -1,0 +1,195 @@
+.variables-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(var(--black-rgb), 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+}
+
+.variables-dialog {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  min-width: 560px;
+  max-width: 80vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(var(--black-rgb), 0.4);
+}
+
+.variables-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.variables-dialog-header h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.variables-dialog-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-3xl);
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.variables-dialog-close:hover {
+  color: var(--text-primary);
+}
+
+.variables-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-base);
+  overflow-y: auto;
+}
+
+.variables-table thead th {
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+}
+
+.variables-table td {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.variables-table td:nth-child(1) {
+  width: 30%;
+}
+.variables-table td:nth-child(2) {
+  width: 45%;
+}
+.variables-table td:nth-child(3) {
+  width: 20%;
+}
+.variables-table td:nth-child(4) {
+  width: 5%;
+}
+
+.variables-table input {
+  width: 100%;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
+  box-sizing: border-box;
+}
+
+.variables-table input:focus {
+  outline: none;
+  border-color: var(--selected-bg);
+}
+
+.variables-table input.invalid {
+  border-color: var(--color-danger-light);
+}
+
+.variables-value {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.variables-value.invalid {
+  color: var(--color-danger-light);
+}
+
+.variables-row-remove {
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-lg);
+  line-height: 1;
+  border-radius: 3px;
+}
+
+.variables-row-remove:hover {
+  color: var(--color-danger-light);
+  background-color: var(--bg-tertiary);
+}
+
+.variables-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.variables-add-row {
+  background: none;
+  border: 1px dashed var(--border-color);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: var(--font-size-base);
+}
+
+.variables-add-row:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.variables-dialog-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.variables-btn {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 5px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: var(--font-size-base);
+}
+
+.variables-btn:hover {
+  background-color: var(--bg-secondary);
+}
+
+.variables-btn.primary {
+  background-color: var(--selected-bg);
+  color: var(--color-white);
+  border-color: var(--selected-bg);
+}
+
+.variables-btn.primary:hover {
+  filter: brightness(1.1);
+}
+
+.variables-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}

@@ -1,0 +1,53 @@
+.busy-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(var(--black-rgb), 0.55);
+  color: var(--color-white);
+  border-radius: 10px;
+  padding: 18px 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 10px 30px rgba(var(--black-rgb), 0.4);
+  font-size: var(--font-size-md);
+  z-index: 100;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.busy-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(var(--white-rgb), 0.25);
+  border-top-color: var(--color-white);
+  border-radius: 50%;
+  animation: busy-spin 0.9s linear infinite;
+}
+
+.busy-label {
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.04em;
+}
+
+@keyframes busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.busy-progress {
+  width: 200px;
+  height: 6px;
+  background-color: rgba(var(--white-rgb), 0.18);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.busy-progress-fill {
+  height: 100%;
+  background-color: var(--color-white);
+  transition: width 120ms ease-out;
+}

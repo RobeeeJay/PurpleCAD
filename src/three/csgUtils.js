@@ -1,107 +1,26 @@
 import * as THREE from "three";
 import {
-  Evaluator,
-  Brush,
-  ADDITION,
-  SUBTRACTION,
-  INTERSECTION,
-} from "three-bvh-csg";
-import { polyCentroid, fullCircleSegments } from "./sceneObjects.js";
+  polyContainsPoint,
+  polyCentroid,
+  polyArea,
+} from "./sceneObjects/polygonUtil.js";
+import {
+  findClosedLoops,
+  groupLoopsWithHoles,
+  withWinding,
+} from "./sceneObjects/closedLoops.js";
 
-// Builds the THREE.BufferGeometry for a given item, or returns null if the
-// item type does not produce solid geometry (e.g. sketches).
-//
-// `options.printPrecision` (mm) lets the caller request high-resolution
-// geometry for primitives (sphere / cylinder / torus).  When omitted or
-// null, primitives use the default 32-segment count for preview-quality.
-export function buildItemGeometry(item, options = {}) {
-  const precision = options.printPrecision ?? null;
-  switch (item.type) {
-    case "cube":
-      return new THREE.BoxGeometry(2, 2, 2);
-    case "sphere": {
-      const widthSegs = fullCircleSegments(1.5, precision, 32);
-      // Height segments are 1 full great-circle (radius = 1.5), so use the
-      // same formula but at half the count (half-arc, pole-to-pole).
-      const heightSegs = Math.max(8, Math.round(widthSegs / 2));
-      return new THREE.SphereGeometry(1.5, widthSegs, heightSegs);
-    }
-    case "cylinder": {
-      const segs = fullCircleSegments(1, precision, 32);
-      return new THREE.CylinderGeometry(1, 1, 2, segs);
-    }
-    case "torus": {
-      // Main ring radius = 1.0, tube radius = 0.4.  Each circle's segment
-      // count is sized to its own radius so the chord deviation matches.
-      const tubularSegs = fullCircleSegments(1.0, precision, 32);
-      const radialSegs = fullCircleSegments(0.4, precision, 16);
-      return new THREE.TorusGeometry(1.0, 0.4, radialSegs, tubularSegs);
-    }
-
-    case "extrude": {
-      const poly = item.profile?.polygon2D;
-      if (!poly || poly.length < 3) return null;
-      const holes = item.profile.holes || [];
-      const depth = item.depth ?? 1.0;
-      const c = polyCentroid(poly);
-      const shape = new THREE.Shape(
-        poly.map((p) => new THREE.Vector2(p.x - c.x, p.y - c.y)),
-      );
-      holes.forEach((h) =>
-        shape.holes.push(
-          new THREE.Path(h.map((p) => new THREE.Vector2(p.x - c.x, p.y - c.y))),
-        ),
-      );
-      const geo = new THREE.ExtrudeGeometry(shape, {
-        depth,
-        bevelEnabled: false,
-      });
-      // Centre along the extrusion axis to match buildSceneObjects behaviour.
-      geo.translate(0, 0, -depth / 2);
-      return geo;
-    }
-
-    case "csg": {
-      if (!item.geometryData) return null;
-      const { positions, normals, indices } = item.geometryData;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute(
-        "position",
-        new THREE.BufferAttribute(new Float32Array(positions), 3),
-      );
-      if (normals)
-        geo.setAttribute(
-          "normal",
-          new THREE.BufferAttribute(new Float32Array(normals), 3),
-        );
-      if (indices)
-        geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
-      if (!normals) geo.computeVertexNormals();
-      return geo;
-    }
-
-    default:
-      return null;
-  }
-}
-
-// Returns the world-space transform {position, rotation, scale} to use when
-// placing the CSG Brush for the given item.
-//
-// For most item types item.position IS the mesh world position and can be used
-// directly.  Extruded items are the exception: buildSceneObjects places the
-// mesh at item.position + rotated_centroid_offset so that the solid sits on
-// the sketch plane rather than floating at the sketch origin.  The CSG brush
-// must mirror that offset or the boolean operation will use the wrong location.
+// World-space transform for placing a CSG input.  Extruded items keep
+// their original centroid-offset behaviour so the solid sits on the sketch
+// plane rather than at the sketch origin.
 export function buildBrushTransform(item) {
   const r = item.rotation || { x: 0, y: 0, z: 0 };
   const s = item.scale ? item.scale.x : 1;
 
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
     const poly = item.profile.polygon2D;
-    const depth = item.depth ?? 1.0;
     const c = polyCentroid(poly);
-    const offset = new THREE.Vector3(c.x, c.y, depth / 2);
+    const offset = new THREE.Vector3(c.x, c.y, 0);
     offset.applyEuler(new THREE.Euler(r.x || 0, r.y || 0, r.z || 0));
     const base = item.position || { x: 0, y: 0, z: 0 };
     return {
@@ -122,87 +41,242 @@ export function buildBrushTransform(item) {
   };
 }
 
-// Runs the CSG operation on the given items.
-// Returns { position, geometryData } for the new item, or null if the
-// operation cannot be completed (fewer than two items produce valid geometry).
-//
-// `options.printPrecision` is forwarded to buildItemGeometry so primitives
-// (sphere / cylinder / torus) are tessellated at high resolution when print
-// mode is on.
-export function performCsg(selectedItems, operation, options = {}) {
-  const evaluator = new Evaluator();
-  const sharedMat = new THREE.MeshStandardMaterial();
-
-  const op =
-    operation === "union"
-      ? ADDITION
-      : operation === "difference"
-        ? SUBTRACTION
-        : INTERSECTION;
-
-  // Collect brushes — skip items whose type doesn't produce solid geometry.
-  const brushes = [];
-  for (const item of selectedItems) {
-    const geo = buildItemGeometry(item, options);
-    if (!geo) continue;
-
-    if (!geo.getAttribute("uv")) {
-      const count = geo.getAttribute("position").count;
-      geo.setAttribute(
-        "uv",
-        new THREE.BufferAttribute(new Float32Array(count * 2), 2),
-      );
-    }
-
-    const brush = new Brush(geo, sharedMat);
-    const { position: p, rotation: r, scale: s } = buildBrushTransform(item);
-    brush.position.set(p.x, p.y, p.z);
-    brush.scale.setScalar(s);
-    brush.rotation.set(r.x || 0, r.y || 0, r.z || 0);
-    brush.updateMatrixWorld();
-    brushes.push(brush);
+// Compute the chamfered-shape's centroid offset in the source's local
+// frame.  New chamfers store this on regenerator.centerOffset at create/
+// regen time; for legacy items without it, derive it from item.position
+// and the source's brushPos so older saved scenes still work.
+export function chamferCenterOffset(regenerator, item) {
+  if (regenerator.centerOffset) {
+    const { cx, cy, cz } = regenerator.centerOffset;
+    return { x: cx, y: cy, z: cz };
   }
-
-  // Require at least two solids — a single-item "operation" is meaningless
-  // and the geometry would be in local space (not world space) making the
-  // bbox-centre position calculation wrong.
-  if (brushes.length < 2) {
-    sharedMat.dispose();
-    return null;
+  if (!regenerator.source || !item?.position) return null;
+  const sourceBrush = buildBrushTransform(regenerator.source).position;
+  const dx = item.position.x - sourceBrush.x;
+  const dy = item.position.y - sourceBrush.y;
+  const dz = item.position.z - sourceBrush.z;
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9 && Math.abs(dz) < 1e-9) {
+    return { x: 0, y: 0, z: 0 };
   }
+  const rot = regenerator.source.rotation || { x: 0, y: 0, z: 0 };
+  const v = new THREE.Vector3(dx, dy, dz);
+  const q = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
+  );
+  q.invert();
+  v.applyQuaternion(q);
+  return { x: v.x, y: v.y, z: v.z };
+}
 
-  let result = brushes[0];
-  for (let i = 1; i < brushes.length; i++) {
-    result = evaluator.evaluate(result, brushes[i], op);
-  }
-
-  const posAttr = result.geometry.getAttribute("position");
-  const normAttr = result.geometry.getAttribute("normal");
-  const idxAttr = result.geometry.index;
-
-  // Centre the result geometry around its bounding-box centre so that
-  // item.position is the world-space pivot of the combined solid.
-  const bbox = new THREE.Box3().setFromBufferAttribute(posAttr);
-  const centre = new THREE.Vector3();
-  bbox.getCenter(centre);
-  for (let i = 0; i < posAttr.count; i++) {
-    posAttr.setXYZ(
-      i,
-      posAttr.getX(i) - centre.x,
-      posAttr.getY(i) - centre.y,
-      posAttr.getZ(i) - centre.z,
+// Re-derive an extrude's profile polygon from its CURRENT sketch geometry (at
+// the given curve precision) so OCC shapes used for CSG / chamfer / cut reflect
+// live sketch edits — not the polygon captured when the extrude was created.
+// `precision` null means preview tessellation (curve segments only).
+export function extrudeWithLivePolygon(item, allItems, precision) {
+  const profile = item.profile;
+  if (!profile || profile.sketchId == null) return item;
+  const sketch = allItems.find((i) => i.id === profile.sketchId);
+  if (!sketch || !Array.isArray(sketch.shapes) || sketch.shapes.length === 0)
+    return item;
+  const loops = findClosedLoops(sketch.shapes, 32, precision);
+  if (!loops || loops.length === 0) return item;
+  const grouped = groupLoopsWithHoles(loops);
+  const allEntries = [];
+  const collect = (e) => {
+    allEntries.push(e);
+    e.entries.forEach(collect);
+  };
+  grouped.forEach(collect);
+  if (allEntries.length === 0) return item;
+  const pc = profile.profileCentroid;
+  const storedArea = polyArea(profile.polygon2D);
+  let match = allEntries[0];
+  if (pc) {
+    const containing = allEntries.filter((g) =>
+      polyContainsPoint(g.polygon, pc),
     );
+    const pool = containing.length > 0 ? containing : allEntries;
+    match = pool.reduce((best, g) => {
+      const da = Math.abs(polyArea(g.polygon) - storedArea);
+      const db = Math.abs(polyArea(best.polygon) - storedArea);
+      return da < db ? g : best;
+    });
   }
-  posAttr.needsUpdate = true;
+  if (!match || match.polygon.length < 3) return item;
+  return Object.assign({}, item, {
+    profile: Object.assign({}, profile, {
+      polygon2D: match.polygon,
+      holes: match.holes.filter((h) => h.length >= 3),
+    }),
+  });
+}
 
-  sharedMat.dispose();
+// Re-derive every extrude profile in an item AND, recursively, in a chamfer/
+// bevel source's nested source — so the live sketch geometry feeds the OCC
+// shape (the Electron bridge can't import this ESM helper and otherwise builds
+// from the stored polygon).  extrudeWithLivePolygon alone only touches the top
+// item; a chained op (bevel on a chamfer) keeps a stale nested extrude, which
+// the bridge then builds at the old size — shifting the object.
+export function withLivePolygons(item, allItems, precision) {
+  if (!item) return item;
+  if (item.type === "extrude") {
+    return extrudeWithLivePolygon(item, allItems, precision);
+  }
+  if (item.type === "csg" && item.regenerator?.source) {
+    return {
+      ...item,
+      regenerator: {
+        ...item.regenerator,
+        source: withLivePolygons(item.regenerator.source, allItems, precision),
+      },
+    };
+  }
+  return item;
+}
+
+// A chamfered SIDE face of an extrude is the wall grown from one polygon edge.
+// When the sketch is edited, that edge — and so the face's outward normal and
+// centroid — move.  The face selection stored at chamfer time still carries the
+// OLD normal/centroid, so OCC can't find the face on the rebuilt shape: the
+// chamfer fails and the object keeps its stale pre-edit geometry.  Re-map each
+// side-face selection onto the matching edge of the LIVE polygon (paired by
+// index, the old edge nearest the stored centroid), so the chamfer tracks the
+// sketch.  Top/bottom faces (Z normals) don't move and are left untouched; if
+// the polygon's vertex count changed there's no index correspondence, so the
+// selection is left as-is (the caller's graceful fallback then applies).
+export function remapExtrudeFaceSelections(subGeo, oldSource, newSource) {
+  const faces = subGeo?.faces || [];
+  if (faces.length === 0) return subGeo;
+  if (oldSource?.type !== "extrude" || newSource?.type !== "extrude")
+    return subGeo;
+  const oldRaw = oldSource.profile?.polygon2D;
+  const newRaw = newSource.profile?.polygon2D;
+  if (!Array.isArray(oldRaw) || !Array.isArray(newRaw)) return subGeo;
+  if (oldRaw.length !== newRaw.length || oldRaw.length < 3) return subGeo;
+  // Match the winding makeExtrude uses (CCW) so the computed normals and the
+  // edge indices agree with the OCC shape.
+  const oldPoly = withWinding(oldRaw, true);
+  const newPoly = withWinding(newRaw, true);
+  const oldC = polyCentroid(oldPoly);
+  const newC = polyCentroid(newPoly);
+  const n = oldPoly.length;
+  const mid = (poly, i) => {
+    const a = poly[i],
+      b = poly[(i + 1) % poly.length];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+  // Outward normal of edge i, oriented away from the polygon centroid.
+  const outward = (poly, c, i) => {
+    const a = poly[i],
+      b = poly[(i + 1) % poly.length];
+    let nx = b.y - a.y,
+      ny = -(b.x - a.x);
+    const len = Math.hypot(nx, ny) || 1;
+    nx /= len;
+    ny /= len;
+    const m = mid(poly, i);
+    if ((m.x - c.x) * nx + (m.y - c.y) * ny < 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    return { nx, ny };
+  };
+  let changed = false;
+  const mapped = faces.map((f) => {
+    if (Math.abs(f.nz ?? 0) >= 0.9) return f; // top / bottom: unaffected
+    // Which old edge did this face come from?  Prefer the stored centroid (in
+    // the same local frame), else the stored normal direction.
+    let bestI = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < n; i++) {
+      let d;
+      if (f.cx != null) {
+        const m = mid(oldPoly, i);
+        d = Math.hypot(m.x - oldC.x - f.cx, m.y - oldC.y - f.cy);
+      } else {
+        const on = outward(oldPoly, oldC, i);
+        d = Math.hypot(on.nx - f.nx, on.ny - f.ny);
+      }
+      if (d < bestD) {
+        bestD = d;
+        bestI = i;
+      }
+    }
+    if (bestI < 0) return f;
+    const on = outward(newPoly, newC, bestI);
+    const m = mid(newPoly, bestI);
+    changed = true;
+    return {
+      ...f,
+      nx: on.nx,
+      ny: on.ny,
+      nz: 0,
+      ...(f.cx != null ? { cx: m.x - newC.x, cy: m.y - newC.y } : null),
+    };
+  });
+  return changed ? { ...subGeo, faces: mapped } : subGeo;
+}
+
+// The chamfer/bevel source is a snapshot with its extrude depth baked in.
+// withLivePolygons re-derives the profile but not the depth, so push the live
+// depth down to the (possibly nested) extrude source — otherwise a depth edit
+// rebuilds the op at the old height.
+export function withLiveDepth(src, depth) {
+  if (!src || depth === undefined) return src;
+  if (src.type === "extrude")
+    return src.depth === depth ? src : { ...src, depth };
+  if (src.regenerator?.source) {
+    const inner = withLiveDepth(src.regenerator.source, depth);
+    return inner === src.regenerator.source
+      ? src
+      : { ...src, regenerator: { ...src.regenerator, source: inner } };
+  }
+  return src;
+}
+
+const addDelta = (pos, delta) => ({
+  x: (pos?.x || 0) + delta.x,
+  y: (pos?.y || 0) + delta.y,
+  z: (pos?.z || 0) + delta.z,
+});
+
+// Retargeting an extrude that anchors a union (buildItemShapeLocal's boolean
+// branch re-localises by `regenerator.originalCenter || item.position`, and
+// performCsg anchors a fresh union on its FIRST input's brush position) moves
+// that anchor by `delta` — the change in the retargeted extrude's
+// buildBrushTransform position.  Without updating the frozen anchor, the
+// anchor input's own geometry shifts inside the union's local frame, dragging
+// any chamfer/fillet `subGeo` selections (and the rendered result) off the
+// shape.  Shift `originalCenter` by the same delta so the anchor input's local
+// geometry — and selections on it — stay put; with that, the union/chamfer's
+// LOCAL geometry is unchanged and the whole result simply translates by
+// `delta` in world space, so `position` shifts by `delta` too.  Recurses into
+// a chamfer/bevel's nested `source` (chained ops keep their own copy of the
+// union snapshot) and propagates the position shift outward through wrappers.
+export function shiftUnionAnchorForRetarget(item, extrudeId, delta) {
+  if (!item?.regenerator) return item;
+  const r = item.regenerator;
+  let shifted = r.kind === "boolean" && r.inputIds?.[0] === extrudeId;
+
+  let newSource = r.source;
+  if (r.source) {
+    newSource = shiftUnionAnchorForRetarget(r.source, extrudeId, delta);
+    if (newSource !== r.source) shifted = true;
+  }
+  if (!shifted) return item;
 
   return {
-    position: { x: centre.x, y: centre.y, z: centre.z },
-    geometryData: {
-      positions: Array.from(posAttr.array),
-      normals: normAttr ? Array.from(normAttr.array) : null,
-      indices: idxAttr ? Array.from(idxAttr.array) : null,
+    ...item,
+    position: addDelta(item.position, delta),
+    regenerator: {
+      ...r,
+      ...(r.kind === "boolean" && r.inputIds?.[0] === extrudeId
+        ? {
+            originalCenter: addDelta(r.originalCenter || item.position, delta),
+          }
+        : null),
+      ...(newSource !== r.source ? { source: newSource } : null),
+      regeneratedAt: "dirty",
     },
   };
 }

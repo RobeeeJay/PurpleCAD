@@ -1,0 +1,403 @@
+// Builds the THREE.Mesh for each item in the scene, attaches custom
+// raycasters for the analytic primitives, and lays out per-item state
+// (originalMaterialsRef, the extrude-centroid offset for drag commits).
+//
+// Re-runs from scratch every time `items` changes — cheap because the
+// per-item geometry is bounded (a box-hull for primitives + the
+// pre-tessellated `geometryData` for csg results).
+
+import * as THREE from "three";
+import { createMaterial } from "../objectMaterials.js";
+import { resolveItemDepth } from "../geometryParams.js";
+import { DEFAULT_MATERIAL } from "../materialPresets.js";
+import {
+  findClosedLoops,
+  groupLoopsWithHoles,
+  polyContainsPoint,
+  polyCentroid,
+  polyArea,
+  withWinding,
+} from "./closedLoops.js";
+import {
+  DEFAULT_MESH_COLOR,
+  WIREFRAME_EDGE_COLOR,
+  NO_EMISSIVE,
+} from "../theme.js";
+
+export function buildSceneObjects(
+  items,
+  scene,
+  objectsRef,
+  originalMaterialsRef,
+  curveSegments = 32,
+  precision = null,
+  defaultMaterial = DEFAULT_MATERIAL,
+) {
+  Object.values(objectsRef.current).forEach((mesh) => {
+    scene.remove(mesh);
+    mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) mesh.material.forEach((m) => m.dispose());
+    else mesh.material.dispose();
+    mesh.children.forEach((child) => {
+      child.geometry && child.geometry.dispose();
+      child.material && child.material.dispose();
+    });
+  });
+  objectsRef.current = {};
+  originalMaterialsRef.current = {};
+
+  items.forEach((item) => {
+    let geometry;
+    let extrudeLocalOffset = null; // set by the extrude case; used for mesh positioning
+    switch (item.type) {
+      case "cube":
+        geometry = new THREE.BoxGeometry(2, 2, 2);
+        break;
+      case "sphere":
+        geometry = new THREE.BoxGeometry(3, 3, 3);
+        break;
+      case "cylinder":
+        geometry = new THREE.BoxGeometry(2, 2, 2);
+        break;
+      case "torus":
+        geometry = new THREE.BoxGeometry(3, 1.2, 3);
+        break;
+      case "sketch":
+        geometry = new THREE.PlaneGeometry(3, 3);
+        break;
+      case "csg": {
+        if (!item.geometryData) return;
+        const { positions, normals, indices } = item.geometryData;
+        geometry = new THREE.BufferGeometry();
+        geometry.setAttribute(
+          "position",
+          new THREE.BufferAttribute(new Float32Array(positions), 3),
+        );
+        if (normals)
+          geometry.setAttribute(
+            "normal",
+            new THREE.BufferAttribute(new Float32Array(normals), 3),
+          );
+        if (indices)
+          geometry.setIndex(
+            new THREE.BufferAttribute(new Uint32Array(indices), 1),
+          );
+        if (!normals) geometry.computeVertexNormals();
+        break;
+      }
+      case "extrude": {
+        const profile = item.profile;
+        if (!profile) return;
+        let poly = profile.polygon2D;
+        let holePolys = profile.holes || [];
+        // Recompute polygon and holes live from the sketch so edits propagate.
+        if (profile.sketchId != null) {
+          const sketchItem = items.find((si) => si.id === profile.sketchId);
+          if (sketchItem && sketchItem.shapes && sketchItem.shapes.length > 0) {
+            const allLoops = findClosedLoops(
+              sketchItem.shapes,
+              curveSegments,
+              precision,
+            );
+            const grouped = groupLoopsWithHoles(allLoops);
+            if (grouped.length > 0) {
+              // Search every entry in the hierarchy (roots and all
+              // descendants) so that sub-regions like the part of a
+              // circle inside a rectangle can be matched — those are
+              // children of a root, not roots themselves.
+              const allEntries = [];
+              const collect = (e) => {
+                allEntries.push(e);
+                e.entries.forEach(collect);
+              };
+              grouped.forEach(collect);
+              const pc = profile.profileCentroid;
+              // Use polyContainsPoint rather than nearest-centroid
+              // distance so that the match is resolution-independent.
+              // At higher curve segment counts the arithmetic-mean
+              // centroid of arc-dominated polygons drifts outside the
+              // polygon itself, causing the distance-based search to
+              // pick the wrong entry.  A geometric interior point stays
+              // inside the same region regardless of how many segments
+              // the arc is split into.
+              let match = allEntries[0];
+              if (pc) {
+                const containing = allEntries.filter((g) =>
+                  polyContainsPoint(g.polygon, pc),
+                );
+                if (containing.length > 0) {
+                  // Pick the polygon whose area is closest to the
+                  // stored profile's area rather than the smallest one.
+                  // polyCentroid is biased by arc vertex density and
+                  // can land inside a neighbouring smaller polygon (eg
+                  // a rect-remainder centroid drifting into the lens
+                  // it borders, or a ring centroid sitting at the inner
+                  // circle centre).  Area proximity is resolution-
+                  // independent and reliably identifies the same
+                  // geometric region across tessellation changes.
+                  const targetArea = polyArea(poly);
+                  match = containing.reduce((best, g) => {
+                    const da = Math.abs(polyArea(g.polygon) - targetArea);
+                    const db = Math.abs(polyArea(best.polygon) - targetArea);
+                    return da < db ? g : best;
+                  });
+                } else {
+                  // Fall back to nearest centroid when nothing contains
+                  // the stored point (eg sketch was heavily edited).
+                  match = allEntries.reduce(
+                    (best, g) => {
+                      const c = polyCentroid(g.polygon);
+                      const d = Math.hypot(c.x - pc.x, c.y - pc.y);
+                      return d < best.d ? { g, d } : best;
+                    },
+                    { g: allEntries[0], d: Infinity },
+                  ).g;
+                }
+              }
+              if (match.polygon.length >= 3) {
+                poly = match.polygon;
+                holePolys = match.holes.filter((h) => h.length >= 3);
+              }
+            }
+          }
+        }
+        if (!poly || poly.length < 3) return;
+        const depth = resolveItemDepth(item);
+        // Shift the 2D polygon so its centroid sits at the local
+        // origin.  Without this the mesh pivot stays at the sketch
+        // origin (often the world origin), making rotation and scaling
+        // feel completely wrong.
+        const profileCentroid2D = polyCentroid(poly);
+        const centeredPoly = poly.map((p) => ({
+          x: p.x - profileCentroid2D.x,
+          y: p.y - profileCentroid2D.y,
+        }));
+        const centeredHoles = holePolys.map((h) =>
+          h.map((p) => ({
+            x: p.x - profileCentroid2D.x,
+            y: p.y - profileCentroid2D.y,
+          })),
+        );
+        // Normalize windings: outer CCW, holes CW.  Polygons traced
+        // from sketch lines can come back from findClosedLoops in
+        // either order (DFS traversal direction is arbitrary); without
+        // normalization an inner hole drawn from lines ends up with
+        // its side-wall normals inverted when fed to
+        // THREE.ExtrudeGeometry.
+        const outerCcw = withWinding(centeredPoly, /* wantCcw */ true);
+        const holesCw = centeredHoles.map((h) =>
+          withWinding(h, /* wantCcw */ false),
+        );
+        const shape = new THREE.Shape(
+          outerCcw.map((p) => new THREE.Vector2(p.x, p.y)),
+        );
+        holesCw.forEach((hole) =>
+          shape.holes.push(
+            new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))),
+          ),
+        );
+        // THREE.ExtrudeGeometry only takes a positive depth, so for a
+        // negative-depth (backwards) extrude we extrude by the absolute
+        // value and then translate the prism into the -Z half-space.
+        const absDepth = Math.abs(depth);
+        geometry = new THREE.ExtrudeGeometry(shape, {
+          depth: absDepth,
+          bevelEnabled: false,
+        });
+        // startOffset slides the prism's base along the profile normal (local
+        // +Z) so the extrude can begin at a picked face / plane instead of the
+        // sketch plane.  Combine it with the negative-depth back-shift.
+        const startOffset = item.startOffset || 0;
+        const baseZ = (depth < 0 ? -absDepth : 0) + startOffset;
+        if (baseZ !== 0) geometry.translate(0, 0, baseZ);
+        geometry.computeVertexNormals();
+        // The prism's base face sits at z=0 in the sketch's local
+        // frame (positive depth extends to +depth, negative to
+        // -|depth|).  Don't shift it to be midpoint-centred — the user
+        // expects the base to sit ON the sketch plane.
+        extrudeLocalOffset = new THREE.Vector3(
+          profileCentroid2D.x,
+          profileCentroid2D.y,
+          0,
+        );
+        break;
+      }
+      default:
+        return;
+    }
+
+    const materialProps = item.material ?? defaultMaterial;
+    const color = materialProps.color ?? DEFAULT_MESH_COLOR;
+    const material = createMaterial(item, color, materialProps);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = item.type !== "sketch";
+    mesh.receiveShadow = item.type !== "sketch";
+    mesh.userData.itemId = item.id;
+    if (["sphere", "cylinder", "torus"].includes(item.type)) {
+      mesh.userData.hullGeometry = geometry;
+      mesh.userData.shaderMat = material;
+    }
+
+    const p = item.position;
+    const rot = item.rotation;
+    if (rot) mesh.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
+    mesh.scale.setScalar(item.scale ? item.scale.x : 1);
+
+    if (extrudeLocalOffset) {
+      // Tag the mesh with the pre-rotation local offset so the drag
+      // handler can subtract it when committing position to the store.
+      // Without this, every drag commit would bake the offset into
+      // item.position and the next rebuild would add it again, causing
+      // the object to drift by one extra offset each move.
+      mesh.userData.extrudeLocalOffset = {
+        x: extrudeLocalOffset.x,
+        y: extrudeLocalOffset.y,
+        z: extrudeLocalOffset.z,
+      };
+      // Rotate the local centroid offset into world space and add it
+      // to the stored sketch position so the solid appears where the
+      // user drew it.
+      extrudeLocalOffset.applyEuler(mesh.rotation);
+      mesh.position.set(
+        (p ? p.x : 0) + extrudeLocalOffset.x,
+        (p ? p.y : 0) + extrudeLocalOffset.y,
+        (p ? p.z : 0) + extrudeLocalOffset.z,
+      );
+    } else {
+      mesh.position.set(p ? p.x : 0, p ? p.y : 2, p ? p.z : 0);
+    }
+
+    if (item.type === "sphere") {
+      mesh.raycast = (raycaster, intersects) => {
+        const worldCenter = new THREE.Vector3();
+        mesh.getWorldPosition(worldCenter);
+        const worldScale = new THREE.Vector3();
+        mesh.getWorldScale(worldScale);
+        const radius = 1.5 * worldScale.x;
+        const sphere = new THREE.Sphere(worldCenter, radius);
+        const target = new THREE.Vector3();
+        if (!raycaster.ray.intersectSphere(sphere, target)) return;
+        const dist = raycaster.ray.origin.distanceTo(target);
+        if (dist < raycaster.near || dist > raycaster.far) return;
+        intersects.push({
+          distance: dist,
+          point: target.clone(),
+          face: { normal: target.clone().sub(worldCenter).normalize() },
+          faceIndex: 0,
+          object: mesh,
+        });
+      };
+    } else if (item.type === "cylinder") {
+      mesh.raycast = (raycaster, intersects) => {
+        const wc = new THREE.Vector3();
+        mesh.getWorldPosition(wc);
+        const ws = new THREE.Vector3();
+        mesh.getWorldScale(ws);
+        const radius = 1.0 * ws.x;
+        const halfH = 1.0 * ws.y;
+        const axis = new THREE.Vector3(0, 1, 0)
+          .applyQuaternion(mesh.quaternion)
+          .normalize();
+        const ray = raycaster.ray;
+        const oc = new THREE.Vector3().subVectors(ray.origin, wc);
+        const da = ray.direction.dot(axis);
+        const oca = oc.dot(axis);
+        const A = 1.0 - da * da;
+        const B = 2.0 * (ray.direction.dot(oc) - da * oca);
+        const C = oc.dot(oc) - oca * oca - radius * radius;
+        let tHit = Infinity,
+          nHit = null;
+        if (Math.abs(A) > 1e-6) {
+          const disc = B * B - 4 * A * C;
+          if (disc >= 0) {
+            const sq = Math.sqrt(disc);
+            for (const t of [(-B - sq) / (2 * A), (-B + sq) / (2 * A)]) {
+              if (t > raycaster.near && t < tHit) {
+                const p = ray.origin.clone().addScaledVector(ray.direction, t);
+                const y = p.clone().sub(wc).dot(axis);
+                if (Math.abs(y) <= halfH) {
+                  tHit = t;
+                  nHit = p
+                    .clone()
+                    .sub(wc)
+                    .addScaledVector(axis, -y)
+                    .normalize();
+                }
+              }
+            }
+          }
+        }
+        if (Math.abs(da) > 1e-6) {
+          for (const sign of [1, -1]) {
+            const t = (sign * halfH - oca) / da;
+            if (t > raycaster.near && t < tHit) {
+              const p = ray.origin.clone().addScaledVector(ray.direction, t);
+              if (
+                p
+                  .clone()
+                  .sub(wc)
+                  .addScaledVector(axis, -sign * halfH)
+                  .lengthSq() <=
+                radius * radius
+              ) {
+                tHit = t;
+                nHit = axis.clone().multiplyScalar(sign);
+              }
+            }
+          }
+        }
+        if (tHit === Infinity || tHit > raycaster.far) return;
+        intersects.push({
+          distance: tHit,
+          point: ray.origin.clone().addScaledVector(ray.direction, tHit),
+          face: { normal: nHit || axis },
+          faceIndex: 0,
+          object: mesh,
+        });
+      };
+    } else if (item.type === "torus") {
+      mesh.raycast = (raycaster, intersects) => {
+        const wc = new THREE.Vector3();
+        mesh.getWorldPosition(wc);
+        const ws = new THREE.Vector3();
+        mesh.getWorldScale(ws);
+        const outerR = (1.0 + 0.4) * ws.x;
+        const sphere = new THREE.Sphere(wc, outerR);
+        const target = new THREE.Vector3();
+        if (!raycaster.ray.intersectSphere(sphere, target)) return;
+        const dist = raycaster.ray.origin.distanceTo(target);
+        if (dist < raycaster.near || dist > raycaster.far) return;
+        intersects.push({
+          distance: dist,
+          point: target.clone(),
+          face: { normal: target.clone().sub(wc).normalize() },
+          faceIndex: 0,
+          object: mesh,
+        });
+      };
+    } else if (item.type !== "sketch") {
+      mesh.add(
+        new THREE.LineSegments(
+          new THREE.EdgesGeometry(geometry),
+          new THREE.LineBasicMaterial({
+            color: WIREFRAME_EDGE_COLOR,
+            linewidth: 2,
+          }),
+        ),
+      );
+    }
+
+    mesh.visible = item.visible !== false;
+    scene.add(mesh);
+    objectsRef.current[item.id] = mesh;
+    originalMaterialsRef.current[item.id] = {
+      color: new THREE.Color(color),
+      metalness: materialProps.metalness ?? 0.3,
+      roughness: materialProps.roughness ?? 0.5,
+      opacity: materialProps.opacity ?? 1,
+      clearcoat: materialProps.clearcoat ?? 0,
+      clearcoatRoughness: materialProps.clearcoatRoughness ?? 0,
+      emissive: new THREE.Color(NO_EMISSIVE),
+    };
+  });
+}

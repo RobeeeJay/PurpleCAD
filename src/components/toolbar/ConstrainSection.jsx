@@ -12,6 +12,10 @@ const ConstrainSection = ({ isSketchMode }) => {
   const setSketchDistanceInput = useStore((s) => s.setSketchDistanceInput);
   const selectedSketchElement = useStore((s) => s.selectedSketchElement);
   const applySketchHVConstraint = useStore((s) => s.applySketchHVConstraint);
+  const snapEnabled = useStore((s) => s.snapEnabled);
+  const toggleSnap = useStore((s) => s.toggleSnap);
+  const snapDistanceMm = useStore((s) => s.snapDistanceMm);
+  const snapAngleDeg = useStore((s) => s.snapAngleDeg);
 
   const handleCoincidentConstraint = () => {
     if (sketchConstraintMode === "coincident") {
@@ -129,12 +133,17 @@ const ConstrainSection = ({ isSketchMode }) => {
             title="Horizontal — force the selected line to be horizontal"
             disabled={selectedSketchElement?.type !== "line"}
             onClick={() => {
-              if (selectedSketchElement?.type === "line")
+              if (selectedSketchElement?.type === "line") {
                 applySketchHVConstraint(
                   selectedId,
                   selectedSketchElement.shapeIdx,
                   "horizontal",
                 );
+                // The line may have moved; re-anchor the selection highlight.
+                useStore
+                  .getState()
+                  ._cameraControls?.refreshSketchSelectionOverlay?.();
+              }
             }}
           >
             <svg viewBox="0 0 24 24" width="20" height="20">
@@ -155,12 +164,16 @@ const ConstrainSection = ({ isSketchMode }) => {
             title="Vertical — force the selected line to be vertical"
             disabled={selectedSketchElement?.type !== "line"}
             onClick={() => {
-              if (selectedSketchElement?.type === "line")
+              if (selectedSketchElement?.type === "line") {
                 applySketchHVConstraint(
                   selectedId,
                   selectedSketchElement.shapeIdx,
                   "vertical",
                 );
+                useStore
+                  .getState()
+                  ._cameraControls?.refreshSketchSelectionOverlay?.();
+              }
             }}
           >
             <svg viewBox="0 0 24 24" width="20" height="20">
@@ -208,6 +221,36 @@ const ConstrainSection = ({ isSketchMode }) => {
           </svg>
         </button>
       )}
+      <button
+        className={`toolbar-btn ${snapEnabled ? "active" : ""}`}
+        title={`${snapEnabled ? "Disable" : "Enable"} snap to grid (${snapDistanceMm}mm / ${snapAngleDeg}°) — set values in Settings`}
+        onClick={toggleSnap}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <path
+            d="M6 3v7a6 6 0 0 0 12 0V3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          />
+          <line
+            x1="5"
+            y1="3"
+            x2="9"
+            y2="3"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          />
+          <line
+            x1="15"
+            y1="3"
+            x2="19"
+            y2="3"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          />
+        </svg>
+      </button>
     </ToolbarSection>
   );
 };

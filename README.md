@@ -1,4 +1,4 @@
-# Untitled CAD
+# PurpleCAD
 
 A modern web-based CAD application built with React, Three.js, and Vite.
 

@@ -1,0 +1,60 @@
+/* Shared color, transparency, and font constants. Extends the
+   bg/text/selected-bg variables in index.css with the values reused (or
+   one-off but theme-relevant) across the panel/dialog/viewport stylesheets,
+   so they can be retuned from one place. */
+
+:root {
+  /* Accent (selection / active-state) blue, matches --selected-bg */
+  --accent-rgb: 91, 141, 232;
+
+  /* Status colors */
+  --color-danger: #ff6b6b;
+  --color-danger-soft: #ff9999;
+  --color-danger-light: #e87575;
+  --color-danger-text: #ffaaaa;
+  --color-danger-bg-rgb: 136, 20, 40;
+
+  --color-warning: #ffa94d;
+  --color-warning-light: #ffee88;
+  --color-warning-rgb: 255, 221, 68;
+
+  --color-info: #88ccff;
+  --color-info-rgb: 136, 170, 255;
+  --color-info-soft: #c8ccdd;
+  --color-info-bg: #eef0ff;
+  --color-info-bg-rgb: 100, 120, 200;
+
+  /* Neutral overlays */
+  --color-white: #ffffff;
+  --white-rgb: 255, 255, 255;
+  --black-rgb: 0, 0, 0;
+
+  /* Floating panel backgrounds (viewport overlays, always dark) */
+  --panel-bg-rgb: 20, 20, 30;
+  --panel-bg-strong-rgb: 18, 18, 28;
+  --rotation-widget-bg-rgb: 30, 30, 30;
+
+  /* Scrollbar thumb */
+  --scrollbar-thumb: #444444;
+  --scrollbar-thumb-hover: #555555;
+
+  /* Fonts */
+  --font-mono: monospace;
+  --font-size-2xs: 9px;
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-base: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 15px;
+  --font-size-2xl: 16px;
+  --font-size-3xl: 18px;
+
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+}
+
+html[data-theme="light"] {
+  --scrollbar-thumb: #cccccc;
+  --scrollbar-thumb-hover: #bbbbbb;
+}

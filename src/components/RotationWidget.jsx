@@ -147,7 +147,12 @@ const makeFaceCanvas = (label, bgColor) => {
   return new THREE.CanvasTexture(canvas);
 };
 
-const RotationWidget = ({ rotationState, onOrientationChange, style }) => {
+const RotationWidget = ({
+  rotationState,
+  onOrientationChange,
+  onHome,
+  style,
+}) => {
   const mountRef = useRef(null);
   const threeRef = useRef({});
   const hoveredRef = useRef(null);
@@ -377,8 +382,10 @@ const RotationWidget = ({ rotationState, onOrientationChange, style }) => {
   );
 
   const handleHome = useCallback(() => {
-    onOrientationChange?.(Math.asin(Math.sqrt(1 / 3)), Math.PI / 4);
-  }, [onOrientationChange]);
+    // onHome frames all models; fall back to a pure isometric reorient.
+    if (onHome) onHome();
+    else onOrientationChange?.(Math.asin(Math.sqrt(1 / 3)), Math.PI / 4);
+  }, [onHome, onOrientationChange]);
 
   return (
     <div className="rotation-widget" style={style}>
