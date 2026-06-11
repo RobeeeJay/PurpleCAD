@@ -11,6 +11,8 @@ const RenderSection = () => {
   const setShadowsEnabled = useStore((s) => s.setShadowsEnabled);
   const crossSectionView = useStore((s) => s.crossSectionView);
   const toggleCrossSectionView = useStore((s) => s.toggleCrossSectionView);
+  const pathTraceView = useStore((s) => s.pathTraceView);
+  const togglePathTraceView = useStore((s) => s.togglePathTraceView);
 
   return (
     <ToolbarSection label="Render">
@@ -170,6 +172,53 @@ const RenderSection = () => {
             y2="9"
             stroke="currentColor"
             strokeWidth="1"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${pathTraceView ? "active" : ""}`}
+        title={
+          pathTraceView
+            ? "Path-traced render on — click to return to the raster view"
+            : "Path-traced render (prototype) — progressive GPU ray tracing"
+        }
+        onClick={togglePathTraceView}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* Camera / eye */}
+          <circle cx="6" cy="12" r="2" fill="currentColor" />
+          {/* Rays bouncing to a sphere */}
+          <circle
+            cx="17"
+            cy="11"
+            r="4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          <line
+            x1="8"
+            y1="12"
+            x2="13.5"
+            y2="11"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <line
+            x1="13.5"
+            y1="11"
+            x2="20"
+            y2="17"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <line
+            x1="13.5"
+            y1="11"
+            x2="19"
+            y2="6"
+            stroke="currentColor"
+            strokeWidth="1.5"
           />
         </svg>
       </button>

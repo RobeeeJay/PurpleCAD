@@ -67,6 +67,13 @@ export const uiInitial = {
   // the view sweeps the cut through different parts of the model.
   crossSectionView: false,
 
+  // Path-traced render mode (prototype): replaces the raster view with a
+  // progressively-accumulated GPU path trace.  `pathTraceView` is the user's
+  // toggle; `pathTracerActive` is set true by pathTrace.js only once the tracer
+  // is actually running, so a failed start can't freeze the raster view.
+  pathTraceView: false,
+  pathTracerActive: false,
+
   // Non-reactive slot holding the live cameraControls object (set by
   // Viewport during mount).  Lets UI components outside the Viewport
   // call viewport-anchored helpers (eg dropSelectedToGround) without
@@ -137,6 +144,8 @@ export const createUiSlice = (set) => ({
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   toggleCrossSectionView: () =>
     set((state) => ({ crossSectionView: !state.crossSectionView })),
+  togglePathTraceView: () =>
+    set((state) => ({ pathTraceView: !state.pathTraceView })),
   setCameraControls: (controls) => set({ _cameraControls: controls }),
 
   beginOperation: () =>

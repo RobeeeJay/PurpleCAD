@@ -80,6 +80,7 @@ export function useSceneSync({
   axisVisible,
   shadowsEnabled,
   crossSectionView,
+  pathTraceView,
   curveSegments,
   printPrecision,
   setSketchMode,
@@ -88,6 +89,9 @@ export function useSceneSync({
 }) {
   const defaultMaterial = useStore((s) => s.defaultMaterial);
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
+  // Tracks whether the path tracer was ever started, so unmount can tear down
+  // its render loop without loading the (lazy) module when it was never used.
+  const pathTraceUsedRef = useRef(false);
 
   useEffect(() => {
     if (axisGroupRef.current)
@@ -694,4 +698,42 @@ export function useSceneSync({
     variables,
     defaultMaterial,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Path-traced render (prototype) ────────────────────────────────────────
+  // Lazily loads three-gpu-pathtracer only when first enabled, then builds a
+  // render scene (real geometry + PBR materials) and lets the tracer drive its
+  // own accumulation loop.  Rebuilds on object/material changes while active.
+  useEffect(() => {
+    if (!rendererRef.current || !cameraRef.current) return;
+    let cancelled = false;
+    import("../../three/pathTrace.js")
+      .then((pt) => {
+        if (cancelled) return;
+        if (pathTraceView && useStore.getState().pathTraceView) {
+          pathTraceUsedRef.current = true;
+          pt.enablePathTracer(rendererRef.current, cameraRef.current, {
+            objectsRef,
+            itemsRef,
+          });
+        } else {
+          pt.disablePathTracer();
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load the path tracer module:", err);
+        useStore.setState({ pathTraceView: false, pathTracerActive: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathTraceView, items, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stop the path tracer's render loop if the viewport unmounts mid-render.
+  useEffect(
+    () => () => {
+      if (pathTraceUsedRef.current)
+        import("../../three/pathTrace.js").then((pt) => pt.disablePathTracer());
+    },
+    [],
+  );
 }

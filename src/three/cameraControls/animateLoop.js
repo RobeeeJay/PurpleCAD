@@ -265,6 +265,11 @@ export function createAnimateLoop({
         }
       });
     }
+    // While the path-traced render is actually running it owns the canvas (its
+    // own RAF loop accumulates samples) — skip the raster render so we don't
+    // fight it.  Gated on pathTracerActive (not the toggle) so a failed start
+    // never leaves the view frozen.
+    if (useStore.getState().pathTracerActive) return;
     if (composerRef.current) composerRef.current.render();
     else renderer.render(scene, cameraRef.current);
   };

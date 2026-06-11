@@ -87,6 +87,7 @@ const Viewport = () => {
   const renderMode = useStore((state) => state.renderMode);
   const shadowsEnabled = useStore((state) => state.shadowsEnabled);
   const crossSectionView = useStore((state) => state.crossSectionView);
+  const pathTraceView = useStore((state) => state.pathTraceView);
   const projectionMode = useStore((state) => state.projectionMode);
   const fov = useStore((state) => state.fov);
   const widgetVisible = useStore((state) => state.widgetVisible);
@@ -240,6 +241,7 @@ const Viewport = () => {
     axisVisible,
     shadowsEnabled,
     crossSectionView,
+    pathTraceView,
     curveSegments,
     printPrecision,
     setSketchMode,
