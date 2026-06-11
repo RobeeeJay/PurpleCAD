@@ -11,6 +11,7 @@ import {
   rewriteCreatedItem,
   maxItemId,
   inheritedHiddenIds,
+  hideIdsFrom,
 } from "./internals.js";
 import { createHistoryNavSlice } from "./historyNavSlice.js";
 import { createItemFlagsSlice } from "./itemFlagsSlice.js";
@@ -18,6 +19,7 @@ import {
   buildBrushTransform,
   shiftUnionAnchorForRetarget,
 } from "../three/csgUtils.js";
+import { splitGeometryComponents } from "../three/geometryComponents.js";
 
 export const createHistorySlice = (set) => ({
   ...createHistoryNavSlice(set),
@@ -90,7 +92,10 @@ export const createHistorySlice = (set) => ({
 
   addItem: (item) =>
     set((state) => {
-      const fullItem = Object.assign({ parentId: null }, item);
+      const fullItem = Object.assign(
+        { parentId: null, material: state.defaultMaterial },
+        item,
+      );
       const newEntry = makeEntry("Added", fullItem.id, {
         type: "create",
         item: fullItem,
@@ -138,7 +143,7 @@ export const createHistorySlice = (set) => ({
   addItems: (newItems, label = "Added") =>
     set((state) => {
       const fullItems = newItems.map((it) =>
-        Object.assign({ parentId: null }, it),
+        Object.assign({ parentId: null, material: state.defaultMaterial }, it),
       );
       const newEntry = makeEntry(label, fullItems[0]?.id ?? null, {
         type: "createGroup",
@@ -172,6 +177,77 @@ export const createHistorySlice = (set) => ({
           items,
           history: withOrphanFlags(rawHistory),
           activeHistoryId: newActiveId,
+        },
+        withUndo(state),
+      );
+    }),
+
+  // Separate a solid into its geometrically-disconnected pieces.  Each
+  // connected component (a lump sharing no welded vertices with the others)
+  // becomes its own standalone item; the original is consumed (hidden from
+  // this step onward) exactly like a boolean hides its inputs.  Symmetric
+  // with addItems+consumeItems, recorded as one "Split" createGroup step so
+  // it's a single undo.  No-op when the solid is a single connected body.
+  splitObject: (id) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === id);
+      if (!item?.geometryData) return {};
+      const components = splitGeometryComponents(item.geometryData);
+      if (components.length < 2) return {};
+
+      let maxId = maxItemId(state.history);
+      const parts = components.map((geometryData, i) => ({
+        id: ++maxId,
+        name: `${item.name} part ${i + 1}`,
+        type: "csg",
+        children: [],
+        parentId: null,
+        // Each part keeps the original's placement and look — only the mesh is
+        // partitioned.  No regenerator: the pieces are independent now.
+        position: item.position,
+        rotation: item.rotation,
+        scale: item.scale,
+        material: item.material,
+        geometryData,
+      }));
+
+      const newEntry = makeEntry("Split", parts[0].id, {
+        type: "createGroup",
+        items: parts,
+      });
+
+      let insertIdx;
+      let newActiveId;
+      if (state.activeHistoryId !== null) {
+        const activeIdx = state.history.findIndex(
+          (h) => h.id === state.activeHistoryId,
+        );
+        insertIdx = activeIdx + 1;
+        newActiveId = newEntry.id;
+      } else {
+        insertIdx = state.history.length;
+        newActiveId = null;
+      }
+      newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
+
+      const inserted = [
+        ...state.history.slice(0, insertIdx),
+        newEntry,
+        ...state.history.slice(insertIdx),
+      ];
+      // Hide the original from the split step onward so a timeline replay
+      // shows the source before, the pieces after.
+      const rawHistory = hideIdsFrom(inserted, insertIdx, [id]);
+      const items = replayUpTo(rawHistory, insertIdx);
+
+      saveTimeline(rawHistory, newActiveId);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(rawHistory),
+          activeHistoryId: newActiveId,
+          selectedId: parts[0].id,
+          selectedIds: parts.map((p) => p.id),
         },
         withUndo(state),
       );

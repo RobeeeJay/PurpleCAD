@@ -218,6 +218,9 @@ export function useSketchModeEffect({
           scene,
           objectsRef,
           originalMaterialsRef,
+          undefined,
+          undefined,
+          useStore.getState().defaultMaterial,
         );
         applyRenderMode(useStore.getState().renderMode, {
           scene,

@@ -11,6 +11,7 @@ import BevelSection from "./toolbar/BevelSection";
 import ModifySection from "./toolbar/ModifySection";
 import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
+import MaterialSection from "./toolbar/MaterialSection";
 import OptionsSection from "./toolbar/OptionsSection";
 import ToolbarSection from "./toolbar/ToolbarSection";
 
@@ -37,6 +38,7 @@ const Toolbar = () => {
       )}
       <ConstrainSection isSketchMode={isSketchMode} />
       <RenderSection />
+      <MaterialSection />
       <OptionsSection />
     </div>
   );

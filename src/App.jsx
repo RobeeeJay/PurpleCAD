@@ -6,6 +6,7 @@ import Timeline from "./components/Timeline";
 import VariablesDialog from "./components/VariablesDialog";
 import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
 import ChamferEditDialog from "./components/ChamferEditDialog";
+import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import VersionTag from "./components/VersionTag";
 import "./styles/App.css";
@@ -72,6 +73,7 @@ function App() {
       <VariablesDialog />
       <ExtrudeLengthDialog />
       <ChamferEditDialog />
+      <MaterialDialog />
       <SettingsDialog />
       <VersionTag />
       {notification && (

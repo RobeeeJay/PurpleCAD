@@ -9,6 +9,7 @@
 import * as THREE from "three";
 import { createMaterial } from "../objectMaterials.js";
 import { resolveItemDepth } from "../geometryParams.js";
+import { DEFAULT_MATERIAL } from "../materialPresets.js";
 import {
   findClosedLoops,
   groupLoopsWithHoles,
@@ -30,6 +31,7 @@ export function buildSceneObjects(
   originalMaterialsRef,
   curveSegments = 32,
   precision = null,
+  defaultMaterial = DEFAULT_MATERIAL,
 ) {
   Object.values(objectsRef.current).forEach((mesh) => {
     scene.remove(mesh);
@@ -224,8 +226,9 @@ export function buildSceneObjects(
         return;
     }
 
-    const color = DEFAULT_MESH_COLOR;
-    const material = createMaterial(item, color);
+    const materialProps = item.material ?? defaultMaterial;
+    const color = materialProps.color ?? DEFAULT_MESH_COLOR;
+    const material = createMaterial(item, color, materialProps);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = item.type !== "sketch";
     mesh.receiveShadow = item.type !== "sketch";
@@ -389,8 +392,11 @@ export function buildSceneObjects(
     objectsRef.current[item.id] = mesh;
     originalMaterialsRef.current[item.id] = {
       color: new THREE.Color(color),
-      metalness: 0.2,
-      roughness: 0.2,
+      metalness: materialProps.metalness ?? 0.3,
+      roughness: materialProps.roughness ?? 0.5,
+      opacity: materialProps.opacity ?? 1,
+      clearcoat: materialProps.clearcoat ?? 0,
+      clearcoatRoughness: materialProps.clearcoatRoughness ?? 0,
       emissive: new THREE.Color(NO_EMISSIVE),
     };
   });

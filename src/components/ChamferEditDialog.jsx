@@ -30,9 +30,33 @@ const ChamferEditDialog = () => {
     }
   }, [regenerator]);
 
+  // Live preview: debounced re-run of the chamfer/fillet with the typed
+  // distance/angle, overlaid as a wireframe so the edit is visible before
+  // Save.  Skipped while a value is invalid (the recipe would no-op anyway).
+  useEffect(() => {
+    if (!regenerator) return;
+    const mm = parseFloat(distanceMm);
+    const deg = parseFloat(angleDeg);
+    if (!Number.isFinite(mm) || mm <= 0) return;
+    const ctrl = useStore.getState()._cameraControls;
+    const timer = setTimeout(() => {
+      ctrl?.updateChamferEditPreview?.(regenerator, mm, deg, entry.itemId);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [distanceMm, angleDeg, regenerator, entry?.itemId]);
+
+  // Drop the preview overlay whenever the dialog closes (Save, Cancel,
+  // Escape, backdrop click) or unmounts.
+  useEffect(() => {
+    return () => useStore.getState()._cameraControls?.clearChamferPreview?.();
+  }, [target]);
+
   if (!target || !entry || !regenerator) return null;
 
-  const close = () => setTarget(null);
+  const close = () => {
+    useStore.getState()._cameraControls?.clearChamferPreview?.();
+    setTarget(null);
+  };
   const commit = () => {
     const mm = parseFloat(distanceMm);
     if (!Number.isFinite(mm) || mm <= 0) return;
@@ -60,10 +84,23 @@ const ChamferEditDialog = () => {
   const valid = distValid && angValid;
 
   return (
-    <div className="variables-dialog-backdrop" onClick={close}>
+    // Non-blocking: a click-through, undimmed backdrop keeps the viewport
+    // visible and orbitable so the live preview is actually seen.  The dialog
+    // floats near the bottom (above the create-overlay band) with its own
+    // pointer events; closing is via Cancel / Save / × / Escape, not
+    // click-away.
+    <div
+      className="variables-dialog-backdrop"
+      style={{
+        background: "transparent",
+        alignItems: "flex-end",
+        paddingBottom: 72,
+        pointerEvents: "none",
+      }}
+    >
       <div
         className="variables-dialog"
-        style={{ minWidth: 400 }}
+        style={{ minWidth: 400, pointerEvents: "auto" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="variables-dialog-header">

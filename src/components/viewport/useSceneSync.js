@@ -76,6 +76,9 @@ export function useSceneSync({
   setSketchDrawPhase,
   setRotationState,
 }) {
+  const defaultMaterial = useStore((s) => s.defaultMaterial);
+  const materialDialogTarget = useStore((s) => s.materialDialogTarget);
+
   useEffect(() => {
     if (axisGroupRef.current)
       axisGroupRef.current.visible = axisVisible && !sketchModeRef.current;
@@ -258,6 +261,7 @@ export function useSceneSync({
       originalMaterialsRef,
       curveSegments,
       printPrecision,
+      defaultMaterial,
     );
     applyRenderMode(renderMode, {
       scene: sceneRef.current,
@@ -277,7 +281,7 @@ export function useSceneSync({
     // Variables drive extrude depth and dimension distances via formula
     // resolution; re-run when they change so geometry/labels reflect the
     // new values.
-  }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, curveResolution, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Persistent sub-geometry selection highlights ─────────────────────────
   // Rebuild a darker-coloured overlay whenever the selected faces or edges
@@ -570,10 +574,16 @@ export function useSceneSync({
   }, [extrudeSelectMode, cutExtrudeInProgress]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Emissive highlight ────────────────────────────────────────────────────
+  // While the Material dialog is open, suppress all selection/hover tinting
+  // so the live preview shows the material's true color.
 
   useEffect(() => {
-    updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
-  }, [hoveredId, selectedId, selectedIds]);
+    if (materialDialogTarget != null) {
+      updateEmissive(objectsRef, null, [], null);
+    } else {
+      updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
+    }
+  }, [hoveredId, selectedId, selectedIds, materialDialogTarget]);
 
   // ── Render mode ───────────────────────────────────────────────────────────
   // Also re-runs on curveResolution changes so the wireframe (and the

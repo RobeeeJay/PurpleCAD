@@ -118,13 +118,18 @@ export function applyRenderMode(renderMode, ctx) {
       const col = orig
         ? orig.color.clone()
         : new THREE.Color(DEFAULT_MESH_COLOR);
+      const opacity = orig?.opacity ?? 1;
+      const transparent = opacity < 1;
       if (mesh.material) mesh.material.dispose();
       mesh.material = new THREE.MeshPhysicalMaterial({
         color: col,
-        metalness: 0.15,
-        roughness: 0.3,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.1,
+        metalness: orig?.metalness ?? 0.15,
+        roughness: orig?.roughness ?? 0.3,
+        clearcoat: orig?.clearcoat ?? 1.0,
+        clearcoatRoughness: orig?.clearcoatRoughness ?? 0.1,
+        opacity,
+        transparent,
+        depthWrite: !transparent,
         envMapIntensity: 1.2,
       });
       mesh.children.forEach((child) => {
@@ -257,14 +262,22 @@ export function applyRenderMode(renderMode, ctx) {
       const col = orig
         ? orig.color.clone()
         : new THREE.Color(DEFAULT_MESH_COLOR);
+      const opacity = isTransparent ? sketchOpacity : (orig?.opacity ?? 1);
+      const transparent = isTransparent || opacity < 1;
       if (mesh.material) mesh.material.dispose();
-      mesh.material = new THREE.MeshStandardMaterial({
+      // Without scene.environment (set only in "smooth" mode) metalness and
+      // clearcoat have no reflection source to sample, but they still darken
+      // the direct-light response — so force them off here rather than
+      // carrying over orig's values.
+      mesh.material = new THREE.MeshPhysicalMaterial({
         color: col,
-        metalness: 0.3,
-        roughness: 0.5,
-        transparent: isTransparent,
-        opacity: isTransparent ? sketchOpacity : 1.0,
-        depthWrite: !isTransparent,
+        metalness: 0,
+        roughness: orig?.roughness ?? 0.5,
+        clearcoat: 0,
+        clearcoatRoughness: 0,
+        transparent,
+        opacity,
+        depthWrite: !transparent,
       });
       mesh.material.wireframe = renderMode === "wireframe";
       mesh.children.forEach((child) => {

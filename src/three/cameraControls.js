@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { createHighlightHelpers } from "./cameraControls/highlights.js";
 import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
+import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
 import { createSketchHoverHelpers } from "./cameraControls/sketchHover.js";
@@ -332,10 +333,34 @@ export function attachCameraControls(ctx) {
   const chamferPreview = createChamferPreviewHelpers({
     scene,
     itemsRef,
+    objectsRef,
   });
   controls.updateChamferPreview = (distanceMm, angleDeg) =>
     chamferPreview.updateChamferPreview(distanceMm, angleDeg);
+  controls.updateChamferEditPreview = (
+    regenerator,
+    distanceMm,
+    angleDeg,
+    itemId,
+  ) =>
+    chamferPreview.updateChamferEditPreview(
+      regenerator,
+      distanceMm,
+      angleDeg,
+      itemId,
+    );
   controls.clearChamferPreview = () => chamferPreview.clearChamferPreview();
+
+  // Live preview for MaterialDialog: instantly applies in-progress
+  // color/finish edits to the live mesh(es) without a store write.
+  const materialPreview = createMaterialPreviewHelpers({
+    objectsRef,
+    itemsRef,
+  });
+  controls.previewMaterial = (target, materialProps) =>
+    materialPreview.previewMaterial(target, materialProps);
+  controls.restoreMaterialPreview = (target) =>
+    materialPreview.restoreMaterialPreview(target);
 
   // The current view centre (camera orbit target) in world coords — the
   // toolbar reads this so a newly created primitive spawns where the user is

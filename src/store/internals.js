@@ -204,6 +204,37 @@ export const saveVariables = (variables) => {
   }
 };
 
+// Default material (applied to newly-created objects) + user-saved presets,
+// persisted together under one key so the Material dialog survives reload.
+export const loadMaterialSettings = () => {
+  try {
+    const raw = localStorage.getItem("cad-material");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        defaultMaterial: parsed.defaultMaterial ?? null,
+        materialPresets: Array.isArray(parsed.materialPresets)
+          ? parsed.materialPresets
+          : [],
+      };
+    }
+  } catch (e) {
+    console.warn("Failed to load material settings from localStorage:", e);
+  }
+  return { defaultMaterial: null, materialPresets: [] };
+};
+
+export const saveMaterialSettings = (defaultMaterial, materialPresets) => {
+  try {
+    localStorage.setItem(
+      "cad-material",
+      JSON.stringify({ defaultMaterial, materialPresets }),
+    );
+  } catch (e) {
+    console.warn("Failed to save material settings to localStorage:", e);
+  }
+};
+
 // Mark every CSG/chamfer regenerator stale so the next regenerate pass rebuilds
 // it from its (now-changed) inputs.  Called after a sketch edit so downstream
 // extruded/cut/bevelled geometry recalculates to the current sketch.  Returns

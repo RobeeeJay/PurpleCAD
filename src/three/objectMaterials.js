@@ -1,11 +1,13 @@
 import * as THREE from "three";
 import {
+  DEFAULT_MESH_COLOR,
   DEFAULT_OBJECT_COLOR,
   EMISSIVE_HOVERED,
   EMISSIVE_MULTI_SELECTED,
   EMISSIVE_SELECTED,
   NO_EMISSIVE,
 } from "./theme.js";
+import { DEFAULT_MATERIAL } from "./materialPresets.js";
 
 export const SPHERE_VERTEX_SHADER = `
   varying vec3 vViewPos;
@@ -203,11 +205,18 @@ export const TORUS_FRAGMENT_SHADER = `
   }
 `;
 
-export function createMaterial(item, color) {
+// `materialProps` is an item.material-shaped object (see
+// materialPresets.js#DEFAULT_MATERIAL): { color, metalness, roughness,
+// opacity, clearcoat, clearcoatRoughness }. `color` here is the resolved
+// THREE color (DEFAULT_MESH_COLOR fallback for items with no recorded
+// original), kept separate from materialProps.color for that reason.
+export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
+  const opacity = materialProps.opacity ?? 1;
+  const transparent = opacity < 1;
   const uniforms = () => ({
     uColor: { value: new THREE.Color(color) },
     uEmissive: { value: new THREE.Color(0) },
-    uOpacity: { value: 1.0 },
+    uOpacity: { value: opacity },
   });
   if (item.type === "sketch") {
     return new THREE.MeshStandardMaterial({
@@ -223,6 +232,7 @@ export function createMaterial(item, color) {
       uniforms: uniforms(),
       vertexShader: SPHERE_VERTEX_SHADER,
       fragmentShader: SPHERE_FRAGMENT_SHADER,
+      transparent,
     });
   }
   if (item.type === "cylinder") {
@@ -230,6 +240,7 @@ export function createMaterial(item, color) {
       uniforms: uniforms(),
       vertexShader: CYLINDER_VERTEX_SHADER,
       fragmentShader: CYLINDER_FRAGMENT_SHADER,
+      transparent,
     });
   }
   if (item.type === "torus") {
@@ -237,13 +248,47 @@ export function createMaterial(item, color) {
       uniforms: uniforms(),
       vertexShader: TORUS_VERTEX_SHADER,
       fragmentShader: TORUS_FRAGMENT_SHADER,
+      transparent,
     });
   }
-  return new THREE.MeshStandardMaterial({
+  return new THREE.MeshPhysicalMaterial({
     color,
-    metalness: 0.3,
-    roughness: 0.5,
+    metalness: materialProps.metalness ?? 0.3,
+    roughness: materialProps.roughness ?? 0.5,
+    opacity,
+    transparent,
+    clearcoat: materialProps.clearcoat ?? 0,
+    clearcoatRoughness: materialProps.clearcoatRoughness ?? 0,
   });
+}
+
+// Live-preview helper: mutate an already-built mesh's material in place to
+// match `materialProps` (item.material shape, color as CSS hex string), so
+// MaterialDialog can show changes instantly without rebuilding the scene.
+// Sketch items are excluded — their translucency is a fixed UI affordance,
+// not user-editable material.
+export function applyMaterialToMesh(mesh, item, materialProps) {
+  if (item.type === "sketch") return;
+  const opacity = materialProps.opacity ?? 1;
+  const transparent = opacity < 1;
+  const mat = mesh.material;
+  if (mat.uniforms?.uColor) {
+    mat.uniforms.uColor.value.set(materialProps.color ?? DEFAULT_MESH_COLOR);
+    mat.uniforms.uOpacity.value = opacity;
+    mat.transparent = transparent;
+    mat.needsUpdate = true;
+    return;
+  }
+  mat.color.set(materialProps.color ?? DEFAULT_MESH_COLOR);
+  if ("metalness" in mat) mat.metalness = materialProps.metalness ?? 0.3;
+  if ("roughness" in mat) mat.roughness = materialProps.roughness ?? 0.5;
+  if ("clearcoat" in mat) mat.clearcoat = materialProps.clearcoat ?? 0;
+  if ("clearcoatRoughness" in mat)
+    mat.clearcoatRoughness = materialProps.clearcoatRoughness ?? 0;
+  mat.opacity = opacity;
+  mat.transparent = transparent;
+  mat.depthWrite = !transparent;
+  mat.needsUpdate = true;
 }
 
 export function updateEmissive(objectsRef, selectedId, selectedIds, hoveredId) {

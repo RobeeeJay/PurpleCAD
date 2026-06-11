@@ -1,21 +1,39 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import { countGeometryComponents } from "../../three/geometryComponents.js";
 
 const ModifySection = ({ bare = false }) => {
   const selectedId = useStore((s) => s.selectedId);
   const selectedIds = useStore((s) => s.selectedIds);
   const items = useStore((s) => s.items);
+  const splitObject = useStore((s) => s.splitObject);
 
   const eligible = (selectedIds.length > 0 ? selectedIds : [selectedId])
     .map((id) => items.find((i) => i.id === id))
     .filter((it) => it && it.type !== "sketch");
   const canDrop = eligible.length > 0;
 
+  const selectedItem = items.find((i) => i.id === selectedId);
+  // Splittable when the single selected solid is geometrically more than one
+  // disconnected lump — covers unions of non-touching parts, a difference
+  // that severed a body, an imported multi-solid, etc.  A welded single body
+  // (or a lone primitive) is one component and stays disabled.
+  const componentCount = useMemo(
+    () => countGeometryComponents(selectedItem?.geometryData),
+    [selectedItem?.geometryData],
+  );
+  const canSplit = selectedIds.length <= 1 && componentCount >= 2;
+
   const handleDrop = () => {
     if (!canDrop) return;
     const ctrl = useStore.getState()._cameraControls;
     ctrl?.dropSelectedToGround?.();
+  };
+
+  const handleSplit = () => {
+    if (!canSplit) return;
+    splitObject(selectedId);
   };
 
   const body = (
@@ -68,7 +86,80 @@ const ModifySection = ({ bare = false }) => {
       </svg>
     </button>
   );
-  return bare ? body : <ToolbarSection label="Modify">{body}</ToolbarSection>;
+
+  const splitButton = (
+    <button
+      className="toolbar-btn"
+      title="Split — separate a union back into its original objects"
+      disabled={!canSplit}
+      onClick={handleSplit}
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        {/* Two separate objects, pulled apart */}
+        <rect
+          x="2"
+          y="9"
+          width="7"
+          height="7"
+          rx="1"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="18.5"
+          cy="12.5"
+          r="3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        {/* Arrows showing the separation */}
+        <path
+          d="M10 8 L13 8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <path
+          d="M11.5 6.5 L13 8 L11.5 9.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M14 17 L11 17"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <path
+          d="M12.5 15.5 L11 17 L12.5 18.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+
+  return bare ? (
+    <>
+      {body}
+      {splitButton}
+    </>
+  ) : (
+    <ToolbarSection label="Modify">
+      {body}
+      {splitButton}
+    </ToolbarSection>
+  );
 };
 
 export default ModifySection;

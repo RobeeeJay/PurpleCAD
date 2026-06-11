@@ -36,18 +36,6 @@ export const shiftSelectionToSource = (sel, centerOffset) => {
   };
 };
 
-// Find the "modify" history entry that holds itemId's current chamfer/fillet
-// recipe — the one retargetChamferEntry needs to update in place.
-export const findChamferEntryId = (history, itemId) =>
-  [...history]
-    .reverse()
-    .find(
-      (h) =>
-        h.instruction?.type === "modify" &&
-        h.instruction.itemId === itemId &&
-        h.instruction.patches?.regenerator?.kind === "chamfer",
-    )?.id;
-
 // Arm a chamfer/fillet retarget: pre-select the faces/edges the original
 // operation used (shifted from the source frame back into this item's
 // rendered, bbox-centred frame) and open ChamferOverlay in the matching
