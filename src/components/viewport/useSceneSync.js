@@ -18,6 +18,15 @@ import {
 import { updateEmissive } from "../../three/objectMaterials.js";
 import { resolveItemDepth } from "../../three/geometryParams.js";
 import { reconcileSelectionHighlight } from "../../three/selectionHighlights.js";
+import {
+  CROSS_SECTION_PLANE,
+  updateCrossSectionPlane,
+} from "../../three/crossSection.js";
+import {
+  ensureCaps,
+  rebuildCaps,
+  setCapsEnabled,
+} from "../../three/crossSectionCaps.js";
 import { useSketchModeEffect } from "./useSketchModeEffect";
 
 export function useSceneSync({
@@ -70,6 +79,7 @@ export function useSceneSync({
   projectionMode,
   axisVisible,
   shadowsEnabled,
+  crossSectionView,
   curveSegments,
   printPrecision,
   setSketchMode,
@@ -613,4 +623,61 @@ export function useSceneSync({
     if (sketchShapesGroupRef.current)
       sketchShapesGroupRef.current.visible = !isSmooth;
   }, [renderMode, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Cross-section view ────────────────────────────────────────────────────
+  // Clip the object meshes (only — helpers, grid, and the origin axis gizmo
+  // stay whole) against the camera-locked section plane (updated per frame in
+  // the animate loop).  Re-applies on every trigger that rebuilds or swaps
+  // object materials (render mode, resolution, items, variables, default
+  // material), since those discard the clip assignment.
+  // Placed last so it runs after the build / render-mode effects on shared
+  // deps.  (Analytic-shader primitives — sphere/cylinder/torus — use a custom
+  // GLSL material without clipping support and are not sectioned.)
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.localClippingEnabled = true;
+    // Seed the plane for the live camera so the cut is correct on this frame;
+    // the animate loop keeps it tracking the camera thereafter.
+    if (crossSectionView && cameraRef.current)
+      updateCrossSectionPlane(cameraRef.current, targetRef.current);
+    const planes = crossSectionView ? [CROSS_SECTION_PLANE] : null;
+    Object.values(objectsRef.current).forEach((mesh) => {
+      mesh.traverse((o) => {
+        const mats = Array.isArray(o.material)
+          ? o.material
+          : o.material
+            ? [o.material]
+            : [];
+        mats.forEach((m) => {
+          // Skip the analytic primitive shader — it can't clip and toggling
+          // needsUpdate on it is wasteful.
+          if (m.isShaderMaterial && !m.isMeshPhysicalMaterial) return;
+          if (m.clippingPlanes !== planes) {
+            m.clippingPlanes = planes;
+            m.needsUpdate = true;
+          }
+        });
+      });
+    });
+    // Hatched caps across the cut faces (stencil-masked).  Rebuilt for the
+    // current objects whenever the view is on; the animate loop re-poses them
+    // to the live plane each frame.
+    if (sceneRef.current) {
+      ensureCaps(sceneRef.current);
+      if (crossSectionView) {
+        rebuildCaps(objectsRef, CROSS_SECTION_PLANE);
+        setCapsEnabled(true);
+      } else {
+        setCapsEnabled(false);
+      }
+    }
+  }, [
+    crossSectionView,
+    renderMode,
+    curveResolution,
+    items,
+    variables,
+    defaultMaterial,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 }

@@ -68,7 +68,14 @@ export function applyRenderMode(renderMode, ctx) {
     });
 
     if (!composerRef.current && cameraRef.current) {
-      const composer = new EffectComposer(renderer);
+      // Give the composer's render target a stencil buffer so the cross-section
+      // caps (stencil-masked) survive smooth mode's post-processing pass.
+      const dbSize = renderer.getDrawingBufferSize(new THREE.Vector2());
+      const composerRT = new THREE.WebGLRenderTarget(dbSize.x, dbSize.y, {
+        stencilBuffer: true,
+        depthBuffer: true,
+      });
+      const composer = new EffectComposer(renderer, composerRT);
       composer.addPass(new RenderPass(scene, cameraRef.current));
       composer.addPass(
         new UnrealBloomPass(

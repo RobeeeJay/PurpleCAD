@@ -46,7 +46,8 @@ export function createCamera(
 }
 
 export function createRenderer(container) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // stencil: true so the cross-section view can cap cut faces (stencil mask).
+  const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   // Compile shadow-aware shaders up-front; the runtime toggle controls

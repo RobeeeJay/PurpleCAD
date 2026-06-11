@@ -86,6 +86,7 @@ const Viewport = () => {
   const selectItem = useStore((state) => state.selectItem);
   const renderMode = useStore((state) => state.renderMode);
   const shadowsEnabled = useStore((state) => state.shadowsEnabled);
+  const crossSectionView = useStore((state) => state.crossSectionView);
   const projectionMode = useStore((state) => state.projectionMode);
   const fov = useStore((state) => state.fov);
   const widgetVisible = useStore((state) => state.widgetVisible);
@@ -238,6 +239,7 @@ const Viewport = () => {
     projectionMode,
     axisVisible,
     shadowsEnabled,
+    crossSectionView,
     curveSegments,
     printPrecision,
     setSketchMode,

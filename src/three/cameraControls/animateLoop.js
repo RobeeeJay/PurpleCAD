@@ -7,6 +7,12 @@
 
 import * as THREE from "three";
 import { updateRuler3D } from "../sceneSetup.js";
+import { useStore } from "../../store";
+import {
+  CROSS_SECTION_PLANE,
+  updateCrossSectionPlane,
+} from "../crossSection.js";
+import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
 
@@ -243,6 +249,12 @@ export function createAnimateLoop({
       }
     }
     gridMaterial.uniforms.uCameraPos.value.copy(cameraRef.current.position);
+    // Keep the cross-section cut locked to the camera as it orbits / pans, and
+    // re-pose the hatched caps onto the live plane.
+    if (useStore.getState().crossSectionView) {
+      updateCrossSectionPlane(cameraRef.current, targetRef.current);
+      updateCaps(CROSS_SECTION_PLANE, targetRef.current);
+    }
     if (composerRef.current) composerRef.current.render();
     else renderer.render(scene, cameraRef.current);
   };

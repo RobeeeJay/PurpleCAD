@@ -80,4 +80,88 @@ describe("offsetSketchGeometry + updateSketchOffsetDistance", () => {
     expect(item.shapes[0].r).toBeCloseTo(3, 2);
     expect(item.shapes[off.shapeIdx].r).toBeCloseTo(2, 2); // 3 + (-1)
   });
+
+  it("offsets an arc concentrically, keeping its angles, and edits the gap", () => {
+    const arc = {
+      type: "arc",
+      cx: 0,
+      cy: 0,
+      r: 3,
+      startAngle: 0,
+      endAngle: Math.PI / 2,
+    };
+    const store = makeStore([
+      { id: 1, type: "sketch", shapes: [arc], constraints: [] },
+    ]);
+    store.getState().offsetSketchGeometry(1, [0], "20"); // +2 units
+
+    let item = store.getState().items.find((i) => i.id === 1);
+    const off = item.constraints.find((c) => c.type === "offset");
+    const copy = item.shapes[off.shapeIdx];
+    expect(copy.type).toBe("arc");
+    expect(copy.cx).toBeCloseTo(0);
+    expect(copy.cy).toBeCloseTo(0);
+    expect(copy.r).toBeCloseTo(5, 2);
+    expect(copy.startAngle).toBeCloseTo(0);
+    expect(copy.endAngle).toBeCloseTo(Math.PI / 2);
+
+    store.getState().updateSketchOffsetDistance(1, off.offsetGroup, null, "10");
+    item = store.getState().items.find((i) => i.id === 1);
+    expect(item.shapes[0].r).toBeCloseTo(3, 2); // original untouched
+    expect(item.shapes[off.shapeIdx].r).toBeCloseTo(4, 2); // 3 + 1
+  });
+
+  it("offsets an ellipse by growing both semi-axes", () => {
+    const ell = { type: "ellipse", cx: 1, cy: 2, rx: 4, ry: 2, rotation: 0.3 };
+    const store = makeStore([
+      { id: 1, type: "sketch", shapes: [ell], constraints: [] },
+    ]);
+    store.getState().offsetSketchGeometry(1, [0], "20"); // +2 units
+
+    let item = store.getState().items.find((i) => i.id === 1);
+    const off = item.constraints.find((c) => c.type === "offset");
+    const copy = item.shapes[off.shapeIdx];
+    expect(copy.type).toBe("ellipse");
+    expect(copy.cx).toBeCloseTo(1);
+    expect(copy.cy).toBeCloseTo(2);
+    expect(copy.rx).toBeCloseTo(6, 2);
+    expect(copy.ry).toBeCloseTo(4, 2);
+    expect(copy.rotation).toBeCloseTo(0.3);
+  });
+
+  it("offsets a bezier and recomputes its geometry when the gap changes", () => {
+    // A straight horizontal bezier so the offset is a simple vertical shift.
+    const bez = {
+      type: "bezier",
+      p0: { x: 0, y: 0 },
+      p1: { x: 3, y: 0 },
+      p2: { x: 6, y: 0 },
+      p3: { x: 9, y: 0 },
+    };
+    const store = makeStore([
+      { id: 1, type: "sketch", shapes: [bez], constraints: [] },
+    ]);
+    store.getState().offsetSketchGeometry(1, [0], "20"); // +2 units
+
+    let item = store.getState().items.find((i) => i.id === 1);
+    expect(item.shapes).toHaveLength(2);
+    const off = item.constraints.find((c) => c.type === "offset");
+    const copy = item.shapes[off.shapeIdx];
+    expect(copy.type).toBe("bezier");
+    // Right normal of a left-to-right curve points -y (same convention as the
+    // line offset); all control points shift by the full offset.
+    [copy.p0, copy.p1, copy.p2, copy.p3].forEach((p) =>
+      expect(p.y).toBeCloseTo(-2, 2),
+    );
+
+    // Beziers aren't solver-linked — the distance edit recomputes geometry.
+    store.getState().updateSketchOffsetDistance(1, off.offsetGroup, null, "50");
+    item = store.getState().items.find((i) => i.id === 1);
+    const moved = item.shapes[off.shapeIdx];
+    [moved.p0, moved.p1, moved.p2, moved.p3].forEach((p) =>
+      expect(p.y).toBeCloseTo(-5, 2),
+    );
+    // Original bezier stays put.
+    expect(item.shapes[0].p0.y).toBeCloseTo(0);
+  });
 });

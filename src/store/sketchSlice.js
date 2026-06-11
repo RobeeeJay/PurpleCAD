@@ -15,6 +15,125 @@ import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
 import { resolveValue } from "../three/geometryParams.js";
 
+// Shape types the Offset tool can copy.
+export const OFFSETTABLE_TYPES = ["line", "circle", "arc", "ellipse", "bezier"];
+
+// Approximate parallel offset of a cubic bezier: shift each control point along
+// the curve normal at its parameter (endpoints exact, interior approximate).
+// A true offset of a bezier isn't a bezier, so this is the usual CAD
+// approximation — good for the gentle curves sketches use.
+const offsetBezierGeometry = (o, d) => {
+  const { p0, p1, p2, p3 } = o;
+  const deriv = (t) => {
+    const mt = 1 - t;
+    return {
+      x:
+        3 * mt * mt * (p1.x - p0.x) +
+        6 * mt * t * (p2.x - p1.x) +
+        3 * t * t * (p3.x - p2.x),
+      y:
+        3 * mt * mt * (p1.y - p0.y) +
+        6 * mt * t * (p2.y - p1.y) +
+        3 * t * t * (p3.y - p2.y),
+    };
+  };
+  const off = (pt, t) => {
+    const tg = deriv(t);
+    let len = Math.hypot(tg.x, tg.y);
+    if (len < 1e-9) {
+      // Degenerate tangent (coincident control points) → use the chord.
+      const cx = p3.x - p0.x,
+        cy = p3.y - p0.y;
+      len = Math.hypot(cx, cy) || 1e-9;
+      return { x: pt.x + (d * cy) / len, y: pt.y + (d * -cx) / len };
+    }
+    // Right normal, matching the line-offset convention.
+    return { x: pt.x + (d * tg.y) / len, y: pt.y + (d * -tg.x) / len };
+  };
+  return {
+    type: "bezier",
+    p0: off(p0, 0),
+    p1: off(p1, 1 / 3),
+    p2: off(p2, 2 / 3),
+    p3: off(p3, 1),
+    ...(o.dashed ? { dashed: true } : null),
+  };
+};
+
+// Geometric offset of a sketch shape by a signed scene distance (right-normal
+// = +d side, matching the line convention; circles/arcs/ellipses grow their
+// radii by +d).  Returns null for types that can't be offset.
+export const offsetShapeGeometry = (o, d) => {
+  const dashed = o.dashed ? { dashed: true } : null;
+  switch (o.type) {
+    case "line": {
+      const odx = o.x2 - o.x1,
+        ody = o.y2 - o.y1;
+      const len = Math.hypot(odx, ody) || 1e-9;
+      const nx = ody / len,
+        ny = -odx / len;
+      return {
+        type: "line",
+        x1: o.x1 + d * nx,
+        y1: o.y1 + d * ny,
+        x2: o.x2 + d * nx,
+        y2: o.y2 + d * ny,
+        ...dashed,
+      };
+    }
+    case "circle":
+      return {
+        type: "circle",
+        cx: o.cx,
+        cy: o.cy,
+        r: Math.max(1e-4, (o.r ?? 0) + d),
+        ...dashed,
+      };
+    case "arc":
+      return {
+        type: "arc",
+        cx: o.cx,
+        cy: o.cy,
+        r: Math.max(1e-4, (o.r ?? 0) + d),
+        startAngle: o.startAngle,
+        endAngle: o.endAngle,
+        ...dashed,
+      };
+    case "ellipse":
+      return {
+        type: "ellipse",
+        cx: o.cx,
+        cy: o.cy,
+        rx: Math.max(1e-4, (o.rx ?? 0) + d),
+        ry: Math.max(1e-4, (o.ry ?? 0) + d),
+        rotation: o.rotation || 0,
+        ...dashed,
+      };
+    case "bezier":
+      return offsetBezierGeometry(o, d);
+    default:
+      return null;
+  }
+};
+
+// Beziers aren't solver variables, so re-solving can't move their offset
+// copies — recompute them geometrically from the (pinned) original at the
+// constraint's current distance.  Returns the same array ref when unchanged.
+const recomputeBezierOffsets = (shapes, constraints) => {
+  let out = shapes;
+  constraints.forEach((c) => {
+    if (c.type !== "offset") return;
+    const orig = out[c.origIdx];
+    const tgt = out[c.shapeIdx];
+    if (orig?.type !== "bezier" || tgt?.type !== "bezier") return;
+    const d = resolveValue(c.distance, 0);
+    if (!Number.isFinite(d)) return;
+    if (out === shapes) out = shapes.slice();
+    out[c.shapeIdx] = offsetShapeGeometry(orig, d);
+  });
+  return out;
+};
+
 export const createSketchSlice = (set) => ({
   ...createSketchUndoSlice(set),
 
@@ -403,10 +522,9 @@ export const createSketchSlice = (set) => ({
       const item = state.items.find((i) => i.id === sketchId);
       if (!item) return {};
       const shapes = item.shapes || [];
-      const sel = (lineIndices || []).filter((idx) => {
-        const t = shapes[idx]?.type;
-        return t === "line" || t === "circle";
-      });
+      const sel = (lineIndices || []).filter((idx) =>
+        OFFSETTABLE_TYPES.includes(shapes[idx]?.type),
+      );
       if (sel.length === 0) return {};
       const dScene = resolveValue(distance, 0.5);
       if (!Number.isFinite(dScene) || dScene === 0) return {};
@@ -425,36 +543,11 @@ export const createSketchSlice = (set) => ({
       const newConstraints = [];
       const newIdxOf = new Map();
       sel.forEach((origIdx) => {
-        const o = shapes[origIdx];
+        const copy = offsetShapeGeometry(shapes[origIdx], dScene);
+        if (!copy) return;
         const newIdx = base + newShapes.length;
         newIdxOf.set(origIdx, newIdx);
-        if (o.type === "circle") {
-          // Concentric copy: radius grows by the signed offset (clamped to stay
-          // positive when offsetting inward past the centre).
-          newShapes.push({
-            type: "circle",
-            cx: o.cx,
-            cy: o.cy,
-            r: Math.max(1e-4, (o.r ?? 0) + dScene),
-            ...(o.dashed ? { dashed: true } : null),
-          });
-        } else {
-          const odx = o.x2 - o.x1,
-            ody = o.y2 - o.y1;
-          const len = Math.hypot(odx, ody) || 1e-9;
-          // Right normal: placing at +dScene here makes the signed perpendicular
-          // distance the solver measures equal +dScene (see the offset residual).
-          const nx = ody / len,
-            ny = -odx / len;
-          newShapes.push({
-            type: "line",
-            x1: o.x1 + dScene * nx,
-            y1: o.y1 + dScene * ny,
-            x2: o.x2 + dScene * nx,
-            y2: o.y2 + dScene * ny,
-            ...(o.dashed ? { dashed: true } : null),
-          });
-        }
+        newShapes.push(copy);
         newConstraints.push({
           type: "offset",
           shapeIdx: newIdx,
@@ -577,7 +670,10 @@ export const createSketchSlice = (set) => ({
           fixed,
         },
       );
-      const finalShapes = ok ? solved : item.shapes;
+      const finalShapes = recomputeBezierOffsets(
+        ok ? solved : item.shapes,
+        constraints,
+      );
 
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((it) =>
@@ -645,11 +741,15 @@ export const createSketchSlice = (set) => ({
           fixed,
         },
       );
+      const finalShapes = recomputeBezierOffsets(
+        ok ? solved : item.shapes,
+        constraints,
+      );
       return {
         items: state.items.map((it) =>
           it.id === sketchId
             ? Object.assign({}, it, {
-                shapes: ok ? solved : item.shapes,
+                shapes: finalShapes,
                 constraints,
               })
             : it,

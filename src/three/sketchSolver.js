@@ -133,6 +133,23 @@ function residuals(shapes, constraints, variables) {
         out.push(nl.cx - ol.cx);
         out.push(nl.cy - ol.cy);
         out.push((nl.r ?? 0) - ((ol.r ?? 0) + d));
+      } else if (nl?.type === "arc" && ol?.type === "arc") {
+        // Concentric arc offset: shared centre + angles, radius offset by d.
+        const d = resolveConstraintDistance(c, variables);
+        out.push(nl.cx - ol.cx);
+        out.push(nl.cy - ol.cy);
+        out.push((nl.r ?? 0) - ((ol.r ?? 0) + d));
+        out.push((nl.startAngle ?? 0) - (ol.startAngle ?? 0));
+        out.push((nl.endAngle ?? 0) - (ol.endAngle ?? 0));
+      } else if (nl?.type === "ellipse" && ol?.type === "ellipse") {
+        // Concentric ellipse offset: shared centre + rotation, both semi-axes
+        // grown by d (an approximation — a true ellipse offset isn't elliptic).
+        const d = resolveConstraintDistance(c, variables);
+        out.push(nl.cx - ol.cx);
+        out.push(nl.cy - ol.cy);
+        out.push((nl.rx ?? 0) - ((ol.rx ?? 0) + d));
+        out.push((nl.ry ?? 0) - ((ol.ry ?? 0) + d));
+        out.push((nl.rotation ?? 0) - (ol.rotation ?? 0));
       } else if (nl?.type === "line" && ol?.type === "line") {
         const ndx = nl.x2 - nl.x1,
           ndy = nl.y2 - nl.y1;

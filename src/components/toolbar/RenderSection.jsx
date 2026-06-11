@@ -9,6 +9,8 @@ const RenderSection = () => {
   const toggleCurveResolution = useStore((s) => s.toggleCurveResolution);
   const shadowsEnabled = useStore((s) => s.shadowsEnabled);
   const setShadowsEnabled = useStore((s) => s.setShadowsEnabled);
+  const crossSectionView = useStore((s) => s.crossSectionView);
+  const toggleCrossSectionView = useStore((s) => s.toggleCrossSectionView);
 
   return (
     <ToolbarSection label="Render">
@@ -112,6 +114,62 @@ const RenderSection = () => {
             d="M 6 15 L 18 15 L 20 18 L 8 18 Z"
             fill="currentColor"
             opacity="0.45"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${crossSectionView ? "active" : ""}`}
+        title={
+          crossSectionView
+            ? "Cross section view on — click to disable"
+            : "Cross section view — hide everything in front of the section plane (tracks the camera)"
+        }
+        onClick={toggleCrossSectionView}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* The cut plane (vertical) */}
+          <line
+            x1="12"
+            y1="3"
+            x2="12"
+            y2="21"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeDasharray="3 2"
+          />
+          {/* The remaining (far) half-solid behind the plane */}
+          <path
+            d="M12 6 L20 6 L20 18 L12 18 Z"
+            fill="currentColor"
+            opacity="0.35"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          {/* Hatching on the cut face */}
+          <line
+            x1="12"
+            y1="9"
+            x2="15"
+            y2="6"
+            stroke="currentColor"
+            strokeWidth="1"
+          />
+          <line
+            x1="12"
+            y1="13"
+            x2="19"
+            y2="6"
+            stroke="currentColor"
+            strokeWidth="1"
+          />
+          <line
+            x1="12"
+            y1="17"
+            x2="20"
+            y2="9"
+            stroke="currentColor"
+            strokeWidth="1"
           />
         </svg>
       </button>

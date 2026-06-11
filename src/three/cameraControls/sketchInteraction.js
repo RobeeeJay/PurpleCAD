@@ -37,6 +37,10 @@ import {
   varFields,
 } from "../sketchSolver.js";
 import { SKETCH_LINE_COLOR, SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
+import {
+  selectedSketchLineIndices,
+  offsetSelectedSketchGeometry,
+} from "../sketchModifyActions.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
@@ -1608,9 +1612,12 @@ export function createSketchInteraction(
     }
 
     if (sketchModeRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (e.key.toLowerCase() === "d") {
+      const key = e.key.toLowerCase();
+      const store = useStore.getState();
+
+      // D toggles the distance-dimension constraint tool.
+      if (key === "d") {
         e.preventDefault();
-        const store = useStore.getState();
         const isActive = store.sketchConstraintMode === "distance";
         store.setSketchConstraintMode(isActive ? null : "distance");
         store.setSketchConstraintFirstPoint(null);
@@ -1618,13 +1625,40 @@ export function createSketchInteraction(
         clearCoincidentFirstOverlay();
         return;
       }
-      const toolMap = { l: "line", r: "rect", a: "arc", b: "bezier" };
-      const tool = toolMap[e.key.toLowerCase()];
+      // I toggles dashed on the selected line(s); O offsets them.  Both are
+      // no-ops without a line selection, mirroring the disabled toolbar
+      // buttons.
+      if (key === "i") {
+        e.preventDefault();
+        const indices = selectedSketchLineIndices();
+        if (indices.length > 0)
+          store.toggleSketchShapesDashed(selectedIdRef.current, indices);
+        return;
+      }
+      if (key === "o") {
+        e.preventDefault();
+        offsetSelectedSketchGeometry(
+          selectedIdRef.current,
+          selectedSketchLineIndices(),
+          e.shiftKey,
+        );
+        return;
+      }
+
+      const toolMap = {
+        l: "line",
+        r: "rect",
+        c: "circle",
+        e: "ellipse",
+        a: "arc",
+        b: "bezier",
+      };
+      const tool = toolMap[key];
       if (tool) {
         e.preventDefault();
         if (sketchDrawRef.current) cancelSketchDraw();
-        const current = useStore.getState().activeSketchTool;
-        useStore.getState().setActiveSketchTool(current === tool ? null : tool);
+        const current = store.activeSketchTool;
+        store.setActiveSketchTool(current === tool ? null : tool);
       }
     }
   };

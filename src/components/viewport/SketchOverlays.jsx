@@ -63,6 +63,46 @@ export default function SketchOverlays({
       cameraControlsRef.current?.finalizeExtrudeWithDepth?.(depth);
     else cameraControlsRef.current?.finalizeExtrudeWithFormula?.(raw, depth);
   };
+
+  // Offset confirm/cancel — shared by the overlay buttons and Enter/Escape.
+  // The latest typed value is tracked here so the Confirm button (which has no
+  // event) can read it; onChange already live-previews it via the store.
+  const offsetDraftRef = React.useRef(null);
+
+  const confirmOffset = () => {
+    const di = useStore.getState().sketchDistanceInput;
+    if (!di || di.offsetConstraintIdx == null) return;
+    const raw = (offsetDraftRef.current ?? String(di.defaultDistance)).trim();
+    const mm = evaluateFormula(
+      raw,
+      variablesToMap(useStore.getState().variables),
+    );
+    if (Number.isFinite(mm) && mm !== 0) {
+      useStore
+        .getState()
+        .updateSketchOffsetDistance(
+          selectedId,
+          di.offsetGroup,
+          di.offsetConstraintIdx,
+          raw,
+        );
+      cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
+    }
+    offsetDraftRef.current = null;
+    useStore.getState().setSketchDistanceInput(null);
+    useStore.getState().setSketchConstraintMode(null);
+  };
+
+  // Cancel discards the whole offset (it was created on entry) via the
+  // per-sketch undo, matching the extrude/chamfer "Cancel removes it" flow.
+  const cancelOffset = () => {
+    offsetDraftRef.current = null;
+    useStore.getState().undoSketch(selectedId);
+    cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
+    useStore.getState().setSketchDistanceInput(null);
+    useStore.getState().setSketchConstraintMode(null);
+  };
+
   return (
     <>
       {sketchPlacementMode && (
@@ -289,6 +329,7 @@ export default function SketchOverlays({
               // history/undo churn) so the geometry follows the typed value.
               if (sketchDistanceInput.offsetConstraintIdx == null) return;
               const raw = e.target.value.trim();
+              offsetDraftRef.current = raw;
               const mm = evaluateFormula(
                 raw,
                 variablesToMap(useStore.getState().variables),
@@ -314,23 +355,10 @@ export default function SketchOverlays({
                   useStore.getState().variables,
                 );
                 const mm = evaluateFormula(raw, variablesMap);
-                // Offset edit: the distance is signed (which side the copy sits
-                // on), so any non-zero value is valid.  Re-solve happens inside
-                // the reducer; only the offset copies move.
+                // Offset edit: Enter confirms (matching the Confirm button).
                 if (sketchDistanceInput.offsetConstraintIdx != null) {
-                  if (Number.isFinite(mm) && mm !== 0) {
-                    useStore
-                      .getState()
-                      .updateSketchOffsetDistance(
-                        selectedId,
-                        sketchDistanceInput.offsetGroup,
-                        sketchDistanceInput.offsetConstraintIdx,
-                        raw,
-                      );
-                    cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
-                  }
-                  useStore.getState().setSketchDistanceInput(null);
-                  useStore.getState().setSketchConstraintMode(null);
+                  offsetDraftRef.current = raw;
+                  confirmOffset();
                   return;
                 }
                 if (Number.isFinite(mm) && mm > 0) {
@@ -432,23 +460,64 @@ export default function SketchOverlays({
                 useStore.getState().setSketchDistanceInput(null);
                 useStore.getState().setSketchConstraintMode(null);
               } else if (e.key === "Escape") {
-                // Discard a live offset preview by re-solving to the original.
-                if (sketchDistanceInput.offsetConstraintIdx != null)
-                  useStore
-                    .getState()
-                    .previewSketchOffsetDistance(
-                      selectedId,
-                      sketchDistanceInput.offsetGroup,
-                      sketchDistanceInput.offsetConstraintIdx,
-                      String(sketchDistanceInput.defaultDistance),
-                    );
+                // Offset: Escape cancels the whole offset (matching Cancel);
+                // a plain dimension edit just closes.
+                if (sketchDistanceInput.offsetConstraintIdx != null) {
+                  cancelOffset();
+                  return;
+                }
                 useStore.getState().setSketchDistanceInput(null);
                 useStore.getState().setSketchConstraintMode(null);
               }
             }}
           />
+          {sketchDistanceInput.offsetConstraintIdx != null && (
+            <>
+              <button
+                type="button"
+                onClick={cancelOffset}
+                title="Cancel — discard the offset"
+                style={{
+                  fontSize: 11,
+                  padding: "3px 10px",
+                  marginLeft: 8,
+                  borderRadius: 3,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-tertiary)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmOffset}
+                title="Confirm — keep the offset at this distance"
+                style={{
+                  fontSize: 11,
+                  padding: "3px 10px",
+                  marginLeft: 8,
+                  borderRadius: 3,
+                  border: "1px solid var(--accent, #4488ff)",
+                  background: "var(--accent, #4488ff)",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Confirm
+              </button>
+            </>
+          )}
         </div>
       )}
+      {sketchMode &&
+        sketchDistanceInput &&
+        sketchDistanceInput.offsetConstraintIdx != null && (
+          <div className="sketch-placement-hint">
+            Set the offset distance, then Confirm · Esc to cancel
+          </div>
+        )}
       {sketchMode && sketchModifyMode && (
         <div className="sketch-placement-hint">
           {sketchModifyMode === "chamfer"

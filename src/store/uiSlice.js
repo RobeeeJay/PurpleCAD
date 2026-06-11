@@ -62,6 +62,11 @@ export const uiInitial = {
   // Whether the Y=0 ground plane shows shadows for scene objects.
   shadowsEnabled: false,
 
+  // Cross-section view: clip away everything on the camera-home (+X) side of
+  // the world ZY plane (x=0).  The plane is fixed in world space, so rotating
+  // the view sweeps the cut through different parts of the model.
+  crossSectionView: false,
+
   // Non-reactive slot holding the live cameraControls object (set by
   // Viewport during mount).  Lets UI components outside the Viewport
   // call viewport-anchored helpers (eg dropSelectedToGround) without
@@ -130,6 +135,8 @@ export const createUiSlice = (set) => ({
   setChamferRetargetTarget: (target) => set({ chamferRetargetTarget: target }),
   setChamferSelectMode: (mode) => set({ chamferSelectMode: mode }),
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
+  toggleCrossSectionView: () =>
+    set((state) => ({ crossSectionView: !state.crossSectionView })),
   setCameraControls: (controls) => set({ _cameraControls: controls }),
 
   beginOperation: () =>
