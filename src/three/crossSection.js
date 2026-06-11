@@ -41,3 +41,13 @@ export function updateCrossSectionPlane(camera, target) {
   CROSS_SECTION_PLANE.normal.copy(_n);
   CROSS_SECTION_PLANE.constant = target ? -_n.dot(target) : 0;
 }
+
+// The plane in VIEW space (for the analytic primitive shaders, which test their
+// computed surface point — already in view space — against it).  Mutates and
+// returns the shared `_viewPlane`.
+const _viewPlane = new THREE.Plane();
+export function crossSectionViewPlane(camera) {
+  return _viewPlane
+    .copy(CROSS_SECTION_PLANE)
+    .applyMatrix4(camera.matrixWorldInverse);
+}

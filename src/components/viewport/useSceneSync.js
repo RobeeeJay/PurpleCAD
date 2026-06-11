@@ -643,6 +643,16 @@ export function useSceneSync({
       updateCrossSectionPlane(cameraRef.current, targetRef.current);
     const planes = crossSectionView ? [CROSS_SECTION_PLANE] : null;
     Object.values(objectsRef.current).forEach((mesh) => {
+      // The sketch plane square is a reference surface, not solid — never clip
+      // or cap it.
+      const item = items.find((i) => i.id === mesh.userData.itemId);
+      if (item?.type === "sketch") return;
+      // Analytic primitives (sphere/cylinder/torus) clip via their own shader
+      // uniform; the live view-space plane is pushed each frame by the animate
+      // loop.  Toggle just the enable flag here.
+      const sm = mesh.userData.shaderMat;
+      if (sm?.uniforms?.uClipEnabled)
+        sm.uniforms.uClipEnabled.value = crossSectionView ? 1 : 0;
       mesh.traverse((o) => {
         const mats = Array.isArray(o.material)
           ? o.material
@@ -650,8 +660,8 @@ export function useSceneSync({
             ? [o.material]
             : [];
         mats.forEach((m) => {
-          // Skip the analytic primitive shader — it can't clip and toggling
-          // needsUpdate on it is wasteful.
+          // Analytic shader handled above; other custom shaders can't clip.
+          if (m.uniforms?.uClipEnabled) return;
           if (m.isShaderMaterial && !m.isMeshPhysicalMaterial) return;
           if (m.clippingPlanes !== planes) {
             m.clippingPlanes = planes;
@@ -660,13 +670,17 @@ export function useSceneSync({
         });
       });
     });
-    // Hatched caps across the cut faces (stencil-masked).  Rebuilt for the
-    // current objects whenever the view is on; the animate loop re-poses them
-    // to the live plane each frame.
+    // Hatched caps across the cut faces (stencil-masked).  Only tessellated
+    // solids are capped — skip the sketch plane and the analytic primitives
+    // (their real surface isn't a triangle mesh the stencil pass could use).
     if (sceneRef.current) {
       ensureCaps(sceneRef.current);
       if (crossSectionView) {
-        rebuildCaps(objectsRef, CROSS_SECTION_PLANE);
+        const capMeshes = Object.values(objectsRef.current).filter((mesh) => {
+          const item = items.find((i) => i.id === mesh.userData.itemId);
+          return item && item.type !== "sketch" && !mesh.userData.shaderMat;
+        });
+        rebuildCaps(capMeshes, CROSS_SECTION_PLANE);
         setCapsEnabled(true);
       } else {
         setCapsEnabled(false);

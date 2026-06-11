@@ -103,13 +103,12 @@ const disposeStencilMeshes = () => {
   });
 };
 
-// Rebuild the per-object stencil meshes for the current scene objects.  Skips
-// analytic-shader primitives (they aren't clipped) and sketches.
-export function rebuildCaps(objectsRef, plane) {
+// Rebuild the per-object stencil meshes for the given cappable meshes (the
+// caller pre-filters out sketches + analytic primitives).
+export function rebuildCaps(meshes, plane) {
   if (!stencilGroup) return;
   disposeStencilMeshes();
-  Object.values(objectsRef.current).forEach((mesh) => {
-    if (mesh.userData.shaderMat) return; // analytic primitive — not clipped
+  meshes.forEach((mesh) => {
     if (!mesh.geometry || !mesh.visible) return;
     const back = new THREE.Mesh(
       mesh.geometry,

@@ -11,6 +11,7 @@ import { useStore } from "../../store";
 import {
   CROSS_SECTION_PLANE,
   updateCrossSectionPlane,
+  crossSectionViewPlane,
 } from "../crossSection.js";
 import { updateCaps } from "../crossSectionCaps.js";
 
@@ -249,11 +250,20 @@ export function createAnimateLoop({
       }
     }
     gridMaterial.uniforms.uCameraPos.value.copy(cameraRef.current.position);
-    // Keep the cross-section cut locked to the camera as it orbits / pans, and
-    // re-pose the hatched caps onto the live plane.
+    // Keep the cross-section cut locked to the camera as it orbits / pans,
+    // re-pose the hatched caps, and feed the view-space plane to the analytic
+    // primitive shaders (they clip their computed surface point themselves).
     if (useStore.getState().crossSectionView) {
       updateCrossSectionPlane(cameraRef.current, targetRef.current);
       updateCaps(CROSS_SECTION_PLANE, targetRef.current);
+      const vp = crossSectionViewPlane(cameraRef.current);
+      Object.values(objectsRef.current).forEach((mesh) => {
+        const u = mesh.userData.shaderMat?.uniforms;
+        if (u?.uClipEnabled) {
+          u.uClipNormal.value.copy(vp.normal);
+          u.uClipConstant.value = vp.constant;
+        }
+      });
     }
     if (composerRef.current) composerRef.current.render();
     else renderer.render(scene, cameraRef.current);

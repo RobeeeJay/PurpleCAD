@@ -27,9 +27,15 @@ export const SPHERE_FRAGMENT_SHADER = `
   uniform vec3 uColor;
   uniform vec3 uEmissive;
   uniform float uOpacity;
+  uniform vec3 uClipNormal;
+  uniform float uClipConstant;
+  uniform float uClipEnabled;
   varying vec3 vViewPos;
   varying vec3 vSphereCenter;
   varying float vSphereRadius;
+  bool clipped(vec3 p) {
+    return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
+  }
   void main() {
     vec3 sc = vSphereCenter;
     float sr = vSphereRadius;
@@ -38,10 +44,18 @@ export const SPHERE_FRAGMENT_SHADER = `
     float c = dot(sc, sc) - sr * sr;
     float disc = b * b - c;
     if (disc < 0.0) discard;
-    float t = b - sqrt(disc);
-    if (t < 0.0) t = b + sqrt(disc);
+    float sq = sqrt(disc);
+    float t = b - sq;
+    if (t < 0.0) t = b + sq;
     if (t < 0.0) discard;
     vec3 hit = rd * t;
+    // If the near surface is on the clipped side, fall through to the far
+    // (interior) surface so the cut reveals the inside rather than a hole.
+    if (clipped(hit)) {
+      t = b + sq;
+      hit = rd * t;
+      if (t < 0.0 || clipped(hit)) discard;
+    }
     vec3 n = normalize(hit - sc);
     vec3 L1 = normalize(vec3(10.0, 15.0, 10.0));
     vec3 L2 = normalize(vec3(-10.0, 10.0, -10.0));
@@ -78,11 +92,17 @@ export const CYLINDER_FRAGMENT_SHADER = `
   uniform vec3 uColor;
   uniform vec3 uEmissive;
   uniform float uOpacity;
+  uniform vec3 uClipNormal;
+  uniform float uClipConstant;
+  uniform float uClipEnabled;
   varying vec3 vViewPos;
   varying vec3 vCylCenter;
   varying vec3 vCylAxis;
   varying float vCylRadius;
   varying float vCylHalfH;
+  bool clipped(vec3 p) {
+    return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
+  }
   void main() {
     vec3 sc = vCylCenter;
     vec3 a  = vCylAxis;
@@ -95,21 +115,23 @@ export const CYLINDER_FRAGMENT_SHADER = `
     float A = 1.0 - da*da;
     float B = 2.0*(dot(rd, oc) - da*oca);
     float C = dot(oc, oc) - oca*oca - r*r;
+    // Pick the NEAREST surface whose point isn't on the clipped side, so the
+    // cut falls through to the interior (back wall / far cap) instead of a hole.
     float tHit = -1.0;
     vec3 nHit  = vec3(0.0);
     if (abs(A) > 1e-6) {
       float disc = B*B - 4.0*A*C;
       if (disc >= 0.0) {
         float sq = sqrt(disc);
-        float t1 = (-B - sq) / (2.0*A);
-        float t2 = (-B + sq) / (2.0*A);
-        if (t1 > 0.001) {
-          float y1 = dot(rd*t1 - sc, a);
-          if (abs(y1) <= h) { tHit = t1; nHit = normalize((rd*t1 - sc) - y1*a); }
-        }
-        if (tHit < 0.0 && t2 > 0.001) {
-          float y2 = dot(rd*t2 - sc, a);
-          if (abs(y2) <= h) { tHit = t2; nHit = normalize((rd*t2 - sc) - y2*a); }
+        for (int si = 0; si < 2; si++) {
+          float ts = (si == 0) ? (-B - sq)/(2.0*A) : (-B + sq)/(2.0*A);
+          if (ts > 0.001 && (tHit < 0.0 || ts < tHit)) {
+            float ys = dot(rd*ts - sc, a);
+            vec3 ps = rd*ts;
+            if (abs(ys) <= h && !clipped(ps)) {
+              tHit = ts; nHit = normalize((rd*ts - sc) - ys*a);
+            }
+          }
         }
       }
     }
@@ -120,7 +142,10 @@ export const CYLINDER_FRAGMENT_SHADER = `
         float tCap = (capH - oca) / da;
         if (tCap > 0.001 && (tHit < 0.0 || tCap < tHit)) {
           vec3 radial = rd*tCap - sc - capH*a;
-          if (dot(radial, radial) <= r*r) { tHit = tCap; nHit = capSign * a; }
+          vec3 pc = rd*tCap;
+          if (dot(radial, radial) <= r*r && !clipped(pc)) {
+            tHit = tCap; nHit = capSign * a;
+          }
         }
       }
     }
@@ -163,11 +188,17 @@ export const TORUS_FRAGMENT_SHADER = `
   uniform vec3 uColor;
   uniform vec3 uEmissive;
   uniform float uOpacity;
+  uniform vec3 uClipNormal;
+  uniform float uClipConstant;
+  uniform float uClipEnabled;
   varying vec3 vViewPos;
   varying vec3 vTorusCenter;
   varying vec3 vTorusNormal;
   varying float vTorusR;
   varying float vTorusr;
+  bool clipped(vec3 p) {
+    return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
+  }
   float sdTorus(vec3 p) {
     vec3 q = p - vTorusCenter;
     float axial  = dot(q, vTorusNormal);
@@ -178,9 +209,16 @@ export const TORUS_FRAGMENT_SHADER = `
     vec3 rd = normalize(vViewPos);
     float t  = max(0.01, length(vTorusCenter) - vTorusR - vTorusr - 0.2);
     bool hit = false;
-    for (int i = 0; i < 128; i++) {
-      float d = sdTorus(rd * t);
-      if (d < 0.0002 * t) { hit = true; break; }
+    for (int i = 0; i < 160; i++) {
+      vec3 p = rd * t;
+      float d = sdTorus(p);
+      if (d < 0.0002 * t) {
+        // Surface reached — accept it unless it's on the clipped side, in which
+        // case step forward to the next (interior) surface past the cut.
+        if (!clipped(p)) { hit = true; break; }
+        t += 0.02;
+        continue;
+      }
       if (t > 60.0) break;
       t += max(d, 0.001);
     }
@@ -217,6 +255,12 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
     uColor: { value: new THREE.Color(color) },
     uEmissive: { value: new THREE.Color(0) },
     uOpacity: { value: opacity },
+    // Cross-section clip plane in VIEW space (the analytic shaders compute the
+    // surface point in view space, so the plane is supplied there).  Pushed
+    // each frame by the animate loop while the cross-section view is active.
+    uClipNormal: { value: new THREE.Vector3(0, 0, 0) },
+    uClipConstant: { value: 0 },
+    uClipEnabled: { value: 0 },
   });
   if (item.type === "sketch") {
     return new THREE.MeshStandardMaterial({
