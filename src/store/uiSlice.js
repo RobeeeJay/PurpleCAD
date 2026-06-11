@@ -53,6 +53,12 @@ export const uiInitial = {
   // clears this back to null.
   chamferRetargetTarget: null,
 
+  // null | "chamfer" | "fillet" — toggled by BevelSection's toolbar
+  // buttons. While set, ChamferOverlay shows a hint banner and (once
+  // selectedSubGeometry has faces/edges) the distance/angle confirmation
+  // overlay, mirroring extrudeSelectMode's pick-then-confirm flow.
+  chamferSelectMode: null,
+
   // Whether the Y=0 ground plane shows shadows for scene objects.
   shadowsEnabled: false,
 
@@ -122,6 +128,7 @@ export const createUiSlice = (set) => ({
   setExtrudeEditTarget: (target) => set({ extrudeEditTarget: target }),
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
   setChamferRetargetTarget: (target) => set({ chamferRetargetTarget: target }),
+  setChamferSelectMode: (mode) => set({ chamferSelectMode: mode }),
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   setCameraControls: (controls) => set({ _cameraControls: controls }),
 

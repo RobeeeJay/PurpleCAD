@@ -58,7 +58,7 @@ describe("createGroup timeline step", () => {
     expect(useStore.getState().selectedId).not.toBe(3);
   });
 
-  it("consumeItems hides grouped prisms in place and survives a replay", () => {
+  it("consumeItems hides grouped prisms only from the union step onward", () => {
     const useStore = makeStore([sketchEntry]);
     useStore.getState().addItems(
       [
@@ -67,14 +67,31 @@ describe("createGroup timeline step", () => {
       ],
       "Extruded",
     );
+    useStore.getState().addItem({
+      id: 4,
+      name: "Union 4",
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      rotation: { x: 0, y: 0, z: 0 },
+      regenerator: {
+        kind: "boolean",
+        op: "union",
+        inputIds: [2, 3],
+        regeneratedAt: 0.01,
+      },
+    });
     // The union swallows both prisms.
     useStore.getState().consumeItems([2, 3]);
-    const groupInst = useStore.getState().history[1].instruction;
-    expect(groupInst.items.every((it) => it.visible === false)).toBe(true);
-    // Replaying the timeline keeps them hidden (no resurrection next to a union).
-    const replayed = replayUpTo(useStore.getState().history, 1);
-    expect(replayed.find((i) => i.id === 2).visible).toBe(false);
-    expect(replayed.find((i) => i.id === 3).visible).toBe(false);
+    // At the createGroup step, the prisms are still visible.
+    const atGroup = replayUpTo(useStore.getState().history, 1);
+    expect(atGroup.find((i) => i.id === 2).visible).not.toBe(false);
+    expect(atGroup.find((i) => i.id === 3).visible).not.toBe(false);
+    // At the union step onward, the prisms are hidden.
+    const atUnion = replayUpTo(useStore.getState().history, 2);
+    expect(atUnion.find((i) => i.id === 2).visible).toBe(false);
+    expect(atUnion.find((i) => i.id === 3).visible).toBe(false);
+    expect(atUnion.find((i) => i.id === 4).visible).not.toBe(false);
   });
 
   // A group is resized as a unit: one distance applied to every prism.

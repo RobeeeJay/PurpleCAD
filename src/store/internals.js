@@ -47,13 +47,78 @@ export const applyInstruction = (items, instruction) => {
   }
 };
 
+// Highest item id ever assigned across the whole history, including
+// "createGroup" entries (multi-area extrude prisms) — `id + 1` is safe to
+// hand out for a new item.  Missing the createGroup case lets a fresh item
+// collide with an existing prism's id, and applyInstruction's id-keyed
+// "transform"/"modify" .map then mutates BOTH items at once.
+export const maxItemId = (history) => {
+  let maxId = 0;
+  history.forEach((entry) => {
+    const inst = entry.instruction;
+    if (inst?.type === "create" && inst.item?.id > maxId) maxId = inst.item.id;
+    if (inst?.type === "createGroup")
+      inst.items?.forEach((it) => {
+        if (it.id > maxId) maxId = it.id;
+      });
+  });
+  return maxId;
+};
+
 export const replayUpTo = (history, upToIndex) => {
   let items = [];
   const end = Math.min(upToIndex, history.length - 1);
   for (let i = 0; i <= end; i++) {
     items = applyInstruction(items, history[i].instruction);
   }
-  return items;
+  // Per-step visibility snapshot: hiddenIds can hide an item but never
+  // un-hides one whose own snapshot already says visible:false (consumed
+  // items recorded before this model existed).
+  const hiddenIds = end >= 0 ? history[end]?.hiddenIds || [] : [];
+  if (hiddenIds.length === 0) return items;
+  return items.map((item) =>
+    hiddenIds.includes(item.id)
+      ? Object.assign({}, item, { visible: false })
+      : item,
+  );
+};
+
+// The set of hidden item ids a freshly-inserted entry should start from —
+// inherited from the entry it's being inserted after.
+export const inheritedHiddenIds = (history, insertIdx) =>
+  insertIdx > 0 ? history[insertIdx - 1].hiddenIds || [] : [];
+
+// Add `ids` to hiddenIds for every entry from `fromIdx` onward (inclusive) —
+// used when a step consumes inputs into a result, or the user hides an item
+// from this point in the timeline forward.
+export const hideIdsFrom = (history, fromIdx, ids) => {
+  if (!ids.length) return history;
+  return history.map((entry, idx) => {
+    if (idx < fromIdx) return entry;
+    const hidden = new Set(entry.hiddenIds || []);
+    let changed = false;
+    ids.forEach((id) => {
+      if (!hidden.has(id)) {
+        hidden.add(id);
+        changed = true;
+      }
+    });
+    return changed ? { ...entry, hiddenIds: [...hidden] } : entry;
+  });
+};
+
+// Inverse of hideIdsFrom — removes `ids` from hiddenIds from `fromIdx` onward.
+export const showIdsFrom = (history, fromIdx, ids) => {
+  if (!ids.length) return history;
+  return history.map((entry, idx) => {
+    if (idx < fromIdx) return entry;
+    const hidden = new Set(entry.hiddenIds || []);
+    let changed = false;
+    ids.forEach((id) => {
+      if (hidden.delete(id)) changed = true;
+    });
+    return changed ? { ...entry, hiddenIds: [...hidden] } : entry;
+  });
 };
 
 export const withOrphanFlags = (history) => {
@@ -113,7 +178,10 @@ export const loadTimeline = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed.history) && parsed.history.length > 0) {
-        if (parsed.history[0].items !== undefined) {
+        if (
+          parsed.history[0].items !== undefined ||
+          parsed.history[0].hiddenIds === undefined
+        ) {
           localStorage.removeItem("cad-timeline");
           return null;
         }
@@ -282,6 +350,7 @@ export const defaultHistory = [
     label: "Scene created",
     itemId: null,
     instruction: { type: "scene_created" },
+    hiddenIds: [],
     _orphaned: false,
   },
 ];

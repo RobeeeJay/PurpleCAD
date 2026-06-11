@@ -9,6 +9,8 @@ import {
   withUndo,
   markCsgDirty,
   rewriteCreatedItem,
+  maxItemId,
+  inheritedHiddenIds,
 } from "./internals.js";
 import { createHistoryNavSlice } from "./historyNavSlice.js";
 import { createItemFlagsSlice } from "./itemFlagsSlice.js";
@@ -106,6 +108,7 @@ export const createHistorySlice = (set) => ({
         insertIdx = state.history.length;
         newActiveId = null;
       }
+      newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
       const rawHistory = [
         ...state.history.slice(0, insertIdx),
@@ -154,6 +157,7 @@ export const createHistorySlice = (set) => ({
         insertIdx = state.history.length;
         newActiveId = null;
       }
+      newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
       const rawHistory = [
         ...state.history.slice(0, insertIdx),
@@ -193,6 +197,7 @@ export const createHistorySlice = (set) => ({
         insertIdx = state.history.length;
         newActiveId = null;
       }
+      newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
       const rawHistory = [
         ...state.history.slice(0, insertIdx),
@@ -228,6 +233,7 @@ export const createHistorySlice = (set) => ({
         type: "delete",
         itemId: id,
       });
+      newEntry.hiddenIds = inheritedHiddenIds(baseHistory, baseHistory.length);
       const rawHistory = [...baseHistory, newEntry];
       // Children of deleted item become top-level.
       const grandParentId = deletedItem?.parentId ?? null;
@@ -314,6 +320,7 @@ export const createHistorySlice = (set) => ({
         // Insert new entry — snapshot undo, clear redo.
         const newEntry = makeEntry(actionLabel, id, instruction);
         const insertIdx = activeIdx + 1;
+        newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
         const rawHistory = [
           ...state.history.slice(0, insertIdx),
           newEntry,
@@ -346,6 +353,10 @@ export const createHistorySlice = (set) => ({
       }
 
       const newEntry = makeEntry(actionLabel, id, instruction);
+      newEntry.hiddenIds = inheritedHiddenIds(
+        state.history,
+        state.history.length,
+      );
       const rawHistory = [...state.history, newEntry];
       saveTimeline(rawHistory, null);
       return Object.assign(
@@ -595,16 +606,7 @@ export const createHistorySlice = (set) => ({
   retargetGroup: (oldPrismIds, newProfiles, depth, startOffset = 0) =>
     set((state) => {
       const oldSet = new Set(oldPrismIds);
-      let maxId = 0;
-      state.history.forEach((e) => {
-        const inst = e.instruction;
-        if (inst?.type === "create" && inst.item?.id > maxId)
-          maxId = inst.item.id;
-        if (inst?.type === "createGroup")
-          inst.items?.forEach((it) => {
-            if (it.id > maxId) maxId = it.id;
-          });
-      });
+      let maxId = maxItemId(state.history);
       const newPrisms = newProfiles.map((profile, i) => {
         const id = i < oldPrismIds.length ? oldPrismIds[i] : ++maxId;
         return {
@@ -619,8 +621,6 @@ export const createHistorySlice = (set) => ({
           position: profile.position,
           rotation: profile.rotation,
           scale: { x: 1, y: 1, z: 1 },
-          // Consumed by the union, like the originals.
-          visible: false,
         };
       });
       const newIds = newPrisms.map((p) => p.id);
@@ -686,16 +686,25 @@ export const createHistorySlice = (set) => ({
         }
         return entry;
       });
+      // Old prism ids may appear in later entries' hiddenIds (the union step
+      // onward, since the union consumes them) — swap them for the new ids
+      // so the retargeted prisms stay hidden from the same step.
+      const finalHistory = newHistory.map((entry) => {
+        const hidden = entry.hiddenIds || [];
+        if (!hidden.some((id) => oldSet.has(id))) return entry;
+        const kept = hidden.filter((id) => !oldSet.has(id));
+        return { ...entry, hiddenIds: [...new Set([...kept, ...newIds])] };
+      });
       const activeIdx =
         state.activeHistoryId !== null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
-      const items = markCsgDirty(replayUpTo(newHistory, activeIdx));
-      saveTimeline(newHistory, state.activeHistoryId);
+          ? finalHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : finalHistory.length - 1;
+      const items = markCsgDirty(replayUpTo(finalHistory, activeIdx));
+      saveTimeline(finalHistory, state.activeHistoryId);
       return {
         ...withUndo(state),
         items,
-        history: withOrphanFlags(newHistory),
+        history: withOrphanFlags(finalHistory),
       };
     }),
 });

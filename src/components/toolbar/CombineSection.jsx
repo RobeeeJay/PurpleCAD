@@ -71,11 +71,9 @@ const CombineSection = ({ bare = false }) => {
           regeneratedAt: printPrecision,
         },
       });
-      // Bake the consumed flag into each input's CREATE history entry so
-      // the boolean's inputs stay hidden across a timeline replay (a
-      // plain `setItemsHidden` mutates state.items but doesn't touch
-      // history, so a replay would resurrect both the inputs and the
-      // result, leaving overlapping geometry).
+      // Hide the boolean's inputs from this step onward so a timeline
+      // replay doesn't resurrect both the inputs and the result, leaving
+      // overlapping geometry.
       consumeItems(selectedItems.map((i) => i.id));
     } catch (err) {
       console.error("CSG operation failed:", err);

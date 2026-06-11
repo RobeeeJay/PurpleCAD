@@ -1,5 +1,6 @@
 import React from "react";
 import { useStore } from "../../store";
+import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
 
 const ObjectCreateSection = () => {
@@ -33,15 +34,7 @@ const ObjectCreateSection = () => {
   };
 
   const createItem = (type) => {
-    let maxId = 0;
-    history.forEach((entry) => {
-      if (
-        entry.instruction?.type === "create" &&
-        entry.instruction.item.id > maxId
-      )
-        maxId = entry.instruction.item.id;
-    });
-    const id = maxId + 1;
+    const id = maxItemId(history) + 1;
     const label = type.charAt(0).toUpperCase() + type.slice(1);
     // Spawn at the current view centre (camera target) so the object appears
     // where the user is looking; fall back to a sensible default if the

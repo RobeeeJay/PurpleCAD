@@ -3,6 +3,7 @@ import * as THREE from "three";
 import RotationWidget from "./RotationWidget";
 import BusyIndicator from "./BusyIndicator";
 import SketchOverlays from "./viewport/SketchOverlays";
+import ChamferOverlay from "./viewport/ChamferOverlay";
 import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
 import { useSceneSync } from "./viewport/useSceneSync";
@@ -279,6 +280,7 @@ const Viewport = () => {
         propagateConstraintsRef={propagateConstraintsRef}
         selectItem={selectItem}
       />
+      <ChamferOverlay />
       {widgetVisible && (
         <RotationWidget
           rotationState={rotationState}

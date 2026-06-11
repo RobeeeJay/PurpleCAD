@@ -1569,6 +1569,13 @@ export function createSketchInteraction(
         cancelExtrude();
         return;
       }
+      if (useStore.getState().chamferSelectMode) {
+        cameraControlsRef.current?.clearChamferPreview?.();
+        useStore.getState().setChamferSelectMode(null);
+        useStore.getState().clearSelectedSubGeometry();
+        useStore.getState().setChamferRetargetTarget(null);
+        return;
+      }
       if (sketchPlacementModeRef.current) {
         useStore.getState().setSketchPlacementMode(false);
         return;

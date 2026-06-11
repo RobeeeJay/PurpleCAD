@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { useStore } from "../store";
 import { createHighlightHelpers } from "./cameraControls/highlights.js";
 import { createExtrudeHelpers } from "./cameraControls/extrude.js";
+import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
 import { createSketchHoverHelpers } from "./cameraControls/sketchHover.js";
@@ -324,6 +325,17 @@ export function attachCameraControls(ctx) {
   controls.extrudeSelectedFace = () => extrude.startFaceExtrudeFromSelection();
   // Pre-select the original profile region when retargeting an extrude.
   controls.preselectRetargetProfile = () => preselectRetargetProfile();
+
+  // Live preview for ChamferOverlay: re-runs the chamfer/fillet recipe
+  // against the current selectedSubGeometry + distance/angle and overlays
+  // the result's outline as a wireframe.
+  const chamferPreview = createChamferPreviewHelpers({
+    scene,
+    itemsRef,
+  });
+  controls.updateChamferPreview = (distanceMm, angleDeg) =>
+    chamferPreview.updateChamferPreview(distanceMm, angleDeg);
+  controls.clearChamferPreview = () => chamferPreview.clearChamferPreview();
 
   // The current view centre (camera orbit target) in world coords — the
   // toolbar reads this so a newly created primitive spawns where the user is
