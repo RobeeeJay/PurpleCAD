@@ -73,12 +73,17 @@ const APP_ICON = path.join(
   "icon-512.png",
 );
 
+// Initial title shown before the page loads; the renderer then sets
+// `document.title` to the same string, which Electron mirrors into the
+// window/title bar via `page-title-updated`.
+const { version: APP_VERSION } = require("../package.json");
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     backgroundColor: "#101013",
-    title: "PurpleCAD",
+    title: `PurpleCAD v${APP_VERSION}`,
     icon: APP_ICON,
     webPreferences: {
       contextIsolation: true,

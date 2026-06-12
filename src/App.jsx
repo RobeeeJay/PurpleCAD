@@ -8,9 +8,16 @@ import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
 import ChamferEditDialog from "./components/ChamferEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
+import AboutDialog from "./components/AboutDialog";
 import VersionTag from "./components/VersionTag";
 import "./styles/App.css";
 import { useStore } from "./store";
+
+// __APP_VERSION__ is baked in at build time by Vite's `define` (see
+// vite.config.js). Vitest doesn't run through that config so guard with
+// `typeof` to keep the test bundle from blowing up.
+const APP_VERSION =
+  typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
 function App() {
   const items = useStore((state) => state.items);
@@ -31,6 +38,12 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+
+  // Electron mirrors the page title into the window/title bar via
+  // `page-title-updated`, so this also covers the desktop title bar.
+  useEffect(() => {
+    document.title = `PurpleCAD v${APP_VERSION}`;
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -75,6 +88,7 @@ function App() {
       <ChamferEditDialog />
       <MaterialDialog />
       <SettingsDialog />
+      <AboutDialog />
       <VersionTag />
       {notification && (
         <div

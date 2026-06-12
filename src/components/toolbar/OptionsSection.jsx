@@ -12,6 +12,7 @@ const OptionsSection = () => {
   const dimensionsVisible = useStore((s) => s.dimensionsVisible);
   const toggleDimensionsVisible = useStore((s) => s.toggleDimensionsVisible);
   const setSettingsDialogOpen = useStore((s) => s.setSettingsDialogOpen);
+  const setAboutDialogOpen = useStore((s) => s.setAboutDialogOpen);
 
   return (
     <ToolbarSection label="Options">
@@ -35,6 +36,33 @@ const OptionsSection = () => {
             strokeWidth="1.5"
             strokeLinecap="square"
             d="M12 2 L12 5 M12 19 L12 22 M2 12 L5 12 M19 12 L22 12 M4.93 4.93 L7.05 7.05 M16.95 16.95 L19.07 19.07 M19.07 4.93 L16.95 7.05 M7.05 16.95 L4.93 19.07"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title="About PurpleCAD"
+        onClick={() => setAboutDialogOpen(true)}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <circle
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="2.5"
+            cx="12"
+            cy="12"
+            r="9"
+          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.4" cx="12" cy="7.5" />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            x1="12"
+            y1="11"
+            x2="12"
+            y2="17"
           />
         </svg>
       </button>

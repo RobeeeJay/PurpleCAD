@@ -52,9 +52,8 @@
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "three": "^0.157.0",
+    "three": "^0.180.0",
     "three-gpu-pathtracer": "^0.0.24",
-    "three-mesh-bvh": "^0.7.8",
     "zustand": "^4.4.0"
   },
   "devDependencies": {
