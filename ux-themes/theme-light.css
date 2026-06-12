@@ -1,0 +1,53 @@
+/* PurpleCAD Light Theme
+   Complementary light theme — same semantic roles as the dark theme,
+   inverted lightness. Apply .pcad-light to the root element. */
+
+:root,
+.pcad-light {
+  /* ── Foundation ── */
+  --pcad-bg:              #F5F3FF;
+  --pcad-surface:         #EEEDFE;
+  --pcad-border:          #CECBF6;
+  --pcad-text-primary:    #26215C;
+  --pcad-text-secondary:  #534AB7;
+
+  /* ── Sketch plane ── */
+  --pcad-plane-fill:      rgba(83, 74, 183, 0.10);
+  --pcad-plane-border:    #534AB7;
+  --pcad-plane-normal:    #534AB7;
+
+  /* ── Sketch lines ── */
+  --pcad-sketch-line:             #534AB7;
+  --pcad-sketch-node:             #854F0B;
+  --pcad-sketch-selected:         #26215C;
+  --pcad-sketch-offset:           #7F77DD;
+  --pcad-sketch-construction:     #AFA9EC;
+  --pcad-sketch-underconstrained: #7F77DD;
+  --pcad-sketch-solved:           #534AB7;
+
+  /* ── Rulers ── */
+  --pcad-ruler-bg:      #EEEDFE;
+  --pcad-ruler-tick:    #854F0B;
+  --pcad-ruler-label:   #633806;
+  --pcad-ruler-cursor:  #534AB7;
+  --pcad-ruler-border:  #CECBF6;
+
+  /* ── Grid ── */
+  --pcad-grid-major:    rgba(83, 74, 183, 0.20);
+  --pcad-grid-minor:    rgba(83, 74, 183, 0.09);
+  --pcad-grid-node:     #7F77DD;
+  --pcad-grid-origin:   rgba(133, 79, 11, 0.40);
+
+  /* ── Dimensions ── */
+  --pcad-dim-line:      #534AB7;
+  --pcad-dim-extension: #AFA9EC;
+  --pcad-dim-value:     #633806;
+  --pcad-dim-driven:    #854F0B;
+
+  /* ── Constraints ── */
+  --pcad-constraint:              #854F0B;
+  --pcad-constraint-label:        #633806;
+  --pcad-constraint-error:        #A32D2D;
+  --pcad-constraint-free:         #7F77DD;
+  --pcad-constraint-solved:       #534AB7;
+}
