@@ -1,0 +1,52 @@
+/* PurpleCAD Colour Theme
+   Derived from the PurpleCAD icon set palette.
+   Apply to the root element of the application. */
+
+:root {
+  /* ── Foundation ── */
+  --pcad-bg:              #1A0D3B;
+  --pcad-surface:         #26215C;
+  --pcad-border:          #3C3489;
+  --pcad-text-primary:    #EEEDFE;
+  --pcad-text-secondary:  #AFA9EC;
+
+  /* ── Sketch plane ── */
+  --pcad-plane-fill:      rgba(108, 63, 212, 0.12);
+  --pcad-plane-border:    #6C3FD4;
+  --pcad-plane-normal:    #6C3FD4;
+
+  /* ── Sketch lines ── */
+  --pcad-sketch-line:           #7F77DD;
+  --pcad-sketch-node:           #D4A33F;
+  --pcad-sketch-selected:       #EEEDFE;
+  --pcad-sketch-offset:         #534AB7;
+  --pcad-sketch-construction:   #3C3489;
+  --pcad-sketch-underconstrained: #AFA9EC;
+  --pcad-sketch-solved:         #7F77DD;
+
+  /* ── Rulers ── */
+  --pcad-ruler-bg:      #26215C;
+  --pcad-ruler-tick:    #D4A33F;
+  --pcad-ruler-label:   rgba(212, 163, 63, 0.75);
+  --pcad-ruler-cursor:  #6C3FD4;
+  --pcad-ruler-border:  rgba(108, 63, 212, 0.45);
+
+  /* ── Grid ── */
+  --pcad-grid-major:    rgba(212, 163, 63, 0.22);
+  --pcad-grid-minor:    rgba(212, 163, 63, 0.10);
+  --pcad-grid-node:     #6C3FD4;
+  --pcad-grid-origin:   rgba(212, 163, 63, 0.45);
+
+  /* ── Dimensions ── */
+  --pcad-dim-line:      #6C3FD4;
+  --pcad-dim-extension: #C4C2B8;
+  --pcad-dim-value:     #D4A33F;
+  --pcad-dim-driven:    #BA7517;
+
+  /* ── Constraints ── */
+  --pcad-constraint:              #D4A33F;
+  --pcad-constraint-label:        #EF9F27;
+  --pcad-constraint-error:        #E24B4A;
+  --pcad-constraint-free:         #AFA9EC;
+  --pcad-constraint-solved:       #7F77DD;
+}
