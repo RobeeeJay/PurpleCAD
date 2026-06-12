@@ -8,6 +8,10 @@ import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 
 const RULER_W = 44; // left strip width (px) — keep in sync with Viewport.css
 const RULER_H = 22; // bottom strip height (px)
+// Width of the Objects/Timeline overlay (.left-panel in App.css) that the
+// left-panel sits in front of. The rulers are pushed past it so they stay
+// visible to its right instead of being covered by it.
+const LEFT_PANEL_W = 250;
 const X_AXIS_COLOR = "#ff6666";
 const Y_AXIS_COLOR = "#6699ff";
 const RULER_INK = "#0055ff";
@@ -145,7 +149,15 @@ export default function SketchRulers({
       if (key === lastKey.current) return;
       lastKey.current = key;
 
-      drawRulerStrip(hCanvas, "h", W - RULER_W, ux, O.x, RULER_W, dpr);
+      drawRulerStrip(
+        hCanvas,
+        "h",
+        W - LEFT_PANEL_W - RULER_W,
+        ux,
+        O.x,
+        LEFT_PANEL_W + RULER_W,
+        dpr,
+      );
       drawRulerStrip(vCanvas, "v", H, uy, O.y, 0, dpr);
     };
     draw();

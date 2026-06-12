@@ -137,8 +137,10 @@
   flex-shrink: 0;
 }
 
-/* Screen-locked sketch rulers. RULER_W/RULER_H here must match the constants
-   in SketchOverlays.jsx (44px / 22px). */
+/* Screen-locked sketch rulers. RULER_W/RULER_H/LEFT_PANEL_W here must match
+   the constants in SketchRulers.jsx (44px / 22px / 250px). The rulers sit to
+   the right of the Objects/Timeline overlay (.left-panel in App.css) so that
+   panel doesn't cover them. */
 .sketch-ruler {
   position: absolute;
   z-index: 15;
@@ -146,14 +148,14 @@
 }
 
 .sketch-ruler-bottom {
-  left: 44px;
+  left: 294px;
   right: 0;
   bottom: 0;
   height: 22px;
 }
 
 .sketch-ruler-left {
-  left: 0;
+  left: 250px;
   top: 0;
   bottom: 0;
   width: 44px;
