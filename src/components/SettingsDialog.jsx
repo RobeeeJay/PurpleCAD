@@ -22,6 +22,7 @@ const SettingsDialog = () => {
   const toggleTheme = useStore((s) => s.toggleTheme);
   const widgetVisible = useStore((s) => s.widgetVisible);
   const toggleWidgetVisibility = useStore((s) => s.toggleWidgetVisibility);
+  const setAboutDialogOpen = useStore((s) => s.setAboutDialogOpen);
 
   if (!open) return null;
 
@@ -174,6 +175,17 @@ const SettingsDialog = () => {
               style={{ minWidth: 56 }}
             >
               {widgetVisible ? "On" : "Off"}
+            </button>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>About PurpleCAD</span>
+            <button
+              className="variables-btn"
+              onClick={() => setAboutDialogOpen(true)}
+              style={{ minWidth: 56 }}
+            >
+              About
             </button>
           </div>
         </div>

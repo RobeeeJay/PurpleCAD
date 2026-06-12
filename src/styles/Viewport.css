@@ -34,7 +34,9 @@
 .close-sketch-btn {
   position: absolute;
   top: 12px;
-  left: 12px;
+  /* 250px = .left-panel width (App.css) — sit clear of the Objects/Timeline
+     overlay instead of under it. */
+  left: 262px;
   z-index: 10;
   background: rgba(var(--panel-bg-rgb), 0.82);
   color: var(--color-white);
