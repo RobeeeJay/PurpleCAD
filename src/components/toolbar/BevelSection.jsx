@@ -24,20 +24,55 @@ const BevelSection = ({ bare = false }) => {
         onClick={() => toggleMode("chamfer")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M4 4 L14 4 L20 10 L20 20 L4 20 Z"
+          <line
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinejoin="round"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="4"
+            y1="20"
+            x2="4"
+            y2="8"
           />
           <line
-            x1="14"
-            y1="4"
-            x2="20"
-            y2="10"
-            stroke="currentColor"
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="4"
+            y1="8"
+            x2="16"
+            y2="8"
+          />
+          <polyline
+            stroke="#6C3FD4"
+            fill="none"
             strokeWidth="2"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="4,20 4,13 9,8 16,8"
+          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="13" />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="9" cy="8" />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="4"
+            y1="8"
+            x2="4"
+            y2="13"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="4"
+            y1="8"
+            x2="9"
+            y2="8"
           />
         </svg>
       </button>
@@ -47,12 +82,54 @@ const BevelSection = ({ bare = false }) => {
         onClick={() => toggleMode("fillet")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M4 4 L13 4 Q20 4 20 11 L20 20 L4 20 Z"
+          <line
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="4"
+            y1="20"
+            x2="4"
+            y2="8"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="4"
+            y1="8"
+            x2="16"
+            y2="8"
+          />
+          <path
+            stroke="#6C3FD4"
+            fill="none"
             strokeWidth="2"
-            strokeLinejoin="round"
+            strokeLinecap="square"
+            d="M4 20 L4 14 Q4 8 10 8 L16 8"
+          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="14" />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="10" cy="8" />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="4"
+            y1="8"
+            x2="4"
+            y2="14"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="4"
+            y1="8"
+            x2="10"
+            y2="8"
           />
         </svg>
       </button>

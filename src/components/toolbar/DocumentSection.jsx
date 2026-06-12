@@ -165,33 +165,36 @@ const DocumentSection = () => {
     <ToolbarSection label="Document">
       <button className="toolbar-btn" title="New document" onClick={handleNew}>
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M6 2h9l5 5v15H6V2z"
+          <rect
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <path
-            d="M14 2v6h6"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            x="3"
+            y="3"
+            width="18"
+            height="18"
           />
           <line
-            x1="9"
-            y1="12"
-            x2="15"
-            y2="12"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
             x1="12"
-            y1="9"
+            y1="7"
             x2="12"
-            y2="15"
-            stroke="currentColor"
-            strokeWidth="2"
+            y2="17"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="7"
+            y1="12"
+            x2="17"
+            y2="12"
           />
         </svg>
       </button>
@@ -202,34 +205,41 @@ const DocumentSection = () => {
         onClick={() => setSaveMenuOpen((open) => !open)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            x="3"
-            y="3"
-            width="18"
-            height="18"
-            rx="1"
+          <path
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <rect
-            x="7"
-            y="3"
-            width="10"
-            height="6"
-            fill="none"
-            stroke="currentColor"
             strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M4 20 L4 4 L14 4 L20 10 L20 20 Z"
           />
-          <rect
-            x="6"
-            y="13"
-            width="12"
-            height="7"
-            rx="1"
+          <polyline
+            stroke="#D4A33F"
             fill="none"
-            stroke="currentColor"
             strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="14,4 14,10 20,10"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="8"
+            y1="14"
+            x2="16"
+            y2="14"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="8"
+            y1="17"
+            x2="14"
+            y2="17"
           />
         </svg>
       </button>
@@ -266,20 +276,20 @@ const DocumentSection = () => {
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <path
-            d="M3 7h5l2-3h6l2 3h3v13H3V7z"
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M4 20 L4 4 L14 4 L20 10 L20 20 Z"
           />
           <polyline
-            points="12,11 12,18"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <polyline
-            points="9,15 12,18 15,15"
-            stroke="currentColor"
-            strokeWidth="2"
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="14,4 14,10 20,10"
           />
         </svg>
       </button>
@@ -289,26 +299,38 @@ const DocumentSection = () => {
         onClick={() => setVariablesDialogOpen(true)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
+          <rect
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            x="2"
+            y="3"
+            width="20"
+            height="18"
+          />
+          <text
+            x="5"
+            y="16"
+            fontSize="13"
+            fontStyle="italic"
+            fontFamily="Georgia, serif"
+            fontWeight="700"
+            fill="#6C3FD4"
+          >
+            f
+          </text>
           <text
             x="12"
             y="16"
-            textAnchor="middle"
-            fontSize="14"
-            fontWeight="bold"
+            fontSize="11"
             fontStyle="italic"
-            fill="currentColor"
-            fontFamily="serif"
+            fontFamily="Georgia, serif"
+            fill="#D4A33F"
           >
             x
           </text>
-          <line
-            x1="5"
-            y1="20"
-            x2="19"
-            y2="20"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
         </svg>
       </button>
       <input

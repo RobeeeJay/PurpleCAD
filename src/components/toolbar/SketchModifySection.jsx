@@ -41,23 +41,56 @@ const SketchModifySection = () => {
         }
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <polyline
-            points="4,20 4,8 14,8"
+          <line
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinejoin="round"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="4"
+            y1="20"
+            x2="4"
+            y2="8"
           />
           <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
             x1="4"
             y1="8"
-            x2="14"
-            y2="20"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
+            x2="16"
+            y2="8"
           />
-          <circle cx="4" cy="8" r="2" fill="currentColor" />
+          <polyline
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="2"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="4,20 4,13 9,8 16,8"
+          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="13" />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="9" cy="8" />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="4"
+            y1="8"
+            x2="4"
+            y2="13"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="4"
+            y1="8"
+            x2="9"
+            y2="8"
+          />
         </svg>
       </button>
       <button
@@ -68,24 +101,55 @@ const SketchModifySection = () => {
         }
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M4,20 L4,10 Q4,8 6,8 L14,8"
+          <line
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinejoin="round"
-            strokeLinecap="round"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="4"
+            y1="20"
+            x2="4"
+            y2="8"
           />
           <line
-            x1="14"
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="4"
             y1="8"
-            x2="20"
+            x2="16"
             y2="8"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
           />
-          <circle cx="4" cy="10" r="1.5" fill="currentColor" opacity="0.5" />
+          <path
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="2"
+            strokeLinecap="square"
+            d="M4 20 L4 14 Q4 8 10 8 L16 8"
+          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="14" />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="10" cy="8" />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="4"
+            y1="8"
+            x2="4"
+            y2="14"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="4"
+            y1="8"
+            x2="10"
+            y2="8"
+          />
         </svg>
       </button>
       <button
@@ -99,15 +163,18 @@ const SketchModifySection = () => {
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeDasharray="3 2.5"
             x1="3"
-            y1="12"
+            y1="21"
             x2="21"
-            y2="12"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeDasharray="4 3"
+            y2="3"
           />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="21" />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="3" />
         </svg>
       </button>
       <button
@@ -118,19 +185,50 @@ const SketchModifySection = () => {
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <path
-            d="M4 18 L8 6 L16 6 L20 18"
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinejoin="round"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M5 17 L5 8 L14 8"
           />
           <path
-            d="M7.5 20.5 L11 10 L13 10 L16.5 20.5"
+            stroke="#6C3FD4"
             fill="none"
-            stroke="currentColor"
             strokeWidth="1.5"
-            strokeLinejoin="round"
-            opacity="0.55"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M8 20 L8 11 L17 11"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="5"
+            y1="8"
+            x2="8"
+            y2="11"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="5"
+            y1="17"
+            x2="8"
+            y2="20"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="14"
+            y1="8"
+            x2="17"
+            y2="11"
           />
         </svg>
       </button>

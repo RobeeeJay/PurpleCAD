@@ -1,6 +1,20 @@
 import React, { useState, useRef } from "react";
 import { useStore } from "../store";
 import { beginChamferRetarget } from "../three/cameraControls/chamferCommit.js";
+import {
+  CubeIcon,
+  SphereIcon,
+  CylinderIcon,
+  TorusIcon,
+  SketchPlaneIcon,
+  ExtrudeIcon,
+  UnionIcon,
+  DifferenceIcon,
+  IntersectionIcon,
+  SplitIcon,
+  ChamferIcon,
+  FilletIcon,
+} from "./toolbar/timelineIcons.jsx";
 import "../styles/Timeline.css";
 
 // Detect chamfer / fillet entries by looking at the instruction payload —
@@ -22,13 +36,46 @@ const chamferFailed = (entry) => {
   return r?.kind === "chamfer" && r.regenFailed === true;
 };
 
-const entryIcon = (label) => {
-  if (label.startsWith("Added")) return "+";
+// The icon a "create"/"createGroup" item type appears as on the Create
+// toolbar — keeps the timeline dot recognizable as "the button you pressed".
+const CREATE_ICONS = {
+  cube: CubeIcon,
+  sphere: SphereIcon,
+  cylinder: CylinderIcon,
+  torus: TorusIcon,
+  sketch: SketchPlaneIcon,
+  extrude: ExtrudeIcon,
+};
+
+const CSG_ICONS = {
+  union: UnionIcon,
+  difference: DifferenceIcon,
+  intersection: IntersectionIcon,
+};
+
+const entryIcon = (entry) => {
+  const ci = chamferInfo(entry);
+  if (ci) return ci.isFillet ? <FilletIcon /> : <ChamferIcon />;
+
+  const inst = entry.instruction;
+  if (entry.label === "Split") return <SplitIcon />;
+  if (entry.label === "Extruded") return <ExtrudeIcon />;
+
+  if (inst?.type === "create") {
+    const item = inst.item;
+    if (item?.type === "csg") {
+      const Icon = CSG_ICONS[item.regenerator?.op];
+      if (Icon) return <Icon />;
+    }
+    const Icon = CREATE_ICONS[item?.type];
+    if (Icon) return <Icon />;
+  }
+
+  const label = entry.label;
   if (label.startsWith("Deleted")) return "−";
   if (label.startsWith("Moved")) return "↔";
   if (label.startsWith("Rotated")) return "↻";
   if (label.startsWith("Scaled")) return "⤢";
-  if (label.startsWith("Chamfered") || label.startsWith("Filleted")) return "◆";
   return "◆";
 };
 
@@ -377,7 +424,7 @@ const Timeline = () => {
             >
               <div className="timeline-track">
                 <div className={`timeline-dot${isActive ? " active" : ""}`}>
-                  {entryIcon(entry.label)}
+                  {entryIcon(entry)}
                 </div>
                 {index < history.length - 1 && (
                   <div className="timeline-line" />

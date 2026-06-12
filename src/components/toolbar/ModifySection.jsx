@@ -44,44 +44,112 @@ const ModifySection = ({ bare = false }) => {
       onClick={handleDrop}
     >
       <svg viewBox="0 0 24 24" width="20" height="20">
-        {/* The object */}
-        <rect
-          x="7"
-          y="4"
-          width="10"
-          height="10"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          rx="1"
-        />
-        {/* Downward arrow showing the drop */}
         <line
-          x1="12"
-          y1="14"
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="2"
+          y1="21"
+          x2="22"
+          y2="21"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          x1="4"
+          y1="22.5"
+          x2="7"
+          y2="21"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          x1="9"
+          y1="22.5"
           x2="12"
-          y2="19"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
+          y2="21"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          x1="14"
+          y1="22.5"
+          x2="17"
+          y2="21"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          x1="19"
+          y1="22.5"
+          x2="22"
+          y2="21"
+        />
+        <rect
+          stroke="#c4c2b8"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinejoin="miter"
+          x="7"
+          y="7"
+          width="8"
+          height="8"
         />
         <polyline
-          points="9,16 12,19 15,16"
+          stroke="#c4c2b8"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          strokeWidth="1.5"
+          strokeLinejoin="miter"
+          points="7,7 9.5,4.5 17.5,4.5 17.5,12.5 15,15"
         />
-        {/* Ground plane */}
         <line
-          x1="3"
-          y1="21"
-          x2="21"
-          y2="21"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
+          stroke="#c4c2b8"
+          fill="none"
+          strokeWidth="1.5"
+          x1="15"
+          y1="7"
+          x2="15"
+          y2="15"
+        />
+        <line
+          stroke="#c4c2b8"
+          fill="none"
+          strokeWidth="1.5"
+          x1="7"
+          y1="7"
+          x2="15"
+          y2="7"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          strokeDasharray="1.5 1.5"
+          x1="9.5"
+          y1="4.5"
+          x2="9.5"
+          y2="12.5"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="11"
+          y1="6"
+          x2="11"
+          y2="19"
+        />
+        <polygon
+          fill="#6C3FD4"
+          stroke="#6C3FD4"
+          strokeWidth="0.5"
+          points="11,21 9,18 13,18"
         />
       </svg>
     </button>
@@ -95,55 +163,79 @@ const ModifySection = ({ bare = false }) => {
       onClick={handleSplit}
     >
       <svg viewBox="0 0 24 24" width="20" height="20">
-        {/* Two separate objects, pulled apart */}
+        <circle
+          stroke="#6C3FD4"
+          fill="rgba(108,63,212,0.35)"
+          strokeWidth="1.5"
+          cx="6"
+          cy="12"
+          r="4.5"
+        />
+        <ellipse
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="0.75"
+          cx="6"
+          cy="12"
+          rx="4.5"
+          ry="1.6"
+        />
         <rect
-          x="2"
+          stroke="#6C3FD4"
+          fill="rgba(108,63,212,0.2)"
+          strokeWidth="1.5"
+          strokeLinejoin="miter"
+          x="14"
           y="9"
           width="7"
           height="7"
-          rx="1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
         />
-        <circle
-          cx="18.5"
-          cy="12.5"
-          r="3.5"
+        <polyline
+          stroke="#6C3FD4"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="1.5"
+          strokeLinejoin="miter"
+          points="14,9 16,7 21,7"
         />
-        {/* Arrows showing the separation */}
-        <path
-          d="M10 8 L13 8"
+        <line
+          stroke="#6C3FD4"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
+          strokeWidth="1.5"
+          x1="21"
+          y1="7"
+          x2="21"
+          y2="16"
         />
-        <path
-          d="M11.5 6.5 L13 8 L11.5 9.5"
+        <line
+          stroke="#D4A33F"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          strokeWidth="1"
+          strokeDasharray="1.5 1.5"
+          x1="16"
+          y1="7"
+          x2="16"
+          y2="14"
         />
-        <path
-          d="M14 17 L11 17"
+        <line
+          stroke="#D4A33F"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
+          strokeWidth="1"
+          strokeDasharray="1.5 1.5"
+          x1="21"
+          y1="7"
+          x2="16"
+          y2="7"
         />
-        <path
-          d="M12.5 15.5 L11 17 L12.5 18.5"
+        <line
+          stroke="#D4A33F"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          strokeWidth="1.5"
+          strokeDasharray="2 2"
+          strokeLinecap="square"
+          x1="12"
+          y1="4"
+          x2="12"
+          y2="20"
         />
       </svg>
     </button>

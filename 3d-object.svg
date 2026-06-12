@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Front face -->
+  <polygon stroke="#6C3FD4" fill="rgba(108,63,212,0.55)" stroke-width="1.5" stroke-linejoin="miter" points="2,8 16,8 16,22 2,22"/>
+  <!-- Top face -->
+  <polygon stroke="#6C3FD4" fill="rgba(108,63,212,0.22)" stroke-width="1.5" stroke-linejoin="miter" points="2,8 6,4 20,4 16,8"/>
+  <!-- Right face -->
+  <polygon stroke="#6C3FD4" fill="rgba(108,63,212,0.38)" stroke-width="1.5" stroke-linejoin="miter" points="16,8 20,4 20,18 16,22"/>
+  <!-- Hidden edges -->
+  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="2 1.5" x1="6" y1="4" x2="6" y2="18"/>
+  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="2 1.5" x1="6" y1="18" x2="16" y2="18"/>
+  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="2 1.5" x1="6" y1="18" x2="2" y2="22"/>
+  <!-- Normal arrow -->
+  <line stroke="#D4A33F" fill="none" stroke-width="1.25" stroke-linecap="square" x1="9" y1="15" x2="9" y2="11"/>
+  <polygon fill="#D4A33F" stroke="#D4A33F" stroke-width="0.5" points="9,11 7.5,13.5 10.5,13.5"/>
+</svg>

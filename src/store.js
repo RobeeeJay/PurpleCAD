@@ -29,6 +29,7 @@ import {
 } from "./store/variablesSlice.js";
 import { createUiSlice, uiInitial } from "./store/uiSlice.js";
 import { createMaterialSlice, materialInitial } from "./store/materialSlice.js";
+import { createFolderSlice, folderInitial } from "./store/folderSlice.js";
 
 export const useStore = create((set, get) => ({
   // ---- Initial state ----
@@ -40,6 +41,7 @@ export const useStore = create((set, get) => ({
   ...uiInitial,
   ...variablesInitial,
   ...materialInitial,
+  ...folderInitial,
 
   // ---- Actions, composed from slices ----
   ...createUiSlice(set, get),
@@ -48,6 +50,7 @@ export const useStore = create((set, get) => ({
   ...createSketchSlice(set, get),
   ...createVariablesSlice(set, get),
   ...createMaterialSlice(set, get),
+  ...createFolderSlice(set, get),
 }));
 
 // Per-sketch undo-state probe (sketch toolbar reads it to enable / disable

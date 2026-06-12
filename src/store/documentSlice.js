@@ -21,6 +21,7 @@ export const createDocumentSlice = (set) => ({
           label: "Scene created",
           itemId: null,
           instruction: { type: "scene_created" },
+          hiddenIds: [],
           _orphaned: false,
         },
       ];

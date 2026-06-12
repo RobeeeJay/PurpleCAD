@@ -62,6 +62,10 @@ export const uiInitial = {
   // Whether the Y=0 ground plane shows shadows for scene objects.
   shadowsEnabled: false,
 
+  // When true, the Objects tree hides items whose visibility is toggled off
+  // (and any of their descendants), instead of showing them dimmed.
+  hideHiddenItems: false,
+
   // Cross-section view: clip away everything on the camera-home (+X) side of
   // the world ZY plane (x=0).  The plane is fixed in world space, so rotating
   // the view sweeps the cut through different parts of the model.
@@ -190,6 +194,9 @@ export const createUiSlice = (set) => ({
 
   toggleAxisVisibility: () =>
     set((state) => ({ axisVisible: !state.axisVisible })),
+
+  toggleHideHiddenItems: () =>
+    set((state) => ({ hideHiddenItems: !state.hideHiddenItems })),
 
   showNotification: (message) => set({ notification: message }),
   clearNotification: () => set({ notification: null }),

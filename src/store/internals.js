@@ -204,6 +204,29 @@ export const saveVariables = (variables) => {
   }
 };
 
+// Tree-view folders are purely organizational (no geometry, not part of the
+// undo/redo timeline) so they're persisted separately from history.
+export const loadFolders = () => {
+  try {
+    const raw = localStorage.getItem("cad-folders");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn("Failed to load folders from localStorage:", e);
+  }
+  return [];
+};
+
+export const saveFolders = (folders) => {
+  try {
+    localStorage.setItem("cad-folders", JSON.stringify(folders));
+  } catch (e) {
+    console.warn("Failed to save folders to localStorage:", e);
+  }
+};
+
 // Default material (applied to newly-created objects) + user-saved presets,
 // persisted together under one key so the Material dialog survives reload.
 export const loadMaterialSettings = () => {

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="19" x2="12" y2="5"/>
+  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="19" x2="21" y2="22"/>
+  <line stroke="#c4c2b8" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="19" x2="3" y2="22"/>
+  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="12,5 10.5,8 13.5,8"/>
+  <polygon fill="#D4A33F" stroke="#D4A33F" stroke-width="0.5" points="21,22 18.5,20 20,23"/>
+  <polygon fill="#c4c2b8" stroke="#c4c2b8" stroke-width="0.5" points="3,22 4,19.5 5.5,22.5"/>
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="19"/>
+  <text x="13" y="8" font-size="5.5" font-family="monospace" fill="#6C3FD4" font-weight="700">Y</text>
+  <text x="20" y="21" font-size="5.5" font-family="monospace" fill="#D4A33F" font-weight="700">X</text>
+  <text x="2" y="21" font-size="5.5" font-family="monospace" fill="#c4c2b8" font-weight="700">Z</text>
+</svg>

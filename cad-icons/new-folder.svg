@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Folder body -->
+  <rect stroke="#c4c2b8" fill="none" stroke-width="1.5" stroke-linejoin="miter" x="2" y="8" width="20" height="13"/>
+  <!-- Tab -->
+  <polyline stroke="#c4c2b8" fill="none" stroke-width="1.5" stroke-linejoin="miter" points="2,8 2,5 8,5 10,8"/>
+  <!-- Purple fold line -->
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="2" y1="11" x2="22" y2="11"/>
+  <!-- Purple plus sign -->
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="14" x2="12" y2="20"/>
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="9" y1="17" x2="15" y2="17"/>
+</svg>
