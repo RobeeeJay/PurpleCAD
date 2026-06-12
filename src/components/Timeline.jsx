@@ -146,32 +146,59 @@ function ExtrudeActions({ itemId, groupIds }) {
         }}
       >
         <svg viewBox="0 0 24 24" width="14" height="14">
-          <rect
-            x="3"
-            y="14"
-            width="12"
-            height="7"
-            rx="1"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <polygon
-            points="3,14 6,9 18,9 18,14"
+          <circle
+            cx="12"
+            cy="12"
+            r="9"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"
-            opacity="0.6"
           />
           <circle
-            cx="19"
-            cy="5"
-            r="3"
+            cx="12"
+            cy="12"
+            r="5.5"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"
           />
-          <circle cx="19" cy="5" r="1" fill="currentColor" />
+          <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+          <line
+            x1="12"
+            y1="2"
+            x2="12"
+            y2="4"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+          />
+          <line
+            x1="12"
+            y1="20"
+            x2="12"
+            y2="22"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+          />
+          <line
+            x1="2"
+            y1="12"
+            x2="4"
+            y2="12"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+          />
+          <line
+            x1="20"
+            y1="12"
+            x2="22"
+            y2="12"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+          />
         </svg>
       </button>
       <button
@@ -186,47 +213,52 @@ function ExtrudeActions({ itemId, groupIds }) {
       >
         <svg viewBox="0 0 24 24" width="14" height="14">
           <line
-            x1="4"
-            y1="12"
-            x2="20"
-            y2="12"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <line
-            x1="4"
-            y1="8"
-            x2="4"
-            y2="16"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <line
-            x1="20"
-            y1="8"
-            x2="20"
-            y2="16"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <polyline
-            points="9,9 12,12 9,15"
-            fill="none"
+            x1="3"
+            y1="10"
+            x2="21"
+            y2="10"
             stroke="currentColor"
             strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+            strokeLinecap="square"
           />
-          <polyline
-            points="15,9 12,12 15,15"
-            fill="none"
+          <line
+            x1="3"
+            y1="10"
+            x2="3"
+            y2="16"
+            stroke="currentColor"
+            strokeWidth="1"
+            strokeLinecap="square"
+          />
+          <line
+            x1="21"
+            y1="10"
+            x2="21"
+            y2="16"
+            stroke="currentColor"
+            strokeWidth="1"
+            strokeLinecap="square"
+          />
+          <line
+            x1="3"
+            y1="15"
+            x2="21"
+            y2="15"
             stroke="currentColor"
             strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+            strokeLinecap="square"
+          />
+          <polygon
+            points="3,15 6,13.5 6,16.5"
+            fill="currentColor"
+            stroke="currentColor"
+            strokeWidth="0.5"
+          />
+          <polygon
+            points="21,15 18,13.5 18,16.5"
+            fill="currentColor"
+            stroke="currentColor"
+            strokeWidth="0.5"
           />
         </svg>
       </button>

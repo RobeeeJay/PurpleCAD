@@ -3,6 +3,7 @@
 :root {
   --bg-primary: #121212;
   --bg-secondary: #1e1e1e;
+  --bg-secondary-rgb: 30, 30, 30;
   --bg-tertiary: #2d2d2d;
   --text-primary: #e0e0e0;
   --text-secondary: #888;
@@ -16,6 +17,7 @@
 html[data-theme="light"] {
   --bg-primary: #f5f5f5;
   --bg-secondary: #ffffff;
+  --bg-secondary-rgb: 255, 255, 255;
   --bg-tertiary: #eeeeee;
   --text-primary: #1a1a1a;
   --text-secondary: #666666;

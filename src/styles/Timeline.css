@@ -1,7 +1,7 @@
 .timeline {
   display: flex;
   flex-direction: column;
-  background-color: var(--bg-secondary);
+  background-color: rgba(var(--bg-secondary-rgb), 0.8);
   border-right: 1px solid var(--border-color);
   border-top: 1px solid var(--border-color);
   min-height: 140px;

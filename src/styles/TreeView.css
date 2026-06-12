@@ -1,6 +1,6 @@
 .tree-view {
   width: 250px;
-  background-color: var(--bg-secondary);
+  background-color: rgba(var(--bg-secondary-rgb), 0.8);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
