@@ -14,6 +14,7 @@ import {
   applyRenderMode,
 } from "../../three/sceneObjects.js";
 import { useStore } from "../../store";
+import { gridMinorColorFor } from "../../three/theme.js";
 
 // Quantize a world coord into a stable key so triangles that share a vertex
 // (even with tiny float drift, e.g. from CSG) map to the same edge. 1e4 → 1e-4
@@ -375,7 +376,7 @@ export function useSketchModeEffect({
       const l = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([a, b]),
         new THREE.LineBasicMaterial({
-          color: 0x445566,
+          color: gridMinorColorFor(useStore.getState().theme),
           transparent: true,
           opacity: 0.45,
           depthTest: false,

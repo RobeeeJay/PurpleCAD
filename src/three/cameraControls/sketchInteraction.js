@@ -36,7 +36,7 @@ import {
   fieldsForPoint,
   varFields,
 } from "../sketchSolver.js";
-import { SKETCH_LINE_COLOR, SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
+import { sketchLineColorFor, SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
 import {
   selectedSketchLineIndices,
   offsetSelectedSketchGeometry,
@@ -311,7 +311,7 @@ export function createSketchInteraction(
     ];
     const geo = new THREE.BufferGeometry().setFromPoints(corners);
     const mat = new THREE.LineBasicMaterial({
-      color: SKETCH_LINE_COLOR,
+      color: sketchLineColorFor(useStore.getState().theme),
       depthTest: false,
       transparent: true,
       opacity: 0.8,

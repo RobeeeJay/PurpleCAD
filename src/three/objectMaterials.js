@@ -1,13 +1,14 @@
 import * as THREE from "three";
 import {
   DEFAULT_MESH_COLOR,
-  DEFAULT_OBJECT_COLOR,
   EMISSIVE_HOVERED,
   EMISSIVE_MULTI_SELECTED,
   EMISSIVE_SELECTED,
   NO_EMISSIVE,
+  sketchPlaneFillColorFor,
 } from "./theme.js";
 import { DEFAULT_MATERIAL } from "./materialPresets.js";
+import { useStore } from "../store";
 
 export const SPHERE_VERTEX_SHADER = `
   varying vec3 vViewPos;
@@ -264,7 +265,7 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
   });
   if (item.type === "sketch") {
     return new THREE.MeshStandardMaterial({
-      color: DEFAULT_OBJECT_COLOR,
+      color: sketchPlaneFillColorFor(useStore.getState().theme),
       transparent: true,
       opacity: 0.18,
       side: THREE.DoubleSide,

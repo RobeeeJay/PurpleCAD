@@ -5,6 +5,8 @@ import {
   AXIS_Y_COLOR,
   AXIS_Z_COLOR,
   LIGHT_COLOR,
+  gridMajorColorFor,
+  rulerTickColorFor,
   sceneBackgroundFor,
   toCssHex,
 } from "./theme.js";
@@ -128,7 +130,7 @@ const RULER_TIERS = {
   ultra: { fontSize: 18, scaleX: 1.05, scaleY: 0.2625 },
 };
 
-function makeRulerSprite(text, tier = "coarse") {
+function makeRulerSprite(text, tier = "coarse", theme) {
   const t = RULER_TIERS[tier];
   const canvas = document.createElement("canvas");
   canvas.width = 160;
@@ -139,7 +141,7 @@ function makeRulerSprite(text, tier = "coarse") {
   ctx.font = `${t.fontSize}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = "#0055ff";
+  ctx.fillStyle = toCssHex(rulerTickColorFor(theme));
   ctx.fillText(text, 80, 20);
   const mat = new THREE.SpriteMaterial({
     map: new THREE.CanvasTexture(canvas),
@@ -154,11 +156,18 @@ function makeRulerSprite(text, tier = "coarse") {
   return sprite;
 }
 
-export function createGrid(scene) {
+export function createGrid(scene, theme) {
+  const gridColor = gridMajorColorFor(theme);
   const gridMaterial = new THREE.ShaderMaterial({
     uniforms: {
       uCameraPos: { value: new THREE.Vector3() },
-      uGridColor: { value: new THREE.Vector3(0.45, 0.45, 0.45) },
+      uGridColor: {
+        value: new THREE.Vector3(
+          ((gridColor >> 16) & 0xff) / 255,
+          ((gridColor >> 8) & 0xff) / 255,
+          (gridColor & 0xff) / 255,
+        ),
+      },
       // 0 → no 1 mm grid, 1 → fully shown; driven by animateLoop to match the
       // 1 mm ruler tier's zoom threshold.
       uUltraFade: { value: 0 },
@@ -261,7 +270,7 @@ const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
 // follow the view.  Labels live at absolute world multiples of each tier's step
 // and read true mm; only labels entering the range get a fresh texture, the
 // rest are just repositioned, so this is cheap to call every frame.
-export function updateRuler3D(rulerGroup, cx, cz, viewHeight) {
+export function updateRuler3D(rulerGroup, cx, cz, viewHeight, theme) {
   const rowZ = Math.round(cz) + RULER_AXIS_OFFSET; // X-labels' row follows target Z
   const rowX = Math.round(cx) + RULER_AXIS_OFFSET; // Z-labels' row follows target X
   for (const tier of rulerGroup.userData.tiers) {
@@ -280,7 +289,11 @@ export function updateRuler3D(rulerGroup, cx, cz, viewHeight) {
       needed.add(key);
       let sp = pool.get(key);
       if (!sp) {
-        sp = makeRulerSprite(`${Math.round(k * step * MM_PER_UNIT)}`, name);
+        sp = makeRulerSprite(
+          `${Math.round(k * step * MM_PER_UNIT)}`,
+          name,
+          theme,
+        );
         pool.set(key, sp);
         group.add(sp);
       }

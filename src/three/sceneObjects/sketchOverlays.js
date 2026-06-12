@@ -9,6 +9,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { addConstraintIconsToGroup } from "./constraintIcons.js";
 import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
+import { useStore } from "../../store";
 import {
   findClosedLoops,
   findClosedLoopsWithShapes,
@@ -17,11 +18,11 @@ import {
 } from "./closedLoops.js";
 import {
   BEVEL_COLOR,
-  OFFSET_COLOR,
   SKETCH_FACE_HIGHLIGHT,
-  SKETCH_LINE_COLOR,
-  SKETCH_PLANE_HOVER_COLOR,
-  SKETCH_POINT_COLOR,
+  sketchConstructionColorFor,
+  sketchLineColorFor,
+  sketchNodeColorFor,
+  sketchOffsetColorFor,
 } from "../theme.js";
 
 // Offset copies (driven by an offset constraint) render in OFFSET_COLOR to
@@ -50,6 +51,7 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     ? renderer.getSize(new THREE.Vector2())
     : new THREE.Vector2(window.innerWidth, window.innerHeight);
 
+  const theme = useStore.getState().theme;
   sketchItems.forEach((item) => {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
@@ -62,10 +64,10 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
       geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
       const mat = new LineMaterial({
         color: offsetIdxs.has(shapeIdx)
-          ? OFFSET_COLOR
+          ? sketchOffsetColorFor(theme)
           : shape.dashed
-            ? SKETCH_PLANE_HOVER_COLOR
-            : SKETCH_LINE_COLOR,
+            ? sketchConstructionColorFor(theme)
+            : sketchLineColorFor(theme),
         linewidth: 1.5,
         depthTest: false,
         resolution: res,
@@ -185,7 +187,7 @@ export function rebuildPointDotsForDrag(group, shapes, sketchMesh) {
   if (pts.length === 0) return;
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const mat = new THREE.PointsMaterial({
-    color: SKETCH_POINT_COLOR,
+    color: sketchNodeColorFor(useStore.getState().theme),
     size: 5,
     sizeAttenuation: false,
     depthTest: false,
@@ -217,6 +219,7 @@ export function buildSketchShapesGroup(
   const res = renderer
     ? renderer.getSize(new THREE.Vector2())
     : new THREE.Vector2(window.innerWidth, window.innerHeight);
+  const theme = useStore.getState().theme;
 
   const toWorld = (lx, ly, z = 0.003) => {
     const v = new THREE.Vector3(lx, ly, z);
@@ -241,8 +244,8 @@ export function buildSketchShapesGroup(
       color: isBevel
         ? BEVEL_COLOR
         : isOffset
-          ? OFFSET_COLOR
-          : SKETCH_LINE_COLOR,
+          ? sketchOffsetColorFor(theme)
+          : sketchLineColorFor(theme),
       linewidth: isBevel ? 1.0 : 1.5,
       depthTest: false,
       resolution: res,
@@ -273,7 +276,7 @@ export function buildSketchShapesGroup(
   if (dotWorldPts.length > 0) {
     const ptGeo = new THREE.BufferGeometry().setFromPoints(dotWorldPts);
     const ptMat = new THREE.PointsMaterial({
-      color: SKETCH_POINT_COLOR,
+      color: sketchNodeColorFor(theme),
       size: 5,
       sizeAttenuation: false,
       depthTest: false,

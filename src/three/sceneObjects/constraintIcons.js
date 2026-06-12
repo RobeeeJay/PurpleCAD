@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
+import { useStore } from "../../store";
 import {
   ANGLE_LABEL_BG,
   ANGLE_LABEL_TEXT,
@@ -15,9 +16,10 @@ import {
   CONSTRAINT_COINCIDENT_COLOR,
   CONSTRAINT_HORIZONTAL_COLOR,
   CONSTRAINT_ON_LINE_COLOR,
-  DIM_COLOR,
-  DIM_LABEL_BG,
-  DIM_LABEL_TEXT,
+  dimLabelBgFor,
+  dimLineColorFor,
+  dimValueColorFor,
+  toCssHex,
 } from "../theme.js";
 
 // Builds constraint icon THREE.js objects into `group`. All objects are tagged
@@ -39,6 +41,7 @@ export function addConstraintIconsToGroup(
   const sketchNormal = toWorld(0, 0, 1)
     .sub(toWorld(0, 0, 0))
     .normalize();
+  const theme = useStore.getState().theme;
   // Offset constraints created together share an offsetGroup; render only one
   // editable dimension label per group (they all carry the same distance).
   const seenOffsetGroups = new Set();
@@ -82,7 +85,10 @@ export function addConstraintIconsToGroup(
     const addDimSeg = (p0, p1) => {
       const l = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([p0, p1]),
-        new THREE.LineBasicMaterial({ color: DIM_COLOR, depthTest: false }),
+        new THREE.LineBasicMaterial({
+          color: dimLineColorFor(theme),
+          depthTest: false,
+        }),
       );
       l.renderOrder = 1004;
       addTagged(l);
@@ -98,7 +104,10 @@ export function addConstraintIconsToGroup(
           tip.clone().addScaledVector(perp, TICK),
           tip.clone().addScaledVector(perp, -TICK),
         ]),
-        new THREE.LineBasicMaterial({ color: DIM_COLOR, depthTest: false }),
+        new THREE.LineBasicMaterial({
+          color: dimLineColorFor(theme),
+          depthTest: false,
+        }),
       );
       t.renderOrder = 1005;
       addTagged(t);
@@ -162,7 +171,7 @@ export function addConstraintIconsToGroup(
           leader,
           { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
           distShapes,
-          DIM_COLOR,
+          dimLineColorFor(theme),
         );
         addDimTick(wB, perpU);
         labelPos = wLineTo.clone().addScaledVector(dir, 0.45);
@@ -195,7 +204,7 @@ export function addConstraintIconsToGroup(
             y: (posA.y + posB.y) / 2 + lpy * OFF,
           },
           distShapes,
-          DIM_COLOR,
+          dimLineColorFor(theme),
         );
         addDimTick(A2, perpU);
         addDimTick(B2, perpU);
@@ -226,9 +235,9 @@ export function addConstraintIconsToGroup(
       canvas.width = Math.max(160, Math.ceil(measured) + 24);
       canvas.height = 32;
       const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = DIM_LABEL_BG;
+      ctx2d.fillStyle = dimLabelBgFor(theme);
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = DIM_LABEL_TEXT;
+      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
       ctx2d.font = labelFont;
       ctx2d.textAlign = "center";
       ctx2d.textBaseline = "middle";
@@ -397,7 +406,12 @@ export function addConstraintIconsToGroup(
           y: (aLocal.y + bLocal.y) / 2,
         };
         // The dimension line is a double-click hotspot too.
-        tag(dimLine, labelLocal, [c.shapeIdx, c.origIdx], DIM_COLOR);
+        tag(
+          dimLine,
+          labelLocal,
+          [c.shapeIdx, c.origIdx],
+          dimLineColorFor(theme),
+        );
       };
       if (nl.type === "circle") {
         // Concentric offset: a radial dimension from the original circle's edge
@@ -449,9 +463,9 @@ export function addConstraintIconsToGroup(
       canvas.width = Math.max(160, Math.ceil(measured) + 24);
       canvas.height = 32;
       const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = DIM_LABEL_BG;
+      ctx2d.fillStyle = dimLabelBgFor(theme);
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = DIM_LABEL_TEXT;
+      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
       ctx2d.font = labelFont;
       ctx2d.textAlign = "center";
       ctx2d.textBaseline = "middle";
@@ -467,7 +481,7 @@ export function addConstraintIconsToGroup(
       sprite.renderOrder = 1009;
       // Tag with the icon's local position so the double-click hit-test can
       // find it and open the edit overlay.
-      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], DIM_COLOR);
+      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimLineColorFor(theme));
       group.add(sprite);
     }
   });

@@ -5,13 +5,14 @@
 // cameraControls.js.
 
 import * as THREE from "three";
+import { useStore } from "../../store";
 import {
-  CONSTRAINT_SELECTED_COLOR,
   SKETCH_HOVER_LINE_COLOR,
   SKETCH_HOVER_POINT_LINE_COLOR,
-  SKETCH_LINE_COLOR,
   SKETCH_PIVOT_COLOR,
   constraintColor,
+  sketchLineColorFor,
+  sketchSelectedColorFor,
 } from "../theme.js";
 
 export function createSketchHoverHelpers(
@@ -35,7 +36,8 @@ export function createSketchHoverHelpers(
   const clearHoverLineHighlight = () => {
     if (hoveredSketchLine) {
       hoveredSketchLine.material.color.setHex(
-        hoveredSketchLineOrigColor ?? SKETCH_LINE_COLOR,
+        hoveredSketchLineOrigColor ??
+          sketchLineColorFor(useStore.getState().theme),
       );
       hoveredSketchLine = null;
       hoveredSketchLineOrigColor = null;
@@ -82,7 +84,9 @@ export function createSketchHoverHelpers(
         o.material?.color &&
         !o.isSprite
       ) {
-        o.material.color.setHex(CONSTRAINT_SELECTED_COLOR);
+        o.material.color.setHex(
+          sketchSelectedColorFor(useStore.getState().theme),
+        );
       }
     }
     const taggedObj = g.children.find(
@@ -102,7 +106,9 @@ export function createSketchHoverHelpers(
         lineObj,
         origColor: lineObj.material.color.getHex(),
       });
-      lineObj.material.color.setHex(CONSTRAINT_SELECTED_COLOR);
+      lineObj.material.color.setHex(
+        sketchSelectedColorFor(useStore.getState().theme),
+      );
     });
   };
 

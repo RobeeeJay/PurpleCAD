@@ -118,7 +118,7 @@ export function useViewportInit({
     const { dir1: shadowLight } = createLights(scene, camera);
     shadowLightRef.current = shadowLight;
     shadowGroundRef.current = createShadowGround(scene);
-    const { gridPlane, gridMaterial, rulerGroup } = createGrid(scene);
+    const { gridPlane, gridMaterial, rulerGroup } = createGrid(scene, theme);
     planeRef.current = gridPlane;
     axisGroupRef.current = createAxisGroup(scene);
     axisGroupRef.current.visible = useStore.getState().axisVisible;

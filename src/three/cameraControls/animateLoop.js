@@ -228,6 +228,7 @@ export function createAnimateLoop({
           targetRef.current.x,
           targetRef.current.z,
           viewHeight,
+          useStore.getState().theme,
         );
         // Fade the matching 1 mm ground grid in over a small band centred on
         // the same threshold the 1 mm ruler tier toggles at (viewHeight 7).
