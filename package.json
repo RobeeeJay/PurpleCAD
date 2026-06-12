@@ -18,6 +18,7 @@
   "build": {
     "appId": "com.purplecad",
     "productName": "PurpleCAD",
+    "icon": "app-icons/padded/icon-1024.png",
     "directories": {
       "output": "release"
     },

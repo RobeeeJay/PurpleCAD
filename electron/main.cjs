@@ -63,12 +63,23 @@ try {
   console.warn("[main] native OCC addon unavailable:", err.message);
 }
 
+// 512px source covers window/taskbar icon use across platforms; packaged
+// builds get their app icon from `build.icon` in package.json instead.
+const APP_ICON = path.join(
+  __dirname,
+  "..",
+  "app-icons",
+  "padded",
+  "icon-512.png",
+);
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     backgroundColor: "#101013",
     title: "PurpleCAD",
+    icon: APP_ICON,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -99,6 +110,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // BrowserWindow's `icon` option doesn't reach the Dock on macOS; packaged
+  // builds get their Dock icon from `build.icon`, but dev runs (launched as
+  // a bare Electron binary) still show Electron's default unless set here.
+  if (process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(APP_ICON);
+  }
+
   // Serve dist files over `app://./<path>`.  Handler decodes the URL
   // and pipes the matching dist file back via a stream response.
   const DIST = path.join(__dirname, "..", "dist");
