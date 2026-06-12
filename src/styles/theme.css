@@ -32,7 +32,6 @@
   /* Floating panel backgrounds (viewport overlays, always dark) */
   --panel-bg-rgb: 20, 20, 30;
   --panel-bg-strong-rgb: 18, 18, 28;
-  --rotation-widget-bg-rgb: 30, 30, 30;
 
   /* Scrollbar thumb */
   --scrollbar-thumb: #444444;

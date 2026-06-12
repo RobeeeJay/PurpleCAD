@@ -2,10 +2,6 @@
   position: absolute;
   top: 16px;
   right: 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
 }
 
 .orientation-cube-mount {
@@ -19,26 +15,16 @@
 }
 
 .home-button {
-  background: rgba(var(--rotation-widget-bg-rgb), 0.85);
-  border: 1px solid var(--border-color);
-  border-radius: 3px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: none;
+  border: none;
   color: var(--text-primary);
   font-size: var(--font-size-lg);
-  padding: 2px 6px;
+  padding: 2px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
-  min-width: 32px;
-  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.home-button:hover {
-  background-color: var(--bg-hover);
-}
-
-html[data-theme="light"] .home-button {
-  background: rgba(var(--white-rgb), 0.9);
-  border-color: var(--border-color-light);
 }
