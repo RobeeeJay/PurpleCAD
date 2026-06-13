@@ -14,6 +14,12 @@ const SketchModifySection = () => {
   const cancelCircularPatternTool = useStore(
     (s) => s.cancelCircularPatternTool,
   );
+  const startRectangularPatternTool = useStore(
+    (s) => s.startRectangularPatternTool,
+  );
+  const cancelRectangularPatternTool = useStore(
+    (s) => s.cancelRectangularPatternTool,
+  );
   const sketchMultiSelectedIndices = useStore(
     (s) => s.sketchMultiSelectedIndices,
   );
@@ -51,6 +57,15 @@ const SketchModifySection = () => {
   const handleCircularPattern = () => {
     if (activeSketchTool === "circularPattern") cancelCircularPatternTool();
     else startCircularPatternTool();
+  };
+
+  // Rectangular Pattern: click geometry to preview/toggle repeats spread on
+  // an X/Y grid; Confirm creates copies linked by rectangularPattern
+  // constraints.
+  const handleRectangularPattern = () => {
+    if (activeSketchTool === "rectangularPattern")
+      cancelRectangularPatternTool();
+    else startRectangularPatternTool();
   };
 
   return (
@@ -307,6 +322,59 @@ const SketchModifySection = () => {
           <rect x="10.5" y="2.5" width="3" height="3" fill="#6C3FD4" />
           <rect x="17.5" y="9.5" width="3" height="3" fill="#c4c2b8" />
           <rect x="3.5" y="9.5" width="3" height="3" fill="#c4c2b8" />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${activeSketchTool === "rectangularPattern" ? "active" : ""}`}
+        title="Rectangular Pattern — repeat the selected geometry on an X/Y grid"
+        onClick={handleRectangularPattern}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <rect x="3" y="3" width="6" height="6" fill="#6C3FD4" stroke="none" />
+          <rect
+            x="15"
+            y="3"
+            width="6"
+            height="6"
+            fill="#c4c2b8"
+            stroke="none"
+          />
+          <rect
+            x="3"
+            y="15"
+            width="6"
+            height="6"
+            fill="#c4c2b8"
+            stroke="none"
+          />
+          <rect
+            x="15"
+            y="15"
+            width="6"
+            height="6"
+            fill="#c4c2b8"
+            stroke="none"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="9"
+            y1="6"
+            x2="15"
+            y2="6"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="6"
+            y1="9"
+            x2="6"
+            y2="15"
+          />
         </svg>
       </button>
     </ToolbarSection>

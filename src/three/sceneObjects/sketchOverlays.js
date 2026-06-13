@@ -25,6 +25,7 @@ import {
   sketchOffsetColorFor,
   sketchMirrorColorFor,
   sketchCircularPatternColorFor,
+  sketchRectangularPatternColorFor,
 } from "../theme.js";
 
 // Offset copies (driven by an offset constraint) render in OFFSET_COLOR to
@@ -57,6 +58,16 @@ const circularPatternShapeIdxSet = (item) =>
       .map((c) => c.shapeIdx),
   );
 
+// Rectangular-pattern copies (driven by a rectangularPattern constraint)
+// render in RECTANGULAR_PATTERN_COLOR and are non-interactive while the
+// constraint holds — same rationale as offset/mirror/circular-pattern copies.
+const rectangularPatternShapeIdxSet = (item) =>
+  new Set(
+    (item.constraints || [])
+      .filter((c) => c.type === "rectangularPattern")
+      .map((c) => c.shapeIdx),
+  );
+
 // ── Object-view sketch lines (all sketches, lines only) ──────────────────────
 
 export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
@@ -80,6 +91,7 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     const offsetIdxs = offsetShapeIdxSet(item);
     const mirrorIdxs = mirrorShapeIdxSet(item);
     const circularPatternIdxs = circularPatternShapeIdxSet(item);
+    const rectangularPatternIdxs = rectangularPatternShapeIdxSet(item);
     item.shapes.forEach((shape, shapeIdx) => {
       if (shape.kind === "bevel") return; // bevel arcs not shown in object view
       const pts = getSketchShapePoints(shape, sketchMesh);
@@ -93,9 +105,11 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
             ? sketchMirrorColorFor(theme)
             : circularPatternIdxs.has(shapeIdx)
               ? sketchCircularPatternColorFor(theme)
-              : shape.dashed
-                ? sketchConstructionColorFor(theme)
-                : sketchLineColorFor(theme),
+              : rectangularPatternIdxs.has(shapeIdx)
+                ? sketchRectangularPatternColorFor(theme)
+                : shape.dashed
+                  ? sketchConstructionColorFor(theme)
+                  : sketchLineColorFor(theme),
         linewidth: 1.5,
         depthTest: false,
         resolution: res,
@@ -260,6 +274,7 @@ export function buildSketchShapesGroup(
   const offsetIdxs = offsetShapeIdxSet(selItem);
   const mirrorIdxs = mirrorShapeIdxSet(selItem);
   const circularPatternIdxs = circularPatternShapeIdxSet(selItem);
+  const rectangularPatternIdxs = rectangularPatternShapeIdxSet(selItem);
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
     const pts = getSketchShapePoints(shape, sketchMesh);
@@ -270,7 +285,9 @@ export function buildSketchShapesGroup(
     const isOffset = offsetIdxs.has(shapeIdx);
     const isMirror = mirrorIdxs.has(shapeIdx);
     const isCircularPattern = circularPatternIdxs.has(shapeIdx);
-    const isInert = isOffset || isMirror || isCircularPattern;
+    const isRectangularPattern = rectangularPatternIdxs.has(shapeIdx);
+    const isInert =
+      isOffset || isMirror || isCircularPattern || isRectangularPattern;
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     const mat = new LineMaterial({
@@ -282,7 +299,9 @@ export function buildSketchShapesGroup(
             ? sketchMirrorColorFor(theme)
             : isCircularPattern
               ? sketchCircularPatternColorFor(theme)
-              : sketchLineColorFor(theme),
+              : isRectangularPattern
+                ? sketchRectangularPatternColorFor(theme)
+                : sketchLineColorFor(theme),
       linewidth: isBevel ? 1.0 : 1.5,
       depthTest: false,
       resolution: res,
@@ -296,12 +315,13 @@ export function buildSketchShapesGroup(
     line.computeLineDistances();
     line.renderOrder = 1001;
     line.userData.shapeIdx = shapeIdx;
-    // Offset / mirror / circular-pattern copies are inert while constrained:
-    // tag so the drag / select hit-tests skip them (they're driven by their
-    // original).
+    // Offset / mirror / circular-pattern / rectangular-pattern copies are
+    // inert while constrained: tag so the drag / select hit-tests skip them
+    // (they're driven by their original).
     if (isOffset) line.userData.isOffset = true;
     if (isMirror) line.userData.isMirror = true;
     if (isCircularPattern) line.userData.isCircularPattern = true;
+    if (isRectangularPattern) line.userData.isRectangularPattern = true;
     group.add(line);
 
     // Collect key points for dots — not for offset/mirror/circular-pattern

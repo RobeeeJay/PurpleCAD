@@ -109,6 +109,9 @@ const Viewport = () => {
   const sketchCircularPatternState = useStore(
     (state) => state.sketchCircularPatternState,
   );
+  const sketchRectangularPatternState = useStore(
+    (state) => state.sketchRectangularPatternState,
+  );
   const constraintsVisible = useStore((state) => state.constraintsVisible);
   const dimensionsVisible = useStore((state) => state.dimensionsVisible);
   const curveResolution = useStore((state) => state.curveResolution);
@@ -280,6 +283,7 @@ const Viewport = () => {
         sketchDistanceInput={sketchDistanceInput}
         sketchMirrorState={sketchMirrorState}
         sketchCircularPatternState={sketchCircularPatternState}
+        sketchRectangularPatternState={sketchRectangularPatternState}
         isInSketchMode={isInSketchMode}
         selectedId={selectedId}
         variables={variables}

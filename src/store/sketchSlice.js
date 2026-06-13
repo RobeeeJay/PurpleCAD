@@ -24,6 +24,11 @@ import {
   rotateShapeGeometry,
   applyCircularPatternConstraints,
 } from "../three/sketchCircularPattern.js";
+import {
+  RECTANGULAR_PATTERNABLE_TYPES,
+  translateShapeGeometry,
+  applyRectangularPatternConstraints,
+} from "../three/sketchRectangularPattern.js";
 import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
 
 // Shape types the Offset tool can copy.
@@ -157,6 +162,9 @@ export const createSketchSlice = (set) => ({
       ...(tool !== "circularPattern"
         ? { sketchCircularPatternState: null }
         : null),
+      ...(tool !== "rectangularPattern"
+        ? { sketchRectangularPatternState: null }
+        : null),
     }),
 
   selectedSketchElement: null, // { type:'point'|'line', shapeIdx, pointKey? }
@@ -284,6 +292,79 @@ export const createSketchSlice = (set) => ({
       return { sketchCircularPatternState: { ...cur, count } };
     }),
 
+  // Rectangular Pattern tool: toggle geometry to preview/copy as a grid of
+  // repeats offset in X and Y.
+  // { shapeIndices: number[], countX, countY, offsetX, offsetY } | null
+  sketchRectangularPatternState: null,
+  setSketchRectangularPatternState: (v) =>
+    set({ sketchRectangularPatternState: v }),
+
+  // Document defaults for the rectangular pattern inputs — remember the last
+  // values entered so new rectangular patterns start from them.
+  rectangularPatternDefaultCountX: 2,
+  rectangularPatternDefaultCountY: 2,
+  rectangularPatternDefaultOffsetX: 10,
+  rectangularPatternDefaultOffsetY: 10,
+
+  startRectangularPatternTool: () =>
+    set((state) => ({
+      activeSketchTool: "rectangularPattern",
+      sketchRectangularPatternState: {
+        shapeIndices: [],
+        countX: state.rectangularPatternDefaultCountX,
+        countY: state.rectangularPatternDefaultCountY,
+        offsetX: state.rectangularPatternDefaultOffsetX,
+        offsetY: state.rectangularPatternDefaultOffsetY,
+      },
+    })),
+
+  cancelRectangularPatternTool: () =>
+    set((state) => ({
+      activeSketchTool:
+        state.activeSketchTool === "rectangularPattern"
+          ? null
+          : state.activeSketchTool,
+      sketchRectangularPatternState: null,
+    })),
+
+  toggleRectangularPatternShape: (shapeIdx) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      const shapeIndices = cur.shapeIndices.includes(shapeIdx)
+        ? cur.shapeIndices.filter((i) => i !== shapeIdx)
+        : [...cur.shapeIndices, shapeIdx];
+      return { sketchRectangularPatternState: { ...cur, shapeIndices } };
+    }),
+
+  setRectangularPatternCountX: (countX) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      return { sketchRectangularPatternState: { ...cur, countX } };
+    }),
+
+  setRectangularPatternCountY: (countY) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      return { sketchRectangularPatternState: { ...cur, countY } };
+    }),
+
+  setRectangularPatternOffsetX: (offsetX) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      return { sketchRectangularPatternState: { ...cur, offsetX } };
+    }),
+
+  setRectangularPatternOffsetY: (offsetY) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      return { sketchRectangularPatternState: { ...cur, offsetY } };
+    }),
+
   // --- Shape + constraint mutations ---
   addSketchConstraints: (sketchId, newConstraints) =>
     set((state) => {
@@ -328,8 +409,11 @@ export const createSketchSlice = (set) => ({
         );
         const constraints = item.constraints || [];
         return Object.assign({}, item, {
-          shapes: applyCircularPatternConstraints(
-            applyMirrorConstraints(shapes, constraints),
+          shapes: applyRectangularPatternConstraints(
+            applyCircularPatternConstraints(
+              applyMirrorConstraints(shapes, constraints),
+              constraints,
+            ),
             constraints,
           ),
         });
@@ -367,8 +451,11 @@ export const createSketchSlice = (set) => ({
         );
         const constraints = item.constraints || [];
         return Object.assign({}, item, {
-          shapes: applyCircularPatternConstraints(
-            applyMirrorConstraints(shapes, constraints),
+          shapes: applyRectangularPatternConstraints(
+            applyCircularPatternConstraints(
+              applyMirrorConstraints(shapes, constraints),
+              constraints,
+            ),
             constraints,
           ),
         });
@@ -1087,6 +1174,103 @@ export const createSketchSlice = (set) => ({
         activeSketchTool: null,
         sketchCircularPatternState: null,
         circularPatternDefaultCount: count,
+      };
+    }),
+
+  // Create a grid of translated copies of the picked shapes, offset by
+  // (offsetX, offsetY) per step in X/Y (skipping the (0,0) original cell),
+  // each linked to its original by a `rectangularPattern` constraint (grid
+  // position i,j sharing dx/dy/countX/countY). The copies are exact
+  // translations (see sketchRectangularPattern.js) and stay in sync via
+  // applyRectangularPatternConstraints whenever the original moves — until
+  // the `rectangularPattern` constraint is deleted, which leaves the copy as
+  // ordinary independent geometry. The chosen counts/offsets become the new
+  // document defaults for future rectangular patterns.
+  confirmRectangularPattern: (sketchId) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const patternState = state.sketchRectangularPatternState;
+      if (!item || !patternState) return {};
+      const shapes = item.shapes || [];
+      const countX = Math.max(1, Math.round(patternState.countX) || 1);
+      const countY = Math.max(1, Math.round(patternState.countY) || 1);
+      const offsetX = patternState.offsetX;
+      const offsetY = patternState.offsetY;
+      const defaults = {
+        activeSketchTool: null,
+        sketchRectangularPatternState: null,
+        rectangularPatternDefaultCountX: countX,
+        rectangularPatternDefaultCountY: countY,
+        rectangularPatternDefaultOffsetX: offsetX,
+        rectangularPatternDefaultOffsetY: offsetY,
+      };
+      const sel = (patternState.shapeIndices || []).filter((idx) =>
+        RECTANGULAR_PATTERNABLE_TYPES.includes(shapes[idx]?.type),
+      );
+      if (sel.length === 0) return defaults;
+
+      const base = shapes.length;
+      const newShapes = [];
+      const newConstraints = [];
+      sel.forEach((origIdx) => {
+        for (let i = 0; i < countX; i++) {
+          for (let j = 0; j < countY; j++) {
+            if (i === 0 && j === 0) continue;
+            const copy = translateShapeGeometry(
+              shapes[origIdx],
+              i * offsetX,
+              j * offsetY,
+            );
+            if (!copy) continue;
+            const newIdx = base + newShapes.length;
+            newShapes.push(copy);
+            newConstraints.push({
+              type: "rectangularPattern",
+              shapeIdx: newIdx,
+              origIdx,
+              i,
+              j,
+              dx: offsetX,
+              dy: offsetY,
+              countX,
+              countY,
+            });
+          }
+        }
+      });
+      if (newShapes.length === 0) return defaults;
+
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: [...shapes, ...newShapes],
+              constraints: [...(it.constraints || []), ...newConstraints],
+            })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+        ...defaults,
       };
     }),
 

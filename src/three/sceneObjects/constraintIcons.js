@@ -21,6 +21,7 @@ import {
   dimValueColorFor,
   sketchMirrorColorFor,
   sketchCircularPatternColorFor,
+  sketchRectangularPatternColorFor,
   toCssHex,
 } from "../theme.js";
 
@@ -560,6 +561,42 @@ export function addConstraintIconsToGroup(
       );
       group.add(diamond);
       markFixedSize(diamond, toWorld(pB.x, pB.y, 0.005));
+    } else if (c.type === "rectangularPattern") {
+      // Small fixed-size square at the copy's reference point — click-select
+      // to enable Delete, which breaks this copy's link via the generic
+      // deleteSketchConstraint flow.
+      const orig = shapes[c.origIdx];
+      const copy = shapes[c.shapeIdx];
+      if (!orig || !copy) return;
+      const key =
+        orig.type === "line"
+          ? "start"
+          : orig.type === "bezier"
+            ? "p0"
+            : "center";
+      const pB = getShapePoint(copy, key);
+      if (!pB) return;
+      const square = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(pB.x - R, pB.y - R, 0.005),
+          toWorld(pB.x + R, pB.y - R, 0.005),
+          toWorld(pB.x + R, pB.y + R, 0.005),
+          toWorld(pB.x - R, pB.y + R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({
+          color: sketchRectangularPatternColorFor(theme),
+          depthTest: false,
+        }),
+      );
+      square.renderOrder = 1004;
+      tag(
+        square,
+        pB,
+        [c.shapeIdx, c.origIdx],
+        sketchRectangularPatternColorFor(theme),
+      );
+      group.add(square);
+      markFixedSize(square, toWorld(pB.x, pB.y, 0.005));
     }
   });
 }

@@ -45,6 +45,7 @@ import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
 import { createSketchCircularPatternHelpers } from "./sketchCircularPatternTool.js";
+import { createSketchRectangularPatternHelpers } from "./sketchRectangularPatternTool.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
 import { createSketchDrawHelpers } from "./sketchDraw.js";
 
@@ -65,6 +66,12 @@ const isMirrorShapeIdx = (selItem, idx) =>
 const isCircularPatternShapeIdx = (selItem, idx) =>
   (selItem?.constraints || []).some(
     (c) => c.type === "circularPattern" && c.shapeIdx === idx,
+  );
+
+// Same inertness for rectangular-pattern copies while their constraint exists.
+const isRectangularPatternShapeIdx = (selItem, idx) =>
+  (selItem?.constraints || []).some(
+    (c) => c.type === "rectangularPattern" && c.shapeIdx === idx,
   );
 
 export function createSketchInteraction(
@@ -348,7 +355,8 @@ export function createSketchInteraction(
         pt.y <= maxY &&
         !isOffsetShapeIdx(selItem, pt.shapeIdx) &&
         !isMirrorShapeIdx(selItem, pt.shapeIdx) &&
-        !isCircularPatternShapeIdx(selItem, pt.shapeIdx)
+        !isCircularPatternShapeIdx(selItem, pt.shapeIdx) &&
+        !isRectangularPatternShapeIdx(selItem, pt.shapeIdx)
       )
         inRect.add(pt.shapeIdx);
     });
@@ -389,6 +397,20 @@ export function createSketchInteraction(
     updateCircularPatternPreview,
     handleCircularPatternClick,
   } = sketchCircularPattern;
+
+  // ── Rectangular Pattern tool ──────────────────────────────────────────────
+  const sketchRectangularPattern = createSketchRectangularPatternHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    sketchShapesGroupRef,
+  });
+  const {
+    clearRectangularPatternPreview,
+    updateRectangularPatternPreview,
+    handleRectangularPatternClick,
+  } = sketchRectangularPattern;
 
   // Whenever sketch shapes are mutated (any store items change while in sketch
   // mode), the selection overlay drawn at the old position becomes a ghost.
@@ -436,6 +458,22 @@ export function createSketchInteraction(
     else clearCircularPatternPreview();
   });
 
+  // Rebuild / clear the rectangular-pattern preview whenever the tool's shape
+  // selection or counts/offsets change, the tool is cancelled, or the
+  // underlying geometry moves (drag of the original).
+  const unsubRectangularPattern = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchRectangularPatternState ===
+        prev.sketchRectangularPatternState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "rectangularPattern")
+      updateRectangularPatternPreview();
+    else clearRectangularPatternPreview();
+  });
+
   const trySelectSketchElement = (screenX, screenY) => {
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
@@ -449,7 +487,8 @@ export function createSketchInteraction(
       snap &&
       !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
       !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
-      !isCircularPatternShapeIdx(selItem, snap.shapeIdx)
+      !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
+      !isRectangularPatternShapeIdx(selItem, snap.shapeIdx)
     ) {
       sketchSelectPoint(snap, sketchMesh);
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
@@ -468,7 +507,8 @@ export function createSketchInteraction(
           c.userData.shapeIdx != null &&
           !c.userData.isOffset &&
           !c.userData.isMirror &&
-          !c.userData.isCircularPattern,
+          !c.userData.isCircularPattern &&
+          !c.userData.isRectangularPattern,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -969,7 +1009,8 @@ export function createSketchInteraction(
           c.userData.shapeIdx != null &&
           !c.userData.isOffset &&
           !c.userData.isMirror &&
-          !c.userData.isCircularPattern,
+          !c.userData.isCircularPattern &&
+          !c.userData.isRectangularPattern,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       for (const hit of hits) {
@@ -1078,7 +1119,8 @@ export function createSketchInteraction(
         snap &&
         !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
         !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
-        !isCircularPatternShapeIdx(selItem, snap.shapeIdx)
+        !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
+        !isRectangularPatternShapeIdx(selItem, snap.shapeIdx)
       ) {
         // If the snapped shape is part of a multi-selection, drag them all together
         // (the snap point acts as the anchor instead of a single-point drag).
@@ -1125,7 +1167,8 @@ export function createSketchInteraction(
           c.userData.shapeIdx != null &&
           !c.userData.isOffset &&
           !c.userData.isMirror &&
-          !c.userData.isCircularPattern,
+          !c.userData.isCircularPattern &&
+          !c.userData.isRectangularPattern,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1201,7 +1244,8 @@ export function createSketchInteraction(
     // on mouse-up by handleMirrorClick, not the draw helpers.
     if (
       activeSketchToolRef.current === "mirror" ||
-      activeSketchToolRef.current === "circularPattern"
+      activeSketchToolRef.current === "circularPattern" ||
+      activeSketchToolRef.current === "rectangularPattern"
     ) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
@@ -1247,7 +1291,8 @@ export function createSketchInteraction(
     if (!sketchModeRef.current) return false;
     if (
       activeSketchToolRef.current === "mirror" ||
-      activeSketchToolRef.current === "circularPattern"
+      activeSketchToolRef.current === "circularPattern" ||
+      activeSketchToolRef.current === "rectangularPattern"
     ) {
       clearAllSketchHover();
       controls.mouseX = e.clientX;
@@ -1310,6 +1355,18 @@ export function createSketchInteraction(
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5)
         handleCircularPatternClick(
+          e.clientX,
+          e.clientY,
+          hitTestSketchLines,
+          makeRay,
+        );
+      return true;
+    }
+    if (activeSketchToolRef.current === "rectangularPattern") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleRectangularPatternClick(
           e.clientX,
           e.clientY,
           hitTestSketchLines,
@@ -1432,7 +1489,8 @@ export function createSketchInteraction(
               c.userData.shapeIdx != null &&
               !c.userData.isOffset &&
               !c.userData.isMirror &&
-              !c.userData.isCircularPattern,
+              !c.userData.isCircularPattern &&
+              !c.userData.isRectangularPattern,
           );
           const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
           if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1457,7 +1515,8 @@ export function createSketchInteraction(
             c.userData.shapeIdx != null &&
             !c.userData.isOffset &&
             !c.userData.isMirror &&
-            !c.userData.isCircularPattern,
+            !c.userData.isCircularPattern &&
+            !c.userData.isRectangularPattern,
         );
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
         if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1743,6 +1802,11 @@ export function createSketchInteraction(
           clearCircularPatternPreview();
           return;
         }
+        if (store.activeSketchTool === "rectangularPattern") {
+          store.cancelRectangularPatternTool();
+          clearRectangularPatternPreview();
+          return;
+        }
         if (store.sketchConstraintMode || store.sketchDistanceInput) {
           store.setSketchConstraintMode(null);
           store.setSketchConstraintFirstPoint(null);
@@ -1877,5 +1941,6 @@ export function createSketchInteraction(
     unsubItems,
     unsubMirror,
     unsubCircularPattern,
+    unsubRectangularPattern,
   };
 }
