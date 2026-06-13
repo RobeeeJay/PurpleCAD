@@ -29,6 +29,7 @@ export default function SketchOverlays({
   sketchConstraintFirstPoint,
   sketchModifyMode,
   sketchDistanceInput,
+  sketchMirrorState,
   isInSketchMode,
   selectedId,
   variables,
@@ -285,10 +286,87 @@ export default function SketchOverlays({
           </button>
         </div>
       )}
-      {activeSketchTool && sketchDrawPhase !== "second" && (
-        <div className="sketch-placement-hint">
-          Click to set the start point
-        </div>
+      {activeSketchTool &&
+        activeSketchTool !== "mirror" &&
+        sketchDrawPhase !== "second" && (
+          <div className="sketch-placement-hint">
+            Click to set the start point
+          </div>
+        )}
+      {sketchMode && activeSketchTool === "mirror" && sketchMirrorState && (
+        <>
+          {sketchMirrorState.lineIdx == null ? (
+            <div className="sketch-placement-hint">
+              Click a line to use as the mirror line · Esc to cancel
+            </div>
+          ) : (
+            <>
+              <div className="sketch-placement-hint">
+                Click geometry to mirror, click again to remove · Esc to cancel
+              </div>
+              <div className="sketch-distance-input-overlay">
+                <span>
+                  Mirroring {sketchMirrorState.shapeIndices.length} item
+                  {sketchMirrorState.shapeIndices.length === 1 ? "" : "s"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => useStore.getState().reselectMirrorLine()}
+                  title="Reselect — pick a different mirror line"
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 10px",
+                    marginLeft: 8,
+                    borderRadius: 3,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Reselect line
+                </button>
+                <button
+                  type="button"
+                  onClick={() => useStore.getState().cancelMirrorTool()}
+                  title="Cancel — discard the mirror"
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 10px",
+                    marginLeft: 8,
+                    borderRadius: 3,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={sketchMirrorState.shapeIndices.length === 0}
+                  onClick={() => useStore.getState().confirmMirror(selectedId)}
+                  title="Confirm — create the mirrored geometry"
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 10px",
+                    marginLeft: 8,
+                    borderRadius: 3,
+                    border: "1px solid var(--accent, #4488ff)",
+                    background: "var(--accent, #4488ff)",
+                    color: "#fff",
+                    cursor: "pointer",
+                    opacity:
+                      sketchMirrorState.shapeIndices.length === 0 ? 0.5 : 1,
+                  }}
+                >
+                  Confirm
+                </button>
+              </div>
+            </>
+          )}
+        </>
       )}
       {sketchMode && sketchConstraintMode === "coincident" && (
         <div className="sketch-placement-hint">

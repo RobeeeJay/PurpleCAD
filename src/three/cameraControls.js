@@ -472,6 +472,7 @@ export function attachCameraControls(ctx) {
     clearSketchVisualsFor3D,
     refreshSketchSelectionOverlay,
     unsubItems,
+    unsubMirror,
   } = createSketchInteraction(
     {
       scene,
@@ -701,5 +702,6 @@ export function attachCameraControls(ctx) {
     document.removeEventListener("keyup", onModifierUp);
     document.removeEventListener("keydown", onKeyDown);
     unsubItems();
+    unsubMirror();
   };
 }

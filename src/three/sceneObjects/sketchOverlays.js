@@ -23,6 +23,7 @@ import {
   sketchLineColorFor,
   sketchNodeColorFor,
   sketchOffsetColorFor,
+  sketchMirrorColorFor,
 } from "../theme.js";
 
 // Offset copies (driven by an offset constraint) render in OFFSET_COLOR to
@@ -32,6 +33,16 @@ const offsetShapeIdxSet = (item) =>
   new Set(
     (item.constraints || [])
       .filter((c) => c.type === "offset")
+      .map((c) => c.shapeIdx),
+  );
+
+// Mirror copies (driven by a mirror constraint) render in MIRROR_COLOR and
+// are made non-interactive while the constraint holds — same rationale as
+// offset copies.
+const mirrorShapeIdxSet = (item) =>
+  new Set(
+    (item.constraints || [])
+      .filter((c) => c.type === "mirror")
       .map((c) => c.shapeIdx),
   );
 
@@ -56,6 +67,7 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
     const offsetIdxs = offsetShapeIdxSet(item);
+    const mirrorIdxs = mirrorShapeIdxSet(item);
     item.shapes.forEach((shape, shapeIdx) => {
       if (shape.kind === "bevel") return; // bevel arcs not shown in object view
       const pts = getSketchShapePoints(shape, sketchMesh);
@@ -65,9 +77,11 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
       const mat = new LineMaterial({
         color: offsetIdxs.has(shapeIdx)
           ? sketchOffsetColorFor(theme)
-          : shape.dashed
-            ? sketchConstructionColorFor(theme)
-            : sketchLineColorFor(theme),
+          : mirrorIdxs.has(shapeIdx)
+            ? sketchMirrorColorFor(theme)
+            : shape.dashed
+              ? sketchConstructionColorFor(theme)
+              : sketchLineColorFor(theme),
         linewidth: 1.5,
         depthTest: false,
         resolution: res,
@@ -230,6 +244,7 @@ export function buildSketchShapesGroup(
 
   // ── Shape lines (Line2 for actual pixel-width thickness) ──────────────────
   const offsetIdxs = offsetShapeIdxSet(selItem);
+  const mirrorIdxs = mirrorShapeIdxSet(selItem);
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
     const pts = getSketchShapePoints(shape, sketchMesh);
@@ -238,6 +253,8 @@ export function buildSketchShapesGroup(
     const isBevel = shape.kind === "bevel";
     const isDashed = !!shape.dashed;
     const isOffset = offsetIdxs.has(shapeIdx);
+    const isMirror = mirrorIdxs.has(shapeIdx);
+    const isInert = isOffset || isMirror;
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     const mat = new LineMaterial({
@@ -245,7 +262,9 @@ export function buildSketchShapesGroup(
         ? BEVEL_COLOR
         : isOffset
           ? sketchOffsetColorFor(theme)
-          : sketchLineColorFor(theme),
+          : isMirror
+            ? sketchMirrorColorFor(theme)
+            : sketchLineColorFor(theme),
       linewidth: isBevel ? 1.0 : 1.5,
       depthTest: false,
       resolution: res,
@@ -259,14 +278,16 @@ export function buildSketchShapesGroup(
     line.computeLineDistances();
     line.renderOrder = 1001;
     line.userData.shapeIdx = shapeIdx;
-    // Offset copies are inert while constrained: tag so the drag / select
-    // hit-tests skip them (they're driven by their original).
+    // Offset / mirror copies are inert while constrained: tag so the drag /
+    // select hit-tests skip them (they're driven by their original).
     if (isOffset) line.userData.isOffset = true;
+    if (isMirror) line.userData.isMirror = true;
     group.add(line);
 
-    // Collect key points for dots — not for offset copies, whose points are
-    // inert (a dot would imply a draggable handle that does nothing).
-    if (!isOffset)
+    // Collect key points for dots — not for offset/mirror copies, whose
+    // points are inert (a dot would imply a draggable handle that does
+    // nothing).
+    if (!isInert)
       getSnapPoints([shape]).forEach((sp) =>
         dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)),
       );

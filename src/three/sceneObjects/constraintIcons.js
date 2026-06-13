@@ -19,6 +19,7 @@ import {
   dimLabelBgFor,
   dimLineColorFor,
   dimValueColorFor,
+  sketchMirrorColorFor,
   toCssHex,
 } from "../theme.js";
 
@@ -483,6 +484,44 @@ export function addConstraintIconsToGroup(
       // find it and open the edit overlay.
       tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimLineColorFor(theme));
       group.add(sprite);
+    } else if (c.type === "mirror") {
+      // Small fixed-size X glyph midway between the original's and the
+      // copy's reference points — click-select to enable Delete, which
+      // breaks the mirror link via the generic deleteSketchConstraint flow.
+      const orig = shapes[c.origIdx];
+      const copy = shapes[c.shapeIdx];
+      if (!orig || !copy) return;
+      const key =
+        orig.type === "line"
+          ? "start"
+          : orig.type === "bezier"
+            ? "p0"
+            : "center";
+      const pA = getShapePoint(orig, key);
+      const pB = getShapePoint(copy, key);
+      if (!pA || !pB) return;
+      const mid = { x: (pA.x + pB.x) / 2, y: (pA.y + pB.y) / 2 };
+      const cross = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(mid.x - R, mid.y - R, 0.005),
+          toWorld(mid.x + R, mid.y + R, 0.005),
+          toWorld(mid.x - R, mid.y + R, 0.005),
+          toWorld(mid.x + R, mid.y - R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({
+          color: sketchMirrorColorFor(theme),
+          depthTest: false,
+        }),
+      );
+      cross.renderOrder = 1004;
+      tag(
+        cross,
+        mid,
+        [c.shapeIdx, c.origIdx, c.lineIdx],
+        sketchMirrorColorFor(theme),
+      );
+      group.add(cross);
+      markFixedSize(cross, toWorld(mid.x, mid.y, 0.005));
     }
   });
 }

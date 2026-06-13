@@ -105,6 +105,7 @@ const Viewport = () => {
   );
   const sketchModifyMode = useStore((state) => state.sketchModifyMode);
   const sketchDistanceInput = useStore((state) => state.sketchDistanceInput);
+  const sketchMirrorState = useStore((state) => state.sketchMirrorState);
   const constraintsVisible = useStore((state) => state.constraintsVisible);
   const dimensionsVisible = useStore((state) => state.dimensionsVisible);
   const curveResolution = useStore((state) => state.curveResolution);
@@ -274,6 +275,7 @@ const Viewport = () => {
         sketchConstraintFirstPoint={sketchConstraintFirstPoint}
         sketchModifyMode={sketchModifyMode}
         sketchDistanceInput={sketchDistanceInput}
+        sketchMirrorState={sketchMirrorState}
         isInSketchMode={isInSketchMode}
         selectedId={selectedId}
         variables={variables}

@@ -14,6 +14,11 @@ import {
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
 import { resolveValue } from "../three/geometryParams.js";
+import {
+  MIRRORABLE_TYPES,
+  mirrorShapeGeometry,
+  applyMirrorConstraints,
+} from "../three/sketchMirror.js";
 
 // Shape types the Offset tool can copy.
 export const OFFSETTABLE_TYPES = ["line", "circle", "arc", "ellipse", "bezier"];
@@ -139,7 +144,11 @@ export const createSketchSlice = (set) => ({
 
   // --- Interaction state ---
   activeSketchTool: null,
-  setActiveSketchTool: (tool) => set({ activeSketchTool: tool }),
+  setActiveSketchTool: (tool) =>
+    set({
+      activeSketchTool: tool,
+      ...(tool !== "mirror" ? { sketchMirrorState: null } : null),
+    }),
 
   selectedSketchElement: null, // { type:'point'|'line', shapeIdx, pointKey? }
   setSelectedSketchElement: (el) => set({ selectedSketchElement: el }),
@@ -162,6 +171,44 @@ export const createSketchSlice = (set) => ({
 
   sketchLongPressMenu: null, // { x, y, items: [{kind, label, ...}] } | null
   setSketchLongPressMenu: (v) => set({ sketchLongPressMenu: v }),
+
+  // Mirror tool: pick a mirror line, then toggle geometry to preview/mirror
+  // across it. { lineIdx: number|null, shapeIndices: number[] } | null
+  sketchMirrorState: null,
+  setSketchMirrorState: (v) => set({ sketchMirrorState: v }),
+
+  startMirrorTool: () =>
+    set({
+      activeSketchTool: "mirror",
+      sketchMirrorState: { lineIdx: null, shapeIndices: [] },
+    }),
+
+  cancelMirrorTool: () =>
+    set((state) => ({
+      activeSketchTool:
+        state.activeSketchTool === "mirror" ? null : state.activeSketchTool,
+      sketchMirrorState: null,
+    })),
+
+  setMirrorLine: (lineIdx) =>
+    set((state) => ({
+      sketchMirrorState: { ...(state.sketchMirrorState || {}), lineIdx },
+    })),
+
+  reselectMirrorLine: () =>
+    set((state) => ({
+      sketchMirrorState: { ...(state.sketchMirrorState || {}), lineIdx: null },
+    })),
+
+  toggleMirrorShape: (shapeIdx) =>
+    set((state) => {
+      const cur = state.sketchMirrorState;
+      if (!cur || cur.lineIdx == null) return {};
+      const shapeIndices = cur.shapeIndices.includes(shapeIdx)
+        ? cur.shapeIndices.filter((i) => i !== shapeIdx)
+        : [...cur.shapeIndices, shapeIdx];
+      return { sketchMirrorState: { ...cur, shapeIndices } };
+    }),
 
   // --- Shape + constraint mutations ---
   addSketchConstraints: (sketchId, newConstraints) =>
@@ -202,10 +249,11 @@ export const createSketchSlice = (set) => ({
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
+        const shapes = (item.shapes || []).map((s, i) =>
+          updatesMap.has(i) ? updatesMap.get(i) : s,
+        );
         return Object.assign({}, item, {
-          shapes: (item.shapes || []).map((s, i) =>
-            updatesMap.has(i) ? updatesMap.get(i) : s,
-          ),
+          shapes: applyMirrorConstraints(shapes, item.constraints || []),
         });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
@@ -234,15 +282,15 @@ export const createSketchSlice = (set) => ({
   updateSketchShape: (sketchId, shapeIdx, newShape) =>
     set((state) => {
       pushSketchSnapshot(state, sketchId);
-      const updatedItems = state.items.map((item) =>
-        item.id === sketchId
-          ? Object.assign({}, item, {
-              shapes: item.shapes.map((s, i) =>
-                i === shapeIdx ? newShape : s,
-              ),
-            })
-          : item,
-      );
+      const updatedItems = state.items.map((item) => {
+        if (item.id !== sketchId) return item;
+        const shapes = item.shapes.map((s, i) =>
+          i === shapeIdx ? newShape : s,
+        );
+        return Object.assign({}, item, {
+          shapes: applyMirrorConstraints(shapes, item.constraints || []),
+        });
+      });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
         if (
@@ -788,6 +836,80 @@ export const createSketchSlice = (set) => ({
       return {
         items: markCsgDirty(updatedItems),
         history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Create mirrored copies of the picked shapes across the picked mirror
+  // line, each linked to its original by a `mirror` constraint. The copies
+  // are exact reflections (see sketchMirror.js) and stay in sync via
+  // applyMirrorConstraints whenever the original or the mirror line moves —
+  // until the `mirror` constraint is deleted, which leaves the copy as
+  // ordinary independent geometry.
+  confirmMirror: (sketchId) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const mirrorState = state.sketchMirrorState;
+      if (!item || !mirrorState || mirrorState.lineIdx == null) return {};
+      const shapes = item.shapes || [];
+      const lineIdx = mirrorState.lineIdx;
+      const lineShape = shapes[lineIdx];
+      const sel = (mirrorState.shapeIndices || []).filter(
+        (idx) =>
+          idx !== lineIdx && MIRRORABLE_TYPES.includes(shapes[idx]?.type),
+      );
+      if (!lineShape || lineShape.type !== "line" || sel.length === 0)
+        return { activeSketchTool: null, sketchMirrorState: null };
+
+      const base = shapes.length;
+      const newShapes = [];
+      const newConstraints = [];
+      sel.forEach((origIdx) => {
+        const copy = mirrorShapeGeometry(shapes[origIdx], lineShape);
+        if (!copy) return;
+        const newIdx = base + newShapes.length;
+        newShapes.push(copy);
+        newConstraints.push({
+          type: "mirror",
+          shapeIdx: newIdx,
+          origIdx,
+          lineIdx,
+        });
+      });
+      if (newShapes.length === 0)
+        return { activeSketchTool: null, sketchMirrorState: null };
+
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: [...shapes, ...newShapes],
+              constraints: [...(it.constraints || []), ...newConstraints],
+            })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+        activeSketchTool: null,
+        sketchMirrorState: null,
       };
     }),
 

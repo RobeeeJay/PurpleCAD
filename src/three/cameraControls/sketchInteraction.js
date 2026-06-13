@@ -43,6 +43,7 @@ import {
 } from "../sketchModifyActions.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
+import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
 import { createSketchDrawHelpers } from "./sketchDraw.js";
 
@@ -51,6 +52,12 @@ import { createSketchDrawHelpers } from "./sketchDraw.js";
 const isOffsetShapeIdx = (selItem, idx) =>
   (selItem?.constraints || []).some(
     (c) => c.type === "offset" && c.shapeIdx === idx,
+  );
+
+// Same inertness for mirror copies while their mirror constraint exists.
+const isMirrorShapeIdx = (selItem, idx) =>
+  (selItem?.constraints || []).some(
+    (c) => c.type === "mirror" && c.shapeIdx === idx,
   );
 
 export function createSketchInteraction(
@@ -332,7 +339,8 @@ export function createSketchInteraction(
         pt.x <= maxX &&
         pt.y >= minY &&
         pt.y <= maxY &&
-        !isOffsetShapeIdx(selItem, pt.shapeIdx)
+        !isOffsetShapeIdx(selItem, pt.shapeIdx) &&
+        !isMirrorShapeIdx(selItem, pt.shapeIdx)
       )
         inRect.add(pt.shapeIdx);
     });
@@ -346,6 +354,17 @@ export function createSketchInteraction(
     clearMultiSelectOverlays();
     multiSelectedIndices = [];
   };
+
+  // ── Mirror tool ────────────────────────────────────────────────────────────
+  const sketchMirror = createSketchMirrorHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    sketchShapesGroupRef,
+  });
+  const { clearMirrorPreview, updateMirrorPreview, handleMirrorClick } =
+    sketchMirror;
 
   // Whenever sketch shapes are mutated (any store items change while in sketch
   // mode), the selection overlay drawn at the old position becomes a ghost.
@@ -364,6 +383,20 @@ export function createSketchInteraction(
     },
   );
 
+  // Rebuild / clear the mirror preview whenever the mirror tool's picked line
+  // or shape selection changes, the tool is cancelled, or the underlying
+  // geometry moves (drag of the original or mirror line).
+  const unsubMirror = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchMirrorState === prev.sketchMirrorState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "mirror") updateMirrorPreview();
+    else clearMirrorPreview();
+  });
+
   const trySelectSketchElement = (screenX, screenY) => {
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
@@ -373,7 +406,11 @@ export function createSketchInteraction(
     const shapes = selItem.shapes || [];
     // Point hit first (ignore offset-copy points — they're inert).
     const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-    if (snap && !isOffsetShapeIdx(selItem, snap.shapeIdx)) {
+    if (
+      snap &&
+      !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
+      !isMirrorShapeIdx(selItem, snap.shapeIdx)
+    ) {
       sketchSelectPoint(snap, sketchMesh);
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
       return;
@@ -387,7 +424,10 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+        (c) =>
+          c.userData.shapeIdx != null &&
+          !c.userData.isOffset &&
+          !c.userData.isMirror,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -884,7 +924,10 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+        (c) =>
+          c.userData.shapeIdx != null &&
+          !c.userData.isOffset &&
+          !c.userData.isMirror,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       for (const hit of hits) {
@@ -989,7 +1032,11 @@ export function createSketchInteraction(
     // An offset copy's points are inert, so skip dragging by them.
     if (!shiftKey) {
       const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-      if (snap && !isOffsetShapeIdx(selItem, snap.shapeIdx)) {
+      if (
+        snap &&
+        !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
+        !isMirrorShapeIdx(selItem, snap.shapeIdx)
+      ) {
         // If the snapped shape is part of a multi-selection, drag them all together
         // (the snap point acts as the anchor instead of a single-point drag).
         if (
@@ -1031,7 +1078,10 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+        (c) =>
+          c.userData.shapeIdx != null &&
+          !c.userData.isOffset &&
+          !c.userData.isMirror,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1103,6 +1153,15 @@ export function createSketchInteraction(
   // ── Sketch-mode pointer dispatch (return true when handled) ───────────────
   const onSketchMouseDown = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
+    // The mirror tool is a pick-mode, not a drawing tool: clicks are handled
+    // on mouse-up by handleMirrorClick, not the draw helpers.
+    if (activeSketchToolRef.current === "mirror") {
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
     if (activeSketchToolRef.current) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
@@ -1139,6 +1198,12 @@ export function createSketchInteraction(
 
   const onSketchMouseMove = (e) => {
     if (!sketchModeRef.current) return false;
+    if (activeSketchToolRef.current === "mirror") {
+      clearAllSketchHover();
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
     if (activeSketchToolRef.current) {
       clearAllSketchHover();
       updateSketchPreview(e.clientX, e.clientY, e.shiftKey);
@@ -1183,6 +1248,13 @@ export function createSketchInteraction(
 
   const onSketchMouseUp = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
+    if (activeSketchToolRef.current === "mirror") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleMirrorClick(e.clientX, e.clientY, hitTestSketchLines, makeRay);
+      return true;
+    }
     if (activeSketchToolRef.current) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
@@ -1294,7 +1366,10 @@ export function createSketchInteraction(
         const sketchGroup = sketchShapesGroupRef?.current;
         if (selItem && sketchMesh && sketchGroup) {
           const lineObjs = sketchGroup.children.filter(
-            (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+            (c) =>
+              c.userData.shapeIdx != null &&
+              !c.userData.isOffset &&
+              !c.userData.isMirror,
           );
           const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
           if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1315,7 +1390,10 @@ export function createSketchInteraction(
         const sketchGroup = sketchShapesGroupRef?.current;
         if (!sketchGroup) return;
         const lineObjs = sketchGroup.children.filter(
-          (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+          (c) =>
+            c.userData.shapeIdx != null &&
+            !c.userData.isOffset &&
+            !c.userData.isMirror,
         );
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
         if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1591,6 +1669,11 @@ export function createSketchInteraction(
           clearModifyPreview();
           return;
         }
+        if (store.activeSketchTool === "mirror") {
+          store.cancelMirrorTool();
+          clearMirrorPreview();
+          return;
+        }
         if (store.sketchConstraintMode || store.sketchDistanceInput) {
           store.setSketchConstraintMode(null);
           store.setSketchConstraintFirstPoint(null);
@@ -1723,5 +1806,6 @@ export function createSketchInteraction(
     clearSketchVisualsFor3D,
     refreshSketchSelectionOverlay,
     unsubItems,
+    unsubMirror,
   };
 }

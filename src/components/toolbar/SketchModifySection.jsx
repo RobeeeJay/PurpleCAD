@@ -7,6 +7,9 @@ const SketchModifySection = () => {
   const selectedId = useStore((s) => s.selectedId);
   const sketchModifyMode = useStore((s) => s.sketchModifyMode);
   const setSketchModifyMode = useStore((s) => s.setSketchModifyMode);
+  const activeSketchTool = useStore((s) => s.activeSketchTool);
+  const startMirrorTool = useStore((s) => s.startMirrorTool);
+  const cancelMirrorTool = useStore((s) => s.cancelMirrorTool);
   const sketchMultiSelectedIndices = useStore(
     (s) => s.sketchMultiSelectedIndices,
   );
@@ -29,6 +32,13 @@ const SketchModifySection = () => {
   // offset to the other (negative) side.
   const handleOffset = (e) => {
     offsetSelectedSketchGeometry(selectedId, selectedIndices, e.shiftKey);
+  };
+
+  // Mirror: pick a mirror line, then click geometry to preview/toggle its
+  // reflection; Confirm creates copies linked by a mirror constraint.
+  const handleMirror = () => {
+    if (activeSketchTool === "mirror") cancelMirrorTool();
+    else startMirrorTool();
   };
 
   return (
@@ -229,6 +239,40 @@ const SketchModifySection = () => {
             y1="8"
             x2="17"
             y2="11"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${activeSketchTool === "mirror" ? "active" : ""}`}
+        title="Mirror — pick a mirror line, then click geometry to reflect across it"
+        onClick={handleMirror}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 2"
+            x1="12"
+            y1="2"
+            x2="12"
+            y2="22"
+          />
+          <path
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M11 4 L11 10 L4 17"
+          />
+          <path
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M13 4 L13 10 L20 17"
           />
         </svg>
       </button>
