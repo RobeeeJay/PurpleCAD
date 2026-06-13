@@ -77,6 +77,10 @@ export const uiInitial = {
   // is actually running, so a failed start can't freeze the raster view.
   pathTraceView: false,
   pathTracerActive: false,
+  // { samples, target } while the tracer is accumulating — drives the
+  // progress bar across the top of the viewport. Reset to 0 samples whenever
+  // the camera moves (the accumulation buffer resets too).
+  pathTraceProgress: null,
 
   // Non-reactive slot holding the live cameraControls object (set by
   // Viewport during mount).  Lets UI components outside the Viewport

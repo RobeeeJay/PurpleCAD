@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import RotationWidget from "./RotationWidget";
 import BusyIndicator from "./BusyIndicator";
+import PathTraceProgress from "./PathTraceProgress";
 import SketchOverlays from "./viewport/SketchOverlays";
 import ChamferOverlay from "./viewport/ChamferOverlay";
 import { useViewportInit } from "./viewport/useViewportInit";
@@ -261,6 +262,7 @@ const Viewport = () => {
         }
       />
       <BusyIndicator />
+      <PathTraceProgress />
       <SketchOverlays
         sketchPlacementMode={sketchPlacementMode}
         extrudeSelectMode={extrudeSelectMode}

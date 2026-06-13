@@ -25,6 +25,11 @@ let activeCamera = null;
 let rafId = null;
 const lastCamMatrix = new THREE.Matrix4();
 
+// Sample count the progress bar treats as "full" — the image still keeps
+// refining past this, but it's a reasonable point to call the accumulation
+// converged for the bar's purposes.
+const TARGET_SAMPLES = 100;
+
 // three-gpu-pathtracer 0.0.23 reads scene.environmentRotation / backgroundRotation
 // (Euler properties added in three r163) — undefined in our three 0.157, which
 // crashes makeRotationFromEuler even in the tracer's internal empty scene.
@@ -216,6 +221,12 @@ export function enablePathTracer(renderer, camera, { objectsRef, itemsRef }) {
           pathTracer.updateCamera();
         }
         pathTracer.renderSample();
+        useStore.setState({
+          pathTraceProgress: {
+            samples: pathTracer.samples,
+            target: TARGET_SAMPLES,
+          },
+        });
       } catch (err) {
         console.error("Path tracer render error:", err);
         useStore
@@ -255,5 +266,5 @@ export function disablePathTracer() {
   }
   pathTracer = null;
   activeCamera = null;
-  useStore.setState({ pathTracerActive: false });
+  useStore.setState({ pathTracerActive: false, pathTraceProgress: null });
 }
