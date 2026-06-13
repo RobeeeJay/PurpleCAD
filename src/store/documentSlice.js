@@ -8,6 +8,7 @@ import {
   withOrphanFlags,
   saveTimeline,
   saveVariables,
+  saveFolders,
   setNextHistoryId,
 } from "./internals.js";
 
@@ -27,6 +28,7 @@ export const createDocumentSlice = (set) => ({
       ];
       saveTimeline(freshHistory, null);
       saveVariables([]);
+      saveFolders([]);
       localStorage.removeItem("cad-camera-state");
       return {
         items: [],
@@ -38,6 +40,7 @@ export const createDocumentSlice = (set) => ({
         undoStack: [],
         redoStack: [],
         variables: [],
+        folders: [],
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),
@@ -70,6 +73,7 @@ export const createDocumentSlice = (set) => ({
       );
       const variables = Array.isArray(data.variables) ? data.variables : [];
       saveVariables(variables);
+      saveFolders([]);
       return {
         items,
         history: withOrphanFlags(data.history),
@@ -80,6 +84,7 @@ export const createDocumentSlice = (set) => ({
         undoStack: [],
         redoStack: [],
         variables,
+        folders: [],
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),
