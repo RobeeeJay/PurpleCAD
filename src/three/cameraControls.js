@@ -473,6 +473,7 @@ export function attachCameraControls(ctx) {
     refreshSketchSelectionOverlay,
     unsubItems,
     unsubMirror,
+    unsubCircularPattern,
   } = createSketchInteraction(
     {
       scene,
@@ -703,5 +704,6 @@ export function attachCameraControls(ctx) {
     document.removeEventListener("keydown", onKeyDown);
     unsubItems();
     unsubMirror();
+    unsubCircularPattern();
   };
 }

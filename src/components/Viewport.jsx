@@ -106,6 +106,9 @@ const Viewport = () => {
   const sketchModifyMode = useStore((state) => state.sketchModifyMode);
   const sketchDistanceInput = useStore((state) => state.sketchDistanceInput);
   const sketchMirrorState = useStore((state) => state.sketchMirrorState);
+  const sketchCircularPatternState = useStore(
+    (state) => state.sketchCircularPatternState,
+  );
   const constraintsVisible = useStore((state) => state.constraintsVisible);
   const dimensionsVisible = useStore((state) => state.dimensionsVisible);
   const curveResolution = useStore((state) => state.curveResolution);
@@ -276,6 +279,7 @@ const Viewport = () => {
         sketchModifyMode={sketchModifyMode}
         sketchDistanceInput={sketchDistanceInput}
         sketchMirrorState={sketchMirrorState}
+        sketchCircularPatternState={sketchCircularPatternState}
         isInSketchMode={isInSketchMode}
         selectedId={selectedId}
         variables={variables}

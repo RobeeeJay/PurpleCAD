@@ -18,6 +18,7 @@ const PCAD = {
     sketchSelected: 0xeeedfe,
     sketchOffset: 0xba7517,
     sketchMirror: 0x00aaff,
+    sketchCircularPattern: 0x33cc88,
     sketchConstruction: 0x3c3489,
     gridMajor: 0xd4a33f,
     gridMinor: 0xd4a33f,
@@ -41,6 +42,7 @@ const PCAD = {
     sketchSelected: 0x26215c,
     sketchOffset: 0x854f0b,
     sketchMirror: 0x0077cc,
+    sketchCircularPattern: 0x1f8a55,
     sketchConstruction: 0xafa9ec,
     gridMajor: 0x534ab7,
     gridMinor: 0x534ab7,
@@ -75,6 +77,8 @@ export const sketchNodeColorFor = (theme) => pcad("sketchNode", theme);
 export const sketchSelectedColorFor = (theme) => pcad("sketchSelected", theme);
 export const sketchOffsetColorFor = (theme) => pcad("sketchOffset", theme);
 export const sketchMirrorColorFor = (theme) => pcad("sketchMirror", theme);
+export const sketchCircularPatternColorFor = (theme) =>
+  pcad("sketchCircularPattern", theme);
 export const sketchConstructionColorFor = (theme) =>
   pcad("sketchConstruction", theme);
 

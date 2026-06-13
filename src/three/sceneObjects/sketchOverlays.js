@@ -24,6 +24,7 @@ import {
   sketchNodeColorFor,
   sketchOffsetColorFor,
   sketchMirrorColorFor,
+  sketchCircularPatternColorFor,
 } from "../theme.js";
 
 // Offset copies (driven by an offset constraint) render in OFFSET_COLOR to
@@ -43,6 +44,16 @@ const mirrorShapeIdxSet = (item) =>
   new Set(
     (item.constraints || [])
       .filter((c) => c.type === "mirror")
+      .map((c) => c.shapeIdx),
+  );
+
+// Circular-pattern copies (driven by a circularPattern constraint) render in
+// CIRCULAR_PATTERN_COLOR and are non-interactive while the constraint holds —
+// same rationale as offset/mirror copies.
+const circularPatternShapeIdxSet = (item) =>
+  new Set(
+    (item.constraints || [])
+      .filter((c) => c.type === "circularPattern")
       .map((c) => c.shapeIdx),
   );
 
@@ -68,6 +79,7 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     if (!sketchMesh) return;
     const offsetIdxs = offsetShapeIdxSet(item);
     const mirrorIdxs = mirrorShapeIdxSet(item);
+    const circularPatternIdxs = circularPatternShapeIdxSet(item);
     item.shapes.forEach((shape, shapeIdx) => {
       if (shape.kind === "bevel") return; // bevel arcs not shown in object view
       const pts = getSketchShapePoints(shape, sketchMesh);
@@ -79,9 +91,11 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
           ? sketchOffsetColorFor(theme)
           : mirrorIdxs.has(shapeIdx)
             ? sketchMirrorColorFor(theme)
-            : shape.dashed
-              ? sketchConstructionColorFor(theme)
-              : sketchLineColorFor(theme),
+            : circularPatternIdxs.has(shapeIdx)
+              ? sketchCircularPatternColorFor(theme)
+              : shape.dashed
+                ? sketchConstructionColorFor(theme)
+                : sketchLineColorFor(theme),
         linewidth: 1.5,
         depthTest: false,
         resolution: res,
@@ -245,6 +259,7 @@ export function buildSketchShapesGroup(
   // ── Shape lines (Line2 for actual pixel-width thickness) ──────────────────
   const offsetIdxs = offsetShapeIdxSet(selItem);
   const mirrorIdxs = mirrorShapeIdxSet(selItem);
+  const circularPatternIdxs = circularPatternShapeIdxSet(selItem);
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
     const pts = getSketchShapePoints(shape, sketchMesh);
@@ -254,7 +269,8 @@ export function buildSketchShapesGroup(
     const isDashed = !!shape.dashed;
     const isOffset = offsetIdxs.has(shapeIdx);
     const isMirror = mirrorIdxs.has(shapeIdx);
-    const isInert = isOffset || isMirror;
+    const isCircularPattern = circularPatternIdxs.has(shapeIdx);
+    const isInert = isOffset || isMirror || isCircularPattern;
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     const mat = new LineMaterial({
@@ -264,7 +280,9 @@ export function buildSketchShapesGroup(
           ? sketchOffsetColorFor(theme)
           : isMirror
             ? sketchMirrorColorFor(theme)
-            : sketchLineColorFor(theme),
+            : isCircularPattern
+              ? sketchCircularPatternColorFor(theme)
+              : sketchLineColorFor(theme),
       linewidth: isBevel ? 1.0 : 1.5,
       depthTest: false,
       resolution: res,
@@ -278,15 +296,17 @@ export function buildSketchShapesGroup(
     line.computeLineDistances();
     line.renderOrder = 1001;
     line.userData.shapeIdx = shapeIdx;
-    // Offset / mirror copies are inert while constrained: tag so the drag /
-    // select hit-tests skip them (they're driven by their original).
+    // Offset / mirror / circular-pattern copies are inert while constrained:
+    // tag so the drag / select hit-tests skip them (they're driven by their
+    // original).
     if (isOffset) line.userData.isOffset = true;
     if (isMirror) line.userData.isMirror = true;
+    if (isCircularPattern) line.userData.isCircularPattern = true;
     group.add(line);
 
-    // Collect key points for dots — not for offset/mirror copies, whose
-    // points are inert (a dot would imply a draggable handle that does
-    // nothing).
+    // Collect key points for dots — not for offset/mirror/circular-pattern
+    // copies, whose points are inert (a dot would imply a draggable handle
+    // that does nothing).
     if (!isInert)
       getSnapPoints([shape]).forEach((sp) =>
         dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)),

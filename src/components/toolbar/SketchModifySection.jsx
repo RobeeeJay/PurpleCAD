@@ -10,6 +10,10 @@ const SketchModifySection = () => {
   const activeSketchTool = useStore((s) => s.activeSketchTool);
   const startMirrorTool = useStore((s) => s.startMirrorTool);
   const cancelMirrorTool = useStore((s) => s.cancelMirrorTool);
+  const startCircularPatternTool = useStore((s) => s.startCircularPatternTool);
+  const cancelCircularPatternTool = useStore(
+    (s) => s.cancelCircularPatternTool,
+  );
   const sketchMultiSelectedIndices = useStore(
     (s) => s.sketchMultiSelectedIndices,
   );
@@ -39,6 +43,14 @@ const SketchModifySection = () => {
   const handleMirror = () => {
     if (activeSketchTool === "mirror") cancelMirrorTool();
     else startMirrorTool();
+  };
+
+  // Circular Pattern: pick a centre point, then click geometry to
+  // preview/toggle rotated repeats; Confirm creates copies linked by
+  // circularPattern constraints.
+  const handleCircularPattern = () => {
+    if (activeSketchTool === "circularPattern") cancelCircularPatternTool();
+    else startCircularPatternTool();
   };
 
   return (
@@ -274,6 +286,27 @@ const SketchModifySection = () => {
             strokeLinejoin="miter"
             d="M13 4 L13 10 L20 17"
           />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${activeSketchTool === "circularPattern" ? "active" : ""}`}
+        title="Circular Pattern — pick a centre point, then click geometry to repeat it around it"
+        onClick={handleCircularPattern}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <circle
+            cx="12"
+            cy="12"
+            r="8"
+            stroke="#D4A33F"
+            strokeDasharray="2 2"
+            fill="none"
+            strokeWidth="1.5"
+          />
+          <circle cx="12" cy="12" r="1" fill="#D4A33F" />
+          <rect x="10.5" y="2.5" width="3" height="3" fill="#6C3FD4" />
+          <rect x="17.5" y="9.5" width="3" height="3" fill="#c4c2b8" />
+          <rect x="3.5" y="9.5" width="3" height="3" fill="#c4c2b8" />
         </svg>
       </button>
     </ToolbarSection>

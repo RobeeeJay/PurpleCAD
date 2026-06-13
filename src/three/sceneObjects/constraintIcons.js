@@ -20,6 +20,7 @@ import {
   dimLineColorFor,
   dimValueColorFor,
   sketchMirrorColorFor,
+  sketchCircularPatternColorFor,
   toCssHex,
 } from "../theme.js";
 
@@ -522,6 +523,43 @@ export function addConstraintIconsToGroup(
       );
       group.add(cross);
       markFixedSize(cross, toWorld(mid.x, mid.y, 0.005));
+    } else if (c.type === "circularPattern") {
+      // Small fixed-size diamond at the copy's reference point — click-select
+      // to enable Delete, which breaks this copy's link via the generic
+      // deleteSketchConstraint flow.
+      const orig = shapes[c.origIdx];
+      const copy = shapes[c.shapeIdx];
+      if (!orig || !copy) return;
+      const key =
+        orig.type === "line"
+          ? "start"
+          : orig.type === "bezier"
+            ? "p0"
+            : "center";
+      const pB = getShapePoint(copy, key);
+      if (!pB) return;
+      const diamond = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(pB.x, pB.y + R, 0.005),
+          toWorld(pB.x + R, pB.y, 0.005),
+          toWorld(pB.x, pB.y - R, 0.005),
+          toWorld(pB.x - R, pB.y, 0.005),
+          toWorld(pB.x, pB.y + R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({
+          color: sketchCircularPatternColorFor(theme),
+          depthTest: false,
+        }),
+      );
+      diamond.renderOrder = 1004;
+      tag(
+        diamond,
+        pB,
+        [c.shapeIdx, c.origIdx, c.centerShapeIdx],
+        sketchCircularPatternColorFor(theme),
+      );
+      group.add(diamond);
+      markFixedSize(diamond, toWorld(pB.x, pB.y, 0.005));
     }
   });
 }
