@@ -54,6 +54,7 @@ const MaterialDialog = () => {
 
   const [draft, setDraft] = useState(DEFAULT_MATERIAL);
   const [presetName, setPresetName] = useState("");
+  const [ignorePresetColor, setIgnorePresetColor] = useState(false);
 
   useEffect(() => {
     if (target == null) return;
@@ -94,7 +95,14 @@ const MaterialDialog = () => {
     setTarget(null);
   };
 
-  const applyPreset = (material) => update(material);
+  const applyPreset = (material) => {
+    if (ignorePresetColor) {
+      const { color, ...rest } = material;
+      update(rest);
+    } else {
+      update(material);
+    }
+  };
 
   const savePreset = () => {
     const name = presetName.trim();
@@ -320,34 +328,56 @@ const MaterialDialog = () => {
           >
             <div style={rowStyle}>
               <span style={labelStyle}>Presets</span>
-              <select
-                className="variables-btn"
-                value=""
-                onChange={(e) => {
-                  const all = [...BUILTIN_MATERIAL_PRESETS, ...materialPresets];
-                  const preset = all.find((p) => p.name === e.target.value);
-                  if (preset) applyPreset(preset.material);
-                }}
-                style={{ minWidth: 140 }}
-              >
-                <option value="" disabled>
-                  Apply preset…
-                </option>
-                {BUILTIN_MATERIAL_PRESETS.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    fontSize: 11,
+                    color: "var(--text-secondary)",
+                  }}
+                  title="Keep the current color when applying a preset"
+                >
+                  <input
+                    type="checkbox"
+                    checked={ignorePresetColor}
+                    onChange={(e) => setIgnorePresetColor(e.target.checked)}
+                  />
+                  Ignore colour
+                </label>
+                <select
+                  className="variables-btn"
+                  value=""
+                  onChange={(e) => {
+                    const all = [
+                      ...BUILTIN_MATERIAL_PRESETS,
+                      ...materialPresets,
+                    ];
+                    const preset = all.find((p) => p.name === e.target.value);
+                    if (preset) applyPreset(preset.material);
+                  }}
+                  style={{ minWidth: 140 }}
+                >
+                  <option value="" disabled>
+                    Apply preset…
                   </option>
-                ))}
-                {materialPresets.length > 0 && (
-                  <optgroup label="Custom">
-                    {materialPresets.map((p) => (
-                      <option key={p.id} value={p.name}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
+                  {BUILTIN_MATERIAL_PRESETS.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                  {materialPresets.length > 0 && (
+                    <optgroup label="Custom">
+                      {materialPresets.map((p) => (
+                        <option key={p.id} value={p.name}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </span>
             </div>
             <div style={rowStyle}>
               <span style={labelStyle}>Save current as preset</span>
