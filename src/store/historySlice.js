@@ -586,6 +586,73 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Update a revolve (sweep) step's parameters.  A revolve is a CREATE entry
+  // (it adds a new solid), so its recipe lives on inst.item, not inst.patches.
+  updateRevolveParams: (entryId, params) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "create") return entry;
+        const r = inst.item?.regenerator;
+        if (r?.kind !== "revolve") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            item: {
+              ...inst.item,
+              regenerator: { ...r, ...params, regeneratedAt: "dirty" },
+              geometryData: null,
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Replace a revolve step's item recipe in place (re-picked profile/axis) —
+  // used by the sweep retarget confirm.  `patches` carries the new regenerator,
+  // geometryData and position to merge onto the CREATE entry's item.
+  retargetRevolveEntry: (entryId, patches) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "create") return entry;
+        if (inst.item?.regenerator?.kind !== "revolve") return entry;
+        return {
+          ...entry,
+          instruction: { ...inst, item: { ...inst.item, ...patches } },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
   // Update an existing chamfer-or-fillet history entry's patches in place
   // (position/regenerator/geometryData), without inserting a new entry —
   // used by BevelSection's retarget(), which has already rebuilt the

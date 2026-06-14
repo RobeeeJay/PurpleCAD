@@ -7,6 +7,7 @@ import VariablesDialog from "./components/VariablesDialog";
 import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
 import ChamferEditDialog from "./components/ChamferEditDialog";
 import PushPullEditDialog from "./components/PushPullEditDialog";
+import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
@@ -88,6 +89,7 @@ function App() {
       <ExtrudeLengthDialog />
       <ChamferEditDialog />
       <PushPullEditDialog />
+      <RevolveEditDialog />
       <MaterialDialog />
       <SettingsDialog />
       <AboutDialog />

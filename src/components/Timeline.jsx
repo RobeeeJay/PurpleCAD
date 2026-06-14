@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import { useStore } from "../store";
 import { beginChamferRetarget } from "../three/cameraControls/chamferCommit.js";
 import { beginPushPullRetarget } from "../three/cameraControls/pushPull.js";
+import { beginRevolveRetarget } from "../three/cameraControls/sweep.js";
 import {
   CubeIcon,
   SphereIcon,
@@ -36,6 +37,14 @@ const pushPullInfo = (entry) => {
   const r = inst.patches?.regenerator;
   if (r?.kind !== "pushpull") return null;
   return { distance: r.distance ?? 0 };
+};
+
+// Detect revolve (sweep) entries — a CREATE whose item carries a revolve recipe.
+const revolveInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "create") return null;
+  if (inst.item?.regenerator?.kind !== "revolve") return null;
+  return { itemId: inst.item.id };
 };
 
 // A chamfer/fillet/push-pull whose regen couldn't rebuild after the geometry
@@ -294,6 +303,8 @@ const Timeline = () => {
   const pushPullRetargetTarget = useStore(
     (state) => state.pushPullRetargetTarget,
   );
+  const setSweepEditTarget = useStore((state) => state.setSweepEditTarget);
+  const sweepRetargetTarget = useStore((state) => state.sweepRetargetTarget);
   const selectItem = useStore((state) => state.selectItem);
   const undoCount = useStore((state) => state.undoStack.length);
   const redoCount = useStore((state) => state.redoStack.length);
@@ -686,6 +697,70 @@ const Timeline = () => {
                         fill="currentColor"
                         stroke="currentColor"
                         strokeWidth="0.5"
+                      />
+                    </svg>
+                  </button>
+                </>
+              )}
+              {revolveInfo(entry) && (
+                <>
+                  <button
+                    className={`timeline-action-btn${
+                      sweepRetargetTarget?.itemId === revolveInfo(entry).itemId
+                        ? " active"
+                        : ""
+                    }`}
+                    title="Retarget revolve — re-pick the profile and axis"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      restoreToHistory(entry.id);
+                      selectItem(revolveInfo(entry).itemId);
+                      beginRevolveRetarget(revolveInfo(entry).itemId, entry.id);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="9"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <circle cx="12" cy="12" r="2" fill="currentColor" />
+                      <line
+                        x1="12"
+                        y1="1"
+                        x2="12"
+                        y2="4"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    className="timeline-action-btn"
+                    title="Edit revolve parameters"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSweepEditTarget({ entryId: entry.id });
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                      <path
+                        d="M4 12 A8 8 0 1 1 12 20"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                      <polyline
+                        points="4,7 4,12 9,12"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                       />
                     </svg>
                   </button>

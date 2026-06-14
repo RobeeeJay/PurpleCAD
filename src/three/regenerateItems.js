@@ -9,7 +9,12 @@ import {
 // imported from the store (the orchestrator in regenerateOrchestrator.js
 // is what Viewport pulls in), so it's outside the worker's transitive
 // graph and the previous cycle no longer applies.
-import { chamferOrFilletItem, pushPullFaces, performCsg } from "./occClient.js";
+import {
+  chamferOrFilletItem,
+  pushPullFaces,
+  revolveItem,
+  performCsg,
+} from "./occClient.js";
 
 // Items that came from CSG or chamfer operations store a `regenerator`
 // field describing how to re-run the operation.  This lets us recompute
@@ -174,6 +179,60 @@ async function regeneratePushPull(
   };
 }
 
+async function regenerateRevolve(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    regenerator.source,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await revolveItem({
+      source,
+      axis: regenerator.axis,
+      angleRad: regenerator.angleRad,
+      prismSides: regenerator.prismSides,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Revolve regen couldn't rebuild (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  // The revolve bbox-centres its result; recompute the world centre from the
+  // profile's sketch-plane brush transform + the fresh centre offset so the
+  // origin tracks a sketch edit (recalculateTimeline drops currentPosition).
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
 async function regenerateBoolean(
   regenerator,
   accumulatedItems,
@@ -251,6 +310,8 @@ export async function regenerateItemsForResolution(
         item.position,
         item.depth,
       );
+    } else if (r.kind === "revolve") {
+      result = await regenerateRevolve(r, out, printPrecision, item.position);
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
     }
@@ -262,7 +323,11 @@ export async function regenerateItemsForResolution(
       // changed.  Keep its last-good mesh but flag it so the timeline marks the
       // step bad until the user retargets / re-applies it.  Stop re-attempting
       // (settle regeneratedAt) so a clean pass doesn't spam OCC every recalc.
-      if (r.kind === "chamfer" || r.kind === "pushpull") {
+      if (
+        r.kind === "chamfer" ||
+        r.kind === "pushpull" ||
+        r.kind === "revolve"
+      ) {
         changed = true;
         out.push({
           ...item,
@@ -287,7 +352,7 @@ export async function regenerateItemsForResolution(
       regenFailed: false,
     };
     if (
-      (r.kind === "chamfer" || r.kind === "pushpull") &&
+      (r.kind === "chamfer" || r.kind === "pushpull" || r.kind === "revolve") &&
       result.centerOffset
     ) {
       nextRegen.centerOffset = result.centerOffset;

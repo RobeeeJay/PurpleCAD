@@ -6,6 +6,7 @@ import PathTraceProgress from "./PathTraceProgress";
 import SketchOverlays from "./viewport/SketchOverlays";
 import ChamferOverlay from "./viewport/ChamferOverlay";
 import PushPullOverlay from "./viewport/PushPullOverlay";
+import SweepOverlay from "./viewport/SweepOverlay";
 import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
 import { useSceneSync } from "./viewport/useSceneSync";
@@ -52,6 +53,7 @@ const Viewport = () => {
   const sketchPlacementPlanesRef = useRef([]);
   const extrudeSelectModeRef = useRef(null);
   const extrudeSelectGroupRef = useRef(null);
+  const sweepSelectModeRef = useRef(null);
   const sketchDrawRef = useRef(null);
   const sketchShapesGroupRef = useRef(null);
   const allSketchGroupRef = useRef(null);
@@ -97,6 +99,7 @@ const Viewport = () => {
   const cameraResetTrigger = useStore((state) => state.cameraResetTrigger);
   const sketchPlacementMode = useStore((state) => state.sketchPlacementMode);
   const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
+  const sweepSelectMode = useStore((state) => state.sweepSelectMode);
   const cutExtrudeInProgress = useStore((state) => state.cutExtrudeInProgress);
   const extrudeDepthInput = useStore((state) => state.extrudeDepthInput);
   const activeSketchTool = useStore((state) => state.activeSketchTool);
@@ -129,6 +132,7 @@ const Viewport = () => {
   sketchPlacementModeRef.current = sketchPlacementMode;
   activeSketchToolRef.current = activeSketchTool;
   extrudeSelectModeRef.current = extrudeSelectMode;
+  sweepSelectModeRef.current = sweepSelectMode ? sweepSelectMode.kind : null;
 
   const { handleOrientationChange, handleHome } = useViewportCamera({
     containerRef,
@@ -182,6 +186,7 @@ const Viewport = () => {
     sketchPlacementPlanesRef,
     extrudeSelectModeRef,
     extrudeSelectGroupRef,
+    sweepSelectModeRef,
     sketchDrawRef,
     sketchShapesGroupRef,
     dimHintRef,
@@ -244,6 +249,7 @@ const Viewport = () => {
     sketchMode,
     sketchPlacementMode,
     extrudeSelectMode,
+    sweepSelectMode,
     cutExtrudeInProgress,
     hoveredId,
     projectionMode,
@@ -265,7 +271,7 @@ const Viewport = () => {
         ref={containerRef}
         className="viewport"
         style={
-          sketchPlacementMode || activeSketchTool
+          sketchPlacementMode || activeSketchTool || sweepSelectMode
             ? { cursor: "crosshair" }
             : undefined
         }
@@ -300,6 +306,7 @@ const Viewport = () => {
       />
       <ChamferOverlay />
       <PushPullOverlay />
+      <SweepOverlay />
       {widgetVisible && (
         <RotationWidget
           rotationState={rotationState}

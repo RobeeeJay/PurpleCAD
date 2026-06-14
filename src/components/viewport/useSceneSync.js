@@ -54,6 +54,7 @@ export function useSceneSync({
   sketchGhostGroupRef,
   sketchGridGroupRef,
   extrudeSelectGroupRef,
+  sweepSelectMode,
   preSketchProjectionRef,
   preExtrudeRenderModeRef,
   dimHintRef,
@@ -515,7 +516,11 @@ export function useSceneSync({
     // selection: the "Start from…" offset picker raycasts them as candidate
     // sketch planes.  Keep the group alive through depth + start, building it
     // once on entry and disposing only when the extrude ends.
-    const active = ["profile", "start"].includes(extrudeSelectMode);
+    // The same loop fills are reused by the sweep tools (Revolve/Pipe/Loft) to
+    // pick a profile — build them while a sweep tool is awaiting its profile.
+    const sweepPicking = !!sweepSelectMode && !sweepSelectMode.profile;
+    const active =
+      ["profile", "start"].includes(extrudeSelectMode) || sweepPicking;
     if (!active) {
       if (extrudeSelectGroupRef.current) {
         scene.remove(extrudeSelectGroupRef.current);
@@ -545,7 +550,7 @@ export function useSceneSync({
         }
       }
     }
-  }, [extrudeSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [extrudeSelectMode, sweepSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Extrude depth input init ──────────────────────────────────────────────
   // The distance overlay + Confirm button appear as soon as the unified

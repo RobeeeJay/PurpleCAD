@@ -76,6 +76,19 @@ export const uiInitial = {
   // timeline: { entryId }.  Mirrors chamferEditTarget.
   pushPullEditTarget: null,
 
+  // Sketch→solid sweep tools (Revolve / Pipe / Loft), all sharing one select
+  // mode driven by the Modify toolbar.  Shape:
+  //   { kind:"revolve"|"pipe"|"loft", profile, axis, secondProfile, params }
+  // `profile`/`secondProfile` are extrudeProfile snapshots; `axis` is
+  // { sketchId, shapeIdx }; `params` holds the op's editable settings.  null
+  // when no sweep tool is active.  Phase is derived (profile==null → pick
+  // profile; then pick axis/second; then show params + Confirm).
+  sweepSelectMode: null,
+  // Timeline "Retarget" / "Edit" targets for a committed sweep, mirroring the
+  // push/pull equivalents.
+  sweepRetargetTarget: null,
+  sweepEditTarget: null,
+
   // Whether the Y=0 ground plane shows shadows for scene objects.
   shadowsEnabled: false,
 
@@ -175,6 +188,53 @@ export const createUiSlice = (set) => ({
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
+
+  // ── Sweep tools (Revolve / Pipe / Loft) ─────────────────────────────────
+  setSweepSelectMode: (v) =>
+    set({
+      sweepSelectMode: v,
+      // A sweep tool is exclusive with the face-select tools.
+      ...(v ? { chamferSelectMode: null, pushPullSelectMode: null } : null),
+    }),
+  startSweepTool: (kind) =>
+    set({
+      sweepSelectMode: {
+        kind,
+        profile: null,
+        axis: null,
+        secondProfile: null,
+        params: { angleDeg: 360, prism: false, sides: 6 },
+      },
+      chamferSelectMode: null,
+      pushPullSelectMode: null,
+    }),
+  cancelSweepTool: () =>
+    set({ sweepSelectMode: null, sweepRetargetTarget: null }),
+  setSweepProfile: (profile) =>
+    set((state) =>
+      state.sweepSelectMode
+        ? { sweepSelectMode: { ...state.sweepSelectMode, profile } }
+        : {},
+    ),
+  setSweepAxis: (axis) =>
+    set((state) =>
+      state.sweepSelectMode
+        ? { sweepSelectMode: { ...state.sweepSelectMode, axis } }
+        : {},
+    ),
+  setSweepParams: (partial) =>
+    set((state) =>
+      state.sweepSelectMode
+        ? {
+            sweepSelectMode: {
+              ...state.sweepSelectMode,
+              params: { ...state.sweepSelectMode.params, ...partial },
+            },
+          }
+        : {},
+    ),
+  setSweepRetargetTarget: (target) => set({ sweepRetargetTarget: target }),
+  setSweepEditTarget: (target) => set({ sweepEditTarget: target }),
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   toggleCrossSectionView: () =>
     set((state) => ({ crossSectionView: !state.crossSectionView })),

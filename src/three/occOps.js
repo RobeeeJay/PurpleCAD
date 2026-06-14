@@ -48,6 +48,38 @@ function bboxOf(positions) {
   return { minX, minY, minZ, maxX, maxY, maxZ };
 }
 
+// Resolve a revolve axis ({ sketchId, shapeIdx }) to its live 2D endpoints by
+// reading the referenced line from the current sketch, so editing the sketch
+// moves the axis too.  Returns null if the line is gone.
+function resolveAxisEndpoints(axis, allItems) {
+  if (!axis) return null;
+  const sketch = (allItems || []).find(
+    (i) => i.id === axis.sketchId && i.type === "sketch",
+  );
+  const line = sketch?.shapes?.[axis.shapeIdx];
+  if (!line || line.type !== "line") return null;
+  return { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 };
+}
+
+// Build the makeRevolve arguments from a revolve recipe's source profile (live
+// polygon) + axis.  Returns null when the profile/axis can't be resolved.
+function revolveArgs(source, axis, allItems, precision) {
+  const live = extrudeWithLivePolygon(source, allItems, precision);
+  const poly = live.profile?.polygon2D;
+  if (!poly || poly.length < 3) return null;
+  const ax = resolveAxisEndpoints(axis, allItems);
+  if (!ax) return null;
+  const holes = (live.profile?.holes || []).filter((h) => h && h.length >= 3);
+  const c = polyCentroid(poly);
+  const outerFlat = new Float64Array(
+    withWinding(poly, true).flatMap((p) => [p.x, p.y]),
+  );
+  const holesFlat = holes.map(
+    (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
+  );
+  return { outerFlat, holesFlat, cx: c.x, cy: c.y, ax };
+}
+
 // Build the native OCC shape for an item in its LOCAL frame (matching the
 // frame of the rendered geometryData so edge endpoints from the viewport
 // mesh align with the OCC shape's edges).
@@ -139,6 +171,44 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       } finally {
         occ.releaseShape(sourceId);
       }
+      if (!resultId) return null;
+      const offset = chamferCenterOffset(r, item);
+      if (
+        offset &&
+        (Math.abs(offset.x) > 1e-9 ||
+          Math.abs(offset.y) > 1e-9 ||
+          Math.abs(offset.z) > 1e-9)
+      ) {
+        const corrected = occ.transformShape(
+          resultId,
+          -offset.x,
+          -offset.y,
+          -offset.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
+    if (r.kind === "revolve") {
+      const args = revolveArgs(r.source, r.axis, allItems, precision);
+      if (!args) return null;
+      const resultId = occ.makeRevolve(
+        args.outerFlat,
+        args.holesFlat,
+        args.cx,
+        args.cy,
+        args.ax.x1,
+        args.ax.y1,
+        args.ax.x2,
+        args.ax.y2,
+        r.angleRad ?? 2 * Math.PI,
+        r.prismSides ?? 0,
+      );
       if (!resultId) return null;
       const offset = chamferCenterOffset(r, item);
       if (
@@ -402,6 +472,68 @@ async function pushPullFaces({
   };
 }
 
+// Revolve a sketch profile around an axis line.  Mirrors pushPullFaces: build
+// the profile from the source's live polygon + the axis from its live sketch
+// line, revolve, tessellate, and bbox-centre.  prismSides >= 3 yields a faceted
+// "prism" sweep instead of a smooth surface of revolution.
+async function revolveItem({
+  source,
+  axis,
+  angleRad,
+  prismSides,
+  allItems,
+  printPrecision,
+}) {
+  const args = revolveArgs(source, axis, allItems, printPrecision);
+  if (!args) {
+    throw new Error(
+      "Revolve needs a closed profile loop and an axis line on the same sketch.",
+    );
+  }
+  const resultId = occ.makeRevolve(
+    args.outerFlat,
+    args.holesFlat,
+    args.cx,
+    args.cy,
+    args.ax.x1,
+    args.ax.y1,
+    args.ax.x2,
+    args.ax.y2,
+    angleRad ?? 2 * Math.PI,
+    prismSides ?? 0,
+  );
+  if (!resultId) throw new Error("Revolve produced no geometry.");
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2,
+    cy = (minY + maxY) / 2,
+    cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx;
+    centered[i + 1] -= cy;
+    centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: {
+      positions: centered,
+      normals: null,
+      indices: Array.from(tess.indices),
+    },
+    centerOffset: { cx, cy, cz },
+    resolvedSubGeo: { axis },
+  };
+}
+
 async function performCsg({
   selectedItems,
   allItems,
@@ -568,6 +700,7 @@ async function exportSTEP({ items }) {
 export const ops = {
   chamferOrFilletItem,
   pushPullFaces,
+  revolveItem,
   performCsg,
   exportSTL,
   exportSTEP,

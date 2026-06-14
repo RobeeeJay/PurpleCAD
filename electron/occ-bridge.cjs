@@ -38,6 +38,37 @@ function withWinding(poly, wantCcw) {
   return isCcw === wantCcw ? poly : [...poly].reverse();
 }
 
+// Resolve a revolve axis ({ sketchId, shapeIdx }) to its live 2D endpoints by
+// reading the referenced line from the current sketch (mirrors occOps.js).
+function resolveAxisEndpoints(axis, allItems) {
+  if (!axis) return null;
+  const sketch = (allItems || []).find(
+    (i) => i.id === axis.sketchId && i.type === "sketch",
+  );
+  const line = sketch && sketch.shapes && sketch.shapes[axis.shapeIdx];
+  if (!line || line.type !== "line") return null;
+  return { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 };
+}
+
+// Build makeRevolve args from a revolve recipe.  The renderer pre-bakes the
+// live polygon into source.profile.polygon2D before IPC (like chamfer), so this
+// reads it directly; the axis is resolved from the live sketch in allItems.
+function revolveArgs(source, axis, allItems) {
+  const poly = source && source.profile && source.profile.polygon2D;
+  if (!poly || poly.length < 3) return null;
+  const ax = resolveAxisEndpoints(axis, allItems);
+  if (!ax) return null;
+  const holes = (source.profile.holes || []).filter((h) => h && h.length >= 3);
+  const c = polyCentroid(poly);
+  const outerFlat = new Float64Array(
+    withWinding(poly, true).flatMap((p) => [p.x, p.y]),
+  );
+  const holesFlat = holes.map(
+    (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
+  );
+  return { outerFlat, holesFlat, cx: c.x, cy: c.y, ax };
+}
+
 // XYZ Euler rotation of a 3D vector, matching THREE.js applyEuler('XYZ').
 function applyEulerXYZ(vx, vy, vz, rx, ry, rz) {
   const a = Math.cos(rx), b = Math.sin(rx);
@@ -177,6 +208,24 @@ function buildItemShapeLocal(item, allItems, precision) {
       if (!resultId) return null;
       // Apply the -centerOffset correction so this shape's local frame matches
       // the rendered geometryData frame (mirrors csgUtils.js / occOps.js).
+      const off = regen.centerOffset;
+      if (off) {
+        const corrected = occ.transformShape(resultId, -off.cx, -off.cy, -off.cz, 0, 0, 0);
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
+    if (regen.kind === "revolve") {
+      const args = revolveArgs(regen.source, regen.axis, allItems);
+      if (!args) return null;
+      const resultId = occ.makeRevolve(
+        args.outerFlat, args.holesFlat, args.cx, args.cy,
+        args.ax.x1, args.ax.y1, args.ax.x2, args.ax.y2,
+        regen.angleRad ?? 2 * Math.PI, regen.prismSides ?? 0,
+      );
+      if (!resultId) return null;
       const off = regen.centerOffset;
       if (off) {
         const corrected = occ.transformShape(resultId, -off.cx, -off.cy, -off.cz, 0, 0, 0);
@@ -536,4 +585,41 @@ function exportSTEP({ items }) {
   }
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, exportSTL, exportSTEP };
+// Revolve a sketch profile around an axis line (mirrors occOps.js#revolveItem).
+function revolveItem({ source, axis, angleRad, prismSides, allItems, printPrecision }) {
+  const args = revolveArgs(source, axis, allItems);
+  if (!args) {
+    throw new Error(
+      "Revolve needs a closed profile loop and an axis line on the same sketch.",
+    );
+  }
+  const resultId = occ.makeRevolve(
+    args.outerFlat, args.holesFlat, args.cx, args.cy,
+    args.ax.x1, args.ax.y1, args.ax.x2, args.ax.y2,
+    angleRad ?? 2 * Math.PI, prismSides ?? 0,
+  );
+  if (!resultId) throw new Error("Revolve produced no geometry.");
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
+    resolvedSubGeo: { axis },
+  };
+}
+
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, exportSTL, exportSTEP };

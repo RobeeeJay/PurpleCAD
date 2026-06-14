@@ -4,6 +4,7 @@ import { createHighlightHelpers } from "./cameraControls/highlights.js";
 import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
+import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
@@ -135,6 +136,7 @@ export function attachCameraControls(ctx) {
     sketchShapesGroupRef,
     extrudeSelectGroupRef,
     extrudeSelectModeRef,
+    sweepSelectModeRef,
     orbitIndicator,
     gridMaterial,
     rulerGroup,
@@ -365,6 +367,24 @@ export function attachCameraControls(ctx) {
     pushPullPreview.updatePushPullEditPreview(regenerator, distanceMm, itemId);
   controls.clearPushPullPreview = () => pushPullPreview.clearPushPullPreview();
 
+  // Sweep tools (Revolve / Pipe / Loft): profile + axis picking, live preview,
+  // and the Confirm-time commit.  The SweepOverlay drives them via these.
+  const sweep = createSweepHelpers({
+    scene,
+    renderer,
+    cameraRef,
+    objectsRef,
+    itemsRef,
+    extrudeSelectGroupRef,
+  });
+  const { handleSweepHover, handleSweepClick } = sweep;
+  controls.updateSweepPreview = () => sweep.updateSweepPreview();
+  controls.updateRevolveEditPreview = (regenerator, params, itemId) =>
+    sweep.updateRevolveEditPreview(regenerator, params, itemId);
+  controls.clearSweepPreview = () => sweep.clearSweepPreview();
+  controls.commitSweep = () => sweep.commitSweep();
+  controls.cancelSweep = () => sweep.cancelSweep();
+
   // Live preview for MaterialDialog: instantly applies in-progress
   // color/finish edits to the live mesh(es) without a store write.
   const materialPreview = createMaterialPreviewHelpers({
@@ -549,6 +569,11 @@ export function attachCameraControls(ctx) {
         controls.mouseDownY = e.clientY;
         return;
       }
+      if (sweepSelectModeRef && sweepSelectModeRef.current) {
+        controls.mouseDownX = e.clientX;
+        controls.mouseDownY = e.clientY;
+        return;
+      }
       if (onSketchMouseDown(e)) return;
 
       if (tryBeginHandleDrag(e)) return;
@@ -588,6 +613,12 @@ export function attachCameraControls(ctx) {
       controls.mouseY = e.clientY;
       return;
     }
+    if (sweepSelectModeRef && sweepSelectModeRef.current) {
+      handleSweepHover(e.clientX, e.clientY);
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return;
+    }
     if (onSketchMouseMove(e)) return;
 
     clearSketchVisualsFor3D();
@@ -611,6 +642,13 @@ export function attachCameraControls(ctx) {
         else if (extrudeSelectModeRef.current === "start")
           handleExtrudeStartClick(e.clientX, e.clientY);
       }
+      return;
+    }
+
+    if (sweepSelectModeRef && sweepSelectModeRef.current && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) handleSweepClick(e.clientX, e.clientY);
       return;
     }
 

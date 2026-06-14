@@ -99,7 +99,8 @@ export async function recalculateTimeline() {
       const src = it.regenerator.source;
       const recenter =
         (it.regenerator.kind === "chamfer" ||
-          it.regenerator.kind === "pushpull") &&
+          it.regenerator.kind === "pushpull" ||
+          it.regenerator.kind === "revolve") &&
         (src?.type === "extrude" || src?.regenerator?.kind === "boolean");
       return {
         ...it,

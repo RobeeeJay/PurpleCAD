@@ -94,6 +94,10 @@ export function pushPullFaces(args) {
   return runOp("pushPullFaces", args);
 }
 
+export function revolveItem(args) {
+  return runOp("revolveItem", args);
+}
+
 export function performCsg(args) {
   return runOp("performCsg", args);
 }

@@ -56,6 +56,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   TKPrim
   TKBO
   TKBool
+  TKOffset
   TKFillet
   TKShHealing
   TKMesh
