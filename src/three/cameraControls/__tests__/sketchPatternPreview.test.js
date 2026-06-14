@@ -44,16 +44,17 @@ describe("buildPatternPreviewObjects", () => {
       sourceShapes: [{}, {}], // 2 selected sources
       copyShapes: [{}, {}, {}], // 3 preview copies
       color: 0xff8844,
-      theme: "dark",
       renderer,
     });
 
     expect(objs).toHaveLength(5);
     const highlights = objs.slice(0, 2);
     const copies = objs.slice(2);
-    // Sources: solid, thicker, drawn on top of the copies.
+    // Sources: solid, thicker, drawn on top of the copies, in the normal
+    // sketch-selection colour.
     expect(highlights.every((o) => o.material.dashed === false)).toBe(true);
     expect(highlights.every((o) => o.renderOrder === 1009)).toBe(true);
+    expect(highlights.every((o) => o.material.color === 0x44aaff)).toBe(true);
     // Copies: dashed, in the tool colour, slightly transparent.
     expect(copies.every((o) => o.material.dashed === true)).toBe(true);
     expect(copies.every((o) => o.material.color === 0xff8844)).toBe(true);
@@ -66,7 +67,6 @@ describe("buildPatternPreviewObjects", () => {
       sourceShapes: [{}],
       copyShapes: [],
       color: 0x123456,
-      theme: "dark",
       renderer,
     });
     expect(objs).toHaveLength(1);

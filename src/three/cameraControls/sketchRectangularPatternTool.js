@@ -73,7 +73,6 @@ export function createSketchRectangularPatternHelpers({
       sourceShapes,
       copyShapes,
       color: sketchRectangularPatternColorFor(theme),
-      theme,
       renderer,
     }).forEach((o) => {
       scene.add(o);

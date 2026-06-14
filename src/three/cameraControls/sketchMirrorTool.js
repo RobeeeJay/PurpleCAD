@@ -58,7 +58,6 @@ export function createSketchMirrorHelpers({
       sourceShapes,
       copyShapes,
       color: sketchMirrorColorFor(theme),
-      theme,
       renderer,
     }).forEach((o) => {
       scene.add(o);

@@ -13,7 +13,7 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { getSketchShapePoints } from "../sceneObjects.js";
-import { sketchSelectedColorFor } from "../theme.js";
+import { SKETCH_SELECTION_BLUE } from "../theme.js";
 
 const resolutionOf = (renderer) =>
   renderer
@@ -57,12 +57,13 @@ export function buildPatternPreviewObjects({
   sourceShapes,
   copyShapes,
   color,
-  theme,
   renderer,
 }) {
   const resolution = resolutionOf(renderer);
   const objs = [];
-  const highlight = sketchSelectedColorFor(theme);
+  // Match the colour normal sketch-line selection uses, so a highlighted source
+  // reads the same whether selected directly or as a pattern source.
+  const highlight = SKETCH_SELECTION_BLUE;
 
   sourceShapes.forEach((shape) => {
     const pts = getSketchShapePoints(shape, sketchMesh);

@@ -75,7 +75,6 @@ export function createSketchCircularPatternHelpers({
       sourceShapes,
       copyShapes,
       color: sketchCircularPatternColorFor(theme),
-      theme,
       renderer,
     }).forEach((o) => {
       scene.add(o);
