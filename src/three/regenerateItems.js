@@ -13,6 +13,7 @@ import {
   chamferOrFilletItem,
   pushPullFaces,
   revolveItem,
+  pipeItem,
   performCsg,
 } from "./occClient.js";
 
@@ -233,6 +234,44 @@ async function regenerateRevolve(
   };
 }
 
+async function regeneratePipe(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const profileSource = withLivePolygons(
+    regenerator.profileSource,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await pipeItem({
+      profileSource,
+      pathRef: regenerator.pathRef,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Pipe regen couldn't rebuild (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  // Pipe is built in world, so the bbox centre IS the position; recalculate-
+  // Timeline drops currentPosition to let a sketch edit re-centre the origin.
+  return {
+    position: currentPosition || result.position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
 async function regenerateBoolean(
   regenerator,
   accumulatedItems,
@@ -312,6 +351,8 @@ export async function regenerateItemsForResolution(
       );
     } else if (r.kind === "revolve") {
       result = await regenerateRevolve(r, out, printPrecision, item.position);
+    } else if (r.kind === "pipe") {
+      result = await regeneratePipe(r, out, printPrecision, item.position);
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
     }
@@ -326,7 +367,8 @@ export async function regenerateItemsForResolution(
       if (
         r.kind === "chamfer" ||
         r.kind === "pushpull" ||
-        r.kind === "revolve"
+        r.kind === "revolve" ||
+        r.kind === "pipe"
       ) {
         changed = true;
         out.push({
@@ -352,7 +394,10 @@ export async function regenerateItemsForResolution(
       regenFailed: false,
     };
     if (
-      (r.kind === "chamfer" || r.kind === "pushpull" || r.kind === "revolve") &&
+      (r.kind === "chamfer" ||
+        r.kind === "pushpull" ||
+        r.kind === "revolve" ||
+        r.kind === "pipe") &&
       result.centerOffset
     ) {
       nextRegen.centerOffset = result.centerOffset;

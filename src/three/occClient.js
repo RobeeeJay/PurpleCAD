@@ -98,6 +98,10 @@ export function revolveItem(args) {
   return runOp("revolveItem", args);
 }
 
+export function pipeItem(args) {
+  return runOp("pipeItem", args);
+}
+
 export function performCsg(args) {
   return runOp("performCsg", args);
 }

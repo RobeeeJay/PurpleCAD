@@ -222,6 +222,13 @@ export const createUiSlice = (set) => ({
         ? { sweepSelectMode: { ...state.sweepSelectMode, axis } }
         : {},
     ),
+  // Pipe path: { sketchId, shapeIdx } of a line in the path sketch.
+  setSweepPath: (path) =>
+    set((state) =>
+      state.sweepSelectMode
+        ? { sweepSelectMode: { ...state.sweepSelectMode, path } }
+        : {},
+    ),
   setSweepParams: (partial) =>
     set((state) =>
       state.sweepSelectMode

@@ -14,8 +14,9 @@ const PREVIEW_DEBOUNCE_MS = 350;
 const AXIS_HIGHLIGHT = 0x44aaff;
 
 // An extrude-like source snapshot whose live polygon re-derives from the sketch
-// (so revolve tracks sketch edits, like chamfer/push-pull).
-const buildRevolveSource = (profile) => ({
+// (so the sweep tracks sketch edits, like chamfer/push-pull).  Used as the
+// profile source for both revolve and pipe.
+const buildProfileSource = (profile) => ({
   type: "extrude",
   depth: 0,
   position: profile.position,
@@ -109,6 +110,44 @@ export function createSweepHelpers({
     return best;
   };
 
+  // Nearest path-candidate line under the cursor, across ALL sketches (the pipe
+  // path typically lives in a different sketch from the profile).
+  const findPathLine = (screenX, screenY) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    let best = null;
+    let bestD = 12;
+    itemsRef.current.forEach((sketch) => {
+      if (sketch.type !== "sketch") return;
+      const sketchMesh = objectsRef.current[sketch.id];
+      if (!sketchMesh) return;
+      const toScreen = (x, y) => {
+        const w = new THREE.Vector3(x, y, 0)
+          .applyQuaternion(sketchMesh.quaternion)
+          .add(sketchMesh.position);
+        const ndc = w.clone().project(cameraRef.current);
+        return {
+          x: ((ndc.x + 1) / 2) * rect.width + rect.left,
+          y: ((-ndc.y + 1) / 2) * rect.height + rect.top,
+        };
+      };
+      (sketch.shapes || []).forEach((s, idx) => {
+        if (s.type !== "line") return;
+        const a = toScreen(s.x1, s.y1);
+        const b = toScreen(s.x2, s.y2);
+        const d = segDist(screenX, screenY, a.x, a.y, b.x, b.y);
+        if (d < bestD) {
+          bestD = d;
+          best = {
+            sketchId: sketch.id,
+            shapeIdx: idx,
+            world: lineWorld(s, sketchMesh),
+          };
+        }
+      });
+    });
+    return best;
+  };
+
   const clearAxisHighlight = () => {
     if (!axisHighlight) return;
     scene.remove(axisHighlight);
@@ -156,8 +195,11 @@ export function createSweepHelpers({
       }
       return;
     }
-    // Axis phase: highlight the candidate axis line.
-    const cand = findAxis(screenX, screenY, sm.profile);
+    // Second phase: highlight the candidate line (pipe path or revolve axis).
+    const cand =
+      sm.kind === "pipe"
+        ? findPathLine(screenX, screenY)
+        : findAxis(screenX, screenY, sm.profile);
     if (cand) showAxisHighlight(cand.world);
     else clearAxisHighlight();
   };
@@ -175,6 +217,20 @@ export function createSweepHelpers({
         dimFill(hoveredFill, false);
         hoveredFill = null;
         store.setSweepProfile(prof);
+      }
+      return;
+    }
+    if (sm.kind === "pipe") {
+      if (!sm.path) {
+        const cand = findPathLine(screenX, screenY);
+        if (cand) {
+          clearAxisHighlight();
+          store.setSweepPath({
+            sketchId: cand.sketchId,
+            shapeIdx: cand.shapeIdx,
+          });
+          updateSweepPreview();
+        }
       }
       return;
     }
@@ -238,6 +294,54 @@ export function createSweepHelpers({
     unghost();
   };
 
+  // Build the translucent preview group (fill + outline) for a result's
+  // geometry and place it at the given world transform, ghosting `ghostItemId`.
+  const showPreviewMesh = (geometryData, position, rotation, ghostItemId) => {
+    const { positions, normals, indices } = geometryData;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positions), 3),
+    );
+    if (normals)
+      geometry.setAttribute(
+        "normal",
+        new THREE.BufferAttribute(new Float32Array(normals), 3),
+      );
+    if (indices)
+      geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+    if (!normals) geometry.computeVertexNormals();
+
+    if (ghostItemId != null) ghost(ghostItemId);
+    removePreviewGroup();
+    const group = new THREE.Group();
+    const fill = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: DEFAULT_MESH_COLOR,
+        roughness: 0.55,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.85,
+      }),
+    );
+    fill.renderOrder = 990;
+    group.add(fill);
+    const lines = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry),
+      new THREE.LineBasicMaterial({
+        color: WIREFRAME_EDGE_COLOR,
+        depthTest: false,
+      }),
+    );
+    lines.renderOrder = 999;
+    group.add(lines);
+    group.position.set(position.x, position.y, position.z);
+    group.rotation.set(rotation?.x || 0, rotation?.y || 0, rotation?.z || 0);
+    scene.add(group);
+    previewGroup = group;
+  };
+
   // Run the revolve recipe and show its result as a translucent mesh + outline.
   // Shared by the create/retarget preview (reads sweepSelectMode) and the edit
   // preview (replays a committed regenerator with new params, ghosting `item`).
@@ -266,64 +370,56 @@ export function createSweepHelpers({
       result = null;
     }
     if (myRequest !== requestId || !result) return;
-
-    const { positions, normals, indices } = result.geometryData;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(positions), 3),
-    );
-    if (normals)
-      geometry.setAttribute(
-        "normal",
-        new THREE.BufferAttribute(new Float32Array(normals), 3),
-      );
-    if (indices)
-      geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
-    if (!normals) geometry.computeVertexNormals();
-
     const { position, rotation } = chamferResultTransform(
       source,
       result.centerOffset,
     );
+    showPreviewMesh(result.geometryData, position, rotation, ghostItemId);
+  };
 
-    if (ghostItemId != null) ghost(ghostItemId);
-    removePreviewGroup();
-    const group = new THREE.Group();
-    const fill = new THREE.Mesh(
-      geometry,
-      new THREE.MeshStandardMaterial({
-        color: DEFAULT_MESH_COLOR,
-        roughness: 0.55,
-        metalness: 0,
-        transparent: true,
-        opacity: 0.85,
-      }),
-    );
-    fill.renderOrder = 990;
-    group.add(fill);
-    const lines = new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({
-        color: WIREFRAME_EDGE_COLOR,
-        depthTest: false,
-      }),
-    );
-    lines.renderOrder = 999;
-    group.add(lines);
-    group.position.set(position.x, position.y, position.z);
-    group.rotation.set(rotation.x || 0, rotation.y || 0, rotation.z || 0);
-    scene.add(group);
-    previewGroup = group;
+  // Run the pipe recipe; it's built in world, so place the preview at the
+  // result's bbox-centre position with no rotation.
+  const showPipe = async ({
+    myRequest,
+    profileSource,
+    pathRef,
+    ghostItemId,
+  }) => {
+    const printPrecision =
+      useStore.getState().curveResolution === "print" ? 0.01 : null;
+    let result;
+    try {
+      const { pipeItem } = await import("../occClient.js");
+      result = await pipeItem({
+        profileSource,
+        pathRef,
+        allItems: itemsRef.current,
+        printPrecision,
+      });
+    } catch {
+      result = null;
+    }
+    if (myRequest !== requestId || !result) return;
+    showPreviewMesh(result.geometryData, result.position, null, ghostItemId);
   };
 
   const runPreview = async () => {
     const myRequest = ++requestId;
     const sm = useStore.getState().sweepSelectMode;
-    if (!sm || !sm.profile || !sm.axis) return;
+    if (!sm || !sm.profile) return;
+    if (sm.kind === "pipe") {
+      if (!sm.path) return;
+      await showPipe({
+        myRequest,
+        profileSource: buildProfileSource(sm.profile),
+        pathRef: sm.path,
+      });
+      return;
+    }
+    if (!sm.axis) return;
     await showRevolve({
       myRequest,
-      source: buildRevolveSource(sm.profile),
+      source: buildProfileSource(sm.profile),
       axis: sm.axis,
       angleRad: angleRadOf(sm.params),
       prismSides: prismSidesOf(sm.params),
@@ -348,11 +444,15 @@ export function createSweepHelpers({
     });
   };
 
+  // True once a tool has all the geometry it needs to build a result.
+  const sweepReady = (sm) =>
+    sm && sm.profile && (sm.kind === "pipe" ? sm.path : sm.axis);
+
   // Debounced — safe to call on every param/selection change.
   const updateSweepPreview = () => {
     const sm = useStore.getState().sweepSelectMode;
     clearTimeout(previewTimer);
-    if (!sm || !sm.profile || !sm.axis) {
+    if (!sweepReady(sm)) {
       clearSweepPreview();
       return;
     }
@@ -360,11 +460,73 @@ export function createSweepHelpers({
   };
 
   // ── Commit ────────────────────────────────────────────────────────────────
+  const commitPipe = async (store, sm) => {
+    const profileSource = buildProfileSource(sm.profile);
+    const printPrecision = store.curveResolution === "print" ? 0.01 : null;
+    let result;
+    try {
+      const { pipeItem } = await import("../occClient.js");
+      result = await pipeItem({
+        profileSource,
+        pathRef: sm.path,
+        allItems: itemsRef.current,
+        printPrecision,
+      });
+    } catch (err) {
+      store.showNotification(err.message);
+      return;
+    }
+    if (!result) {
+      store.showNotification("Pipe produced no geometry.");
+      return;
+    }
+    const { geometryData, centerOffset, position } = result;
+    const regenerator = {
+      kind: "pipe",
+      profileSource,
+      pathRef: sm.path,
+      centerOffset,
+      regeneratedAt: printPrecision,
+    };
+    clearSweepPreview();
+    clearAxisHighlight();
+
+    const retarget = store.sweepRetargetTarget;
+    if (retarget) {
+      store.retargetPipeEntry(retarget.entryId, {
+        regenerator,
+        geometryData,
+        position,
+        rotation: { x: 0, y: 0, z: 0 },
+      });
+      store.setSweepRetargetTarget(null);
+    } else {
+      const id = maxItemId(store.history) + 1;
+      store.addItem({
+        id,
+        name: `Pipe ${id}`,
+        type: "csg",
+        children: [],
+        regenerator,
+        geometryData,
+        position,
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+    }
+    store.setSweepSelectMode(null);
+  };
+
   const commitSweep = async () => {
     const store = useStore.getState();
     const sm = store.sweepSelectMode;
-    if (!sm || sm.kind !== "revolve" || !sm.profile || !sm.axis) return;
-    const source = buildRevolveSource(sm.profile);
+    if (!sweepReady(sm)) return;
+    if (sm.kind === "pipe") {
+      await commitPipe(store, sm);
+      return;
+    }
+    if (sm.kind !== "revolve") return;
+    const source = buildProfileSource(sm.profile);
     const angleRad = angleRadOf(sm.params);
     const prismSides = prismSidesOf(sm.params);
     const printPrecision = store.curveResolution === "print" ? 0.01 : null;
@@ -476,6 +638,35 @@ export function beginRevolveRetarget(itemId, entryId) {
       prism: (r.prismSides ?? 0) >= 3,
       sides: r.prismSides >= 3 ? r.prismSides : 6,
     },
+  });
+  store.setSweepRetargetTarget({ itemId, entryId });
+}
+
+// Re-open the Pipe tool to retarget a committed pipe (re-pick the profile/path),
+// seeded from its regenerator.  Mirrors beginRevolveRetarget.
+export function beginPipeRetarget(itemId, entryId) {
+  const store = useStore.getState();
+  const item = store.items.find((i) => i.id === itemId);
+  const r = item?.regenerator;
+  if (!r || r.kind !== "pipe") return;
+  const p = r.profileSource?.profile;
+  store.setSweepSelectMode({
+    kind: "pipe",
+    profile: p
+      ? {
+          sketchId: p.sketchId,
+          profileCentroid: p.profileCentroid,
+          polygon2D: p.polygon2D,
+          holes: p.holes || [],
+          position: p.position,
+          rotation: p.rotation,
+          normalWorld: p.normalWorld,
+        }
+      : null,
+    path: r.pathRef,
+    axis: null,
+    secondProfile: null,
+    params: {},
   });
   store.setSweepRetargetTarget({ itemId, entryId });
 }

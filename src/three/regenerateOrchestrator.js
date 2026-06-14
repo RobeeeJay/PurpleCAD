@@ -98,10 +98,14 @@ export async function recalculateTimeline() {
       if (it.id !== targetId || it.type !== "csg" || !it.regenerator) return it;
       const src = it.regenerator.source;
       const recenter =
-        (it.regenerator.kind === "chamfer" ||
+        ((it.regenerator.kind === "chamfer" ||
           it.regenerator.kind === "pushpull" ||
           it.regenerator.kind === "revolve") &&
-        (src?.type === "extrude" || src?.regenerator?.kind === "boolean");
+          (src?.type === "extrude" || src?.regenerator?.kind === "boolean")) ||
+        // Pipe is built in world and its position IS the bbox centre; drop it so
+        // a sketch edit to the profile or path re-centres the result.
+        (it.regenerator.kind === "pipe" &&
+          it.regenerator.profileSource?.type === "extrude");
       return {
         ...it,
         regenerator: { ...it.regenerator, regeneratedAt: "dirty" },

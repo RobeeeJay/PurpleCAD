@@ -1,9 +1,10 @@
-// Hint banners + parameter panel for the sketch→solid sweep tools (Phase 1:
-// Revolve).  Picking happens in the viewport (handled by cameraControls/sweep.js
-// via _cameraControls); this overlay shows the per-phase hint and, once a
-// profile + axis are picked, the Angle / Prism / Sides inputs with a debounced
-// live preview, gating Confirm on a valid value — like the chamfer/push-pull
-// overlays.
+// Hint banners + parameter panel for the sketch→solid sweep tools (Revolve,
+// Pipe).  Picking happens in the viewport (handled by cameraControls/sweep.js
+// via _cameraControls); this overlay shows the per-phase hint and, for Revolve,
+// once a profile + axis are picked, the Angle / Prism / Sides inputs with a
+// debounced live preview, gating Confirm on a valid value — like the
+// chamfer/push-pull overlays.  Pipe has no parameters, so it shows just a
+// Confirm/Cancel bar once its profile + path are picked.
 
 import React, { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
@@ -32,7 +33,11 @@ export default function SweepOverlay() {
   const seededRef = useRef(false);
 
   const params = sweepSelectMode?.params || {};
-  const ready = !!sweepSelectMode?.profile && !!sweepSelectMode?.axis;
+  const isRevolve = sweepSelectMode?.kind === "revolve";
+  const isPipe = sweepSelectMode?.kind === "pipe";
+  // The revolve param panel is "ready" once a profile + axis are picked.
+  const ready =
+    isRevolve && !!sweepSelectMode?.profile && !!sweepSelectMode?.axis;
   const angleVal = evalValue(angleDeg, variables);
   const sidesVal = evalValue(sides, variables);
   const angleValid =
@@ -76,12 +81,56 @@ export default function SweepOverlay() {
     return () => window.removeEventListener("keydown", onKey);
   }, [sweepSelectMode]);
 
-  if (!sweepSelectMode || sweepSelectMode.kind !== "revolve") return null;
+  if (!sweepSelectMode) return null;
 
   const cancel = () => useStore.getState()._cameraControls?.cancelSweep?.();
   const confirm = () => {
     if (valid) useStore.getState()._cameraControls?.commitSweep?.();
   };
+
+  if (isPipe) {
+    if (!sweepSelectMode.profile) {
+      return (
+        <div className="sketch-placement-hint">
+          Click a sketch region to sweep · Esc to cancel
+        </div>
+      );
+    }
+    if (!sweepSelectMode.path) {
+      return (
+        <div className="sketch-placement-hint">
+          Click a path line (in another sketch) to follow · Esc to cancel
+        </div>
+      );
+    }
+    return (
+      <>
+        <div className="sketch-placement-hint">
+          Confirm to create the pipe · Esc to cancel
+        </div>
+        <div className="sketch-distance-input-overlay">
+          <button
+            type="button"
+            onClick={cancel}
+            title="Cancel"
+            style={btn(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => useStore.getState()._cameraControls?.commitSweep?.()}
+            title="Confirm — create the pipe"
+            style={btn(true)}
+          >
+            Confirm
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  if (!isRevolve) return null;
 
   if (!sweepSelectMode.profile) {
     return (

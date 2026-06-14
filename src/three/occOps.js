@@ -80,6 +80,108 @@ function revolveArgs(source, axis, allItems, precision) {
   return { outerFlat, holesFlat, cx: c.x, cy: c.y, ax };
 }
 
+// ── Pipe sweep helpers ────────────────────────────────────────────────────
+
+// XYZ-Euler rotation of a vector (matches THREE.applyEuler('XYZ') and the
+// Electron bridge), used to map a sketch's 2D points onto its world plane.
+function applyEulerXYZ(vx, vy, vz, rx, ry, rz) {
+  const a = Math.cos(rx),
+    b = Math.sin(rx),
+    c = Math.cos(ry),
+    d = Math.sin(ry),
+    e = Math.cos(rz),
+    f = Math.sin(rz);
+  const ae = a * e,
+    af = a * f,
+    be = b * e,
+    bf = b * f;
+  return {
+    x: c * e * vx + -c * f * vy + d * vz,
+    y: (af + be * d) * vx + (ae - bf * d) * vy + -b * c * vz,
+    z: (bf - ae * d) * vx + (be + af * d) * vy + a * c * vz,
+  };
+}
+
+function sketchPointToWorld(sketch, x, y) {
+  const r = sketch.rotation || { x: 0, y: 0, z: 0 };
+  const p = sketch.position || { x: 0, y: 0, z: 0 };
+  const w = applyEulerXYZ(x, y, 0, r.x || 0, r.y || 0, r.z || 0);
+  return { x: w.x + (p.x || 0), y: w.y + (p.y || 0), z: w.z + (p.z || 0) };
+}
+
+// Order the path: starting from the picked line, greedily walk endpoint-
+// connected lines in the sketch (both directions) into a single 2D polyline.
+// Geometry-based so it works whether or not coincident constraints exist.
+export function orderPathPoints(sketch, startShapeIdx) {
+  const shapes = sketch?.shapes || [];
+  const start = shapes[startShapeIdx];
+  if (!start || start.type !== "line") return null;
+  const eps = 1e-4;
+  const lines = [];
+  shapes.forEach((s, i) => {
+    if (s?.type === "line")
+      lines.push({ i, a: { x: s.x1, y: s.y1 }, b: { x: s.x2, y: s.y2 } });
+  });
+  const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < eps;
+  const used = new Set([startShapeIdx]);
+  const pts = [
+    { x: start.x1, y: start.y1 },
+    { x: start.x2, y: start.y2 },
+  ];
+  const extend = (atEnd) => {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const tip = atEnd ? pts[pts.length - 1] : pts[0];
+      for (const ln of lines) {
+        if (used.has(ln.i)) continue;
+        const next = near(ln.a, tip) ? ln.b : near(ln.b, tip) ? ln.a : null;
+        if (next) {
+          used.add(ln.i);
+          if (atEnd) pts.push(next);
+          else pts.unshift(next);
+          changed = true;
+          break;
+        }
+      }
+    }
+  };
+  extend(true);
+  extend(false);
+  return pts;
+}
+
+// Resolve a pipe path ({ sketchId, shapeIdx }) to its live world polyline.
+function pipePathWorld(pathRef, allItems) {
+  const sketch = (allItems || []).find(
+    (i) => i.id === pathRef?.sketchId && i.type === "sketch",
+  );
+  if (!sketch) return null;
+  const pts2d = orderPathPoints(sketch, pathRef.shapeIdx);
+  if (!pts2d || pts2d.length < 2) return null;
+  return pts2d.map((p) => sketchPointToWorld(sketch, p.x, p.y));
+}
+
+// Build makePipe args: 2D profile (live from sketch A) + the path's world
+// polyline (live from sketch B).  Returns null if either can't be resolved.
+function pipeArgs(profileSource, pathRef, allItems, precision) {
+  const live = extrudeWithLivePolygon(profileSource, allItems, precision);
+  const poly = live.profile?.polygon2D;
+  if (!poly || poly.length < 3) return null;
+  const pathWorld = pipePathWorld(pathRef, allItems);
+  if (!pathWorld) return null;
+  const holes = (live.profile?.holes || []).filter((h) => h && h.length >= 3);
+  const c = polyCentroid(poly);
+  const outerFlat = new Float64Array(
+    withWinding(poly, true).flatMap((p) => [p.x, p.y]),
+  );
+  const holesFlat = holes.map(
+    (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
+  );
+  const pathFlat = new Float64Array(pathWorld.flatMap((p) => [p.x, p.y, p.z]));
+  return { outerFlat, holesFlat, cx: c.x, cy: c.y, pathFlat };
+}
+
 // Build the native OCC shape for an item in its LOCAL frame (matching the
 // frame of the rendered geometryData so edge endpoints from the viewport
 // mesh align with the OCC shape's edges).
@@ -210,6 +312,41 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         r.prismSides ?? 0,
       );
       if (!resultId) return null;
+      const offset = chamferCenterOffset(r, item);
+      if (
+        offset &&
+        (Math.abs(offset.x) > 1e-9 ||
+          Math.abs(offset.y) > 1e-9 ||
+          Math.abs(offset.z) > 1e-9)
+      ) {
+        const corrected = occ.transformShape(
+          resultId,
+          -offset.x,
+          -offset.y,
+          -offset.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
+    if (r.kind === "pipe") {
+      const args = pipeArgs(r.profileSource, r.pathRef, allItems, precision);
+      if (!args) return null;
+      const resultId = occ.makePipe(
+        args.outerFlat,
+        args.holesFlat,
+        args.cx,
+        args.cy,
+        args.pathFlat,
+      );
+      if (!resultId) return null;
+      // Built in WORLD; centerOffset (the world bbox centre) is also the item
+      // position, so subtract it to centre the local shape like the others.
       const offset = chamferCenterOffset(r, item);
       if (
         offset &&
@@ -534,6 +671,56 @@ async function revolveItem({
   };
 }
 
+// Pipe sweep: build the profile (live, sketch A) + world path polyline (live,
+// sketch B), sweep, tessellate, and bbox-centre.  Built in WORLD, so the bbox
+// centre is both the centerOffset and the item position (rotation identity).
+async function pipeItem({ profileSource, pathRef, allItems, printPrecision }) {
+  const args = pipeArgs(profileSource, pathRef, allItems, printPrecision);
+  if (!args) {
+    throw new Error(
+      "Pipe needs a closed profile loop and a path line on another sketch.",
+    );
+  }
+  const resultId = occ.makePipe(
+    args.outerFlat,
+    args.holesFlat,
+    args.cx,
+    args.cy,
+    args.pathFlat,
+  );
+  if (!resultId) throw new Error("Pipe produced no geometry.");
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2,
+    cy = (minY + maxY) / 2,
+    cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx;
+    centered[i + 1] -= cy;
+    centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: {
+      positions: centered,
+      normals: null,
+      indices: Array.from(tess.indices),
+    },
+    centerOffset: { cx, cy, cz },
+    position: { x: cx, y: cy, z: cz },
+    resolvedSubGeo: { pathRef },
+  };
+}
+
 async function performCsg({
   selectedItems,
   allItems,
@@ -701,6 +888,7 @@ export const ops = {
   chamferOrFilletItem,
   pushPullFaces,
   revolveItem,
+  pipeItem,
   performCsg,
   exportSTL,
   exportSTEP,

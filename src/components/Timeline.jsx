@@ -2,7 +2,10 @@ import React, { useState, useRef } from "react";
 import { useStore } from "../store";
 import { beginChamferRetarget } from "../three/cameraControls/chamferCommit.js";
 import { beginPushPullRetarget } from "../three/cameraControls/pushPull.js";
-import { beginRevolveRetarget } from "../three/cameraControls/sweep.js";
+import {
+  beginRevolveRetarget,
+  beginPipeRetarget,
+} from "../three/cameraControls/sweep.js";
 import {
   CubeIcon,
   SphereIcon,
@@ -44,6 +47,13 @@ const revolveInfo = (entry) => {
   const inst = entry?.instruction;
   if (inst?.type !== "create") return null;
   if (inst.item?.regenerator?.kind !== "revolve") return null;
+  return { itemId: inst.item.id };
+};
+
+const pipeInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "create") return null;
+  if (inst.item?.regenerator?.kind !== "pipe") return null;
   return { itemId: inst.item.id };
 };
 
@@ -765,6 +775,33 @@ const Timeline = () => {
                     </svg>
                   </button>
                 </>
+              )}
+              {pipeInfo(entry) && (
+                <button
+                  className={`timeline-action-btn${
+                    sweepRetargetTarget?.itemId === pipeInfo(entry).itemId
+                      ? " active"
+                      : ""
+                  }`}
+                  title="Retarget pipe — re-pick the profile and path"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    restoreToHistory(entry.id);
+                    selectItem(pipeInfo(entry).itemId);
+                    beginPipeRetarget(pipeInfo(entry).itemId, entry.id);
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14">
+                    <path
+                      d="M5 19 L5 10 C5 8, 6 7, 8 7 L19 7"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                    <circle cx="5" cy="19" r="2" fill="currentColor" />
+                  </svg>
+                </button>
               )}
               {canDelete(index) && (
                 <button

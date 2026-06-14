@@ -82,6 +82,86 @@ function applyEulerXYZ(vx, vy, vz, rx, ry, rz) {
   };
 }
 
+// ── Pipe sweep helpers (mirror occOps.js) ────────────────────────────────
+
+function sketchPointToWorld(sketch, x, y) {
+  const r = sketch.rotation || { x: 0, y: 0, z: 0 };
+  const p = sketch.position || { x: 0, y: 0, z: 0 };
+  const w = applyEulerXYZ(x, y, 0, r.x || 0, r.y || 0, r.z || 0);
+  return { x: w.x + (p.x || 0), y: w.y + (p.y || 0), z: w.z + (p.z || 0) };
+}
+
+function orderPathPoints(sketch, startShapeIdx) {
+  const shapes = (sketch && sketch.shapes) || [];
+  const start = shapes[startShapeIdx];
+  if (!start || start.type !== "line") return null;
+  const eps = 1e-4;
+  const lines = [];
+  shapes.forEach((s, i) => {
+    if (s && s.type === "line")
+      lines.push({ i, a: { x: s.x1, y: s.y1 }, b: { x: s.x2, y: s.y2 } });
+  });
+  const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < eps;
+  const used = new Set([startShapeIdx]);
+  const pts = [
+    { x: start.x1, y: start.y1 },
+    { x: start.x2, y: start.y2 },
+  ];
+  const extend = (atEnd) => {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const tip = atEnd ? pts[pts.length - 1] : pts[0];
+      for (const ln of lines) {
+        if (used.has(ln.i)) continue;
+        const next = near(ln.a, tip) ? ln.b : near(ln.b, tip) ? ln.a : null;
+        if (next) {
+          used.add(ln.i);
+          if (atEnd) pts.push(next);
+          else pts.unshift(next);
+          changed = true;
+          break;
+        }
+      }
+    }
+  };
+  extend(true);
+  extend(false);
+  return pts;
+}
+
+function pipePathWorld(pathRef, allItems) {
+  const sketch = (allItems || []).find(
+    (i) => i.id === (pathRef && pathRef.sketchId) && i.type === "sketch",
+  );
+  if (!sketch) return null;
+  const pts2d = orderPathPoints(sketch, pathRef.shapeIdx);
+  if (!pts2d || pts2d.length < 2) return null;
+  return pts2d.map((p) => sketchPointToWorld(sketch, p.x, p.y));
+}
+
+// The renderer pre-bakes the live profile polygon into source.profile.polygon2D
+// (like revolve); the path is resolved from the live sketch in allItems.
+function pipeArgs(profileSource, pathRef, allItems) {
+  const poly =
+    profileSource && profileSource.profile && profileSource.profile.polygon2D;
+  if (!poly || poly.length < 3) return null;
+  const pathWorld = pipePathWorld(pathRef, allItems);
+  if (!pathWorld) return null;
+  const holes = (profileSource.profile.holes || []).filter(
+    (h) => h && h.length >= 3,
+  );
+  const c = polyCentroid(poly);
+  const outerFlat = new Float64Array(
+    withWinding(poly, true).flatMap((p) => [p.x, p.y]),
+  );
+  const holesFlat = holes.map(
+    (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
+  );
+  const pathFlat = new Float64Array(pathWorld.flatMap((p) => [p.x, p.y, p.z]));
+  return { outerFlat, holesFlat, cx: c.x, cy: c.y, pathFlat };
+}
+
 // Resolve depth from legacy number (scene units) or simple string formula
 // (mm / MM_PER_UNIT where MM_PER_UNIT = 10).  Complex variable references
 // can't be resolved without the store; fall back to 1 in that case.
@@ -224,6 +304,22 @@ function buildItemShapeLocal(item, allItems, precision) {
         args.outerFlat, args.holesFlat, args.cx, args.cy,
         args.ax.x1, args.ax.y1, args.ax.x2, args.ax.y2,
         regen.angleRad ?? 2 * Math.PI, regen.prismSides ?? 0,
+      );
+      if (!resultId) return null;
+      const off = regen.centerOffset;
+      if (off) {
+        const corrected = occ.transformShape(resultId, -off.cx, -off.cy, -off.cz, 0, 0, 0);
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
+    if (regen.kind === "pipe") {
+      const args = pipeArgs(regen.profileSource, regen.pathRef, allItems);
+      if (!args) return null;
+      const resultId = occ.makePipe(
+        args.outerFlat, args.holesFlat, args.cx, args.cy, args.pathFlat,
       );
       if (!resultId) return null;
       const off = regen.centerOffset;
@@ -622,4 +718,40 @@ function revolveItem({ source, axis, angleRad, prismSides, allItems, printPrecis
   };
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, exportSTL, exportSTEP };
+// Sweep a sketch profile along a path polyline (mirrors occOps.js#pipeItem).
+function pipeItem({ profileSource, pathRef, allItems, printPrecision }) {
+  const args = pipeArgs(profileSource, pathRef, allItems);
+  if (!args) {
+    throw new Error(
+      "Pipe needs a closed profile loop and a path line on another sketch.",
+    );
+  }
+  const resultId = occ.makePipe(
+    args.outerFlat, args.holesFlat, args.cx, args.cy, args.pathFlat,
+  );
+  if (!resultId) throw new Error("Pipe produced no geometry.");
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
+    position: { x: cx, y: cy, z: cz },
+    resolvedSubGeo: { pathRef },
+  };
+}
+
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, exportSTL, exportSTEP };

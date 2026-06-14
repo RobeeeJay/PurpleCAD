@@ -10,6 +10,8 @@
 
 // ── Sweep / loft ─────────────────────────────────────────────────────────
 #include <BRepOffsetAPI_ThruSections.hxx>
+#include <BRepOffsetAPI_MakePipe.hxx>
+#include <gp_Ax3.hxx>
 
 // ── Wire / face builders (extrude) ──────────────────────────────────────
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -743,6 +745,54 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// makePipe(outer, holes, cx, cy, pathPts) → shapeId
+// Sweep the 2D profile cross-section along the world-space path polyline
+// `pathPts` ([x0,y0,z0, x1,y1,z1, ...], >= 2 points).  The profile is placed at
+// the path start in the plane perpendicular to the start tangent, so the sweep
+// is independent of which sketch planes the inputs were drawn on.
+Napi::Number MakePipe(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    Napi::Float64Array outer = info[0].As<Napi::Float64Array>();
+    Napi::Array holes        = info[1].As<Napi::Array>();
+    double cx = GetDouble(info[2]), cy = GetDouble(info[3]);
+    Napi::Float64Array path = info[4].As<Napi::Float64Array>();
+    size_t nPath = path.ElementLength() / 3;
+    if (nPath < 2) throw std::runtime_error("pipe path needs at least 2 points");
+
+    // Spine wire from the path polyline (skip zero-length segments).
+    BRepBuilderAPI_MakeWire wireMk;
+    gp_Pnt prev(path[0], path[1], path[2]);
+    bool havePrev = true;
+    for (size_t i = 1; i < nPath; i++) {
+      gp_Pnt p(path[i * 3], path[i * 3 + 1], path[i * 3 + 2]);
+      if (havePrev && prev.Distance(p) > 1e-9) {
+        wireMk.Add(BRepBuilderAPI_MakeEdge(prev, p).Edge());
+      }
+      prev = p;
+      havePrev = true;
+    }
+    if (!wireMk.IsDone()) throw std::runtime_error("pipe path wire failed");
+    TopoDS_Wire spine = wireMk.Wire();
+
+    // Profile face (local XY, centroid-subtracted, +Z normal), relocated to the
+    // path start and rotated so its +Z aligns with the start tangent.
+    TopoDS_Face face = BuildProfileFace(outer, holes, cx, cy);
+    gp_Pnt p0(path[0], path[1], path[2]);
+    gp_Dir tangent(path[3] - path[0], path[4] - path[1], path[5] - path[2]);
+    gp_Trsf place;
+    place.SetTransformation(gp_Ax3(p0, tangent));
+    place.Invert();  // local (origin, +Z) → world (p0, tangent)
+    TopoDS_Face placed =
+        TopoDS::Face(BRepBuilderAPI_Transform(face, place, true).Shape());
+
+    BRepOffsetAPI_MakePipe pipe(spine, placed);
+    pipe.Build();
+    if (!pipe.IsDone()) throw std::runtime_error("pipe sweep failed");
+    return Napi::Number::New(env, StoreShape(pipe.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Exported functions — transforms
 // ════════════════════════════════════════════════════════════════════════
@@ -1203,6 +1253,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("makeTorus",          Napi::Function::New(env, MakeTorus));
   exports.Set("makeExtrude",        Napi::Function::New(env, MakeExtrude));
   exports.Set("makeRevolve",        Napi::Function::New(env, MakeRevolve));
+  exports.Set("makePipe",           Napi::Function::New(env, MakePipe));
 
   // Transforms
   exports.Set("transformShape",     Napi::Function::New(env, TransformShape));
