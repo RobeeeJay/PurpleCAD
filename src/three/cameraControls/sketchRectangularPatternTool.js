@@ -3,14 +3,13 @@
 // store.confirmRectangularPattern); this module only owns the toggle clicks
 // and the preview overlay.
 
-import * as THREE from "three";
 import { useStore } from "../../store";
-import { getSketchShapePoints } from "../sceneObjects.js";
 import {
   RECTANGULAR_PATTERNABLE_TYPES,
   translateShapeGeometry,
 } from "../sketchRectangularPattern.js";
 import { sketchRectangularPatternColorFor } from "../theme.js";
+import { buildPatternPreviewObjects } from "./sketchPatternPreview.js";
 
 export function createSketchRectangularPatternHelpers({
   scene,
@@ -18,6 +17,7 @@ export function createSketchRectangularPatternHelpers({
   itemsRef,
   selectedIdRef,
   sketchShapesGroupRef,
+  renderer,
 }) {
   let previewObjs = [];
 
@@ -48,17 +48,13 @@ export function createSketchRectangularPatternHelpers({
     const countY = Math.max(1, Math.round(patternState.countY) || 1);
     const { offsetX, offsetY } = patternState;
     const theme = useStore.getState().theme;
-    const mat = new THREE.LineDashedMaterial({
-      color: sketchRectangularPatternColorFor(theme),
-      depthTest: false,
-      transparent: true,
-      opacity: 0.6,
-      dashSize: 0.08,
-      gapSize: 0.05,
-    });
+
+    const sourceShapes = [];
+    const copyShapes = [];
     patternState.shapeIndices.forEach((idx) => {
       const shape = shapes[idx];
       if (!shape) return;
+      sourceShapes.push(shape);
       for (let i = 0; i < countX; i++) {
         for (let j = 0; j < countY; j++) {
           if (i === 0 && j === 0) continue;
@@ -67,19 +63,21 @@ export function createSketchRectangularPatternHelpers({
             i * offsetX,
             j * offsetY,
           );
-          if (!translated) continue;
-          const pts = getSketchShapePoints(translated, sketchMesh);
-          if (pts.length < 2) continue;
-          const line = new THREE.Line(
-            new THREE.BufferGeometry().setFromPoints(pts),
-            mat,
-          );
-          line.computeLineDistances();
-          line.renderOrder = 1008;
-          scene.add(line);
-          previewObjs.push(line);
+          if (translated) copyShapes.push(translated);
         }
       }
+    });
+
+    buildPatternPreviewObjects({
+      sketchMesh,
+      sourceShapes,
+      copyShapes,
+      color: sketchRectangularPatternColorFor(theme),
+      theme,
+      renderer,
+    }).forEach((o) => {
+      scene.add(o);
+      previewObjs.push(o);
     });
   };
 

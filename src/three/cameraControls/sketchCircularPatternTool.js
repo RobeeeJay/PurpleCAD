@@ -5,13 +5,13 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
-import { getSketchShapePoints } from "../sceneObjects.js";
 import { getSnapPoints, getShapePoint } from "../sceneObjects/sketchShapes.js";
 import {
   CIRCULAR_PATTERNABLE_TYPES,
   rotateShapeGeometry,
 } from "../sketchCircularPattern.js";
 import { sketchCircularPatternColorFor } from "../theme.js";
+import { buildPatternPreviewObjects } from "./sketchPatternPreview.js";
 
 const PICK_PX = 20;
 
@@ -56,32 +56,30 @@ export function createSketchCircularPatternHelpers({
     if (!center) return;
     const count = Math.max(2, Math.round(patternState.count) || 2);
     const theme = useStore.getState().theme;
-    const mat = new THREE.LineDashedMaterial({
-      color: sketchCircularPatternColorFor(theme),
-      depthTest: false,
-      transparent: true,
-      opacity: 0.6,
-      dashSize: 0.08,
-      gapSize: 0.05,
-    });
+
+    const sourceShapes = [];
+    const copyShapes = [];
     patternState.shapeIndices.forEach((idx) => {
       const shape = shapes[idx];
       if (!shape) return;
+      sourceShapes.push(shape);
       for (let index = 1; index < count; index++) {
         const angle = (index * 2 * Math.PI) / count;
         const rotated = rotateShapeGeometry(shape, center, angle);
-        if (!rotated) continue;
-        const pts = getSketchShapePoints(rotated, sketchMesh);
-        if (pts.length < 2) continue;
-        const line = new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints(pts),
-          mat,
-        );
-        line.computeLineDistances();
-        line.renderOrder = 1008;
-        scene.add(line);
-        previewObjs.push(line);
+        if (rotated) copyShapes.push(rotated);
       }
+    });
+
+    buildPatternPreviewObjects({
+      sketchMesh,
+      sourceShapes,
+      copyShapes,
+      color: sketchCircularPatternColorFor(theme),
+      theme,
+      renderer,
+    }).forEach((o) => {
+      scene.add(o);
+      previewObjs.push(o);
     });
   };
 

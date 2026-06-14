@@ -3,11 +3,10 @@
 // by store.confirmMirror); this module only owns the picking clicks and the
 // preview overlay.
 
-import * as THREE from "three";
 import { useStore } from "../../store";
-import { getSketchShapePoints } from "../sceneObjects.js";
 import { MIRRORABLE_TYPES, mirrorShapeGeometry } from "../sketchMirror.js";
 import { sketchMirrorColorFor } from "../theme.js";
+import { buildPatternPreviewObjects } from "./sketchPatternPreview.js";
 
 export function createSketchMirrorHelpers({
   scene,
@@ -15,6 +14,7 @@ export function createSketchMirrorHelpers({
   itemsRef,
   selectedIdRef,
   sketchShapesGroupRef,
+  renderer,
 }) {
   let previewObjs = [];
 
@@ -42,29 +42,27 @@ export function createSketchMirrorHelpers({
     const lineShape = shapes[mirrorState.lineIdx];
     if (!lineShape) return;
     const theme = useStore.getState().theme;
-    const mat = new THREE.LineDashedMaterial({
-      color: sketchMirrorColorFor(theme),
-      depthTest: false,
-      transparent: true,
-      opacity: 0.6,
-      dashSize: 0.08,
-      gapSize: 0.05,
-    });
+
+    const sourceShapes = [];
+    const copyShapes = [];
     mirrorState.shapeIndices.forEach((idx) => {
       const shape = shapes[idx];
       if (!shape) return;
+      sourceShapes.push(shape);
       const mirrored = mirrorShapeGeometry(shape, lineShape);
-      if (!mirrored) return;
-      const pts = getSketchShapePoints(mirrored, sketchMesh);
-      if (pts.length < 2) return;
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        mat,
-      );
-      line.computeLineDistances();
-      line.renderOrder = 1008;
-      scene.add(line);
-      previewObjs.push(line);
+      if (mirrored) copyShapes.push(mirrored);
+    });
+
+    buildPatternPreviewObjects({
+      sketchMesh,
+      sourceShapes,
+      copyShapes,
+      color: sketchMirrorColorFor(theme),
+      theme,
+      renderer,
+    }).forEach((o) => {
+      scene.add(o);
+      previewObjs.push(o);
     });
   };
 
