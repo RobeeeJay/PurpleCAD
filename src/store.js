@@ -53,6 +53,14 @@ export const useStore = create((set, get) => ({
   ...createFolderSlice(set, get),
 }));
 
+// E2E test hook: expose the store on window so Playwright can read state and
+// drive actions via page.evaluate, instead of trying to assert on opaque WebGL
+// canvas pixels.  Gated behind the VITE_E2E build flag so it never ships in a
+// normal build — `VITE_E2E=1 vite build` (see the `e2e:build` npm script).
+if (typeof window !== "undefined" && import.meta.env?.VITE_E2E) {
+  window.__store = useStore;
+}
+
 // Per-sketch undo-state probe (sketch toolbar reads it to enable / disable
 // the per-sketch undo + redo buttons).
 export const getSketchUndoState = (sketchId) => {
