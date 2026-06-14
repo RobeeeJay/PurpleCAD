@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
+import FormulaInput from "./FormulaInput";
+import { evalValue, useDebouncedPreview } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
 // Edit just the distance of a committed push/pull, from its timeline step.
 // Mirrors ChamferEditDialog: a non-blocking floating panel with a live preview
 // that re-runs the stored recipe at the typed distance before Save.  Distance
-// is signed — positive pulls the faces outward, negative pushes them in.
+// is signed — positive pulls the faces outward, negative pushes them in.  The
+// field accepts variable formulas and may be cleared while typing.
 const PushPullEditDialog = () => {
   const target = useStore((s) => s.pushPullEditTarget);
   const setTarget = useStore((s) => s.setPushPullEditTarget);
   const history = useStore((s) => s.history);
+  const variables = useStore((s) => s.variables);
   const updatePushPullParams = useStore((s) => s.updatePushPullParams);
 
   const entry =
@@ -25,17 +29,24 @@ const PushPullEditDialog = () => {
       setDistanceMm(((regenerator.distance ?? 0.1) * MM_PER_UNIT).toString());
   }, [regenerator]);
 
-  // Live preview: debounced re-run of the push/pull at the typed distance.
-  useEffect(() => {
-    if (!regenerator) return;
-    const mm = parseFloat(distanceMm);
-    if (!Number.isFinite(mm) || mm === 0) return;
-    const ctrl = useStore.getState()._cameraControls;
-    const timer = setTimeout(() => {
-      ctrl?.updatePushPullEditPreview?.(regenerator, mm, entry.itemId);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [distanceMm, regenerator, entry?.itemId]);
+  const distVal = evalValue(distanceMm, variables);
+  const valid = Number.isFinite(distVal) && distVal !== 0;
+
+  // Live preview: debounced re-run of the push/pull at the typed distance,
+  // cleared the moment it goes blank/invalid.
+  useDebouncedPreview(
+    !!regenerator && valid,
+    () =>
+      useStore
+        .getState()
+        ._cameraControls?.updatePushPullEditPreview?.(
+          regenerator,
+          distVal,
+          entry?.itemId,
+        ),
+    () => useStore.getState()._cameraControls?.clearPushPullPreview?.(),
+    [distVal, regenerator, entry?.itemId],
+  );
 
   useEffect(() => {
     return () => useStore.getState()._cameraControls?.clearPushPullPreview?.();
@@ -47,14 +58,9 @@ const PushPullEditDialog = () => {
     useStore.getState()._cameraControls?.clearPushPullPreview?.();
     setTarget(null);
   };
-  const valid = (() => {
-    const mm = parseFloat(distanceMm);
-    return Number.isFinite(mm) && mm !== 0;
-  })();
   const commit = () => {
-    const mm = parseFloat(distanceMm);
-    if (!Number.isFinite(mm) || mm === 0) return;
-    updatePushPullParams(entry.id, { distance: mm / MM_PER_UNIT });
+    if (!valid) return;
+    updatePushPullParams(entry.id, { distance: distVal / MM_PER_UNIT });
     close();
   };
 
@@ -101,9 +107,8 @@ const PushPullEditDialog = () => {
             }}
           >
             <span>Distance (mm · positive pulls out, negative pushes in)</span>
-            <input
-              type="number"
-              step="0.1"
+            <FormulaInput
+              variables={variables}
               autoFocus
               value={distanceMm}
               onChange={(e) => setDistanceMm(e.target.value)}

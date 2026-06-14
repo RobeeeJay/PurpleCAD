@@ -6,6 +6,7 @@
 
 import React from "react";
 import FormulaInput from "../FormulaInput";
+import { DebouncedNumberField } from "../inputs.jsx";
 import SketchRulers from "./SketchRulers";
 import SketchLongPressMenu from "./SketchLongPressMenu";
 import { useStore } from "../../store";
@@ -45,6 +46,27 @@ export default function SketchOverlays({
   propagateConstraintsRef,
   selectItem,
 }) {
+  // Tracks which pattern-overlay fields currently hold an invalid / blank
+  // value, so Confirm can be disabled until every field parses again.  Keyed
+  // by field name; a field reports true (valid) on unmount so a closed tool
+  // never leaves a stale block.
+  const [patternInvalid, setPatternInvalid] = React.useState({});
+  const reportPatternValid = React.useCallback(
+    (key) => (valid) =>
+      setPatternInvalid((prev) => {
+        const blocked = !!prev[key];
+        if (valid && blocked) {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        }
+        if (!valid && !blocked) return { ...prev, [key]: true };
+        return prev;
+      }),
+    [],
+  );
+  const anyPatternInvalid = Object.keys(patternInvalid).length > 0;
+
   // Commit the extrude at the typed distance (shared by Enter and the Confirm
   // button).  Distance is read from the input state — never from the mouse.
   const confirmExtrude = () => {
@@ -403,23 +425,20 @@ export default function SketchOverlays({
                     }}
                   >
                     Instances per 360°
-                    <input
-                      type="number"
+                    <DebouncedNumberField
                       min={2}
                       step={1}
-                      value={sketchCircularPatternState.count}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value, 10);
-                        useStore
-                          .getState()
-                          .setCircularPatternCount(Number.isFinite(v) ? v : 2);
-                      }}
+                      storeValue={sketchCircularPatternState.count}
+                      validate={(v) => Number.isFinite(v) && v >= 2}
+                      onValidChange={reportPatternValid("circCount")}
+                      commit={(v) =>
+                        useStore.getState().setCircularPatternCount(v)
+                      }
                       style={{
                         width: 48,
                         fontSize: 11,
                         padding: "2px 4px",
                         borderRadius: 3,
-                        border: "1px solid var(--border-color)",
                         background: "var(--bg-tertiary)",
                         color: "var(--text-primary)",
                       }}
@@ -463,32 +482,34 @@ export default function SketchOverlays({
                   >
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    disabled={
-                      sketchCircularPatternState.shapeIndices.length === 0
-                    }
-                    onClick={() =>
-                      useStore.getState().confirmCircularPattern(selectedId)
-                    }
-                    title="Confirm — create the patterned geometry"
-                    style={{
-                      fontSize: 11,
-                      padding: "3px 10px",
-                      marginLeft: 8,
-                      borderRadius: 3,
-                      border: "1px solid var(--accent, #4488ff)",
-                      background: "var(--accent, #4488ff)",
-                      color: "#fff",
-                      cursor: "pointer",
-                      opacity:
-                        sketchCircularPatternState.shapeIndices.length === 0
-                          ? 0.5
-                          : 1,
-                    }}
-                  >
-                    Confirm
-                  </button>
+                  {(() => {
+                    const blocked =
+                      sketchCircularPatternState.shapeIndices.length === 0 ||
+                      anyPatternInvalid;
+                    return (
+                      <button
+                        type="button"
+                        disabled={blocked}
+                        onClick={() =>
+                          useStore.getState().confirmCircularPattern(selectedId)
+                        }
+                        title="Confirm — create the patterned geometry"
+                        style={{
+                          fontSize: 11,
+                          padding: "3px 10px",
+                          marginLeft: 8,
+                          borderRadius: 3,
+                          border: "1px solid var(--accent, #4488ff)",
+                          background: "var(--accent, #4488ff)",
+                          color: "#fff",
+                          cursor: blocked ? "not-allowed" : "pointer",
+                          opacity: blocked ? 0.5 : 1,
+                        }}
+                      >
+                        Confirm
+                      </button>
+                    );
+                  })()}
                 </div>
               </>
             )}
@@ -518,23 +539,20 @@ export default function SketchOverlays({
                 }}
               >
                 Count X
-                <input
-                  type="number"
+                <DebouncedNumberField
                   min={1}
                   step={1}
-                  value={sketchRectangularPatternState.countX}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    useStore
-                      .getState()
-                      .setRectangularPatternCountX(Number.isFinite(v) ? v : 1);
-                  }}
+                  storeValue={sketchRectangularPatternState.countX}
+                  validate={(v) => Number.isFinite(v) && v >= 1}
+                  onValidChange={reportPatternValid("rectCountX")}
+                  commit={(v) =>
+                    useStore.getState().setRectangularPatternCountX(v)
+                  }
                   style={{
                     width: 44,
                     fontSize: 11,
                     padding: "2px 4px",
                     borderRadius: 3,
-                    border: "1px solid var(--border-color)",
                     background: "var(--bg-tertiary)",
                     color: "var(--text-primary)",
                   }}
@@ -549,22 +567,19 @@ export default function SketchOverlays({
                 }}
               >
                 Offset X (mm)
-                <input
-                  type="number"
+                <DebouncedNumberField
                   step="any"
-                  value={sketchRectangularPatternState.offsetX}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    useStore
-                      .getState()
-                      .setRectangularPatternOffsetX(Number.isFinite(v) ? v : 0);
-                  }}
+                  storeValue={sketchRectangularPatternState.offsetX}
+                  validate={(v) => Number.isFinite(v)}
+                  onValidChange={reportPatternValid("rectOffsetX")}
+                  commit={(v) =>
+                    useStore.getState().setRectangularPatternOffsetX(v)
+                  }
                   style={{
                     width: 56,
                     fontSize: 11,
                     padding: "2px 4px",
                     borderRadius: 3,
-                    border: "1px solid var(--border-color)",
                     background: "var(--bg-tertiary)",
                     color: "var(--text-primary)",
                   }}
@@ -579,23 +594,20 @@ export default function SketchOverlays({
                 }}
               >
                 Count Y
-                <input
-                  type="number"
+                <DebouncedNumberField
                   min={1}
                   step={1}
-                  value={sketchRectangularPatternState.countY}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    useStore
-                      .getState()
-                      .setRectangularPatternCountY(Number.isFinite(v) ? v : 1);
-                  }}
+                  storeValue={sketchRectangularPatternState.countY}
+                  validate={(v) => Number.isFinite(v) && v >= 1}
+                  onValidChange={reportPatternValid("rectCountY")}
+                  commit={(v) =>
+                    useStore.getState().setRectangularPatternCountY(v)
+                  }
                   style={{
                     width: 44,
                     fontSize: 11,
                     padding: "2px 4px",
                     borderRadius: 3,
-                    border: "1px solid var(--border-color)",
                     background: "var(--bg-tertiary)",
                     color: "var(--text-primary)",
                   }}
@@ -610,22 +622,19 @@ export default function SketchOverlays({
                 }}
               >
                 Offset Y (mm)
-                <input
-                  type="number"
+                <DebouncedNumberField
                   step="any"
-                  value={sketchRectangularPatternState.offsetY}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    useStore
-                      .getState()
-                      .setRectangularPatternOffsetY(Number.isFinite(v) ? v : 0);
-                  }}
+                  storeValue={sketchRectangularPatternState.offsetY}
+                  validate={(v) => Number.isFinite(v)}
+                  onValidChange={reportPatternValid("rectOffsetY")}
+                  commit={(v) =>
+                    useStore.getState().setRectangularPatternOffsetY(v)
+                  }
                   style={{
                     width: 56,
                     fontSize: 11,
                     padding: "2px 4px",
                     borderRadius: 3,
-                    border: "1px solid var(--border-color)",
                     background: "var(--bg-tertiary)",
                     color: "var(--text-primary)",
                   }}
@@ -650,32 +659,34 @@ export default function SketchOverlays({
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                disabled={
-                  sketchRectangularPatternState.shapeIndices.length === 0
-                }
-                onClick={() =>
-                  useStore.getState().confirmRectangularPattern(selectedId)
-                }
-                title="Confirm — create the patterned geometry"
-                style={{
-                  fontSize: 11,
-                  padding: "3px 10px",
-                  marginLeft: 8,
-                  borderRadius: 3,
-                  border: "1px solid var(--accent, #4488ff)",
-                  background: "var(--accent, #4488ff)",
-                  color: "#fff",
-                  cursor: "pointer",
-                  opacity:
-                    sketchRectangularPatternState.shapeIndices.length === 0
-                      ? 0.5
-                      : 1,
-                }}
-              >
-                Confirm
-              </button>
+              {(() => {
+                const blocked =
+                  sketchRectangularPatternState.shapeIndices.length === 0 ||
+                  anyPatternInvalid;
+                return (
+                  <button
+                    type="button"
+                    disabled={blocked}
+                    onClick={() =>
+                      useStore.getState().confirmRectangularPattern(selectedId)
+                    }
+                    title="Confirm — create the patterned geometry"
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 10px",
+                      marginLeft: 8,
+                      borderRadius: 3,
+                      border: "1px solid var(--accent, #4488ff)",
+                      background: "var(--accent, #4488ff)",
+                      color: "#fff",
+                      cursor: blocked ? "not-allowed" : "pointer",
+                      opacity: blocked ? 0.5 : 1,
+                    }}
+                  >
+                    Confirm
+                  </button>
+                );
+              })()}
             </div>
           </>
         )}

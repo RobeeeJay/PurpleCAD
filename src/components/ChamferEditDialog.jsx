@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
+import FormulaInput from "./FormulaInput";
+import { evalValue, useDebouncedPreview } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
 const ChamferEditDialog = () => {
   const target = useStore((s) => s.chamferEditTarget);
   const setTarget = useStore((s) => s.setChamferEditTarget);
   const history = useStore((s) => s.history);
+  const variables = useStore((s) => s.variables);
   const updateChamferParams = useStore((s) => s.updateChamferParams);
 
   const entry =
@@ -16,7 +19,8 @@ const ChamferEditDialog = () => {
   const regenerator = entry?.instruction?.patches?.regenerator;
   const isFillet = regenerator?.segments !== 1;
 
-  // Inputs are in user units (mm for distance/radius, degrees for angle).
+  // Inputs are in user units (mm for distance/radius, degrees for angle) and
+  // accept variable formulas.
   const [distanceMm, setDistanceMm] = useState("");
   const [angleDeg, setAngleDeg] = useState("");
   useEffect(() => {
@@ -30,20 +34,30 @@ const ChamferEditDialog = () => {
     }
   }, [regenerator]);
 
+  const distVal = evalValue(distanceMm, variables);
+  const angVal = evalValue(angleDeg, variables);
+  const distValid = Number.isFinite(distVal) && distVal > 0;
+  const angValid =
+    isFillet || (Number.isFinite(angVal) && angVal > 0 && angVal < 90);
+  const valid = distValid && angValid;
+
   // Live preview: debounced re-run of the chamfer/fillet with the typed
-  // distance/angle, overlaid as a wireframe so the edit is visible before
-  // Save.  Skipped while a value is invalid (the recipe would no-op anyway).
-  useEffect(() => {
-    if (!regenerator) return;
-    const mm = parseFloat(distanceMm);
-    const deg = parseFloat(angleDeg);
-    if (!Number.isFinite(mm) || mm <= 0) return;
-    const ctrl = useStore.getState()._cameraControls;
-    const timer = setTimeout(() => {
-      ctrl?.updateChamferEditPreview?.(regenerator, mm, deg, entry.itemId);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [distanceMm, angleDeg, regenerator, entry?.itemId]);
+  // distance/angle, overlaid as a wireframe so the edit is visible before Save;
+  // cleared the moment a value goes blank/invalid.
+  useDebouncedPreview(
+    !!regenerator && valid,
+    () =>
+      useStore
+        .getState()
+        ._cameraControls?.updateChamferEditPreview?.(
+          regenerator,
+          distVal,
+          angVal,
+          entry?.itemId,
+        ),
+    () => useStore.getState()._cameraControls?.clearChamferPreview?.(),
+    [distVal, angVal, regenerator, entry?.itemId],
+  );
 
   // Drop the preview overlay whenever the dialog closes (Save, Cancel,
   // Escape, backdrop click) or unmounts.
@@ -58,30 +72,17 @@ const ChamferEditDialog = () => {
     setTarget(null);
   };
   const commit = () => {
-    const mm = parseFloat(distanceMm);
-    if (!Number.isFinite(mm) || mm <= 0) return;
-    const amount = mm / MM_PER_UNIT;
+    if (!valid) return;
+    const amount = distVal / MM_PER_UNIT;
     let angleRad = null;
-    if (!isFillet) {
-      const deg = parseFloat(angleDeg);
-      if (Number.isFinite(deg) && Math.abs(deg - 45) > 0.1)
-        angleRad = (deg * Math.PI) / 180;
-    }
+    if (!isFillet && Math.abs(angVal - 45) > 0.1)
+      angleRad = (angVal * Math.PI) / 180;
     updateChamferParams(entry.id, { amount, angleRad });
     close();
   };
 
   const opName = isFillet ? "fillet" : "chamfer";
   const valueLabel = isFillet ? "Radius (mm)" : "Distance (mm)";
-  const distValid =
-    Number.isFinite(parseFloat(distanceMm)) && parseFloat(distanceMm) > 0;
-  const angValid = isFillet
-    ? true
-    : (() => {
-        const d = parseFloat(angleDeg);
-        return Number.isFinite(d) && d > 0 && d < 90;
-      })();
-  const valid = distValid && angValid;
 
   return (
     // Non-blocking: a click-through, undimmed backdrop keeps the viewport
@@ -131,10 +132,8 @@ const ChamferEditDialog = () => {
             }}
           >
             <span>{valueLabel}</span>
-            <input
-              type="number"
-              step="0.1"
-              min="0.05"
+            <FormulaInput
+              variables={variables}
               autoFocus
               value={distanceMm}
               onChange={(e) => setDistanceMm(e.target.value)}
@@ -167,11 +166,8 @@ const ChamferEditDialog = () => {
               }}
             >
               <span>Angle (degrees · 45° = symmetric)</span>
-              <input
-                type="number"
-                step="1"
-                min="1"
-                max="89"
+              <FormulaInput
+                variables={variables}
                 value={angleDeg}
                 onChange={(e) => setAngleDeg(e.target.value)}
                 onKeyDown={(e) => {

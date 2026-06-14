@@ -4,13 +4,16 @@
 // call into pushPull.js swaps in a translucent preview of the moved result as
 // the selection or distance changes.  A positive distance pulls each face
 // outward (growing the solid); a negative distance pushes it inward.
+//
+// The distance accepts variable formulas, may be cleared to blank while typing,
+// and gates the live preview + Confirm on a valid (non-zero) value.
 
 import React, { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { commitPushPull } from "../../three/cameraControls/pushPull.js";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
-
-const PREVIEW_DEBOUNCE_MS = 250;
+import FormulaInput from "../FormulaInput";
+import { evalValue, useDebouncedPreview } from "../inputs.jsx";
 
 export default function PushPullOverlay() {
   const pushPullSelectMode = useStore((s) => s.pushPullSelectMode);
@@ -18,6 +21,7 @@ export default function PushPullOverlay() {
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const items = useStore((s) => s.items);
+  const variables = useStore((s) => s.variables);
   const curveResolution = useStore((s) => s.curveResolution);
   const showNotification = useStore((s) => s.showNotification);
   const pushPullRetargetTarget = useStore((s) => s.pushPullRetargetTarget);
@@ -25,34 +29,30 @@ export default function PushPullOverlay() {
     (s) => s.setPushPullRetargetTarget,
   );
 
-  const [distanceMm, setDistanceMm] = useState(1);
+  const [distanceMm, setDistanceMm] = useState("1");
 
   // Retarget pre-selects the prior faces and arms pushPullRetargetTarget —
-  // seed the distance from that op's recipe so Confirm reproduces it by default
-  // (the user can still tweak it before confirming).
+  // seed the distance from that op's recipe so Confirm reproduces it by default.
   useEffect(() => {
     if (!pushPullRetargetTarget) return;
     const item = items.find((i) => i.id === pushPullRetargetTarget.itemId);
     const prior = item?.regenerator;
     if (prior?.kind !== "pushpull") return;
-    setDistanceMm((prior.distance ?? 0.1) * MM_PER_UNIT);
+    setDistanceMm(String((prior.distance ?? 0.1) * MM_PER_UNIT));
   }, [pushPullRetargetTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasSelection = (selectedSubGeometry?.faces?.length ?? 0) > 0;
+  const distVal = evalValue(distanceMm, variables); // mm (signed)
+  const valid = Number.isFinite(distVal) && distVal !== 0;
 
-  // Live preview: debounced re-run of the push/pull recipe against the current
-  // face selection + distance.
-  useEffect(() => {
-    const cameraControls = useStore.getState()._cameraControls;
-    if (!pushPullSelectMode || !hasSelection) {
-      cameraControls?.clearPushPullPreview?.();
-      return;
-    }
-    const timer = setTimeout(() => {
-      cameraControls?.updatePushPullPreview?.(distanceMm);
-    }, PREVIEW_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [pushPullSelectMode, selectedSubGeometry, distanceMm, hasSelection]);
+  // Live preview: debounced re-run while a valid distance and a face selection
+  // exist; cleared the moment the value goes blank/invalid.
+  useDebouncedPreview(
+    !!pushPullSelectMode && hasSelection && valid,
+    () => useStore.getState()._cameraControls?.updatePushPullPreview?.(distVal),
+    () => useStore.getState()._cameraControls?.clearPushPullPreview?.(),
+    [distVal, selectedSubGeometry],
+  );
 
   // Clear any preview mesh on unmount (mode toggled off, item deselected).
   useEffect(() => {
@@ -69,6 +69,7 @@ export default function PushPullOverlay() {
   };
 
   const applyPushPull = async () => {
+    if (!valid) return;
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
     try {
@@ -77,7 +78,7 @@ export default function PushPullOverlay() {
         item,
         items,
         selectedSubGeometry,
-        distanceMm,
+        distanceMm: distVal,
         printPrecision,
       });
       if (!ok) {
@@ -95,8 +96,9 @@ export default function PushPullOverlay() {
 
   const handleKeyDown = (e) => {
     e.stopPropagation();
-    if (e.key === "Enter") applyPushPull();
-    else if (e.key === "Escape") cancel();
+    if (e.key === "Enter") {
+      if (valid) applyPushPull();
+    } else if (e.key === "Escape") cancel();
   };
 
   return (
@@ -111,17 +113,17 @@ export default function PushPullOverlay() {
           <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
             Distance (mm):
           </span>
-          <input
-            type="number"
+          <FormulaInput
+            variables={variables}
             autoFocus
-            step="0.1"
             value={distanceMm}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value);
-              if (!isNaN(v)) setDistanceMm(v);
-            }}
+            onChange={(e) => setDistanceMm(e.target.value)}
             onKeyDown={handleKeyDown}
-            style={{ width: 64, marginRight: 8 }}
+            style={{
+              width: 64,
+              marginRight: 8,
+              border: `1px solid ${valid ? "var(--border-color)" : "#e87575"}`,
+            }}
           />
           <button
             type="button"
@@ -143,7 +145,10 @@ export default function PushPullOverlay() {
           <button
             type="button"
             onClick={applyPushPull}
-            title="Confirm — apply the push/pull"
+            disabled={!valid}
+            title={
+              valid ? "Confirm — apply the push/pull" : "Enter a valid value"
+            }
             style={{
               fontSize: 11,
               padding: "3px 10px",
@@ -152,7 +157,8 @@ export default function PushPullOverlay() {
               border: "1px solid var(--accent, #4488ff)",
               background: "var(--accent, #4488ff)",
               color: "#fff",
-              cursor: "pointer",
+              cursor: valid ? "pointer" : "not-allowed",
+              opacity: valid ? 1 : 0.5,
             }}
           >
             Confirm
