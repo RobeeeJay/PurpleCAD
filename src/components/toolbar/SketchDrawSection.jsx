@@ -180,6 +180,55 @@ const SKETCH_TOOLS = [
     ),
   },
   {
+    id: "point",
+    label: "Point — click to place a point; on a line it's constrained to it",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="12"
+          y1="3"
+          x2="12"
+          y2="9"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="12"
+          y1="15"
+          x2="12"
+          y2="21"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="3"
+          y1="12"
+          x2="9"
+          y2="12"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="15"
+          y1="12"
+          x2="21"
+          y2="12"
+        />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="2.5" cx="12" cy="12" />
+      </svg>
+    ),
+  },
+  {
     id: "bezier",
     label: "Bezier",
     icon: (

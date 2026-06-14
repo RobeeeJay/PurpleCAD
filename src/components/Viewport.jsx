@@ -253,6 +253,7 @@ const Viewport = () => {
     pathTraceView,
     curveSegments,
     printPrecision,
+    activeSketchTool,
     setSketchMode,
     setSketchDrawPhase,
     setRotationState,

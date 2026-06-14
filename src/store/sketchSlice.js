@@ -34,6 +34,60 @@ import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
 // Shape types the Offset tool can copy.
 export const OFFSETTABLE_TYPES = ["line", "circle", "arc", "ellipse", "bezier"];
 
+// Every field on a constraint that references a shape by index, across all
+// constraint types (coincident/distance/angle use A/B; onLine uses
+// point/line; H/V and the copy ops use shapeIdx; mirror/offset/pattern carry
+// a source origIdx; mirror adds lineIdx; circularPattern adds centerShapeIdx).
+// `i`, `j`, `index`, `count`, `offsetGroup` are NOT shape indices.
+const SHAPE_INDEX_FIELDS = [
+  "shapeAIdx",
+  "shapeBIdx",
+  "shapeIdx",
+  "origIdx",
+  "pointShapeIdx",
+  "lineShapeIdx",
+  "lineIdx",
+  "centerShapeIdx",
+];
+
+// Remap a constraint's shape-index fields through `indexMap` (old index → new
+// index, or -1 for a removed shape).  Returns null when the constraint
+// references any removed shape, so the caller can drop it.  Used when deleting
+// shapes (e.g. replacing a rectangular pattern's copies) so every surviving
+// constraint keeps pointing at the right geometry.
+export const remapConstraintShapeIndices = (constraint, indexMap) => {
+  const out = { ...constraint };
+  for (const f of SHAPE_INDEX_FIELDS) {
+    if (typeof constraint[f] === "number") {
+      const next = indexMap.get(constraint[f]);
+      if (next == null || next === -1) return null;
+      out[f] = next;
+    }
+  }
+  return out;
+};
+
+// Editing a mirror / pattern in place removes its old copy shapes and rebuilds
+// fresh ones.  This drops `copyIndices`, reindexes every surviving constraint,
+// and returns a `remapIdx` to bring any kept references (sources, a mirror line,
+// a pattern centre) into the reduced frame.  remapIdx returns null for a
+// removed index.
+const removeCopiesForEdit = (shapes, constraints, copyIndices) => {
+  const copySet = new Set(copyIndices);
+  const indexMap = new Map();
+  let ni = 0;
+  shapes.forEach((_, i) => indexMap.set(i, copySet.has(i) ? -1 : ni++));
+  const workShapes = shapes.filter((_, i) => !copySet.has(i));
+  const workConstraints = constraints
+    .map((c) => remapConstraintShapeIndices(c, indexMap))
+    .filter(Boolean);
+  const remapIdx = (i) => {
+    const m = indexMap.get(i);
+    return m == null || m === -1 ? null : m;
+  };
+  return { workShapes, workConstraints, remapIdx };
+};
+
 // Approximate parallel offset of a cubic bezier: shift each control point along
 // the curve normal at its parameter (endpoints exact, interior approximate).
 // A true offset of a bezier isn't a bezier, so this is the usual CAD
@@ -227,6 +281,29 @@ export const createSketchSlice = (set) => ({
       return { sketchMirrorState: { ...cur, shapeIndices } };
     }),
 
+  // Re-open the Mirror tool to edit an existing mirror, seeded from the
+  // constraint the user double-clicked.  A "mirror" is the set of mirror
+  // constraints sharing the same mirror line; its sources are their distinct
+  // origIdx and its copies are their shapeIdx.  editCopyIndices is carried so
+  // Confirm replaces those copies rather than adding a second mirror.
+  beginMirrorEdit: (sketchId, constraintIdx) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const clicked = (item?.constraints || [])[constraintIdx];
+      if (!clicked || clicked.type !== "mirror") return {};
+      const group = (item.constraints || []).filter(
+        (c) => c.type === "mirror" && c.lineIdx === clicked.lineIdx,
+      );
+      return {
+        activeSketchTool: "mirror",
+        sketchMirrorState: {
+          lineIdx: clicked.lineIdx,
+          shapeIndices: [...new Set(group.map((c) => c.origIdx))],
+          editCopyIndices: group.map((c) => c.shapeIdx),
+        },
+      };
+    }),
+
   // Circular Pattern tool: pick a centre point, then toggle geometry to
   // preview/copy as rotated repeats around it.
   // { centerShapeIdx, centerPointKey, shapeIndices: number[], count } | null
@@ -290,6 +367,34 @@ export const createSketchSlice = (set) => ({
       const cur = state.sketchCircularPatternState;
       if (!cur) return {};
       return { sketchCircularPatternState: { ...cur, count } };
+    }),
+
+  // Re-open the Circular Pattern tool to edit an existing pattern, seeded from
+  // the constraint the user double-clicked.  A "pattern" is the set of
+  // circularPattern constraints sharing the same centre point + count; its
+  // sources are their distinct origIdx and its copies are their shapeIdx.
+  beginCircularPatternEdit: (sketchId, constraintIdx) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const clicked = (item?.constraints || [])[constraintIdx];
+      if (!clicked || clicked.type !== "circularPattern") return {};
+      const group = (item.constraints || []).filter(
+        (c) =>
+          c.type === "circularPattern" &&
+          c.centerShapeIdx === clicked.centerShapeIdx &&
+          c.centerPointKey === clicked.centerPointKey &&
+          c.count === clicked.count,
+      );
+      return {
+        activeSketchTool: "circularPattern",
+        sketchCircularPatternState: {
+          centerShapeIdx: clicked.centerShapeIdx,
+          centerPointKey: clicked.centerPointKey,
+          count: clicked.count,
+          shapeIndices: [...new Set(group.map((c) => c.origIdx))],
+          editCopyIndices: group.map((c) => c.shapeIdx),
+        },
+      };
     }),
 
   // Rectangular Pattern tool: toggle geometry to preview/copy as a grid of
@@ -363,6 +468,41 @@ export const createSketchSlice = (set) => ({
       const cur = state.sketchRectangularPatternState;
       if (!cur) return {};
       return { sketchRectangularPatternState: { ...cur, offsetY } };
+    }),
+
+  // Re-open the Rectangular Pattern tool to edit an existing pattern, seeded
+  // from the constraint the user double-clicked.  A "pattern" is the set of
+  // rectangularPattern constraints sharing the same offsets + counts; its
+  // sources are their distinct origIdx and its copies are their shapeIdx.
+  // editCopyIndices is carried so Confirm replaces those copies rather than
+  // appending a second pattern.  No-op (and no tool change) if the index isn't
+  // a rectangularPattern constraint.
+  beginRectangularPatternEdit: (sketchId, constraintIdx) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const clicked = (item?.constraints || [])[constraintIdx];
+      if (!clicked || clicked.type !== "rectangularPattern") return {};
+      const group = (item.constraints || []).filter(
+        (c) =>
+          c.type === "rectangularPattern" &&
+          c.dx === clicked.dx &&
+          c.dy === clicked.dy &&
+          c.countX === clicked.countX &&
+          c.countY === clicked.countY,
+      );
+      const sourceIndices = [...new Set(group.map((c) => c.origIdx))];
+      const copyIndices = group.map((c) => c.shapeIdx);
+      return {
+        activeSketchTool: "rectangularPattern",
+        sketchRectangularPatternState: {
+          shapeIndices: sourceIndices,
+          countX: clicked.countX,
+          countY: clicked.countY,
+          offsetX: clicked.dx,
+          offsetY: clicked.dy,
+          editCopyIndices: copyIndices,
+        },
+      };
     }),
 
   // --- Shape + constraint mutations ---
@@ -611,35 +751,12 @@ export const createSketchSlice = (set) => ({
           indexMap.set(i, deleteSet.has(i) ? -1 : newIdx++);
         });
         const shapes = oldShapes.filter((_, i) => !deleteSet.has(i));
+        // Reindex every constraint type generically (covers mirror / offset /
+        // circular- & rectangular-pattern too, which the old per-type filter
+        // silently corrupted), dropping any that referenced a deleted shape.
         const constraints = (item.constraints || [])
-          .filter((c) => {
-            if (c.type === "onLine")
-              return (
-                indexMap.get(c.pointShapeIdx) !== -1 &&
-                indexMap.get(c.lineShapeIdx) !== -1
-              );
-            if (c.type === "horizontal" || c.type === "vertical")
-              return indexMap.get(c.shapeIdx) !== -1;
-            return (
-              indexMap.get(c.shapeAIdx) !== -1 &&
-              indexMap.get(c.shapeBIdx) !== -1
-            );
-          })
-          .map((c) => {
-            if (c.type === "onLine")
-              return {
-                ...c,
-                pointShapeIdx: indexMap.get(c.pointShapeIdx),
-                lineShapeIdx: indexMap.get(c.lineShapeIdx),
-              };
-            if (c.type === "horizontal" || c.type === "vertical")
-              return { ...c, shapeIdx: indexMap.get(c.shapeIdx) };
-            return {
-              ...c,
-              shapeAIdx: indexMap.get(c.shapeAIdx),
-              shapeBIdx: indexMap.get(c.shapeBIdx),
-            };
-          });
+          .map((c) => remapConstraintShapeIndices(c, indexMap))
+          .filter(Boolean);
         return Object.assign({}, item, { shapes, constraints });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
@@ -1019,40 +1136,60 @@ export const createSketchSlice = (set) => ({
       const item = state.items.find((i) => i.id === sketchId);
       const mirrorState = state.sketchMirrorState;
       if (!item || !mirrorState || mirrorState.lineIdx == null) return {};
-      const shapes = item.shapes || [];
-      const lineIdx = mirrorState.lineIdx;
-      const lineShape = shapes[lineIdx];
-      const sel = (mirrorState.shapeIndices || []).filter(
-        (idx) =>
-          idx !== lineIdx && MIRRORABLE_TYPES.includes(shapes[idx]?.type),
-      );
-      if (!lineShape || lineShape.type !== "line" || sel.length === 0)
-        return { activeSketchTool: null, sketchMirrorState: null };
+      const done = { activeSketchTool: null, sketchMirrorState: null };
 
-      const base = shapes.length;
+      // Edit mode: drop the old copies first, reindexing every surviving
+      // constraint, and bring the line + source selection into the reduced
+      // frame.
+      let workShapes = item.shapes || [];
+      let workConstraints = item.constraints || [];
+      let lineIdx = mirrorState.lineIdx;
+      let selRaw = mirrorState.shapeIndices || [];
+      const copyIndices = mirrorState.editCopyIndices || [];
+      const editing = copyIndices.length > 0;
+      if (editing) {
+        const r = removeCopiesForEdit(workShapes, workConstraints, copyIndices);
+        workShapes = r.workShapes;
+        workConstraints = r.workConstraints;
+        lineIdx = r.remapIdx(lineIdx);
+        selRaw = selRaw.map(r.remapIdx).filter((i) => i != null);
+      }
+
+      const lineShape = lineIdx == null ? null : workShapes[lineIdx];
+      const sel = selRaw.filter(
+        (idx) =>
+          idx !== lineIdx && MIRRORABLE_TYPES.includes(workShapes[idx]?.type),
+      );
+      if (!lineShape || lineShape.type !== "line" || sel.length === 0) {
+        // A valid edit that empties the mirror still commits the removal.
+        if (!editing) return done;
+      }
+
+      const base = workShapes.length;
       const newShapes = [];
       const newConstraints = [];
-      sel.forEach((origIdx) => {
-        const copy = mirrorShapeGeometry(shapes[origIdx], lineShape);
-        if (!copy) return;
-        const newIdx = base + newShapes.length;
-        newShapes.push(copy);
-        newConstraints.push({
-          type: "mirror",
-          shapeIdx: newIdx,
-          origIdx,
-          lineIdx,
+      if (lineShape && lineShape.type === "line") {
+        sel.forEach((origIdx) => {
+          const copy = mirrorShapeGeometry(workShapes[origIdx], lineShape);
+          if (!copy) return;
+          const newIdx = base + newShapes.length;
+          newShapes.push(copy);
+          newConstraints.push({
+            type: "mirror",
+            shapeIdx: newIdx,
+            origIdx,
+            lineIdx,
+          });
         });
-      });
-      if (newShapes.length === 0)
-        return { activeSketchTool: null, sketchMirrorState: null };
+      }
+      if (newShapes.length === 0 && !editing) return done;
 
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((it) =>
         it.id === sketchId
           ? Object.assign({}, it, {
-              shapes: [...shapes, ...newShapes],
-              constraints: [...(it.constraints || []), ...newConstraints],
+              shapes: [...workShapes, ...newShapes],
+              constraints: [...workConstraints, ...newConstraints],
             })
           : it,
       );
@@ -1096,57 +1233,78 @@ export const createSketchSlice = (set) => ({
       const patternState = state.sketchCircularPatternState;
       if (!item || !patternState || patternState.centerShapeIdx == null)
         return {};
-      const shapes = item.shapes || [];
-      const { centerShapeIdx, centerPointKey } = patternState;
       const count = Math.max(2, Math.round(patternState.count) || 2);
-      const sel = (patternState.shapeIndices || []).filter((idx) =>
-        CIRCULAR_PATTERNABLE_TYPES.includes(shapes[idx]?.type),
-      );
-      if (sel.length === 0)
-        return {
-          activeSketchTool: null,
-          sketchCircularPatternState: null,
-          circularPatternDefaultCount: count,
-        };
+      const { centerPointKey } = patternState;
+      const done = {
+        activeSketchTool: null,
+        sketchCircularPatternState: null,
+        circularPatternDefaultCount: count,
+      };
 
-      const base = shapes.length;
+      // Edit mode: drop the old copies first, reindexing every surviving
+      // constraint, and bring the centre + source selection into the reduced
+      // frame.
+      let workShapes = item.shapes || [];
+      let workConstraints = item.constraints || [];
+      let centerShapeIdx = patternState.centerShapeIdx;
+      let selRaw = patternState.shapeIndices || [];
+      const copyIndices = patternState.editCopyIndices || [];
+      const editing = copyIndices.length > 0;
+      if (editing) {
+        const r = removeCopiesForEdit(workShapes, workConstraints, copyIndices);
+        workShapes = r.workShapes;
+        workConstraints = r.workConstraints;
+        centerShapeIdx = r.remapIdx(centerShapeIdx);
+        selRaw = selRaw.map(r.remapIdx).filter((i) => i != null);
+      }
+
+      const sel =
+        centerShapeIdx == null
+          ? []
+          : selRaw.filter((idx) =>
+              CIRCULAR_PATTERNABLE_TYPES.includes(workShapes[idx]?.type),
+            );
+      if (sel.length === 0 && !editing) return done;
+
+      const base = workShapes.length;
       const newShapes = [];
       const newConstraints = [];
-      sel.forEach((origIdx) => {
-        for (let index = 1; index < count; index++) {
-          const angle = (index * 2 * Math.PI) / count;
-          const copy = rotateShapeGeometry(
-            shapes[origIdx],
-            getShapePoint(shapes[centerShapeIdx], centerPointKey),
-            angle,
-          );
-          if (!copy) continue;
-          const newIdx = base + newShapes.length;
-          newShapes.push(copy);
-          newConstraints.push({
-            type: "circularPattern",
-            shapeIdx: newIdx,
-            origIdx,
-            centerShapeIdx,
-            centerPointKey,
-            count,
-            index,
-          });
-        }
-      });
-      if (newShapes.length === 0)
-        return {
-          activeSketchTool: null,
-          sketchCircularPatternState: null,
-          circularPatternDefaultCount: count,
-        };
+      if (centerShapeIdx != null) {
+        const center = getShapePoint(
+          workShapes[centerShapeIdx],
+          centerPointKey,
+        );
+        sel.forEach((origIdx) => {
+          for (let index = 1; index < count; index++) {
+            const angle = (index * 2 * Math.PI) / count;
+            const copy = rotateShapeGeometry(
+              workShapes[origIdx],
+              center,
+              angle,
+            );
+            if (!copy) continue;
+            const newIdx = base + newShapes.length;
+            newShapes.push(copy);
+            newConstraints.push({
+              type: "circularPattern",
+              shapeIdx: newIdx,
+              origIdx,
+              centerShapeIdx,
+              centerPointKey,
+              count,
+              index,
+            });
+          }
+        });
+      }
+      if (newShapes.length === 0 && !editing) return done;
 
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((it) =>
         it.id === sketchId
           ? Object.assign({}, it, {
-              shapes: [...shapes, ...newShapes],
-              constraints: [...(it.constraints || []), ...newConstraints],
+              shapes: [...workShapes, ...newShapes],
+              constraints: [...workConstraints, ...newConstraints],
             })
           : it,
       );
@@ -1204,12 +1362,38 @@ export const createSketchSlice = (set) => ({
         rectangularPatternDefaultOffsetX: offsetX,
         rectangularPatternDefaultOffsetY: offsetY,
       };
-      const sel = (patternState.shapeIndices || []).filter((idx) =>
-        RECTANGULAR_PATTERNABLE_TYPES.includes(shapes[idx]?.type),
-      );
-      if (sel.length === 0) return defaults;
+      // Edit mode (double-clicked an existing pattern): drop the old copies
+      // first, reindexing every surviving constraint, and carry the source
+      // selection through the same remap so it still points at the originals.
+      let workShapes = shapes;
+      let workConstraints = item.constraints || [];
+      let selRaw = patternState.shapeIndices || [];
+      const copyIndices = patternState.editCopyIndices || [];
+      const editing = copyIndices.length > 0;
+      if (editing) {
+        const copySet = new Set(copyIndices);
+        const indexMap = new Map();
+        let ni = 0;
+        workShapes.forEach((_, i) =>
+          indexMap.set(i, copySet.has(i) ? -1 : ni++),
+        );
+        workShapes = workShapes.filter((_, i) => !copySet.has(i));
+        workConstraints = workConstraints
+          .map((c) => remapConstraintShapeIndices(c, indexMap))
+          .filter(Boolean);
+        selRaw = selRaw
+          .map((i) => indexMap.get(i))
+          .filter((i) => i != null && i !== -1);
+      }
 
-      const base = shapes.length;
+      const sel = selRaw.filter((idx) =>
+        RECTANGULAR_PATTERNABLE_TYPES.includes(workShapes[idx]?.type),
+      );
+      // Nothing to do only when we're not editing — an edit with no sources
+      // (or counts of 1×1) still has to commit the removal of the old copies.
+      if (sel.length === 0 && !editing) return defaults;
+
+      const base = workShapes.length;
       const newShapes = [];
       const newConstraints = [];
       sel.forEach((origIdx) => {
@@ -1217,7 +1401,7 @@ export const createSketchSlice = (set) => ({
           for (let j = 0; j < countY; j++) {
             if (i === 0 && j === 0) continue;
             const copy = translateShapeGeometry(
-              shapes[origIdx],
+              workShapes[origIdx],
               i * offsetX,
               j * offsetY,
             );
@@ -1238,14 +1422,14 @@ export const createSketchSlice = (set) => ({
           }
         }
       });
-      if (newShapes.length === 0) return defaults;
+      if (newShapes.length === 0 && !editing) return defaults;
 
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((it) =>
         it.id === sketchId
           ? Object.assign({}, it, {
-              shapes: [...shapes, ...newShapes],
-              constraints: [...(it.constraints || []), ...newConstraints],
+              shapes: [...workShapes, ...newShapes],
+              constraints: [...workConstraints, ...newConstraints],
             })
           : it,
       );

@@ -68,6 +68,24 @@ const rectangularPatternShapeIdxSet = (item) =>
       .map((c) => c.shapeIdx),
   );
 
+// The copy shapes of the mirror / pattern currently being edited (double-click
+// → beginXEdit stamps editCopyIndices on the active tool's state).  These are
+// hidden while editing so the live preview shows source + preview only, like
+// the initial creation.  Empty when no edit is in progress on this sketch.
+const editHiddenShapeIdxSet = (sketchId) => {
+  const s = useStore.getState();
+  if (s.selectedId !== sketchId) return new Set();
+  const st =
+    s.activeSketchTool === "mirror"
+      ? s.sketchMirrorState
+      : s.activeSketchTool === "circularPattern"
+        ? s.sketchCircularPatternState
+        : s.activeSketchTool === "rectangularPattern"
+          ? s.sketchRectangularPatternState
+          : null;
+  return new Set(st?.editCopyIndices || []);
+};
+
 // ── Object-view sketch lines (all sketches, lines only) ──────────────────────
 
 export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
@@ -270,6 +288,10 @@ export function buildSketchShapesGroup(
     return v;
   };
 
+  // While editing a mirror / pattern, its existing copies are hidden so the
+  // live preview reads like the initial creation (source + preview only).
+  const editHidden = editHiddenShapeIdxSet(selItem.id);
+
   // ── Shape lines (Line2 for actual pixel-width thickness) ──────────────────
   const offsetIdxs = offsetShapeIdxSet(selItem);
   const mirrorIdxs = mirrorShapeIdxSet(selItem);
@@ -277,8 +299,17 @@ export function buildSketchShapesGroup(
   const rectangularPatternIdxs = rectangularPatternShapeIdxSet(selItem);
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
+    if (editHidden.has(shapeIdx)) return;
     const pts = getSketchShapePoints(shape, sketchMesh);
-    if (pts.length < 2) return;
+    if (pts.length < 2) {
+      // A standalone point has no polyline; still emit its node dot so it's
+      // visible and pickable.
+      if (shape.type === "point")
+        getSnapPoints([shape]).forEach((sp) =>
+          dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)),
+        );
+      return;
+    }
 
     const isBevel = shape.kind === "bevel";
     const isDashed = !!shape.dashed;
@@ -358,6 +389,7 @@ export function buildSketchShapesGroup(
       toWorld,
       res,
       showDimensions,
+      editHidden,
     );
 
   // ── Enclosed region fills (hole-aware, hidden until hover) ──────────────────

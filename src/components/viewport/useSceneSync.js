@@ -83,6 +83,7 @@ export function useSceneSync({
   pathTraceView,
   curveSegments,
   printPrecision,
+  activeSketchTool,
   setSketchMode,
   setSketchDrawPhase,
   setRotationState,
@@ -474,6 +475,9 @@ export function useSceneSync({
     constraintsVisible,
     dimensionsVisible,
     curveResolution,
+    // Entering / leaving a mirror-or-pattern edit (double-click) toggles which
+    // copies are hidden, so the in-sketch group must rebuild on tool change.
+    activeSketchTool,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Object-view sketch construction lines ────────────────────────────────

@@ -22,6 +22,8 @@ export function varFields(s) {
       return ["cx", "cy", "rx", "ry", "rotation"];
     case "arc":
       return ["cx", "cy", "r", "startAngle", "endAngle"];
+    case "point":
+      return ["x", "y"];
     default:
       return []; // bezier & unknowns: treated as fixed
   }
@@ -45,6 +47,7 @@ export function fieldsForPoint(shape, key) {
     shape.type === "arc"
   )
     return key === "center" ? ["cx", "cy"] : [];
+  if (shape.type === "point") return ["x", "y"];
   return [];
 }
 
@@ -77,6 +80,8 @@ function pointOf(s, key) {
   } else if (s.type === "bezier") {
     if (key === "p0") return { x: s.p0.x, y: s.p0.y };
     if (key === "p3") return { x: s.p3.x, y: s.p3.y };
+  } else if (s.type === "point") {
+    return { x: s.x, y: s.y };
   }
   return null;
 }

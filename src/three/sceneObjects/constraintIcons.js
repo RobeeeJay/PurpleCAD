@@ -34,6 +34,7 @@ export function addConstraintIconsToGroup(
   toWorld,
   res,
   showDimensions = true,
+  editHidden = null,
 ) {
   const R = 0.14;
   // The sketch plane's normal in world space (toWorld maps sketch-local → world,
@@ -49,6 +50,14 @@ export function addConstraintIconsToGroup(
   // editable dimension label per group (they all carry the same distance).
   const seenOffsetGroups = new Set();
   constraints.forEach((c, ci) => {
+    // Skip the icon of a mirror / pattern copy that's hidden while its
+    // operation is being edited (the copy shape itself is hidden too).
+    if (
+      editHidden &&
+      typeof c.shapeIdx === "number" &&
+      editHidden.has(c.shapeIdx)
+    )
+      return;
     const tag = (obj, iconLocalPos, shapeIndices, color) => {
       obj.userData.isConstraintObj = true;
       obj.userData.isConstraint = true;

@@ -378,6 +378,7 @@ export function createSketchInteraction(
     itemsRef,
     selectedIdRef,
     sketchShapesGroupRef,
+    renderer,
   });
   const { clearMirrorPreview, updateMirrorPreview, handleMirrorClick } =
     sketchMirror;
@@ -405,6 +406,7 @@ export function createSketchInteraction(
     itemsRef,
     selectedIdRef,
     sketchShapesGroupRef,
+    renderer,
   });
   const {
     clearRectangularPatternPreview,
@@ -1272,6 +1274,12 @@ export function createSketchInteraction(
           sketchDrag = null;
           renderer.domElement.style.cursor = "";
           longPressMenuOpen = true;
+          // Cancel the pending marquee armed on mouse-down — a long press opens
+          // the element list, it must not also start a selection box if the
+          // cursor drifts while held.
+          marqueeStartScreen = null;
+          marqueeActive = false;
+          clearMarqueeRect();
           useStore
             .getState()
             .setSketchLongPressMenu({ x: downX, y: downY, items });
@@ -1289,6 +1297,9 @@ export function createSketchInteraction(
 
   const onSketchMouseMove = (e) => {
     if (!sketchModeRef.current) return false;
+    // While the long-press element list is open, ignore canvas motion — no
+    // marquee, no hover repaint underneath it.
+    if (longPressMenuOpen) return true;
     if (
       activeSketchToolRef.current === "mirror" ||
       activeSketchToolRef.current === "circularPattern" ||
@@ -1341,8 +1352,73 @@ export function createSketchInteraction(
     return true;
   };
 
+  // Closest point on segment AB to P (all in sketch-local coords).
+  const closestOnSegment = (px, py, ax, ay, bx, by) => {
+    const dx = bx - ax,
+      dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1e-12;
+    let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return { x: ax + t * dx, y: ay + t * dy };
+  };
+
+  // "Point" tool: a single click drops a standalone point.  Clicking on a line
+  // snaps the point onto it and adds an onLine constraint so the point rides
+  // the line through later edits.
+  const handlePointClick = (clientX, clientY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    let local = screenToSketchLocal(clientX, clientY, sketchMesh);
+    if (!local) return;
+    const shapes = selItem.shapes || [];
+
+    const sketchGroup = sketchShapesGroupRef?.current;
+    const lineObjs = sketchGroup
+      ? sketchGroup.children.filter(
+          (c) =>
+            c.userData.shapeIdx != null &&
+            !c.userData.isOffset &&
+            !c.userData.isMirror &&
+            !c.userData.isCircularPattern &&
+            !c.userData.isRectangularPattern,
+        )
+      : [];
+    const hits = hitTestSketchLines(makeRay(clientX, clientY), lineObjs);
+    const constraints = [];
+    if (hits.length > 0) {
+      const lineIdx = hits[0].object.userData.shapeIdx;
+      const ln = shapes[lineIdx];
+      if (ln?.type === "line") {
+        // Snap exactly onto the segment so the onLine residual starts at zero.
+        local = closestOnSegment(local.x, local.y, ln.x1, ln.y1, ln.x2, ln.y2);
+        constraints.push({
+          type: "onLine",
+          pointShapeIdx: shapes.length, // index of the point we're appending
+          pointKey: "p",
+          lineShapeIdx: lineIdx,
+        });
+      }
+    }
+    useStore
+      .getState()
+      .addSketchShape(
+        selItem.id,
+        { type: "point", x: local.x, y: local.y },
+        constraints,
+      );
+  };
+
   const onSketchMouseUp = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
+    if (activeSketchToolRef.current === "point") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) handlePointClick(e.clientX, e.clientY);
+      return true;
+    }
     if (activeSketchToolRef.current === "mirror") {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
@@ -1437,7 +1513,10 @@ export function createSketchInteraction(
             if (
               !cObj.userData.isConstraint ||
               (cObj.userData.constraintType !== "distance" &&
-                cObj.userData.constraintType !== "offset")
+                cObj.userData.constraintType !== "offset" &&
+                cObj.userData.constraintType !== "rectangularPattern" &&
+                cObj.userData.constraintType !== "mirror" &&
+                cObj.userData.constraintType !== "circularPattern")
             )
               continue;
             const lp = cObj.userData.constraintIconLocalPos;
@@ -1469,6 +1548,29 @@ export function createSketchInteraction(
                   defaultDistance: c.distance,
                 });
                 useStore.getState().setSketchConstraintMode("distance");
+              } else if (c && c.type === "rectangularPattern") {
+                // Re-open the Rectangular Pattern tool seeded from this pattern
+                // so its counts/offsets can be edited and re-confirmed.
+                useStore
+                  .getState()
+                  .beginRectangularPatternEdit(
+                    selectedIdRef.current,
+                    cObj.userData.constraintIdx,
+                  );
+              } else if (c && c.type === "mirror") {
+                useStore
+                  .getState()
+                  .beginMirrorEdit(
+                    selectedIdRef.current,
+                    cObj.userData.constraintIdx,
+                  );
+              } else if (c && c.type === "circularPattern") {
+                useStore
+                  .getState()
+                  .beginCircularPatternEdit(
+                    selectedIdRef.current,
+                    cObj.userData.constraintIdx,
+                  );
               }
               return;
             }
@@ -1737,12 +1839,19 @@ export function createSketchInteraction(
         return;
       }
       const sel = useStore.getState().selectedSketchElement;
+      const selShapes =
+        itemsRef.current.find((i) => i.id === selectedIdRef.current)?.shapes ||
+        [];
       const toDelete =
         multiSelectedIndices.length > 0
           ? [...multiSelectedIndices]
           : sel?.type === "line"
             ? [sel.shapeIdx]
-            : null;
+            : // A selected standalone point deletes that point (a line's
+              // endpoint node, also type "point", is left alone).
+              sel?.type === "point" && selShapes[sel.shapeIdx]?.type === "point"
+              ? [sel.shapeIdx]
+              : null;
       if (toDelete?.length > 0) {
         e.preventDefault();
         useStore.getState().deleteSketchShapes(selectedIdRef.current, toDelete);

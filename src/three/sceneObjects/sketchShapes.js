@@ -188,6 +188,8 @@ export function moveShapePoint(shape, pointKey, newPos) {
       if (pointKey === "p2") return { ...shape, p2: { x, y } };
       break;
     }
+    case "point":
+      return { ...shape, x, y };
     default:
       break;
   }
@@ -235,6 +237,9 @@ export function getSnapPoints(shapes) {
         pts.push({ x: shape.p0.x, y: shape.p0.y, shapeIdx, pointKey: "p0" });
         pts.push({ x: shape.p3.x, y: shape.p3.y, shapeIdx, pointKey: "p3" });
         break;
+      case "point":
+        pts.push({ x: shape.x, y: shape.y, shapeIdx, pointKey: "p" });
+        break;
       default:
         break;
     }
@@ -274,6 +279,8 @@ export function getShapePoint(shape, pointKey) {
       return null;
     case "bezier":
       return shape[pointKey] ?? null;
+    case "point":
+      return { x: shape.x, y: shape.y };
     default:
       return null;
   }
