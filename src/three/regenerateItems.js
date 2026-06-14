@@ -9,7 +9,7 @@ import {
 // imported from the store (the orchestrator in regenerateOrchestrator.js
 // is what Viewport pulls in), so it's outside the worker's transitive
 // graph and the previous cycle no longer applies.
-import { chamferOrFilletItem, performCsg } from "./occClient.js";
+import { chamferOrFilletItem, pushPullFaces, performCsg } from "./occClient.js";
 
 // Items that came from CSG or chamfer operations store a `regenerator`
 // field describing how to re-run the operation.  This lets us recompute
@@ -111,6 +111,69 @@ async function regenerateChamfer(
   };
 }
 
+async function regeneratePushPull(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+  currentDepth,
+) {
+  const rawSubGeo = regenerator.subGeo || { faces: [] };
+  if ((rawSubGeo.faces?.length || 0) === 0) return null;
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    withLiveDepth(regenerator.source, currentDepth),
+    liveItems,
+    printPrecision,
+  );
+  // A sketch edit moves the polygon edges a side-face selection was bound to —
+  // re-point the face selections at the live edges so OCC can still find them.
+  const subGeo = remapExtrudeFaceSelections(
+    rawSubGeo,
+    regenerator.source,
+    source,
+  );
+  let result;
+  try {
+    result = await pushPullFaces({
+      source,
+      subGeo,
+      distance: regenerator.distance ?? 0,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Push/pull regen couldn't re-match its selection (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  // Keep the item's existing position (same rationale as regenerateChamfer):
+  // the re-tessellated geometry is bbox-centred, so the rendered centre is
+  // already item.position regardless of precision.
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
 async function regenerateBoolean(
   regenerator,
   accumulatedItems,
@@ -180,6 +243,14 @@ export async function regenerateItemsForResolution(
         item.position,
         item.depth,
       );
+    } else if (r.kind === "pushpull") {
+      result = await regeneratePushPull(
+        r,
+        out,
+        printPrecision,
+        item.position,
+        item.depth,
+      );
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
     }
@@ -191,7 +262,7 @@ export async function regenerateItemsForResolution(
       // changed.  Keep its last-good mesh but flag it so the timeline marks the
       // step bad until the user retargets / re-applies it.  Stop re-attempting
       // (settle regeneratedAt) so a clean pass doesn't spam OCC every recalc.
-      if (r.kind === "chamfer") {
+      if (r.kind === "chamfer" || r.kind === "pushpull") {
         changed = true;
         out.push({
           ...item,
@@ -215,7 +286,10 @@ export async function regenerateItemsForResolution(
       regeneratedAt: printPrecision,
       regenFailed: false,
     };
-    if (r.kind === "chamfer" && result.centerOffset) {
+    if (
+      (r.kind === "chamfer" || r.kind === "pushpull") &&
+      result.centerOffset
+    ) {
       nextRegen.centerOffset = result.centerOffset;
     }
     out.push({

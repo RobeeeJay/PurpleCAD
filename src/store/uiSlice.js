@@ -59,6 +59,13 @@ export const uiInitial = {
   // overlay, mirroring extrudeSelectMode's pick-then-confirm flow.
   chamferSelectMode: null,
 
+  // null | "pushpull" — toggled by the Modify toolbar's Push/Pull button.
+  // While set, PushPullOverlay shows a hint banner and (once
+  // selectedSubGeometry has faces) the distance confirmation overlay,
+  // mirroring chamferSelectMode.  Mutually exclusive with chamferSelectMode:
+  // entering one mode clears the other.
+  pushPullSelectMode: null,
+
   // Whether the Y=0 ground plane shows shadows for scene objects.
   shadowsEnabled: false,
 
@@ -149,7 +156,12 @@ export const createUiSlice = (set) => ({
   setExtrudeEditTarget: (target) => set({ extrudeEditTarget: target }),
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
   setChamferRetargetTarget: (target) => set({ chamferRetargetTarget: target }),
-  setChamferSelectMode: (mode) => set({ chamferSelectMode: mode }),
+  // Setting either face-select mode clears the other — only one pick/confirm
+  // overlay can be active at a time.
+  setChamferSelectMode: (mode) =>
+    set({ chamferSelectMode: mode, pushPullSelectMode: null }),
+  setPushPullSelectMode: (mode) =>
+    set({ pushPullSelectMode: mode, chamferSelectMode: null }),
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   toggleCrossSectionView: () =>
     set((state) => ({ crossSectionView: !state.crossSectionView })),

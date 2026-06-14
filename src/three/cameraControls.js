@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { createHighlightHelpers } from "./cameraControls/highlights.js";
 import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
+import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
@@ -350,6 +351,17 @@ export function attachCameraControls(ctx) {
       itemId,
     );
   controls.clearChamferPreview = () => chamferPreview.clearChamferPreview();
+
+  // Live preview for PushPullOverlay: re-runs the push/pull recipe against the
+  // current selectedSubGeometry faces + distance and overlays the result.
+  const pushPullPreview = createPushPullPreviewHelpers({
+    scene,
+    itemsRef,
+    objectsRef,
+  });
+  controls.updatePushPullPreview = (distanceMm) =>
+    pushPullPreview.updatePushPullPreview(distanceMm);
+  controls.clearPushPullPreview = () => pushPullPreview.clearPushPullPreview();
 
   // Live preview for MaterialDialog: instantly applies in-progress
   // color/finish edits to the live mesh(es) without a store write.

@@ -129,6 +129,39 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       return resultId;
     }
 
+    if (r.kind === "pushpull") {
+      const sourceId = buildItemShapeLocal(r.source, allItems, precision);
+      if (sourceId == null) return null;
+      const subGeo = r.subGeo || { faces: [] };
+      let resultId;
+      try {
+        resultId = occ.pushPullFaces(sourceId, subGeo, r.distance ?? 0);
+      } finally {
+        occ.releaseShape(sourceId);
+      }
+      if (!resultId) return null;
+      const offset = chamferCenterOffset(r, item);
+      if (
+        offset &&
+        (Math.abs(offset.x) > 1e-9 ||
+          Math.abs(offset.y) > 1e-9 ||
+          Math.abs(offset.z) > 1e-9)
+      ) {
+        const corrected = occ.transformShape(
+          resultId,
+          -offset.x,
+          -offset.y,
+          -offset.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
     if (r.kind === "boolean") {
       const inputShapeIds = (r.inputIds || [])
         .map((id) => allItems.find((i) => i.id === id))
@@ -307,6 +340,68 @@ async function chamferOrFilletItem({
   };
 }
 
+// Move the selected faces of an item along their normals by `distance`
+// (signed: +pull / -push).  Mirrors chamferOrFilletItem's structure: rebuild
+// the source shape, run the native push/pull, tessellate, and centre the
+// result on its bbox so the rendered mesh stays origin-centred.
+async function pushPullFaces({
+  source,
+  subGeo,
+  distance,
+  allItems,
+  printPrecision,
+}) {
+  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  if (sourceId == null) {
+    throw new Error(
+      "Could not rebuild the source shape — the item's recipe (boolean / chamfer / push-pull) is missing or references deleted inputs.",
+    );
+  }
+
+  let resultId;
+  try {
+    resultId = occ.pushPullFaces(sourceId, subGeo, distance);
+  } finally {
+    occ.releaseShape(sourceId);
+  }
+
+  if (!resultId) {
+    throw new Error(
+      "Push/pull couldn't find a matching face on the source shape. " +
+        "Try re-selecting the face on the current object.",
+    );
+  }
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2,
+    cy = (minY + maxY) / 2,
+    cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx;
+    centered[i + 1] -= cy;
+    centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: {
+      positions: centered,
+      normals: null,
+      indices: Array.from(tess.indices),
+    },
+    centerOffset: { cx, cy, cz },
+    resolvedSubGeo: subGeo,
+  };
+}
+
 async function performCsg({
   selectedItems,
   allItems,
@@ -472,6 +567,7 @@ async function exportSTEP({ items }) {
 
 export const ops = {
   chamferOrFilletItem,
+  pushPullFaces,
   performCsg,
   exportSTL,
   exportSTEP,

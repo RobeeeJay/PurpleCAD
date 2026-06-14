@@ -56,6 +56,9 @@ try {
   ipcMain.handle("occ:chamferOrFilletItem", (_e, args) =>
     occBridge.chamferOrFilletItem(args),
   );
+  ipcMain.handle("occ:pushPullFaces", (_e, args) =>
+    occBridge.pushPullFaces(args),
+  );
   ipcMain.handle("occ:exportSTL", (_e, args) => occBridge.exportSTL(args));
   ipcMain.handle("occ:exportSTEP", (_e, args) => occBridge.exportSTEP(args));
 } catch (err) {

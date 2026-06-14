@@ -475,6 +475,53 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
   return out;
 }
 
+// Resolve the actual faces a subGeo spec selects — the face-only analogue of
+// SelectSubGeoEdges (which explodes matched faces into their edges for
+// chamfer/fillet).  Matches by normal, using the stored centroid only as a
+// nearest tie-break among same-normal faces so a resized face still matches.
+// Used by push/pull, which needs the TopoDS_Face itself to sweep a prism.
+static std::vector<TopoDS_Face> SelectSubGeoFaces(const TopoDS_Shape& shape,
+                                                  const EdgeFaceSpec& spec) {
+  std::vector<TopoDS_Face> out;
+  const double eps = 0.05;
+  for (const auto& req : spec.faces) {
+    TopoDS_Face best;
+    double bestDist = 1e300;
+    bool found = false;
+    std::vector<TopoDS_Face> allNormalMatches;
+    TopExp_Explorer fexp(shape, TopAbs_FACE);
+    for (; fexp.More(); fexp.Next()) {
+      TopoDS_Face face = TopoDS::Face(fexp.Current());
+      auto n = ComputeFaceNormal(face);
+      if (!n.valid) continue;
+      if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
+          std::abs(req.nz - n.z) >= eps)
+        continue;
+      if (!req.hasCentroid) {
+        allNormalMatches.push_back(face);
+        continue;
+      }
+      gp_Pnt pnt(req.cx, req.cy, req.cz);
+      BRepBuilderAPI_MakeVertex vMk(pnt);
+      BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
+                                      Extrema_ExtAlgo_Grad);
+      dist.Perform();
+      double d = (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
+      if (!found || d < bestDist) {
+        best = face;
+        bestDist = d;
+        found = true;
+      }
+    }
+    if (req.hasCentroid) {
+      if (found) out.push_back(best);
+    } else {
+      for (const auto& f : allNormalMatches) out.push_back(f);
+    }
+  }
+  return out;
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Exported functions — primitives
 // ════════════════════════════════════════════════════════════════════════
@@ -779,6 +826,85 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// pushPullFaces(id, subGeo, distance) → newShapeId
+// Moves each selected planar face along its OUTWARD normal by `distance`
+// (signed: +pull grows the solid, -push shrinks it).  Each face is swept into
+// a feature prism that is fused (pull) or cut (push) from the solid; a final
+// ShapeUpgrade_UnifySameDomain welds the resulting coplanar side-wall seams so
+// the body stays a clean single solid — the same fuzzy-fuse + unify recipe the
+// union path uses to keep abutting geometry valid.
+//
+// subGeo: { faces?: [{nx,ny,nz,cx?,cy?,cz?}] }.  Edges are ignored — push/pull
+// operates on faces only.
+Napi::Number PushPullFaces(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id          = info[0].As<Napi::Number>().Int32Value();
+    Napi::Object sg = info[1].As<Napi::Object>();
+    double distance = GetDouble(info[2], 0.0);
+
+    TopoDS_Shape shape = FetchShape(id);
+    EdgeFaceSpec spec  = ParseSubGeo(sg);
+    // No faces, or a zero move — nothing to do; hand back the input unchanged.
+    if (spec.faces.empty() || std::abs(distance) < 1e-9)
+      return Napi::Number::New(env, StoreShape(shape));
+
+    auto faces = SelectSubGeoFaces(shape, spec);
+    // 0 = sentinel "no faces matched" — the JS bridge turns this into a
+    // descriptive error (same convention as chamfer/fillet).
+    if (faces.empty()) return Napi::Number::New(env, 0);
+
+    const bool pull = distance > 0;
+    const Standard_Real kFuzzy = 1.0e-5;
+    TopoDS_Shape result = shape;
+    try {
+      for (const auto& face : faces) {
+        FaceNormal n = ComputeFaceNormal(face);
+        if (!n.valid) continue;
+        // Signed sweep: outward (pull) or inward (push) by |distance|.  The
+        // prism is built from the ORIGINAL face geometry; since distinct faces
+        // don't overlap, fusing / cutting them onto the running result in any
+        // order yields the same solid.
+        gp_Vec vec(n.x * distance, n.y * distance, n.z * distance);
+        if (vec.Magnitude() < 1e-12) continue;
+        BRepPrimAPI_MakePrism prismMk(face, vec, Standard_False, Standard_True);
+        prismMk.Build();
+        if (!prismMk.IsDone()) continue;
+        TopoDS_Shape prism = prismMk.Shape();
+        if (pull) {
+          BRepAlgoAPI_Fuse fuse(result, prism);
+          fuse.SetFuzzyValue(kFuzzy);
+          fuse.Build();
+          if (!fuse.IsDone()) throw std::runtime_error("fuse rejected the prism");
+          result = fuse.Shape();
+        } else {
+          BRepAlgoAPI_Cut cut(result, prism);
+          cut.SetFuzzyValue(kFuzzy);
+          cut.Build();
+          if (!cut.IsDone()) throw std::runtime_error("cut rejected the prism");
+          result = cut.Shape();
+        }
+      }
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+        std::string("Push/pull failed — try a smaller distance or a different "
+                    "face (") + e.what() + ")");
+    }
+
+    // Weld coplanar seams the fuse/cut left behind.  Fall back to the raw
+    // boolean result if unification rejects it (matches the union path).
+    try {
+      ShapeUpgrade_UnifySameDomain unifier(
+        result, Standard_True, Standard_True, Standard_True);
+      unifier.Build();
+      result = unifier.Shape();
+    } catch (const std::exception&) {
+      // keep the un-unified result
+    }
+    return Napi::Number::New(env, StoreShape(result));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // enrichSubGeo(shapeId, subGeo) → subGeo with each edge's two adjacent face
 // normals resolved (n1, n2).  Called once at chamfer/fillet creation — when
 // the stored endpoint coordinates still line up with the (pre-resize) shape —
@@ -994,6 +1120,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   // Chamfer / fillet
   exports.Set("chamferShape",       Napi::Function::New(env, ChamferShape));
   exports.Set("filletShape",        Napi::Function::New(env, FilletShape));
+  exports.Set("pushPullFaces",      Napi::Function::New(env, PushPullFaces));
   exports.Set("enrichSubGeo",       Napi::Function::New(env, EnrichSubGeo));
 
   // Tessellation

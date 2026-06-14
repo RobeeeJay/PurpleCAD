@@ -6,6 +6,8 @@ const BevelSection = ({ bare = false }) => {
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const chamferSelectMode = useStore((s) => s.chamferSelectMode);
   const setChamferSelectMode = useStore((s) => s.setChamferSelectMode);
+  const pushPullSelectMode = useStore((s) => s.pushPullSelectMode);
+  const setPushPullSelectMode = useStore((s) => s.setPushPullSelectMode);
 
   const toggleMode = (mode) => {
     if (chamferSelectMode === mode) {
@@ -13,6 +15,17 @@ const BevelSection = ({ bare = false }) => {
       clearSelectedSubGeometry();
     } else {
       setChamferSelectMode(mode);
+    }
+  };
+
+  // Push/Pull shares the face-selection UX with chamfer/fillet; its store
+  // setter clears chamferSelectMode so only one pick/confirm overlay is live.
+  const togglePushPull = () => {
+    if (pushPullSelectMode) {
+      setPushPullSelectMode(null);
+      clearSelectedSubGeometry();
+    } else {
+      setPushPullSelectMode("pushpull");
     }
   };
 
@@ -130,6 +143,65 @@ const BevelSection = ({ bare = false }) => {
             y1="8"
             x2="10"
             y2="8"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${pushPullSelectMode ? "active" : ""}`}
+        title="Push/Pull — select faces, then confirm a distance to move them along their normal"
+        onClick={togglePushPull}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.25)"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="4,9 10,6 16,9 10,12"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            x1="4"
+            y1="9"
+            x2="4"
+            y2="16"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            x1="10"
+            y1="12"
+            x2="10"
+            y2="19"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            x1="16"
+            y1="9"
+            x2="16"
+            y2="16"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="20"
+            y1="13"
+            x2="20"
+            y2="3"
+          />
+          <polyline
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="17.5,5.5 20,3 22.5,5.5"
           />
         </svg>
       </button>

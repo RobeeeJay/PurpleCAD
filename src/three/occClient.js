@@ -90,6 +90,10 @@ export function chamferOrFilletItem(args) {
   return runOp("chamferOrFilletItem", args);
 }
 
+export function pushPullFaces(args) {
+  return runOp("pushPullFaces", args);
+}
+
 export function performCsg(args) {
   return runOp("performCsg", args);
 }

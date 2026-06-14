@@ -5,6 +5,7 @@ import BusyIndicator from "./BusyIndicator";
 import PathTraceProgress from "./PathTraceProgress";
 import SketchOverlays from "./viewport/SketchOverlays";
 import ChamferOverlay from "./viewport/ChamferOverlay";
+import PushPullOverlay from "./viewport/PushPullOverlay";
 import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
 import { useSceneSync } from "./viewport/useSceneSync";
@@ -297,6 +298,7 @@ const Viewport = () => {
         selectItem={selectItem}
       />
       <ChamferOverlay />
+      <PushPullOverlay />
       {widgetVisible && (
         <RotationWidget
           rotationState={rotationState}

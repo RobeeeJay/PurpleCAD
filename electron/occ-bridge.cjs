@@ -164,6 +164,28 @@ function buildItemShapeLocal(item, allItems, precision) {
       return resultId;
     }
 
+    if (regen.kind === "pushpull") {
+      const sourceId = buildItemShapeLocal(regen.source, allItems, precision);
+      if (sourceId == null) return null;
+      const subGeo = regen.subGeo || { faces: [] };
+      let resultId;
+      try {
+        resultId = occ.pushPullFaces(sourceId, subGeo, regen.distance ?? 0);
+      } finally {
+        occ.releaseShape(sourceId);
+      }
+      if (!resultId) return null;
+      // Apply the -centerOffset correction so this shape's local frame matches
+      // the rendered geometryData frame (mirrors csgUtils.js / occOps.js).
+      const off = regen.centerOffset;
+      if (off) {
+        const corrected = occ.transformShape(resultId, -off.cx, -off.cy, -off.cz, 0, 0, 0);
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
     if (regen.kind === "boolean") {
       const inputShapeIds = (regen.inputIds || [])
         .map(id => allItems.find(i => i.id === id))
@@ -359,6 +381,53 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
   };
 }
 
+// Mirrors occOps.js#pushPullFaces — move the selected faces along their
+// normals by `distance` (signed: +pull / -push), then bbox-centre the result.
+function pushPullFaces({ source, subGeo, distance, allItems, printPrecision }) {
+  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  if (sourceId == null) {
+    throw new Error(
+      "Could not rebuild the source shape — the item's recipe (boolean / chamfer / push-pull) is missing or references deleted inputs."
+    );
+  }
+
+  let resultId;
+  try {
+    resultId = occ.pushPullFaces(sourceId, subGeo, distance);
+  } finally {
+    occ.releaseShape(sourceId);
+  }
+
+  if (!resultId) {
+    throw new Error(
+      "Push/pull couldn't find a matching face on the source shape. " +
+      "Try re-selecting the face on the current object."
+    );
+  }
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
+  }
+
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
+    resolvedSubGeo: subGeo,
+  };
+}
+
 // ── Export helpers ────────────────────────────────────────────────────────
 
 const EXPORTABLE_TYPES = new Set(["cube", "sphere", "cylinder", "torus", "extrude", "csg"]);
@@ -467,4 +536,4 @@ function exportSTEP({ items }) {
   }
 }
 
-module.exports = { performCsg, chamferOrFilletItem, exportSTL, exportSTEP };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, exportSTL, exportSTEP };
