@@ -6,6 +6,7 @@ import Timeline from "./components/Timeline";
 import VariablesDialog from "./components/VariablesDialog";
 import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
 import ChamferEditDialog from "./components/ChamferEditDialog";
+import PushPullEditDialog from "./components/PushPullEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
@@ -86,6 +87,7 @@ function App() {
       <VariablesDialog />
       <ExtrudeLengthDialog />
       <ChamferEditDialog />
+      <PushPullEditDialog />
       <MaterialDialog />
       <SettingsDialog />
       <AboutDialog />

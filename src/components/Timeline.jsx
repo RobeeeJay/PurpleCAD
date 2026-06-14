@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { useStore } from "../store";
 import { beginChamferRetarget } from "../three/cameraControls/chamferCommit.js";
+import { beginPushPullRetarget } from "../three/cameraControls/pushPull.js";
 import {
   CubeIcon,
   SphereIcon,
@@ -28,12 +29,23 @@ const chamferInfo = (entry) => {
   return { isFillet: r.segments !== 1 };
 };
 
-// A chamfer/fillet whose regen couldn't rebuild after the geometry changed (the
-// selected edge/face vanished or OCC rejected it).  The step keeps its stale
-// mesh and is flagged bad until the user retargets / re-applies it.
+// Detect push/pull entries — a modify whose regenerator is a push/pull op.
+const pushPullInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  const r = inst.patches?.regenerator;
+  if (r?.kind !== "pushpull") return null;
+  return { distance: r.distance ?? 0 };
+};
+
+// A chamfer/fillet/push-pull whose regen couldn't rebuild after the geometry
+// changed (the selected edge/face vanished or OCC rejected it).  The step keeps
+// its stale mesh and is flagged bad until the user retargets / re-applies it.
 const chamferFailed = (entry) => {
   const r = entry?.instruction?.patches?.regenerator;
-  return r?.kind === "chamfer" && r.regenFailed === true;
+  return (
+    (r?.kind === "chamfer" || r?.kind === "pushpull") && r.regenFailed === true
+  );
 };
 
 // The icon a "create"/"createGroup" item type appears as on the Create
@@ -275,6 +287,12 @@ const Timeline = () => {
   const setChamferEditTarget = useStore((state) => state.setChamferEditTarget);
   const chamferRetargetTarget = useStore(
     (state) => state.chamferRetargetTarget,
+  );
+  const setPushPullEditTarget = useStore(
+    (state) => state.setPushPullEditTarget,
+  );
+  const pushPullRetargetTarget = useStore(
+    (state) => state.pushPullRetargetTarget,
   );
   const selectItem = useStore((state) => state.selectItem);
   const undoCount = useStore((state) => state.undoStack.length);
@@ -574,6 +592,101 @@ const Timeline = () => {
                           />
                         </>
                       )}
+                    </svg>
+                  </button>
+                </>
+              )}
+              {pushPullInfo(entry) && (
+                <>
+                  <button
+                    className={`timeline-action-btn${
+                      pushPullRetargetTarget?.itemId === entry.itemId
+                        ? " active"
+                        : ""
+                    }`}
+                    title="Retarget push/pull — adjust the selected face(s) and confirm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      restoreToHistory(entry.id);
+                      selectItem(entry.itemId);
+                      beginPushPullRetarget(entry.itemId, entry.id);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                      <rect
+                        x="3"
+                        y="14"
+                        width="12"
+                        height="7"
+                        rx="1"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      />
+                      <polygon
+                        points="3,14 6,9 18,9 18,14"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        opacity="0.6"
+                      />
+                      <circle
+                        cx="19"
+                        cy="5"
+                        r="3"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <circle cx="19" cy="5" r="1" fill="currentColor" />
+                    </svg>
+                  </button>
+                  <button
+                    className="timeline-action-btn"
+                    title="Edit push/pull distance"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPushPullEditTarget({ entryId: entry.id });
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                      <rect
+                        x="6"
+                        y="9"
+                        width="12"
+                        height="6"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <line
+                        x1="12"
+                        y1="2"
+                        x2="12"
+                        y2="9"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <polygon
+                        points="12,2 9.5,5 14.5,5"
+                        fill="currentColor"
+                        stroke="currentColor"
+                        strokeWidth="0.5"
+                      />
+                      <line
+                        x1="12"
+                        y1="15"
+                        x2="12"
+                        y2="22"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <polygon
+                        points="12,22 9.5,19 14.5,19"
+                        fill="currentColor"
+                        stroke="currentColor"
+                        strokeWidth="0.5"
+                      />
                     </svg>
                   </button>
                 </>

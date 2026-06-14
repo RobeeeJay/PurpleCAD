@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { commitPushPull } from "../../three/cameraControls/pushPull.js";
+import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 
 const PREVIEW_DEBOUNCE_MS = 250;
 
@@ -19,8 +20,23 @@ export default function PushPullOverlay() {
   const items = useStore((s) => s.items);
   const curveResolution = useStore((s) => s.curveResolution);
   const showNotification = useStore((s) => s.showNotification);
+  const pushPullRetargetTarget = useStore((s) => s.pushPullRetargetTarget);
+  const setPushPullRetargetTarget = useStore(
+    (s) => s.setPushPullRetargetTarget,
+  );
 
   const [distanceMm, setDistanceMm] = useState(1);
+
+  // Retarget pre-selects the prior faces and arms pushPullRetargetTarget —
+  // seed the distance from that op's recipe so Confirm reproduces it by default
+  // (the user can still tweak it before confirming).
+  useEffect(() => {
+    if (!pushPullRetargetTarget) return;
+    const item = items.find((i) => i.id === pushPullRetargetTarget.itemId);
+    const prior = item?.regenerator;
+    if (prior?.kind !== "pushpull") return;
+    setDistanceMm((prior.distance ?? 0.1) * MM_PER_UNIT);
+  }, [pushPullRetargetTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasSelection = (selectedSubGeometry?.faces?.length ?? 0) > 0;
 
@@ -49,6 +65,7 @@ export default function PushPullOverlay() {
     useStore.getState()._cameraControls?.clearPushPullPreview?.();
     clearSelectedSubGeometry();
     setPushPullSelectMode(null);
+    setPushPullRetargetTarget(null);
   };
 
   const applyPushPull = async () => {

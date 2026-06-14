@@ -361,6 +361,8 @@ export function attachCameraControls(ctx) {
   });
   controls.updatePushPullPreview = (distanceMm) =>
     pushPullPreview.updatePushPullPreview(distanceMm);
+  controls.updatePushPullEditPreview = (regenerator, distanceMm, itemId) =>
+    pushPullPreview.updatePushPullEditPreview(regenerator, distanceMm, itemId);
   controls.clearPushPullPreview = () => pushPullPreview.clearPushPullPreview();
 
   // Live preview for MaterialDialog: instantly applies in-progress

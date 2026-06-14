@@ -66,6 +66,16 @@ export const uiInitial = {
   // entering one mode clears the other.
   pushPullSelectMode: null,
 
+  // Set by the Timeline's push/pull "Retarget" button: { itemId, entryId }.
+  // While set, PushPullOverlay re-applies to the next face selection by
+  // updating entryId's history entry in place (rather than appending a new
+  // step), then clears back to null — mirrors chamferRetargetTarget.
+  pushPullRetargetTarget: null,
+
+  // Modal state for editing a committed push/pull's distance from the
+  // timeline: { entryId }.  Mirrors chamferEditTarget.
+  pushPullEditTarget: null,
+
   // Whether the Y=0 ground plane shows shadows for scene objects.
   shadowsEnabled: false,
 
@@ -162,6 +172,9 @@ export const createUiSlice = (set) => ({
     set({ chamferSelectMode: mode, pushPullSelectMode: null }),
   setPushPullSelectMode: (mode) =>
     set({ pushPullSelectMode: mode, chamferSelectMode: null }),
+  setPushPullRetargetTarget: (target) =>
+    set({ pushPullRetargetTarget: target }),
+  setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   toggleCrossSectionView: () =>
     set((state) => ({ crossSectionView: !state.crossSectionView })),

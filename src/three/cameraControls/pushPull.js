@@ -8,10 +8,38 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { withLivePolygons, withLiveDepth } from "../csgUtils.js";
-import { chamferResultTransform } from "./chamferCommit.js";
+import {
+  chamferResultTransform,
+  shiftSelectionToSource,
+} from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 
 const GHOST_OPACITY = 0.12;
+
+// Arm a push/pull retarget: pre-select the faces the original op used (shifted
+// from the source frame back into this item's rendered, bbox-centred frame)
+// and open PushPullOverlay.  The user can then add/remove faces (live preview)
+// before confirming, which updates the entry in place.  Mirrors
+// beginChamferRetarget.
+export const beginPushPullRetarget = (itemId, entryId) => {
+  const store = useStore.getState();
+  const item = store.items.find((i) => i.id === itemId);
+  const prior = item?.regenerator;
+  if (!prior || prior.kind !== "pushpull") return;
+  const { cx, cy, cz } = prior.centerOffset || { cx: 0, cy: 0, cz: 0 };
+  const rendered = shiftSelectionToSource(prior.subGeo || {}, {
+    cx: -cx,
+    cy: -cy,
+    cz: -cz,
+  });
+  store.setSelectedSubGeometry({
+    itemId,
+    edges: [],
+    faces: rendered.faces,
+  });
+  store.setPushPullSelectMode("pushpull");
+  store.setPushPullRetargetTarget({ itemId, entryId });
+};
 
 // Snapshot the item as the push/pull source with its live polygon/depth baked
 // in (so a sketch / variable edit before confirming is reflected), plus the
@@ -42,13 +70,36 @@ export async function commitPushPull({
   printPrecision,
 }) {
   const { pushPullFaces } = await import("../occClient.js");
+  const store = useStore.getState();
   const distance = distanceMm / MM_PER_UNIT;
-  const { source, subGeo } = buildPushPullSourceAndSubGeo(
-    item,
-    items,
-    selectedSubGeometry,
-    printPrecision,
-  );
+
+  // Retargeting replaces the FROZEN source's selection with the current picks
+  // (shifted back into the source frame), updating the existing entry in place;
+  // a fresh push/pull snapshots the live item as the source and appends a step.
+  const retarget = store.pushPullRetargetTarget;
+  const retargetEntryId =
+    retarget?.itemId === item.id ? retarget.entryId : null;
+  const prior = item.regenerator;
+
+  let source, subGeo;
+  if (retargetEntryId && prior?.kind === "pushpull") {
+    source = withLivePolygons(
+      withLiveDepth({ ...prior.source }, item.depth ?? prior.source.depth),
+      items,
+      printPrecision,
+    );
+    subGeo = {
+      faces: shiftSelectionToSource(selectedSubGeometry, prior.centerOffset)
+        .faces,
+    };
+  } else {
+    ({ source, subGeo } = buildPushPullSourceAndSubGeo(
+      item,
+      items,
+      selectedSubGeometry,
+      printPrecision,
+    ));
+  }
   if (subGeo.faces.length === 0) return false;
 
   const result = await pushPullFaces({
@@ -62,26 +113,24 @@ export async function commitPushPull({
 
   const { geometryData, centerOffset } = result;
   const { position } = chamferResultTransform(source, centerOffset);
-  const store = useStore.getState();
   store._cameraControls?.clearPushPullPreview?.();
-  store.modifyItem(
-    item.id,
-    {
-      type: "csg",
-      position,
-      regenerator: {
-        kind: "pushpull",
-        distance,
-        source,
-        subGeo: result.resolvedSubGeo || subGeo,
-        centerOffset,
-        regeneratedAt: printPrecision,
-      },
-      geometryData,
+  const patches = {
+    type: "csg",
+    position,
+    regenerator: {
+      kind: "pushpull",
+      distance,
+      source,
+      subGeo: result.resolvedSubGeo || subGeo,
+      centerOffset,
+      regeneratedAt: printPrecision,
     },
-    distance >= 0 ? "Pulled" : "Pushed",
-  );
+    geometryData,
+  };
+  if (retargetEntryId) store.retargetPushPullEntry(retargetEntryId, patches);
+  else store.modifyItem(item.id, patches, distance >= 0 ? "Pulled" : "Pushed");
   store.clearSelectedSubGeometry();
+  if (retargetEntryId) store.setPushPullRetargetTarget(null);
   return true;
 }
 
@@ -148,6 +197,89 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     unghostSource();
   };
 
+  // Run the push/pull recipe and overlay its result as a ghosted fill +
+  // wireframe.  Shared by the create/retarget preview (selection-driven) and
+  // the edit preview (replays a committed op's stored source/subGeo with a new
+  // distance).  `myRequest` guards against a newer call superseding this one.
+  const runAndShow = async ({
+    myRequest,
+    source,
+    subGeo,
+    distance,
+    items,
+    printPrecision,
+    ghostItemId,
+  }) => {
+    let result;
+    try {
+      const { pushPullFaces } = await import("../occClient.js");
+      result = await pushPullFaces({
+        source,
+        subGeo,
+        distance,
+        allItems: items,
+        printPrecision,
+      });
+    } catch {
+      result = null;
+    }
+    // A newer request superseded this one, or the geometry was unworkable —
+    // leave whatever preview is currently shown rather than flickering it away.
+    if (myRequest !== requestId || !result) return;
+
+    const { positions, normals, indices } = result.geometryData;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positions), 3),
+    );
+    if (normals)
+      geometry.setAttribute(
+        "normal",
+        new THREE.BufferAttribute(new Float32Array(normals), 3),
+      );
+    if (indices)
+      geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+    if (!normals) geometry.computeVertexNormals();
+
+    const { position, rotation } = chamferResultTransform(
+      source,
+      result.centerOffset,
+    );
+
+    ghostSource(ghostItemId);
+    removePreview();
+    const group = new THREE.Group();
+
+    const fill = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: DEFAULT_MESH_COLOR,
+        roughness: 0.55,
+        metalness: 0.0,
+        transparent: true,
+        opacity: 0.92,
+      }),
+    );
+    fill.renderOrder = 990;
+    group.add(fill);
+
+    const lines = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry),
+      new THREE.LineBasicMaterial({
+        color: WIREFRAME_EDGE_COLOR,
+        depthTest: false,
+      }),
+    );
+    lines.renderOrder = 999;
+    group.add(lines);
+
+    group.position.set(position.x, position.y, position.z);
+    group.rotation.set(rotation.x || 0, rotation.y || 0, rotation.z || 0);
+    scene.add(group);
+    previewGroup = group;
+  };
+
   // Recompute and swap in the preview for the current selection + distance.
   // Safe to call on every keystroke / selection toggle — stale async results
   // (superseded by a newer call) are discarded.
@@ -181,75 +313,42 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
       return;
     }
 
-    let result;
-    try {
-      const { pushPullFaces } = await import("../occClient.js");
-      result = await pushPullFaces({
-        source,
-        subGeo,
-        distance: distanceMm / MM_PER_UNIT,
-        allItems: items,
-        printPrecision,
-      });
-    } catch {
-      result = null;
-    }
-    // A newer request superseded this one, or the geometry was unworkable —
-    // leave whatever preview is currently shown rather than flickering it away.
-    if (myRequest !== requestId || !result) return;
-
-    const { positions, normals, indices } = result.geometryData;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(positions), 3),
-    );
-    if (normals)
-      geometry.setAttribute(
-        "normal",
-        new THREE.BufferAttribute(new Float32Array(normals), 3),
-      );
-    if (indices)
-      geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
-    if (!normals) geometry.computeVertexNormals();
-
-    const { position, rotation } = chamferResultTransform(
+    await runAndShow({
+      myRequest,
       source,
-      result.centerOffset,
-    );
-
-    ghostSource(item.id);
-    removePreview();
-    const group = new THREE.Group();
-
-    const fill = new THREE.Mesh(
-      geometry,
-      new THREE.MeshStandardMaterial({
-        color: DEFAULT_MESH_COLOR,
-        roughness: 0.55,
-        metalness: 0.0,
-        transparent: true,
-        opacity: 0.92,
-      }),
-    );
-    fill.renderOrder = 990;
-    group.add(fill);
-
-    const lines = new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({
-        color: WIREFRAME_EDGE_COLOR,
-        depthTest: false,
-      }),
-    );
-    lines.renderOrder = 999;
-    group.add(lines);
-
-    group.position.set(position.x, position.y, position.z);
-    group.rotation.set(rotation.x || 0, rotation.y || 0, rotation.z || 0);
-    scene.add(group);
-    previewGroup = group;
+      subGeo,
+      distance: distanceMm / MM_PER_UNIT,
+      items,
+      printPrecision,
+      ghostItemId: item.id,
+    });
   };
 
-  return { updatePushPullPreview, clearPushPullPreview };
+  // Live preview for PushPullEditDialog: replays a committed push/pull's stored
+  // recipe (source + subGeo) with the new distance the user is typing, ghosting
+  // the existing result mesh so the change is visible before Save.
+  const updatePushPullEditPreview = async (regenerator, distanceMm, itemId) => {
+    const myRequest = ++requestId;
+    if (regenerator?.kind !== "pushpull" || !regenerator.source) {
+      clearPushPullPreview();
+      return;
+    }
+    const { curveResolution } = useStore.getState();
+    const printPrecision = curveResolution === "print" ? 0.01 : null;
+    await runAndShow({
+      myRequest,
+      source: regenerator.source,
+      subGeo: regenerator.subGeo || { faces: [] },
+      distance: distanceMm / MM_PER_UNIT,
+      items: itemsRef.current,
+      printPrecision,
+      ghostItemId: itemId,
+    });
+  };
+
+  return {
+    updatePushPullPreview,
+    updatePushPullEditPreview,
+    clearPushPullPreview,
+  };
 }

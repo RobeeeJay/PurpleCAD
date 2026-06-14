@@ -201,6 +201,11 @@ export function useSceneSync({
       // edit makes it rebuild, not just in the cheap items-only pass.
       else if (r.kind === "chamfer")
         base = `c${r.amount ?? ""}:${r.angleRad ?? ""}:${r.segments ?? ""}`;
+      // Likewise include the push/pull distance: it bbox-centres its result, so
+      // editing the distance must take the full recalc to recompute the
+      // position — the cheap items-only pass keeps the stale anchor and the
+      // body's origin slides along the push/pull direction.
+      else if (r.kind === "pushpull") base = `p${r.distance ?? ""}`;
       else base = r.kind;
       return r.source?.regenerator
         ? `${base}>${regenSig(r.source.regenerator)}`
