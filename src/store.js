@@ -55,9 +55,15 @@ export const useStore = create((set, get) => ({
 
 // E2E test hook: expose the store on window so Playwright can read state and
 // drive actions via page.evaluate, instead of trying to assert on opaque WebGL
-// canvas pixels.  Gated behind the VITE_E2E build flag so it never ships in a
-// normal build — `VITE_E2E=1 vite build` (see the `e2e:build` npm script).
-if (typeof window !== "undefined" && import.meta.env?.VITE_E2E) {
+// canvas pixels.  Gated behind the __E2E__ compile-time flag (vite.config.js,
+// driven by the VITE_E2E shell var via the `e2e:build` npm script) so it never
+// ships in a normal build.  `typeof` guards keep it inert under vitest/node,
+// where __E2E__ isn't defined.
+if (
+  typeof window !== "undefined" &&
+  typeof __E2E__ !== "undefined" &&
+  __E2E__
+) {
   window.__store = useStore;
 }
 

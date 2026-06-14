@@ -74,6 +74,10 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(readVersion()),
     __GIT_COMMIT__: JSON.stringify(readGitCommit()),
     __DEPENDENCY_VERSIONS__: JSON.stringify(readDependencyVersions()),
+    // E2E build flag (see store.js): baked from the VITE_E2E shell var at
+    // config-load time so the replacement is deterministic — set by the
+    // `e2e:build` npm script.  `false` in every normal build.
+    __E2E__: JSON.stringify(process.env.VITE_E2E === "1"),
   },
   server: {
     host: "0.0.0.0",
@@ -92,5 +96,8 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Only the in-repo unit tests under src/.  The Playwright E2E specs live in
+    // e2e/ and use their own runner — vitest must not try to collect them.
+    include: ["src/**/*.test.{js,jsx}"],
   },
 });
