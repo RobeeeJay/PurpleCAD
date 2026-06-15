@@ -393,6 +393,20 @@ export function attachCameraControls(ctx) {
       itemIds.map((id) => objectsRef.current[id]).filter(Boolean),
       operation,
     );
+  // World position + triangle/vertex counts of a selected object's live mesh,
+  // for the status line.
+  controls.getObjectStats = (id) => {
+    const mesh = objectsRef.current[id];
+    const g = mesh?.geometry;
+    const pos = g?.getAttribute("position");
+    if (!pos) return null;
+    const wp = mesh.getWorldPosition(new THREE.Vector3());
+    return {
+      worldPosition: { x: wp.x, y: wp.y, z: wp.z },
+      points: pos.count,
+      faces: g.index ? g.index.count / 3 : pos.count / 3,
+    };
+  };
 
   // Live preview for MaterialDialog: instantly applies in-progress
   // color/finish edits to the live mesh(es) without a store write.

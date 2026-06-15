@@ -11,6 +11,8 @@ import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
+import StatusLine from "./components/StatusLine";
+import "./styles/StatusLine.css";
 import VersionTag from "./components/VersionTag";
 import "./styles/App.css";
 import { useStore } from "./store";
@@ -93,6 +95,7 @@ function App() {
       <MaterialDialog />
       <SettingsDialog />
       <AboutDialog />
+      <StatusLine />
       <VersionTag />
       {notification && (
         <div
