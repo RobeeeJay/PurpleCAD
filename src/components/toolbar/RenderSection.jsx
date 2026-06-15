@@ -280,9 +280,13 @@ const RenderSection = () => {
         </svg>
       </button>
       <button
-        className={`toolbar-btn ${renderMode === "smooth" ? "active" : ""}`}
-        title="Smooth (4)"
-        onClick={() => setRenderMode("smooth")}
+        className={`toolbar-btn ${pathTraceView ? "active" : ""}`}
+        title={
+          pathTraceView
+            ? "Path-traced render on — click to return to the raster view (4)"
+            : "Path-traced render (prototype) — progressive GPU ray tracing (4)"
+        }
+        onClick={togglePathTraceView}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <circle
@@ -495,75 +499,6 @@ const RenderSection = () => {
             y1="16"
             x2="10"
             y2="16"
-          />
-        </svg>
-      </button>
-      <button
-        className={`toolbar-btn ${pathTraceView ? "active" : ""}`}
-        title={
-          pathTraceView
-            ? "Path-traced render on — click to return to the raster view (7)"
-            : "Path-traced render (prototype) — progressive GPU ray tracing (7)"
-        }
-        onClick={togglePathTraceView}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.5)"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-            d="M7 18 C5 18, 4 16.5, 4 15 C4 13, 5.5 11.5, 7 11 C7 9, 8.5 7.5, 10 7.5 L14 7.5 C15.5 7.5, 17 9, 17 11 C18.5 11.5, 20 13, 20 15 C20 16.5, 19 18, 17 18 Z"
-          />
-          <path
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.5)"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-            d="M17 13 C19 12, 21 11, 21.5 10 C22 9, 21.5 8, 21 7.5 C20.5 7, 20 7.5, 19.5 8 C19 8.5, 18.5 9.5, 18 11"
-          />
-          <path
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            d="M7 12 C4 11.5, 3 13, 3 14.5 C3 16, 4 17, 7 16.5"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="9"
-            y1="7.5"
-            x2="15"
-            y2="7.5"
-          />
-          <path
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.4)"
-            strokeWidth="1.5"
-            d="M9.5 7.5 C9.5 5.5, 14.5 5.5, 14.5 7.5"
-          />
-          <circle stroke="#6C3FD4" fill="#6C3FD4" r="1" cx="12" cy="5" />
-          <ellipse
-            stroke="none"
-            fill="rgba(212,163,63,0.85)"
-            cx="10"
-            cy="12"
-            rx="2"
-            ry="1.4"
-            transform="rotate(-15 10 12)"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="5"
-            y1="18"
-            x2="19"
-            y2="18"
           />
         </svg>
       </button>

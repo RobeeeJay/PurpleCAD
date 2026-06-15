@@ -2025,11 +2025,16 @@ export function createSketchInteraction(
         1: "wireframe",
         2: "shaded",
         3: "transparent",
-        4: "smooth",
       };
       if (renderModeKeys[e.key]) {
         e.preventDefault();
         store.setRenderMode(renderModeKeys[e.key]);
+        return;
+      }
+      // 4 now toggles the path-traced render (replaced the old Smooth mode).
+      if (e.key === "4") {
+        e.preventDefault();
+        store.togglePathTraceView();
         return;
       }
       if (e.key === "5") {
@@ -2040,11 +2045,6 @@ export function createSketchInteraction(
       if (e.key === "6") {
         e.preventDefault();
         store.toggleCrossSectionView();
-        return;
-      }
-      if (e.key === "7") {
-        e.preventDefault();
-        store.togglePathTraceView();
         return;
       }
       if (e.key === "8") {
