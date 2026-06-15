@@ -13,6 +13,7 @@ import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
 import PlaneDialog from "./components/PlaneDialog";
 import Pattern3dDialog from "./components/Pattern3dDialog";
+import MirrorDialog from "./components/MirrorDialog";
 import StatusLine from "./components/StatusLine";
 import "./styles/StatusLine.css";
 import VersionTag from "./components/VersionTag";
@@ -99,6 +100,7 @@ function App() {
       <AboutDialog />
       <PlaneDialog />
       <Pattern3dDialog />
+      <MirrorDialog />
       <StatusLine />
       <VersionTag />
       {notification && (

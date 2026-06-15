@@ -110,6 +110,10 @@ export const uiInitial = {
   // The dialog adds the counts/angle/spacing and confirms.
   pattern3dTool: null,
 
+  // Mirror dialog open-flag (truthy while open).  The dialog itself owns the
+  // picked object/plane ids; this just gates its visibility.
+  mirrorTool: null,
+
   // Path-traced render mode (prototype): replaces the raster view with a
   // progressively-accumulated GPU path trace.  `pathTraceView` is the user's
   // toggle; `pathTracerActive` is set true by pathTrace.js only once the tracer
@@ -168,6 +172,11 @@ export const createUiSlice = (set) => ({
   selectItem: (id) =>
     set({ selectedId: id, selectedIds: id != null ? [id] : [] }),
 
+  // Replace the whole selection with an explicit id list (used by tools that
+  // restore a previously-captured pick set, e.g. the Mirror dialog).
+  setSelection: (ids) =>
+    set({ selectedIds: [...ids], selectedId: ids[ids.length - 1] ?? null }),
+
   addToSelection: (id) =>
     set((state) => {
       if (!id) return { selectedIds: [], selectedId: null };
@@ -211,6 +220,8 @@ export const createUiSlice = (set) => ({
   cancelPlaneTool: () => set({ planeTool: null }),
   startPattern3d: (v) => set({ pattern3dTool: v }),
   cancelPattern3d: () => set({ pattern3dTool: null }),
+  startMirrorTool: (seed) => set({ mirrorTool: seed || {} }),
+  cancelMirrorTool: () => set({ mirrorTool: null }),
 
   // ── Sweep tools (Revolve / Pipe / Loft) ─────────────────────────────────
   setSweepSelectMode: (v) =>

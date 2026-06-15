@@ -1,8 +1,5 @@
 import React from "react";
-import * as THREE from "three";
 import { useStore } from "../../store";
-import { pattern3dItem } from "../../three/occClient.js";
-import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
 
 const SOLID_TYPES = ["cube", "sphere", "cylinder", "torus", "extrude", "csg"];
@@ -14,9 +11,8 @@ const PLANE_TYPES = ["plane", "sketch"];
 const Pattern3dSection = ({ bare = false }) => {
   const selectedIds = useStore((s) => s.selectedIds);
   const items = useStore((s) => s.items);
-  const addItem = useStore((s) => s.addItem);
-  const curveResolution = useStore((s) => s.curveResolution);
   const startPattern3d = useStore((s) => s.startPattern3d);
+  const startMirrorTool = useStore((s) => s.startMirrorTool);
 
   const sel = selectedIds
     .map((id) => items.find((i) => i.id === id))
@@ -46,63 +42,15 @@ const Pattern3dSection = ({ bare = false }) => {
     startPattern3d({ patternType: "rectangular", sourceId: source.id });
   };
 
-  const handleMirror = async () => {
-    if (!ready) {
-      alert("Select an object and a mirror plane (a Plane or a sketch).");
-      return;
-    }
-    try {
-      const printPrecision = curveResolution === "print" ? 0.01 : null;
-      const rot = plane.rotation || { x: 0, y: 0, z: 0 };
-      const nv = new THREE.Vector3(0, 0, 1).applyEuler(
-        new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
-      );
-      const result = await pattern3dItem({
-        patternType: "mirror",
-        sourceId: source.id,
-        params: {
-          origin: plane.position,
-          normal: { x: nv.x, y: nv.y, z: nv.z },
-        },
-        allItems: items,
-        printPrecision,
-      });
-      if (!result) {
-        alert("Mirror produced nothing.");
-        return;
-      }
-      const id = maxItemId(useStore.getState().history) + 1;
-      addItem({
-        id,
-        name: `Mirror of ${source.name}`,
-        type: "csg",
-        children: [],
-        position: result.position,
-        rotation: { x: 0, y: 0, z: 0 },
-        scale: { x: 1, y: 1, z: 1 },
-        geometryData: result.geometryData,
-        regenerator: {
-          kind: "pattern3d",
-          patternType: "mirror",
-          sourceId: source.id,
-          planeId: plane.id,
-          centerOffset: result.centerOffset,
-          regeneratedAt: printPrecision,
-        },
-      });
-      useStore.getState().selectItem?.(id);
-    } catch (err) {
-      console.error("Mirror failed:", err);
-      alert("Mirror failed: " + err.message);
-    }
-  };
+  // Open the Mirror dialog (seeded from the current selection); it owns the
+  // object/plane picking and the confirm.
+  const handleMirror = () => startMirrorTool();
 
   const mirrorBtn = (
     <button
       className="toolbar-btn"
-      title="Mirror (3D) — clone the selected object across the selected plane; the clone tracks the original"
+      title="Mirror (3D) — clone objects across a plane; the clones track their originals"
       onClick={handleMirror}
-      style={ready ? undefined : { opacity: 0.45 }}
     >
       <svg viewBox="0 0 24 24" width="20" height="20">
         <line
