@@ -13,6 +13,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../sceneObjects.js";
+import { activePrecision } from "../resolution.js";
 import {
   buildChamferSourceAndSubGeo,
   chamferResultTransform,
@@ -195,12 +196,8 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
   // stale async results (superseded by a newer call) are discarded.
   const updateChamferPreview = async (distanceMm, angleDeg) => {
     const myRequest = ++requestId;
-    const {
-      chamferSelectMode,
-      selectedSubGeometry,
-      chamferRetargetTarget,
-      curveResolution,
-    } = useStore.getState();
+    const { chamferSelectMode, selectedSubGeometry, chamferRetargetTarget } =
+      useStore.getState();
     if (!chamferSelectMode || !selectedSubGeometry) {
       clearChamferPreview();
       return;
@@ -223,7 +220,7 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
       segments === 1 && Math.abs(angleDeg - 45) > 0.1
         ? (angleDeg * Math.PI) / 180
         : null;
-    const printPrecision = curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision();
     const retargeting = chamferRetargetTarget?.itemId === item.id;
 
     const { source, subGeo } = buildChamferSourceAndSubGeo({
@@ -268,14 +265,13 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
       clearChamferPreview();
       return;
     }
-    const { curveResolution } = useStore.getState();
     const segments = regenerator.segments;
     const amount = distanceMm / MM_PER_UNIT;
     const angleRad =
       segments === 1 && Math.abs(angleDeg - 45) > 0.1
         ? (angleDeg * Math.PI) / 180
         : null;
-    const printPrecision = curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision();
 
     await runAndShow({
       myRequest,

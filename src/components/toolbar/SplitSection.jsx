@@ -1,6 +1,7 @@
 import React from "react";
 import { useStore } from "../../store";
 import { splitItem } from "../../three/occClient.js";
+import { activePrecision } from "../../three/resolution.js";
 import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
 
@@ -15,7 +16,7 @@ const SplitSection = ({ bare = false }) => {
   const items = useStore((s) => s.items);
   const addItem = useStore((s) => s.addItem);
   const consumeItems = useStore((s) => s.consumeItems);
-  const curveResolution = useStore((s) => s.curveResolution);
+  const printPrecision = useStore(activePrecision);
 
   const sel = selectedIds
     .map((id) => items.find((i) => i.id === id))
@@ -30,7 +31,6 @@ const SplitSection = ({ bare = false }) => {
       return;
     }
     try {
-      const printPrecision = curveResolution === "print" ? 0.01 : null;
       const result = await splitItem({
         target: solid,
         plane: { position: planeItem.position, rotation: planeItem.rotation },

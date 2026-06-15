@@ -7,6 +7,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../sceneObjects.js";
+import { activePrecision } from "../resolution.js";
 import { withLivePolygons, withLiveDepth } from "../csgUtils.js";
 import {
   chamferResultTransform,
@@ -285,8 +286,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
   // (superseded by a newer call) are discarded.
   const updatePushPullPreview = async (distanceMm) => {
     const myRequest = ++requestId;
-    const { pushPullSelectMode, selectedSubGeometry, curveResolution } =
-      useStore.getState();
+    const { pushPullSelectMode, selectedSubGeometry } = useStore.getState();
     if (!pushPullSelectMode || !selectedSubGeometry) {
       clearPushPullPreview();
       return;
@@ -301,7 +301,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
 
-    const printPrecision = curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision();
     const { source, subGeo } = buildPushPullSourceAndSubGeo(
       item,
       items,
@@ -333,8 +333,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
       clearPushPullPreview();
       return;
     }
-    const { curveResolution } = useStore.getState();
-    const printPrecision = curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision();
     await runAndShow({
       myRequest,
       source: regenerator.source,

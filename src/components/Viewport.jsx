@@ -14,6 +14,7 @@ import { useViewportCamera } from "./viewport/useViewportCamera";
 import { useSceneSync } from "./viewport/useSceneSync";
 import "../styles/Viewport.css";
 import { useStore } from "../store";
+import { activePrecision } from "../three/resolution.js";
 
 const Viewport = () => {
   const containerRef = useRef(null);
@@ -120,10 +121,9 @@ const Viewport = () => {
   );
   const constraintsVisible = useStore((state) => state.constraintsVisible);
   const dimensionsVisible = useStore((state) => state.dimensionsVisible);
-  const curveResolution = useStore((state) => state.curveResolution);
   const selectedSubGeometry = useStore((state) => state.selectedSubGeometry);
   const curveSegments = 32;
-  const printPrecision = curveResolution === "print" ? 0.01 : null;
+  const printPrecision = useStore(activePrecision);
 
   const _selItem = items.find((i) => i.id === selectedId);
   const isInSketchMode = _selItem != null && _selItem.type === "sketch";
@@ -247,7 +247,6 @@ const Viewport = () => {
     selectedSubGeometry,
     constraintsVisible,
     dimensionsVisible,
-    curveResolution,
     sketchMode,
     sketchPlacementMode,
     extrudeSelectMode,

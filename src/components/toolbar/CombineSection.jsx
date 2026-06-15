@@ -2,6 +2,7 @@ import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { performCsg } from "../../three/occClient.js";
+import { activePrecision } from "../../three/resolution.js";
 
 const CombineSection = ({ bare = false }) => {
   const selectedIds = useStore((s) => s.selectedIds);
@@ -9,7 +10,7 @@ const CombineSection = ({ bare = false }) => {
   const history = useStore((s) => s.history);
   const addItem = useStore((s) => s.addItem);
   const consumeItems = useStore((s) => s.consumeItems);
-  const curveResolution = useStore((s) => s.curveResolution);
+  const printPrecision = useStore(activePrecision);
 
   // Non-sketch items from the current selection.
   const selectedEligible = selectedIds
@@ -65,9 +66,8 @@ const CombineSection = ({ bare = false }) => {
         return;
       }
 
-      // Tessellate primitives at the high-resolution setting so the CSG
-      // result inherits the chord-deviation precision the user selected.
-      const printPrecision = curveResolution === "print" ? 0.01 : null;
+      // Tessellate primitives at the resolution the user selected so the CSG
+      // result inherits that chord-deviation precision.
       const result = await performCsg({
         selectedItems,
         operation,

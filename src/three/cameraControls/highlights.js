@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "../sceneObjects.js";
+import { activePrecision } from "../resolution.js";
 import { computeSegmentChain } from "../segmentChain.js";
 import { CHAMFER_EDGE_HOVER, CHAMFER_PREVIEW_COLOR } from "../theme.js";
 
@@ -53,8 +54,7 @@ export function createHighlightHelpers({
     // depth-tested materials, but the highlight material uses
     // depthTest:false + high renderOrder, so an inflated overlay just
     // visibly extends past the actual primitive.
-    const printPrecisionMm =
-      useStore.getState().curveResolution === "print" ? 0.01 : null;
+    const printPrecisionMm = activePrecision();
     const displayPrecision =
       printPrecisionMm != null
         ? Math.min(printPrecisionMm, DISPLAY_PRECISION_MM)

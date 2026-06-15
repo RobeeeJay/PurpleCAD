@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { useStore } from "../store";
 import { useDebouncedPreview } from "./inputs.jsx";
 import { pattern3dItem } from "../three/occClient.js";
+import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 import "../styles/VariablesDialog.css";
 
@@ -24,7 +25,7 @@ const MirrorDialog = () => {
   const setSelection = useStore((s) => s.setSelection);
   const items = useStore((s) => s.items);
   const addItem = useStore((s) => s.addItem);
-  const curveResolution = useStore((s) => s.curveResolution);
+  const printPrecision = useStore(activePrecision);
 
   const open = !!mirrorTool;
 
@@ -58,7 +59,6 @@ const MirrorDialog = () => {
 
   const plane = items.find((i) => i.id === planeId);
   const valid = objectIds.length > 0 && !!plane;
-  const printPrecision = curveResolution === "print" ? 0.01 : null;
 
   // Mirror every picked object across the plane; returns [{ sourceId, result }].
   const buildResults = async () => {

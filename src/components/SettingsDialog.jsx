@@ -18,6 +18,10 @@ const SettingsDialog = () => {
   const setCurveDetectionAngleDeg = useStore(
     (s) => s.setCurveDetectionAngleDeg,
   );
+  const previewPrecisionMm = useStore((s) => s.previewPrecisionMm);
+  const setPreviewPrecisionMm = useStore((s) => s.setPreviewPrecisionMm);
+  const printPrecisionMm = useStore((s) => s.printPrecisionMm);
+  const setPrintPrecisionMm = useStore((s) => s.setPrintPrecisionMm);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
   const widgetVisible = useStore((s) => s.widgetVisible);
@@ -153,6 +157,48 @@ const SettingsDialog = () => {
                 style={numStyle}
               />
               <span style={{ fontSize: 10, opacity: 0.7 }}>&deg;</span>
+            </span>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
+              <span>Preview resolution</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                surface deviation while editing (lower = denser)
+              </span>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="number"
+                min="0.001"
+                step="0.05"
+                value={previewPrecisionMm}
+                onChange={(e) => setPreviewPrecisionMm(e.target.value)}
+                onKeyDown={stop}
+                style={numStyle}
+              />
+              <span style={{ fontSize: 10, opacity: 0.7 }}>mm</span>
+            </span>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
+              <span>Normal resolution</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                final density (the high-res toggle / 3D print)
+              </span>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="number"
+                min="0.001"
+                step="0.005"
+                value={printPrecisionMm}
+                onChange={(e) => setPrintPrecisionMm(e.target.value)}
+                onKeyDown={stop}
+                style={numStyle}
+              />
+              <span style={{ fontSize: 10, opacity: 0.7 }}>mm</span>
             </span>
           </div>
 

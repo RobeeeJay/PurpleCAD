@@ -74,7 +74,6 @@ export function useSceneSync({
   selectedSubGeometry,
   constraintsVisible,
   dimensionsVisible,
-  curveResolution,
   sketchMode,
   sketchPlacementMode,
   extrudeSelectMode,
@@ -263,7 +262,7 @@ export function useSceneSync({
         m.regenerateForResolution(printPrecision);
       }
     });
-  }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, printPrecision, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run a sketch edit's deferred timeline recalc once the sketch is closed.
   useEffect(() => {
@@ -310,7 +309,7 @@ export function useSceneSync({
     // Variables drive extrude depth and dimension distances via formula
     // resolution; re-run when they change so geometry/labels reflect the
     // new values.
-  }, [items, curveResolution, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, printPrecision, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the sketch selection overlays glued to the committed geometry after an
   // external shapes change (e.g. undoing a move), so they don't linger at the
@@ -491,7 +490,7 @@ export function useSceneSync({
     items,
     constraintsVisible,
     dimensionsVisible,
-    curveResolution,
+    printPrecision,
     // Entering / leaving a mirror-or-pattern edit (double-click) toggles which
     // copies are hidden, so the in-sketch group must rebuild on tool change.
     activeSketchTool,
@@ -570,7 +569,7 @@ export function useSceneSync({
         }
       }
     }
-  }, [extrudeSelectMode, sweepSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [extrudeSelectMode, sweepSelectMode, items, printPrecision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Extrude depth input init ──────────────────────────────────────────────
   // The distance overlay + Confirm button appear as soon as the unified
@@ -635,7 +634,7 @@ export function useSceneSync({
   }, [hoveredId, selectedId, selectedIds, materialDialogTarget]);
 
   // ── Render mode ───────────────────────────────────────────────────────────
-  // Also re-runs on curveResolution changes so the wireframe (and the
+  // Also re-runs on printPrecision changes so the wireframe (and the
   // primitive shader vs. wireframe swap) picks up the new chord-deviation
   // precision and matches the smooth shader / CSG / bevel resolution.
 
@@ -666,7 +665,7 @@ export function useSceneSync({
       allSketchGroupRef.current.visible = !isSmooth;
     if (sketchShapesGroupRef.current)
       sketchShapesGroupRef.current.visible = !isSmooth;
-  }, [renderMode, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [renderMode, printPrecision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Cross-section view ────────────────────────────────────────────────────
   // Clip the object meshes (only — helpers, grid, and the origin axis gizmo
@@ -733,7 +732,7 @@ export function useSceneSync({
   }, [
     crossSectionView,
     renderMode,
-    curveResolution,
+    printPrecision,
     items,
     variables,
     defaultMaterial,

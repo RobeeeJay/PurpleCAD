@@ -22,7 +22,9 @@ export const uiInitial = {
   constraintsVisible: true,
   dimensionsVisible: true,
   cameraResetTrigger: 0,
-  curveResolution: "preview", // "preview" (32 pts) | "print" (128 pts)
+  // Active tessellation mode; its density (mm deviation) is previewPrecisionMm /
+  // printPrecisionMm, configurable in Settings.  See three/resolution.js.
+  curveResolution: "preview", // "preview" | "print"
 
   sketchPlacementMode: false,
   extrudeSelectMode: null, // null | "profile" | "depth"
@@ -375,6 +377,26 @@ export const createUiSlice = (set) => ({
         Number.isFinite(n) && n >= 0 ? Math.min(90, n) : 5;
       saveSnapSettings({ ...state, curveDetectionAngleDeg });
       return { curveDetectionAngleDeg };
+    }),
+
+  // Tessellation density (mm deviation) for the two resolution modes.  Clamped
+  // to a sane range; lower = denser.  A change re-triggers scene regeneration
+  // because the resolved precision is a scene-sync effect dependency.
+  setPreviewPrecisionMm: (v) =>
+    set((state) => {
+      const n = Number(v);
+      const previewPrecisionMm =
+        Number.isFinite(n) && n > 0 ? Math.min(5, Math.max(0.001, n)) : 0.5;
+      saveSnapSettings({ ...state, previewPrecisionMm });
+      return { previewPrecisionMm };
+    }),
+  setPrintPrecisionMm: (v) =>
+    set((state) => {
+      const n = Number(v);
+      const printPrecisionMm =
+        Number.isFinite(n) && n > 0 ? Math.min(5, Math.max(0.001, n)) : 0.01;
+      saveSnapSettings({ ...state, printPrecisionMm });
+      return { printPrecisionMm };
     }),
 
   setSettingsDialogOpen: (open) => set({ settingsDialogOpen: !!open }),

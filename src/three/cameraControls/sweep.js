@@ -12,6 +12,7 @@ import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "../sceneObjects.js";
+import { activePrecision } from "../resolution.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 
 const PREVIEW_DEBOUNCE_MS = 350;
@@ -412,8 +413,7 @@ export function createSweepHelpers({
     offsetPerRotation,
     ghostItemId,
   }) => {
-    const printPrecision =
-      useStore.getState().curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision();
     let result;
     try {
       const { revolveItem } = await import("../occClient.js");
@@ -447,8 +447,7 @@ export function createSweepHelpers({
     autoRotate,
     ghostItemId,
   }) => {
-    const printPrecision =
-      useStore.getState().curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision();
     let result;
     try {
       const { pipeItem } = await import("../occClient.js");
@@ -474,8 +473,7 @@ export function createSweepHelpers({
     secondProfileSource,
     ghostItemId,
   }) => {
-    const printPrecision =
-      useStore.getState().curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision();
     let result;
     try {
       const { loftItem } = await import("../occClient.js");
@@ -571,7 +569,7 @@ export function createSweepHelpers({
     const profileSource = buildProfileSource(sm.profile);
     const twistTurns = twistTurnsOf(sm.params);
     const autoRotate = autoRotateOf(sm.params);
-    const printPrecision = store.curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision(store);
     let result;
     try {
       const { pipeItem } = await import("../occClient.js");
@@ -633,7 +631,7 @@ export function createSweepHelpers({
   const commitLoft = async (store, sm) => {
     const profileSource = buildProfileSource(sm.profile);
     const secondProfileSource = buildProfileSource(sm.secondProfile);
-    const printPrecision = store.curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision(store);
     let result;
     try {
       const { loftItem } = await import("../occClient.js");
@@ -705,7 +703,7 @@ export function createSweepHelpers({
     const angleRad = angleRadOf(sm.params);
     const prismSides = prismSidesOf(sm.params);
     const offsetPerRotation = offsetSceneOf(sm.params);
-    const printPrecision = store.curveResolution === "print" ? 0.01 : null;
+    const printPrecision = activePrecision(store);
     let result;
     try {
       const { revolveItem } = await import("../occClient.js");

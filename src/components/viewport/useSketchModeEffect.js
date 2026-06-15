@@ -14,6 +14,7 @@ import {
   applyRenderMode,
 } from "../../three/sceneObjects.js";
 import { useStore } from "../../store";
+import { activePrecision } from "../../three/resolution.js";
 import { gridMinorColorFor } from "../../three/theme.js";
 
 // Quantize a world coord into a stable key so triangles that share a vertex
@@ -236,8 +237,7 @@ export function useSketchModeEffect({
           composerRef,
           envTextureRef,
           sketchModeRef,
-          printPrecision:
-            useStore.getState().curveResolution === "print" ? 0.01 : null,
+          printPrecision: activePrecision(),
         });
         clearSketchGrid();
         const saved = savedCameraStateRef.current;

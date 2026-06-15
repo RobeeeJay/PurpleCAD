@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
 import { evalValue, useDebouncedPreview } from "./inputs.jsx";
 import { pattern3dItem } from "../three/occClient.js";
+import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
 import "../styles/VariablesDialog.css";
@@ -18,7 +19,7 @@ const Pattern3dDialog = () => {
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const addItem = useStore((s) => s.addItem);
-  const curveResolution = useStore((s) => s.curveResolution);
+  const printPrecision = useStore(activePrecision);
 
   const open = !!tool;
   const circular = tool?.patternType === "circular";
@@ -59,8 +60,6 @@ const Pattern3dDialog = () => {
       countYV >= 1 &&
       Number.isFinite(dxV) &&
       Number.isFinite(dyV);
-
-  const printPrecision = curveResolution === "print" ? 0.01 : null;
 
   // Resolve the live OCC params + the regenerator to persist.
   const build = () => {

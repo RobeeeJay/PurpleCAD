@@ -12,6 +12,7 @@ import React, { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { commitPushPull } from "../../three/cameraControls/pushPull.js";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
+import { activePrecision } from "../../three/resolution.js";
 import FormulaInput from "../FormulaInput";
 import { evalValue, useDebouncedPreview } from "../inputs.jsx";
 
@@ -22,7 +23,7 @@ export default function PushPullOverlay() {
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
-  const curveResolution = useStore((s) => s.curveResolution);
+  const printPrecision = useStore(activePrecision);
   const showNotification = useStore((s) => s.showNotification);
   const pushPullRetargetTarget = useStore((s) => s.pushPullRetargetTarget);
   const setPushPullRetargetTarget = useStore(
@@ -73,7 +74,6 @@ export default function PushPullOverlay() {
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
     try {
-      const printPrecision = curveResolution === "print" ? 0.01 : null;
       const ok = await commitPushPull({
         item,
         items,

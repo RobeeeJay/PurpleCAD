@@ -296,12 +296,18 @@ export const markCsgDirty = (items) => {
 // perspective.  `curveDetectionAngleDeg` is the max bend between consecutive
 // connected lines for them to be treated as one smooth curve when highlighting.
 // Persisted alongside snap under the same `cad-snap` key.
+// previewPrecisionMm / printPrecisionMm are the tessellation deviation (sagitta,
+// mm) for the two resolution modes — lower = denser/smoother, more triangles.
+// Preview is the interactive/editing density; print ("Normal/High") is the
+// final density used when the resolution toggle is on.
 const SNAP_DEFAULTS = {
   snapEnabled: false,
   snapDistanceMm: 5,
   snapAngleDeg: 9,
   fov: 35,
   curveDetectionAngleDeg: 5,
+  previewPrecisionMm: 0.5,
+  printPrecisionMm: 0.01,
 };
 
 export const loadSnapSettings = () => {
@@ -316,6 +322,10 @@ export const loadSnapSettings = () => {
       fov: parsed.fov > 0 ? parsed.fov : 35,
       curveDetectionAngleDeg:
         parsed.curveDetectionAngleDeg >= 0 ? parsed.curveDetectionAngleDeg : 5,
+      previewPrecisionMm:
+        parsed.previewPrecisionMm > 0 ? parsed.previewPrecisionMm : 0.5,
+      printPrecisionMm:
+        parsed.printPrecisionMm > 0 ? parsed.printPrecisionMm : 0.01,
     };
   } catch {
     return { ...SNAP_DEFAULTS };
@@ -332,6 +342,8 @@ export const saveSnapSettings = (snap) => {
         snapAngleDeg: snap.snapAngleDeg,
         fov: snap.fov,
         curveDetectionAngleDeg: snap.curveDetectionAngleDeg,
+        previewPrecisionMm: snap.previewPrecisionMm,
+        printPrecisionMm: snap.printPrecisionMm,
       }),
     );
   } catch (e) {

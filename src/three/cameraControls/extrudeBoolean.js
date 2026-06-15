@@ -4,6 +4,7 @@
 // replace their inputs with a single CSG item.
 
 import { useStore } from "../../store";
+import { activePrecision } from "../resolution.js";
 
 // Run a cut-extrusion: subtract the new extrude shape from the target solid
 // (or every visible solid when no source was captured), then hide both the
@@ -61,7 +62,7 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
       const result = await performCsg({
         selectedItems: [target, extrude],
         operation: "difference",
-        printPrecision: freshStore.curveResolution === "print" ? 0.01 : null,
+        printPrecision: activePrecision(freshStore),
         allItems: items,
       });
       if (!result) continue;
@@ -85,7 +86,7 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
           op: "difference",
           inputIds: [target.id, extrudeItemId],
           originalCenter: result.position,
-          regeneratedAt: freshStore.curveResolution === "print" ? 0.01 : null,
+          regeneratedAt: activePrecision(freshStore),
         },
       });
     }
@@ -120,7 +121,7 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       .filter(Boolean);
     const inputs = [...extrudes, ...solids];
     if (inputs.length < 2) return;
-    const precision = freshStore.curveResolution === "print" ? 0.01 : null;
+    const precision = activePrecision(freshStore);
     const result = await performCsg({
       selectedItems: inputs,
       operation: "union",

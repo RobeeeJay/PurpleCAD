@@ -13,6 +13,7 @@ import React, { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 import { chamferOrFilletItem } from "../../three/occClient.js";
+import { activePrecision } from "../../three/resolution.js";
 import {
   buildChamferSourceAndSubGeo,
   commitChamferResult,
@@ -33,7 +34,7 @@ export default function ChamferOverlay() {
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
-  const curveResolution = useStore((s) => s.curveResolution);
+  const printPrecision = useStore(activePrecision);
   const showNotification = useStore((s) => s.showNotification);
   const chamferRetargetTarget = useStore((s) => s.chamferRetargetTarget);
   const setChamferRetargetTarget = useStore((s) => s.setChamferRetargetTarget);
@@ -113,7 +114,6 @@ export default function ChamferOverlay() {
         : null;
 
     try {
-      const printPrecision = curveResolution === "print" ? 0.01 : null;
       const amount = distVal / MM_PER_UNIT;
       // Only chamfer (segments=1) uses the angle; fillet is purely
       // radius-driven.  Treat angle ≈ 45° as "symmetric" and skip the AddDA

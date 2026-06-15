@@ -20,6 +20,7 @@ import {
   withOrphanFlags,
 } from "../store/internals.js";
 import { regenerateItemsForResolution } from "./regenerateItems.js";
+import { activePrecision } from "./resolution.js";
 
 export async function regenerateForResolution(printPrecision) {
   const state = useStore.getState();
@@ -64,7 +65,7 @@ function geomTargetId(inst) {
 export async function recalculateTimeline() {
   const state = useStore.getState();
   const history = state.history;
-  const printPrecision = state.curveResolution === "print" ? 0.01 : null;
+  const printPrecision = activePrecision(state);
 
   const total = history.reduce(
     (n, e) => (geomTargetId(e.instruction) != null ? n + 1 : n),
