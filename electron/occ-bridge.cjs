@@ -337,6 +337,16 @@ function buildItemShapeLocal(item, allItems, precision) {
     return prismId;
   }
 
+  // Imported solid (mesh only, no recipe) — sew a solid for booleans/chamfers.
+  if (item.type === "csg" && !item.regenerator && item.geometryData) {
+    const g = item.geometryData;
+    if (!g.positions || g.positions.length < 9) return null;
+    const positions = new Float64Array(g.positions);
+    const indices =
+      g.indices && g.indices.length ? new Uint32Array(g.indices) : null;
+    return occ.makeSolidFromMesh(positions, indices);
+  }
+
   if (item.type === "csg" && item.regenerator) {
     const regen = item.regenerator;
 

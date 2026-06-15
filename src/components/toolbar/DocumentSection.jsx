@@ -183,11 +183,11 @@ const DocumentSection = () => {
     importInputRef.current.click();
   };
 
-  const addImportedSolid = (geometryData) => {
+  const addImportedSolid = (geometryData, name) => {
     const id = maxItemId(history) + 1;
     addItem({
       id,
-      name: `Imported ${id}`,
+      name,
       type: "csg",
       children: [],
       geometryData,
@@ -202,6 +202,7 @@ const DocumentSection = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     const ext = file.name.toLowerCase().split(".").pop();
+    const baseName = file.name.replace(/\.[^.]+$/, "");
     try {
       if (isSketch) {
         if (ext !== "svg") {
@@ -215,11 +216,15 @@ const DocumentSection = () => {
         }
         addSketchShapes(selectedId, shapes);
       } else if (ext === "stl") {
-        addImportedSolid(parseStl(await file.arrayBuffer()).geometryData);
+        addImportedSolid(
+          parseStl(await file.arrayBuffer()).geometryData,
+          `${baseName} (STL)`,
+        );
       } else if (ext === "step" || ext === "stp") {
         const res = await importStep({ stepText: await file.text() });
         addImportedSolid(
           finalizeImportedMesh(res.positions, res.indices).geometryData,
+          `${baseName} (STEP)`,
         );
       } else {
         alert("Import STL or STEP files in the 3D view, or SVG in a sketch.");

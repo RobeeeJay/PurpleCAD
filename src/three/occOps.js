@@ -347,6 +347,17 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
     return prismId;
   }
 
+  // An imported solid is a csg item carrying only its mesh (no recipe).  Sew a
+  // solid from that mesh so it can take part in booleans/chamfers.
+  if (item.type === "csg" && !item.regenerator && item.geometryData) {
+    const g = item.geometryData;
+    if (!g.positions || g.positions.length < 9) return null;
+    const positions = new Float64Array(g.positions);
+    const indices =
+      g.indices && g.indices.length ? new Uint32Array(g.indices) : null;
+    return occ.makeSolidFromMesh(positions, indices);
+  }
+
   if (item.type === "csg" && item.regenerator) {
     const r = item.regenerator;
 

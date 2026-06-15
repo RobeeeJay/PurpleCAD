@@ -19,6 +19,9 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
 
 // ── Boolean ops ──────────────────────────────────────────────────────────
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -1382,6 +1385,57 @@ Napi::Number ImportSTEP(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// makeSolidFromMesh(positions: Float64Array, indices: Uint32Array|null) → shapeId
+// Sew a triangle soup into a shell and make a solid, so imported meshes (STL, or
+// a tessellated STEP) can take part in boolean operations.  Works for closed,
+// reasonably watertight meshes; an open mesh yields an open shell that booleans
+// may reject.
+Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    Napi::Float64Array pos = info[0].As<Napi::Float64Array>();
+    const double* p = pos.Data();
+    const bool hasIdx = info[1].IsTypedArray();
+
+    BRepBuilderAPI_Sewing sew(1.0e-6);
+    auto addTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) {
+      gp_Pnt a(p[ia * 3], p[ia * 3 + 1], p[ia * 3 + 2]);
+      gp_Pnt b(p[ib * 3], p[ib * 3 + 1], p[ib * 3 + 2]);
+      gp_Pnt c(p[ic * 3], p[ic * 3 + 1], p[ic * 3 + 2]);
+      if (a.Distance(b) < 1e-12 || b.Distance(c) < 1e-12 ||
+          c.Distance(a) < 1e-12)
+        return;
+      BRepBuilderAPI_MakePolygon poly(a, b, c, Standard_True);
+      if (!poly.IsDone()) return;
+      BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
+      if (face.IsDone()) sew.Add(face.Face());
+    };
+
+    if (hasIdx) {
+      Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
+      for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3)
+        addTri(idx[i], idx[i + 1], idx[i + 2]);
+    } else {
+      uint32_t nv = (uint32_t)(pos.ElementLength() / 3);
+      for (uint32_t i = 0; i + 2 < nv; i += 3) addTri(i, i + 1, i + 2);
+    }
+
+    sew.Perform();
+    TopoDS_Shape sewn = sew.SewedShape();
+    if (sewn.IsNull()) throw std::runtime_error("mesh sewing produced nothing");
+
+    TopoDS_Shape result = sewn;
+    BRepBuilderAPI_MakeSolid mk;
+    bool anyShell = false;
+    for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next()) {
+      mk.Add(TopoDS::Shell(ex.Current()));
+      anyShell = true;
+    }
+    if (anyShell && mk.IsDone()) result = mk.Solid();
+    return Napi::Number::New(env, StoreShape(result));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Phase-0 full-pipeline smoke test (kept for existing test/ping.mjs)
 // ════════════════════════════════════════════════════════════════════════
@@ -1454,6 +1508,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   // Export
   exports.Set("exportSTEP",         Napi::Function::New(env, ExportSTEP));
   exports.Set("importSTEP",         Napi::Function::New(env, ImportSTEP));
+  exports.Set("makeSolidFromMesh",  Napi::Function::New(env, MakeSolidFromMesh));
 
   // Shape store management
   exports.Set("releaseShape",       Napi::Function::New(env, ReleaseShape));

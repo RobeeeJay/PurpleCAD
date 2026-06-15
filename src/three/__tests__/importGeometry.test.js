@@ -17,7 +17,7 @@ vi.mock("../../store", () => {
 
 import { finalizeImportedMesh } from "../importGeometry.js";
 import { ensureOcc } from "../occ/init.js";
-import { exportSTEP, importStep } from "../occClient.js";
+import { exportSTEP, importStep, performCsg } from "../occClient.js";
 
 const extents = (positions) => {
   let mn = [Infinity, Infinity, Infinity];
@@ -74,5 +74,47 @@ describe("STEP import round-trip", () => {
     expect(ex).toBeCloseTo(2, 1);
     expect(ey).toBeCloseTo(2, 1);
     expect(ez).toBeCloseTo(2, 1);
+  });
+
+  it("lets an imported mesh-only solid take part in a boolean", async () => {
+    // Build an imported-style item (csg + geometryData, no regenerator) from a
+    // STEP round-trip of the cube primitive.
+    const stepText = await exportSTEP({
+      items: [
+        {
+          id: 1,
+          type: "cube",
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+        },
+      ],
+    });
+    const res = await importStep({ stepText, printPrecision: 0.1 });
+    const { geometryData } = finalizeImportedMesh(res.positions, res.indices);
+    const imported = {
+      id: 2,
+      type: "csg",
+      geometryData,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+    const cube = {
+      id: 3,
+      type: "cube",
+      position: { x: 1, y: 1, z: 1 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+    const items = [imported, cube];
+    const result = await performCsg({
+      selectedItems: items,
+      allItems: items,
+      operation: "union",
+      printPrecision: 0.1,
+    });
+    expect(result).toBeTruthy();
+    expect(result.geometryData.positions.length).toBeGreaterThan(0);
   });
 });
