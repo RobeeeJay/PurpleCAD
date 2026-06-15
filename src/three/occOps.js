@@ -470,6 +470,8 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         args.cx,
         args.cy,
         args.pathFlat,
+        r.twistTurns ?? 0,
+        !!r.autoRotate,
       );
       if (!resultId) return null;
       // Built in WORLD; centerOffset (the world bbox centre) is also the item
@@ -836,7 +838,14 @@ async function revolveItem({
 // Pipe sweep: build the profile (live, sketch A) + world path polyline (live,
 // sketch B), sweep, tessellate, and bbox-centre.  Built in WORLD, so the bbox
 // centre is both the centerOffset and the item position (rotation identity).
-async function pipeItem({ profileSource, pathRef, allItems, printPrecision }) {
+async function pipeItem({
+  profileSource,
+  pathRef,
+  twistTurns,
+  autoRotate,
+  allItems,
+  printPrecision,
+}) {
   const args = pipeArgs(profileSource, pathRef, allItems, printPrecision);
   if (!args) {
     throw new Error(
@@ -849,6 +858,8 @@ async function pipeItem({ profileSource, pathRef, allItems, printPrecision }) {
     args.cx,
     args.cy,
     args.pathFlat,
+    twistTurns ?? 0,
+    !!autoRotate,
   );
   if (!resultId) throw new Error("Pipe produced no geometry.");
 

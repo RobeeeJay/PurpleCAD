@@ -785,11 +785,12 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
-// makePipe(outer, holes, cx, cy, pathPts) → shapeId
+// makePipe(outer, holes, cx, cy, pathPts, twistTurns, autoRotate) → shapeId
 // Sweep the 2D profile cross-section along the world-space path polyline
-// `pathPts` ([x0,y0,z0, x1,y1,z1, ...], >= 2 points).  The profile is placed at
-// the path start in the plane perpendicular to the start tangent, so the sweep
-// is independent of which sketch planes the inputs were drawn on.
+// `pathPts` ([x0,y0,z0, x1,y1,z1, ...], >= 2 points).  twistTurns spins the
+// profile about the path that many full turns over the sweep; autoRotate keeps
+// the section perpendicular to the local path tangent (so a curved path isn't
+// flattened).  With both off this is the plain start-oriented pipe.
 Napi::Number MakePipe(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   try {
@@ -797,39 +798,118 @@ Napi::Number MakePipe(const Napi::CallbackInfo& info) {
     Napi::Array holes        = info[1].As<Napi::Array>();
     double cx = GetDouble(info[2]), cy = GetDouble(info[3]);
     Napi::Float64Array path = info[4].As<Napi::Float64Array>();
+    double twistTurns = GetDouble(info[5], 0.0);
+    bool autoRotate =
+        info[6].IsBoolean() ? info[6].As<Napi::Boolean>().Value() : false;
     size_t nPath = path.ElementLength() / 3;
     if (nPath < 2) throw std::runtime_error("pipe path needs at least 2 points");
 
-    // Spine wire from the path polyline (skip zero-length segments).
-    BRepBuilderAPI_MakeWire wireMk;
-    gp_Pnt prev(path[0], path[1], path[2]);
-    bool havePrev = true;
+    const bool custom = std::abs(twistTurns) > 1e-9 || autoRotate;
+
+    if (!custom) {
+      // Plain pipe: spine + a single start-oriented profile.
+      BRepBuilderAPI_MakeWire wireMk;
+      gp_Pnt prev(path[0], path[1], path[2]);
+      for (size_t i = 1; i < nPath; i++) {
+        gp_Pnt p(path[i * 3], path[i * 3 + 1], path[i * 3 + 2]);
+        if (prev.Distance(p) > 1e-9)
+          wireMk.Add(BRepBuilderAPI_MakeEdge(prev, p).Edge());
+        prev = p;
+      }
+      if (!wireMk.IsDone()) throw std::runtime_error("pipe path wire failed");
+      TopoDS_Face face = BuildProfileFace(outer, holes, cx, cy);
+      gp_Pnt p0(path[0], path[1], path[2]);
+      gp_Dir tangent(path[3] - path[0], path[4] - path[1], path[5] - path[2]);
+      gp_Trsf place;
+      place.SetTransformation(gp_Ax3(p0, tangent));
+      place.Invert();
+      TopoDS_Face placed =
+          TopoDS::Face(BRepBuilderAPI_Transform(face, place, true).Shape());
+      BRepOffsetAPI_MakePipe pipe(wireMk.Wire(), placed);
+      pipe.Build();
+      if (!pipe.IsDone()) throw std::runtime_error("pipe sweep failed");
+      return Napi::Number::New(env, StoreShape(pipe.Shape()));
+    }
+
+    // Twist / auto-rotate: loft the profile through many sections, each placed
+    // and oriented along the path (with a rotation-minimizing frame when
+    // auto-rotating) and twisted progressively.
+
+    // De-dup the raw path points.
+    std::vector<gp_Pnt> raw;
+    raw.push_back(gp_Pnt(path[0], path[1], path[2]));
     for (size_t i = 1; i < nPath; i++) {
       gp_Pnt p(path[i * 3], path[i * 3 + 1], path[i * 3 + 2]);
-      if (havePrev && prev.Distance(p) > 1e-9) {
-        wireMk.Add(BRepBuilderAPI_MakeEdge(prev, p).Edge());
-      }
-      prev = p;
-      havePrev = true;
+      if (p.Distance(raw.back()) > 1e-9) raw.push_back(p);
     }
-    if (!wireMk.IsDone()) throw std::runtime_error("pipe path wire failed");
-    TopoDS_Wire spine = wireMk.Wire();
+    if (raw.size() < 2) throw std::runtime_error("pipe path is degenerate");
 
-    // Profile face (local XY, centroid-subtracted, +Z normal), relocated to the
-    // path start and rotated so its +Z aligns with the start tangent.
-    TopoDS_Face face = BuildProfileFace(outer, holes, cx, cy);
-    gp_Pnt p0(path[0], path[1], path[2]);
-    gp_Dir tangent(path[3] - path[0], path[4] - path[1], path[5] - path[2]);
-    gp_Trsf place;
-    place.SetTransformation(gp_Ax3(p0, tangent));
-    place.Invert();  // local (origin, +Z) → world (p0, tangent)
-    TopoDS_Face placed =
-        TopoDS::Face(BRepBuilderAPI_Transform(face, place, true).Shape());
+    // Resample evenly by arc length — denser when there's more twist to show.
+    int minSec = (int)raw.size();
+    int twistSec = (int)std::ceil(24.0 * std::abs(twistTurns)) + 1;
+    int n = minSec > twistSec ? minSec : twistSec;
+    if (n < 2) n = 2;
+    std::vector<double> cum(raw.size(), 0.0);
+    for (size_t i = 1; i < raw.size(); i++)
+      cum[i] = cum[i - 1] + raw[i].Distance(raw[i - 1]);
+    double total = cum.back();
+    if (total < 1e-9) throw std::runtime_error("pipe path has zero length");
+    std::vector<gp_Pnt> pts(n);
+    for (int k = 0; k < n; k++) {
+      double s = total * k / (n - 1);
+      size_t i = 1;
+      while (i < raw.size() && cum[i] < s) i++;
+      if (i >= raw.size()) { pts[k] = raw.back(); continue; }
+      double segLen = cum[i] - cum[i - 1];
+      double t = segLen > 1e-12 ? (s - cum[i - 1]) / segLen : 0.0;
+      pts[k] = gp_Pnt(raw[i - 1].X() + (raw[i].X() - raw[i - 1].X()) * t,
+                      raw[i - 1].Y() + (raw[i].Y() - raw[i - 1].Y()) * t,
+                      raw[i - 1].Z() + (raw[i].Z() - raw[i - 1].Z()) * t);
+    }
 
-    BRepOffsetAPI_MakePipe pipe(spine, placed);
-    pipe.Build();
-    if (!pipe.IsDone()) throw std::runtime_error("pipe sweep failed");
-    return Napi::Number::New(env, StoreShape(pipe.Shape()));
+    auto tangentAt = [&](int i) -> gp_Dir {
+      gp_Pnt a = pts[i > 0 ? i - 1 : 0];
+      gp_Pnt b = pts[i < n - 1 ? i + 1 : n - 1];
+      gp_Vec v(a, b);
+      if (v.Magnitude() < 1e-9) return gp_Dir(1, 0, 0);
+      return gp_Dir(v);
+    };
+
+    TopoDS_Wire base =
+        BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+    if (base.IsNull())
+      throw std::runtime_error("pipe profile wire builder failed");
+
+    gp_Dir Z0 = tangentAt(0);
+    gp_Dir Xcur = gp_Ax2(pts[0], Z0).XDirection();
+    gp_Dir Zprev = Z0;
+
+    BRepOffsetAPI_ThruSections loft(Standard_True, Standard_False);
+    for (int k = 0; k < n; k++) {
+      gp_Dir Z = autoRotate ? tangentAt(k) : Z0;
+      if (autoRotate && k > 0) {
+        // Rotation-minimizing frame: carry X across the tangent's turn.
+        gp_Vec cr = gp_Vec(Zprev).Crossed(gp_Vec(Z));
+        double sn = cr.Magnitude();
+        if (sn > 1e-9) {
+          double ang = std::atan2(sn, gp_Vec(Zprev).Dot(gp_Vec(Z)));
+          Xcur = Xcur.Rotated(gp_Ax1(gp::Origin(), gp_Dir(cr)), ang);
+        }
+      }
+      Zprev = Z;
+      double theta = twistTurns * 2 * M_PI * (n > 1 ? (double)k / (n - 1) : 0.0);
+      gp_Dir Xk = std::abs(theta) > 1e-12
+                      ? Xcur.Rotated(gp_Ax1(gp::Origin(), Z), theta)
+                      : Xcur;
+      gp_Trsf place;
+      place.SetTransformation(gp_Ax3(pts[k], Z, Xk));
+      place.Invert();
+      loft.AddWire(
+          TopoDS::Wire(BRepBuilderAPI_Transform(base, place, true).Shape()));
+    }
+    loft.Build();
+    if (!loft.IsDone()) throw std::runtime_error("pipe sweep (twist) failed");
+    return Napi::Number::New(env, StoreShape(loft.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 

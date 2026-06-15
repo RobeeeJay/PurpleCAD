@@ -412,6 +412,7 @@ function buildItemShapeLocal(item, allItems, precision) {
       if (!args) return null;
       const resultId = occ.makePipe(
         args.outerFlat, args.holesFlat, args.cx, args.cy, args.pathFlat,
+        regen.twistTurns ?? 0, !!regen.autoRotate,
       );
       if (!resultId) return null;
       const off = regen.centerOffset;
@@ -825,7 +826,7 @@ function revolveItem({ source, axis, angleRad, prismSides, offsetPerRotation, al
 }
 
 // Sweep a sketch profile along a path polyline (mirrors occOps.js#pipeItem).
-function pipeItem({ profileSource, pathRef, allItems, printPrecision }) {
+function pipeItem({ profileSource, pathRef, twistTurns, autoRotate, allItems, printPrecision }) {
   const args = pipeArgs(profileSource, pathRef, allItems);
   if (!args) {
     throw new Error(
@@ -834,6 +835,7 @@ function pipeItem({ profileSource, pathRef, allItems, printPrecision }) {
   }
   const resultId = occ.makePipe(
     args.outerFlat, args.holesFlat, args.cx, args.cy, args.pathFlat,
+    twistTurns ?? 0, !!autoRotate,
   );
   if (!resultId) throw new Error("Pipe produced no geometry.");
 

@@ -255,6 +255,8 @@ async function regeneratePipe(
     result = await pipeItem({
       profileSource,
       pathRef: regenerator.pathRef,
+      twistTurns: regenerator.twistTurns,
+      autoRotate: regenerator.autoRotate,
       allItems: liveItems,
       printPrecision,
     });

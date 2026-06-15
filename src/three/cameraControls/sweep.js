@@ -45,6 +45,10 @@ const offsetSceneOf = (params) =>
   (Number(params?.offsetPerRotation) || 0) / MM_PER_UNIT;
 const prismSidesOf = (params) =>
   params?.prism ? Math.max(3, Math.round(Number(params.sides) || 3)) : 0;
+// Pipe: full turns the profile twists over the sweep, and whether the section
+// auto-rotates to follow the path tangent.
+const twistTurnsOf = (params) => Number(params?.twistTurns) || 0;
+const autoRotateOf = (params) => !!params?.autoRotate;
 
 // Screen-space distance from P to segment AB.
 const segDist = (px, py, ax, ay, bx, by) => {
@@ -439,6 +443,8 @@ export function createSweepHelpers({
     myRequest,
     profileSource,
     pathRef,
+    twistTurns,
+    autoRotate,
     ghostItemId,
   }) => {
     const printPrecision =
@@ -449,6 +455,8 @@ export function createSweepHelpers({
       result = await pipeItem({
         profileSource,
         pathRef,
+        twistTurns,
+        autoRotate,
         allItems: itemsRef.current,
         printPrecision,
       });
@@ -494,6 +502,8 @@ export function createSweepHelpers({
         myRequest,
         profileSource: buildProfileSource(sm.profile),
         pathRef: sm.path,
+        twistTurns: twistTurnsOf(sm.params),
+        autoRotate: autoRotateOf(sm.params),
       });
       return;
     }
@@ -559,6 +569,8 @@ export function createSweepHelpers({
   // ── Commit ────────────────────────────────────────────────────────────────
   const commitPipe = async (store, sm) => {
     const profileSource = buildProfileSource(sm.profile);
+    const twistTurns = twistTurnsOf(sm.params);
+    const autoRotate = autoRotateOf(sm.params);
     const printPrecision = store.curveResolution === "print" ? 0.01 : null;
     let result;
     try {
@@ -566,6 +578,8 @@ export function createSweepHelpers({
       result = await pipeItem({
         profileSource,
         pathRef: sm.path,
+        twistTurns,
+        autoRotate,
         allItems: itemsRef.current,
         printPrecision,
       });
@@ -582,6 +596,8 @@ export function createSweepHelpers({
       kind: "pipe",
       profileSource,
       pathRef: sm.path,
+      twistTurns,
+      autoRotate,
       centerOffset,
       regeneratedAt: printPrecision,
     };
@@ -835,7 +851,10 @@ export function beginPipeRetarget(itemId, entryId) {
     path: r.pathRef,
     axis: null,
     secondProfile: null,
-    params: {},
+    params: {
+      twistTurns: r.twistTurns ?? 0,
+      autoRotate: !!r.autoRotate,
+    },
   });
   store.setSweepRetargetTarget({ itemId, entryId });
 }

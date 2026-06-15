@@ -3,8 +3,8 @@
 // cameraControls/sweep.js via _cameraControls); this overlay shows the per-phase
 // hint and, for Revolve, once a profile + axis are picked, the Angle / Prism /
 // Sides inputs with a debounced live preview, gating Confirm on a valid value —
-// like the chamfer/push-pull overlays.  Pipe and Loft have no parameters, so
-// they show just a Confirm/Cancel bar once both picks are made.
+// like the chamfer/push-pull overlays.  Pipe shows Rotations (twist) + an
+// Auto-rotate toggle; Loft has no parameters (just Confirm/Cancel).
 
 import React, { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
@@ -31,7 +31,9 @@ export default function SweepOverlay() {
   const [rotations, setRotations] = useState("1");
   const [offset, setOffset] = useState("0");
   const [sides, setSides] = useState("6");
+  const [twist, setTwist] = useState("0");
   const seededRef = useRef(false);
+  const pipeSeededRef = useRef(false);
 
   const params = sweepSelectMode?.params || {};
   const isRevolve = sweepSelectMode?.kind === "revolve";
@@ -54,6 +56,12 @@ export default function SweepOverlay() {
   const sidesValid =
     !params.prism || (Number.isFinite(sidesVal) && sidesVal >= 3);
   const valid = rotationsValid && offsetValid && sidesValid;
+
+  // Pipe twist params.
+  const pipeReady =
+    isPipe && !!sweepSelectMode?.profile && !!sweepSelectMode?.path;
+  const twistVal = evalValue(twist, variables);
+  const twistValid = Number.isFinite(twistVal);
 
   // Seed the inputs when the params panel first appears (covers retarget, which
   // pre-fills params); reset the latch when the tool closes.
@@ -84,6 +92,26 @@ export default function SweepOverlay() {
     cc?.updateSweepPreview?.();
   }, [ready, valid, rotationsVal, offsetVal, sidesVal, params.prism]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Seed + push pipe twist params (auto-rotate is toggled straight into params).
+  useEffect(() => {
+    if (pipeReady && !pipeSeededRef.current) {
+      pipeSeededRef.current = true;
+      setTwist(String(params.twistTurns ?? 0));
+    }
+    if (!sweepSelectMode) pipeSeededRef.current = false;
+  }, [pipeReady, sweepSelectMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!pipeReady) return;
+    const cc = useStore.getState()._cameraControls;
+    if (!twistValid) {
+      cc?.clearSweepPreview?.();
+      return;
+    }
+    setSweepParams({ twistTurns: twistVal });
+    cc?.updateSweepPreview?.();
+  }, [pipeReady, twistValid, twistVal, params.autoRotate]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Esc cancels the whole tool from any phase.
   useEffect(() => {
     if (!sweepSelectMode) return;
@@ -101,9 +129,12 @@ export default function SweepOverlay() {
   const confirm = () => {
     if (valid) useStore.getState()._cameraControls?.commitSweep?.();
   };
+  const confirmPipe = () => {
+    if (twistValid) useStore.getState()._cameraControls?.commitSweep?.();
+  };
 
-  // Pipe and loft have no parameters: a per-phase hint, then a Confirm/Cancel
-  // bar once both picks are made.
+  // Loft has no parameters: a per-phase hint, then a Confirm/Cancel bar once
+  // both picks are made.
   const confirmBar = (label) => (
     <>
       <div className="sketch-placement-hint">
@@ -146,7 +177,68 @@ export default function SweepOverlay() {
         </div>
       );
     }
-    return confirmBar("pipe");
+    return (
+      <>
+        <div className="sketch-placement-hint">
+          Set the sweep options, then Confirm · Esc to cancel
+        </div>
+        <div className="sketch-distance-input-overlay">
+          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+            Rotations:
+          </span>
+          <FormulaInput
+            variables={variables}
+            autoFocus
+            value={twist}
+            onChange={(e) => setTwist(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter" && twistValid) confirmPipe();
+            }}
+            style={{
+              width: 48,
+              marginRight: 8,
+              border: `1px solid ${twistValid ? "var(--border-color)" : "#e87575"}`,
+            }}
+          />
+          <label
+            style={{
+              fontSize: 11,
+              color: "#ccc",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              marginRight: 8,
+            }}
+            title="Rotate the section to follow the path tangent (so a curved path isn't flattened)"
+          >
+            <input
+              type="checkbox"
+              checked={!!params.autoRotate}
+              onChange={(e) => setSweepParams({ autoRotate: e.target.checked })}
+            />
+            Auto-rotate
+          </label>
+          <button
+            type="button"
+            onClick={cancel}
+            title="Cancel"
+            style={btn(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirmPipe}
+            disabled={!twistValid}
+            title="Confirm — create the pipe"
+            style={btn(true, !twistValid)}
+          >
+            Confirm
+          </button>
+        </div>
+      </>
+    );
   }
 
   if (isLoft) {
