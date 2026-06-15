@@ -46,6 +46,9 @@ import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
 import { createSketchCircularPatternHelpers } from "./sketchCircularPatternTool.js";
 import { createSketchRectangularPatternHelpers } from "./sketchRectangularPatternTool.js";
+import { MIRRORABLE_TYPES } from "../sketchMirror.js";
+import { CIRCULAR_PATTERNABLE_TYPES } from "../sketchCircularPattern.js";
+import { RECTANGULAR_PATTERNABLE_TYPES } from "../sketchRectangularPattern.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
 import { createSketchDrawHelpers } from "./sketchDraw.js";
 
@@ -1295,6 +1298,76 @@ export function createSketchInteraction(
     return true;
   };
 
+  // Hover feedback while a mirror/circular/rectangular pattern tool is active:
+  // highlight the geometry under the cursor that this tool/phase could actually
+  // select (the mirror axis line, a pattern centre point, or a patternable
+  // shape), so it's clear what a click would pick.
+  const updateSketchToolHover = (screenX, screenY, tool) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    const group = sketchShapesGroupRef?.current;
+    if (!selItem || !sketchMesh || !group) {
+      clearHoverLineHighlight();
+      clearHoverPointIndicator();
+      renderer.domElement.style.cursor = "";
+      return;
+    }
+    const shapes = selItem.shapes || [];
+    const store = useStore.getState();
+    const mirrorLineIdx =
+      tool === "mirror" ? store.sketchMirrorState?.lineIdx : null;
+
+    // Circular pattern's first phase picks a centre snap point — show the ring.
+    if (
+      tool === "circularPattern" &&
+      store.sketchCircularPatternState?.centerShapeIdx == null
+    ) {
+      const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+      clearHoverLineHighlight();
+      if (snap) {
+        showHoverPointIndicator(snap, sketchMesh);
+        renderer.domElement.style.cursor = "grab";
+      } else {
+        clearHoverPointIndicator();
+        renderer.domElement.style.cursor = "";
+      }
+      return;
+    }
+    clearHoverPointIndicator();
+
+    // Line/shape pick: hit-test the original (non-copy) shape lines.
+    const lineObjs = group.children.filter(
+      (c) =>
+        c.userData.shapeIdx != null &&
+        !c.userData.isOffset &&
+        !c.userData.isMirror &&
+        !c.userData.isCircularPattern &&
+        !c.userData.isRectangularPattern,
+    );
+    const hits = hitTestSketchLines(makeRay(screenX, screenY), lineObjs);
+    const hitIdx = hits[0]?.object?.userData?.shapeIdx;
+    if (hitIdx != null) {
+      const type = shapes[hitIdx]?.type;
+      const selectable =
+        tool === "mirror"
+          ? mirrorLineIdx == null
+            ? type === "line" // phase 1: any line can be the mirror axis
+            : hitIdx !== mirrorLineIdx && MIRRORABLE_TYPES.includes(type)
+          : tool === "circularPattern"
+            ? CIRCULAR_PATTERNABLE_TYPES.includes(type)
+            : RECTANGULAR_PATTERNABLE_TYPES.includes(type);
+      if (selectable) {
+        applyHoverLineHighlight(hits[0].object);
+        renderer.domElement.style.cursor = "pointer";
+        return;
+      }
+    }
+    clearHoverLineHighlight();
+    renderer.domElement.style.cursor = "";
+  };
+
   const onSketchMouseMove = (e) => {
     if (!sketchModeRef.current) return false;
     // While the long-press element list is open, ignore canvas motion — no
@@ -1305,7 +1378,7 @@ export function createSketchInteraction(
       activeSketchToolRef.current === "circularPattern" ||
       activeSketchToolRef.current === "rectangularPattern"
     ) {
-      clearAllSketchHover();
+      updateSketchToolHover(e.clientX, e.clientY, activeSketchToolRef.current);
       controls.mouseX = e.clientX;
       controls.mouseY = e.clientY;
       return true;

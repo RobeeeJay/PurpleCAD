@@ -57,6 +57,7 @@ export function createSketchMirrorHelpers({
       sketchMesh,
       sourceShapes,
       copyShapes,
+      axisShapes: [lineShape],
       color: sketchMirrorColorFor(theme),
       renderer,
     }).forEach((o) => {

@@ -56,6 +56,7 @@ export function buildPatternPreviewObjects({
   sketchMesh,
   sourceShapes,
   copyShapes,
+  axisShapes = [],
   color,
   renderer,
 }) {
@@ -64,6 +65,22 @@ export function buildPatternPreviewObjects({
   // Match the colour normal sketch-line selection uses, so a highlighted source
   // reads the same whether selected directly or as a pattern source.
   const highlight = SKETCH_SELECTION_BLUE;
+
+  // The mirror axis: a bold solid line in the tool colour so the chosen line of
+  // reflection reads clearly distinct from the (dashed) copies.
+  axisShapes.forEach((shape) => {
+    const pts = getSketchShapePoints(shape, sketchMesh);
+    if (pts.length < 2) return;
+    objs.push(
+      makeLine(pts, {
+        color,
+        linewidth: 3,
+        dashed: false,
+        resolution,
+        renderOrder: 1007,
+      }),
+    );
+  });
 
   sourceShapes.forEach((shape) => {
     const pts = getSketchShapePoints(shape, sketchMesh);
