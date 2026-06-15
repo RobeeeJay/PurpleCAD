@@ -15,6 +15,7 @@ import {
   revolveItem,
   pipeItem,
   loftItem,
+  pattern3dItem,
   performCsg,
 } from "./occClient.js";
 
@@ -319,6 +320,58 @@ async function regenerateLoft(
   };
 }
 
+// Resolve a 3D pattern's live params: mirror/circular read the plane object's
+// frame (origin + normal); circular uses the normal as the rotation axis.
+function resolvePatternParams(r, items) {
+  if (r.patternType === "rectangular") {
+    return { countX: r.countX, countY: r.countY, dx: r.dx, dy: r.dy };
+  }
+  const plane = items.find((i) => i.id === r.planeId);
+  if (!plane) return null;
+  const rot = plane.rotation || { x: 0, y: 0, z: 0 };
+  const nv = new THREE.Vector3(0, 0, 1).applyEuler(
+    new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
+  );
+  const origin = plane.position || { x: 0, y: 0, z: 0 };
+  const normal = { x: nv.x, y: nv.y, z: nv.z };
+  if (r.patternType === "mirror") return { origin, normal };
+  return { origin, axis: normal, count: r.count, angleRad: r.angleRad };
+}
+
+async function regenerate3dPattern(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const params = resolvePatternParams(regenerator, liveItems);
+  if (!params) return null;
+  let result;
+  try {
+    result = await pattern3dItem({
+      patternType: regenerator.patternType,
+      sourceId: regenerator.sourceId,
+      params,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Pattern regen couldn't rebuild (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  return {
+    position: currentPosition || result.position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
 async function regenerateBoolean(
   regenerator,
   accumulatedItems,
@@ -402,6 +455,8 @@ export async function regenerateItemsForResolution(
       result = await regeneratePipe(r, out, printPrecision, item.position);
     } else if (r.kind === "loft") {
       result = await regenerateLoft(r, out, printPrecision, item.position);
+    } else if (r.kind === "pattern3d") {
+      result = await regenerate3dPattern(r, out, printPrecision, item.position);
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
     }
@@ -418,7 +473,8 @@ export async function regenerateItemsForResolution(
         r.kind === "pushpull" ||
         r.kind === "revolve" ||
         r.kind === "pipe" ||
-        r.kind === "loft"
+        r.kind === "loft" ||
+        r.kind === "pattern3d"
       ) {
         changed = true;
         out.push({
@@ -448,7 +504,8 @@ export async function regenerateItemsForResolution(
         r.kind === "pushpull" ||
         r.kind === "revolve" ||
         r.kind === "pipe" ||
-        r.kind === "loft") &&
+        r.kind === "loft" ||
+        r.kind === "pattern3d") &&
       result.centerOffset
     ) {
       nextRegen.centerOffset = result.centerOffset;

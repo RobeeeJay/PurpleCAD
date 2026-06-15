@@ -9,6 +9,7 @@ import SketchModifySection from "./toolbar/SketchModifySection";
 import CombineSection from "./toolbar/CombineSection";
 import BevelSection from "./toolbar/BevelSection";
 import SplitSection from "./toolbar/SplitSection";
+import Pattern3dSection from "./toolbar/Pattern3dSection";
 import ModifySection from "./toolbar/ModifySection";
 import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
@@ -35,6 +36,7 @@ const Toolbar = () => {
           <CombineSection bare />
           <BevelSection bare />
           <SplitSection bare />
+          <Pattern3dSection bare />
           <ModifySection bare />
         </ToolbarSection>
       )}

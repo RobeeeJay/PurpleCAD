@@ -105,7 +105,9 @@ export async function recalculateTimeline() {
         // Pipe and loft are built in world and their position IS the bbox
         // centre; drop it so a sketch edit to an input re-centres the result.
         ((it.regenerator.kind === "pipe" || it.regenerator.kind === "loft") &&
-          it.regenerator.profileSource?.type === "extrude");
+          it.regenerator.profileSource?.type === "extrude") ||
+        // A 3D pattern is world-built and follows its source — always recentre.
+        it.regenerator.kind === "pattern3d";
       return {
         ...it,
         regenerator: { ...it.regenerator, regeneratedAt: "dirty" },

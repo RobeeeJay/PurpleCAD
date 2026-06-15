@@ -982,4 +982,91 @@ function splitItem({ target, plane, allItems, printPrecision }) {
   return { partA, partB };
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, loftItem, splitItem, exportSTL, exportSTEP, importStep };
+// ── 3D pattern (mirror / circular / rectangular) — mirrors occOps.js ────────
+function buildWorldSolid(item, allItems, precision) {
+  const localId = buildItemShapeLocal(item, allItems, precision);
+  if (localId == null) return null;
+  const t = buildBrushTransform(item);
+  let id = localId;
+  if (Math.abs(t.scale - 1) > 1e-9) {
+    id = occ.scaleShape(localId, t.scale);
+    occ.releaseShape(localId);
+  }
+  const w = occ.transformShape(
+    id, t.position.x, t.position.y, t.position.z,
+    t.rotation.x || 0, t.rotation.y || 0, t.rotation.z || 0,
+  );
+  if (id !== localId) occ.releaseShape(id);
+  else occ.releaseShape(localId);
+  return w;
+}
+
+function combineTessellations(ids, precision) {
+  const positions = [];
+  const indices = [];
+  for (const id of ids) {
+    if (!id) continue;
+    let tess;
+    try {
+      tess = occ.tessellate(id, precision ?? 0.5);
+    } finally {
+      occ.releaseShape(id);
+    }
+    if (!tess || tess.positions.length === 0) continue;
+    const base = positions.length / 3;
+    for (let i = 0; i < tess.positions.length; i++) positions.push(tess.positions[i]);
+    for (let i = 0; i < tess.indices.length; i++) indices.push(tess.indices[i] + base);
+  }
+  if (positions.length === 0) return null;
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(positions);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] -= cx; positions[i + 1] -= cy; positions[i + 2] -= cz;
+  }
+  return {
+    geometryData: { positions, normals: null, indices },
+    centerOffset: { cx, cy, cz },
+    position: { x: cx, y: cy, z: cz },
+  };
+}
+
+function patternInstances(worldId, patternType, params) {
+  const out = [];
+  if (patternType === "mirror") {
+    const o = params.origin, n = params.normal;
+    out.push(occ.mirrorShape(worldId, o.x, o.y, o.z, n.x, n.y, n.z));
+  } else if (patternType === "circular") {
+    const count = Math.max(2, Math.round(params.count || 2));
+    const total = params.angleRad ?? 2 * Math.PI;
+    const o = params.origin, a = params.axis;
+    for (let k = 1; k < count; k++)
+      out.push(occ.rotateShapeAxis(worldId, o.x, o.y, o.z, a.x, a.y, a.z, (total * k) / count));
+  } else if (patternType === "rectangular") {
+    const cx = Math.max(1, Math.round(params.countX || 1));
+    const cy = Math.max(1, Math.round(params.countY || 1));
+    for (let i = 0; i < cx; i++)
+      for (let j = 0; j < cy; j++) {
+        if (i === 0 && j === 0) continue;
+        out.push(occ.transformShape(worldId, i * (params.dx || 0), j * (params.dy || 0), 0, 0, 0, 0));
+      }
+  }
+  return out;
+}
+
+function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision }) {
+  const source = (allItems || []).find((i) => i.id === sourceId);
+  if (!source) throw new Error("Pattern source object not found.");
+  const worldId = buildWorldSolid(source, allItems, printPrecision);
+  if (!worldId) throw new Error("Couldn't build the pattern source.");
+  let ids;
+  try {
+    ids = patternInstances(worldId, patternType, params);
+  } finally {
+    occ.releaseShape(worldId);
+  }
+  const result = combineTessellations(ids, printPrecision);
+  if (!result) throw new Error("Pattern produced no geometry.");
+  return result;
+}
+
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };

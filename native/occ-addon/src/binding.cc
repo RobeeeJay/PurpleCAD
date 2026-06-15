@@ -975,6 +975,43 @@ Napi::Number TransformShape(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// mirrorShape(id, ox,oy,oz, nx,ny,nz) → newShapeId
+// Reflect a shape across the plane through (o) with normal (n).
+Napi::Number MirrorShape(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id = info[0].As<Napi::Number>().Int32Value();
+    double ox = GetDouble(info[1]), oy = GetDouble(info[2]), oz = GetDouble(info[3]);
+    double nx = GetDouble(info[4]), ny = GetDouble(info[5]), nz = GetDouble(info[6]);
+    double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+    if (len < 1e-9) throw std::runtime_error("mirror plane normal is degenerate");
+    TopoDS_Shape shape = FetchShape(id);
+    gp_Trsf trsf;
+    trsf.SetMirror(gp_Ax2(gp_Pnt(ox, oy, oz), gp_Dir(nx / len, ny / len, nz / len)));
+    BRepBuilderAPI_Transform mk(shape, trsf, true);
+    return Napi::Number::New(env, StoreShape(mk.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// rotateShapeAxis(id, ox,oy,oz, dx,dy,dz, angleRad) → newShapeId
+// Rotate a shape about the axis through (o) along direction (d).
+Napi::Number RotateShapeAxis(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id = info[0].As<Napi::Number>().Int32Value();
+    double ox = GetDouble(info[1]), oy = GetDouble(info[2]), oz = GetDouble(info[3]);
+    double dx = GetDouble(info[4]), dy = GetDouble(info[5]), dz = GetDouble(info[6]);
+    double angle = GetDouble(info[7], 0.0);
+    double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 1e-9) throw std::runtime_error("rotation axis is degenerate");
+    TopoDS_Shape shape = FetchShape(id);
+    gp_Trsf trsf;
+    trsf.SetRotation(gp_Ax1(gp_Pnt(ox, oy, oz), gp_Dir(dx / len, dy / len, dz / len)), angle);
+    BRepBuilderAPI_Transform mk(shape, trsf, true);
+    return Napi::Number::New(env, StoreShape(mk.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // scaleShape(id, factor) → newShapeId
 Napi::Number ScaleShape(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
@@ -1527,6 +1564,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
 
   // Transforms
   exports.Set("transformShape",     Napi::Function::New(env, TransformShape));
+  exports.Set("mirrorShape",        Napi::Function::New(env, MirrorShape));
+  exports.Set("rotateShapeAxis",    Napi::Function::New(env, RotateShapeAxis));
   exports.Set("scaleShape",         Napi::Function::New(env, ScaleShape));
 
   // Boolean ops

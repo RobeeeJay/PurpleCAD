@@ -125,3 +125,7 @@ export function importStep(args) {
 export function splitItem(args) {
   return runOp("splitItem", args);
 }
+
+export function pattern3dItem(args) {
+  return runOp("pattern3dItem", args);
+}
