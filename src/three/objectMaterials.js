@@ -355,3 +355,34 @@ export function updateEmissive(objectsRef, selectedId, selectedIds, hoveredId) {
     }
   });
 }
+
+// While a hidden object is selected, reveal it at 25% opacity (75% transparent)
+// so the user can see what they've picked in the objects list; hidden objects
+// that aren't selected stay hidden.  applyRenderMode forces hidden meshes
+// invisible, so this runs after it (and on selection change) to override.
+export function applyHiddenSelectionVisibility(
+  objectsRef,
+  itemsRef,
+  selectedIds,
+) {
+  const sel = new Set(selectedIds || []);
+  Object.values(objectsRef.current).forEach((mesh) => {
+    const item = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
+    if (!item || item.visible !== false || item.type === "sketch") return;
+    const selected = sel.has(item.id);
+    mesh.visible = selected;
+    if (!selected) return;
+    const m = mesh.material;
+    if (!m) return;
+    if (m.uniforms?.uOpacity) {
+      m.uniforms.uOpacity.value = 0.25;
+      m.transparent = true;
+      m.depthWrite = false;
+    } else if ("opacity" in m) {
+      m.transparent = true;
+      m.opacity = 0.25;
+      m.depthWrite = false;
+      m.needsUpdate = true;
+    }
+  });
+}

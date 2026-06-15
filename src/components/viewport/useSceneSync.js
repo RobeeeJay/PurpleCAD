@@ -15,7 +15,10 @@ import {
   buildExtrudeSelectGroup,
   applyRenderMode,
 } from "../../three/sceneObjects.js";
-import { updateEmissive } from "../../three/objectMaterials.js";
+import {
+  updateEmissive,
+  applyHiddenSelectionVisibility,
+} from "../../three/objectMaterials.js";
 import { resolveItemDepth } from "../../three/geometryParams.js";
 import { reconcileSelectionHighlight } from "../../three/selectionHighlights.js";
 import {
@@ -299,6 +302,11 @@ export function useSceneSync({
       sketchModeRef,
       printPrecision,
     });
+    applyHiddenSelectionVisibility(
+      objectsRef,
+      itemsRef,
+      selectedIdsRef.current,
+    );
     // Variables drive extrude depth and dimension distances via formula
     // resolution; re-run when they change so geometry/labels reflect the
     // new values.
@@ -615,6 +623,7 @@ export function useSceneSync({
     } else {
       updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
     }
+    applyHiddenSelectionVisibility(objectsRef, itemsRef, selectedIds);
   }, [hoveredId, selectedId, selectedIds, materialDialogTarget]);
 
   // ── Render mode ───────────────────────────────────────────────────────────
@@ -639,6 +648,11 @@ export function useSceneSync({
       sketchModeRef,
       printPrecision,
     });
+    applyHiddenSelectionVisibility(
+      objectsRef,
+      itemsRef,
+      selectedIdsRef.current,
+    );
     const isSmooth = renderMode === "smooth";
     if (allSketchGroupRef.current)
       allSketchGroupRef.current.visible = !isSmooth;
