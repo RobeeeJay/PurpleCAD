@@ -19,11 +19,52 @@ const CombineSection = ({ bare = false }) => {
   // Require 2+ selected non-sketch items.
   const canCsg = selectedEligible.length >= 2;
 
+  // An imported solid is a csg item carrying only a mesh (no recipe).  OCC can't
+  // boolean a dense one without freezing, so those go through a mesh boolean.
+  const isImportedMesh = (item) =>
+    item.type === "csg" && !item.regenerator && item.geometryData;
+
   const handleCsg = async (operation) => {
     if (!canCsg) return;
     const selectedItems = selectedEligible;
 
     try {
+      if (selectedItems.some(isImportedMesh)) {
+        const cc = useStore.getState()._cameraControls;
+        const result = cc?.meshBoolean?.(
+          selectedItems.map((i) => i.id),
+          operation,
+        );
+        if (!result) {
+          alert("Couldn't combine the selected meshes.");
+          return;
+        }
+        let maxMeshId = 0;
+        history.forEach((entry) => {
+          if (
+            entry.instruction?.type === "create" &&
+            entry.instruction.item.id > maxMeshId
+          )
+            maxMeshId = entry.instruction.item.id;
+        });
+        const meshId = maxMeshId + 1;
+        const meshLabel =
+          operation.charAt(0).toUpperCase() + operation.slice(1);
+        // A baked mesh result — no OCC recipe to re-run, so no regenerator.
+        addItem({
+          id: meshId,
+          name: `${meshLabel} ${meshId}`,
+          type: "csg",
+          children: [],
+          position: result.position,
+          scale: { x: 1, y: 1, z: 1 },
+          rotation: { x: 0, y: 0, z: 0 },
+          geometryData: result.geometryData,
+        });
+        consumeItems(selectedItems.map((i) => i.id));
+        return;
+      }
+
       // Tessellate primitives at the high-resolution setting so the CSG
       // result inherits the chord-deviation precision the user selected.
       const printPrecision = curveResolution === "print" ? 0.01 : null;

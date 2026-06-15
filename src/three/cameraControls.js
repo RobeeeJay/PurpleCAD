@@ -5,6 +5,7 @@ import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
+import { meshBoolean } from "./meshBoolean.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
@@ -385,6 +386,13 @@ export function attachCameraControls(ctx) {
   controls.clearSweepPreview = () => sweep.clearSweepPreview();
   controls.commitSweep = () => sweep.commitSweep();
   controls.cancelSweep = () => sweep.cancelSweep();
+  // Triangle-mesh boolean over the live scene meshes (used when an imported
+  // mesh is an operand, where OCC's solid boolean is infeasible).
+  controls.meshBoolean = (itemIds, operation) =>
+    meshBoolean(
+      itemIds.map((id) => objectsRef.current[id]).filter(Boolean),
+      operation,
+    );
 
   // Live preview for MaterialDialog: instantly applies in-progress
   // color/finish edits to the live mesh(es) without a store write.
