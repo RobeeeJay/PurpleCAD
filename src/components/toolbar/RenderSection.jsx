@@ -12,12 +12,15 @@ const RenderSection = () => {
   const crossSectionView = useStore((s) => s.crossSectionView);
   const toggleCrossSectionView = useStore((s) => s.toggleCrossSectionView);
   const pathTraceView = useStore((s) => s.pathTraceView);
-  const togglePathTraceView = useStore((s) => s.togglePathTraceView);
+  const setPathTraceView = useStore((s) => s.setPathTraceView);
+  // The raster modes read as selected only when the path-traced view is off, so
+  // all four behave as one mutually-exclusive radio group.
+  const rasterMode = (m) => renderMode === m && !pathTraceView;
 
   return (
     <ToolbarSection label="Render">
       <button
-        className={`toolbar-btn ${renderMode === "wireframe" ? "active" : ""}`}
+        className={`toolbar-btn ${rasterMode("wireframe") ? "active" : ""}`}
         title="Wireframe (1)"
         onClick={() => setRenderMode("wireframe")}
       >
@@ -104,7 +107,7 @@ const RenderSection = () => {
         </svg>
       </button>
       <button
-        className={`toolbar-btn ${renderMode === "shaded" ? "active" : ""}`}
+        className={`toolbar-btn ${rasterMode("shaded") ? "active" : ""}`}
         title="Shaded (2)"
         onClick={() => setRenderMode("shaded")}
       >
@@ -166,7 +169,7 @@ const RenderSection = () => {
         </svg>
       </button>
       <button
-        className={`toolbar-btn ${renderMode === "transparent" ? "active" : ""}`}
+        className={`toolbar-btn ${rasterMode("transparent") ? "active" : ""}`}
         title="Transparent (50%) (3)"
         onClick={() => setRenderMode("transparent")}
       >
@@ -281,12 +284,8 @@ const RenderSection = () => {
       </button>
       <button
         className={`toolbar-btn ${pathTraceView ? "active" : ""}`}
-        title={
-          pathTraceView
-            ? "Path-traced render on — click to return to the raster view (4)"
-            : "Path-traced render (prototype) — progressive GPU ray tracing (4)"
-        }
-        onClick={togglePathTraceView}
+        title="Path-traced render (prototype) — progressive GPU ray tracing (4)"
+        onClick={() => setPathTraceView(true)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <circle

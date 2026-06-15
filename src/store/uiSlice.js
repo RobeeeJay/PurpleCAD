@@ -249,8 +249,6 @@ export const createUiSlice = (set) => ({
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   toggleCrossSectionView: () =>
     set((state) => ({ crossSectionView: !state.crossSectionView })),
-  togglePathTraceView: () =>
-    set((state) => ({ pathTraceView: !state.pathTraceView })),
   setCameraControls: (controls) => set({ _cameraControls: controls }),
 
   beginOperation: () =>
@@ -276,7 +274,10 @@ export const createUiSlice = (set) => ({
   setCutExtrudeInProgress: (v) => set({ cutExtrudeInProgress: !!v }),
   setExtrudeRetargetId: (id) => set({ extrudeRetargetId: id }),
   setExtrudeRetargetGroup: (ids) => set({ extrudeRetargetGroup: ids }),
-  setRenderMode: (mode) => set({ renderMode: mode }),
+  // Selecting a raster render mode also leaves the path-traced view, so the
+  // four modes (wireframe/shaded/transparent/path-traced) act as one radio set.
+  setRenderMode: (mode) => set({ renderMode: mode, pathTraceView: false }),
+  setPathTraceView: (v) => set({ pathTraceView: !!v }),
   setProjectionMode: (mode) => set({ projectionMode: mode }),
 
   toggleProjectionMode: () =>

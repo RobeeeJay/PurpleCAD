@@ -2031,10 +2031,10 @@ export function createSketchInteraction(
         store.setRenderMode(renderModeKeys[e.key]);
         return;
       }
-      // 4 now toggles the path-traced render (replaced the old Smooth mode).
+      // 4 selects the path-traced render mode (1-3 select the raster modes).
       if (e.key === "4") {
         e.preventDefault();
-        store.togglePathTraceView();
+        store.setPathTraceView(true);
         return;
       }
       if (e.key === "5") {
