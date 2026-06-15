@@ -788,6 +788,23 @@ function exportSTEP({ items }) {
   }
 }
 
+// Read a STEP file into a tessellated mesh (mirrors occOps.js#importStep).
+function importStep({ stepText, printPrecision }) {
+  const id = occ.importSTEP(stepText);
+  if (!id) throw new Error("STEP import produced no shape.");
+  let tess;
+  try {
+    tess = occ.tessellate(id, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(id);
+  }
+  if (!tess) throw new Error("STEP import produced no geometry.");
+  return {
+    positions: Array.from(tess.positions),
+    indices: Array.from(tess.indices),
+  };
+}
+
 // Revolve a sketch profile around an axis line (mirrors occOps.js#revolveItem).
 function revolveItem({ source, axis, angleRad, prismSides, offsetPerRotation, allItems, printPrecision }) {
   const args = revolveArgs(source, axis, allItems);
@@ -892,4 +909,4 @@ function loftItem({ profileSource, secondProfileSource, printPrecision }) {
   };
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, loftItem, exportSTL, exportSTEP };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, loftItem, exportSTL, exportSTEP, importStep };

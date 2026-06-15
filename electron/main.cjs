@@ -64,6 +64,7 @@ try {
   ipcMain.handle("occ:loftItem", (_e, args) => occBridge.loftItem(args));
   ipcMain.handle("occ:exportSTL", (_e, args) => occBridge.exportSTL(args));
   ipcMain.handle("occ:exportSTEP", (_e, args) => occBridge.exportSTEP(args));
+  ipcMain.handle("occ:importStep", (_e, args) => occBridge.importStep(args));
 } catch (err) {
   // Addon not built or OCC dylib missing — fall back to WASM path in renderer.
   console.warn("[main] native OCC addon unavailable:", err.message);

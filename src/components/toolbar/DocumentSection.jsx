@@ -2,7 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
-import { exportSTL, exportSTEP } from "../../three/occClient.js";
+import { exportSTL, exportSTEP, importStep } from "../../three/occClient.js";
+import { maxItemId } from "../../store/internals.js";
+import {
+  parseStl,
+  parseSvgToSketchShapes,
+  finalizeImportedMesh,
+} from "../../three/importGeometry.js";
 
 const DocumentSection = () => {
   const history = useStore((s) => s.history);
@@ -13,8 +19,16 @@ const DocumentSection = () => {
   const variables = useStore((s) => s.variables);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
   const cameraControls = useStore((s) => s._cameraControls);
+  const selectedId = useStore((s) => s.selectedId);
+  const addItem = useStore((s) => s.addItem);
+  const addSketchShapes = useStore((s) => s.addSketchShapes);
+  const selectItem = useStore((s) => s.selectItem);
+
+  const selectedItem = items.find((i) => i.id === selectedId);
+  const isSketch = selectedItem?.type === "sketch";
 
   const fileInputRef = useRef(null);
+  const importInputRef = useRef(null);
   const saveBtnRef = useRef(null);
   const saveMenuRef = useRef(null);
   const [saveMenuOpen, setSaveMenuOpen] = useState(false);
@@ -161,6 +175,61 @@ const DocumentSection = () => {
     download(blob, "scene.png");
   };
 
+  // Import — STL/STEP solids in the 3D view, SVG geometry while editing a sketch.
+  const handleImportClick = () => {
+    if (!importInputRef.current) return;
+    importInputRef.current.accept = isSketch ? ".svg" : ".stl,.step,.stp";
+    importInputRef.current.value = "";
+    importInputRef.current.click();
+  };
+
+  const addImportedSolid = (geometryData) => {
+    const id = maxItemId(history) + 1;
+    addItem({
+      id,
+      name: `Imported ${id}`,
+      type: "csg",
+      children: [],
+      geometryData,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    });
+    selectItem(id);
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = file.name.toLowerCase().split(".").pop();
+    try {
+      if (isSketch) {
+        if (ext !== "svg") {
+          alert("In a sketch, import SVG geometry.");
+          return;
+        }
+        const shapes = parseSvgToSketchShapes(await file.text());
+        if (shapes.length === 0) {
+          alert("No importable geometry found in the SVG.");
+          return;
+        }
+        addSketchShapes(selectedId, shapes);
+      } else if (ext === "stl") {
+        addImportedSolid(parseStl(await file.arrayBuffer()).geometryData);
+      } else if (ext === "step" || ext === "stp") {
+        const res = await importStep({ stepText: await file.text() });
+        addImportedSolid(
+          finalizeImportedMesh(res.positions, res.indices).geometryData,
+        );
+      } else {
+        alert("Import STL or STEP files in the 3D view, or SVG in a sketch.");
+      }
+    } catch (err) {
+      console.error("Import failed:", err);
+      alert("Import failed: " + err.message);
+    }
+  };
+
   return (
     <ToolbarSection label="Document">
       <button className="toolbar-btn" title="New document" onClick={handleNew}>
@@ -295,6 +364,44 @@ const DocumentSection = () => {
       </button>
       <button
         className="toolbar-btn"
+        title={
+          isSketch
+            ? "Import SVG geometry into this sketch"
+            : "Import an STL or STEP object"
+        }
+        onClick={handleImportClick}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <path
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M4 14 L4 20 L20 20 L20 14"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="3"
+            x2="12"
+            y2="15"
+          />
+          <polyline
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="7,10 12,15 17,10"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
         title="Variables"
         onClick={() => setVariablesDialogOpen(true)}
       >
@@ -339,6 +446,12 @@ const DocumentSection = () => {
         accept=".json,.cad.json"
         style={{ display: "none" }}
         onChange={handleFileChange}
+      />
+      <input
+        ref={importInputRef}
+        type="file"
+        style={{ display: "none" }}
+        onChange={handleImportFile}
       />
     </ToolbarSection>
   );

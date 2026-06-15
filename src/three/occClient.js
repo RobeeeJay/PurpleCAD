@@ -117,3 +117,7 @@ export function exportSTL(args) {
 export function exportSTEP(args) {
   return runOp("exportSTEP", args);
 }
+
+export function importStep(args) {
+  return runOp("importStep", args);
+}

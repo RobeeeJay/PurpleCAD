@@ -67,6 +67,7 @@
 // ── STEP export ─────────────────────────────────────────────────────────
 #include <STEPControl_Writer.hxx>
 #include <STEPControl_StepModelType.hxx>
+#include <STEPControl_Reader.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 
 #include <algorithm>
@@ -1362,6 +1363,25 @@ Napi::String ExportSTEP(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// importSTEP(stepText: string) → shapeId
+// Reads a STEP file's content into a single shape (all roots fused into one
+// compound).  The caller tessellates it and must release the shape.
+Napi::Number ImportSTEP(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    std::string content = info[0].As<Napi::String>().Utf8Value();
+    std::istringstream iss(content);
+    STEPControl_Reader reader;
+    IFSelect_ReturnStatus status = reader.ReadStream("import.step", iss);
+    if (status != IFSelect_RetDone)
+      throw std::runtime_error("STEP read failed");
+    reader.TransferRoots();
+    TopoDS_Shape shape = reader.OneShape();
+    if (shape.IsNull()) throw std::runtime_error("STEP file produced no shape");
+    return Napi::Number::New(env, StoreShape(shape));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Phase-0 full-pipeline smoke test (kept for existing test/ping.mjs)
 // ════════════════════════════════════════════════════════════════════════
@@ -1433,6 +1453,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
 
   // Export
   exports.Set("exportSTEP",         Napi::Function::New(env, ExportSTEP));
+  exports.Set("importSTEP",         Napi::Function::New(env, ImportSTEP));
 
   // Shape store management
   exports.Set("releaseShape",       Napi::Function::New(env, ReleaseShape));

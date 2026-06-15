@@ -1107,6 +1107,24 @@ async function exportSTEP({ items }) {
   }
 }
 
+// Read a STEP file's content into a tessellated mesh (raw mm / Z-up positions —
+// the renderer converts to scene units / Y-up and centres it).
+async function importStep({ stepText, printPrecision }) {
+  const id = occ.importSTEP(stepText);
+  if (!id) throw new Error("STEP import produced no shape.");
+  let tess;
+  try {
+    tess = occ.tessellate(id, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(id);
+  }
+  if (!tess) throw new Error("STEP import produced no geometry.");
+  return {
+    positions: Array.from(tess.positions),
+    indices: Array.from(tess.indices),
+  };
+}
+
 export const ops = {
   chamferOrFilletItem,
   pushPullFaces,
@@ -1116,4 +1134,5 @@ export const ops = {
   performCsg,
   exportSTL,
   exportSTEP,
+  importStep,
 };
