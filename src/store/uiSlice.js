@@ -105,20 +105,10 @@ export const uiInitial = {
   planeTool: null,
   // True while picking the 3 points that define a new plane in the 3D view.
   planePickActive: false,
-  setPlanePickActive: (v) => set({ planePickActive: !!v }),
-  startPlaneTool: (base) =>
-    set({ planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 } }),
-  updatePlaneTool: (partial) =>
-    set((state) =>
-      state.planeTool ? { planeTool: { ...state.planeTool, ...partial } } : {},
-    ),
-  cancelPlaneTool: () => set({ planeTool: null }),
 
   // Pending circular/rectangular 3D pattern: { patternType, sourceId, planeId }.
   // The dialog adds the counts/angle/spacing and confirms.
   pattern3dTool: null,
-  startPattern3d: (v) => set({ pattern3dTool: v }),
-  cancelPattern3d: () => set({ pattern3dTool: null }),
 
   // Path-traced render mode (prototype): replaces the raster view with a
   // progressively-accumulated GPU path trace.  `pathTraceView` is the user's
@@ -207,6 +197,18 @@ export const createUiSlice = (set) => ({
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
+
+  // ── Plane object + 3D pattern tools ─────────────────────────────────────
+  setPlanePickActive: (v) => set({ planePickActive: !!v }),
+  startPlaneTool: (base) =>
+    set({ planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 } }),
+  updatePlaneTool: (partial) =>
+    set((state) =>
+      state.planeTool ? { planeTool: { ...state.planeTool, ...partial } } : {},
+    ),
+  cancelPlaneTool: () => set({ planeTool: null }),
+  startPattern3d: (v) => set({ pattern3dTool: v }),
+  cancelPattern3d: () => set({ pattern3dTool: null }),
 
   // ── Sweep tools (Revolve / Pipe / Loft) ─────────────────────────────────
   setSweepSelectMode: (v) =>
