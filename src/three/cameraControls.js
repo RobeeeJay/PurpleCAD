@@ -6,7 +6,7 @@ import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js"
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean } from "./meshBoolean.js";
-import { frameFromPoints } from "./planeFrame.js";
+import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
@@ -554,6 +554,29 @@ export function attachCameraControls(ctx) {
           .getState()
           .showNotification?.("Pick three non-collinear points.");
     }
+  };
+
+  // Pick an object face: its world plane (click point + face normal) seeds a
+  // new Plane and reopens the creation dialog.
+  controls.planeFacePickClick = (screenX, screenY) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    const meshes = Object.values(objectsRef.current).filter(
+      (m) => m.visible !== false,
+    );
+    const hit = ray.intersectObjects(meshes, false)[0];
+    if (!hit || !hit.face) {
+      useStore.getState().showNotification?.("Click a face to define a plane.");
+      return;
+    }
+    const nm = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+    const worldN = hit.face.normal.clone().applyMatrix3(nm).normalize();
+    const base = frameFromPointNormal(hit.point, worldN);
+    useStore.getState().setPlanePickActive(false);
+    if (base) useStore.getState().startPlaneTool(base);
   };
 
   // Live preview for MaterialDialog: instantly applies in-progress

@@ -199,7 +199,9 @@ export const createUiSlice = (set) => ({
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
 
   // ── Plane object + 3D pattern tools ─────────────────────────────────────
-  setPlanePickActive: (v) => set({ planePickActive: !!v }),
+  // false when off, else a mode string ("points" | "face") naming what a
+  // viewport click contributes to the plane being defined.
+  setPlanePickActive: (v) => set({ planePickActive: v || false }),
   startPlaneTool: (base) =>
     set({ planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 } }),
   updatePlaneTool: (partial) =>

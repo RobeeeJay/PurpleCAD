@@ -21,8 +21,9 @@ export default function PlanePickHint() {
   if (!active) return null;
   return (
     <div className="sketch-placement-hint">
-      Click 3 points to define a plane (e.g. two ends of an edge + a point) ·
-      Esc to cancel
+      {active === "face"
+        ? "Click an object face to use its plane · Esc to cancel"
+        : "Click 3 points to define a plane (e.g. two ends of an edge + a point) · Esc to cancel"}
     </div>
   );
 }

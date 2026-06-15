@@ -31,6 +31,29 @@ export function frameFromPoints(p0, p1, p2) {
   };
 }
 
+// A plane frame { position, rotation } from a world point and a world normal
+// (+Z aligned to the normal; +X chosen perpendicular).  Used to seed a Plane
+// from a picked object face.  Returns null when the normal is degenerate.
+export function frameFromPointNormal(point, normal) {
+  const n = new THREE.Vector3(normal.x, normal.y, normal.z);
+  if (n.lengthSq() < 1e-12) return null;
+  n.normalize();
+  // Any axis not parallel to n works as the seed for +X.
+  const ref =
+    Math.abs(n.x) < 0.9
+      ? new THREE.Vector3(1, 0, 0)
+      : new THREE.Vector3(0, 1, 0);
+  const x = ref.sub(n.clone().multiplyScalar(ref.dot(n))).normalize();
+  const y = n.clone().cross(x).normalize();
+  const e = new THREE.Euler().setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(x, y, n),
+  );
+  return {
+    position: { x: point.x, y: point.y, z: point.z },
+    rotation: { x: e.x, y: e.y, z: e.z },
+  };
+}
+
 const eul = (r) => new THREE.Euler(r.x || 0, r.y || 0, r.z || 0);
 
 // The unit normal (+Z) of a frame's rotation.

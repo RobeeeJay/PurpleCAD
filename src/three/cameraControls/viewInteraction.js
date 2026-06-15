@@ -122,11 +122,17 @@ export function createViewInteraction(
     controls.isPanning = false;
     orbitIndicator.visible = false;
 
-    // Plane-from-3-points: clicks pick vertices to define a new Plane.
-    if (useStore.getState().planePickActive && e.button === 0) {
+    // Plane picking: clicks either accumulate vertices (3-point mode) or pick a
+    // single face's plane, depending on the active mode.
+    const planePick = useStore.getState().planePickActive;
+    if (planePick && e.button === 0) {
       const dx = e.clientX - (controls.mouseDownX || e.clientX);
       const dy = e.clientY - (controls.mouseDownY || e.clientY);
-      if (Math.hypot(dx, dy) < 5) controls.planePickClick(e.clientX, e.clientY);
+      if (Math.hypot(dx, dy) < 5) {
+        if (planePick === "face")
+          controls.planeFacePickClick(e.clientX, e.clientY);
+        else controls.planePickClick(e.clientX, e.clientY);
+      }
       return;
     }
 

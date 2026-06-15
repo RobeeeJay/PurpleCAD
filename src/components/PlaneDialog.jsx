@@ -114,10 +114,10 @@ const PlaneDialog = () => {
     setRz("0");
     setOffset("0");
   };
-  const pickPoints = () => {
+  const startPick = (mode) => {
     useStore.getState()._cameraControls?.clearPlanePreview?.();
     cancelPlaneTool();
-    setPlanePickActive(true);
+    setPlanePickActive(mode);
   };
   const baseBtn = {
     fontSize: 11,
@@ -193,8 +193,19 @@ const PlaneDialog = () => {
             >
               YZ
             </button>
-            <button type="button" style={baseBtn} onClick={pickPoints}>
+            <button
+              type="button"
+              style={baseBtn}
+              onClick={() => startPick("points")}
+            >
               Pick 3 points
+            </button>
+            <button
+              type="button"
+              style={baseBtn}
+              onClick={() => startPick("face")}
+            >
+              Select face
             </button>
           </div>
           <label style={row}>

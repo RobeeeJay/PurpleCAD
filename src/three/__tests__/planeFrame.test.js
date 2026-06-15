@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
-import { frameFromPoints, applyPlaneAdjust, normalOf } from "../planeFrame.js";
+import {
+  frameFromPoints,
+  frameFromPointNormal,
+  applyPlaneAdjust,
+  normalOf,
+} from "../planeFrame.js";
 
 describe("frameFromPoints", () => {
   it("derives an XY-plane frame (normal +Z) from three points", () => {
@@ -26,6 +31,30 @@ describe("frameFromPoints", () => {
         { x: 1, y: 0, z: 0 },
         { x: 2, y: 0, z: 0 },
       ),
+    ).toBeNull();
+  });
+});
+
+describe("frameFromPointNormal", () => {
+  it("aligns +Z to the given normal and keeps the point as origin", () => {
+    const f = frameFromPointNormal({ x: 1, y: 2, z: 3 }, { x: 0, y: 1, z: 0 });
+    expect(f).toBeTruthy();
+    const n = normalOf(f.rotation);
+    expect(n.x).toBeCloseTo(0, 5);
+    expect(n.y).toBeCloseTo(1, 5);
+    expect(n.z).toBeCloseTo(0, 5);
+    expect(f.position).toEqual({ x: 1, y: 2, z: 3 });
+  });
+
+  it("normalises a non-unit normal", () => {
+    const f = frameFromPointNormal({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 5 });
+    const n = normalOf(f.rotation);
+    expect(n.z).toBeCloseTo(1, 5);
+  });
+
+  it("returns null for a zero normal", () => {
+    expect(
+      frameFromPointNormal({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }),
     ).toBeNull();
   });
 });
