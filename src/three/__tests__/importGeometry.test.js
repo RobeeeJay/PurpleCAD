@@ -117,4 +117,38 @@ describe("STEP import round-trip", () => {
     expect(result).toBeTruthy();
     expect(result.geometryData.positions.length).toBeGreaterThan(0);
   });
+
+  it("rejects a too-dense imported mesh fast (no boolean hang)", async () => {
+    // A boolean on a many-thousand-face mesh-solid would freeze the main
+    // process, so an over-the-limit mesh must throw rather than be attempted.
+    const triCount = 50001;
+    const imported = {
+      id: 2,
+      type: "csg",
+      geometryData: {
+        positions: new Array(triCount * 9).fill(0),
+        normals: null,
+        indices: null,
+      },
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+    const cube = {
+      id: 3,
+      type: "cube",
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+    const items = [imported, cube];
+    await expect(
+      performCsg({
+        selectedItems: items,
+        allItems: items,
+        operation: "union",
+        printPrecision: 0.1,
+      }),
+    ).rejects.toThrow(/too detailed/i);
+  });
 });
