@@ -118,6 +118,22 @@ describe("revolveItem", () => {
     expect(Math.min(ex, ez)).toBeCloseTo(5.196, 1);
   });
 
+  it("makes a helical coil when an offset per rotation is set", async () => {
+    const coil = await revolveItem({
+      source: source(),
+      axis,
+      angleRad: 3 * 2 * Math.PI, // 3 full turns
+      prismSides: 0,
+      offsetPerRotation: 2, // advance 2 along the Y axis per turn
+      allItems: [sketch()],
+      printPrecision: 0.05,
+    });
+    expect(coil).toBeTruthy();
+    const [, ey] = extents(coil.geometryData.positions);
+    // 3 turns × 2 advance = 6 along the axis, plus the profile's own height 1.
+    expect(ey).toBeCloseTo(7, 0);
+  });
+
   it("throws when the axis line is missing", async () => {
     await expect(
       revolveItem({

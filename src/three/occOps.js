@@ -394,6 +394,7 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         args.ax.y2,
         r.angleRad ?? 2 * Math.PI,
         r.prismSides ?? 0,
+        r.offsetPerRotation ?? 0,
       );
       if (!resultId) return null;
       const offset = chamferCenterOffset(r, item);
@@ -735,6 +736,7 @@ async function revolveItem({
   axis,
   angleRad,
   prismSides,
+  offsetPerRotation,
   allItems,
   printPrecision,
 }) {
@@ -755,6 +757,7 @@ async function revolveItem({
     args.ax.y2,
     angleRad ?? 2 * Math.PI,
     prismSides ?? 0,
+    offsetPerRotation ?? 0,
   );
   if (!resultId) throw new Error("Revolve produced no geometry.");
 

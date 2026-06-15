@@ -2,10 +2,11 @@ import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
 import { evalValue, useDebouncedPreview } from "./inputs.jsx";
+import { MM_PER_UNIT } from "../three/sceneObjects.js";
 import "../styles/VariablesDialog.css";
 
-// Edit a committed revolve's parameters (angle, prism mode, sides) from its
-// timeline step.  A revolve is a CREATE entry, so its recipe lives on
+// Edit a committed revolve's parameters (rotations, offset/turn, prism mode,
+// sides) from its timeline step.  A revolve is a CREATE entry, so it lives on
 // inst.item.regenerator.  Mirrors ChamferEditDialog: a non-blocking floating
 // panel with a debounced live preview that ghosts the existing solid.
 const RevolveEditDialog = () => {
@@ -22,16 +23,16 @@ const RevolveEditDialog = () => {
   const item = entry?.instruction?.item;
   const regenerator = item?.regenerator;
 
-  const [angleDeg, setAngleDeg] = useState("");
+  const [rotations, setRotations] = useState("1");
+  const [offset, setOffset] = useState("0");
   const [prism, setPrism] = useState(false);
   const [sides, setSides] = useState("6");
   useEffect(() => {
     if (regenerator?.kind === "revolve") {
-      setAngleDeg(
-        String(
-          Math.round(((regenerator.angleRad ?? 2 * Math.PI) * 180) / Math.PI),
-        ),
+      setRotations(
+        String((regenerator.angleRad ?? 2 * Math.PI) / (2 * Math.PI)),
       );
+      setOffset(String((regenerator.offsetPerRotation ?? 0) * MM_PER_UNIT));
       setPrism((regenerator.prismSides ?? 0) >= 3);
       setSides(
         String(regenerator.prismSides >= 3 ? regenerator.prismSides : 6),
@@ -39,25 +40,29 @@ const RevolveEditDialog = () => {
     }
   }, [regenerator]);
 
-  const angleVal = evalValue(angleDeg, variables);
+  const rotationsVal = evalValue(rotations, variables);
+  const offsetVal = evalValue(offset, variables);
   const sidesVal = evalValue(sides, variables);
-  const angleValid =
-    Number.isFinite(angleVal) && angleVal > 0 && angleVal <= 360;
+  const rotationsValid = Number.isFinite(rotationsVal) && rotationsVal > 0;
+  const offsetValid = Number.isFinite(offsetVal);
   const sidesValid = !prism || (Number.isFinite(sidesVal) && sidesVal >= 3);
-  const valid = angleValid && sidesValid;
+  const valid = rotationsValid && offsetValid && sidesValid;
 
   useDebouncedPreview(
     regenerator?.kind === "revolve" && valid,
     () =>
-      useStore
-        .getState()
-        ._cameraControls?.updateRevolveEditPreview?.(
-          regenerator,
-          { angleDeg: angleVal, prism, sides: sidesVal },
-          item?.id,
-        ),
+      useStore.getState()._cameraControls?.updateRevolveEditPreview?.(
+        regenerator,
+        {
+          rotations: rotationsVal,
+          offsetPerRotation: offsetVal,
+          prism,
+          sides: sidesVal,
+        },
+        item?.id,
+      ),
     () => useStore.getState()._cameraControls?.clearSweepPreview?.(),
-    [angleVal, sidesVal, prism, regenerator, item?.id],
+    [rotationsVal, offsetVal, sidesVal, prism, regenerator, item?.id],
   );
 
   useEffect(() => {
@@ -73,7 +78,8 @@ const RevolveEditDialog = () => {
   const commit = () => {
     if (!valid) return;
     updateRevolveParams(entry.id, {
-      angleRad: (angleVal * Math.PI) / 180,
+      angleRad: rotationsVal * 2 * Math.PI,
+      offsetPerRotation: offsetVal / MM_PER_UNIT,
       prismSides: prism ? Math.max(3, Math.round(sidesVal)) : 0,
     });
     close();
@@ -132,18 +138,40 @@ const RevolveEditDialog = () => {
               color: "var(--text-secondary)",
             }}
           >
-            <span>Angle (degrees)</span>
+            <span>Rotations</span>
             <FormulaInput
               variables={variables}
               autoFocus
-              value={angleDeg}
-              onChange={(e) => setAngleDeg(e.target.value)}
+              value={rotations}
+              onChange={(e) => setRotations(e.target.value)}
               onKeyDown={(e) => {
                 e.stopPropagation();
                 if (e.key === "Enter") commit();
                 else if (e.key === "Escape") close();
               }}
-              style={field(angleValid)}
+              style={field(rotationsValid)}
+            />
+          </label>
+          <label
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              fontSize: 12,
+              color: "var(--text-secondary)",
+            }}
+          >
+            <span>Offset per rotation (mm)</span>
+            <FormulaInput
+              variables={variables}
+              value={offset}
+              onChange={(e) => setOffset(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commit();
+                else if (e.key === "Escape") close();
+              }}
+              style={field(offsetValid)}
             />
           </label>
           <label

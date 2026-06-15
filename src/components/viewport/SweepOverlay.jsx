@@ -28,7 +28,8 @@ export default function SweepOverlay() {
   const variables = useStore((s) => s.variables);
   const setSweepParams = useStore((s) => s.setSweepParams);
 
-  const [angleDeg, setAngleDeg] = useState("360");
+  const [rotations, setRotations] = useState("1");
+  const [offset, setOffset] = useState("0");
   const [sides, setSides] = useState("6");
   const seededRef = useRef(false);
 
@@ -39,20 +40,22 @@ export default function SweepOverlay() {
   // The revolve param panel is "ready" once a profile + axis are picked.
   const ready =
     isRevolve && !!sweepSelectMode?.profile && !!sweepSelectMode?.axis;
-  const angleVal = evalValue(angleDeg, variables);
+  const rotationsVal = evalValue(rotations, variables);
+  const offsetVal = evalValue(offset, variables);
   const sidesVal = evalValue(sides, variables);
-  const angleValid =
-    Number.isFinite(angleVal) && angleVal > 0 && angleVal <= 360;
+  const rotationsValid = Number.isFinite(rotationsVal) && rotationsVal > 0;
+  const offsetValid = Number.isFinite(offsetVal); // 0 / negative are allowed
   const sidesValid =
     !params.prism || (Number.isFinite(sidesVal) && sidesVal >= 3);
-  const valid = angleValid && sidesValid;
+  const valid = rotationsValid && offsetValid && sidesValid;
 
   // Seed the inputs when the params panel first appears (covers retarget, which
   // pre-fills params); reset the latch when the tool closes.
   useEffect(() => {
     if (ready && !seededRef.current) {
       seededRef.current = true;
-      setAngleDeg(String(params.angleDeg ?? 360));
+      setRotations(String(params.rotations ?? 1));
+      setOffset(String(params.offsetPerRotation ?? 0));
       setSides(String(params.sides ?? 6));
     }
     if (!sweepSelectMode) seededRef.current = false;
@@ -67,9 +70,13 @@ export default function SweepOverlay() {
       cc?.clearSweepPreview?.();
       return;
     }
-    setSweepParams({ angleDeg: angleVal, sides: Math.round(sidesVal) });
+    setSweepParams({
+      rotations: rotationsVal,
+      offsetPerRotation: offsetVal,
+      sides: Math.round(sidesVal),
+    });
     cc?.updateSweepPreview?.();
-  }, [ready, valid, angleVal, sidesVal, params.prism]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, valid, rotationsVal, offsetVal, sidesVal, params.prism]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Esc cancels the whole tool from any phase.
   useEffect(() => {
@@ -179,21 +186,38 @@ export default function SweepOverlay() {
       </div>
       <div className="sketch-distance-input-overlay">
         <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
-          Angle (°):
+          Rotations:
         </span>
         <FormulaInput
           variables={variables}
           autoFocus
-          value={angleDeg}
-          onChange={(e) => setAngleDeg(e.target.value)}
+          value={rotations}
+          onChange={(e) => setRotations(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation();
             if (e.key === "Enter") confirm();
           }}
           style={{
-            width: 56,
+            width: 48,
             marginRight: 8,
-            border: `1px solid ${angleValid ? "var(--border-color)" : "#e87575"}`,
+            border: `1px solid ${rotationsValid ? "var(--border-color)" : "#e87575"}`,
+          }}
+        />
+        <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+          Offset/turn (mm):
+        </span>
+        <FormulaInput
+          variables={variables}
+          value={offset}
+          onChange={(e) => setOffset(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") confirm();
+          }}
+          style={{
+            width: 48,
+            marginRight: 8,
+            border: `1px solid ${offsetValid ? "var(--border-color)" : "#e87575"}`,
           }}
         />
         <label

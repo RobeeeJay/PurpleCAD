@@ -8,7 +8,7 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { chamferResultTransform } from "./chamferCommit.js";
-import { getSketchShapePoints } from "../sceneObjects.js";
+import { getSketchShapePoints, MM_PER_UNIT } from "../sceneObjects.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 
 const PREVIEW_DEBOUNCE_MS = 350;
@@ -35,8 +35,11 @@ const buildProfileSource = (profile) => ({
   },
 });
 
-const angleRadOf = (params) =>
-  ((Number(params?.angleDeg) || 360) * Math.PI) / 180;
+// Total swept angle = number of full turns × 2π (a partial revolve is < 1 turn).
+const angleRadOf = (params) => (Number(params?.rotations) || 1) * 2 * Math.PI;
+// Axial advance per turn, mm in the UI → scene units for the OCC op.
+const offsetSceneOf = (params) =>
+  (Number(params?.offsetPerRotation) || 0) / MM_PER_UNIT;
 const prismSidesOf = (params) =>
   params?.prism ? Math.max(3, Math.round(Number(params.sides) || 3)) : 0;
 
@@ -381,6 +384,7 @@ export function createSweepHelpers({
     axis,
     angleRad,
     prismSides,
+    offsetPerRotation,
     ghostItemId,
   }) => {
     const printPrecision =
@@ -393,6 +397,7 @@ export function createSweepHelpers({
         axis,
         angleRad,
         prismSides,
+        offsetPerRotation,
         allItems: itemsRef.current,
         printPrecision,
       });
@@ -487,6 +492,7 @@ export function createSweepHelpers({
       axis: sm.axis,
       angleRad: angleRadOf(sm.params),
       prismSides: prismSidesOf(sm.params),
+      offsetPerRotation: offsetSceneOf(sm.params),
     });
   };
 
@@ -504,6 +510,7 @@ export function createSweepHelpers({
       axis: regenerator.axis,
       angleRad: angleRadOf(params),
       prismSides: prismSidesOf(params),
+      offsetPerRotation: offsetSceneOf(params),
       ghostItemId: itemId,
     });
   };
@@ -661,6 +668,7 @@ export function createSweepHelpers({
     const source = buildProfileSource(sm.profile);
     const angleRad = angleRadOf(sm.params);
     const prismSides = prismSidesOf(sm.params);
+    const offsetPerRotation = offsetSceneOf(sm.params);
     const printPrecision = store.curveResolution === "print" ? 0.01 : null;
     let result;
     try {
@@ -670,6 +678,7 @@ export function createSweepHelpers({
         axis: sm.axis,
         angleRad,
         prismSides,
+        offsetPerRotation,
         allItems: itemsRef.current,
         printPrecision,
       });
@@ -689,6 +698,7 @@ export function createSweepHelpers({
       axis: sm.axis,
       angleRad,
       prismSides,
+      offsetPerRotation,
       centerOffset,
       regeneratedAt: printPrecision,
     };
@@ -766,7 +776,8 @@ export function beginRevolveRetarget(itemId, entryId) {
     axis: r.axis,
     secondProfile: null,
     params: {
-      angleDeg: Math.round(((r.angleRad ?? 2 * Math.PI) * 180) / Math.PI),
+      rotations: (r.angleRad ?? 2 * Math.PI) / (2 * Math.PI),
+      offsetPerRotation: (r.offsetPerRotation ?? 0) * MM_PER_UNIT,
       prism: (r.prismSides ?? 0) >= 3,
       sides: r.prismSides >= 3 ? r.prismSides : 6,
     },

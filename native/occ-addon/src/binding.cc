@@ -679,12 +679,48 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
     double angleRad = GetDouble(info[8], 2 * M_PI);
     int prismSides =
         info[9].IsNumber() ? info[9].As<Napi::Number>().Int32Value() : 0;
+    // Axial advance per full turn (helical/coil sweep).  0 → a flat revolve.
+    double pitch = GetDouble(info[10], 0.0);
 
     double dx = ax2 - ax1, dy = ay2 - ay1;
     double len = std::hypot(dx, dy);
     if (len < 1e-9) throw std::runtime_error("revolve axis is degenerate");
+    gp_Dir axisDir(dx / len, dy / len, 0);
     // Axis in the centroid-local frame the profile is built in.
-    gp_Ax1 axis(gp_Pnt(ax1 - cx, ay1 - cy, 0), gp_Dir(dx / len, dy / len, 0));
+    gp_Ax1 axis(gp_Pnt(ax1 - cx, ay1 - cy, 0), axisDir);
+
+    // Helical sweep: thread the profile through one multi-section loft, each
+    // section rotated about the axis AND advanced along it by the pitch.  Used
+    // whenever a non-zero offset/turn is set (the only way to exceed a full
+    // turn meaningfully).  Outer boundary only (holes aren't lofted).
+    if (std::abs(pitch) > 1e-9) {
+      TopoDS_Wire base =
+          BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+      if (base.IsNull())
+        throw std::runtime_error("revolve profile wire builder failed");
+      const int perTurn = prismSides >= 3 ? prismSides : 24;
+      int steps = (int)std::ceil(perTurn * std::abs(angleRad) / (2 * M_PI));
+      if (steps < 2) steps = 2;
+      BRepOffsetAPI_ThruSections loft(Standard_True /*solid*/,
+                                      prismSides >= 3 /*ruled vs smooth*/);
+      for (int k = 0; k <= steps; k++) {
+        double a = angleRad * k / steps;
+        double off = pitch * a / (2 * M_PI);
+        gp_Trsf rot;
+        rot.SetRotation(axis, a);
+        gp_Trsf tr;
+        tr.SetTranslation(gp_Vec(axisDir.X() * off, axisDir.Y() * off, 0));
+        TopoDS_Wire w = TopoDS::Wire(
+            BRepBuilderAPI_Transform(base, tr.Multiplied(rot), true).Shape());
+        loft.AddWire(w);
+      }
+      loft.Build();
+      if (!loft.IsDone()) throw std::runtime_error("helical revolve failed");
+      return Napi::Number::New(env, StoreShape(loft.Shape()));
+    }
+
+    // A flat revolve can't exceed a full turn — extra rotations would overlap.
+    if (angleRad > 2 * M_PI) angleRad = 2 * M_PI;
 
     if (prismSides >= 3) {
       TopoDS_Wire base =

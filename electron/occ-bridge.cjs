@@ -364,6 +364,7 @@ function buildItemShapeLocal(item, allItems, precision) {
         args.outerFlat, args.holesFlat, args.cx, args.cy,
         args.ax.x1, args.ax.y1, args.ax.x2, args.ax.y2,
         regen.angleRad ?? 2 * Math.PI, regen.prismSides ?? 0,
+        regen.offsetPerRotation ?? 0,
       );
       if (!resultId) return null;
       const off = regen.centerOffset;
@@ -756,7 +757,7 @@ function exportSTEP({ items }) {
 }
 
 // Revolve a sketch profile around an axis line (mirrors occOps.js#revolveItem).
-function revolveItem({ source, axis, angleRad, prismSides, allItems, printPrecision }) {
+function revolveItem({ source, axis, angleRad, prismSides, offsetPerRotation, allItems, printPrecision }) {
   const args = revolveArgs(source, axis, allItems);
   if (!args) {
     throw new Error(
@@ -766,7 +767,7 @@ function revolveItem({ source, axis, angleRad, prismSides, allItems, printPrecis
   const resultId = occ.makeRevolve(
     args.outerFlat, args.holesFlat, args.cx, args.cy,
     args.ax.x1, args.ax.y1, args.ax.x2, args.ax.y2,
-    angleRad ?? 2 * Math.PI, prismSides ?? 0,
+    angleRad ?? 2 * Math.PI, prismSides ?? 0, offsetPerRotation ?? 0,
   );
   if (!resultId) throw new Error("Revolve produced no geometry.");
 

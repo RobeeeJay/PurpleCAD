@@ -203,7 +203,7 @@ export const createUiSlice = (set) => ({
         profile: null,
         axis: null,
         secondProfile: null,
-        params: { angleDeg: 360, prism: false, sides: 6 },
+        params: { rotations: 1, offsetPerRotation: 0, prism: false, sides: 6 },
       },
       chamferSelectMode: null,
       pushPullSelectMode: null,
