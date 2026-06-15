@@ -288,6 +288,8 @@ export function createSketchInteraction(
   };
   let multiSelectedIndices = [];
   let marqueeStartScreen = null;
+  // Selection a shift+marquee adds to (the pre-drag selection); [] replaces.
+  let marqueeBaseIndices = [];
   let marqueeActive = false;
   let marqueeRectObj = null;
   let lastClickTime = 0;
@@ -470,7 +472,10 @@ export function createSketchInteraction(
       )
         inRect.add(pt.shapeIdx);
     });
-    multiSelectedIndices = [...inRect];
+    // Shift-marquee adds to the pre-drag selection; otherwise it replaces.
+    const union = new Set(marqueeBaseIndices);
+    inRect.forEach((i) => union.add(i));
+    multiSelectedIndices = [...union];
     showMultiSelectOverlays(multiSelectedIndices);
   };
 
@@ -1189,6 +1194,9 @@ export function createSketchInteraction(
     );
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return false;
+    // Shift is additive-selection only — never start a drag, so a shift click /
+    // marquee adds to the current selection rather than moving or replacing it.
+    if (shiftKey) return false;
     const shapes = selItem.shapes || [];
     clearAllSketchHover();
 
@@ -1432,8 +1440,12 @@ export function createSketchInteraction(
       }, 500);
       const didDrag = startSketchDrag(e.clientX, e.clientY, e.shiftKey);
       if (!didDrag) {
-        clearMultiSelectOverlays();
-        multiSelectedIndices = [];
+        // Shift keeps the current selection so a marquee/click adds to it.
+        if (!e.shiftKey) {
+          clearMultiSelectOverlays();
+          multiSelectedIndices = [];
+        }
+        marqueeBaseIndices = e.shiftKey ? [...multiSelectedIndices] : [];
         marqueeStartScreen = { x: e.clientX, y: e.clientY };
       }
     }
