@@ -2,6 +2,7 @@ import React from "react";
 import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
+import SweepSection from "./SweepSection";
 
 const ObjectCreateSection = () => {
   const addItem = useStore((s) => s.addItem);
@@ -378,6 +379,8 @@ const ObjectCreateSection = () => {
           />
         </svg>
       </button>
+      {/* Sketch→solid sweeps (Revolve / Pipe / Loft) live here in Create. */}
+      <SweepSection bare />
     </ToolbarSection>
   );
 };
