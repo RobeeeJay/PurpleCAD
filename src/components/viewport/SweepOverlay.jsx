@@ -128,7 +128,8 @@ export default function SweepOverlay() {
     if (!sweepSelectMode.path) {
       return (
         <div className="sketch-placement-hint">
-          Click a path line (in another sketch) to follow · Esc to cancel
+          Click a path line or curve (in another sketch) to follow · Esc to
+          cancel
         </div>
       );
     }

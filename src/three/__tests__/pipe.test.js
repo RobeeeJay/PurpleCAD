@@ -120,6 +120,33 @@ describe("pipeItem", () => {
     expect(result.centerOffset).toBeTruthy();
   });
 
+  it("sweeps along a bezier-curve path", async () => {
+    // A cubic bezier from (0,0) up and over to (4,4), bowing through +X.
+    const result = await pipeItem({
+      profileSource: profileSource(),
+      pathRef: { sketchId: 2, shapeIdx: 0 },
+      allItems: [
+        profileSketch(),
+        pathSketch([
+          {
+            type: "bezier",
+            p0: { x: 0, y: 0 },
+            p1: { x: 4, y: 0 },
+            p2: { x: 4, y: 4 },
+            p3: { x: 4, y: 4 },
+          },
+        ]),
+      ],
+      printPrecision: 0.05,
+    });
+    expect(result).toBeTruthy();
+    const [ex, ey] = extents(result.geometryData.positions);
+    // The curve spans ~4 in both X and Y; the tube follows it (well past a
+    // straight chord, which would be the section width only in one axis).
+    expect(ex).toBeGreaterThan(3);
+    expect(ey).toBeGreaterThan(3);
+  });
+
   it("throws when the path sketch is missing", async () => {
     await expect(
       pipeItem({

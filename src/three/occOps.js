@@ -109,37 +109,84 @@ function sketchPointToWorld(sketch, x, y) {
   return { x: w.x + (p.x || 0), y: w.y + (p.y || 0), z: w.z + (p.z || 0) };
 }
 
-// Order the path: starting from the picked line, greedily walk endpoint-
-// connected lines in the sketch (both directions) into a single 2D polyline.
-// Geometry-based so it works whether or not coincident constraints exist.
+// Sample a cubic bezier (p0..p3) into n+1 ordered 2D points.
+function sampleCubic(p0, p1, p2, p3, n) {
+  const out = [];
+  for (let k = 0; k <= n; k++) {
+    const t = k / n,
+      u = 1 - t;
+    out.push({
+      x:
+        u * u * u * p0.x +
+        3 * u * u * t * p1.x +
+        3 * u * t * t * p2.x +
+        t * t * t * p3.x,
+      y:
+        u * u * u * p0.y +
+        3 * u * u * t * p1.y +
+        3 * u * t * t * p2.y +
+        t * t * t * p3.y,
+    });
+  }
+  return out;
+}
+
+// A path-eligible shape as { a, b, sample(reverse) } — its endpoints plus an
+// ordered point list (a→b, or reversed) used to thread it into the polyline.
+function pathSegment(shape, i) {
+  if (shape?.type === "line") {
+    const a = { x: shape.x1, y: shape.y1 };
+    const b = { x: shape.x2, y: shape.y2 };
+    return { i, a, b, sample: (rev) => (rev ? [b, a] : [a, b]) };
+  }
+  if (shape?.type === "bezier") {
+    const a = { x: shape.p0.x, y: shape.p0.y };
+    const b = { x: shape.p3.x, y: shape.p3.y };
+    const pts = sampleCubic(shape.p0, shape.p1, shape.p2, shape.p3, 24);
+    return {
+      i,
+      a,
+      b,
+      sample: (rev) => (rev ? pts.slice().reverse() : pts.slice()),
+    };
+  }
+  return null;
+}
+
+// Order the path: starting from the picked shape, greedily walk endpoint-
+// connected lines/beziers in the sketch (both directions) into one 2D polyline,
+// sampling curves along the way.  Geometry-based so it works whether or not
+// coincident constraints exist.
 export function orderPathPoints(sketch, startShapeIdx) {
   const shapes = sketch?.shapes || [];
-  const start = shapes[startShapeIdx];
-  if (!start || start.type !== "line") return null;
-  const eps = 1e-4;
-  const lines = [];
+  const segs = [];
   shapes.forEach((s, i) => {
-    if (s?.type === "line")
-      lines.push({ i, a: { x: s.x1, y: s.y1 }, b: { x: s.x2, y: s.y2 } });
+    const seg = pathSegment(s, i);
+    if (seg) segs.push(seg);
   });
+  const startSeg = segs.find((s) => s.i === startShapeIdx);
+  if (!startSeg) return null;
+  const eps = 1e-4;
   const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < eps;
   const used = new Set([startShapeIdx]);
-  const pts = [
-    { x: start.x1, y: start.y1 },
-    { x: start.x2, y: start.y2 },
-  ];
+  let pts = startSeg.sample(false);
   const extend = (atEnd) => {
     let changed = true;
     while (changed) {
       changed = false;
       const tip = atEnd ? pts[pts.length - 1] : pts[0];
-      for (const ln of lines) {
-        if (used.has(ln.i)) continue;
-        const next = near(ln.a, tip) ? ln.b : near(ln.b, tip) ? ln.a : null;
-        if (next) {
-          used.add(ln.i);
-          if (atEnd) pts.push(next);
-          else pts.unshift(next);
+      for (const seg of segs) {
+        if (used.has(seg.i)) continue;
+        // Sample so the new segment's points START at the shared tip.
+        const segPts = near(seg.a, tip)
+          ? seg.sample(false)
+          : near(seg.b, tip)
+            ? seg.sample(true)
+            : null;
+        if (segPts) {
+          used.add(seg.i);
+          if (atEnd) pts = pts.concat(segPts.slice(1));
+          else pts = segPts.slice(1).reverse().concat(pts);
           changed = true;
           break;
         }

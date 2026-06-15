@@ -8,10 +8,13 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { chamferResultTransform } from "./chamferCommit.js";
+import { getSketchShapePoints } from "../sceneObjects.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 
 const PREVIEW_DEBOUNCE_MS = 350;
 const AXIS_HIGHLIGHT = 0x44aaff;
+// Sketch shapes a pipe path can follow (matches occOps.js#orderPathPoints).
+const PATH_TYPES = ["line", "bezier"];
 
 // An extrude-like source snapshot whose live polygon re-derives from the sketch
 // (so the sweep tracks sketch edits, like chamfer/push-pull).  Used as the
@@ -110,8 +113,10 @@ export function createSweepHelpers({
     return best;
   };
 
-  // Nearest path-candidate line under the cursor, across ALL sketches (the pipe
-  // path typically lives in a different sketch from the profile).
+  // Nearest path-candidate shape under the cursor, across ALL sketches (the pipe
+  // path typically lives in a different sketch from the profile).  Lines and
+  // bezier curves are eligible; each is sampled to world points so a curve is
+  // hit-tested (and highlighted) along its whole length.
   const findPathLine = (screenX, screenY) => {
     const rect = renderer.domElement.getBoundingClientRect();
     let best = null;
@@ -120,28 +125,30 @@ export function createSweepHelpers({
       if (sketch.type !== "sketch") return;
       const sketchMesh = objectsRef.current[sketch.id];
       if (!sketchMesh) return;
-      const toScreen = (x, y) => {
-        const w = new THREE.Vector3(x, y, 0)
-          .applyQuaternion(sketchMesh.quaternion)
-          .add(sketchMesh.position);
-        const ndc = w.clone().project(cameraRef.current);
-        return {
-          x: ((ndc.x + 1) / 2) * rect.width + rect.left,
-          y: ((-ndc.y + 1) / 2) * rect.height + rect.top,
-        };
-      };
       (sketch.shapes || []).forEach((s, idx) => {
-        if (s.type !== "line") return;
-        const a = toScreen(s.x1, s.y1);
-        const b = toScreen(s.x2, s.y2);
-        const d = segDist(screenX, screenY, a.x, a.y, b.x, b.y);
-        if (d < bestD) {
-          bestD = d;
-          best = {
-            sketchId: sketch.id,
-            shapeIdx: idx,
-            world: lineWorld(s, sketchMesh),
+        if (!PATH_TYPES.includes(s.type)) return;
+        const world = getSketchShapePoints(s, sketchMesh);
+        if (world.length < 2) return;
+        const scr = world.map((w) => {
+          const ndc = w.clone().project(cameraRef.current);
+          return {
+            x: ((ndc.x + 1) / 2) * rect.width + rect.left,
+            y: ((-ndc.y + 1) / 2) * rect.height + rect.top,
           };
+        });
+        for (let k = 0; k < scr.length - 1; k++) {
+          const d = segDist(
+            screenX,
+            screenY,
+            scr[k].x,
+            scr[k].y,
+            scr[k + 1].x,
+            scr[k + 1].y,
+          );
+          if (d < bestD) {
+            bestD = d;
+            best = { sketchId: sketch.id, shapeIdx: idx, world };
+          }
         }
       });
     });
