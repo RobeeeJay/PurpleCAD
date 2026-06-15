@@ -122,6 +122,14 @@ export function createViewInteraction(
     controls.isPanning = false;
     orbitIndicator.visible = false;
 
+    // Plane-from-3-points: clicks pick vertices to define a new Plane.
+    if (useStore.getState().planePickActive && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX || e.clientX);
+      const dy = e.clientY - (controls.mouseDownY || e.clientY);
+      if (Math.hypot(dx, dy) < 5) controls.planePickClick(e.clientX, e.clientY);
+      return;
+    }
+
     if (sketchPlacementModeRef.current && e.button === 0) {
       const dx = e.clientX - (controls.mouseDownX || e.clientX);
       const dy = e.clientY - (controls.mouseDownY || e.clientY);

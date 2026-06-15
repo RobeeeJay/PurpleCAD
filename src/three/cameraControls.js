@@ -6,6 +6,7 @@ import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js"
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean } from "./meshBoolean.js";
+import { frameFromPoints } from "./planeFrame.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
@@ -447,6 +448,75 @@ export function attachCameraControls(ctx) {
     );
   };
   controls.clearPlanePreview = () => controls.previewPlane(null);
+
+  // Pick 3 points (snapping to object vertices) to define a new Plane.  Markers
+  // mark each pick; the 3rd derives a frame and opens the creation dialog.
+  let planePickPoints = [];
+  let planePickMarkers = [];
+  controls.clearPlanePick = () => {
+    planePickMarkers.forEach((m) => {
+      scene.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+    });
+    planePickMarkers = [];
+    planePickPoints = [];
+  };
+  controls.planePickClick = (screenX, screenY) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    const meshes = Object.values(objectsRef.current).filter(
+      (m) => m.visible !== false,
+    );
+    const hit = ray.intersectObjects(meshes, false)[0];
+    if (!hit) return;
+    // Snap to the nearest vertex of the hit triangle (real geometry only);
+    // primitives raycast against a hull/sphere, so fall back to the hit point.
+    let p = hit.point.clone();
+    const posAttr = hit.face && hit.object.geometry?.getAttribute("position");
+    if (posAttr) {
+      let best = p,
+        bd = Infinity;
+      [hit.face.a, hit.face.b, hit.face.c].forEach((idx) => {
+        const v = new THREE.Vector3()
+          .fromBufferAttribute(posAttr, idx)
+          .applyMatrix4(hit.object.matrixWorld);
+        const d = v.distanceTo(hit.point);
+        if (d < bd) {
+          bd = d;
+          best = v;
+        }
+      });
+      p = best;
+    }
+    planePickPoints.push({ x: p.x, y: p.y, z: p.z });
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0x44aaff, depthTest: false }),
+    );
+    marker.position.copy(p);
+    marker.renderOrder = 1011;
+    scene.add(marker);
+    planePickMarkers.push(marker);
+
+    if (planePickPoints.length >= 3) {
+      const base = frameFromPoints(
+        planePickPoints[0],
+        planePickPoints[1],
+        planePickPoints[2],
+      );
+      controls.clearPlanePick();
+      useStore.getState().setPlanePickActive(false);
+      if (base) useStore.getState().startPlaneTool(base);
+      else
+        useStore
+          .getState()
+          .showNotification?.("Pick three non-collinear points.");
+    }
+  };
 
   // Live preview for MaterialDialog: instantly applies in-progress
   // color/finish edits to the live mesh(es) without a store write.

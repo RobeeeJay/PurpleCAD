@@ -14,20 +14,22 @@ const ObjectCreateSection = () => {
   const selectedId = useStore((s) => s.selectedId);
   const items = useStore((s) => s.items);
   const startPlaneTool = useStore((s) => s.startPlaneTool);
+  const setPlanePickActive = useStore((s) => s.setPlanePickActive);
 
   const hasFaceSelected = (selectedSubGeometry?.faces?.length ?? 0) > 0;
 
-  // Create a Plane object: from the selected sketch's plane, else the world XY.
+  // Create a Plane object: from the selected sketch's plane, otherwise pick 3
+  // points in the viewport (which also covers a line's two ends + a point).
   const handlePlane = () => {
     const sel = items.find((i) => i.id === selectedId);
-    const base =
-      sel?.type === "sketch"
-        ? { position: { ...sel.position }, rotation: { ...sel.rotation } }
-        : {
-            position: { x: 0, y: 0, z: 0 },
-            rotation: { x: 0, y: 0, z: 0 },
-          };
-    startPlaneTool(base);
+    if (sel?.type === "sketch") {
+      startPlaneTool({
+        position: { ...sel.position },
+        rotation: { ...sel.rotation },
+      });
+    } else {
+      setPlanePickActive(true);
+    }
   };
 
   const handleExtrudeClick = () => {
@@ -397,7 +399,7 @@ const ObjectCreateSection = () => {
       </button>
       <button
         className="toolbar-btn"
-        title="Plane — a reference plane (from the selected sketch, else world XY) to sketch on"
+        title="Plane — a reference plane to sketch on (from the selected sketch, else pick 3 points)"
         onClick={handlePlane}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">

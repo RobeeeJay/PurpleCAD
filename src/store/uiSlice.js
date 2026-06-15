@@ -103,6 +103,9 @@ export const uiInitial = {
   // default XY) the dialog then adjusts — rotation (deg, per-axis) + offset
   // along the plane normal.  { base:{position,rotation}, rot:{x,y,z}, offset }
   planeTool: null,
+  // True while picking the 3 points that define a new plane in the 3D view.
+  planePickActive: false,
+  setPlanePickActive: (v) => set({ planePickActive: !!v }),
   startPlaneTool: (base) =>
     set({ planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 } }),
   updatePlaneTool: (partial) =>
