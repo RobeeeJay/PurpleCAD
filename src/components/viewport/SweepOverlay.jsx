@@ -37,9 +37,15 @@ export default function SweepOverlay() {
   const isRevolve = sweepSelectMode?.kind === "revolve";
   const isPipe = sweepSelectMode?.kind === "pipe";
   const isLoft = sweepSelectMode?.kind === "loft";
+  // A revolve EDIT session is driven by RevolveEditDialog instead of this
+  // overlay, so stand down while it's active.
+  const editing = !!sweepSelectMode?.editing;
   // The revolve param panel is "ready" once a profile + axis are picked.
   const ready =
-    isRevolve && !!sweepSelectMode?.profile && !!sweepSelectMode?.axis;
+    isRevolve &&
+    !editing &&
+    !!sweepSelectMode?.profile &&
+    !!sweepSelectMode?.axis;
   const rotationsVal = evalValue(rotations, variables);
   const offsetVal = evalValue(offset, variables);
   const sidesVal = evalValue(sides, variables);
@@ -89,7 +95,7 @@ export default function SweepOverlay() {
     return () => window.removeEventListener("keydown", onKey);
   }, [sweepSelectMode]);
 
-  if (!sweepSelectMode) return null;
+  if (!sweepSelectMode || editing) return null;
 
   const cancel = () => useStore.getState()._cameraControls?.cancelSweep?.();
   const confirm = () => {

@@ -379,8 +379,9 @@ export function attachCameraControls(ctx) {
   });
   const { handleSweepHover, handleSweepClick } = sweep;
   controls.updateSweepPreview = () => sweep.updateSweepPreview();
-  controls.updateRevolveEditPreview = (regenerator, params, itemId) =>
-    sweep.updateRevolveEditPreview(regenerator, params, itemId);
+  controls.setRevolveEditHidden = (itemId) =>
+    sweep.setRevolveEditHidden(itemId);
+  controls.restoreRevolveEditHidden = () => sweep.restoreRevolveEditHidden();
   controls.clearSweepPreview = () => sweep.clearSweepPreview();
   controls.commitSweep = () => sweep.commitSweep();
   controls.cancelSweep = () => sweep.cancelSweep();

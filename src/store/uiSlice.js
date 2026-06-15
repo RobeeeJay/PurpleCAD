@@ -84,10 +84,8 @@ export const uiInitial = {
   // when no sweep tool is active.  Phase is derived (profile==null → pick
   // profile; then pick axis/second; then show params + Confirm).
   sweepSelectMode: null,
-  // Timeline "Retarget" / "Edit" targets for a committed sweep, mirroring the
-  // push/pull equivalents.
+  // Timeline "Retarget" / "Edit" target for a committed sweep.
   sweepRetargetTarget: null,
-  sweepEditTarget: null,
 
   // Whether the Y=0 ground plane shows shadows for scene objects.
   shadowsEnabled: false,
@@ -248,7 +246,6 @@ export const createUiSlice = (set) => ({
         : {},
     ),
   setSweepRetargetTarget: (target) => set({ sweepRetargetTarget: target }),
-  setSweepEditTarget: (target) => set({ sweepEditTarget: target }),
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   toggleCrossSectionView: () =>
     set((state) => ({ crossSectionView: !state.crossSectionView })),

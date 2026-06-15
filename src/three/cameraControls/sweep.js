@@ -517,23 +517,22 @@ export function createSweepHelpers({
     });
   };
 
-  // Edit-dialog preview: replay a committed revolve's stored recipe with the
-  // typed params, ghosting the existing solid so the change reads clearly.
-  const updateRevolveEditPreview = async (regenerator, params, itemId) => {
-    const myRequest = ++requestId;
-    if (regenerator?.kind !== "revolve" || !regenerator.source) {
-      clearSweepPreview();
-      return;
+  // While the revolve edit dialog is open, fully hide the original solid so only
+  // the live preview shows.  Restored on cancel/confirm (and on dialog unmount).
+  let editHidden = null; // { mesh, visible }
+  const restoreRevolveEditHidden = () => {
+    if (editHidden) {
+      editHidden.mesh.visible = editHidden.visible;
+      editHidden = null;
     }
-    await showRevolve({
-      myRequest,
-      source: regenerator.source,
-      axis: regenerator.axis,
-      angleRad: angleRadOf(params),
-      prismSides: prismSidesOf(params),
-      offsetPerRotation: offsetSceneOf(params),
-      ghostItemId: itemId,
-    });
+  };
+  const setRevolveEditHidden = (itemId) => {
+    restoreRevolveEditHidden();
+    const mesh = itemId != null ? objectsRef.current[itemId] : null;
+    if (mesh) {
+      editHidden = { mesh, visible: mesh.visible };
+      mesh.visible = false;
+    }
   };
 
   // True once a tool has all the geometry it needs to build a result.
@@ -749,6 +748,7 @@ export function createSweepHelpers({
         scale: { x: 1, y: 1, z: 1 },
       });
     }
+    restoreRevolveEditHidden();
     store.setSweepSelectMode(null);
   };
 
@@ -757,6 +757,7 @@ export function createSweepHelpers({
     clearAxisHighlight();
     dimFill(hoveredFill, false);
     hoveredFill = null;
+    restoreRevolveEditHidden();
     const store = useStore.getState();
     store.setSweepSelectMode(null);
     store.setSweepRetargetTarget(null);
@@ -766,16 +767,19 @@ export function createSweepHelpers({
     handleSweepHover,
     handleSweepClick,
     updateSweepPreview,
-    updateRevolveEditPreview,
+    setRevolveEditHidden,
+    restoreRevolveEditHidden,
     clearSweepPreview,
     commitSweep,
     cancelSweep,
   };
 }
 
-// Re-open the Revolve tool to retarget a committed revolve (re-pick the
-// profile/axis), seeded from its regenerator.  Mirrors beginPushPullRetarget.
-export function beginRevolveRetarget(itemId, entryId) {
+// Open the rich Revolve editor (RevolveEditDialog): a sweep session seeded from
+// the committed revolve's recipe, with `editing` set so the dialog drives it
+// (params + re-pick profile/axis) while the original solid is hidden.  Confirm
+// replaces the original in place (via the retarget commit path).
+export function beginRevolveEdit(itemId, entryId) {
   const store = useStore.getState();
   const item = store.items.find((i) => i.id === itemId);
   const r = item?.regenerator;
@@ -783,6 +787,7 @@ export function beginRevolveRetarget(itemId, entryId) {
   const p = r.source?.profile;
   store.setSweepSelectMode({
     kind: "revolve",
+    editing: true,
     profile: p
       ? {
           sketchId: p.sketchId,
@@ -807,7 +812,7 @@ export function beginRevolveRetarget(itemId, entryId) {
 }
 
 // Re-open the Pipe tool to retarget a committed pipe (re-pick the profile/path),
-// seeded from its regenerator.  Mirrors beginRevolveRetarget.
+// seeded from its regenerator.  Mirrors beginRevolveEdit (minus the dialog).
 export function beginPipeRetarget(itemId, entryId) {
   const store = useStore.getState();
   const item = store.items.find((i) => i.id === itemId);

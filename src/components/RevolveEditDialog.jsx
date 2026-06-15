@@ -1,88 +1,99 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
-import { evalValue, useDebouncedPreview } from "./inputs.jsx";
-import { MM_PER_UNIT } from "../three/sceneObjects.js";
+import { evalValue } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
-// Edit a committed revolve's parameters (rotations, offset/turn, prism mode,
-// sides) from its timeline step.  A revolve is a CREATE entry, so it lives on
-// inst.item.regenerator.  Mirrors ChamferEditDialog: a non-blocking floating
-// panel with a debounced live preview that ghosts the existing solid.
+// Rich editor for a committed revolve, opened from its timeline step.  It drives
+// a `sweepSelectMode` edit session (seeded by beginRevolveEdit): the parameters
+// here, plus "Pick new geometry" / "Pick new axis" which hand picking back to
+// the viewport.  The original solid is hidden while editing so only the live
+// preview shows; Cancel restores it, Save replaces it in place.
 const RevolveEditDialog = () => {
-  const target = useStore((s) => s.sweepEditTarget);
-  const setTarget = useStore((s) => s.setSweepEditTarget);
-  const history = useStore((s) => s.history);
+  const sm = useStore((s) => s.sweepSelectMode);
+  const target = useStore((s) => s.sweepRetargetTarget);
   const variables = useStore((s) => s.variables);
-  const updateRevolveParams = useStore((s) => s.updateRevolveParams);
+  const setSweepParams = useStore((s) => s.setSweepParams);
+  const setSweepProfile = useStore((s) => s.setSweepProfile);
+  const setSweepAxis = useStore((s) => s.setSweepAxis);
 
-  const entry =
-    target?.entryId != null
-      ? history.find((h) => h.id === target.entryId)
-      : null;
-  const item = entry?.instruction?.item;
-  const regenerator = item?.regenerator;
+  const editing = !!sm?.editing && sm?.kind === "revolve";
+  const params = sm?.params || {};
+  const itemId = target?.itemId;
 
   const [rotations, setRotations] = useState("1");
   const [offset, setOffset] = useState("0");
-  const [prism, setPrism] = useState(false);
   const [sides, setSides] = useState("6");
+  const seededRef = useRef(false);
+
+  // Seed the inputs once when the edit session opens; reset when it closes.
   useEffect(() => {
-    if (regenerator?.kind === "revolve") {
-      setRotations(
-        String((regenerator.angleRad ?? 2 * Math.PI) / (2 * Math.PI)),
-      );
-      setOffset(String((regenerator.offsetPerRotation ?? 0) * MM_PER_UNIT));
-      setPrism((regenerator.prismSides ?? 0) >= 3);
-      setSides(
-        String(regenerator.prismSides >= 3 ? regenerator.prismSides : 6),
-      );
+    if (editing && !seededRef.current) {
+      seededRef.current = true;
+      setRotations(String(params.rotations ?? 1));
+      setOffset(String(params.offsetPerRotation ?? 0));
+      setSides(String(params.sides ?? 6));
     }
-  }, [regenerator]);
+    if (!editing) seededRef.current = false;
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Hide the original solid for the duration of the dialog; restore on unmount
+  // (Cancel/Save also restore explicitly).
+  useEffect(() => {
+    if (!editing || itemId == null) return;
+    useStore.getState()._cameraControls?.setRevolveEditHidden?.(itemId);
+    return () =>
+      useStore.getState()._cameraControls?.restoreRevolveEditHidden?.();
+  }, [editing, itemId]);
 
   const rotationsVal = evalValue(rotations, variables);
   const offsetVal = evalValue(offset, variables);
   const sidesVal = evalValue(sides, variables);
   const rotationsValid = Number.isFinite(rotationsVal) && rotationsVal > 0;
   const offsetValid = Number.isFinite(offsetVal);
-  const sidesValid = !prism || (Number.isFinite(sidesVal) && sidesVal >= 3);
+  const sidesValid =
+    !params.prism || (Number.isFinite(sidesVal) && sidesVal >= 3);
   const valid = rotationsValid && offsetValid && sidesValid;
+  const ready = !!sm?.profile && !!sm?.axis;
 
-  useDebouncedPreview(
-    regenerator?.kind === "revolve" && valid,
-    () =>
-      useStore.getState()._cameraControls?.updateRevolveEditPreview?.(
-        regenerator,
-        {
-          rotations: rotationsVal,
-          offsetPerRotation: offsetVal,
-          prism,
-          sides: sidesVal,
-        },
-        item?.id,
-      ),
-    () => useStore.getState()._cameraControls?.clearSweepPreview?.(),
-    [rotationsVal, offsetVal, sidesVal, prism, regenerator, item?.id],
-  );
-
-  useEffect(() => {
-    return () => useStore.getState()._cameraControls?.clearSweepPreview?.();
-  }, [target]);
-
-  if (!target || !entry || regenerator?.kind !== "revolve") return null;
-
-  const close = () => {
-    useStore.getState()._cameraControls?.clearSweepPreview?.();
-    setTarget(null);
-  };
-  const commit = () => {
-    if (!valid) return;
-    updateRevolveParams(entry.id, {
-      angleRad: rotationsVal * 2 * Math.PI,
-      offsetPerRotation: offsetVal / MM_PER_UNIT,
-      prismSides: prism ? Math.max(3, Math.round(sidesVal)) : 0,
+  const pushParams = () =>
+    setSweepParams({
+      rotations: rotationsVal,
+      offsetPerRotation: offsetVal,
+      sides: Math.round(sidesVal),
     });
-    close();
+
+  // Push valid params and refresh the (debounced) preview; clear it while
+  // invalid or mid re-pick (no profile/axis yet).  Re-runs when the re-picked
+  // profile/axis change too.
+  useEffect(() => {
+    if (!editing) return;
+    const cc = useStore.getState()._cameraControls;
+    if (!ready || !valid) {
+      cc?.clearSweepPreview?.();
+      return;
+    }
+    pushParams();
+    cc?.updateSweepPreview?.();
+  }, [
+    editing,
+    ready,
+    valid,
+    rotationsVal,
+    offsetVal,
+    sidesVal,
+    params.prism,
+    sm?.profile,
+    sm?.axis,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!editing) return null;
+
+  const cancel = () => useStore.getState()._cameraControls?.cancelSweep?.();
+  const save = () => {
+    if (!valid || !ready) return;
+    pushParams();
+    useStore.getState()._cameraControls?.commitSweep?.();
   };
 
   const field = (ok) => ({
@@ -95,6 +106,35 @@ const RevolveEditDialog = () => {
     fontSize: 13,
     width: 80,
   });
+  const rowLabel = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: 12,
+    color: "var(--text-secondary)",
+  };
+  const pickBtnStyle = (active) => ({
+    flex: 1,
+    fontSize: 12,
+    padding: "6px 8px",
+    borderRadius: 3,
+    border: `1px solid ${active ? "var(--accent, #4488ff)" : "var(--border-color)"}`,
+    background: active ? "var(--accent, #4488ff)" : "var(--bg-tertiary)",
+    color: active ? "#fff" : "var(--text-primary)",
+    cursor: "pointer",
+  });
+
+  const onKey = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") save();
+    else if (e.key === "Escape") cancel();
+  };
+
+  const hint = !sm.profile
+    ? "Click a sketch region in the viewport to revolve"
+    : !sm.axis
+      ? "Click the axis line in the viewport (any sketch)"
+      : null;
 
   return (
     <div
@@ -115,8 +155,8 @@ const RevolveEditDialog = () => {
           <h2>Edit revolve</h2>
           <button
             className="variables-dialog-close"
-            onClick={close}
-            title="Close without saving"
+            onClick={cancel}
+            title="Cancel — restore the original"
           >
             ×
           </button>
@@ -129,102 +169,94 @@ const RevolveEditDialog = () => {
             gap: 12,
           }}
         >
-          <label
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              fontSize: 12,
-              color: "var(--text-secondary)",
-            }}
-          >
-            <span>Rotations</span>
-            <FormulaInput
-              variables={variables}
-              autoFocus
-              value={rotations}
-              onChange={(e) => setRotations(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") commit();
-                else if (e.key === "Escape") close();
-              }}
-              style={field(rotationsValid)}
-            />
-          </label>
-          <label
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              fontSize: 12,
-              color: "var(--text-secondary)",
-            }}
-          >
-            <span>Offset per rotation (mm)</span>
-            <FormulaInput
-              variables={variables}
-              value={offset}
-              onChange={(e) => setOffset(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") commit();
-                else if (e.key === "Escape") close();
-              }}
-              style={field(offsetValid)}
-            />
-          </label>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 12,
-              color: "var(--text-secondary)",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={prism}
-              onChange={(e) => setPrism(e.target.checked)}
-            />
-            Prism mode (faceted sweep)
-          </label>
-          {prism && (
-            <label
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                fontSize: 12,
-                color: "var(--text-secondary)",
-              }}
+          {/* Re-pick geometry / axis from the viewport. */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              style={pickBtnStyle(!sm.profile)}
+              title="Pick a new sketch region to revolve"
+              onClick={() => setSweepProfile(null)}
             >
-              <span>Sides</span>
-              <FormulaInput
-                variables={variables}
-                value={sides}
-                onChange={(e) => setSides(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter") commit();
-                  else if (e.key === "Escape") close();
+              {sm.profile ? "Pick new geometry" : "Click a region…"}
+            </button>
+            <button
+              type="button"
+              style={pickBtnStyle(!sm.axis)}
+              title="Pick a new rotation axis line (any sketch)"
+              onClick={() => setSweepAxis(null)}
+            >
+              {sm.axis ? "Pick new axis" : "Click a line…"}
+            </button>
+          </div>
+
+          {hint ? (
+            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              {hint}
+            </div>
+          ) : (
+            <>
+              <label style={rowLabel}>
+                <span>Rotations</span>
+                <FormulaInput
+                  variables={variables}
+                  autoFocus
+                  value={rotations}
+                  onChange={(e) => setRotations(e.target.value)}
+                  onKeyDown={onKey}
+                  style={field(rotationsValid)}
+                />
+              </label>
+              <label style={rowLabel}>
+                <span>Offset per rotation (mm)</span>
+                <FormulaInput
+                  variables={variables}
+                  value={offset}
+                  onChange={(e) => setOffset(e.target.value)}
+                  onKeyDown={onKey}
+                  style={field(offsetValid)}
+                />
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
                 }}
-                style={field(sidesValid)}
-              />
-            </label>
+              >
+                <input
+                  type="checkbox"
+                  checked={!!params.prism}
+                  onChange={(e) => setSweepParams({ prism: e.target.checked })}
+                />
+                Prism mode (faceted sweep)
+              </label>
+              {params.prism && (
+                <label style={rowLabel}>
+                  <span>Sides</span>
+                  <FormulaInput
+                    variables={variables}
+                    value={sides}
+                    onChange={(e) => setSides(e.target.value)}
+                    onKeyDown={onKey}
+                    style={field(sidesValid)}
+                  />
+                </label>
+              )}
+            </>
           )}
         </div>
         <div className="variables-dialog-footer">
           <div />
           <div className="variables-dialog-actions">
-            <button className="variables-btn" onClick={close}>
+            <button className="variables-btn" onClick={cancel}>
               Cancel
             </button>
             <button
               className="variables-btn primary"
-              disabled={!valid}
-              onClick={commit}
+              disabled={!valid || !ready}
+              onClick={save}
             >
               Save
             </button>
