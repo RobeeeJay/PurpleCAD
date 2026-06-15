@@ -408,6 +408,46 @@ export function attachCameraControls(ctx) {
     };
   };
 
+  // Live preview of a Plane object while the creation dialog adjusts its
+  // rotation/offset.  Pass null to clear.
+  let planePreviewMesh = null;
+  controls.previewPlane = (frame) => {
+    if (!frame) {
+      if (planePreviewMesh) {
+        scene.remove(planePreviewMesh);
+        planePreviewMesh.geometry.dispose();
+        planePreviewMesh.material.dispose();
+        planePreviewMesh = null;
+      }
+      return;
+    }
+    if (!planePreviewMesh) {
+      planePreviewMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(6, 6),
+        new THREE.MeshBasicMaterial({
+          color: 0x4488ff,
+          transparent: true,
+          opacity: 0.22,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      planePreviewMesh.renderOrder = 999;
+      scene.add(planePreviewMesh);
+    }
+    planePreviewMesh.position.set(
+      frame.position.x,
+      frame.position.y,
+      frame.position.z,
+    );
+    planePreviewMesh.rotation.set(
+      frame.rotation.x || 0,
+      frame.rotation.y || 0,
+      frame.rotation.z || 0,
+    );
+  };
+  controls.clearPlanePreview = () => controls.previewPlane(null);
+
   // Live preview for MaterialDialog: instantly applies in-progress
   // color/finish edits to the live mesh(es) without a store write.
   const materialPreview = createMaterialPreviewHelpers({

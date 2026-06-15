@@ -65,6 +65,9 @@ export function buildSceneObjects(
       case "sketch":
         geometry = new THREE.PlaneGeometry(3, 3);
         break;
+      case "plane":
+        geometry = new THREE.PlaneGeometry(6, 6);
+        break;
       case "csg": {
         if (!item.geometryData) return;
         const { positions, normals, indices } = item.geometryData;
@@ -228,10 +231,20 @@ export function buildSceneObjects(
 
     const materialProps = item.material ?? defaultMaterial;
     const color = materialProps.color ?? DEFAULT_MESH_COLOR;
-    const material = createMaterial(item, color, materialProps);
+    // A Plane object is a translucent double-sided reference surface, not solid.
+    const material =
+      item.type === "plane"
+        ? new THREE.MeshBasicMaterial({
+            color: 0x4488ff,
+            transparent: true,
+            opacity: 0.16,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          })
+        : createMaterial(item, color, materialProps);
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = item.type !== "sketch";
-    mesh.receiveShadow = item.type !== "sketch";
+    mesh.castShadow = item.type !== "sketch" && item.type !== "plane";
+    mesh.receiveShadow = item.type !== "sketch" && item.type !== "plane";
     mesh.userData.itemId = item.id;
     if (["sphere", "cylinder", "torus"].includes(item.type)) {
       mesh.userData.hullGeometry = geometry;

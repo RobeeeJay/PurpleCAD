@@ -99,6 +99,18 @@ export const uiInitial = {
   // the view sweeps the cut through different parts of the model.
   crossSectionView: false,
 
+  // Plane-object creation: a base frame (from a selected sketch / face, or the
+  // default XY) the dialog then adjusts — rotation (deg, per-axis) + offset
+  // along the plane normal.  { base:{position,rotation}, rot:{x,y,z}, offset }
+  planeTool: null,
+  startPlaneTool: (base) =>
+    set({ planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 } }),
+  updatePlaneTool: (partial) =>
+    set((state) =>
+      state.planeTool ? { planeTool: { ...state.planeTool, ...partial } } : {},
+    ),
+  cancelPlaneTool: () => set({ planeTool: null }),
+
   // Path-traced render mode (prototype): replaces the raster view with a
   // progressively-accumulated GPU path trace.  `pathTraceView` is the user's
   // toggle; `pathTracerActive` is set true by pathTrace.js only once the tracer

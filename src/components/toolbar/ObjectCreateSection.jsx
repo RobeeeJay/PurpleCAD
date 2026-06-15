@@ -11,8 +11,24 @@ const ObjectCreateSection = () => {
   const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
   const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
+  const selectedId = useStore((s) => s.selectedId);
+  const items = useStore((s) => s.items);
+  const startPlaneTool = useStore((s) => s.startPlaneTool);
 
   const hasFaceSelected = (selectedSubGeometry?.faces?.length ?? 0) > 0;
+
+  // Create a Plane object: from the selected sketch's plane, else the world XY.
+  const handlePlane = () => {
+    const sel = items.find((i) => i.id === selectedId);
+    const base =
+      sel?.type === "sketch"
+        ? { position: { ...sel.position }, rotation: { ...sel.rotation } }
+        : {
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+          };
+    startPlaneTool(base);
+  };
 
   const handleExtrudeClick = () => {
     if (extrudeSelectMode) {
@@ -376,6 +392,30 @@ const ObjectCreateSection = () => {
             y1="3"
             x2="12"
             y2="21"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title="Plane — a reference plane (from the selected sketch, else world XY) to sketch on"
+        onClick={handlePlane}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <polygon
+            points="3,9 14,5 21,11 10,15"
+            fill="rgba(68,136,255,0.25)"
+            stroke="#4488ff"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+          <line
+            x1="12"
+            y1="10"
+            x2="12"
+            y2="20"
+            stroke="#D4A33F"
+            strokeWidth="1.5"
+            strokeDasharray="2 2"
           />
         </svg>
       </button>
