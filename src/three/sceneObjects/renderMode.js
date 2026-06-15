@@ -100,6 +100,11 @@ export function applyRenderMode(renderMode, ctx) {
         mesh.visible = false;
         return;
       }
+      // A Plane object keeps its own translucent reference material.
+      if (itemData?.type === "plane") {
+        mesh.visible = true;
+        return;
+      }
       if (itemData?.type === "sketch") {
         mesh.visible = false;
         return;
@@ -170,6 +175,11 @@ export function applyRenderMode(renderMode, ctx) {
       );
       if (itemData?.visible === false) {
         mesh.visible = false;
+        return;
+      }
+      // A Plane object keeps its own translucent reference material.
+      if (itemData?.type === "plane") {
+        mesh.visible = true;
         return;
       }
       if (itemData?.type === "sketch") {

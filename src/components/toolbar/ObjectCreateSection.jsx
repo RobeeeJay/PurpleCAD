@@ -14,22 +14,18 @@ const ObjectCreateSection = () => {
   const selectedId = useStore((s) => s.selectedId);
   const items = useStore((s) => s.items);
   const startPlaneTool = useStore((s) => s.startPlaneTool);
-  const setPlanePickActive = useStore((s) => s.setPlanePickActive);
 
   const hasFaceSelected = (selectedSubGeometry?.faces?.length ?? 0) > 0;
 
-  // Create a Plane object: from the selected sketch's plane, otherwise pick 3
-  // points in the viewport (which also covers a line's two ends + a point).
+  // Open the Plane dialog seeded from the selected sketch's plane, else world
+  // XY.  The dialog also offers axis-plane bases and "Pick 3 points".
   const handlePlane = () => {
     const sel = items.find((i) => i.id === selectedId);
-    if (sel?.type === "sketch") {
-      startPlaneTool({
-        position: { ...sel.position },
-        rotation: { ...sel.rotation },
-      });
-    } else {
-      setPlanePickActive(true);
-    }
+    startPlaneTool(
+      sel?.type === "sketch"
+        ? { position: { ...sel.position }, rotation: { ...sel.rotation } }
+        : { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } },
+    );
   };
 
   const handleExtrudeClick = () => {

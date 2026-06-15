@@ -13,6 +13,8 @@ import "../styles/VariablesDialog.css";
 const PlaneDialog = () => {
   const planeTool = useStore((s) => s.planeTool);
   const cancelPlaneTool = useStore((s) => s.cancelPlaneTool);
+  const updatePlaneTool = useStore((s) => s.updatePlaneTool);
+  const setPlanePickActive = useStore((s) => s.setPlanePickActive);
   const variables = useStore((s) => s.variables);
   const addItem = useStore((s) => s.addItem);
 
@@ -104,6 +106,29 @@ const PlaneDialog = () => {
     else if (e.key === "Escape") close();
   };
 
+  // Swap the base frame to a world axis-plane (resetting the rotation deltas).
+  const setBase = (rotation) => {
+    updatePlaneTool({ base: { position: { x: 0, y: 0, z: 0 }, rotation } });
+    setRx("0");
+    setRy("0");
+    setRz("0");
+    setOffset("0");
+  };
+  const pickPoints = () => {
+    useStore.getState()._cameraControls?.clearPlanePreview?.();
+    cancelPlaneTool();
+    setPlanePickActive(true);
+  };
+  const baseBtn = {
+    fontSize: 11,
+    padding: "4px 8px",
+    borderRadius: 3,
+    border: "1px solid var(--border-color)",
+    background: "var(--bg-tertiary)",
+    color: "var(--text-primary)",
+    cursor: "pointer",
+  };
+
   return (
     <div
       className="variables-dialog-backdrop"
@@ -137,6 +162,41 @@ const PlaneDialog = () => {
             gap: 12,
           }}
         >
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                marginRight: 2,
+              }}
+            >
+              Base:
+            </span>
+            <button
+              type="button"
+              style={baseBtn}
+              onClick={() => setBase({ x: 0, y: 0, z: 0 })}
+            >
+              XY
+            </button>
+            <button
+              type="button"
+              style={baseBtn}
+              onClick={() => setBase({ x: -Math.PI / 2, y: 0, z: 0 })}
+            >
+              XZ
+            </button>
+            <button
+              type="button"
+              style={baseBtn}
+              onClick={() => setBase({ x: 0, y: Math.PI / 2, z: 0 })}
+            >
+              YZ
+            </button>
+            <button type="button" style={baseBtn} onClick={pickPoints}>
+              Pick 3 points
+            </button>
+          </div>
           <label style={row}>
             <span>Rotate X (°)</span>
             <FormulaInput
