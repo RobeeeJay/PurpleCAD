@@ -121,3 +121,7 @@ export function exportSTEP(args) {
 export function importStep(args) {
   return runOp("importStep", args);
 }
+
+export function splitItem(args) {
+  return runOp("splitItem", args);
+}

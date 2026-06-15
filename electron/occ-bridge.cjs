@@ -919,4 +919,67 @@ function loftItem({ profileSource, secondProfileSource, printPrecision }) {
   };
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, loftItem, exportSTL, exportSTEP, importStep };
+// Slice a solid into two parts along a plane (mirrors occOps.js#splitItem).
+function splitItem({ target, plane, allItems, printPrecision }) {
+  const localId = buildItemShapeLocal(target, allItems, printPrecision);
+  if (localId == null) throw new Error("Couldn't build the object to split.");
+  const t = buildBrushTransform(target);
+  let scaledId = localId;
+  if (Math.abs(t.scale - 1) > 1e-9) {
+    scaledId = occ.scaleShape(localId, t.scale);
+    occ.releaseShape(localId);
+  }
+  const solidId = occ.transformShape(
+    scaledId, t.position.x, t.position.y, t.position.z,
+    t.rotation.x || 0, t.rotation.y || 0, t.rotation.z || 0,
+  );
+  if (scaledId !== localId) occ.releaseShape(scaledId);
+  else occ.releaseShape(localId);
+  if (!solidId) throw new Error("Couldn't build the object to split.");
+
+  const S = 1000;
+  const boxLocal = occ.makeBox(-S, -S, 0, S, S, 2 * S);
+  const box = occ.transformShape(
+    boxLocal, plane.position.x, plane.position.y, plane.position.z,
+    plane.rotation.x || 0, plane.rotation.y || 0, plane.rotation.z || 0,
+  );
+  occ.releaseShape(boxLocal);
+
+  let aId, bId;
+  try {
+    aId = occ.booleanOp([solidId, box], "intersection");
+    bId = occ.booleanOp([solidId, box], "difference");
+  } finally {
+    occ.releaseShape(solidId);
+    occ.releaseShape(box);
+  }
+
+  const part = (id) => {
+    if (!id) return null;
+    let tess;
+    try {
+      tess = occ.tessellate(id, printPrecision ?? 0.5);
+    } finally {
+      occ.releaseShape(id);
+    }
+    if (!tess || tess.positions.length === 0) return null;
+    const positions = Array.from(tess.positions);
+    const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(positions);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+    for (let i = 0; i < positions.length; i += 3) {
+      positions[i] -= cx; positions[i + 1] -= cy; positions[i + 2] -= cz;
+    }
+    return {
+      position: { x: cx, y: cy, z: cz },
+      geometryData: { positions, normals: null, indices: Array.from(tess.indices) },
+    };
+  };
+
+  const partA = part(aId);
+  const partB = part(bId);
+  if (!partA && !partB)
+    throw new Error("Split produced no geometry — does the plane cross it?");
+  return { partA, partB };
+}
+
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, loftItem, splitItem, exportSTL, exportSTEP, importStep };
