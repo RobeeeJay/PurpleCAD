@@ -182,6 +182,43 @@ function pipeArgs(profileSource, pathRef, allItems, precision) {
   return { outerFlat, holesFlat, cx: c.x, cy: c.y, pathFlat };
 }
 
+// ── Loft helpers ──────────────────────────────────────────────────────────
+
+// Map a 2D sketch polygon onto its world plane (position + XYZ-euler rotation).
+function polyToWorld(poly, position, rotation) {
+  const r = rotation || { x: 0, y: 0, z: 0 };
+  const p = position || { x: 0, y: 0, z: 0 };
+  return poly.map((pt) => {
+    const w = applyEulerXYZ(pt.x, pt.y, 0, r.x || 0, r.y || 0, r.z || 0);
+    return { x: w.x + (p.x || 0), y: w.y + (p.y || 0), z: w.z + (p.z || 0) };
+  });
+}
+
+// Build makeLoft args: both profiles' live outer loops, wound CCW and mapped to
+// their world planes.  Returns null if either can't be resolved.  (Holes aren't
+// lofted — outer boundaries only.)
+function loftArgs(profileSource, secondSource, allItems, precision) {
+  const liveA = extrudeWithLivePolygon(profileSource, allItems, precision);
+  const liveB = extrudeWithLivePolygon(secondSource, allItems, precision);
+  const pa = liveA.profile?.polygon2D;
+  const pb = liveB.profile?.polygon2D;
+  if (!pa || pa.length < 3 || !pb || pb.length < 3) return null;
+  const worldA = polyToWorld(
+    withWinding(pa, true),
+    liveA.profile.position,
+    liveA.profile.rotation,
+  );
+  const worldB = polyToWorld(
+    withWinding(pb, true),
+    liveB.profile.position,
+    liveB.profile.rotation,
+  );
+  return {
+    aFlat: new Float64Array(worldA.flatMap((p) => [p.x, p.y, p.z])),
+    bFlat: new Float64Array(worldB.flatMap((p) => [p.x, p.y, p.z])),
+  };
+}
+
 // Build the native OCC shape for an item in its LOCAL frame (matching the
 // frame of the rendered geometryData so edge endpoints from the viewport
 // mesh align with the OCC shape's edges).
@@ -347,6 +384,39 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       if (!resultId) return null;
       // Built in WORLD; centerOffset (the world bbox centre) is also the item
       // position, so subtract it to centre the local shape like the others.
+      const offset = chamferCenterOffset(r, item);
+      if (
+        offset &&
+        (Math.abs(offset.x) > 1e-9 ||
+          Math.abs(offset.y) > 1e-9 ||
+          Math.abs(offset.z) > 1e-9)
+      ) {
+        const corrected = occ.transformShape(
+          resultId,
+          -offset.x,
+          -offset.y,
+          -offset.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
+    if (r.kind === "loft") {
+      const args = loftArgs(
+        r.profileSource,
+        r.secondProfileSource,
+        allItems,
+        precision,
+      );
+      if (!args) return null;
+      const resultId = occ.makeLoft(args.aFlat, args.bFlat);
+      if (!resultId) return null;
+      // Built in WORLD; centerOffset (bbox centre) is also the item position.
       const offset = chamferCenterOffset(r, item);
       if (
         offset &&
@@ -721,6 +791,56 @@ async function pipeItem({ profileSource, pathRef, allItems, printPrecision }) {
   };
 }
 
+// Loft a smooth solid between two profile loops (live, on parallel sketch
+// planes), tessellate, and bbox-centre.  Built in WORLD like pipe, so the bbox
+// centre is both the centerOffset and the item position (rotation identity).
+async function loftItem({
+  profileSource,
+  secondProfileSource,
+  allItems,
+  printPrecision,
+}) {
+  const args = loftArgs(
+    profileSource,
+    secondProfileSource,
+    allItems,
+    printPrecision,
+  );
+  if (!args) throw new Error("Loft needs two closed profile loops.");
+  const resultId = occ.makeLoft(args.aFlat, args.bFlat);
+  if (!resultId) throw new Error("Loft produced no geometry.");
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2,
+    cy = (minY + maxY) / 2,
+    cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx;
+    centered[i + 1] -= cy;
+    centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: {
+      positions: centered,
+      normals: null,
+      indices: Array.from(tess.indices),
+    },
+    centerOffset: { cx, cy, cz },
+    position: { x: cx, y: cy, z: cz },
+    resolvedSubGeo: {},
+  };
+}
+
 async function performCsg({
   selectedItems,
   allItems,
@@ -889,6 +1009,7 @@ export const ops = {
   pushPullFaces,
   revolveItem,
   pipeItem,
+  loftItem,
   performCsg,
   exportSTL,
   exportSTEP,

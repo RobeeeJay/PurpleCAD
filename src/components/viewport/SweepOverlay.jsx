@@ -1,10 +1,10 @@
 // Hint banners + parameter panel for the sketch→solid sweep tools (Revolve,
-// Pipe).  Picking happens in the viewport (handled by cameraControls/sweep.js
-// via _cameraControls); this overlay shows the per-phase hint and, for Revolve,
-// once a profile + axis are picked, the Angle / Prism / Sides inputs with a
-// debounced live preview, gating Confirm on a valid value — like the
-// chamfer/push-pull overlays.  Pipe has no parameters, so it shows just a
-// Confirm/Cancel bar once its profile + path are picked.
+// Pipe, Loft).  Picking happens in the viewport (handled by
+// cameraControls/sweep.js via _cameraControls); this overlay shows the per-phase
+// hint and, for Revolve, once a profile + axis are picked, the Angle / Prism /
+// Sides inputs with a debounced live preview, gating Confirm on a valid value —
+// like the chamfer/push-pull overlays.  Pipe and Loft have no parameters, so
+// they show just a Confirm/Cancel bar once both picks are made.
 
 import React, { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
@@ -35,6 +35,7 @@ export default function SweepOverlay() {
   const params = sweepSelectMode?.params || {};
   const isRevolve = sweepSelectMode?.kind === "revolve";
   const isPipe = sweepSelectMode?.kind === "pipe";
+  const isLoft = sweepSelectMode?.kind === "loft";
   // The revolve param panel is "ready" once a profile + axis are picked.
   const ready =
     isRevolve && !!sweepSelectMode?.profile && !!sweepSelectMode?.axis;
@@ -88,6 +89,34 @@ export default function SweepOverlay() {
     if (valid) useStore.getState()._cameraControls?.commitSweep?.();
   };
 
+  // Pipe and loft have no parameters: a per-phase hint, then a Confirm/Cancel
+  // bar once both picks are made.
+  const confirmBar = (label) => (
+    <>
+      <div className="sketch-placement-hint">
+        Confirm to create the {label} · Esc to cancel
+      </div>
+      <div className="sketch-distance-input-overlay">
+        <button
+          type="button"
+          onClick={cancel}
+          title="Cancel"
+          style={btn(false)}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => useStore.getState()._cameraControls?.commitSweep?.()}
+          title={`Confirm — create the ${label}`}
+          style={btn(true)}
+        >
+          Confirm
+        </button>
+      </div>
+    </>
+  );
+
   if (isPipe) {
     if (!sweepSelectMode.profile) {
       return (
@@ -103,31 +132,26 @@ export default function SweepOverlay() {
         </div>
       );
     }
-    return (
-      <>
+    return confirmBar("pipe");
+  }
+
+  if (isLoft) {
+    if (!sweepSelectMode.profile) {
+      return (
         <div className="sketch-placement-hint">
-          Confirm to create the pipe · Esc to cancel
+          Click the first sketch region to loft from · Esc to cancel
         </div>
-        <div className="sketch-distance-input-overlay">
-          <button
-            type="button"
-            onClick={cancel}
-            title="Cancel"
-            style={btn(false)}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => useStore.getState()._cameraControls?.commitSweep?.()}
-            title="Confirm — create the pipe"
-            style={btn(true)}
-          >
-            Confirm
-          </button>
+      );
+    }
+    if (!sweepSelectMode.secondProfile) {
+      return (
+        <div className="sketch-placement-hint">
+          Click the second region (on a parallel plane) to loft to · Esc to
+          cancel
         </div>
-      </>
-    );
+      );
+    }
+    return confirmBar("loft");
   }
 
   if (!isRevolve) return null;

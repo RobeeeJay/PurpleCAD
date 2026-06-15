@@ -162,6 +162,38 @@ function pipeArgs(profileSource, pathRef, allItems) {
   return { outerFlat, holesFlat, cx: c.x, cy: c.y, pathFlat };
 }
 
+// ── Loft helpers (mirror occOps.js) ──────────────────────────────────────
+
+function polyToWorld(poly, position, rotation) {
+  const r = rotation || { x: 0, y: 0, z: 0 };
+  const p = position || { x: 0, y: 0, z: 0 };
+  return poly.map((pt) => {
+    const w = applyEulerXYZ(pt.x, pt.y, 0, r.x || 0, r.y || 0, r.z || 0);
+    return { x: w.x + (p.x || 0), y: w.y + (p.y || 0), z: w.z + (p.z || 0) };
+  });
+}
+
+// The renderer pre-bakes both live profile polygons into profile.polygon2D.
+function loftArgs(profileSource, secondSource) {
+  const pa = profileSource && profileSource.profile && profileSource.profile.polygon2D;
+  const pb = secondSource && secondSource.profile && secondSource.profile.polygon2D;
+  if (!pa || pa.length < 3 || !pb || pb.length < 3) return null;
+  const worldA = polyToWorld(
+    withWinding(pa, true),
+    profileSource.profile.position,
+    profileSource.profile.rotation,
+  );
+  const worldB = polyToWorld(
+    withWinding(pb, true),
+    secondSource.profile.position,
+    secondSource.profile.rotation,
+  );
+  return {
+    aFlat: new Float64Array(worldA.flatMap((p) => [p.x, p.y, p.z])),
+    bFlat: new Float64Array(worldB.flatMap((p) => [p.x, p.y, p.z])),
+  };
+}
+
 // Resolve depth from legacy number (scene units) or simple string formula
 // (mm / MM_PER_UNIT where MM_PER_UNIT = 10).  Complex variable references
 // can't be resolved without the store; fall back to 1 in that case.
@@ -321,6 +353,20 @@ function buildItemShapeLocal(item, allItems, precision) {
       const resultId = occ.makePipe(
         args.outerFlat, args.holesFlat, args.cx, args.cy, args.pathFlat,
       );
+      if (!resultId) return null;
+      const off = regen.centerOffset;
+      if (off) {
+        const corrected = occ.transformShape(resultId, -off.cx, -off.cy, -off.cz, 0, 0, 0);
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
+    if (regen.kind === "loft") {
+      const args = loftArgs(regen.profileSource, regen.secondProfileSource);
+      if (!args) return null;
+      const resultId = occ.makeLoft(args.aFlat, args.bFlat);
       if (!resultId) return null;
       const off = regen.centerOffset;
       if (off) {
@@ -754,4 +800,34 @@ function pipeItem({ profileSource, pathRef, allItems, printPrecision }) {
   };
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, exportSTL, exportSTEP };
+// Loft a smooth solid between two profile loops (mirrors occOps.js#loftItem).
+function loftItem({ profileSource, secondProfileSource, printPrecision }) {
+  const args = loftArgs(profileSource, secondProfileSource);
+  if (!args) throw new Error("Loft needs two closed profile loops.");
+  const resultId = occ.makeLoft(args.aFlat, args.bFlat);
+  if (!resultId) throw new Error("Loft produced no geometry.");
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
+    position: { x: cx, y: cy, z: cz },
+    resolvedSubGeo: {},
+  };
+}
+
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, loftItem, exportSTL, exportSTEP };

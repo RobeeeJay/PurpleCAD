@@ -2,8 +2,7 @@ import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 
-// Sketch→solid sweep tools in the Modify section.  Phase 1 ships Revolve,
-// Phase 2 Pipe; Loft will slot in here as it lands.
+// Sketch→solid sweep tools in the Modify section: Revolve, Pipe, Loft.
 const SweepSection = ({ bare = false }) => {
   const sweepSelectMode = useStore((s) => s.sweepSelectMode);
   const startSweepTool = useStore((s) => s.startSweepTool);
@@ -108,10 +107,52 @@ const SweepSection = ({ bare = false }) => {
     </button>
   );
 
+  const loftBtn = (
+    <button
+      className={`toolbar-btn ${sweepSelectMode?.kind === "loft" ? "active" : ""}`}
+      title="Loft — blend a solid between two sketch regions on parallel planes"
+      onClick={() => toggle("loft")}
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        {/* top (smaller) profile */}
+        <rect
+          x="9"
+          y="3"
+          width="6"
+          height="4"
+          fill="rgba(108,63,212,0.3)"
+          stroke="#6C3FD4"
+          strokeWidth="1.5"
+        />
+        {/* bottom (larger) profile */}
+        <rect
+          x="4"
+          y="17"
+          width="16"
+          height="4"
+          fill="rgba(108,63,212,0.3)"
+          stroke="#6C3FD4"
+          strokeWidth="1.5"
+        />
+        {/* lofted sides */}
+        <line x1="9" y1="7" x2="4" y2="17" stroke="#c4c2b8" strokeWidth="1.5" />
+        <line
+          x1="15"
+          y1="7"
+          x2="20"
+          y2="17"
+          stroke="#c4c2b8"
+          strokeWidth="1.5"
+        />
+      </svg>
+    </button>
+  );
+
   const body = (
     <>
       {revolveBtn}
       {pipeBtn}
+      {loftBtn}
     </>
   );
 

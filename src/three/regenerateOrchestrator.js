@@ -102,9 +102,9 @@ export async function recalculateTimeline() {
           it.regenerator.kind === "pushpull" ||
           it.regenerator.kind === "revolve") &&
           (src?.type === "extrude" || src?.regenerator?.kind === "boolean")) ||
-        // Pipe is built in world and its position IS the bbox centre; drop it so
-        // a sketch edit to the profile or path re-centres the result.
-        (it.regenerator.kind === "pipe" &&
+        // Pipe and loft are built in world and their position IS the bbox
+        // centre; drop it so a sketch edit to an input re-centres the result.
+        ((it.regenerator.kind === "pipe" || it.regenerator.kind === "loft") &&
           it.regenerator.profileSource?.type === "extrude");
       return {
         ...it,

@@ -793,6 +793,45 @@ Napi::Number MakePipe(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// Build a closed wire from a world-space 3D polyline [x0,y0,z0, x1,y1,z1, ...].
+static TopoDS_Wire BuildWorldWire(const Napi::Float64Array& pts) {
+  size_t n = pts.ElementLength() / 3;
+  if (n < 3) return TopoDS_Wire();
+  BRepBuilderAPI_MakeWire wireMk;
+  for (size_t i = 0; i < n; i++) {
+    size_t j = (i + 1) % n;
+    gp_Pnt p1(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+    gp_Pnt p2(pts[j * 3], pts[j * 3 + 1], pts[j * 3 + 2]);
+    if (p1.Distance(p2) < 1e-9) continue;
+    wireMk.Add(BRepBuilderAPI_MakeEdge(p1, p2).Edge());
+  }
+  return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
+}
+
+// makeLoft(wireAPts, wireBPts) → shapeId
+// Loft a smooth solid between two world-space closed profiles (each a flat 3D
+// polyline).  The caller positions both loops on their own sketch planes, so
+// this just threads them through BRepOffsetAPI_ThruSections.  Holes aren't
+// supported (outer boundaries only).
+Napi::Number MakeLoft(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    Napi::Float64Array a = info[0].As<Napi::Float64Array>();
+    Napi::Float64Array b = info[1].As<Napi::Float64Array>();
+    TopoDS_Wire wa = BuildWorldWire(a);
+    TopoDS_Wire wb = BuildWorldWire(b);
+    if (wa.IsNull() || wb.IsNull())
+      throw std::runtime_error("loft needs two closed profiles");
+    BRepOffsetAPI_ThruSections loft(Standard_True /*solid*/,
+                                    Standard_False /*ruled → smooth*/);
+    loft.AddWire(wa);
+    loft.AddWire(wb);
+    loft.Build();
+    if (!loft.IsDone()) throw std::runtime_error("loft failed");
+    return Napi::Number::New(env, StoreShape(loft.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Exported functions — transforms
 // ════════════════════════════════════════════════════════════════════════
@@ -1254,6 +1293,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("makeExtrude",        Napi::Function::New(env, MakeExtrude));
   exports.Set("makeRevolve",        Napi::Function::New(env, MakeRevolve));
   exports.Set("makePipe",           Napi::Function::New(env, MakePipe));
+  exports.Set("makeLoft",           Napi::Function::New(env, MakeLoft));
 
   // Transforms
   exports.Set("transformShape",     Napi::Function::New(env, TransformShape));

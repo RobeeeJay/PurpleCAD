@@ -61,6 +61,7 @@ try {
   );
   ipcMain.handle("occ:revolveItem", (_e, args) => occBridge.revolveItem(args));
   ipcMain.handle("occ:pipeItem", (_e, args) => occBridge.pipeItem(args));
+  ipcMain.handle("occ:loftItem", (_e, args) => occBridge.loftItem(args));
   ipcMain.handle("occ:exportSTL", (_e, args) => occBridge.exportSTL(args));
   ipcMain.handle("occ:exportSTEP", (_e, args) => occBridge.exportSTEP(args));
 } catch (err) {

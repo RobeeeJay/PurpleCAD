@@ -14,6 +14,7 @@ import {
   pushPullFaces,
   revolveItem,
   pipeItem,
+  loftItem,
   performCsg,
 } from "./occClient.js";
 
@@ -272,6 +273,49 @@ async function regeneratePipe(
   };
 }
 
+async function regenerateLoft(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const profileSource = withLivePolygons(
+    regenerator.profileSource,
+    liveItems,
+    printPrecision,
+  );
+  const secondProfileSource = withLivePolygons(
+    regenerator.secondProfileSource,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await loftItem({
+      profileSource,
+      secondProfileSource,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Loft regen couldn't rebuild (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  // Built in world, so the bbox centre is the position; recalculateTimeline
+  // drops currentPosition to let a sketch edit re-centre the origin.
+  return {
+    position: currentPosition || result.position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
 async function regenerateBoolean(
   regenerator,
   accumulatedItems,
@@ -353,6 +397,8 @@ export async function regenerateItemsForResolution(
       result = await regenerateRevolve(r, out, printPrecision, item.position);
     } else if (r.kind === "pipe") {
       result = await regeneratePipe(r, out, printPrecision, item.position);
+    } else if (r.kind === "loft") {
+      result = await regenerateLoft(r, out, printPrecision, item.position);
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
     }
@@ -368,7 +414,8 @@ export async function regenerateItemsForResolution(
         r.kind === "chamfer" ||
         r.kind === "pushpull" ||
         r.kind === "revolve" ||
-        r.kind === "pipe"
+        r.kind === "pipe" ||
+        r.kind === "loft"
       ) {
         changed = true;
         out.push({
@@ -397,7 +444,8 @@ export async function regenerateItemsForResolution(
       (r.kind === "chamfer" ||
         r.kind === "pushpull" ||
         r.kind === "revolve" ||
-        r.kind === "pipe") &&
+        r.kind === "pipe" ||
+        r.kind === "loft") &&
       result.centerOffset
     ) {
       nextRegen.centerOffset = result.centerOffset;

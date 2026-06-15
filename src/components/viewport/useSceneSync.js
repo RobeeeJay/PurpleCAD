@@ -517,8 +517,12 @@ export function useSceneSync({
     // sketch planes.  Keep the group alive through depth + start, building it
     // once on entry and disposing only when the extrude ends.
     // The same loop fills are reused by the sweep tools (Revolve/Pipe/Loft) to
-    // pick a profile — build them while a sweep tool is awaiting its profile.
-    const sweepPicking = !!sweepSelectMode && !sweepSelectMode.profile;
+    // pick a profile — build them while a sweep tool is awaiting a profile.
+    // Loft picks two regions, so keep them while its second profile is pending.
+    const sweepPicking =
+      !!sweepSelectMode &&
+      (!sweepSelectMode.profile ||
+        (sweepSelectMode.kind === "loft" && !sweepSelectMode.secondProfile));
     const active =
       ["profile", "start"].includes(extrudeSelectMode) || sweepPicking;
     if (!active) {

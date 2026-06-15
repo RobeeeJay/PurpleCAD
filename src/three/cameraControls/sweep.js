@@ -179,11 +179,16 @@ export function createSweepHelpers({
     fill.material.needsUpdate = true;
   };
 
+  // A fill pick is the current phase when no profile is set, or for loft's
+  // second profile (loft picks two regions; revolve/pipe pick a region + line).
+  const needsFillPick = (sm) =>
+    !sm.profile || (sm.kind === "loft" && !sm.secondProfile);
+
   // ── Hover ─────────────────────────────────────────────────────────────────
   const handleSweepHover = (screenX, screenY) => {
     const sm = useStore.getState().sweepSelectMode;
     if (!sm) return;
-    if (!sm.profile) {
+    if (needsFillPick(sm)) {
       // Highlight the profile fill under the cursor.
       const fills = extrudeSelectGroupRef?.current?.children ?? [];
       const hit = ray(screenX, screenY).intersectObjects(fills, false)[0];
@@ -204,19 +209,37 @@ export function createSweepHelpers({
     else clearAxisHighlight();
   };
 
+  // Parallel-plane test for loft (allows antiparallel normals — both define the
+  // same plane orientation).
+  const planesParallel = (a, b) =>
+    a && b && Math.abs(a.x * b.x + a.y * b.y + a.z * b.z) > 0.999;
+
   // ── Click ─────────────────────────────────────────────────────────────────
   const handleSweepClick = (screenX, screenY) => {
     const store = useStore.getState();
     const sm = store.sweepSelectMode;
     if (!sm) return;
-    if (!sm.profile) {
+    if (needsFillPick(sm)) {
       const fills = extrudeSelectGroupRef?.current?.children ?? [];
       const hit = ray(screenX, screenY).intersectObjects(fills, false)[0];
       const prof = hit?.object?.userData?.extrudeProfile;
-      if (prof) {
+      if (!prof) return;
+      if (!sm.profile) {
         dimFill(hoveredFill, false);
         hoveredFill = null;
         store.setSweepProfile(prof);
+      } else {
+        // Loft's second profile must sit on a plane parallel to the first.
+        if (!planesParallel(sm.profile.normalWorld, prof.normalWorld)) {
+          store.showNotification(
+            "Loft needs the second sketch on a parallel plane.",
+          );
+          return;
+        }
+        dimFill(hoveredFill, false);
+        hoveredFill = null;
+        store.setSweepSecondProfile(prof);
+        updateSweepPreview();
       }
       return;
     }
@@ -403,6 +426,31 @@ export function createSweepHelpers({
     showPreviewMesh(result.geometryData, result.position, null, ghostItemId);
   };
 
+  // Run the loft recipe; built in world like pipe.
+  const showLoft = async ({
+    myRequest,
+    profileSource,
+    secondProfileSource,
+    ghostItemId,
+  }) => {
+    const printPrecision =
+      useStore.getState().curveResolution === "print" ? 0.01 : null;
+    let result;
+    try {
+      const { loftItem } = await import("../occClient.js");
+      result = await loftItem({
+        profileSource,
+        secondProfileSource,
+        allItems: itemsRef.current,
+        printPrecision,
+      });
+    } catch {
+      result = null;
+    }
+    if (myRequest !== requestId || !result) return;
+    showPreviewMesh(result.geometryData, result.position, null, ghostItemId);
+  };
+
   const runPreview = async () => {
     const myRequest = ++requestId;
     const sm = useStore.getState().sweepSelectMode;
@@ -413,6 +461,15 @@ export function createSweepHelpers({
         myRequest,
         profileSource: buildProfileSource(sm.profile),
         pathRef: sm.path,
+      });
+      return;
+    }
+    if (sm.kind === "loft") {
+      if (!sm.secondProfile) return;
+      await showLoft({
+        myRequest,
+        profileSource: buildProfileSource(sm.profile),
+        secondProfileSource: buildProfileSource(sm.secondProfile),
       });
       return;
     }
@@ -446,7 +503,13 @@ export function createSweepHelpers({
 
   // True once a tool has all the geometry it needs to build a result.
   const sweepReady = (sm) =>
-    sm && sm.profile && (sm.kind === "pipe" ? sm.path : sm.axis);
+    sm &&
+    sm.profile &&
+    (sm.kind === "pipe"
+      ? sm.path
+      : sm.kind === "loft"
+        ? sm.secondProfile
+        : sm.axis);
 
   // Debounced — safe to call on every param/selection change.
   const updateSweepPreview = () => {
@@ -517,12 +580,74 @@ export function createSweepHelpers({
     store.setSweepSelectMode(null);
   };
 
+  const commitLoft = async (store, sm) => {
+    const profileSource = buildProfileSource(sm.profile);
+    const secondProfileSource = buildProfileSource(sm.secondProfile);
+    const printPrecision = store.curveResolution === "print" ? 0.01 : null;
+    let result;
+    try {
+      const { loftItem } = await import("../occClient.js");
+      result = await loftItem({
+        profileSource,
+        secondProfileSource,
+        allItems: itemsRef.current,
+        printPrecision,
+      });
+    } catch (err) {
+      store.showNotification(err.message);
+      return;
+    }
+    if (!result) {
+      store.showNotification("Loft produced no geometry.");
+      return;
+    }
+    const { geometryData, centerOffset, position } = result;
+    const regenerator = {
+      kind: "loft",
+      profileSource,
+      secondProfileSource,
+      centerOffset,
+      regeneratedAt: printPrecision,
+    };
+    clearSweepPreview();
+    clearAxisHighlight();
+
+    const retarget = store.sweepRetargetTarget;
+    if (retarget) {
+      store.retargetLoftEntry(retarget.entryId, {
+        regenerator,
+        geometryData,
+        position,
+        rotation: { x: 0, y: 0, z: 0 },
+      });
+      store.setSweepRetargetTarget(null);
+    } else {
+      const id = maxItemId(store.history) + 1;
+      store.addItem({
+        id,
+        name: `Loft ${id}`,
+        type: "csg",
+        children: [],
+        regenerator,
+        geometryData,
+        position,
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+    }
+    store.setSweepSelectMode(null);
+  };
+
   const commitSweep = async () => {
     const store = useStore.getState();
     const sm = store.sweepSelectMode;
     if (!sweepReady(sm)) return;
     if (sm.kind === "pipe") {
       await commitPipe(store, sm);
+      return;
+    }
+    if (sm.kind === "loft") {
+      await commitLoft(store, sm);
       return;
     }
     if (sm.kind !== "revolve") return;
@@ -666,6 +791,38 @@ export function beginPipeRetarget(itemId, entryId) {
     path: r.pathRef,
     axis: null,
     secondProfile: null,
+    params: {},
+  });
+  store.setSweepRetargetTarget({ itemId, entryId });
+}
+
+// A profile pick-snapshot reconstructed from a stored extrude source's profile.
+const profileSnapshot = (p) =>
+  p
+    ? {
+        sketchId: p.sketchId,
+        profileCentroid: p.profileCentroid,
+        polygon2D: p.polygon2D,
+        holes: p.holes || [],
+        position: p.position,
+        rotation: p.rotation,
+        normalWorld: p.normalWorld,
+      }
+    : null;
+
+// Re-open the Loft tool to retarget a committed loft (re-pick both profiles),
+// seeded from its regenerator.  Mirrors beginPipeRetarget.
+export function beginLoftRetarget(itemId, entryId) {
+  const store = useStore.getState();
+  const item = store.items.find((i) => i.id === itemId);
+  const r = item?.regenerator;
+  if (!r || r.kind !== "loft") return;
+  store.setSweepSelectMode({
+    kind: "loft",
+    profile: profileSnapshot(r.profileSource?.profile),
+    secondProfile: profileSnapshot(r.secondProfileSource?.profile),
+    path: null,
+    axis: null,
     params: {},
   });
   store.setSweepRetargetTarget({ itemId, entryId });

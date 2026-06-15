@@ -5,6 +5,7 @@ import { beginPushPullRetarget } from "../three/cameraControls/pushPull.js";
 import {
   beginRevolveRetarget,
   beginPipeRetarget,
+  beginLoftRetarget,
 } from "../three/cameraControls/sweep.js";
 import {
   CubeIcon,
@@ -54,6 +55,13 @@ const pipeInfo = (entry) => {
   const inst = entry?.instruction;
   if (inst?.type !== "create") return null;
   if (inst.item?.regenerator?.kind !== "pipe") return null;
+  return { itemId: inst.item.id };
+};
+
+const loftInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "create") return null;
+  if (inst.item?.regenerator?.kind !== "loft") return null;
   return { itemId: inst.item.id };
 };
 
@@ -800,6 +808,59 @@ const Timeline = () => {
                       strokeLinecap="round"
                     />
                     <circle cx="5" cy="19" r="2" fill="currentColor" />
+                  </svg>
+                </button>
+              )}
+              {loftInfo(entry) && (
+                <button
+                  className={`timeline-action-btn${
+                    sweepRetargetTarget?.itemId === loftInfo(entry).itemId
+                      ? " active"
+                      : ""
+                  }`}
+                  title="Retarget loft — re-pick the two profile regions"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    restoreToHistory(entry.id);
+                    selectItem(loftInfo(entry).itemId);
+                    beginLoftRetarget(loftInfo(entry).itemId, entry.id);
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14">
+                    <rect
+                      x="9"
+                      y="3"
+                      width="6"
+                      height="3"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    />
+                    <rect
+                      x="4"
+                      y="18"
+                      width="16"
+                      height="3"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    />
+                    <line
+                      x1="9"
+                      y1="6"
+                      x2="4"
+                      y2="18"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    />
+                    <line
+                      x1="15"
+                      y1="6"
+                      x2="20"
+                      y2="18"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    />
                   </svg>
                 </button>
               )}

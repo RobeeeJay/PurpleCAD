@@ -229,6 +229,13 @@ export const createUiSlice = (set) => ({
         ? { sweepSelectMode: { ...state.sweepSelectMode, path } }
         : {},
     ),
+  // Loft second profile (the loop to loft to, on a parallel plane).
+  setSweepSecondProfile: (secondProfile) =>
+    set((state) =>
+      state.sweepSelectMode
+        ? { sweepSelectMode: { ...state.sweepSelectMode, secondProfile } }
+        : {},
+    ),
   setSweepParams: (partial) =>
     set((state) =>
       state.sweepSelectMode

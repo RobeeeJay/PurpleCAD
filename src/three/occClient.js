@@ -102,6 +102,10 @@ export function pipeItem(args) {
   return runOp("pipeItem", args);
 }
 
+export function loftItem(args) {
+  return runOp("loftItem", args);
+}
+
 export function performCsg(args) {
   return runOp("performCsg", args);
 }

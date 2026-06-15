@@ -653,8 +653,8 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
-  // Pipe is a CREATE entry like revolve, but has no editable parameters —
-  // only re-picking its profile/path.  Mirrors retargetRevolveEntry.
+  // Pipe and loft are CREATE entries like revolve, but with no editable
+  // parameters — only re-picking their inputs.  Mirrors retargetRevolveEntry.
   retargetPipeEntry: (entryId, patches) =>
     set((state) => {
       const newHistory = state.history.map((entry) => {
@@ -662,6 +662,33 @@ export const createHistorySlice = (set) => ({
         const inst = entry.instruction;
         if (inst?.type !== "create") return entry;
         if (inst.item?.regenerator?.kind !== "pipe") return entry;
+        return {
+          ...entry,
+          instruction: { ...inst, item: { ...inst.item, ...patches } },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  retargetLoftEntry: (entryId, patches) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "create") return entry;
+        if (inst.item?.regenerator?.kind !== "loft") return entry;
         return {
           ...entry,
           instruction: { ...inst, item: { ...inst.item, ...patches } },
