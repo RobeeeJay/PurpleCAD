@@ -16,6 +16,7 @@ const Pattern3dSection = ({ bare = false }) => {
   const items = useStore((s) => s.items);
   const addItem = useStore((s) => s.addItem);
   const curveResolution = useStore((s) => s.curveResolution);
+  const startPattern3d = useStore((s) => s.startPattern3d);
 
   const sel = selectedIds
     .map((id) => items.find((i) => i.id === id))
@@ -23,6 +24,27 @@ const Pattern3dSection = ({ bare = false }) => {
   const source = sel.find((i) => SOLID_TYPES.includes(i.type));
   const plane = sel.find((i) => PLANE_TYPES.includes(i.type));
   const ready = !!source && !!plane;
+
+  // Circular needs a source + a plane (its normal is the rotation axis);
+  // rectangular only needs a source (it tiles along the world X/Y axes).
+  const handleCircular = () => {
+    if (!source || !plane) {
+      alert("Select an object and a plane (its normal is the rotation axis).");
+      return;
+    }
+    startPattern3d({
+      patternType: "circular",
+      sourceId: source.id,
+      planeId: plane.id,
+    });
+  };
+  const handleRectangular = () => {
+    if (!source) {
+      alert("Select an object to pattern.");
+      return;
+    }
+    startPattern3d({ patternType: "rectangular", sourceId: source.id });
+  };
 
   const handleMirror = async () => {
     if (!ready) {
@@ -75,7 +97,7 @@ const Pattern3dSection = ({ bare = false }) => {
     }
   };
 
-  const body = (
+  const mirrorBtn = (
     <button
       className="toolbar-btn"
       title="Mirror (3D) — clone the selected object across the selected plane; the clone tracks the original"
@@ -108,6 +130,60 @@ const Pattern3dSection = ({ bare = false }) => {
         />
       </svg>
     </button>
+  );
+
+  const circularBtn = (
+    <button
+      className="toolbar-btn"
+      title="Circular pattern (3D) — clone around the selected plane's normal axis"
+      onClick={handleCircular}
+      style={ready ? undefined : { opacity: 0.45 }}
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <circle
+          cx="12"
+          cy="12"
+          r="8"
+          fill="none"
+          stroke="#D4A33F"
+          strokeWidth="1.5"
+          strokeDasharray="2 2"
+        />
+        <rect x="10.5" y="2.5" width="3" height="3" fill="#6C3FD4" />
+        <rect x="18.5" y="10.5" width="3" height="3" fill="#6C3FD4" />
+        <rect x="10.5" y="18.5" width="3" height="3" fill="#6C3FD4" />
+        <rect x="2.5" y="10.5" width="3" height="3" fill="#6C3FD4" />
+      </svg>
+    </button>
+  );
+
+  const rectangularBtn = (
+    <button
+      className="toolbar-btn"
+      title="Rectangular pattern (3D) — clone the selected object on an X/Y grid"
+      onClick={handleRectangular}
+      style={source ? undefined : { opacity: 0.45 }}
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <rect x="3" y="3" width="4" height="4" fill="#6C3FD4" />
+        <rect x="10" y="3" width="4" height="4" fill="rgba(108,63,212,0.45)" />
+        <rect x="17" y="3" width="4" height="4" fill="rgba(108,63,212,0.45)" />
+        <rect x="3" y="10" width="4" height="4" fill="rgba(108,63,212,0.45)" />
+        <rect x="10" y="10" width="4" height="4" fill="rgba(108,63,212,0.45)" />
+        <rect x="17" y="10" width="4" height="4" fill="rgba(108,63,212,0.45)" />
+        <rect x="3" y="17" width="4" height="4" fill="rgba(108,63,212,0.45)" />
+        <rect x="10" y="17" width="4" height="4" fill="rgba(108,63,212,0.45)" />
+        <rect x="17" y="17" width="4" height="4" fill="rgba(108,63,212,0.45)" />
+      </svg>
+    </button>
+  );
+
+  const body = (
+    <>
+      {mirrorBtn}
+      {circularBtn}
+      {rectangularBtn}
+    </>
   );
 
   return bare ? body : <ToolbarSection label="Modify">{body}</ToolbarSection>;

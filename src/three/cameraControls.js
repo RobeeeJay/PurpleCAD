@@ -449,6 +449,44 @@ export function attachCameraControls(ctx) {
   };
   controls.clearPlanePreview = () => controls.previewPlane(null);
 
+  // Live preview of a 3D pattern (circular/rectangular) while its dialog adjusts
+  // the counts/angle/spacing.  Pass null to clear.
+  let patternPreviewMesh = null;
+  controls.previewPattern3d = (result) => {
+    if (patternPreviewMesh) {
+      scene.remove(patternPreviewMesh);
+      patternPreviewMesh.geometry.dispose();
+      patternPreviewMesh.material.dispose();
+      patternPreviewMesh = null;
+    }
+    if (!result?.geometryData) return;
+    const { positions, indices } = result.geometryData;
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positions), 3),
+    );
+    if (indices)
+      geom.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+    geom.computeVertexNormals();
+    const mesh = new THREE.Mesh(
+      geom,
+      new THREE.MeshStandardMaterial({
+        color: 0x6c3fd4,
+        roughness: 0.55,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.65,
+      }),
+    );
+    const p = result.position || { x: 0, y: 0, z: 0 };
+    mesh.position.set(p.x, p.y, p.z);
+    mesh.renderOrder = 998;
+    scene.add(mesh);
+    patternPreviewMesh = mesh;
+  };
+  controls.clearPattern3dPreview = () => controls.previewPattern3d(null);
+
   // Pick 3 points (snapping to object vertices) to define a new Plane.  Markers
   // mark each pick; the 3rd derives a frame and opens the creation dialog.
   let planePickPoints = [];

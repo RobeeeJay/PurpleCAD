@@ -12,6 +12,7 @@ import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
 import PlaneDialog from "./components/PlaneDialog";
+import Pattern3dDialog from "./components/Pattern3dDialog";
 import StatusLine from "./components/StatusLine";
 import "./styles/StatusLine.css";
 import VersionTag from "./components/VersionTag";
@@ -97,6 +98,7 @@ function App() {
       <SettingsDialog />
       <AboutDialog />
       <PlaneDialog />
+      <Pattern3dDialog />
       <StatusLine />
       <VersionTag />
       {notification && (

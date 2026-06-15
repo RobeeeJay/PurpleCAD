@@ -114,6 +114,12 @@ export const uiInitial = {
     ),
   cancelPlaneTool: () => set({ planeTool: null }),
 
+  // Pending circular/rectangular 3D pattern: { patternType, sourceId, planeId }.
+  // The dialog adds the counts/angle/spacing and confirms.
+  pattern3dTool: null,
+  startPattern3d: (v) => set({ pattern3dTool: v }),
+  cancelPattern3d: () => set({ pattern3dTool: null }),
+
   // Path-traced render mode (prototype): replaces the raster view with a
   // progressively-accumulated GPU path trace.  `pathTraceView` is the user's
   // toggle; `pathTracerActive` is set true by pathTrace.js only once the tracer
