@@ -5,6 +5,9 @@
 // profile-pick + the push/pull preview/commit conventions.
 
 import * as THREE from "three";
+import { Line2 } from "three/addons/lines/Line2.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { chamferResultTransform } from "./chamferCommit.js";
@@ -166,12 +169,22 @@ export function createSweepHelpers({
     axisHighlight = null;
   };
 
+  // Bold hover highlight over the candidate revolve axis / pipe path under the
+  // cursor (a real-pixel-width Line2, so the selectable line/curve is obvious —
+  // matching the sketch pattern tools' hover feedback rather than a thin line).
   const showAxisHighlight = (world) => {
     clearAxisHighlight();
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(world),
-      new THREE.LineBasicMaterial({ color: AXIS_HIGHLIGHT, depthTest: false }),
-    );
+    const geo = new LineGeometry();
+    geo.setPositions(world.flatMap((p) => [p.x, p.y, p.z]));
+    const mat = new LineMaterial({
+      color: AXIS_HIGHLIGHT,
+      linewidth: 3,
+      depthTest: false,
+      transparent: true,
+      resolution: renderer.getSize(new THREE.Vector2()),
+    });
+    const line = new Line2(geo, mat);
+    line.computeLineDistances();
     line.renderOrder = 1010;
     scene.add(line);
     axisHighlight = line;
