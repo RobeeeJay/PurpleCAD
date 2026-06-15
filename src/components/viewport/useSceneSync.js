@@ -312,6 +312,14 @@ export function useSceneSync({
     // new values.
   }, [items, curveResolution, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep the sketch selection overlays glued to the committed geometry after an
+  // external shapes change (e.g. undoing a move), so they don't linger at the
+  // old positions until the user reselects.
+  useEffect(() => {
+    if (sketchModeRef.current)
+      cameraControlsRef.current?.refreshSketchSelectionOverlays?.();
+  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Persistent sub-geometry selection highlights ─────────────────────────
   // Rebuild a darker-coloured overlay whenever the selected faces or edges
   // change, so the user can see what they have committed to selection

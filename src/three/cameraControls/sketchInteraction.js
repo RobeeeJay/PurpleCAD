@@ -323,6 +323,19 @@ export function createSketchInteraction(
     selectedIdRef,
   });
 
+  // After an external shapes change (e.g. undoing a move) the selection overlays
+  // linger at the old positions until the user reselects — snap them back to the
+  // committed geometry.  Driven by useSceneSync on every items change.
+  controls.refreshSketchSelectionOverlays = () => {
+    if (!hasMultiSelectOverlays() && !hasSketchSelectionOverlay()) return;
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    updateSelectionForDrag(selItem.shapes || [], sketchMesh, true);
+  };
+
   // Exposed on cameraControlsRef so SketchOverlays can drive hover/select for
   // the long-press context menu without duplicating these highlight functions.
   controls.highlightForMenu = (item) => {
