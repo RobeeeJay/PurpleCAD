@@ -72,6 +72,18 @@ const isCircularPatternShapeIdx = (selItem, idx) =>
     (c) => c.type === "circularPattern" && c.shapeIdx === idx,
   );
 
+// Indices of every shape sharing a group with shape `idx` (just [idx] when it
+// isn't grouped) — so a grouped shape selects / drags as a unit.
+const groupMembersOf = (shapes, idx) => {
+  const g = shapes?.[idx]?.group;
+  if (g == null) return [idx];
+  const members = [];
+  shapes.forEach((s, i) => {
+    if (s?.group === g) members.push(i);
+  });
+  return members.length ? members : [idx];
+};
+
 // Same inertness for rectangular-pattern copies while their constraint exists.
 const isRectangularPatternShapeIdx = (selItem, idx) =>
   (selItem?.constraints || []).some(
@@ -602,6 +614,15 @@ export function createSketchInteraction(
         const shapeIdx = hits[0].object.userData.shapeIdx;
         const shape = shapes[shapeIdx];
         if (shape) {
+          // A grouped shape selects the whole group as a multi-selection.
+          const members = groupMembersOf(shapes, shapeIdx);
+          if (members.length > 1) {
+            multiSelectedIndices = members;
+            showMultiSelectOverlays(members);
+            useStore.getState().setSelectedSketchElement(null);
+            if (dimHintRef.current) dimHintRef.current.style.display = "none";
+            return;
+          }
           sketchSelectLine(shapeIdx, shape, sketchMesh);
           const len = getShapeLength(shape);
           if (len !== null && dimHintRef.current) {
@@ -1265,18 +1286,26 @@ export function createSketchInteraction(
           screenY,
           sketchMesh,
         ) || { x: 0, y: 0 };
-        // If the hit shape is part of a multi-selection, drag them all together
-        if (
-          multiSelectedIndices.length > 1 &&
-          multiSelectedIndices.includes(shapeIdx)
-        ) {
+        // Grabbing a grouped shape drags the whole group; otherwise honour an
+        // existing multi-selection that includes the hit shape.
+        const group = groupMembersOf(shapes, shapeIdx);
+        const dragSet =
+          group.length > 1
+            ? group
+            : multiSelectedIndices.length > 1 &&
+                multiSelectedIndices.includes(shapeIdx)
+              ? [...multiSelectedIndices]
+              : null;
+        if (dragSet) {
+          multiSelectedIndices = dragSet;
+          showMultiSelectOverlays(dragSet);
           sketchDrag = {
             kind: "multi",
             sketchMesh,
             selItemId: selItem.id,
             anchorLocal: localAnchor,
-            multiIndices: [...multiSelectedIndices],
-            multiOrigShapes: multiSelectedIndices.map((i) => shapes[i]),
+            multiIndices: [...dragSet],
+            multiOrigShapes: dragSet.map((i) => shapes[i]),
           };
         } else {
           clearMultiSelectOverlays();
@@ -2012,7 +2041,13 @@ export function createSketchInteraction(
       const PASTE_OFFSET = 0.5;
       const newShapes = sketchClipboard.shapes
         .map((s) => translateShape(s, PASTE_OFFSET, PASTE_OFFSET))
-        .filter(Boolean);
+        .filter(Boolean)
+        // Pasted copies start ungrouped (don't inherit the source's group).
+        .map((s) => {
+          if (s.group == null) return s;
+          const { group, ...rest } = s;
+          return rest;
+        });
       const newConstraints = sketchClipboard.constraints.map((c) => ({
         ...c,
         shapeAIdx: c.shapeAIdx + baseIdx,
@@ -2021,6 +2056,41 @@ export function createSketchInteraction(
       useStore
         .getState()
         .addSketchShapes(selectedIdRef.current, newShapes, newConstraints);
+      return;
+    }
+
+    // Cmd/Ctrl+G — group the selected sketch shapes (2+) so they act as a unit.
+    if (
+      sketchModeRef.current &&
+      (isMac ? e.metaKey : e.ctrlKey) &&
+      !e.shiftKey &&
+      e.key.toLowerCase() === "g"
+    ) {
+      if (multiSelectedIndices.length < 2) return;
+      e.preventDefault();
+      const indices = [...multiSelectedIndices];
+      useStore.getState().groupSketchShapes(selectedIdRef.current, indices);
+      showMultiSelectOverlays(indices);
+      return;
+    }
+
+    // Cmd/Ctrl+U — ungroup the selected sketch shapes.
+    if (
+      sketchModeRef.current &&
+      (isMac ? e.metaKey : e.ctrlKey) &&
+      !e.shiftKey &&
+      e.key.toLowerCase() === "u"
+    ) {
+      const sel = useStore.getState().selectedSketchElement;
+      const indices =
+        multiSelectedIndices.length > 0
+          ? [...multiSelectedIndices]
+          : sel?.type === "line"
+            ? [sel.shapeIdx]
+            : [];
+      if (indices.length === 0) return;
+      e.preventDefault();
+      useStore.getState().ungroupSketchShapes(selectedIdRef.current, indices);
       return;
     }
 

@@ -204,6 +204,35 @@ const recomputeBezierOffsets = (shapes, constraints) => {
   return out;
 };
 
+// Commit a shapes-only change to a sketch: snapshot for undo, update items +
+// the matching CREATE history entry, persist.  Used by grouping (which only
+// adds/removes a `group` tag on shapes).
+const commitSketchShapesChange = (state, sketchId, newShapes) => {
+  pushSketchSnapshot(state, sketchId);
+  const updatedItems = state.items.map((item) =>
+    item.id === sketchId
+      ? Object.assign({}, item, { shapes: newShapes })
+      : item,
+  );
+  const newHistory = state.history.map((entry) =>
+    entry.instruction?.type === "create" &&
+    entry.instruction.item?.id === sketchId
+      ? Object.assign({}, entry, {
+          instruction: Object.assign({}, entry.instruction, {
+            item: Object.assign({}, entry.instruction.item, {
+              shapes: newShapes,
+            }),
+          }),
+        })
+      : entry,
+  );
+  saveTimeline(newHistory, state.activeHistoryId);
+  return {
+    items: markCsgDirty(updatedItems),
+    history: withOrphanFlags(newHistory),
+  };
+};
+
 export const createSketchSlice = (set) => ({
   ...createSketchUndoSlice(set),
 
@@ -667,6 +696,47 @@ export const createSketchSlice = (set) => ({
         items: markCsgDirty(updatedItems),
         history: withOrphanFlags(newHistory),
       };
+    }),
+
+  // Tag the given shape indices with a shared, fresh group id so they select /
+  // move / delete as a unit.  Needs at least two shapes.
+  groupSketchShapes: (sketchId, indices) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const idxSet = new Set(indices || []);
+      if (!item || idxSet.size < 2) return {};
+      const shapes = item.shapes || [];
+      const maxGroup = shapes.reduce(
+        (m, s) => (typeof s.group === "number" ? Math.max(m, s.group) : m),
+        0,
+      );
+      const gid = maxGroup + 1;
+      const newShapes = shapes.map((s, i) =>
+        idxSet.has(i) ? { ...s, group: gid } : s,
+      );
+      return commitSketchShapesChange(state, sketchId, newShapes);
+    }),
+
+  // Dissolve every group that any of the given shapes belongs to.
+  ungroupSketchShapes: (sketchId, indices) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const shapes = item.shapes || [];
+      const groups = new Set();
+      (indices || []).forEach((i) => {
+        const g = shapes[i]?.group;
+        if (g != null) groups.add(g);
+      });
+      if (groups.size === 0) return {};
+      const newShapes = shapes.map((s) => {
+        if (s.group != null && groups.has(s.group)) {
+          const { group, ...rest } = s;
+          return rest;
+        }
+        return s;
+      });
+      return commitSketchShapesChange(state, sketchId, newShapes);
     }),
 
   addSketchShape: (sketchId, shape, newConstraints = []) =>
