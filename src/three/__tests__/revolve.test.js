@@ -134,6 +134,31 @@ describe("revolveItem", () => {
     expect(ey).toBeCloseTo(7, 0);
   });
 
+  it("accepts an axis line from a different (coplanar) sketch", async () => {
+    // Sketch 2 is offset +5 in X; its local line (-5,0)-(-5,1) sits on the world
+    // Y axis — the same axis as the same-sketch case, just sourced elsewhere.
+    const sketch2 = {
+      id: 2,
+      type: "sketch",
+      position: { x: 5, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      shapes: [{ type: "line", x1: -5, y1: 0, x2: -5, y2: 1 }],
+    };
+    const result = await revolveItem({
+      source: source(),
+      axis: { sketchId: 2, shapeIdx: 0 },
+      angleRad: 2 * Math.PI,
+      prismSides: 0,
+      allItems: [sketch(), sketch2],
+      printPrecision: 0.05,
+    });
+    expect(result).toBeTruthy();
+    const [ex, ey, ez] = extents(result.geometryData.positions);
+    expect(ex).toBeCloseTo(6, 1);
+    expect(ez).toBeCloseTo(6, 1);
+    expect(ey).toBeCloseTo(1, 2);
+  });
+
   it("throws when the axis line is missing", async () => {
     await expect(
       revolveItem({

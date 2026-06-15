@@ -48,17 +48,37 @@ function bboxOf(positions) {
   return { minX, minY, minZ, maxX, maxY, maxZ };
 }
 
-// Resolve a revolve axis ({ sketchId, shapeIdx }) to its live 2D endpoints by
-// reading the referenced line from the current sketch, so editing the sketch
-// moves the axis too.  Returns null if the line is gone.
-function resolveAxisEndpoints(axis, allItems) {
+// Resolve a revolve axis ({ sketchId, shapeIdx }) to its live endpoints in the
+// PROFILE sketch's local 3D frame, so the axis line can live in a different
+// sketch (its world position is mapped into the profile's frame; a z component
+// appears only if the two sketches aren't coplanar).  Returns null if gone.
+function resolveAxisLocal(axis, allItems, profile) {
   if (!axis) return null;
-  const sketch = (allItems || []).find(
+  const aSketch = (allItems || []).find(
     (i) => i.id === axis.sketchId && i.type === "sketch",
   );
-  const line = sketch?.shapes?.[axis.shapeIdx];
+  const line = aSketch?.shapes?.[axis.shapeIdx];
   if (!line || line.type !== "line") return null;
-  return { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 };
+  const aR = aSketch.rotation || { x: 0, y: 0, z: 0 };
+  const aP = aSketch.position || { x: 0, y: 0, z: 0 };
+  const toWorld = (x, y) => {
+    const w = applyEulerXYZ(x, y, 0, aR.x || 0, aR.y || 0, aR.z || 0);
+    return { x: w.x + (aP.x || 0), y: w.y + (aP.y || 0), z: w.z + (aP.z || 0) };
+  };
+  const pR = profile?.rotation || { x: 0, y: 0, z: 0 };
+  const pP = profile?.position || { x: 0, y: 0, z: 0 };
+  const toLocal = (W) =>
+    applyInverseEulerXYZ(
+      W.x - (pP.x || 0),
+      W.y - (pP.y || 0),
+      W.z - (pP.z || 0),
+      pR.x || 0,
+      pR.y || 0,
+      pR.z || 0,
+    );
+  const l1 = toLocal(toWorld(line.x1, line.y1));
+  const l2 = toLocal(toWorld(line.x2, line.y2));
+  return { x1: l1.x, y1: l1.y, z1: l1.z, x2: l2.x, y2: l2.y, z2: l2.z };
 }
 
 // Build the makeRevolve arguments from a revolve recipe's source profile (live
@@ -67,7 +87,7 @@ function revolveArgs(source, axis, allItems, precision) {
   const live = extrudeWithLivePolygon(source, allItems, precision);
   const poly = live.profile?.polygon2D;
   if (!poly || poly.length < 3) return null;
-  const ax = resolveAxisEndpoints(axis, allItems);
+  const ax = resolveAxisLocal(axis, allItems, live.profile);
   if (!ax) return null;
   const holes = (live.profile?.holes || []).filter((h) => h && h.length >= 3);
   const c = polyCentroid(poly);
@@ -99,6 +119,26 @@ function applyEulerXYZ(vx, vy, vz, rx, ry, rz) {
     x: c * e * vx + -c * f * vy + d * vz,
     y: (af + be * d) * vx + (ae - bf * d) * vy + -b * c * vz,
     z: (bf - ae * d) * vx + (be + af * d) * vy + a * c * vz,
+  };
+}
+
+// Inverse (transpose) of the XYZ-Euler rotation applyEulerXYZ applies — maps a
+// world vector back into a sketch's local frame.
+function applyInverseEulerXYZ(vx, vy, vz, rx, ry, rz) {
+  const a = Math.cos(rx),
+    b = Math.sin(rx),
+    c = Math.cos(ry),
+    d = Math.sin(ry),
+    e = Math.cos(rz),
+    f = Math.sin(rz);
+  const ae = a * e,
+    af = a * f,
+    be = b * e,
+    bf = b * f;
+  return {
+    x: c * e * vx + (af + be * d) * vy + (bf - ae * d) * vz,
+    y: -c * f * vx + (ae - bf * d) * vy + (be + af * d) * vz,
+    z: d * vx + -b * c * vy + a * c * vz,
   };
 }
 
@@ -390,8 +430,10 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         args.cy,
         args.ax.x1,
         args.ax.y1,
+        args.ax.z1,
         args.ax.x2,
         args.ax.y2,
+        args.ax.z2,
         r.angleRad ?? 2 * Math.PI,
         r.prismSides ?? 0,
         r.offsetPerRotation ?? 0,
@@ -742,9 +784,7 @@ async function revolveItem({
 }) {
   const args = revolveArgs(source, axis, allItems, printPrecision);
   if (!args) {
-    throw new Error(
-      "Revolve needs a closed profile loop and an axis line on the same sketch.",
-    );
+    throw new Error("Revolve needs a closed profile loop and an axis line.");
   }
   const resultId = occ.makeRevolve(
     args.outerFlat,
@@ -753,8 +793,10 @@ async function revolveItem({
     args.cy,
     args.ax.x1,
     args.ax.y1,
+    args.ax.z1,
     args.ax.x2,
     args.ax.y2,
+    args.ax.z2,
     angleRad ?? 2 * Math.PI,
     prismSides ?? 0,
     offsetPerRotation ?? 0,

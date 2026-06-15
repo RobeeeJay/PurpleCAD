@@ -88,33 +88,41 @@ export function createSweepHelpers({
     return [toW(line.x1, line.y1), toW(line.x2, line.y2)];
   };
 
-  // Nearest axis-candidate line (in the profile's sketch) under the cursor.
-  const findAxis = (screenX, screenY, profile) => {
-    const sketchMesh = objectsRef.current[profile.sketchId];
-    const sketch = itemsRef.current.find((i) => i.id === profile.sketchId);
-    if (!sketchMesh || !sketch) return null;
+  // Nearest axis-candidate line under the cursor, across ALL sketches — the
+  // revolve axis may live in a different sketch from the profile.  Returns the
+  // line's sketchId + index so the recipe records which sketch it came from.
+  const findAxis = (screenX, screenY) => {
     const rect = renderer.domElement.getBoundingClientRect();
-    const toScreen = (x, y) => {
-      const w = new THREE.Vector3(x, y, 0)
-        .applyQuaternion(sketchMesh.quaternion)
-        .add(sketchMesh.position);
-      const ndc = w.clone().project(cameraRef.current);
-      return {
-        x: ((ndc.x + 1) / 2) * rect.width + rect.left,
-        y: ((-ndc.y + 1) / 2) * rect.height + rect.top,
-      };
-    };
     let best = null;
     let bestD = 12;
-    (sketch.shapes || []).forEach((s, idx) => {
-      if (s.type !== "line") return;
-      const a = toScreen(s.x1, s.y1);
-      const b = toScreen(s.x2, s.y2);
-      const d = segDist(screenX, screenY, a.x, a.y, b.x, b.y);
-      if (d < bestD) {
-        bestD = d;
-        best = { shapeIdx: idx, world: lineWorld(s, sketchMesh) };
-      }
+    itemsRef.current.forEach((sketch) => {
+      if (sketch.type !== "sketch") return;
+      const sketchMesh = objectsRef.current[sketch.id];
+      if (!sketchMesh) return;
+      const toScreen = (x, y) => {
+        const w = new THREE.Vector3(x, y, 0)
+          .applyQuaternion(sketchMesh.quaternion)
+          .add(sketchMesh.position);
+        const ndc = w.clone().project(cameraRef.current);
+        return {
+          x: ((ndc.x + 1) / 2) * rect.width + rect.left,
+          y: ((-ndc.y + 1) / 2) * rect.height + rect.top,
+        };
+      };
+      (sketch.shapes || []).forEach((s, idx) => {
+        if (s.type !== "line") return;
+        const a = toScreen(s.x1, s.y1);
+        const b = toScreen(s.x2, s.y2);
+        const d = segDist(screenX, screenY, a.x, a.y, b.x, b.y);
+        if (d < bestD) {
+          bestD = d;
+          best = {
+            sketchId: sketch.id,
+            shapeIdx: idx,
+            world: lineWorld(s, sketchMesh),
+          };
+        }
+      });
     });
     return best;
   };
@@ -227,7 +235,7 @@ export function createSweepHelpers({
     const cand =
       sm.kind === "pipe"
         ? findPathLine(screenX, screenY)
-        : findAxis(screenX, screenY, sm.profile);
+        : findAxis(screenX, screenY);
     if (cand) showAxisHighlight(cand.world);
     else clearAxisHighlight();
   };
@@ -281,11 +289,11 @@ export function createSweepHelpers({
       return;
     }
     if (!sm.axis) {
-      const cand = findAxis(screenX, screenY, sm.profile);
+      const cand = findAxis(screenX, screenY);
       if (cand) {
         clearAxisHighlight();
         store.setSweepAxis({
-          sketchId: sm.profile.sketchId,
+          sketchId: cand.sketchId,
           shapeIdx: cand.shapeIdx,
         });
         updateSweepPreview();

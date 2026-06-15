@@ -674,20 +674,23 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
     Napi::Float64Array outer = info[0].As<Napi::Float64Array>();
     Napi::Array holes        = info[1].As<Napi::Array>();
     double cx  = GetDouble(info[2]), cy  = GetDouble(info[3]);
-    double ax1 = GetDouble(info[4]), ay1 = GetDouble(info[5]);
-    double ax2 = GetDouble(info[6]), ay2 = GetDouble(info[7]);
-    double angleRad = GetDouble(info[8], 2 * M_PI);
+    // Axis endpoints in the profile sketch's frame (3D — the axis may come from
+    // a different, non-coplanar sketch, so a z component is allowed).
+    double ax1 = GetDouble(info[4]), ay1 = GetDouble(info[5]), az1 = GetDouble(info[6]);
+    double ax2 = GetDouble(info[7]), ay2 = GetDouble(info[8]), az2 = GetDouble(info[9]);
+    double angleRad = GetDouble(info[10], 2 * M_PI);
     int prismSides =
-        info[9].IsNumber() ? info[9].As<Napi::Number>().Int32Value() : 0;
+        info[11].IsNumber() ? info[11].As<Napi::Number>().Int32Value() : 0;
     // Axial advance per full turn (helical/coil sweep).  0 → a flat revolve.
-    double pitch = GetDouble(info[10], 0.0);
+    double pitch = GetDouble(info[12], 0.0);
 
-    double dx = ax2 - ax1, dy = ay2 - ay1;
-    double len = std::hypot(dx, dy);
+    double dx = ax2 - ax1, dy = ay2 - ay1, dz = az2 - az1;
+    double len = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (len < 1e-9) throw std::runtime_error("revolve axis is degenerate");
-    gp_Dir axisDir(dx / len, dy / len, 0);
-    // Axis in the centroid-local frame the profile is built in.
-    gp_Ax1 axis(gp_Pnt(ax1 - cx, ay1 - cy, 0), axisDir);
+    gp_Dir axisDir(dx / len, dy / len, dz / len);
+    // Axis in the centroid-local frame the profile is built in (x/y centroid-
+    // subtracted to match the face; z carried through as-is).
+    gp_Ax1 axis(gp_Pnt(ax1 - cx, ay1 - cy, az1), axisDir);
 
     // Helical sweep: thread the profile through one multi-section loft, each
     // section rotated about the axis AND advanced along it by the pitch.  Used
@@ -709,7 +712,8 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
         gp_Trsf rot;
         rot.SetRotation(axis, a);
         gp_Trsf tr;
-        tr.SetTranslation(gp_Vec(axisDir.X() * off, axisDir.Y() * off, 0));
+        tr.SetTranslation(
+            gp_Vec(axisDir.X() * off, axisDir.Y() * off, axisDir.Z() * off));
         TopoDS_Wire w = TopoDS::Wire(
             BRepBuilderAPI_Transform(base, tr.Multiplied(rot), true).Shape());
         loft.AddWire(w);
