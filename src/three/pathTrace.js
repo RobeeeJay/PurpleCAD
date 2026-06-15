@@ -113,7 +113,15 @@ const buildRenderScene = (objectsRef, itemsRef) => {
   let minY = Infinity;
   Object.values(objectsRef.current).forEach((mesh) => {
     const item = items.find((i) => i.id === mesh.userData.itemId);
-    if (!item || item.type === "sketch" || item.visible === false) return;
+    // Sketches and reference Planes are construction aids — exclude them from
+    // the traced scene (along with hidden items).
+    if (
+      !item ||
+      item.type === "sketch" ||
+      item.type === "plane" ||
+      item.visible === false
+    )
+      return;
     const geometry = normalizeGeometry(renderGeometryFor(item, mesh));
     const m = new THREE.Mesh(
       geometry,
