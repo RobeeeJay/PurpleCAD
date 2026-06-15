@@ -220,6 +220,32 @@ describe("pipeItem", () => {
     expect(result).toBeTruthy();
   });
 
+  it("subdivides a bezier path more finely at print precision", async () => {
+    const bezier = pathSketch([
+      {
+        type: "bezier",
+        p0: { x: 0, y: 0 },
+        p1: { x: 4, y: 0 },
+        p2: { x: 4, y: 4 },
+        p3: { x: 4, y: 4 },
+      },
+    ]);
+    const run = (printPrecision) =>
+      pipeItem({
+        profileSource: profileSource(),
+        pathRef: { sketchId: 2, shapeIdx: 0 },
+        allItems: [profileSketch(), bezier],
+        printPrecision,
+      });
+    // preview (null → coarse path) vs print (fine path); the swept tube along a
+    // curved path should gain vertices when the path resolution increases.
+    const coarse = await run(null);
+    const fine = await run(0.01);
+    expect(fine.geometryData.positions.length).toBeGreaterThan(
+      coarse.geometryData.positions.length,
+    );
+  });
+
   it("throws when the path sketch is missing", async () => {
     await expect(
       pipeItem({

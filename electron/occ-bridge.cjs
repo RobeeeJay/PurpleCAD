@@ -134,7 +134,21 @@ function sampleCubic(p0, p1, p2, p3, n) {
   return out;
 }
 
-function pathSegment(shape, i) {
+// Mirror of occOps.js#bezierSegments: subdivide a swept path's beziers finer at
+// finer tessellation precision, so print resolution refines the pipe's length.
+function bezierSegments(p0, p1, p2, p3, precision) {
+  if (precision == null) return 24;
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const len = d(p0, p1) + d(p1, p2) + d(p2, p3);
+  if (len <= 0) return 24;
+  const r = len / (2 * Math.PI);
+  const sUnits = precision / MM_PER_UNIT;
+  const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
+  if (!isFinite(halfTheta) || halfTheta <= 0) return 24;
+  return Math.max(8, Math.min(256, Math.ceil(Math.PI / halfTheta)));
+}
+
+function pathSegment(shape, i, precision) {
   if (shape && shape.type === "line") {
     const a = { x: shape.x1, y: shape.y1 };
     const b = { x: shape.x2, y: shape.y2 };
@@ -143,17 +157,18 @@ function pathSegment(shape, i) {
   if (shape && shape.type === "bezier") {
     const a = { x: shape.p0.x, y: shape.p0.y };
     const b = { x: shape.p3.x, y: shape.p3.y };
-    const pts = sampleCubic(shape.p0, shape.p1, shape.p2, shape.p3, 24);
+    const n = bezierSegments(shape.p0, shape.p1, shape.p2, shape.p3, precision);
+    const pts = sampleCubic(shape.p0, shape.p1, shape.p2, shape.p3, n);
     return { i, a, b, sample: (rev) => (rev ? pts.slice().reverse() : pts.slice()) };
   }
   return null;
 }
 
-function orderPathPoints(sketch, startShapeIdx) {
+function orderPathPoints(sketch, startShapeIdx, precision) {
   const shapes = (sketch && sketch.shapes) || [];
   const segs = [];
   shapes.forEach((s, i) => {
-    const seg = pathSegment(s, i);
+    const seg = pathSegment(s, i, precision);
     if (seg) segs.push(seg);
   });
   const startSeg = segs.find((s) => s.i === startShapeIdx);
@@ -189,23 +204,23 @@ function orderPathPoints(sketch, startShapeIdx) {
   return pts;
 }
 
-function pipePathWorld(pathRef, allItems) {
+function pipePathWorld(pathRef, allItems, precision) {
   const sketch = (allItems || []).find(
     (i) => i.id === (pathRef && pathRef.sketchId) && i.type === "sketch",
   );
   if (!sketch) return null;
-  const pts2d = orderPathPoints(sketch, pathRef.shapeIdx);
+  const pts2d = orderPathPoints(sketch, pathRef.shapeIdx, precision);
   if (!pts2d || pts2d.length < 2) return null;
   return pts2d.map((p) => sketchPointToWorld(sketch, p.x, p.y));
 }
 
 // The renderer pre-bakes the live profile polygon into source.profile.polygon2D
 // (like revolve); the path is resolved from the live sketch in allItems.
-function pipeArgs(profileSource, pathRef, allItems) {
+function pipeArgs(profileSource, pathRef, allItems, precision) {
   const poly =
     profileSource && profileSource.profile && profileSource.profile.polygon2D;
   if (!poly || poly.length < 3) return null;
-  const pathWorld = pipePathWorld(pathRef, allItems);
+  const pathWorld = pipePathWorld(pathRef, allItems, precision);
   if (!pathWorld) return null;
   const holes = (profileSource.profile.holes || []).filter(
     (h) => h && h.length >= 3,
@@ -418,7 +433,7 @@ function buildItemShapeLocal(item, allItems, precision) {
     }
 
     if (regen.kind === "pipe") {
-      const args = pipeArgs(regen.profileSource, regen.pathRef, allItems);
+      const args = pipeArgs(regen.profileSource, regen.pathRef, allItems, precision);
       if (!args) return null;
       const resultId = occ.makePipe(
         args.outerFlat, args.holesFlat, args.cx, args.cy, args.pathFlat,
@@ -854,7 +869,7 @@ function revolveItem({ source, axis, angleRad, prismSides, offsetPerRotation, al
 
 // Sweep a sketch profile along a path polyline (mirrors occOps.js#pipeItem).
 function pipeItem({ profileSource, pathRef, twistTurns, autoRotate, allItems, printPrecision }) {
-  const args = pipeArgs(profileSource, pathRef, allItems);
+  const args = pipeArgs(profileSource, pathRef, allItems, printPrecision);
   if (!args) {
     throw new Error(
       "Pipe needs a closed profile loop and a path line on another sketch.",

@@ -171,9 +171,26 @@ function sampleCubic(p0, p1, p2, p3, n) {
   return out;
 }
 
+// How many segments to sample a cubic into for a given tessellation precision
+// (sagitta in mm).  Treats the control-polygon length as a circle circumference
+// and reuses the same sagitta→segments math as curved-surface tessellation, so
+// a finer print resolution subdivides the swept path too (not just its surface).
+// precision == null (preview) keeps the historical fixed count.
+function bezierSegments(p0, p1, p2, p3, precision) {
+  if (precision == null) return 24;
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const len = d(p0, p1) + d(p1, p2) + d(p2, p3);
+  if (len <= 0) return 24;
+  const r = len / (2 * Math.PI);
+  const sUnits = precision / MM_PER_UNIT;
+  const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
+  if (!isFinite(halfTheta) || halfTheta <= 0) return 24;
+  return Math.max(8, Math.min(256, Math.ceil(Math.PI / halfTheta)));
+}
+
 // A path-eligible shape as { a, b, sample(reverse) } — its endpoints plus an
 // ordered point list (a→b, or reversed) used to thread it into the polyline.
-function pathSegment(shape, i) {
+function pathSegment(shape, i, precision) {
   if (shape?.type === "line") {
     const a = { x: shape.x1, y: shape.y1 };
     const b = { x: shape.x2, y: shape.y2 };
@@ -182,7 +199,8 @@ function pathSegment(shape, i) {
   if (shape?.type === "bezier") {
     const a = { x: shape.p0.x, y: shape.p0.y };
     const b = { x: shape.p3.x, y: shape.p3.y };
-    const pts = sampleCubic(shape.p0, shape.p1, shape.p2, shape.p3, 24);
+    const n = bezierSegments(shape.p0, shape.p1, shape.p2, shape.p3, precision);
+    const pts = sampleCubic(shape.p0, shape.p1, shape.p2, shape.p3, n);
     return {
       i,
       a,
@@ -197,11 +215,11 @@ function pathSegment(shape, i) {
 // connected lines/beziers in the sketch (both directions) into one 2D polyline,
 // sampling curves along the way.  Geometry-based so it works whether or not
 // coincident constraints exist.
-export function orderPathPoints(sketch, startShapeIdx) {
+export function orderPathPoints(sketch, startShapeIdx, precision) {
   const shapes = sketch?.shapes || [];
   const segs = [];
   shapes.forEach((s, i) => {
-    const seg = pathSegment(s, i);
+    const seg = pathSegment(s, i, precision);
     if (seg) segs.push(seg);
   });
   const startSeg = segs.find((s) => s.i === startShapeIdx);
@@ -239,12 +257,12 @@ export function orderPathPoints(sketch, startShapeIdx) {
 }
 
 // Resolve a pipe path ({ sketchId, shapeIdx }) to its live world polyline.
-function pipePathWorld(pathRef, allItems) {
+function pipePathWorld(pathRef, allItems, precision) {
   const sketch = (allItems || []).find(
     (i) => i.id === pathRef?.sketchId && i.type === "sketch",
   );
   if (!sketch) return null;
-  const pts2d = orderPathPoints(sketch, pathRef.shapeIdx);
+  const pts2d = orderPathPoints(sketch, pathRef.shapeIdx, precision);
   if (!pts2d || pts2d.length < 2) return null;
   return pts2d.map((p) => sketchPointToWorld(sketch, p.x, p.y));
 }
@@ -255,7 +273,7 @@ function pipeArgs(profileSource, pathRef, allItems, precision) {
   const live = extrudeWithLivePolygon(profileSource, allItems, precision);
   const poly = live.profile?.polygon2D;
   if (!poly || poly.length < 3) return null;
-  const pathWorld = pipePathWorld(pathRef, allItems);
+  const pathWorld = pipePathWorld(pathRef, allItems, precision);
   if (!pathWorld) return null;
   const holes = (live.profile?.holes || []).filter((h) => h && h.length >= 3);
   const c = polyCentroid(poly);
