@@ -202,6 +202,7 @@ async function regenerateRevolve(
       axis: regenerator.axis,
       angleRad: regenerator.angleRad,
       prismSides: regenerator.prismSides,
+      offsetPerRotation: regenerator.offsetPerRotation,
       allItems: liveItems,
       printPrecision,
     });

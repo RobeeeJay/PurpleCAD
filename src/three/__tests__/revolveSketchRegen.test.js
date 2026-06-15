@@ -111,4 +111,35 @@ describe("revolve follows an upstream sketch edit", () => {
     const after = useStore.getState().items.find((i) => i.id === 2);
     expect(widthX(after.geometryData)).toBeCloseTo(10, 1);
   });
+
+  // Regression: a multi-turn helical revolve must keep its rotations + offset
+  // through a regen (e.g. a resolution toggle) — it used to revert to a flat
+  // 360° ring because the regen path dropped offsetPerRotation.
+  it("keeps a helical coil's turns + offset across a recalc", async () => {
+    const h = history(3);
+    h[1].instruction.item.regenerator.angleRad = 3 * 2 * Math.PI; // 3 turns
+    h[1].instruction.item.regenerator.offsetPerRotation = 2; // advance 2 per turn
+    useStore.setState({
+      history: h,
+      activeHistoryId: "h2",
+      items: [],
+      variables: [],
+      curveResolution: "preview",
+    });
+    await recalculateTimeline();
+    const heightY = (g) => {
+      const p = g.positions;
+      let mn = Infinity,
+        mx = -Infinity;
+      for (let i = 1; i < p.length; i += 3) {
+        mn = Math.min(mn, p[i]);
+        mx = Math.max(mx, p[i]);
+      }
+      return mx - mn;
+    };
+    const item = useStore.getState().items.find((i) => i.id === 2);
+    // 3 turns × 2 advance + profile height 1 ≈ 7 along the axis (a flat ring
+    // would be ~1).
+    expect(heightY(item.geometryData)).toBeCloseTo(7, 0);
+  });
 });
