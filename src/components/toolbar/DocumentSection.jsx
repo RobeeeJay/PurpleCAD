@@ -21,7 +21,7 @@ const DocumentSection = () => {
   const cameraControls = useStore((s) => s._cameraControls);
   const selectedId = useStore((s) => s.selectedId);
   const addItem = useStore((s) => s.addItem);
-  const addSketchShapes = useStore((s) => s.addSketchShapes);
+  const setSvgImport = useStore((s) => s.setSvgImport);
   const selectItem = useStore((s) => s.selectItem);
 
   const selectedItem = items.find((i) => i.id === selectedId);
@@ -214,7 +214,17 @@ const DocumentSection = () => {
           alert("No importable geometry found in the SVG.");
           return;
         }
-        addSketchShapes(selectedId, shapes);
+        // Don't commit yet — let the user scale/move it first.
+        setSvgImport({
+          sketchId: selectedId,
+          shapes,
+          scale: 1,
+          offsetX: 0,
+          offsetY: 0,
+        });
+        requestAnimationFrame(() =>
+          useStore.getState()._cameraControls?.updateSvgPreview?.(),
+        );
       } else if (ext === "stl") {
         addImportedSolid(
           parseStl(await file.arrayBuffer()).geometryData,

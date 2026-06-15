@@ -243,6 +243,17 @@ export const createSketchSlice = (set) => ({
   sketchLongPressMenu: null, // { x, y, items: [{kind, label, ...}] } | null
   setSketchLongPressMenu: (v) => set({ sketchLongPressMenu: v }),
 
+  // Pending SVG import placement: the parsed shapes plus an interactive scale +
+  // offset the user adjusts before confirming.
+  // { sketchId, shapes, scale, offsetX, offsetY } | null
+  svgImport: null,
+  setSvgImport: (v) => set({ svgImport: v }),
+  updateSvgImport: (partial) =>
+    set((state) =>
+      state.svgImport ? { svgImport: { ...state.svgImport, ...partial } } : {},
+    ),
+  clearSvgImport: () => set({ svgImport: null }),
+
   // Mirror tool: pick a mirror line, then toggle geometry to preview/mirror
   // across it. { lineIdx: number|null, shapeIndices: number[] } | null
   sketchMirrorState: null,

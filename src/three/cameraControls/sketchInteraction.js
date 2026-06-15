@@ -46,6 +46,7 @@ import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
 import { createSketchCircularPatternHelpers } from "./sketchCircularPatternTool.js";
 import { createSketchRectangularPatternHelpers } from "./sketchRectangularPatternTool.js";
+import { buildPatternPreviewObjects } from "./sketchPatternPreview.js";
 import { MIRRORABLE_TYPES } from "../sketchMirror.js";
 import { CIRCULAR_PATTERNABLE_TYPES } from "../sketchCircularPattern.js";
 import { RECTANGULAR_PATTERNABLE_TYPES } from "../sketchRectangularPattern.js";
@@ -123,6 +124,87 @@ export function createSketchInteraction(
   },
 ) {
   const controls = cameraControlsRef.current;
+
+  // ── SVG import placement ──────────────────────────────────────────────────
+  // After an SVG is parsed it isn't committed straight away — its shapes show as
+  // a movable/scalable preview until the user confirms.  Drag to move, the
+  // overlay sets the scale; commit appends the transformed shapes to the sketch.
+  let svgPreviewObjs = [];
+  let svgDrag = null; // { startLocal, startOffsetX, startOffsetY }
+
+  const transformSvgShapes = (shapes, scale, ox, oy) => {
+    const t = (p) => ({ x: p.x * scale + ox, y: p.y * scale + oy });
+    return shapes.map((s) =>
+      s.type === "line"
+        ? {
+            type: "line",
+            x1: s.x1 * scale + ox,
+            y1: s.y1 * scale + oy,
+            x2: s.x2 * scale + ox,
+            y2: s.y2 * scale + oy,
+          }
+        : {
+            type: "bezier",
+            p0: t(s.p0),
+            p1: t(s.p1),
+            p2: t(s.p2),
+            p3: t(s.p3),
+          },
+    );
+  };
+
+  const clearSvgPreview = () => {
+    svgPreviewObjs.forEach((o) => {
+      scene.remove(o);
+      o.geometry?.dispose();
+      o.material?.dispose();
+    });
+    svgPreviewObjs = [];
+  };
+
+  const updateSvgPreview = () => {
+    clearSvgPreview();
+    const svg = useStore.getState().svgImport;
+    if (!svg) return;
+    const sketchMesh = objectsRef.current[svg.sketchId];
+    if (!sketchMesh) return;
+    const shapes = transformSvgShapes(
+      svg.shapes,
+      svg.scale,
+      svg.offsetX,
+      svg.offsetY,
+    );
+    buildPatternPreviewObjects({
+      sketchMesh,
+      sourceShapes: shapes,
+      copyShapes: [],
+      color: 0x44aaff,
+      renderer,
+    }).forEach((o) => {
+      scene.add(o);
+      svgPreviewObjs.push(o);
+    });
+  };
+
+  controls.updateSvgPreview = updateSvgPreview;
+  controls.commitSvgPlacement = () => {
+    const store = useStore.getState();
+    const svg = store.svgImport;
+    if (svg) {
+      store.addSketchShapes(
+        svg.sketchId,
+        transformSvgShapes(svg.shapes, svg.scale, svg.offsetX, svg.offsetY),
+      );
+    }
+    clearSvgPreview();
+    svgDrag = null;
+    store.clearSvgImport();
+  };
+  controls.cancelSvgPlacement = () => {
+    clearSvgPreview();
+    svgDrag = null;
+    useStore.getState().clearSvgImport();
+  };
 
   // ── Sketch drawing preview cleanup ────────────────────────────────────────
   const clearSketchPreview = () => {
@@ -1245,6 +1327,24 @@ export function createSketchInteraction(
   // ── Sketch-mode pointer dispatch (return true when handled) ───────────────
   const onSketchMouseDown = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
+    // SVG placement: start dragging the pending import to move it.
+    const svg = useStore.getState().svgImport;
+    if (svg) {
+      const sketchMesh = objectsRef.current[svg.sketchId];
+      const local = sketchMesh
+        ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
+        : null;
+      svgDrag = local
+        ? {
+            startLocal: local,
+            startOffsetX: svg.offsetX,
+            startOffsetY: svg.offsetY,
+          }
+        : null;
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      return true;
+    }
     // The mirror tool is a pick-mode, not a drawing tool: clicks are handled
     // on mouse-up by handleMirrorClick, not the draw helpers.
     if (
@@ -1370,6 +1470,27 @@ export function createSketchInteraction(
 
   const onSketchMouseMove = (e) => {
     if (!sketchModeRef.current) return false;
+    // SVG placement: drag moves the pending import's offset.
+    const svgMove = useStore.getState().svgImport;
+    if (svgMove) {
+      if (svgDrag) {
+        const sketchMesh = objectsRef.current[svgMove.sketchId];
+        const cur = sketchMesh
+          ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
+          : null;
+        if (cur) {
+          useStore.getState().updateSvgImport({
+            offsetX: svgDrag.startOffsetX + (cur.x - svgDrag.startLocal.x),
+            offsetY: svgDrag.startOffsetY + (cur.y - svgDrag.startLocal.y),
+          });
+          updateSvgPreview();
+        }
+      }
+      renderer.domElement.style.cursor = svgDrag ? "grabbing" : "grab";
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
     // While the long-press element list is open, ignore canvas motion — no
     // marquee, no hover repaint underneath it.
     if (longPressMenuOpen) return true;
@@ -1486,6 +1607,11 @@ export function createSketchInteraction(
 
   const onSketchMouseUp = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
+    if (useStore.getState().svgImport) {
+      svgDrag = null;
+      renderer.domElement.style.cursor = "grab";
+      return true;
+    }
     if (activeSketchToolRef.current === "point") {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
