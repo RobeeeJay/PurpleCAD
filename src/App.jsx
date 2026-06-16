@@ -14,6 +14,7 @@ import AboutDialog from "./components/AboutDialog";
 import PlaneDialog from "./components/PlaneDialog";
 import Pattern3dDialog from "./components/Pattern3dDialog";
 import MirrorDialog from "./components/MirrorDialog";
+import SplitDialog from "./components/SplitDialog";
 import StatusLine from "./components/StatusLine";
 import "./styles/StatusLine.css";
 import VersionTag from "./components/VersionTag";
@@ -101,6 +102,7 @@ function App() {
       <PlaneDialog />
       <Pattern3dDialog />
       <MirrorDialog />
+      <SplitDialog />
       <StatusLine />
       <VersionTag />
       {notification && (

@@ -120,6 +120,11 @@ export const uiInitial = {
   // colliding with the sketch slice's startMirrorTool (the 2D sketch mirror).
   mirror3dTool: null,
 
+  // Split tool: a guided pick flow (no pre-selection needed).  splitTool holds
+  // the chosen object + cut plane; splitPick names which a viewport click picks.
+  splitTool: null,
+  splitPick: null, // "object" | "cut" | null
+
   // Solo: when set, the viewport shows ONLY this item (even if marked hidden)
   // and hides every other object.  Ephemeral (not history/persisted).  soloView
   // is the camera snapshot captured when solo turned on, restored when it ends.
@@ -245,6 +250,24 @@ export const createUiSlice = (set) => ({
   // Solo controls.  setItemSolo captures the camera snapshot (first solo);
   // switchItemSolo re-points an active solo without re-capturing the view;
   // clearItemSolo ends solo (the caller restores the view from soloView first).
+  startSplit3d: (seed) =>
+    set({
+      splitTool: {
+        objectId: null,
+        objectName: null,
+        cutFrame: null,
+        cutLabel: null,
+        ...(seed || {}),
+      },
+      splitPick: "object",
+    }),
+  updateSplit3d: (partial) =>
+    set((state) =>
+      state.splitTool ? { splitTool: { ...state.splitTool, ...partial } } : {},
+    ),
+  cancelSplit3d: () => set({ splitTool: null, splitPick: null }),
+  setSplitPick: (v) => set({ splitPick: v || null }),
+
   setItemSolo: (id, view) => set({ soloItemId: id, soloView: view ?? null }),
   switchItemSolo: (id) => set({ soloItemId: id }),
   clearItemSolo: () => set({ soloItemId: null, soloView: null }),

@@ -1,75 +1,36 @@
 import React from "react";
 import { useStore } from "../../store";
-import { splitItem } from "../../three/occClient.js";
-import { activePrecision } from "../../three/resolution.js";
-import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
 
 const SOLID_TYPES = ["cube", "sphere", "cylinder", "torus", "extrude", "csg"];
-const PLANE_TYPES = ["plane", "sketch"];
 
-// Split object: slice the selected solid along a selected plane / sketch plane
-// into two separate objects.  Select one solid + one plane (or sketch), then
-// click — the original is hidden and replaced by the two halves.
+// Split object: opens a guided dialog (no pre-selection needed) that prompts you
+// to pick an object, then a face or plane to slice it along into two objects.
 const SplitSection = ({ bare = false }) => {
   const selectedIds = useStore((s) => s.selectedIds);
   const items = useStore((s) => s.items);
-  const addItem = useStore((s) => s.addItem);
-  const consumeItems = useStore((s) => s.consumeItems);
-  const printPrecision = useStore(activePrecision);
+  const startSplit3d = useStore((s) => s.startSplit3d);
 
-  const sel = selectedIds
-    .map((id) => items.find((i) => i.id === id))
-    .filter(Boolean);
-  const solid = sel.find((i) => SOLID_TYPES.includes(i.type));
-  const planeItem = sel.find((i) => PLANE_TYPES.includes(i.type));
-  const canSplit = !!solid && !!planeItem && solid.id !== planeItem.id;
-
-  const handleSplit = async () => {
-    if (!canSplit) {
-      alert("Select one object and one plane (or sketch) to split it.");
-      return;
-    }
-    try {
-      const result = await splitItem({
-        target: solid,
-        plane: { position: planeItem.position, rotation: planeItem.rotation },
-        allItems: items,
-        printPrecision,
-      });
-      if (!result || (!result.partA && !result.partB)) {
-        alert("Split produced nothing — does the plane cross the object?");
-        return;
-      }
-      const add = (part, suffix) => {
-        if (!part) return;
-        const id = maxItemId(useStore.getState().history) + 1;
-        addItem({
-          id,
-          name: `${solid.name} ${suffix}`,
-          type: "csg",
-          children: [],
-          position: part.position,
-          rotation: { x: 0, y: 0, z: 0 },
-          scale: { x: 1, y: 1, z: 1 },
-          geometryData: part.geometryData,
-        });
-      };
-      add(result.partA, "(1)");
-      add(result.partB, "(2)");
-      consumeItems([solid.id]);
-    } catch (err) {
-      console.error("Split failed:", err);
-      alert("Split failed: " + err.message);
-    }
+  const handleSplit = () => {
+    // Seed the object slot from a selected solid, if any (a convenience — the
+    // dialog still lets you pick it in the view).
+    const sel = selectedIds.find((id) => {
+      const it = items.find((i) => i.id === id);
+      return it && SOLID_TYPES.includes(it.type);
+    });
+    const item = sel != null ? items.find((i) => i.id === sel) : null;
+    startSplit3d(
+      item ? { objectId: item.id, objectName: item.name } : undefined,
+    );
+    // If we seeded an object, jump straight to picking the cut.
+    if (item) useStore.getState().setSplitPick("cut");
   };
 
   const body = (
     <button
-      className={`toolbar-btn ${canSplit ? "" : ""}`}
-      title="Split object — slice the selected object along a selected plane/sketch into two"
+      className="toolbar-btn"
+      title="Split object — pick an object, then a face or plane to slice it into two"
       onClick={handleSplit}
-      style={canSplit ? undefined : { opacity: 0.45 }}
     >
       <svg viewBox="0 0 24 24" width="20" height="20">
         <polygon

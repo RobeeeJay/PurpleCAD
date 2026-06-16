@@ -122,6 +122,19 @@ export function createViewInteraction(
     controls.isPanning = false;
     orbitIndicator.visible = false;
 
+    // Split tool: a click picks the object to split, then the cut plane/face.
+    const splitPick = useStore.getState().splitPick;
+    if (splitPick && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX || e.clientX);
+      const dy = e.clientY - (controls.mouseDownY || e.clientY);
+      if (Math.hypot(dx, dy) < 5) {
+        if (splitPick === "object")
+          controls.pickSplitObject(e.clientX, e.clientY);
+        else controls.pickSplitCut(e.clientX, e.clientY);
+      }
+      return;
+    }
+
     // Circular pattern axis: a click picks the sketch line / face edge to rotate
     // around.
     if (useStore.getState().circularAxisPick && e.button === 0) {

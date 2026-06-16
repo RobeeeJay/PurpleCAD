@@ -691,6 +691,70 @@ export function attachCameraControls(ctx) {
     });
   };
 
+  // Split tool picks (plain clicks): first an object to split, then a cut — a
+  // Plane/sketch item, or any solid face (its plane).  Shows a translucent
+  // preview of the cut plane.  Mirrors the plane face-pick raycast.
+  const splitRaycast = (screenX, screenY) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    const meshes = Object.values(objectsRef.current).filter(
+      (m) => m.visible !== false,
+    );
+    return ray.intersectObjects(meshes, false)[0] || null;
+  };
+  const SPLIT_SOLIDS = [
+    "cube",
+    "sphere",
+    "cylinder",
+    "torus",
+    "extrude",
+    "csg",
+  ];
+  controls.pickSplitObject = (screenX, screenY) => {
+    const hit = splitRaycast(screenX, screenY);
+    const item = hit
+      ? itemsRef.current.find((i) => i.id === hit.object.userData.itemId)
+      : null;
+    if (!item || !SPLIT_SOLIDS.includes(item.type)) {
+      useStore.getState().showNotification?.("Click an object to split.");
+      return;
+    }
+    useStore
+      .getState()
+      .updateSplit3d({ objectId: item.id, objectName: item.name });
+    // Guide the user straight on to picking the cut.
+    useStore.getState().setSplitPick("cut");
+  };
+  controls.pickSplitCut = (screenX, screenY) => {
+    const hit = splitRaycast(screenX, screenY);
+    const item = hit
+      ? itemsRef.current.find((i) => i.id === hit.object.userData.itemId)
+      : null;
+    if (!item) {
+      useStore
+        .getState()
+        .showNotification?.("Click a plane, a sketch, or a face to cut along.");
+      return;
+    }
+    let frame, label;
+    if (item.type === "plane" || item.type === "sketch") {
+      frame = { position: item.position, rotation: item.rotation };
+      label = item.name;
+    } else if (hit.face) {
+      const nm = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+      const worldN = hit.face.normal.clone().applyMatrix3(nm).normalize();
+      frame = frameFromPointNormal(hit.point, worldN);
+      label = `face of ${item.name}`;
+    }
+    if (!frame) return;
+    useStore.getState().updateSplit3d({ cutFrame: frame, cutLabel: label });
+    useStore.getState().setSplitPick(null);
+    controls.previewPlane(frame);
+  };
+
   // Snapshot / restore the camera view (used by the Objects-list Solo button so
   // toggling solo off returns to where the user was).
   controls.captureView = () => {
