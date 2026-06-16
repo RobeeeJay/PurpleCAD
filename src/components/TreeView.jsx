@@ -518,6 +518,18 @@ const TreeViewItem = ({
           <span className="expand-spacer" />
         )}
 
+        {isFolder ? (
+          <span className="expand-spacer" />
+        ) : (
+          <button
+            className={`tree-action-btn solo-btn ${isSoloed ? "always-visible active" : ""}`}
+            title={isSoloed ? "Exit solo" : "Solo (show only this)"}
+            onClick={toggleSolo}
+          >
+            <SoloIcon />
+          </button>
+        )}
+
         <span className="tree-icon">
           {isFolder ? <FolderIcon /> : getIcon(node.type)}
         </span>
@@ -548,15 +560,6 @@ const TreeViewItem = ({
 
         {!editing && (
           <>
-            {!isFolder && (
-              <button
-                className={`tree-action-btn solo-btn ${isSoloed ? "always-visible active" : ""}`}
-                title={isSoloed ? "Exit solo" : "Solo (show only this)"}
-                onClick={toggleSolo}
-              >
-                <SoloIcon />
-              </button>
-            )}
             {!isFolder && (
               <button
                 className={`tree-action-btn visibility-btn ${isHidden ? "always-visible" : ""}`}
