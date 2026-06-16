@@ -168,24 +168,25 @@ describe("pattern3dItem mesh fallback", () => {
     expect(res.position.x).toBeCloseTo(-5, 4);
   });
 
-  it("circular axial offset spirals copies along the axis", async () => {
+  it("circular offset is a helical pitch (axial distance per 360°)", async () => {
     const res = await pattern3dItem({
       patternType: "circular",
       sourceId: 1,
-      // 3 copies (k=1,2,3) about the Z axis, each shifted +4 in Z per copy →
-      // copies at z=4, 8, 12 (source cube is 2 deep, centred) → z-span 12..-… .
+      // count 2 over 720° → the single clone (k=1) sits at exactly 360°, so a
+      // pitch of 4 lifts it 4 along Z (and a full turn brings x back to +5).
       params: {
         origin: { x: 0, y: 0, z: 0 },
         axis: { x: 0, y: 0, z: 1 },
-        count: 4,
-        angleRad: 2 * Math.PI,
+        count: 2,
+        angleRad: 4 * Math.PI,
         axialOffset: 4,
       },
       allItems: [source({ x: 5, y: 0, z: 0 })],
       printPrecision: 0.1,
     });
     expect(res).toBeTruthy();
-    // Clones at z ∈ [3,5], [7,9], [11,13] → total Z span 13 - 3 = 10.
-    expect(bbox(res.geometryData.positions)[2]).toBeCloseTo(10, 4);
+    // Only one clone → its bbox centre is the result position.
+    expect(res.position.z).toBeCloseTo(4, 4);
+    expect(res.position.x).toBeCloseTo(5, 4);
   });
 });

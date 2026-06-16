@@ -1077,10 +1077,11 @@ function patternCloneTransforms(patternType, params) {
     const count = Math.max(2, Math.round(params.count || 2));
     const total = params.angleRad != null ? params.angleRad : 2 * Math.PI;
     const o = params.origin, a = v3normalize(params.axis);
-    const off = params.axialOffset || 0;
+    // Helical pitch: axial distance per full 360°.
+    const pitch = params.axialOffset || 0;
     for (let k = 1; k < count; k++) {
       const ang = (total * k) / count;
-      const d = off * k;
+      const d = (pitch * ang) / (2 * Math.PI);
       out.push({
         fn: (x, y, z) => {
           const r = rotateAboutAxis(x, y, z, o, a, ang);
@@ -1158,11 +1159,13 @@ function patternInstances(worldId, patternType, params) {
     const count = Math.max(2, Math.round(params.count || 2));
     const total = params.angleRad ?? 2 * Math.PI;
     const o = params.origin, a = params.axis;
-    const off = params.axialOffset || 0;
+    // Helical pitch: axial distance per full 360°.
+    const pitch = params.axialOffset || 0;
     for (let k = 1; k < count; k++) {
-      const rotId = occ.rotateShapeAxis(worldId, o.x, o.y, o.z, a.x, a.y, a.z, (total * k) / count);
-      if (off) {
-        const d = off * k;
+      const ang = (total * k) / count;
+      const rotId = occ.rotateShapeAxis(worldId, o.x, o.y, o.z, a.x, a.y, a.z, ang);
+      if (pitch) {
+        const d = (pitch * ang) / (2 * Math.PI);
         const moved = occ.transformShape(rotId, a.x * d, a.y * d, a.z * d, 0, 0, 0);
         occ.releaseShape(rotId);
         out.push(moved);

@@ -338,7 +338,7 @@ const Pattern3dDialog = () => {
                 {inp(angle, setAngle, Number.isFinite(angleV) && angleV > 0)}
               </label>
               <label style={row}>
-                <span>Offset / copy (mm)</span>
+                <span>Offset / 360° (mm)</span>
                 {inp(
                   axialOffset,
                   setAxialOffset,

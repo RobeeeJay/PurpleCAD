@@ -1219,9 +1219,11 @@ function patternInstances(worldId, patternType, params) {
     const total = params.angleRad ?? 2 * Math.PI;
     const o = params.origin,
       a = params.axis;
-    // Per-copy slide along the (unit) axis turns the ring into a helix/spiral.
-    const off = params.axialOffset || 0;
+    // Helical pitch: axial slide along the (unit) axis per full 360°, so each
+    // copy moves in proportion to how far it has rotated.
+    const pitch = params.axialOffset || 0;
     for (let k = 1; k < count; k++) {
+      const ang = (total * k) / count;
       const rotId = occ.rotateShapeAxis(
         worldId,
         o.x,
@@ -1230,10 +1232,10 @@ function patternInstances(worldId, patternType, params) {
         a.x,
         a.y,
         a.z,
-        (total * k) / count,
+        ang,
       );
-      if (off) {
-        const d = off * k;
+      if (pitch) {
+        const d = (pitch * ang) / (2 * Math.PI);
         const moved = occ.transformShape(
           rotId,
           a.x * d,
@@ -1322,10 +1324,11 @@ function patternCloneTransforms(patternType, params) {
     const total = params.angleRad ?? 2 * Math.PI;
     const o = params.origin,
       a = v3normalize(params.axis);
-    const off = params.axialOffset || 0;
+    // Helical pitch: axial distance per full 360°.
+    const pitch = params.axialOffset || 0;
     for (let k = 1; k < count; k++) {
       const ang = (total * k) / count;
-      const d = off * k;
+      const d = (pitch * ang) / (2 * Math.PI);
       out.push({
         fn: (x, y, z) => {
           const r = rotateAboutAxis(x, y, z, o, a, ang);
