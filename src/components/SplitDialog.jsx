@@ -58,6 +58,14 @@ const SplitDialog = () => {
       alert("Split produced nothing — does the cut cross the object?");
       return;
     }
+    // The halves inherit the body's EFFECTIVE material.  A pattern clone carries
+    // no own item.material (it resolves from its source), so read that through;
+    // a default-material body stays default (undefined → addItem's default).
+    const r = target.regenerator;
+    const bodyMaterial =
+      r?.kind === "pattern3d" && r.sourceId != null
+        ? items.find((i) => i.id === r.sourceId)?.material
+        : target.material;
     const add = (part, suffix) => {
       if (!part) return;
       const id = maxItemId(useStore.getState().history) + 1;
@@ -70,7 +78,7 @@ const SplitDialog = () => {
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
         geometryData: part.geometryData,
-        ...(target.material && { material: target.material }),
+        ...(bodyMaterial && { material: bodyMaterial }),
       });
     };
     add(result.partA, "(1)");
