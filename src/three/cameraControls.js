@@ -6,6 +6,7 @@ import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js"
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
+import { getSketchShapePoints } from "./sceneObjects.js";
 import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
 import {
   featureEdgeGraph,
@@ -935,7 +936,8 @@ export function attachCameraControls(ctx) {
       );
       return;
     }
-    store.addSketchShapes(ctx.sketch.id, shapes);
+    store.addProjectShapes(shapes);
+    controls.previewProjection(useStore.getState().projectTool?.shapes);
   };
 
   // Marquee: project every feature edge whose screen midpoint falls in the box.
@@ -996,7 +998,44 @@ export function attachCameraControls(ctx) {
       store.showNotification?.("No edges inside the box.");
       return;
     }
-    store.addSketchShapes(ctx.sketch.id, deduped);
+    store.addProjectShapes(deduped);
+    controls.previewProjection(useStore.getState().projectTool?.shapes);
+  };
+
+  // Live preview of the staged projection: the accumulated sketch shapes drawn
+  // on the sketch plane (teal) before they're committed by the dialog.
+  let projectionPreviewGroup = null;
+  controls.clearProjectionPreview = () => {
+    if (!projectionPreviewGroup) return;
+    scene.remove(projectionPreviewGroup);
+    projectionPreviewGroup.traverse((o) => {
+      o.geometry?.dispose();
+      o.material?.dispose();
+    });
+    projectionPreviewGroup = null;
+  };
+  controls.previewProjection = (shapes) => {
+    controls.clearProjectionPreview();
+    const ctx = activeSketchForProject();
+    if (!ctx || !shapes || shapes.length === 0) return;
+    const group = new THREE.Group();
+    for (const shape of shapes) {
+      const pts = getSketchShapePoints(shape, ctx.sketchMesh);
+      if (!pts || pts.length < 2) continue;
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({
+          color: 0x37b8a0,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.95,
+        }),
+      );
+      line.renderOrder = 1011;
+      group.add(line);
+    }
+    scene.add(group);
+    projectionPreviewGroup = group;
   };
 
   // Hover feedback: highlight the connected feature edges of the body under the

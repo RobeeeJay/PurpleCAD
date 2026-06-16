@@ -120,6 +120,11 @@ export const uiInitial = {
   // colliding with the sketch slice's startMirrorTool (the 2D sketch mirror).
   mirror3dTool: null,
 
+  // Sketch Project tool: while open, clicks/marquee-drags accumulate the
+  // projected sketch shapes (with a live preview) into `shapes`; the dialog
+  // confirms (commits them) or cancels.
+  projectTool: null,
+
   // Split tool: a guided pick flow (no pre-selection needed).  splitTool holds
   // the chosen object + cut plane; splitPick names which a viewport click picks.
   splitTool: null,
@@ -246,6 +251,15 @@ export const createUiSlice = (set) => ({
   setCircularAxisPick: (v) => set({ circularAxisPick: !!v }),
   startMirror3d: (seed) => set({ mirror3dTool: seed || {} }),
   cancelMirror3d: () => set({ mirror3dTool: null }),
+
+  startProjectTool: () => set({ projectTool: { shapes: [] } }),
+  addProjectShapes: (shapes) =>
+    set((state) =>
+      state.projectTool
+        ? { projectTool: { shapes: [...state.projectTool.shapes, ...shapes] } }
+        : {},
+    ),
+  cancelProjectTool: () => set({ projectTool: null }),
 
   // Solo controls.  setItemSolo captures the camera snapshot (first solo);
   // switchItemSolo re-points an active solo without re-capturing the view;

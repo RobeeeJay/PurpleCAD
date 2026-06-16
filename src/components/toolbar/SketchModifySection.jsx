@@ -27,17 +27,27 @@ const SketchModifySection = () => {
   const selectedSketchElement = useStore((s) => s.selectedSketchElement);
   const setActiveSketchTool = useStore((s) => s.setActiveSketchTool);
   const releaseProjection = useStore((s) => s.releaseProjection);
+  const startProjectTool = useStore((s) => s.startProjectTool);
+  const cancelProjectTool = useStore((s) => s.cancelProjectTool);
   const items = useStore((s) => s.items);
 
   const activeSketch = items.find((i) => i.id === selectedId);
   const hasProjections = (activeSketch?.shapes || []).some((s) => s.projection);
 
-  // Project: click a 3D edge to drop it onto the sketch plane as geometry linked
-  // by a projection constraint (immovable until released).
+  // Project: stage edges from hovered 3D objects (with a preview), then confirm
+  // via the dialog to drop them onto the sketch plane as projection-linked
+  // geometry (immovable until released).
   const handleProject = () => {
     const turningOff = activeSketchTool === "project";
     setActiveSketchTool(turningOff ? null : "project");
-    if (turningOff) useStore.getState()._cameraControls?.clearProjectHover?.();
+    if (turningOff) {
+      const cc = useStore.getState()._cameraControls;
+      cc?.clearProjectHover?.();
+      cc?.clearProjectionPreview?.();
+      cancelProjectTool();
+    } else {
+      startProjectTool();
+    }
   };
 
   // Release: strip the projection constraint from the selected projected shape's
