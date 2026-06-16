@@ -33,17 +33,26 @@ const SplitDialog = () => {
   const confirm = async () => {
     const target = items.find((i) => i.id === objectId);
     if (!target || !cutFrame) return;
+    const plane = { position: cutFrame.position, rotation: cutFrame.rotation };
     let result;
     try {
       result = await splitItem({
         target,
-        plane: { position: cutFrame.position, rotation: cutFrame.rotation },
+        plane,
         allItems: items,
         printPrecision,
       });
     } catch (err) {
-      alert("Split failed: " + err.message);
-      return;
+      // OCC couldn't rebuild the target as a solid (imported dense mesh, a
+      // pattern, or a sweep whose recipe won't re-resolve) — cut the baked mesh
+      // directly instead.
+      result =
+        useStore.getState()._cameraControls?.meshSplit?.(target.id, plane) ??
+        null;
+      if (!result) {
+        alert("Split failed: " + err.message);
+        return;
+      }
     }
     if (!result || (!result.partA && !result.partB)) {
       alert("Split produced nothing — does the cut cross the object?");

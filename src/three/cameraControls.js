@@ -5,7 +5,7 @@ import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
-import { meshBoolean } from "./meshBoolean.js";
+import { meshBoolean, meshSplit } from "./meshBoolean.js";
 import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
@@ -394,6 +394,14 @@ export function attachCameraControls(ctx) {
       itemIds.map((id) => objectsRef.current[id]).filter(Boolean),
       operation,
     );
+  // Renderer-side mesh split (target ∩/− a half-space box at the cut plane) —
+  // the fallback when OCC can't rebuild a baked-mesh target as a solid.
+  controls.meshSplit = (itemId, plane) => {
+    const mesh = objectsRef.current[itemId];
+    if (!mesh) return null;
+    mesh.updateMatrixWorld(true);
+    return meshSplit(mesh, plane);
+  };
   // World position + triangle/vertex counts of a selected object's live mesh,
   // for the status line.
   controls.getObjectStats = (id) => {
