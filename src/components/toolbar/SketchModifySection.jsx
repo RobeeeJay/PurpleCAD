@@ -25,6 +25,27 @@ const SketchModifySection = () => {
   );
   const toggleSketchShapesDashed = useStore((s) => s.toggleSketchShapesDashed);
   const selectedSketchElement = useStore((s) => s.selectedSketchElement);
+  const setActiveSketchTool = useStore((s) => s.setActiveSketchTool);
+  const releaseProjection = useStore((s) => s.releaseProjection);
+  const items = useStore((s) => s.items);
+
+  const activeSketch = items.find((i) => i.id === selectedId);
+  const hasProjections = (activeSketch?.shapes || []).some((s) => s.projection);
+
+  // Project: click a 3D edge to drop it onto the sketch plane as geometry linked
+  // by a projection constraint (immovable until released).
+  const handleProject = () => {
+    setActiveSketchTool(activeSketchTool === "project" ? null : "project");
+  };
+
+  // Release: strip the projection constraint from the selected projected shape's
+  // group (else every projection), leaving editable sketch geometry behind.
+  const handleRelease = () => {
+    const idx = selectedSketchElement?.shapeIdx;
+    const key =
+      idx != null ? activeSketch?.shapes?.[idx]?.projection?.key : null;
+    releaseProjection(selectedId, key ?? null);
+  };
 
   const selectedIndices =
     sketchMultiSelectedIndices.length > 0
@@ -375,6 +396,81 @@ const SketchModifySection = () => {
             x2="6"
             y2="15"
           />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${activeSketchTool === "project" ? "active" : ""}`}
+        title="Project — click a 3D edge to project it onto the sketch (tracks the source; immovable until released)"
+        onClick={handleProject}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* 3D edge above */}
+          <line
+            stroke="#c4c2b8"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            x1="5"
+            y1="5"
+            x2="17"
+            y2="7"
+          />
+          {/* projection rays dropping down */}
+          <line
+            stroke="#D4A33F"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="5"
+            y1="5"
+            x2="5"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="17"
+            y1="7"
+            x2="17"
+            y2="19"
+          />
+          {/* projected line on the sketch plane */}
+          <line
+            stroke="#6C3FD4"
+            strokeWidth="2"
+            strokeLinecap="round"
+            x1="5"
+            y1="17"
+            x2="17"
+            y2="19"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title="Release projection — strip the projection constraint, leaving editable geometry"
+        onClick={handleRelease}
+        disabled={!hasProjections}
+        style={hasProjections ? undefined : { opacity: 0.45 }}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* an open padlock — unlock the projection */}
+          <rect
+            x="6"
+            y="11"
+            width="12"
+            height="9"
+            rx="1.5"
+            fill="none"
+            stroke="#c4c2b8"
+            strokeWidth="1.5"
+          />
+          <path
+            d="M9 11 V8 a3 3 0 0 1 6 0"
+            fill="none"
+            stroke="#D4A33F"
+            strokeWidth="1.5"
+          />
+          <circle cx="12" cy="15" r="1.5" fill="#6C3FD4" />
         </svg>
       </button>
     </ToolbarSection>

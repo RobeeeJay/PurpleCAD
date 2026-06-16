@@ -698,6 +698,56 @@ export const createSketchSlice = (set) => ({
       };
     }),
 
+  // Live re-projection: replace the shapes of one projection group (projKey =
+  // `${sourceId}:${edgeKey}`) with freshly re-fitted ones.  No undo snapshot —
+  // this tracks the source automatically, it isn't a user edit.
+  updateProjectionShapes: (sketchId, projKey, newShapes) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const kept = (item.shapes || []).filter(
+        (s) => s.projection?.key !== projKey,
+      );
+      const shapes = [...kept, ...newShapes];
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId ? Object.assign({}, it, { shapes }) : it,
+      );
+      const newHistory = state.history.map((entry) =>
+        entry.instruction?.type === "create" &&
+        entry.instruction.item?.id === sketchId
+          ? Object.assign({}, entry, {
+              instruction: Object.assign({}, entry.instruction, {
+                item: Object.assign({}, entry.instruction.item, { shapes }),
+              }),
+            })
+          : entry,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Delete a projection constraint: strip the `projection` link from its shapes
+  // (or every projected shape when projKey is null), leaving plain editable
+  // sketch geometry behind.  A user action, so it snapshots for undo.
+  releaseProjection: (sketchId, projKey = null) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      let changed = false;
+      const shapes = (item.shapes || []).map((s) => {
+        if (!s.projection) return s;
+        if (projKey && s.projection.key !== projKey) return s;
+        changed = true;
+        const { projection, ...rest } = s; // eslint-disable-line no-unused-vars
+        return rest;
+      });
+      if (!changed) return {};
+      return commitSketchShapesChange(state, sketchId, shapes);
+    }),
+
   // Tag the given shape indices with a shared, fresh group id so they select /
   // move / delete as a unit.  Needs at least two shapes.
   groupSketchShapes: (sketchId, indices) =>

@@ -317,22 +317,31 @@ export function buildSketchShapesGroup(
     const isMirror = mirrorIdxs.has(shapeIdx);
     const isCircularPattern = circularPatternIdxs.has(shapeIdx);
     const isRectangularPattern = rectangularPatternIdxs.has(shapeIdx);
+    // Projected geometry is locked to its 3D source — drawn in a distinct teal
+    // and (like the other constrained copies) inert to dragging.
+    const isProjected = !!shape.projection;
     const isInert =
-      isOffset || isMirror || isCircularPattern || isRectangularPattern;
+      isOffset ||
+      isMirror ||
+      isCircularPattern ||
+      isRectangularPattern ||
+      isProjected;
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     const mat = new LineMaterial({
       color: isBevel
         ? BEVEL_COLOR
-        : isOffset
-          ? sketchOffsetColorFor(theme)
-          : isMirror
-            ? sketchMirrorColorFor(theme)
-            : isCircularPattern
-              ? sketchCircularPatternColorFor(theme)
-              : isRectangularPattern
-                ? sketchRectangularPatternColorFor(theme)
-                : sketchLineColorFor(theme),
+        : isProjected
+          ? 0x37b8a0
+          : isOffset
+            ? sketchOffsetColorFor(theme)
+            : isMirror
+              ? sketchMirrorColorFor(theme)
+              : isCircularPattern
+                ? sketchCircularPatternColorFor(theme)
+                : isRectangularPattern
+                  ? sketchRectangularPatternColorFor(theme)
+                  : sketchLineColorFor(theme),
       linewidth: isBevel ? 1.0 : 1.5,
       depthTest: false,
       resolution: res,
@@ -353,6 +362,7 @@ export function buildSketchShapesGroup(
     if (isMirror) line.userData.isMirror = true;
     if (isCircularPattern) line.userData.isCircularPattern = true;
     if (isRectangularPattern) line.userData.isRectangularPattern = true;
+    if (isProjected) line.userData.isProjected = true;
     group.add(line);
 
     // Collect key points for dots — not for offset/mirror/circular-pattern

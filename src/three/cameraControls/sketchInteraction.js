@@ -1249,7 +1249,9 @@ export function createSketchInteraction(
         !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
         !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
         !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
-        !isRectangularPatternShapeIdx(selItem, snap.shapeIdx)
+        !isRectangularPatternShapeIdx(selItem, snap.shapeIdx) &&
+        // Projected geometry is immovable until its constraint is released.
+        !shapes[snap.shapeIdx]?.projection
       ) {
         // If the snapped shape is part of a multi-selection, drag them all together
         // (the snap point acts as the anchor instead of a single-point drag).
@@ -1300,7 +1302,12 @@ export function createSketchInteraction(
           !c.userData.isRectangularPattern,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
-      if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+      if (
+        hits.length > 0 &&
+        hits[0].object.userData.shapeIdx != null &&
+        // Projected geometry is immovable until its constraint is released.
+        !shapes[hits[0].object.userData.shapeIdx]?.projection
+      ) {
         const shapeIdx = hits[0].object.userData.shapeIdx;
         const localAnchor = screenToSketchLocal(
           screenX,
@@ -1670,6 +1677,12 @@ export function createSketchInteraction(
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5) handlePointClick(e.clientX, e.clientY);
+      return true;
+    }
+    if (activeSketchToolRef.current === "project") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) controls.projectEdgeAt(e.clientX, e.clientY);
       return true;
     }
     if (activeSketchToolRef.current === "mirror") {

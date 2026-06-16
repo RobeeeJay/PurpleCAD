@@ -16,6 +16,25 @@ import {
 import { useStore } from "../../store";
 import { activePrecision } from "../../three/resolution.js";
 import { gridMinorColorFor } from "../../three/theme.js";
+import {
+  worldPolylineToLocal2D,
+  fitProjectedShapes,
+} from "../../three/sketchProjection.js";
+
+// Geometry-only signature of a shape list, so re-projection only writes to the
+// store when the projected geometry actually moved (avoids an update loop).
+const projSig = (shapes) =>
+  shapes
+    .map((s) => {
+      const r = (n) => Math.round((n ?? 0) * 1e4);
+      if (s.type === "line")
+        return `l${r(s.x1)},${r(s.y1)},${r(s.x2)},${r(s.y2)}`;
+      if (s.type === "circle") return `c${r(s.cx)},${r(s.cy)},${r(s.r)}`;
+      if (s.type === "arc")
+        return `a${r(s.cx)},${r(s.cy)},${r(s.r)},${r(s.startAngle)},${r(s.endAngle)}`;
+      return JSON.stringify(s);
+    })
+    .join("|");
 
 // Quantize a world coord into a stable key so triangles that share a vertex
 // (even with tiny float drift, e.g. from CSG) map to the same edge. 1e4 → 1e-4
@@ -506,5 +525,45 @@ export function useSketchModeEffect({
       scene.add(ghostGroup);
       sketchGhostGroupRef.current = ghostGroup;
     }
+  }, [selectedId, items]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Live re-projection ────────────────────────────────────────────────────
+  // Projected sketch geometry tracks its source: re-derive each projection
+  // group from its stored source-local polyline through the source's current
+  // world transform, and write back only when the result actually moved.
+  useEffect(() => {
+    if (!sketchModeRef.current) return;
+    const sketch = itemsRef.current.find(
+      (i) => i.id === selectedId && i.type === "sketch",
+    );
+    const sketchMesh = sketch ? objectsRef.current[sketch.id] : null;
+    if (!sketch || !sketchMesh) return;
+    const groups = new Map();
+    (sketch.shapes || []).forEach((s) => {
+      const key = s.projection?.key;
+      if (!key) return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(s);
+    });
+    if (groups.size === 0) return;
+    groups.forEach((grpShapes, key) => {
+      const proj = grpShapes[0].projection;
+      const source = objectsRef.current[proj.sourceId];
+      if (!source || !proj.localPolyline) return;
+      source.updateMatrixWorld(true);
+      const mw = source.matrixWorld;
+      const worldPoly = proj.localPolyline.map(([x, y, z]) => {
+        const v = new THREE.Vector3(x, y, z).applyMatrix4(mw);
+        return { x: v.x, y: v.y, z: v.z };
+      });
+      const pts2d = worldPolylineToLocal2D(
+        worldPoly,
+        sketchMesh.position,
+        sketchMesh.quaternion,
+      );
+      const newShapes = fitProjectedShapes(pts2d, { projection: proj });
+      if (newShapes.length && projSig(newShapes) !== projSig(grpShapes))
+        useStore.getState().updateProjectionShapes(sketch.id, key, newShapes);
+    });
   }, [selectedId, items]); // eslint-disable-line react-hooks/exhaustive-deps
 }

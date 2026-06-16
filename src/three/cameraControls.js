@@ -7,6 +7,12 @@ import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
 import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
+import {
+  featureEdgeGraph,
+  edgePolylineNear,
+  worldPolylineToLocal2D,
+  fitProjectedShapes,
+} from "./sketchProjection.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
@@ -761,6 +767,85 @@ export function attachCameraControls(ctx) {
     useStore.getState().updateSplit3d({ cutFrame: frame, cutLabel: label });
     useStore.getState().setSplitPick(null);
     controls.previewPlane(frame);
+  };
+
+  // Project tool: project the 3D feature edge under the cursor onto the active
+  // sketch plane as sketch geometry, linked to its source by a projection
+  // constraint (so it tracks the source and is immovable until released).
+  controls.projectEdgeAt = (screenX, screenY) => {
+    const store = useStore.getState();
+    const sketch = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current && i.type === "sketch",
+    );
+    const sketchMesh = sketch ? objectsRef.current[sketch.id] : null;
+    if (!sketch || !sketchMesh) return;
+    const solids = Object.values(objectsRef.current).filter((m) => {
+      const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
+      return it && it.type !== "sketch";
+    });
+    // Solids are hidden in sketch mode; make them raycastable for this pick.
+    const prevVisible = solids.map((m) => m.visible);
+    solids.forEach((m) => (m.visible = true));
+    const rect = renderer.domElement.getBoundingClientRect();
+    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    const hit = ray.intersectObjects(solids, false)[0];
+    solids.forEach((m, i) => (m.visible = prevVisible[i]));
+    if (!hit) {
+      store.showNotification?.("Hover a 3D edge to project.");
+      return;
+    }
+    const solid = hit.object;
+    solid.updateMatrixWorld(true);
+    const geo = solid.geometry;
+    const posAttr = geo.getAttribute("position");
+    if (!posAttr) return;
+    const mw = solid.matrixWorld;
+    const tmp = new THREE.Vector3();
+    const positions = new Array(posAttr.count * 3);
+    for (let i = 0; i < posAttr.count; i++) {
+      tmp.fromBufferAttribute(posAttr, i).applyMatrix4(mw);
+      positions[i * 3] = tmp.x;
+      positions[i * 3 + 1] = tmp.y;
+      positions[i * 3 + 2] = tmp.z;
+    }
+    const idxAttr = geo.getIndex();
+    const indices = idxAttr ? Array.from(idxAttr.array) : null;
+    const graph = featureEdgeGraph(positions, indices);
+    const worldPoly = edgePolylineNear(graph, hit.point);
+    if (!worldPoly || worldPoly.length < 2) {
+      store.showNotification?.("No projectable edge there.");
+      return;
+    }
+    // Store the polyline in the source's LOCAL frame so re-projection tracks the
+    // source through transforms (move / rotate / scale).
+    const invMw = new THREE.Matrix4().copy(mw).invert();
+    const localPolyline = worldPoly.map((p) => {
+      const v = new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(invMw);
+      return [v.x, v.y, v.z];
+    });
+    const pts2d = worldPolylineToLocal2D(
+      worldPoly,
+      sketchMesh.position,
+      sketchMesh.quaternion,
+    );
+    const sourceId = solid.userData.itemId;
+    const edgeKey = `${Date.now()}_${Math.round(Math.random() * 1e6)}`;
+    const shapes = fitProjectedShapes(pts2d, {
+      projection: {
+        sourceId,
+        edgeKey,
+        key: `${sourceId}:${edgeKey}`,
+        localPolyline,
+      },
+    });
+    if (shapes.length === 0) {
+      store.showNotification?.("Couldn't project that edge.");
+      return;
+    }
+    store.addSketchShapes(sketch.id, shapes);
   };
 
   // Snapshot / restore the camera view (used by the Objects-list Solo button so
