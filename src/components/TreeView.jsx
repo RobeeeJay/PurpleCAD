@@ -425,8 +425,9 @@ const TreeViewItem = ({
 
   const isFolder = node._kind === "folder";
   const hasChildren = node._children && node._children.length > 0;
-  const isSketch = node.type === "sketch";
-  const dragEnabled = isFolder || !isSketch;
+  // Everything is draggable — sketches included, so they can be organised into
+  // folders (parentId is purely organizational, separate from a sketch's host).
+  const dragEnabled = true;
   const isDragging = dragState.draggingId === node.id;
   const isDropTarget = dragState.dropTargetId === node.id;
   const isSecondarySelected =
