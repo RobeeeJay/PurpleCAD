@@ -7,7 +7,7 @@
 // pre-tessellated `geometryData` for csg results).
 
 import * as THREE from "three";
-import { createMaterial } from "../objectMaterials.js";
+import { createMaterial, resolveItemMaterial } from "../objectMaterials.js";
 import { resolveItemDepth } from "../geometryParams.js";
 import { DEFAULT_MATERIAL } from "../materialPresets.js";
 import {
@@ -229,7 +229,7 @@ export function buildSceneObjects(
         return;
     }
 
-    const materialProps = item.material ?? defaultMaterial;
+    const materialProps = resolveItemMaterial(item, items, defaultMaterial);
     const color = materialProps.color ?? DEFAULT_MESH_COLOR;
     // A Plane object is a translucent double-sided reference surface, not solid.
     const material =

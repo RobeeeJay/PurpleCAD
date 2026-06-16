@@ -377,6 +377,8 @@ vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
 }));
 vi.mock("../objectMaterials.js", () => ({
   createMaterial: () => ({ dispose() {} }),
+  resolveItemMaterial: (item, items, defaultMaterial) =>
+    item?.material ?? defaultMaterial,
 }));
 vi.mock("../../store", () => ({ useStore: () => null }));
 

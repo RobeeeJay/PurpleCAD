@@ -244,6 +244,20 @@ export const TORUS_FRAGMENT_SHADER = `
   }
 `;
 
+// The material props an item should render with.  Mirror / circular /
+// rectangular pattern clones (kind:"pattern3d") track their originating object,
+// so they inherit ITS material live — a later change to the source's material
+// flows to every clone on the next scene build.  Everything else uses its own
+// item.material (or the default).
+export function resolveItemMaterial(item, items, defaultMaterial) {
+  const r = item?.regenerator;
+  if (r?.kind === "pattern3d" && r.sourceId != null) {
+    const src = (items || []).find((i) => i.id === r.sourceId);
+    if (src) return src.material ?? defaultMaterial;
+  }
+  return item?.material ?? defaultMaterial;
+}
+
 // `materialProps` is an item.material-shaped object (see
 // materialPresets.js#DEFAULT_MATERIAL): { color, metalness, roughness,
 // opacity, clearcoat, clearcoatRoughness }. `color` here is the resolved
