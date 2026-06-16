@@ -71,6 +71,17 @@ describe("featureEdgeGraph + edgePolylineNear", () => {
 });
 
 describe("decomposeFeatureEdges", () => {
+  it("keeps only front-facing edges when given a plane normal", () => {
+    // Viewed straight down +Z, only the top face's 4 edges face the viewer;
+    // the verticals are edge-on and the bottom edges are hidden.
+    const geo = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();
+    const pos = Array.from(geo.getAttribute("position").array);
+    const graph = featureEdgeGraph(pos, null, undefined, { x: 0, y: 0, z: 1 });
+    const chains = decomposeFeatureEdges(graph);
+    expect(chains).toHaveLength(4);
+    for (const c of chains) for (const p of c) expect(p.z).toBeCloseTo(1, 5);
+  });
+
   it("splits a box into its 12 edges", () => {
     const geo = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();
     const pos = Array.from(geo.getAttribute("position").array);

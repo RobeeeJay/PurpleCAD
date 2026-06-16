@@ -10,9 +10,18 @@ const vKey = (x, y, z) =>
 
 // Build the mesh's feature edges (a sharp dihedral between adjacent faces, or a
 // boundary edge) as a vertex-key adjacency graph.  positions/indices are flat
-// arrays already in WORLD space.  Returns { nodes: Map(key->{x,y,z}),
-// adj: Map(key->Set(key)) }.
-export function featureEdgeGraph(positions, indices, sharpAngleRad = 0.35) {
+// arrays already in WORLD space.  When `planeNormal` (the sketch plane's world
+// normal) is given, only FRONT-facing edges are kept — an edge with at least one
+// adjacent face pointing toward the viewer.  That drops a body's hidden back
+// edges, so a projected box reads as its visible outline + faces instead of a
+// doubled wireframe that subdivides the silhouette.
+// Returns { nodes: Map(key->{x,y,z}), adj: Map(key->Set(key)), segments }.
+export function featureEdgeGraph(
+  positions,
+  indices,
+  sharpAngleRad = 0.35,
+  planeNormal = null,
+) {
   const triCount = (indices ? indices.length : positions.length / 3) / 3;
   const vi = (t, c) => (indices ? indices[t * 3 + c] : t * 3 + c);
   const v = (i) => ({
@@ -66,6 +75,9 @@ export function featureEdgeGraph(positions, indices, sharpAngleRad = 0.35) {
     adj.get(kq).add(kp);
   };
   const cosSharp = Math.cos(sharpAngleRad);
+  const pn = planeNormal;
+  const frontFacing = (e) =>
+    !pn || e.normals.some((n) => n.x * pn.x + n.y * pn.y + n.z * pn.z > 1e-4);
   const segments = [];
   edges.forEach((e) => {
     let sharp = e.normals.length === 1; // boundary edge
@@ -75,7 +87,7 @@ export function featureEdgeGraph(positions, indices, sharpAngleRad = 0.35) {
           b = e.normals[j];
         if (a.x * b.x + a.y * b.y + a.z * b.z < cosSharp) sharp = true;
       }
-    if (sharp) {
+    if (sharp && frontFacing(e)) {
       link(e.kp, e.kq);
       segments.push([e.kp, e.kq]);
     }

@@ -808,7 +808,20 @@ export function attachCameraControls(ctx) {
     }
     const idxAttr = solid.geometry.getIndex();
     const indices = idxAttr ? Array.from(idxAttr.array) : null;
-    return { graph: featureEdgeGraph(positions, indices), mw };
+    // The sketch plane's world normal (toward the viewer) — keep only edges on a
+    // face that faces it, so hidden back edges aren't projected.
+    const ctx = activeSketchForProject();
+    let planeNormal = null;
+    if (ctx) {
+      const n = new THREE.Vector3(0, 0, 1).applyQuaternion(
+        ctx.sketchMesh.quaternion,
+      );
+      planeNormal = { x: n.x, y: n.y, z: n.z };
+    }
+    return {
+      graph: featureEdgeGraph(positions, indices, undefined, planeNormal),
+      mw,
+    };
   };
   // Fit a list of world-polyline chains belonging to one source body and return
   // their projected sketch shapes (each chain its own projection group).
