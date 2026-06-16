@@ -147,4 +147,24 @@ describe("pattern3dItem mesh fallback", () => {
     expect(ext[0]).toBeCloseTo(2, 5);
     expect(res.position.x).toBeCloseTo(-5, 5);
   });
+
+  it("circular rotates copies about a picked axis", async () => {
+    const res = await pattern3dItem({
+      patternType: "circular",
+      sourceId: 1,
+      // Source cube centred at x=5; one clone (count 2 over 2π → 180°) about the
+      // Z axis through the origin lands centred at x=-5 → x-span -6..6.
+      params: {
+        origin: { x: 0, y: 0, z: 0 },
+        axis: { x: 0, y: 0, z: 1 },
+        count: 2,
+        angleRad: 2 * Math.PI,
+      },
+      allItems: [source({ x: 5, y: 0, z: 0 })],
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+    expect(bbox(res.geometryData.positions)[0]).toBeCloseTo(2, 5);
+    expect(res.position.x).toBeCloseTo(-5, 4);
+  });
 });

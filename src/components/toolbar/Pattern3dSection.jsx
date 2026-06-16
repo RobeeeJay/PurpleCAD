@@ -3,7 +3,6 @@ import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 
 const SOLID_TYPES = ["cube", "sphere", "cylinder", "torus", "extrude", "csg"];
-const PLANE_TYPES = ["plane", "sketch"];
 
 // 3D Mirror: clone the selected object across the selected plane.  The clone is
 // a regenerator item that rebuilds from the live source, so it tracks changes to
@@ -18,21 +17,15 @@ const Pattern3dSection = ({ bare = false }) => {
     .map((id) => items.find((i) => i.id === id))
     .filter(Boolean);
   const source = sel.find((i) => SOLID_TYPES.includes(i.type));
-  const plane = sel.find((i) => PLANE_TYPES.includes(i.type));
-  const ready = !!source && !!plane;
 
-  // Circular needs a source + a plane (its normal is the rotation axis);
-  // rectangular only needs a source (it tiles along the world X/Y axes).
+  // Circular needs a source; the rotation axis is picked (a sketch line or face
+  // edge) in the dialog.  Rectangular only needs a source.
   const handleCircular = () => {
-    if (!source || !plane) {
-      alert("Select an object and a plane (its normal is the rotation axis).");
+    if (!source) {
+      alert("Select an object to pattern.");
       return;
     }
-    startPattern3d({
-      patternType: "circular",
-      sourceId: source.id,
-      planeId: plane.id,
-    });
+    startPattern3d({ patternType: "circular", sourceId: source.id });
   };
   const handleRectangular = () => {
     if (!source) {
@@ -83,9 +76,9 @@ const Pattern3dSection = ({ bare = false }) => {
   const circularBtn = (
     <button
       className="toolbar-btn"
-      title="Circular pattern (3D) — clone around the selected plane's normal axis"
+      title="Circular pattern (3D) — clone around a picked sketch line or face edge"
       onClick={handleCircular}
-      style={ready ? undefined : { opacity: 0.45 }}
+      style={source ? undefined : { opacity: 0.45 }}
     >
       <svg viewBox="0 0 24 24" width="20" height="20">
         <circle

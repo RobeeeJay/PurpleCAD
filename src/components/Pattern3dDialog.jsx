@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import * as THREE from "three";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
 import { evalValue, useDebouncedPreview } from "./inputs.jsx";
@@ -16,6 +15,8 @@ import "../styles/VariablesDialog.css";
 const Pattern3dDialog = () => {
   const tool = useStore((s) => s.pattern3dTool);
   const cancelPattern3d = useStore((s) => s.cancelPattern3d);
+  const setCircularAxisPick = useStore((s) => s.setCircularAxisPick);
+  const circularAxisPick = useStore((s) => s.circularAxisPick);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const addItem = useStore((s) => s.addItem);
@@ -59,7 +60,8 @@ const Pattern3dDialog = () => {
     ? Number.isFinite(countV) &&
       countV >= 2 &&
       Number.isFinite(angleV) &&
-      angleV > 0
+      angleV > 0 &&
+      !!tool?.axis
     : Number.isFinite(countXV) &&
       countXV >= 1 &&
       Number.isFinite(countYV) &&
@@ -74,17 +76,13 @@ const Pattern3dDialog = () => {
   const build = () => {
     if (!tool || !valid) return null;
     if (circular) {
-      const plane = items.find((i) => i.id === tool.planeId);
-      if (!plane) return null;
-      const r = plane.rotation || { x: 0, y: 0, z: 0 };
-      const nv = new THREE.Vector3(0, 0, 1).applyEuler(
-        new THREE.Euler(r.x || 0, r.y || 0, r.z || 0),
-      );
+      const axis = tool.axis;
+      if (!axis) return null;
       const angleRad = (angleV * Math.PI) / 180;
       return {
         params: {
-          origin: plane.position,
-          axis: { x: nv.x, y: nv.y, z: nv.z },
+          origin: axis.origin,
+          axis: axis.dir,
           count: Math.round(countV),
           angleRad,
         },
@@ -92,7 +90,9 @@ const Pattern3dDialog = () => {
           kind: "pattern3d",
           patternType: "circular",
           sourceId: tool.sourceId,
-          planeId: tool.planeId,
+          // Axis is baked (a picked sketch line / face edge), not a live ref.
+          axisOrigin: axis.origin,
+          axisDir: axis.dir,
           count: Math.round(countV),
           angleRad,
         },
@@ -152,18 +152,29 @@ const Pattern3dDialog = () => {
       countZV,
       dzV,
       circular,
+      tool?.axis,
     ],
   );
 
   useEffect(() => {
-    return () => useStore.getState()._cameraControls?.clearPattern3dPreview?.();
+    return () => {
+      const cc = useStore.getState()._cameraControls;
+      cc?.clearPattern3dPreview?.();
+      cc?.clearCircularAxisHighlight?.();
+    };
   }, [tool]);
 
   if (!open) return null;
 
   const close = () => {
-    useStore.getState()._cameraControls?.clearPattern3dPreview?.();
+    const cc = useStore.getState()._cameraControls;
+    cc?.clearPattern3dPreview?.();
+    cc?.clearCircularAxisHighlight?.();
     cancelPattern3d();
+  };
+  const pickAxis = () => {
+    useStore.getState()._cameraControls?.clearPattern3dPreview?.();
+    setCircularAxisPick(true);
   };
   const confirm = async () => {
     const args = build();
@@ -274,6 +285,36 @@ const Pattern3dDialog = () => {
         >
           {circular ? (
             <>
+              <div style={row}>
+                <span>Rotation axis</span>
+                <button
+                  type="button"
+                  onClick={pickAxis}
+                  style={{
+                    fontSize: 12,
+                    padding: "6px 10px",
+                    borderRadius: 3,
+                    border: `1px solid ${
+                      circularAxisPick
+                        ? "#44aaff"
+                        : tool?.axis
+                          ? "var(--border-color)"
+                          : "#e87575"
+                    }`,
+                    background: circularAxisPick
+                      ? "rgba(68,170,255,0.18)"
+                      : "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {circularAxisPick
+                    ? "Click a line/edge…"
+                    : tool?.axis
+                      ? "Axis set — re-pick"
+                      : "Pick axis"}
+                </button>
+              </div>
               <label style={row}>
                 <span>Count</span>
                 {inp(

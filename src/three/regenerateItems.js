@@ -333,6 +333,15 @@ function resolvePatternParams(r, items) {
       dz: r.dz,
     };
   }
+  // A circular pattern carries a baked axis (a picked sketch line / face edge).
+  if (r.patternType === "circular" && r.axisOrigin && r.axisDir) {
+    return {
+      origin: r.axisOrigin,
+      axis: r.axisDir,
+      count: r.count,
+      angleRad: r.angleRad,
+    };
+  }
   const plane = items.find((i) => i.id === r.planeId);
   if (!plane) return null;
   const rot = plane.rotation || { x: 0, y: 0, z: 0 };

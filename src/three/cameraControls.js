@@ -590,6 +590,107 @@ export function attachCameraControls(ctx) {
     if (base) useStore.getState().startPlaneTool(base);
   };
 
+  // Pick the circular pattern's rotation axis: the nearest sketch line or solid
+  // face edge under the cursor.  Stores it as { origin, dir } (world) on the
+  // pattern tool, highlights it, and ends the pick.
+  let circularAxisHL = null;
+  controls.clearCircularAxisHighlight = () => {
+    if (!circularAxisHL) return;
+    scene.remove(circularAxisHL);
+    circularAxisHL.geometry.dispose();
+    circularAxisHL.material.dispose();
+    circularAxisHL = null;
+  };
+  controls.pickCircularAxis = (screenX, screenY) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const toScreen = (w) => {
+      const ndc = w.clone().project(cameraRef.current);
+      return {
+        x: ((ndc.x + 1) / 2) * rect.width + rect.left,
+        y: ((-ndc.y + 1) / 2) * rect.height + rect.top,
+      };
+    };
+    const segDist = (px, py, a, b) => {
+      const dx = b.x - a.x,
+        dy = b.y - a.y;
+      const l2 = dx * dx + dy * dy || 1e-9;
+      let t = ((px - a.x) * dx + (py - a.y) * dy) / l2;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+    };
+    let best = null;
+    let bestD = 14;
+    const consider = (wa, wb) => {
+      const d = segDist(screenX, screenY, toScreen(wa), toScreen(wb));
+      if (d < bestD) {
+        bestD = d;
+        best = { a: wa.clone(), b: wb.clone() };
+      }
+    };
+    // Sketch lines (a clean straight axis the user can draw on purpose).
+    itemsRef.current.forEach((sk) => {
+      if (sk.type !== "sketch") return;
+      const mesh = objectsRef.current[sk.id];
+      if (!mesh || mesh.visible === false) return;
+      (sk.shapes || []).forEach((s) => {
+        if (s.type !== "line") return;
+        const wa = new THREE.Vector3(s.x1, s.y1, 0)
+          .applyQuaternion(mesh.quaternion)
+          .add(mesh.position);
+        const wb = new THREE.Vector3(s.x2, s.y2, 0)
+          .applyQuaternion(mesh.quaternion)
+          .add(mesh.position);
+        consider(wa, wb);
+      });
+    });
+    // Face edges: the edges of the triangle hit under the cursor (a model edge
+    // of a box/extrude face is the nearest of the three to the click).
+    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    const meshes = Object.values(objectsRef.current).filter(
+      (m) => m.visible !== false,
+    );
+    const hit = ray.intersectObjects(meshes, false)[0];
+    if (hit && hit.face) {
+      const posAttr = hit.object.geometry.getAttribute("position");
+      const v = (i) =>
+        new THREE.Vector3()
+          .fromBufferAttribute(posAttr, i)
+          .applyMatrix4(hit.object.matrixWorld);
+      const va = v(hit.face.a),
+        vb = v(hit.face.b),
+        vc = v(hit.face.c);
+      consider(va, vb);
+      consider(vb, vc);
+      consider(vc, va);
+    }
+    if (!best) {
+      useStore
+        .getState()
+        .showNotification?.("Click a sketch line or a face edge for the axis.");
+      return;
+    }
+    const dir = best.b.clone().sub(best.a).normalize();
+    controls.clearCircularAxisHighlight();
+    const geo = new THREE.BufferGeometry().setFromPoints([best.a, best.b]);
+    const line = new THREE.Line(
+      geo,
+      new THREE.LineBasicMaterial({ color: 0x44aaff, depthTest: false }),
+    );
+    line.renderOrder = 1011;
+    scene.add(line);
+    circularAxisHL = line;
+    useStore.getState().setCircularAxisPick(false);
+    useStore.getState().updatePattern3d({
+      axis: {
+        origin: { x: best.a.x, y: best.a.y, z: best.a.z },
+        dir: { x: dir.x, y: dir.y, z: dir.z },
+      },
+    });
+  };
+
   // Live preview for MaterialDialog: instantly applies in-progress
   // color/finish edits to the live mesh(es) without a store write.
   const materialPreview = createMaterialPreviewHelpers({

@@ -122,6 +122,16 @@ export function createViewInteraction(
     controls.isPanning = false;
     orbitIndicator.visible = false;
 
+    // Circular pattern axis: a click picks the sketch line / face edge to rotate
+    // around.
+    if (useStore.getState().circularAxisPick && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX || e.clientX);
+      const dy = e.clientY - (controls.mouseDownY || e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        controls.pickCircularAxis(e.clientX, e.clientY);
+      return;
+    }
+
     // Plane picking: clicks either accumulate vertices (3-point mode) or pick a
     // single face's plane, depending on the active mode.
     const planePick = useStore.getState().planePickActive;

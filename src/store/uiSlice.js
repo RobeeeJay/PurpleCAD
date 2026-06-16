@@ -108,9 +108,12 @@ export const uiInitial = {
   // True while picking the 3 points that define a new plane in the 3D view.
   planePickActive: false,
 
-  // Pending circular/rectangular 3D pattern: { patternType, sourceId, planeId }.
-  // The dialog adds the counts/angle/spacing and confirms.
+  // Pending circular/rectangular 3D pattern: { patternType, sourceId, ... }.
+  // For circular the dialog also captures an `axis` ({ origin, dir } in world,
+  // picked off a sketch line or face edge); the dialog adds counts/angle/spacing.
   pattern3dTool: null,
+  // True while picking the circular pattern's rotation axis in the 3D view.
+  circularAxisPick: false,
 
   // 3D Mirror dialog open-flag (truthy while open).  The dialog itself owns the
   // picked object/plane ids; this just gates its visibility.  Named *3d to avoid
@@ -222,7 +225,14 @@ export const createUiSlice = (set) => ({
     ),
   cancelPlaneTool: () => set({ planeTool: null }),
   startPattern3d: (v) => set({ pattern3dTool: v }),
-  cancelPattern3d: () => set({ pattern3dTool: null }),
+  updatePattern3d: (partial) =>
+    set((state) =>
+      state.pattern3dTool
+        ? { pattern3dTool: { ...state.pattern3dTool, ...partial } }
+        : {},
+    ),
+  cancelPattern3d: () => set({ pattern3dTool: null, circularAxisPick: false }),
+  setCircularAxisPick: (v) => set({ circularAxisPick: !!v }),
   startMirror3d: (seed) => set({ mirror3dTool: seed || {} }),
   cancelMirror3d: () => set({ mirror3dTool: null }),
 
