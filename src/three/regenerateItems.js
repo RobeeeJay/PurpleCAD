@@ -340,6 +340,7 @@ function resolvePatternParams(r, items) {
       axis: r.axisDir,
       count: r.count,
       angleRad: r.angleRad,
+      axialOffset: r.axialOffset,
     };
   }
   const plane = items.find((i) => i.id === r.planeId);

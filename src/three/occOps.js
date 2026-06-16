@@ -1219,19 +1219,35 @@ function patternInstances(worldId, patternType, params) {
     const total = params.angleRad ?? 2 * Math.PI;
     const o = params.origin,
       a = params.axis;
+    // Per-copy slide along the (unit) axis turns the ring into a helix/spiral.
+    const off = params.axialOffset || 0;
     for (let k = 1; k < count; k++) {
-      out.push(
-        occ.rotateShapeAxis(
-          worldId,
-          o.x,
-          o.y,
-          o.z,
-          a.x,
-          a.y,
-          a.z,
-          (total * k) / count,
-        ),
+      const rotId = occ.rotateShapeAxis(
+        worldId,
+        o.x,
+        o.y,
+        o.z,
+        a.x,
+        a.y,
+        a.z,
+        (total * k) / count,
       );
+      if (off) {
+        const d = off * k;
+        const moved = occ.transformShape(
+          rotId,
+          a.x * d,
+          a.y * d,
+          a.z * d,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(rotId);
+        out.push(moved);
+      } else {
+        out.push(rotId);
+      }
     }
   } else if (patternType === "rectangular") {
     const cx = Math.max(1, Math.round(params.countX || 1));
@@ -1306,9 +1322,16 @@ function patternCloneTransforms(patternType, params) {
     const total = params.angleRad ?? 2 * Math.PI;
     const o = params.origin,
       a = v3normalize(params.axis);
+    const off = params.axialOffset || 0;
     for (let k = 1; k < count; k++) {
       const ang = (total * k) / count;
-      out.push({ fn: (x, y, z) => rotateAboutAxis(x, y, z, o, a, ang) });
+      const d = off * k;
+      out.push({
+        fn: (x, y, z) => {
+          const r = rotateAboutAxis(x, y, z, o, a, ang);
+          return { x: r.x + a.x * d, y: r.y + a.y * d, z: r.z + a.z * d };
+        },
+      });
     }
   } else if (patternType === "rectangular") {
     const cx = Math.max(1, Math.round(params.countX || 1));

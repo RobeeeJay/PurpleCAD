@@ -27,6 +27,7 @@ const Pattern3dDialog = () => {
 
   const [count, setCount] = useState("4");
   const [angle, setAngle] = useState("360");
+  const [axialOffset, setAxialOffset] = useState("0");
   const [countX, setCountX] = useState("3");
   const [dx, setDx] = useState("50");
   const [countY, setCountY] = useState("1");
@@ -38,6 +39,7 @@ const Pattern3dDialog = () => {
     if (open) {
       setCount("4");
       setAngle("360");
+      setAxialOffset("0");
       setCountX("3");
       setDx("50");
       setCountY("1");
@@ -49,6 +51,7 @@ const Pattern3dDialog = () => {
 
   const countV = evalValue(count, variables);
   const angleV = evalValue(angle, variables);
+  const axialOffsetV = evalValue(axialOffset, variables);
   const countXV = evalValue(countX, variables);
   const dxV = evalValue(dx, variables);
   const countYV = evalValue(countY, variables);
@@ -61,6 +64,7 @@ const Pattern3dDialog = () => {
       countV >= 2 &&
       Number.isFinite(angleV) &&
       angleV > 0 &&
+      Number.isFinite(axialOffsetV) &&
       !!tool?.axis
     : Number.isFinite(countXV) &&
       countXV >= 1 &&
@@ -79,12 +83,15 @@ const Pattern3dDialog = () => {
       const axis = tool.axis;
       if (!axis) return null;
       const angleRad = (angleV * Math.PI) / 180;
+      // Offset is entered in mm (per copy along the axis); store scene units.
+      const axialOffsetScene = axialOffsetV / MM_PER_UNIT;
       return {
         params: {
           origin: axis.origin,
           axis: axis.dir,
           count: Math.round(countV),
           angleRad,
+          axialOffset: axialOffsetScene,
         },
         regenerator: {
           kind: "pattern3d",
@@ -95,6 +102,7 @@ const Pattern3dDialog = () => {
           axisDir: axis.dir,
           count: Math.round(countV),
           angleRad,
+          axialOffset: axialOffsetScene,
         },
       };
     }
@@ -145,6 +153,7 @@ const Pattern3dDialog = () => {
       valid,
       countV,
       angleV,
+      axialOffsetV,
       countXV,
       dxV,
       countYV,
@@ -327,6 +336,14 @@ const Pattern3dDialog = () => {
               <label style={row}>
                 <span>Total angle (°)</span>
                 {inp(angle, setAngle, Number.isFinite(angleV) && angleV > 0)}
+              </label>
+              <label style={row}>
+                <span>Offset / copy (mm)</span>
+                {inp(
+                  axialOffset,
+                  setAxialOffset,
+                  Number.isFinite(axialOffsetV),
+                )}
               </label>
             </>
           ) : (
