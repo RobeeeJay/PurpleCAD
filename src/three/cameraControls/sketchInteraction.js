@@ -1610,9 +1610,13 @@ export function createSketchInteraction(
         const dy = e.clientY - marqueeStartScreen.y;
         if (Math.hypot(dx, dy) > 5) {
           marqueeActive = true;
+          controls.clearProjectHover?.();
           drawProjectMarquee(e.clientX, e.clientY);
+          return true;
         }
       }
+      // Not dragging a box → highlight the edges under the cursor.
+      controls.projectHoverAt?.(e.clientX, e.clientY);
       return true;
     }
     if (
@@ -1753,6 +1757,7 @@ export function createSketchInteraction(
         controls.projectEdgeAt(e.clientX, e.clientY);
       }
       clearMarqueeRect();
+      controls.clearProjectHover?.();
       marqueeActive = false;
       marqueeStartScreen = null;
       return true;

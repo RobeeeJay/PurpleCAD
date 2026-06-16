@@ -986,6 +986,80 @@ export function attachCameraControls(ctx) {
     store.addSketchShapes(ctx.sketch.id, deduped);
   };
 
+  // Hover feedback: highlight the connected feature edges of the body under the
+  // cursor (what a click would project).  The body's edge graph is cached so
+  // sweeping across the same body doesn't rebuild it each frame.
+  let projectHoverGroup = null;
+  let projectHoverCache = null; // { bodyId, sig, chains }
+  controls.clearProjectHover = () => {
+    if (!projectHoverGroup) return;
+    scene.remove(projectHoverGroup);
+    projectHoverGroup.traverse((o) => {
+      o.geometry?.dispose();
+      o.material?.dispose();
+    });
+    projectHoverGroup = null;
+  };
+  controls.projectHoverAt = (screenX, screenY) => {
+    if (!activeSketchForProject()) {
+      controls.clearProjectHover();
+      return;
+    }
+    const solids = projectSolidMeshes();
+    const prevVisible = solids.map((m) => m.visible);
+    solids.forEach((m) => (m.visible = true));
+    const rect = renderer.domElement.getBoundingClientRect();
+    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    const hit = ray.intersectObjects(solids, false)[0];
+    solids.forEach((m, i) => (m.visible = prevVisible[i]));
+    if (!hit) {
+      controls.clearProjectHover();
+      return;
+    }
+    const solid = hit.object;
+    const bodyId = solid.userData.itemId;
+    solid.updateMatrixWorld(true);
+    const sig = solid.matrixWorld.elements
+      .map((e) => Math.round(e * 1e3))
+      .join(",");
+    if (
+      !projectHoverCache ||
+      projectHoverCache.bodyId !== bodyId ||
+      projectHoverCache.sig !== sig
+    ) {
+      const built = bodyEdgeGraph(solid);
+      projectHoverCache = {
+        bodyId,
+        sig,
+        chains: built ? decomposeFeatureEdges(built.graph) : [],
+      };
+    }
+    controls.clearProjectHover();
+    if (projectHoverCache.chains.length === 0) return;
+    const group = new THREE.Group();
+    for (const chain of projectHoverCache.chains) {
+      const geo = new THREE.BufferGeometry().setFromPoints(
+        chain.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
+      );
+      const line = new THREE.Line(
+        geo,
+        new THREE.LineBasicMaterial({
+          color: 0x37b8a0,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.95,
+        }),
+      );
+      line.renderOrder = 1012;
+      group.add(line);
+    }
+    scene.add(group);
+    projectHoverGroup = group;
+  };
+
   // Snapshot / restore the camera view (used by the Objects-list Solo button so
   // toggling solo off returns to where the user was).
   controls.captureView = () => {

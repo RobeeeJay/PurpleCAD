@@ -314,11 +314,18 @@ export default function SketchOverlays({
         activeSketchTool !== "mirror" &&
         activeSketchTool !== "circularPattern" &&
         activeSketchTool !== "rectangularPattern" &&
+        activeSketchTool !== "project" &&
         sketchDrawPhase !== "second" && (
           <div className="sketch-placement-hint">
             Click to set the start point
           </div>
         )}
+      {activeSketchTool === "project" && (
+        <div className="sketch-placement-hint">
+          Click a 3D edge to project its connected edges, or drag a box to
+          project everything inside · Esc to cancel
+        </div>
+      )}
       {sketchMode && activeSketchTool === "mirror" && sketchMirrorState && (
         <>
           {sketchMirrorState.lineIdx == null ? (

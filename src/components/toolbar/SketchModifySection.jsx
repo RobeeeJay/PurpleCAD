@@ -35,7 +35,9 @@ const SketchModifySection = () => {
   // Project: click a 3D edge to drop it onto the sketch plane as geometry linked
   // by a projection constraint (immovable until released).
   const handleProject = () => {
-    setActiveSketchTool(activeSketchTool === "project" ? null : "project");
+    const turningOff = activeSketchTool === "project";
+    setActiveSketchTool(turningOff ? null : "project");
+    if (turningOff) useStore.getState()._cameraControls?.clearProjectHover?.();
   };
 
   // Release: strip the projection constraint from the selected projected shape's
