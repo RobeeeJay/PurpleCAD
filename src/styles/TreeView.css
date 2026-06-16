@@ -76,7 +76,7 @@
 .tree-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   padding: 6px 8px;
   cursor: pointer;
   transition: background-color 0.2s ease;
@@ -112,7 +112,7 @@
 }
 
 .expand-btn {
-  width: 20px;
+  width: 16px;
   height: 20px;
   padding: 0;
   background: none;
@@ -132,7 +132,7 @@
 }
 
 .expand-spacer {
-  width: 20px;
+  width: 16px;
   flex-shrink: 0;
 }
 
@@ -193,6 +193,12 @@
 
 .tree-item.folder-item .tree-label {
   font-weight: var(--font-weight-semibold);
+}
+
+/* The solo button shares the icon-column gutter, so match the expand column
+   width to keep folder and item icons aligned. */
+.tree-action-btn.solo-btn {
+  width: 16px;
 }
 
 .solo-btn:hover {

@@ -490,7 +490,7 @@ const TreeViewItem = ({
         ]
           .filter(Boolean)
           .join(" ")}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        style={{ paddingLeft: `${depth * 14 + 2}px` }}
         draggable={dragEnabled && !editing}
         onDragStart={
           dragEnabled ? (e) => onDragStart(e, node.id, node._kind) : undefined
