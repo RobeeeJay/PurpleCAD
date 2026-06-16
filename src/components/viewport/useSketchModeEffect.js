@@ -7,7 +7,7 @@
 // rebuild scene objects so any downstream extrudes pick up the latest
 // sketch shapes.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import {
   buildSceneObjects,
@@ -530,7 +530,11 @@ export function useSketchModeEffect({
   // ── Live re-projection ────────────────────────────────────────────────────
   // Projected sketch geometry tracks its source: re-derive each projection
   // group from its stored source-local polyline through the source's current
-  // world transform, and write back only when the result actually moved.
+  // world transform.  Gated on a per-group source-transform signature so it ONLY
+  // works when the source actually moved — this both avoids needless refits on
+  // every unrelated sketch edit AND stops the effect from re-triggering on its
+  // own writes (which would freeze the app).
+  const projXformRef = useRef(new Map());
   useEffect(() => {
     if (!sketchModeRef.current) return;
     const sketch = itemsRef.current.find(
@@ -546,11 +550,17 @@ export function useSketchModeEffect({
       groups.get(key).push(s);
     });
     if (groups.size === 0) return;
+    const xformSig = (m) =>
+      `${sketchMesh.matrixWorld.elements.map((e) => Math.round(e * 1e3)).join(",")}|${m.elements.map((e) => Math.round(e * 1e3)).join(",")}`;
     groups.forEach((grpShapes, key) => {
       const proj = grpShapes[0].projection;
       const source = objectsRef.current[proj.sourceId];
       if (!source || !proj.localPolyline) return;
       source.updateMatrixWorld(true);
+      sketchMesh.updateMatrixWorld(true);
+      const sig = xformSig(source.matrixWorld);
+      if (projXformRef.current.get(key) === sig) return; // source hasn't moved
+      projXformRef.current.set(key, sig);
       const mw = source.matrixWorld;
       const worldPoly = proj.localPolyline.map(([x, y, z]) => {
         const v = new THREE.Vector3(x, y, z).applyMatrix4(mw);

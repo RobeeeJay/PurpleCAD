@@ -787,11 +787,15 @@ export function attachCameraControls(ctx) {
       const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
       return it && it.type !== "sketch";
     });
-  // World feature-edge graph of a solid mesh, plus its world matrix.
+  // World feature-edge graph of a solid mesh, plus its world matrix.  Bails on a
+  // mesh too dense to graph cheaply (an imported/high-res body would freeze).
+  const MAX_PROJECT_TRIS = 40000;
   const bodyEdgeGraph = (solid) => {
     solid.updateMatrixWorld(true);
     const posAttr = solid.geometry?.getAttribute("position");
     if (!posAttr) return null;
+    const idx = solid.geometry.getIndex();
+    if ((idx ? idx.count : posAttr.count) / 3 > MAX_PROJECT_TRIS) return null;
     const mw = solid.matrixWorld;
     const tmp = new THREE.Vector3();
     const positions = new Array(posAttr.count * 3);
@@ -835,6 +839,41 @@ export function attachCameraControls(ctx) {
     return out;
   };
 
+  // Guard against pathological bodies (a dense/faceted mesh can have thousands
+  // of feature edges) — projecting that many would freeze the app.
+  const MAX_PROJECTED = 300;
+  // A solid's screen-space bounding box (or null), for cheaply skipping bodies
+  // that can't overlap a marquee before building their (possibly huge) graph.
+  const solidScreenBox = (solid, rect) => {
+    const g = solid.geometry;
+    if (!g) return null;
+    if (!g.boundingBox) g.computeBoundingBox();
+    const bb = g.boundingBox;
+    if (!bb) return null;
+    solid.updateMatrixWorld(true);
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < 8; i++) {
+      v.set(
+        i & 1 ? bb.max.x : bb.min.x,
+        i & 2 ? bb.max.y : bb.min.y,
+        i & 4 ? bb.max.z : bb.min.z,
+      )
+        .applyMatrix4(solid.matrixWorld)
+        .project(cameraRef.current);
+      const sx = ((v.x + 1) / 2) * rect.width + rect.left;
+      const sy = ((-v.y + 1) / 2) * rect.height + rect.top;
+      minX = Math.min(minX, sx);
+      maxX = Math.max(maxX, sx);
+      minY = Math.min(minY, sy);
+      maxY = Math.max(maxY, sy);
+    }
+    return { minX, maxX, minY, maxY };
+  };
+
   // Click: project every connected edge of the body under the cursor.
   controls.projectEdgeAt = (screenX, screenY) => {
     const store = useStore.getState();
@@ -855,7 +894,10 @@ export function attachCameraControls(ctx) {
       return;
     }
     const built = bodyEdgeGraph(hit.object);
-    if (!built) return;
+    if (!built) {
+      store.showNotification?.("That body is too dense to project edges from.");
+      return;
+    }
     // The clicked edge's connected component → its smooth chains.  (A body's
     // feature edges are one component, so this is "all connected lines".)
     let chains = decomposeFeatureEdges(built.graph);
@@ -869,6 +911,12 @@ export function attachCameraControls(ctx) {
     );
     if (shapes.length === 0) {
       store.showNotification?.("No projectable edges there.");
+      return;
+    }
+    if (shapes.length > MAX_PROJECTED) {
+      store.showNotification?.(
+        "That body has too many edges to project at once.",
+      );
       return;
     }
     store.addSketchShapes(ctx.sketch.id, shapes);
@@ -892,9 +940,18 @@ export function attachCameraControls(ctx) {
       return sx >= minX && sx <= maxX && sy >= minY && sy <= maxY;
     };
     const allShapes = [];
-    projectSolidMeshes().forEach((solid) => {
+    let aborted = false;
+    for (const solid of projectSolidMeshes()) {
+      // Skip bodies whose screen bbox can't overlap the marquee, so a dense mesh
+      // off to the side isn't graphed at all.
+      const sb = solidScreenBox(solid, rect);
+      if (
+        sb &&
+        (sb.maxX < minX || sb.minX > maxX || sb.maxY < minY || sb.minY > maxY)
+      )
+        continue;
       const built = bodyEdgeGraph(solid);
-      if (!built) return;
+      if (!built) continue;
       const chains = decomposeFeatureEdges(built.graph).filter((chain) =>
         inBox(chain[Math.floor(chain.length / 2)]),
       );
@@ -907,7 +964,17 @@ export function attachCameraControls(ctx) {
             chains,
           ),
         );
-    });
+      if (allShapes.length > MAX_PROJECTED) {
+        aborted = true;
+        break;
+      }
+    }
+    if (aborted) {
+      store.showNotification?.(
+        "Too many edges in the box — select a smaller region.",
+      );
+      return;
+    }
     if (allShapes.length === 0) {
       store.showNotification?.("No edges inside the box.");
       return;
