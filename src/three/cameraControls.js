@@ -13,6 +13,7 @@ import {
   decomposeFeatureEdges,
   worldPolylineToLocal2D,
   fitProjectedShapes,
+  dedupProjectedShapes,
 } from "./sketchProjection.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
@@ -903,11 +904,13 @@ export function attachCameraControls(ctx) {
     let chains = decomposeFeatureEdges(built.graph);
     const nearest = edgePolylineNear(built.graph, hit.point);
     if (!chains.length && nearest) chains = [nearest];
-    const shapes = chainsToShapes(
-      hit.object.userData.itemId,
-      built.mw,
-      ctx.sketchMesh,
-      chains,
+    const shapes = dedupProjectedShapes(
+      chainsToShapes(
+        hit.object.userData.itemId,
+        built.mw,
+        ctx.sketchMesh,
+        chains,
+      ),
     );
     if (shapes.length === 0) {
       store.showNotification?.("No projectable edges there.");
@@ -975,11 +978,12 @@ export function attachCameraControls(ctx) {
       );
       return;
     }
-    if (allShapes.length === 0) {
+    const deduped = dedupProjectedShapes(allShapes);
+    if (deduped.length === 0) {
       store.showNotification?.("No edges inside the box.");
       return;
     }
-    store.addSketchShapes(ctx.sketch.id, allShapes);
+    store.addSketchShapes(ctx.sketch.id, deduped);
   };
 
   // Snapshot / restore the camera view (used by the Objects-list Solo button so

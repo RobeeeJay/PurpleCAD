@@ -5,6 +5,7 @@ import {
   featureEdgeGraph,
   edgePolylineNear,
   decomposeFeatureEdges,
+  dedupProjectedShapes,
   worldPolylineToLocal2D,
 } from "../sketchProjection.js";
 
@@ -83,6 +84,23 @@ describe("decomposeFeatureEdges", () => {
       const len = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
       expect(len).toBeCloseTo(2, 5);
     }
+  });
+});
+
+describe("dedupProjectedShapes", () => {
+  it("drops coincident (either-orientation) lines, zero-length lines, and dup arcs", () => {
+    const shapes = [
+      { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 },
+      { type: "line", x1: 4, y1: 0, x2: 0, y2: 0 }, // reverse → coincident
+      { type: "line", x1: 2, y1: 2, x2: 2, y2: 2 }, // zero length
+      { type: "line", x1: 0, y1: 0, x2: 0, y2: 4 }, // distinct
+      { type: "circle", cx: 1, cy: 1, r: 3 },
+      { type: "circle", cx: 1, cy: 1, r: 3 }, // dup
+    ];
+    const out = dedupProjectedShapes(shapes);
+    expect(out).toHaveLength(3); // one of the coincident lines, the distinct line, one circle
+    expect(out.filter((s) => s.type === "line")).toHaveLength(2);
+    expect(out.filter((s) => s.type === "circle")).toHaveLength(1);
   });
 });
 

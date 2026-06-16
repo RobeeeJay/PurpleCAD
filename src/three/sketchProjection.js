@@ -221,6 +221,40 @@ export function decomposeFeatureEdges(graph) {
   return chains.filter((c) => c.length >= 2);
 }
 
+// Drop near-zero-length lines and duplicate/coincident shapes from a projected
+// set.  Projecting a body's whole wireframe onto a parallel plane collapses
+// front/back edges onto each other (and edges perpendicular to the plane onto
+// points); leaving those in makes region detection degenerate.  Keeps the first
+// of each, so the projection reads as a clean outline.
+export function dedupProjectedShapes(shapes, eps = 1e-3) {
+  const r = (n) => Math.round((n ?? 0) / eps);
+  const seen = new Set();
+  const out = [];
+  for (const s of shapes) {
+    let sig;
+    if (s.type === "line") {
+      const d = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+      if (d < eps) continue; // collapsed to (near) a point
+      const a = [r(s.x1), r(s.y1)];
+      const b = [r(s.x2), r(s.y2)];
+      // Undirected: order the endpoints so A→B and B→A dedupe together.
+      const [p, q] =
+        a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]) ? [a, b] : [b, a];
+      sig = `l${p[0]},${p[1]},${q[0]},${q[1]}`;
+    } else if (s.type === "circle") {
+      sig = `c${r(s.cx)},${r(s.cy)},${r(s.r)}`;
+    } else if (s.type === "arc") {
+      sig = `a${r(s.cx)},${r(s.cy)},${r(s.r)},${r(s.startAngle)},${r(s.endAngle)}`;
+    } else {
+      sig = JSON.stringify(s);
+    }
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push(s);
+  }
+  return out;
+}
+
 // Drop world points perpendicular onto the sketch plane, then express them in
 // the sketch's local 2D frame.  origin = sketch.position, quat = sketch
 // orientation (its +Z is the plane normal).
