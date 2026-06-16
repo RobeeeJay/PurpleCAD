@@ -81,6 +81,8 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
         scale: { x: 1, y: 1, z: 1 },
         rotation: { x: 0, y: 0, z: 0 },
         geometryData: result.geometryData,
+        // A cut replaces the target, so inherit the target's material.
+        ...(target.material && { material: target.material }),
         regenerator: {
           kind: "boolean",
           op: "difference",
@@ -121,6 +123,9 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       .filter(Boolean);
     const inputs = [...extrudes, ...solids];
     if (inputs.length < 2) return;
+    // A boss adds to an existing solid, so prefer that solid's material; for a
+    // pure multi-extrude union fall back to the first extrude's.
+    const unionMaterial = (solids[0] ?? extrudes[0])?.material;
     const precision = activePrecision(freshStore);
     const result = await performCsg({
       selectedItems: inputs,
@@ -138,6 +143,7 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       scale: { x: 1, y: 1, z: 1 },
       rotation: { x: 0, y: 0, z: 0 },
       geometryData: result.geometryData,
+      ...(unionMaterial && { material: unionMaterial }),
       regenerator: {
         kind: "boolean",
         op: "union",

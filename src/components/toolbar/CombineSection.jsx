@@ -28,6 +28,10 @@ const CombineSection = ({ bare = false }) => {
   const handleCsg = async (operation) => {
     if (!canCsg) return;
     const selectedItems = selectedEligible;
+    // The result inherits the primary (first-selected) object's material — for a
+    // difference that's the object being cut from; for union/intersection it's
+    // the first picked.  Omitted when the primary uses the default material.
+    const primaryMaterial = selectedItems[0]?.material;
 
     try {
       if (selectedItems.some(isImportedMesh)) {
@@ -61,6 +65,7 @@ const CombineSection = ({ bare = false }) => {
           scale: { x: 1, y: 1, z: 1 },
           rotation: { x: 0, y: 0, z: 0 },
           geometryData: result.geometryData,
+          ...(primaryMaterial && { material: primaryMaterial }),
         });
         consumeItems(selectedItems.map((i) => i.id));
         return;
@@ -100,6 +105,7 @@ const CombineSection = ({ bare = false }) => {
         scale: { x: 1, y: 1, z: 1 },
         rotation: { x: 0, y: 0, z: 0 },
         geometryData: result.geometryData,
+        ...(primaryMaterial && { material: primaryMaterial }),
         // Recipe for re-running this boolean at a different resolution so
         // toggling the preview/print setting updates the result.  Records
         // input item ids + the operation; the regenerate pass looks them
