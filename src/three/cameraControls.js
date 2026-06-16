@@ -707,6 +707,46 @@ export function attachCameraControls(ctx) {
       up: cameraRef.current.up.clone(),
     };
   };
+  // Tween the camera to frame a single object (its world bounding box), keeping
+  // the current view direction.  Used by Solo so the soloed object fills the
+  // view.
+  controls.frameObject = (itemId) => {
+    const mesh = objectsRef.current?.[itemId];
+    const camera = cameraRef.current;
+    if (!mesh || !camera) return;
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    if (box.isEmpty()) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(
+      box.getBoundingSphere(new THREE.Sphere()).radius,
+      0.001,
+    );
+    // Preserve the current orbit direction (camera → target), just change how
+    // far back the camera sits so the bbox sphere fits the frustum.
+    const dir = camera.position.clone().sub(targetRef.current);
+    if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1);
+    dir.normalize();
+    let dist;
+    if (camera.isPerspectiveCamera) {
+      const vFov = (camera.fov * Math.PI) / 180;
+      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (camera.aspect || 1));
+      dist = (radius / Math.sin(Math.min(vFov, hFov) / 2)) * 1.2;
+    } else {
+      dist = radius * 3;
+    }
+    cameraAnimRef.current = {
+      startPos: camera.position.clone(),
+      endPos: center.clone().add(dir.multiplyScalar(dist)),
+      startTarget: targetRef.current.clone(),
+      endTarget: center.clone(),
+      startUp: camera.up.clone(),
+      endUp: camera.up.clone(),
+      startTime: Date.now(),
+      duration: 400,
+    };
+  };
+
   controls.restoreView = (saved) => {
     if (!saved || !cameraRef.current || !cameraControlsRef.current) return;
     const camera = cameraRef.current;

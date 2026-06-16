@@ -109,19 +109,20 @@ const buildRenderScene = (objectsRef, itemsRef) => {
   const scene = new THREE.Scene();
   const items = itemsRef.current;
   const defaultMaterial = useStore.getState().defaultMaterial;
+  const soloId = useStore.getState().soloItemId;
 
   let minY = Infinity;
   Object.values(objectsRef.current).forEach((mesh) => {
     const item = items.find((i) => i.id === mesh.userData.itemId);
-    // Sketches and reference Planes are construction aids — exclude them from
-    // the traced scene (along with hidden items).
-    if (
-      !item ||
-      item.type === "sketch" ||
-      item.type === "plane" ||
-      item.visible === false
-    )
+    // Sketches and reference Planes are construction aids — always excluded.
+    if (!item || item.type === "sketch" || item.type === "plane") return;
+    // Solo: trace ONLY the soloed object (even if it's marked hidden);
+    // otherwise exclude hidden items as usual.
+    if (soloId != null) {
+      if (item.id !== soloId) return;
+    } else if (item.visible === false) {
       return;
+    }
     const geometry = normalizeGeometry(renderGeometryFor(item, mesh));
     const m = new THREE.Mesh(
       geometry,

@@ -787,7 +787,7 @@ export function useSceneSync({
     return () => {
       cancelled = true;
     };
-  }, [pathTraceView, items, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pathTraceView, items, variables, defaultMaterial, soloItemId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stop the path tracer's render loop if the viewport unmounts mid-render.
   useEffect(

@@ -409,9 +409,13 @@ const TreeViewItem = ({
       if (state.soloView) cc?.restoreView?.(state.soloView);
       clearItemSolo();
     } else if (state.soloItemId == null) {
+      // First solo: remember where we are, then frame the soloed object.
       setItemSolo(node.id, cc?.captureView?.() ?? null);
+      cc?.frameObject?.(node.id);
     } else {
+      // Switching solo: keep the original snapshot, frame the new object.
       switchItemSolo(node.id);
+      cc?.frameObject?.(node.id);
     }
   };
 
