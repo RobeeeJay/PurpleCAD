@@ -392,3 +392,175 @@ export const FilletIcon = () => (
     />
   </svg>
 );
+
+export const PlaneIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <polygon
+      points="3,12 13,6 21,12 11,18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <line
+      x1="12"
+      y1="12"
+      x2="12"
+      y2="21"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeDasharray="2 2"
+    />
+  </svg>
+);
+
+export const RevolveIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <line
+      x1="5"
+      y1="2"
+      x2="5"
+      y2="22"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeDasharray="2 2"
+    />
+    <rect
+      x="9"
+      y="8"
+      width="4"
+      height="8"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <path
+      d="M9 8 C 17 8, 21 10, 21 12 C 21 14, 17 16, 13 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+export const PipeIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <path
+      d="M4 20 L4 9 C4 6, 6 4, 9 4 L20 4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeDasharray="2 2"
+      strokeLinecap="round"
+    />
+    <rect
+      x="1.5"
+      y="17"
+      width="5"
+      height="5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+  </svg>
+);
+
+export const LoftIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <rect
+      x="9"
+      y="3"
+      width="6"
+      height="4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <rect
+      x="4"
+      y="17"
+      width="16"
+      height="4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <line
+      x1="9"
+      y1="7"
+      x2="4"
+      y2="17"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <line
+      x1="15"
+      y1="7"
+      x2="20"
+      y2="17"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+  </svg>
+);
+
+export const MirrorIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <line
+      x1="12"
+      y1="2"
+      x2="12"
+      y2="22"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeDasharray="2 2"
+    />
+    <polygon
+      points="4,7 10,5 10,17 4,19"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <polygon
+      points="20,7 14,5 14,17 20,19"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+export const CircularPatternIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <circle
+      cx="12"
+      cy="12"
+      r="8"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeDasharray="2 2"
+    />
+    <rect x="10.5" y="2.5" width="3" height="3" fill="currentColor" />
+    <rect x="18.5" y="10.5" width="3" height="3" fill="currentColor" />
+    <rect x="10.5" y="18.5" width="3" height="3" fill="currentColor" />
+    <rect x="2.5" y="10.5" width="3" height="3" fill="currentColor" />
+  </svg>
+);
+
+export const RectangularPatternIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <rect x="3" y="3" width="4" height="4" fill="currentColor" />
+    <rect x="10" y="3" width="4" height="4" fill="currentColor" />
+    <rect x="17" y="3" width="4" height="4" fill="currentColor" />
+    <rect x="3" y="10" width="4" height="4" fill="currentColor" />
+    <rect x="10" y="10" width="4" height="4" fill="currentColor" />
+    <rect x="17" y="10" width="4" height="4" fill="currentColor" />
+    <rect x="3" y="17" width="4" height="4" fill="currentColor" />
+    <rect x="10" y="17" width="4" height="4" fill="currentColor" />
+    <rect x="17" y="17" width="4" height="4" fill="currentColor" />
+  </svg>
+);

@@ -20,6 +20,13 @@ import {
   SplitIcon,
   ChamferIcon,
   FilletIcon,
+  PlaneIcon,
+  RevolveIcon,
+  PipeIcon,
+  LoftIcon,
+  MirrorIcon,
+  CircularPatternIcon,
+  RectangularPatternIcon,
 } from "./toolbar/timelineIcons.jsx";
 import "../styles/Timeline.css";
 
@@ -84,6 +91,20 @@ const CREATE_ICONS = {
   torus: TorusIcon,
   sketch: SketchPlaneIcon,
   extrude: ExtrudeIcon,
+  plane: PlaneIcon,
+};
+
+// Sweep / pattern csg items carry a regenerator.kind (no boolean `.op`); map
+// those to the tool icon that created them.
+const PATTERN3D_ICONS = {
+  mirror: MirrorIcon,
+  circular: CircularPatternIcon,
+  rectangular: RectangularPatternIcon,
+};
+const REGEN_KIND_ICONS = {
+  revolve: RevolveIcon,
+  pipe: PipeIcon,
+  loft: LoftIcon,
 };
 
 const CSG_ICONS = {
@@ -103,7 +124,12 @@ const entryIcon = (entry) => {
   if (inst?.type === "create") {
     const item = inst.item;
     if (item?.type === "csg") {
-      const Icon = CSG_ICONS[item.regenerator?.op];
+      const r = item.regenerator;
+      const KindIcon =
+        REGEN_KIND_ICONS[r?.kind] ||
+        (r?.kind === "pattern3d" ? PATTERN3D_ICONS[r.patternType] : null);
+      if (KindIcon) return <KindIcon />;
+      const Icon = CSG_ICONS[r?.op];
       if (Icon) return <Icon />;
     }
     const Icon = CREATE_ICONS[item?.type];
