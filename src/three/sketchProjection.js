@@ -12,11 +12,11 @@ const vKey = (x, y, z) =>
 // boundary edge) as a vertex-key adjacency graph.  positions/indices are flat
 // arrays already in WORLD space.  The FULL graph is always built so corner
 // vertices keep their true degree (decomposition must break edges there).  When
-// `planeNormal` (the sketch plane's world normal) is given, front-facing edges —
-// those with at least one adjacent face pointing toward the viewer — are
-// recorded in `frontEdges`; decomposeFeatureEdges then drops the back-only
-// chains so a body's hidden back edges aren't projected.
-// Returns { nodes, adj, segments, frontEdges:Set|null }.
+// `planeNormal` (the sketch plane's world normal) is given, the SILHOUETTE edges
+// — boundary edges, or edges between a front- and a back-facing face — are
+// recorded in `silhouetteEdges`; decomposeFeatureEdges keeps only those chains,
+// so a body projects as its outer outline (no internal or hidden edges).
+// Returns { nodes, adj, segments, silhouetteEdges:Set|null }.
 export function featureEdgeGraph(
   positions,
   indices,
@@ -78,12 +78,24 @@ export function featureEdgeGraph(
   const cosSharp = Math.cos(sharpAngleRad);
   const pn = planeNormal;
   // The FULL feature-edge graph is built (so corner vertices keep their true
-  // degree and decomposition breaks edges there).  front-facing is recorded
-  // per edge instead — decomposeFeatureEdges then drops the back-only chains.
-  const frontFacing = (e) =>
-    !pn || e.normals.some((n) => n.x * pn.x + n.y * pn.y + n.z * pn.z > 1e-4);
+  // degree and decomposition breaks edges there).  Silhouette membership is
+  // recorded per edge — an outline edge is a boundary edge, or one between a
+  // front-facing and a non-front-facing face.  decomposeFeatureEdges keeps only
+  // the silhouette chains, so projecting a body yields just its outer outline
+  // (no internal/visible-interior edges).
+  const isSilhouette = (e) => {
+    if (!pn) return true;
+    if (e.normals.length === 1) return true; // boundary
+    let front = false,
+      back = false;
+    for (const n of e.normals) {
+      if (n.x * pn.x + n.y * pn.y + n.z * pn.z > 1e-6) front = true;
+      else back = true;
+    }
+    return front && back;
+  };
   const segments = [];
-  const frontEdges = pn ? new Set() : null;
+  const silhouetteEdges = pn ? new Set() : null;
   const ekey = (kp, kq) => (kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`);
   edges.forEach((e) => {
     let sharp = e.normals.length === 1; // boundary edge
@@ -96,10 +108,11 @@ export function featureEdgeGraph(
     if (sharp) {
       link(e.kp, e.kq);
       segments.push([e.kp, e.kq]);
-      if (frontEdges && frontFacing(e)) frontEdges.add(ekey(e.kp, e.kq));
+      if (silhouetteEdges && isSilhouette(e))
+        silhouetteEdges.add(ekey(e.kp, e.kq));
     }
   });
-  return { nodes, adj, segments, frontEdges };
+  return { nodes, adj, segments, silhouetteEdges };
 }
 
 // 60°-ish: continue a feature edge across a node only when the turn stays this
@@ -187,7 +200,7 @@ export function edgePolylineNear(graph, world) {
 // runs between junctions / sharp corners), so "project all connected edges"
 // yields one fitted shape per real edge.  Returns an array of world polylines.
 export function decomposeFeatureEdges(graph) {
-  const { nodes, adj, frontEdges } = graph;
+  const { nodes, adj, silhouetteEdges } = graph;
   const usedEdge = new Set();
   const ek = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
   const dirBetween = (k1, k2) => {
@@ -225,13 +238,13 @@ export function decomposeFeatureEdges(graph) {
     }
     return keys;
   };
-  // A chain is kept unless every one of its edges is back-facing (when a plane
-  // normal was supplied) — so hidden back edges are dropped, but corners stay
-  // split because the full graph kept their real junction degree.
+  // Keep a chain only if it has a silhouette (outline) edge — so internal and
+  // hidden edges are dropped, while corners stay split because the full graph
+  // kept their real junction degree.
   const keep = (keys) => {
-    if (!frontEdges) return true;
+    if (!silhouetteEdges) return true;
     for (let i = 0; i < keys.length - 1; i++)
-      if (frontEdges.has(ek(keys[i], keys[i + 1]))) return true;
+      if (silhouetteEdges.has(ek(keys[i], keys[i + 1]))) return true;
     return false;
   };
   const addChain = (start, next) => {
