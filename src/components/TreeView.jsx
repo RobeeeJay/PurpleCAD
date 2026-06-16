@@ -149,6 +149,29 @@ const ThreeDObjectIcon = () => (
   </svg>
 );
 
+// A reference Plane: a translucent blue parallelogram with a dashed normal,
+// matching the Plane toolbar button.
+const PlaneObjectIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24">
+    <polygon
+      points="3,12 13,6 21,12 11,18"
+      fill="rgba(68,136,255,0.28)"
+      stroke="#4488ff"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <line
+      x1="12"
+      y1="12"
+      x2="12"
+      y2="22"
+      stroke="#D4A33F"
+      strokeWidth="1.5"
+      strokeDasharray="2 2"
+    />
+  </svg>
+);
+
 const FolderIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24">
     <rect
@@ -369,8 +392,11 @@ const TreeViewItem = ({
     !isFolder && selectedId !== node.id && selectedIds.includes(node.id);
   const isHidden = !isFolder && node.visible === false;
 
-  const getIcon = (type) =>
-    type === "sketch" ? <SketchObjectIcon /> : <ThreeDObjectIcon />;
+  const getIcon = (type) => {
+    if (type === "sketch") return <SketchObjectIcon />;
+    if (type === "plane") return <PlaneObjectIcon />;
+    return <ThreeDObjectIcon />;
+  };
 
   const startRename = (e) => {
     e.stopPropagation();
