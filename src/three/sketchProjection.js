@@ -10,12 +10,13 @@ const vKey = (x, y, z) =>
 
 // Build the mesh's feature edges (a sharp dihedral between adjacent faces, or a
 // boundary edge) as a vertex-key adjacency graph.  positions/indices are flat
-// arrays already in WORLD space.  When `planeNormal` (the sketch plane's world
-// normal) is given, only FRONT-facing edges are kept — an edge with at least one
-// adjacent face pointing toward the viewer.  That drops a body's hidden back
-// edges, so a projected box reads as its visible outline + faces instead of a
-// doubled wireframe that subdivides the silhouette.
-// Returns { nodes: Map(key->{x,y,z}), adj: Map(key->Set(key)), segments }.
+// arrays already in WORLD space.  The FULL graph is always built so corner
+// vertices keep their true degree (decomposition must break edges there).  When
+// `planeNormal` (the sketch plane's world normal) is given, front-facing edges —
+// those with at least one adjacent face pointing toward the viewer — are
+// recorded in `frontEdges`; decomposeFeatureEdges then drops the back-only
+// chains so a body's hidden back edges aren't projected.
+// Returns { nodes, adj, segments, frontEdges:Set|null }.
 export function featureEdgeGraph(
   positions,
   indices,
@@ -76,9 +77,14 @@ export function featureEdgeGraph(
   };
   const cosSharp = Math.cos(sharpAngleRad);
   const pn = planeNormal;
+  // The FULL feature-edge graph is built (so corner vertices keep their true
+  // degree and decomposition breaks edges there).  front-facing is recorded
+  // per edge instead — decomposeFeatureEdges then drops the back-only chains.
   const frontFacing = (e) =>
     !pn || e.normals.some((n) => n.x * pn.x + n.y * pn.y + n.z * pn.z > 1e-4);
   const segments = [];
+  const frontEdges = pn ? new Set() : null;
+  const ekey = (kp, kq) => (kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`);
   edges.forEach((e) => {
     let sharp = e.normals.length === 1; // boundary edge
     for (let i = 0; i < e.normals.length && !sharp; i++)
@@ -87,12 +93,13 @@ export function featureEdgeGraph(
           b = e.normals[j];
         if (a.x * b.x + a.y * b.y + a.z * b.z < cosSharp) sharp = true;
       }
-    if (sharp && frontFacing(e)) {
+    if (sharp) {
       link(e.kp, e.kq);
       segments.push([e.kp, e.kq]);
+      if (frontEdges && frontFacing(e)) frontEdges.add(ekey(e.kp, e.kq));
     }
   });
-  return { nodes, adj, segments };
+  return { nodes, adj, segments, frontEdges };
 }
 
 // 60°-ish: continue a feature edge across a node only when the turn stays this
@@ -180,7 +187,7 @@ export function edgePolylineNear(graph, world) {
 // runs between junctions / sharp corners), so "project all connected edges"
 // yields one fitted shape per real edge.  Returns an array of world polylines.
 export function decomposeFeatureEdges(graph) {
-  const { nodes, adj } = graph;
+  const { nodes, adj, frontEdges } = graph;
   const usedEdge = new Set();
   const ek = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
   const dirBetween = (k1, k2) => {
@@ -216,21 +223,33 @@ export function decomposeFeatureEdges(graph) {
       cur = nxt;
       inDir = outDir;
     }
-    return keys.map((k) => nodes.get(k));
+    return keys;
+  };
+  // A chain is kept unless every one of its edges is back-facing (when a plane
+  // normal was supplied) — so hidden back edges are dropped, but corners stay
+  // split because the full graph kept their real junction degree.
+  const keep = (keys) => {
+    if (!frontEdges) return true;
+    for (let i = 0; i < keys.length - 1; i++)
+      if (frontEdges.has(ek(keys[i], keys[i + 1]))) return true;
+    return false;
+  };
+  const addChain = (start, next) => {
+    const keys = walk(start, next);
+    if (keys.length >= 2 && keep(keys))
+      chains.push(keys.map((k) => nodes.get(k)));
   };
   // Chains anchored at junction nodes first…
   nodes.forEach((_, k) => {
     const deg = adj.get(k)?.size ?? 0;
     if (deg === 2 || deg === 0) return;
-    for (const nb of adj.get(k))
-      if (!usedEdge.has(ek(k, nb))) chains.push(walk(k, nb));
+    for (const nb of adj.get(k)) if (!usedEdge.has(ek(k, nb))) addChain(k, nb);
   });
   // …then any remaining all-degree-2 closed loops (e.g. a cylinder rim).
   adj.forEach((nbrs, k) => {
-    for (const nb of nbrs)
-      if (!usedEdge.has(ek(k, nb))) chains.push(walk(k, nb));
+    for (const nb of nbrs) if (!usedEdge.has(ek(k, nb))) addChain(k, nb);
   });
-  return chains.filter((c) => c.length >= 2);
+  return chains;
 }
 
 // Drop near-zero-length lines and duplicate/coincident shapes from a projected
