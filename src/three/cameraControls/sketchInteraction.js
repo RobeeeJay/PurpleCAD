@@ -415,6 +415,45 @@ export function createSketchInteraction(
     }
   };
 
+  // The Project tool's marquee box — drawn in projection teal, no shape select.
+  const drawProjectMarquee = (screenX, screenY) => {
+    clearMarqueeRect();
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!sketchMesh || !marqueeStartScreen) return;
+    const p1 = screenToSketchLocal(
+      marqueeStartScreen.x,
+      marqueeStartScreen.y,
+      sketchMesh,
+    );
+    const p2 = screenToSketchLocal(screenX, screenY, sketchMesh);
+    if (!p1 || !p2) return;
+    const toW = (lx, ly) =>
+      new THREE.Vector3(lx, ly, 0.008)
+        .applyQuaternion(sketchMesh.quaternion)
+        .add(sketchMesh.position);
+    const corners = [
+      toW(p1.x, p1.y),
+      toW(p2.x, p1.y),
+      toW(p2.x, p2.y),
+      toW(p1.x, p2.y),
+      toW(p1.x, p1.y),
+    ];
+    marqueeRectObj = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(corners),
+      new THREE.LineBasicMaterial({
+        color: 0x37b8a0,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.8,
+      }),
+    );
+    marqueeRectObj.renderOrder = 1010;
+    scene.add(marqueeRectObj);
+  };
+
   const updateMarquee = (screenX, screenY) => {
     clearMarqueeRect();
     const selItem = itemsRef.current.find(
@@ -1415,6 +1454,14 @@ export function createSketchInteraction(
       controls.mouseY = e.clientY;
       return true;
     }
+    // Project: arm a marquee so a drag box-selects edges, a click projects all
+    // connected edges of the body under the cursor.
+    if (activeSketchToolRef.current === "project") {
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      marqueeStartScreen = { x: e.clientX, y: e.clientY };
+      return true;
+    }
     if (activeSketchToolRef.current) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
@@ -1555,6 +1602,19 @@ export function createSketchInteraction(
     // While the long-press element list is open, ignore canvas motion — no
     // marquee, no hover repaint underneath it.
     if (longPressMenuOpen) return true;
+    if (activeSketchToolRef.current === "project") {
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      if (marqueeStartScreen) {
+        const dx = e.clientX - marqueeStartScreen.x;
+        const dy = e.clientY - marqueeStartScreen.y;
+        if (Math.hypot(dx, dy) > 5) {
+          marqueeActive = true;
+          drawProjectMarquee(e.clientX, e.clientY);
+        }
+      }
+      return true;
+    }
     if (
       activeSketchToolRef.current === "mirror" ||
       activeSketchToolRef.current === "circularPattern" ||
@@ -1682,7 +1742,19 @@ export function createSketchInteraction(
     if (activeSketchToolRef.current === "project") {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
-      if (Math.hypot(dx, dy) < 5) controls.projectEdgeAt(e.clientX, e.clientY);
+      if (Math.hypot(dx, dy) >= 5 && marqueeStartScreen) {
+        controls.projectEdgesInBox({
+          x1: marqueeStartScreen.x,
+          y1: marqueeStartScreen.y,
+          x2: e.clientX,
+          y2: e.clientY,
+        });
+      } else {
+        controls.projectEdgeAt(e.clientX, e.clientY);
+      }
+      clearMarqueeRect();
+      marqueeActive = false;
+      marqueeStartScreen = null;
       return true;
     }
     if (activeSketchToolRef.current === "mirror") {

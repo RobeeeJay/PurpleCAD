@@ -4,6 +4,7 @@ import {
   fitProjectedShapes,
   featureEdgeGraph,
   edgePolylineNear,
+  decomposeFeatureEdges,
   worldPolylineToLocal2D,
 } from "../sketchProjection.js";
 
@@ -64,6 +65,23 @@ describe("featureEdgeGraph + edgePolylineNear", () => {
     for (const p of poly) {
       expect(p.y).toBeCloseTo(1, 5);
       expect(p.z).toBeCloseTo(1, 5);
+    }
+  });
+});
+
+describe("decomposeFeatureEdges", () => {
+  it("splits a box into its 12 edges", () => {
+    const geo = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();
+    const pos = Array.from(geo.getAttribute("position").array);
+    const graph = featureEdgeGraph(pos, null);
+    const chains = decomposeFeatureEdges(graph);
+    expect(chains).toHaveLength(12);
+    // Each chain is a straight box edge of length 2.
+    for (const c of chains) {
+      const a = c[0],
+        b = c[c.length - 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+      expect(len).toBeCloseTo(2, 5);
     }
   });
 });

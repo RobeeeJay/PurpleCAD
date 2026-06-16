@@ -164,6 +164,63 @@ export function edgePolylineNear(graph, world) {
   return keys.map((k) => nodes.get(k));
 }
 
+// Decompose the whole feature-edge graph into ordered chains (maximal smooth
+// runs between junctions / sharp corners), so "project all connected edges"
+// yields one fitted shape per real edge.  Returns an array of world polylines.
+export function decomposeFeatureEdges(graph) {
+  const { nodes, adj } = graph;
+  const usedEdge = new Set();
+  const ek = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const dirBetween = (k1, k2) => {
+    const a = nodes.get(k1),
+      b = nodes.get(k2);
+    const dx = b.x - a.x,
+      dy = b.y - a.y,
+      dz = b.z - a.z;
+    const l = Math.hypot(dx, dy, dz) || 1;
+    return { x: dx / l, y: dy / l, z: dz / l };
+  };
+  const chains = [];
+  const walk = (start, next) => {
+    const keys = [start, next];
+    usedEdge.add(ek(start, next));
+    let prev = start,
+      cur = next,
+      inDir = dirBetween(start, next);
+    for (;;) {
+      const nbrs = [...(adj.get(cur) || [])];
+      if (nbrs.length !== 2) break; // junction → end chain
+      const nxt = nbrs.find((k) => k !== prev);
+      if (nxt == null || usedEdge.has(ek(cur, nxt))) break; // closed loop
+      const outDir = dirBetween(cur, nxt);
+      if (
+        outDir.x * inDir.x + outDir.y * inDir.y + outDir.z * inDir.z <
+        STRAIGHT_DOT
+      )
+        break; // sharp corner → end chain
+      usedEdge.add(ek(cur, nxt));
+      keys.push(nxt);
+      prev = cur;
+      cur = nxt;
+      inDir = outDir;
+    }
+    return keys.map((k) => nodes.get(k));
+  };
+  // Chains anchored at junction nodes first…
+  nodes.forEach((_, k) => {
+    const deg = adj.get(k)?.size ?? 0;
+    if (deg === 2 || deg === 0) return;
+    for (const nb of adj.get(k))
+      if (!usedEdge.has(ek(k, nb))) chains.push(walk(k, nb));
+  });
+  // …then any remaining all-degree-2 closed loops (e.g. a cylinder rim).
+  adj.forEach((nbrs, k) => {
+    for (const nb of nbrs)
+      if (!usedEdge.has(ek(k, nb))) chains.push(walk(k, nb));
+  });
+  return chains.filter((c) => c.length >= 2);
+}
+
 // Drop world points perpendicular onto the sketch plane, then express them in
 // the sketch's local 2D frame.  origin = sketch.position, quat = sketch
 // orientation (its +Z is the plane normal).

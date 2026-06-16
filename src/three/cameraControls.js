@@ -10,6 +10,7 @@ import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
 import {
   featureEdgeGraph,
   edgePolylineNear,
+  decomposeFeatureEdges,
   worldPolylineToLocal2D,
   fitProjectedShapes,
 } from "./sketchProjection.js";
@@ -769,21 +770,77 @@ export function attachCameraControls(ctx) {
     controls.previewPlane(frame);
   };
 
-  // Project tool: project the 3D feature edge under the cursor onto the active
-  // sketch plane as sketch geometry, linked to its source by a projection
-  // constraint (so it tracks the source and is immovable until released).
-  controls.projectEdgeAt = (screenX, screenY) => {
-    const store = useStore.getState();
+  // ── Project tool ──────────────────────────────────────────────────────────
+  // Project 3D feature edges onto the active sketch plane as sketch geometry,
+  // each linked to its source by a projection constraint (tracks the source,
+  // immovable until released).  A click projects all connected edges of the
+  // body under the cursor; a marquee box projects every edge inside it.
+  const activeSketchForProject = () => {
     const sketch = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current && i.type === "sketch",
     );
     const sketchMesh = sketch ? objectsRef.current[sketch.id] : null;
-    if (!sketch || !sketchMesh) return;
-    const solids = Object.values(objectsRef.current).filter((m) => {
+    return sketch && sketchMesh ? { sketch, sketchMesh } : null;
+  };
+  const projectSolidMeshes = () =>
+    Object.values(objectsRef.current).filter((m) => {
       const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
       return it && it.type !== "sketch";
     });
-    // Solids are hidden in sketch mode; make them raycastable for this pick.
+  // World feature-edge graph of a solid mesh, plus its world matrix.
+  const bodyEdgeGraph = (solid) => {
+    solid.updateMatrixWorld(true);
+    const posAttr = solid.geometry?.getAttribute("position");
+    if (!posAttr) return null;
+    const mw = solid.matrixWorld;
+    const tmp = new THREE.Vector3();
+    const positions = new Array(posAttr.count * 3);
+    for (let i = 0; i < posAttr.count; i++) {
+      tmp.fromBufferAttribute(posAttr, i).applyMatrix4(mw);
+      positions[i * 3] = tmp.x;
+      positions[i * 3 + 1] = tmp.y;
+      positions[i * 3 + 2] = tmp.z;
+    }
+    const idxAttr = solid.geometry.getIndex();
+    const indices = idxAttr ? Array.from(idxAttr.array) : null;
+    return { graph: featureEdgeGraph(positions, indices), mw };
+  };
+  // Fit a list of world-polyline chains belonging to one source body and return
+  // their projected sketch shapes (each chain its own projection group).
+  const chainsToShapes = (sourceId, mw, sketchMesh, chains) => {
+    const invMw = new THREE.Matrix4().copy(mw).invert();
+    const out = [];
+    chains.forEach((chain) => {
+      const localPolyline = chain.map((p) => {
+        const v = new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(invMw);
+        return [v.x, v.y, v.z];
+      });
+      const pts2d = worldPolylineToLocal2D(
+        chain,
+        sketchMesh.position,
+        sketchMesh.quaternion,
+      );
+      const edgeKey = `${Date.now()}_${Math.round(Math.random() * 1e9)}`;
+      out.push(
+        ...fitProjectedShapes(pts2d, {
+          projection: {
+            sourceId,
+            edgeKey,
+            key: `${sourceId}:${edgeKey}`,
+            localPolyline,
+          },
+        }),
+      );
+    });
+    return out;
+  };
+
+  // Click: project every connected edge of the body under the cursor.
+  controls.projectEdgeAt = (screenX, screenY) => {
+    const store = useStore.getState();
+    const ctx = activeSketchForProject();
+    if (!ctx) return;
+    const solids = projectSolidMeshes();
     const prevVisible = solids.map((m) => m.visible);
     solids.forEach((m) => (m.visible = true));
     const rect = renderer.domElement.getBoundingClientRect();
@@ -794,58 +851,68 @@ export function attachCameraControls(ctx) {
     const hit = ray.intersectObjects(solids, false)[0];
     solids.forEach((m, i) => (m.visible = prevVisible[i]));
     if (!hit) {
-      store.showNotification?.("Hover a 3D edge to project.");
+      store.showNotification?.("Click a 3D edge to project.");
       return;
     }
-    const solid = hit.object;
-    solid.updateMatrixWorld(true);
-    const geo = solid.geometry;
-    const posAttr = geo.getAttribute("position");
-    if (!posAttr) return;
-    const mw = solid.matrixWorld;
-    const tmp = new THREE.Vector3();
-    const positions = new Array(posAttr.count * 3);
-    for (let i = 0; i < posAttr.count; i++) {
-      tmp.fromBufferAttribute(posAttr, i).applyMatrix4(mw);
-      positions[i * 3] = tmp.x;
-      positions[i * 3 + 1] = tmp.y;
-      positions[i * 3 + 2] = tmp.z;
-    }
-    const idxAttr = geo.getIndex();
-    const indices = idxAttr ? Array.from(idxAttr.array) : null;
-    const graph = featureEdgeGraph(positions, indices);
-    const worldPoly = edgePolylineNear(graph, hit.point);
-    if (!worldPoly || worldPoly.length < 2) {
-      store.showNotification?.("No projectable edge there.");
-      return;
-    }
-    // Store the polyline in the source's LOCAL frame so re-projection tracks the
-    // source through transforms (move / rotate / scale).
-    const invMw = new THREE.Matrix4().copy(mw).invert();
-    const localPolyline = worldPoly.map((p) => {
-      const v = new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(invMw);
-      return [v.x, v.y, v.z];
-    });
-    const pts2d = worldPolylineToLocal2D(
-      worldPoly,
-      sketchMesh.position,
-      sketchMesh.quaternion,
+    const built = bodyEdgeGraph(hit.object);
+    if (!built) return;
+    // The clicked edge's connected component → its smooth chains.  (A body's
+    // feature edges are one component, so this is "all connected lines".)
+    let chains = decomposeFeatureEdges(built.graph);
+    const nearest = edgePolylineNear(built.graph, hit.point);
+    if (!chains.length && nearest) chains = [nearest];
+    const shapes = chainsToShapes(
+      hit.object.userData.itemId,
+      built.mw,
+      ctx.sketchMesh,
+      chains,
     );
-    const sourceId = solid.userData.itemId;
-    const edgeKey = `${Date.now()}_${Math.round(Math.random() * 1e6)}`;
-    const shapes = fitProjectedShapes(pts2d, {
-      projection: {
-        sourceId,
-        edgeKey,
-        key: `${sourceId}:${edgeKey}`,
-        localPolyline,
-      },
-    });
     if (shapes.length === 0) {
-      store.showNotification?.("Couldn't project that edge.");
+      store.showNotification?.("No projectable edges there.");
       return;
     }
-    store.addSketchShapes(sketch.id, shapes);
+    store.addSketchShapes(ctx.sketch.id, shapes);
+  };
+
+  // Marquee: project every feature edge whose screen midpoint falls in the box.
+  controls.projectEdgesInBox = (box) => {
+    const store = useStore.getState();
+    const ctx = activeSketchForProject();
+    if (!ctx) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const minX = Math.min(box.x1, box.x2),
+      maxX = Math.max(box.x1, box.x2),
+      minY = Math.min(box.y1, box.y2),
+      maxY = Math.max(box.y1, box.y2);
+    const inBox = (p) => {
+      const ndc = new THREE.Vector3(p.x, p.y, p.z).project(cameraRef.current);
+      if (ndc.z > 1) return false;
+      const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
+      const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+      return sx >= minX && sx <= maxX && sy >= minY && sy <= maxY;
+    };
+    const allShapes = [];
+    projectSolidMeshes().forEach((solid) => {
+      const built = bodyEdgeGraph(solid);
+      if (!built) return;
+      const chains = decomposeFeatureEdges(built.graph).filter((chain) =>
+        inBox(chain[Math.floor(chain.length / 2)]),
+      );
+      if (chains.length)
+        allShapes.push(
+          ...chainsToShapes(
+            solid.userData.itemId,
+            built.mw,
+            ctx.sketchMesh,
+            chains,
+          ),
+        );
+    });
+    if (allShapes.length === 0) {
+      store.showNotification?.("No edges inside the box.");
+      return;
+    }
+    store.addSketchShapes(ctx.sketch.id, allShapes);
   };
 
   // Snapshot / restore the camera view (used by the Objects-list Solo button so
