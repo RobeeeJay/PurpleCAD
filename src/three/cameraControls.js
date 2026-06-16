@@ -1025,21 +1025,22 @@ export function attachCameraControls(ctx) {
     const sig = solid.matrixWorld.elements
       .map((e) => Math.round(e * 1e3))
       .join(",");
-    if (
-      !projectHoverCache ||
-      projectHoverCache.bodyId !== bodyId ||
-      projectHoverCache.sig !== sig
-    ) {
+    const bodyKey = `${bodyId}|${sig}`;
+    // The highlight sits on the (fixed) body, so only rebuild it when the hovered
+    // body changes — not on every mouse-move, which would churn the GPU buffers.
+    if (projectHoverGroup && projectHoverGroup.userData.bodyKey === bodyKey)
+      return;
+    if (!projectHoverCache || projectHoverCache.bodyKey !== bodyKey) {
       const built = bodyEdgeGraph(solid);
       projectHoverCache = {
-        bodyId,
-        sig,
+        bodyKey,
         chains: built ? decomposeFeatureEdges(built.graph) : [],
       };
     }
     controls.clearProjectHover();
     if (projectHoverCache.chains.length === 0) return;
     const group = new THREE.Group();
+    group.userData.bodyKey = bodyKey;
     for (const chain of projectHoverCache.chains) {
       const geo = new THREE.BufferGeometry().setFromPoints(
         chain.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
