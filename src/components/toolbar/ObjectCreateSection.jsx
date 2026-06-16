@@ -3,6 +3,7 @@ import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
 import SweepSection from "./SweepSection";
+import Pattern3dSection from "./Pattern3dSection";
 
 const ObjectCreateSection = () => {
   const addItem = useStore((s) => s.addItem);
@@ -419,6 +420,8 @@ const ObjectCreateSection = () => {
       </button>
       {/* Sketch→solid sweeps (Revolve / Pipe / Loft) live here in Create. */}
       <SweepSection bare />
+      {/* 3D Mirror / Circular / Rectangular patterns also create new objects. */}
+      <Pattern3dSection bare />
     </ToolbarSection>
   );
 };
