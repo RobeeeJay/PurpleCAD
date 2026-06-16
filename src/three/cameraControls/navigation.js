@@ -40,7 +40,12 @@ export function createNavigationHandlers(
             currentCamera.position.distanceTo(targetRef.current) *
             Math.tan((currentCamera.fov * Math.PI) / 360)) /
           rect.height
-        : (currentCamera.top - currentCamera.bottom) / rect.height;
+        : // Orthographic: the visible world height is (top - bottom) / zoom, so
+          // the world-per-pixel must divide by zoom — otherwise panning moves
+          // too far zoomed in and too little zoomed out.
+          (currentCamera.top - currentCamera.bottom) /
+          currentCamera.zoom /
+          rect.height;
       const panSpeed = worldPerPx * 1.2;
       const offset = new THREE.Vector3()
         .addScaledVector(right, e.deltaX * panSpeed)
@@ -81,7 +86,12 @@ export function createNavigationHandlers(
             currentCamera.position.distanceTo(targetRef.current) *
             Math.tan((currentCamera.fov * Math.PI) / 360)) /
           rect.height
-        : (currentCamera.top - currentCamera.bottom) / rect.height;
+        : // Orthographic: the visible world height is (top - bottom) / zoom, so
+          // the world-per-pixel must divide by zoom — otherwise panning moves
+          // too far zoomed in and too little zoomed out.
+          (currentCamera.top - currentCamera.bottom) /
+          currentCamera.zoom /
+          rect.height;
       const forward = new THREE.Vector3();
       currentCamera.getWorldDirection(forward);
       const right = new THREE.Vector3()
