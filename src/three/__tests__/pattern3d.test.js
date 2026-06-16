@@ -92,4 +92,22 @@ describe("pattern3dItem", () => {
     // x spans from the i=1 copy (7..9) to the i=2 copy (12..14) → width 7.
     expect(ext[0]).toBeCloseTo(7, 0);
   });
+
+  it("rectangular pattern tiles along Z (depth) too", async () => {
+    const res = await pattern3dItem({
+      patternType: "rectangular",
+      sourceId: 1,
+      params: { countX: 1, countY: 1, countZ: 3, dx: 0, dy: 0, dz: 5 },
+      allItems: [cube()],
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+    const { ext } = bbox(res.geometryData.positions);
+    // Clones only (original excluded): k=1 at z ∈ [4, 6] and k=2 at z ∈ [9, 11]
+    // → depth span 7.
+    expect(ext[2]).toBeCloseTo(7, 0);
+    // No X/Y spread (counts are 1).
+    expect(ext[0]).toBeCloseTo(2, 0);
+    expect(ext[1]).toBeCloseTo(2, 0);
+  });
 });

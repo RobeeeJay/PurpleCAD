@@ -1059,11 +1059,13 @@ function patternInstances(worldId, patternType, params) {
   } else if (patternType === "rectangular") {
     const cx = Math.max(1, Math.round(params.countX || 1));
     const cy = Math.max(1, Math.round(params.countY || 1));
+    const cz = Math.max(1, Math.round(params.countZ || 1));
     for (let i = 0; i < cx; i++)
-      for (let j = 0; j < cy; j++) {
-        if (i === 0 && j === 0) continue;
-        out.push(occ.transformShape(worldId, i * (params.dx || 0), j * (params.dy || 0), 0, 0, 0, 0));
-      }
+      for (let j = 0; j < cy; j++)
+        for (let k = 0; k < cz; k++) {
+          if (i === 0 && j === 0 && k === 0) continue;
+          out.push(occ.transformShape(worldId, i * (params.dx || 0), j * (params.dy || 0), k * (params.dz || 0), 0, 0, 0));
+        }
   }
   return out;
 }

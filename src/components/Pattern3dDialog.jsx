@@ -30,6 +30,8 @@ const Pattern3dDialog = () => {
   const [dx, setDx] = useState("50");
   const [countY, setCountY] = useState("1");
   const [dy, setDy] = useState("50");
+  const [countZ, setCountZ] = useState("1");
+  const [dz, setDz] = useState("50");
 
   useEffect(() => {
     if (open) {
@@ -39,6 +41,8 @@ const Pattern3dDialog = () => {
       setDx("50");
       setCountY("1");
       setDy("50");
+      setCountZ("1");
+      setDz("50");
     }
   }, [open]);
 
@@ -48,6 +52,8 @@ const Pattern3dDialog = () => {
   const dxV = evalValue(dx, variables);
   const countYV = evalValue(countY, variables);
   const dyV = evalValue(dy, variables);
+  const countZV = evalValue(countZ, variables);
+  const dzV = evalValue(dz, variables);
 
   const valid = circular
     ? Number.isFinite(countV) &&
@@ -58,8 +64,11 @@ const Pattern3dDialog = () => {
       countXV >= 1 &&
       Number.isFinite(countYV) &&
       countYV >= 1 &&
+      Number.isFinite(countZV) &&
+      countZV >= 1 &&
       Number.isFinite(dxV) &&
-      Number.isFinite(dyV);
+      Number.isFinite(dyV) &&
+      Number.isFinite(dzV);
 
   // Resolve the live OCC params + the regenerator to persist.
   const build = () => {
@@ -90,22 +99,23 @@ const Pattern3dDialog = () => {
       };
     }
     const sx = dxV / MM_PER_UNIT,
-      sy = dyV / MM_PER_UNIT;
+      sy = dyV / MM_PER_UNIT,
+      sz = dzV / MM_PER_UNIT;
+    const grid = {
+      countX: Math.round(countXV),
+      countY: Math.round(countYV),
+      countZ: Math.round(countZV),
+      dx: sx,
+      dy: sy,
+      dz: sz,
+    };
     return {
-      params: {
-        countX: Math.round(countXV),
-        countY: Math.round(countYV),
-        dx: sx,
-        dy: sy,
-      },
+      params: grid,
       regenerator: {
         kind: "pattern3d",
         patternType: "rectangular",
         sourceId: tool.sourceId,
-        countX: Math.round(countXV),
-        countY: Math.round(countYV),
-        dx: sx,
-        dy: sy,
+        ...grid,
       },
     };
   };
@@ -130,7 +140,19 @@ const Pattern3dDialog = () => {
       }
     },
     () => useStore.getState()._cameraControls?.clearPattern3dPreview?.(),
-    [open, valid, countV, angleV, countXV, dxV, countYV, dyV, circular],
+    [
+      open,
+      valid,
+      countV,
+      angleV,
+      countXV,
+      dxV,
+      countYV,
+      dyV,
+      countZV,
+      dzV,
+      circular,
+    ],
   );
 
   useEffect(() => {
@@ -292,6 +314,18 @@ const Pattern3dDialog = () => {
               <label style={row}>
                 <span>Spacing Y (mm)</span>
                 {inp(dy, setDy, Number.isFinite(dyV))}
+              </label>
+              <label style={row}>
+                <span>Count Z</span>
+                {inp(
+                  countZ,
+                  setCountZ,
+                  Number.isFinite(countZV) && countZV >= 1,
+                )}
+              </label>
+              <label style={row}>
+                <span>Spacing Z (mm)</span>
+                {inp(dz, setDz, Number.isFinite(dzV))}
               </label>
             </>
           )}

@@ -324,7 +324,14 @@ async function regenerateLoft(
 // frame (origin + normal); circular uses the normal as the rotation axis.
 function resolvePatternParams(r, items) {
   if (r.patternType === "rectangular") {
-    return { countX: r.countX, countY: r.countY, dx: r.dx, dy: r.dy };
+    return {
+      countX: r.countX,
+      countY: r.countY,
+      countZ: r.countZ,
+      dx: r.dx,
+      dy: r.dy,
+      dz: r.dz,
+    };
   }
   const plane = items.find((i) => i.id === r.planeId);
   if (!plane) return null;
