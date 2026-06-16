@@ -52,13 +52,15 @@ const PlaneDialog = () => {
       offv / MM_PER_UNIT,
     );
 
-  // Live preview as the values change.
+  // Live preview as the values change.  Depend on planeTool.base too so picking
+  // a new base (XY/XZ/YZ, a face, or 3 points) re-runs the preview even when the
+  // rotation/offset deltas stay at zero.
   useEffect(() => {
     if (!open) return;
     const cc = useStore.getState()._cameraControls;
     if (valid) cc?.previewPlane?.(finalFrame());
     return () => useStore.getState()._cameraControls?.clearPlanePreview?.();
-  }, [open, valid, rxv, ryv, rzv, offv]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, valid, rxv, ryv, rzv, offv, planeTool?.base]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open) return null;
 
