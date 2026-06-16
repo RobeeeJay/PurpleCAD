@@ -1,6 +1,7 @@
-// When a pattern source can't be rebuilt as an OCC solid, pattern3dItem falls
-// back to replicating the source's baked mesh.  Forced here with a csg source
-// whose regenerator (a pipe) can't resolve (no sketches in allItems).
+// pattern3dItem patterns any source carrying a baked mesh by replicating that
+// mesh — it must NOT rebuild it as an OCC solid (which can hard-crash the kernel
+// for a boolean over a dense / swept mesh).  These sources have recipes that
+// would fail/crash the OCC rebuild, so reaching the mesh path is the assertion.
 
 import { describe, it, expect, vi, beforeAll } from "vitest";
 
@@ -101,6 +102,34 @@ describe("pattern3dItem mesh fallback", () => {
     });
     const ext = bbox(res.geometryData.positions);
     expect(ext[2]).toBeCloseTo(7, 5);
+  });
+
+  it("patterns a boolean-result source via its mesh (no OCC rebuild)", async () => {
+    // A boolean whose inputs aren't in allItems would fail/crash the OCC
+    // rebuild; the baked mesh must be used instead.
+    const boolSource = {
+      id: 2,
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      geometryData: cubeMesh(),
+      regenerator: {
+        kind: "boolean",
+        op: "difference",
+        inputIds: [101, 102],
+        originalCenter: { x: 0, y: 0, z: 0 },
+      },
+    };
+    const res = await pattern3dItem({
+      patternType: "rectangular",
+      sourceId: 2,
+      params: { countX: 3, countY: 1, countZ: 1, dx: 5, dy: 0, dz: 0 },
+      allItems: [boolSource],
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+    expect(bbox(res.geometryData.positions)[0]).toBeCloseTo(7, 5);
   });
 
   it("mirror reflects across the plane", async () => {

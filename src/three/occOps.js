@@ -1400,14 +1400,21 @@ async function pattern3dItem({
 }) {
   const source = (allItems || []).find((i) => i.id === sourceId);
   if (!source) throw new Error("Pattern source object not found.");
-  const worldId = buildWorldSolid(source, allItems, printPrecision);
-  if (!worldId) {
-    // The source can't be rebuilt as an OCC solid (imported dense mesh, or a
-    // sweep whose recipe won't re-resolve) — replicate its baked mesh instead.
+
+  // Any source carrying a baked mesh (every csg / sweep / imported result) is
+  // patterned by replicating that mesh.  Rebuilding it as an OCC solid is not
+  // just slower — for a boolean over a dense / imported / swept mesh the OCC
+  // boolean rebuild can hard-crash the kernel, so we must NOT attempt it here.
+  // Primitives and extrudes carry no baked mesh and take the OCC path below.
+  const g = source.geometryData;
+  if (g && g.positions && g.positions.length >= 9) {
     const meshResult = patternMeshInstances(source, patternType, params);
-    if (meshResult) return meshResult;
-    throw new Error("Couldn't build the pattern source.");
+    if (!meshResult) throw new Error("Pattern produced no geometry.");
+    return meshResult;
   }
+
+  const worldId = buildWorldSolid(source, allItems, printPrecision);
+  if (!worldId) throw new Error("Couldn't build the pattern source.");
   let ids;
   try {
     ids = patternInstances(worldId, patternType, params);

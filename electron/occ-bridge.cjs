@@ -1170,12 +1170,20 @@ function patternInstances(worldId, patternType, params) {
 function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision }) {
   const source = (allItems || []).find((i) => i.id === sourceId);
   if (!source) throw new Error("Pattern source object not found.");
-  const worldId = buildWorldSolid(source, allItems, printPrecision);
-  if (!worldId) {
+
+  // Sources with a baked mesh (every csg / sweep / imported result) are
+  // patterned by replicating that mesh — never rebuilt as an OCC solid, whose
+  // boolean rebuild can hard-crash the kernel on dense/swept inputs.  Primitives
+  // and extrudes have no baked mesh and take the OCC path below.
+  const g = source.geometryData;
+  if (g && g.positions && g.positions.length >= 9) {
     const meshResult = patternMeshInstances(source, patternType, params);
-    if (meshResult) return meshResult;
-    throw new Error("Couldn't build the pattern source.");
+    if (!meshResult) throw new Error("Pattern produced no geometry.");
+    return meshResult;
   }
+
+  const worldId = buildWorldSolid(source, allItems, printPrecision);
+  if (!worldId) throw new Error("Couldn't build the pattern source.");
   let ids;
   try {
     ids = patternInstances(worldId, patternType, params);
