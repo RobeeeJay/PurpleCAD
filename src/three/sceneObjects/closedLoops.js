@@ -32,9 +32,12 @@ export function findClosedLoopsWithShapes(
   const EPS = 1e-4;
 
   // ── Filter solid shapes ───────────────────────────────────────────────
+  // Projected geometry is excluded: it's reference-only (release it to make
+  // editable geometry), and a projected wireframe is full of coincident /
+  // overlapping segments that make region detection pathologically slow.
   const solidEntries = [];
   shapes.forEach((s, i) => {
-    if (!s.dashed && s.kind !== "bevel")
+    if (!s.dashed && s.kind !== "bevel" && !s.projection)
       solidEntries.push({ shape: s, origIdx: i });
   });
 

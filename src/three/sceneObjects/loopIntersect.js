@@ -101,10 +101,10 @@ export function arcSegsN(shape, arcAngle, curveSegments, precision) {
     if (r > 0) {
       const sUnits = precision / MM_PER_UNIT;
       const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
-      return Math.max(
-        8,
-        Math.min(65536, Math.ceil(arcAngle / (2 * halfTheta))),
-      );
+      // Cap well below the old 65536: region detection only needs the loop
+      // topology, and a huge segment count makes its O(n²) intersection pass
+      // pathological for a large-radius / fine-precision arc.
+      return Math.max(8, Math.min(1024, Math.ceil(arcAngle / (2 * halfTheta))));
     }
   }
   return Math.round(curveSegments / 2);
