@@ -1045,6 +1045,103 @@ function combineTessellations(ids, precision) {
   };
 }
 
+// ── Mesh-based pattern instancing (mirrors occOps.js) ───────────────────────
+// Fallback for sources that can't be rebuilt as an OCC solid: replicate the
+// source's baked tessellation with rigid transforms.  Clones only (source
+// excluded), bbox-centred like combineTessellations.
+function v3normalize(v) {
+  const l = Math.hypot(v.x, v.y, v.z) || 1;
+  return { x: v.x / l, y: v.y / l, z: v.z / l };
+}
+function reflectPoint(x, y, z, o, n) {
+  const d = (x - o.x) * n.x + (y - o.y) * n.y + (z - o.z) * n.z;
+  return { x: x - 2 * d * n.x, y: y - 2 * d * n.y, z: z - 2 * d * n.z };
+}
+function rotateAboutAxis(x, y, z, o, a, ang) {
+  const px = x - o.x, py = y - o.y, pz = z - o.z;
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const dot = a.x * px + a.y * py + a.z * pz;
+  const cx = a.y * pz - a.z * py, cy = a.z * px - a.x * pz, cz = a.x * py - a.y * px;
+  return {
+    x: px * c + cx * s + a.x * dot * (1 - c) + o.x,
+    y: py * c + cy * s + a.y * dot * (1 - c) + o.y,
+    z: pz * c + cz * s + a.z * dot * (1 - c) + o.z,
+  };
+}
+function patternCloneTransforms(patternType, params) {
+  const out = [];
+  if (patternType === "mirror") {
+    const o = params.origin, n = v3normalize(params.normal);
+    out.push({ fn: (x, y, z) => reflectPoint(x, y, z, o, n), flip: true });
+  } else if (patternType === "circular") {
+    const count = Math.max(2, Math.round(params.count || 2));
+    const total = params.angleRad != null ? params.angleRad : 2 * Math.PI;
+    const o = params.origin, a = v3normalize(params.axis);
+    for (let k = 1; k < count; k++) {
+      const ang = (total * k) / count;
+      out.push({ fn: (x, y, z) => rotateAboutAxis(x, y, z, o, a, ang) });
+    }
+  } else if (patternType === "rectangular") {
+    const cx = Math.max(1, Math.round(params.countX || 1));
+    const cy = Math.max(1, Math.round(params.countY || 1));
+    const cz = Math.max(1, Math.round(params.countZ || 1));
+    for (let i = 0; i < cx; i++)
+      for (let j = 0; j < cy; j++)
+        for (let k = 0; k < cz; k++) {
+          if (i === 0 && j === 0 && k === 0) continue;
+          const tx = i * (params.dx || 0), ty = j * (params.dy || 0), tz = k * (params.dz || 0);
+          out.push({ fn: (x, y, z) => ({ x: x + tx, y: y + ty, z: z + tz }) });
+        }
+  }
+  return out;
+}
+function patternMeshInstances(source, patternType, params) {
+  const g = source.geometryData;
+  if (!g || !g.positions || g.positions.length < 9) return null;
+  const s = (source.scale && source.scale.x) || 1;
+  const rot = source.rotation || { x: 0, y: 0, z: 0 };
+  const pos = source.position || { x: 0, y: 0, z: 0 };
+  const lp = g.positions;
+  const world = new Float64Array(lp.length);
+  for (let i = 0; i < lp.length; i += 3) {
+    const w = applyEulerXYZ(lp[i] * s, lp[i + 1] * s, lp[i + 2] * s, rot.x || 0, rot.y || 0, rot.z || 0);
+    world[i] = w.x + (pos.x || 0);
+    world[i + 1] = w.y + (pos.y || 0);
+    world[i + 2] = w.z + (pos.z || 0);
+  }
+  const vertCount = lp.length / 3;
+  const srcIdx =
+    g.indices && g.indices.length
+      ? g.indices
+      : Array.from({ length: vertCount }, (_, i) => i);
+  const transforms = patternCloneTransforms(patternType, params);
+  const positions = [];
+  const indices = [];
+  for (const { fn, flip } of transforms) {
+    const base = positions.length / 3;
+    for (let i = 0; i < world.length; i += 3) {
+      const t = fn(world[i], world[i + 1], world[i + 2]);
+      positions.push(t.x, t.y, t.z);
+    }
+    for (let t = 0; t < srcIdx.length; t += 3) {
+      const a = srcIdx[t] + base, b = srcIdx[t + 1] + base, c = srcIdx[t + 2] + base;
+      if (flip) indices.push(a, c, b);
+      else indices.push(a, b, c);
+    }
+  }
+  if (positions.length === 0) return null;
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(positions);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] -= cx; positions[i + 1] -= cy; positions[i + 2] -= cz;
+  }
+  return {
+    geometryData: { positions, normals: null, indices },
+    centerOffset: { cx, cy, cz },
+    position: { x: cx, y: cy, z: cz },
+  };
+}
+
 function patternInstances(worldId, patternType, params) {
   const out = [];
   if (patternType === "mirror") {
@@ -1074,7 +1171,11 @@ function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision
   const source = (allItems || []).find((i) => i.id === sourceId);
   if (!source) throw new Error("Pattern source object not found.");
   const worldId = buildWorldSolid(source, allItems, printPrecision);
-  if (!worldId) throw new Error("Couldn't build the pattern source.");
+  if (!worldId) {
+    const meshResult = patternMeshInstances(source, patternType, params);
+    if (meshResult) return meshResult;
+    throw new Error("Couldn't build the pattern source.");
+  }
   let ids;
   try {
     ids = patternInstances(worldId, patternType, params);
