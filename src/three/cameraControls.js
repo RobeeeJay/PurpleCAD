@@ -691,6 +691,47 @@ export function attachCameraControls(ctx) {
     });
   };
 
+  // Snapshot / restore the camera view (used by the Objects-list Solo button so
+  // toggling solo off returns to where the user was).
+  controls.captureView = () => {
+    if (!cameraRef.current || !cameraControlsRef.current) return null;
+    return {
+      positionX: cameraRef.current.position.x,
+      positionY: cameraRef.current.position.y,
+      positionZ: cameraRef.current.position.z,
+      targetX: targetRef.current.x,
+      targetY: targetRef.current.y,
+      targetZ: targetRef.current.z,
+      rotationX: cameraControlsRef.current.targetRotationX,
+      rotationY: cameraControlsRef.current.targetRotationY,
+      up: cameraRef.current.up.clone(),
+    };
+  };
+  controls.restoreView = (saved) => {
+    if (!saved || !cameraRef.current || !cameraControlsRef.current) return;
+    const camera = cameraRef.current;
+    const cc = cameraControlsRef.current;
+    cameraAnimRef.current = {
+      startPos: camera.position.clone(),
+      endPos: new THREE.Vector3(
+        saved.positionX,
+        saved.positionY,
+        saved.positionZ,
+      ),
+      startTarget: targetRef.current.clone(),
+      endTarget: new THREE.Vector3(saved.targetX, saved.targetY, saved.targetZ),
+      startUp: camera.up.clone(),
+      endUp: saved.up ? saved.up.clone() : new THREE.Vector3(0, 1, 0),
+      startTime: Date.now(),
+      duration: 400,
+      onComplete: () => {
+        cc.targetRotationX = saved.rotationX;
+        cc.targetRotationY = saved.rotationY;
+        setRotationState(cameraRef.current.quaternion.clone());
+      },
+    };
+  };
+
   // Live preview for MaterialDialog: instantly applies in-progress
   // color/finish edits to the live mesh(es) without a store write.
   const materialPreview = createMaterialPreviewHelpers({

@@ -195,6 +195,16 @@
   font-weight: var(--font-weight-semibold);
 }
 
+.solo-btn:hover {
+  color: var(--text-primary);
+}
+
+/* A soloed item highlights its button (and the button stays visible via
+   .always-visible) so it's obvious which item is currently soloed. */
+.tree-action-btn.solo-btn.active {
+  color: var(--color-accent, #d4a33f);
+}
+
 .rename-btn:hover {
   color: var(--text-primary);
 }

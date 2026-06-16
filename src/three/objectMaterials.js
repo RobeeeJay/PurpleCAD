@@ -400,3 +400,21 @@ export function applyHiddenSelectionVisibility(
     }
   });
 }
+
+// Final visibility pass.  When an item is soloed, show ONLY its mesh (even if
+// the item is marked hidden) and hide everything else; otherwise fall back to
+// the normal hidden/selected reveal.  Guards against a stale solo id (the soloed
+// item was deleted / the timeline moved) leaving the scene entirely blank.
+export function finalizeVisibility(objectsRef, itemsRef, selectedIds, soloId) {
+  if (soloId != null) {
+    const meshes = Object.values(objectsRef.current);
+    const hasSolo = meshes.some((m) => m.userData.itemId === soloId);
+    if (hasSolo) {
+      meshes.forEach((mesh) => {
+        mesh.visible = mesh.userData.itemId === soloId;
+      });
+      return;
+    }
+  }
+  applyHiddenSelectionVisibility(objectsRef, itemsRef, selectedIds);
+}

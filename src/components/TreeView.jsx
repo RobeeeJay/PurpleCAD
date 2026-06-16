@@ -172,6 +172,21 @@ const PlaneObjectIcon = () => (
   </svg>
 );
 
+// Solo: a single filled dot inside a ring — "show only this".
+const SoloIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24">
+    <circle
+      cx="12"
+      cy="12"
+      r="8"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    />
+    <circle cx="12" cy="12" r="3.5" fill="currentColor" />
+  </svg>
+);
+
 const FolderIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24">
     <rect
@@ -377,6 +392,28 @@ const TreeViewItem = ({
   const selectedId = useStore((s) => s.selectedId);
   const selectedIds = useStore((s) => s.selectedIds);
   const hoveredId = useStore((s) => s.hoveredId);
+  const soloItemId = useStore((s) => s.soloItemId);
+  const setItemSolo = useStore((s) => s.setItemSolo);
+  const switchItemSolo = useStore((s) => s.switchItemSolo);
+  const clearItemSolo = useStore((s) => s.clearItemSolo);
+
+  const isSoloed = node._kind !== "folder" && soloItemId === node.id;
+
+  // Toggle solo: first solo snapshots the camera; ending it restores that view;
+  // switching to another item keeps the original snapshot.
+  const toggleSolo = (e) => {
+    e.stopPropagation();
+    const state = useStore.getState();
+    const cc = state._cameraControls;
+    if (state.soloItemId === node.id) {
+      if (state.soloView) cc?.restoreView?.(state.soloView);
+      clearItemSolo();
+    } else if (state.soloItemId == null) {
+      setItemSolo(node.id, cc?.captureView?.() ?? null);
+    } else {
+      switchItemSolo(node.id);
+    }
+  };
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -507,6 +544,15 @@ const TreeViewItem = ({
 
         {!editing && (
           <>
+            {!isFolder && (
+              <button
+                className={`tree-action-btn solo-btn ${isSoloed ? "always-visible active" : ""}`}
+                title={isSoloed ? "Exit solo" : "Solo (show only this)"}
+                onClick={toggleSolo}
+              >
+                <SoloIcon />
+              </button>
+            )}
             {!isFolder && (
               <button
                 className={`tree-action-btn visibility-btn ${isHidden ? "always-visible" : ""}`}

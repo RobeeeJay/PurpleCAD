@@ -17,7 +17,7 @@ import {
 } from "../../three/sceneObjects.js";
 import {
   updateEmissive,
-  applyHiddenSelectionVisibility,
+  finalizeVisibility,
 } from "../../three/objectMaterials.js";
 import { resolveItemDepth } from "../../three/geometryParams.js";
 import { reconcileSelectionHighlight } from "../../three/selectionHighlights.js";
@@ -93,6 +93,7 @@ export function useSceneSync({
 }) {
   const defaultMaterial = useStore((s) => s.defaultMaterial);
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
+  const soloItemId = useStore((s) => s.soloItemId);
   // Tracks whether the path tracer was ever started, so unmount can tear down
   // its render loop without loading the (lazy) module when it was never used.
   const pathTraceUsedRef = useRef(false);
@@ -301,15 +302,30 @@ export function useSceneSync({
       sketchModeRef,
       printPrecision,
     });
-    applyHiddenSelectionVisibility(
+    finalizeVisibility(
       objectsRef,
       itemsRef,
       selectedIdsRef.current,
+      useStore.getState().soloItemId,
     );
     // Variables drive extrude depth and dimension distances via formula
     // resolution; re-run when they change so geometry/labels reflect the
-    // new values.
-  }, [items, printPrecision, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
+    // new values.  soloItemId is here (not in the render-mode effect) because
+    // toggling solo needs the FULL rebuild: fresh meshes restore visible=true,
+    // applyRenderMode reapplies materials, then finalizeVisibility applies or
+    // releases the solo override.
+  }, [items, printPrecision, variables, defaultMaterial, soloItemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // End solo if the soloed item is gone (deleted, or the timeline moved past
+  // it), restoring the saved view so the user isn't left staring at a blank
+  // scene with no button to toggle off.
+  useEffect(() => {
+    if (soloItemId == null) return;
+    if (items.some((i) => i.id === soloItemId)) return;
+    const st = useStore.getState();
+    if (st.soloView) st._cameraControls?.restoreView?.(st.soloView);
+    st.clearItemSolo();
+  }, [items, soloItemId]);
 
   // Keep the sketch selection overlays glued to the committed geometry after an
   // external shapes change (e.g. undoing a move), so they don't linger at the
@@ -630,7 +646,12 @@ export function useSceneSync({
     } else {
       updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
     }
-    applyHiddenSelectionVisibility(objectsRef, itemsRef, selectedIds);
+    finalizeVisibility(
+      objectsRef,
+      itemsRef,
+      selectedIds,
+      useStore.getState().soloItemId,
+    );
   }, [hoveredId, selectedId, selectedIds, materialDialogTarget]);
 
   // ── Render mode ───────────────────────────────────────────────────────────
@@ -655,10 +676,11 @@ export function useSceneSync({
       sketchModeRef,
       printPrecision,
     });
-    applyHiddenSelectionVisibility(
+    finalizeVisibility(
       objectsRef,
       itemsRef,
       selectedIdsRef.current,
+      useStore.getState().soloItemId,
     );
     const isSmooth = renderMode === "smooth";
     if (allSketchGroupRef.current)

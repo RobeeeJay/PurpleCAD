@@ -120,6 +120,12 @@ export const uiInitial = {
   // colliding with the sketch slice's startMirrorTool (the 2D sketch mirror).
   mirror3dTool: null,
 
+  // Solo: when set, the viewport shows ONLY this item (even if marked hidden)
+  // and hides every other object.  Ephemeral (not history/persisted).  soloView
+  // is the camera snapshot captured when solo turned on, restored when it ends.
+  soloItemId: null,
+  soloView: null,
+
   // Path-traced render mode (prototype): replaces the raster view with a
   // progressively-accumulated GPU path trace.  `pathTraceView` is the user's
   // toggle; `pathTracerActive` is set true by pathTrace.js only once the tracer
@@ -235,6 +241,13 @@ export const createUiSlice = (set) => ({
   setCircularAxisPick: (v) => set({ circularAxisPick: !!v }),
   startMirror3d: (seed) => set({ mirror3dTool: seed || {} }),
   cancelMirror3d: () => set({ mirror3dTool: null }),
+
+  // Solo controls.  setItemSolo captures the camera snapshot (first solo);
+  // switchItemSolo re-points an active solo without re-capturing the view;
+  // clearItemSolo ends solo (the caller restores the view from soloView first).
+  setItemSolo: (id, view) => set({ soloItemId: id, soloView: view ?? null }),
+  switchItemSolo: (id) => set({ soloItemId: id }),
+  clearItemSolo: () => set({ soloItemId: null, soloView: null }),
 
   // ── Sweep tools (Revolve / Pipe / Loft) ─────────────────────────────────
   setSweepSelectMode: (v) =>
