@@ -192,6 +192,11 @@ export function findClosedLoopsWithShapes(
     }
   }
 
+  // Too many split segments → the O(n²) node merge and the cycle DFS below get
+  // pathologically slow (a dense projected wireframe of crossing edges).  Bail
+  // out of region detection rather than freeze; the geometry still draws.
+  if (subEntries.length > 2500) return [];
+
   // ── Build adjacency graph from sub-shapes ────────────────────────────
   const nodes = [];
   const getNode = (x, y) => {
@@ -305,9 +310,15 @@ export function findClosedLoopsWithShapes(
   });
 
   // ── DFS cycle detection ─────────────────────────────────────────────
+  // Enumerating every cycle is exponential in the graph's branching, so a dense
+  // intersection graph (e.g. a projected body's wireframe with many crossing
+  // edges) would otherwise freeze the app.  Bound the total exploration: when
+  // the budget runs out we keep the regions found so far rather than hang.
   const cycles = [];
+  let dfsBudget = 150000;
   const dfs = (start, cur, path, visited) => {
-    if (path.length > 24) return;
+    if (path.length > 24 || dfsBudget <= 0) return;
+    dfsBudget--;
     for (const { si, otherNode } of adj[cur] || []) {
       if (path.some((e) => e.si === si)) continue;
       if (otherNode === start && path.length >= 2) {

@@ -1413,3 +1413,20 @@ describe("sketch region detection", () => {
     });
   });
 });
+
+describe("region detection is bounded on dense input", () => {
+  it("completes quickly on a dense crossing-line grid instead of hanging", () => {
+    // A 40x40 grid of crossing lines (a projected wireframe is similarly dense):
+    // every horizontal crosses every vertical, exploding intersections + cycles.
+    const shapes = [];
+    for (let i = 0; i < 40; i++) {
+      shapes.push({ type: "line", x1: 0, y1: i, x2: 40, y2: i });
+      shapes.push({ type: "line", x1: i, y1: 0, x2: i, y2: 40 });
+    }
+    const start = Date.now();
+    const loops = findClosedLoops(shapes);
+    // It must return (bailing/budget) well under vitest's timeout — not hang.
+    expect(Date.now() - start).toBeLessThan(3000);
+    expect(Array.isArray(loops)).toBe(true);
+  });
+});
