@@ -19,15 +19,15 @@ const isPlane = (item) => item && PLANE_TYPES.includes(item.type);
 // normal viewport selection — the active "Select …" button decides whether a
 // click captures objects or the plane.
 const MirrorDialog = () => {
-  const mirrorTool = useStore((s) => s.mirrorTool);
-  const cancelMirrorTool = useStore((s) => s.cancelMirrorTool);
+  const mirror3dTool = useStore((s) => s.mirror3dTool);
+  const cancelMirror3d = useStore((s) => s.cancelMirror3d);
   const selectedIds = useStore((s) => s.selectedIds);
   const setSelection = useStore((s) => s.setSelection);
   const items = useStore((s) => s.items);
   const addItem = useStore((s) => s.addItem);
   const printPrecision = useStore(activePrecision);
 
-  const open = !!mirrorTool;
+  const open = !!mirror3dTool;
 
   const [objectIds, setObjectIds] = useState([]);
   const [planeId, setPlaneId] = useState(null);
@@ -101,13 +101,13 @@ const MirrorDialog = () => {
 
   useEffect(() => {
     return () => useStore.getState()._cameraControls?.clearPattern3dPreview?.();
-  }, [mirrorTool]);
+  }, [mirror3dTool]);
 
   if (!open) return null;
 
   const close = () => {
     useStore.getState()._cameraControls?.clearPattern3dPreview?.();
-    cancelMirrorTool();
+    cancelMirror3d();
   };
 
   // Re-highlight the already-captured set so refining a pick doesn't start blank

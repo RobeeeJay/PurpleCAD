@@ -112,9 +112,10 @@ export const uiInitial = {
   // The dialog adds the counts/angle/spacing and confirms.
   pattern3dTool: null,
 
-  // Mirror dialog open-flag (truthy while open).  The dialog itself owns the
-  // picked object/plane ids; this just gates its visibility.
-  mirrorTool: null,
+  // 3D Mirror dialog open-flag (truthy while open).  The dialog itself owns the
+  // picked object/plane ids; this just gates its visibility.  Named *3d to avoid
+  // colliding with the sketch slice's startMirrorTool (the 2D sketch mirror).
+  mirror3dTool: null,
 
   // Path-traced render mode (prototype): replaces the raster view with a
   // progressively-accumulated GPU path trace.  `pathTraceView` is the user's
@@ -222,8 +223,8 @@ export const createUiSlice = (set) => ({
   cancelPlaneTool: () => set({ planeTool: null }),
   startPattern3d: (v) => set({ pattern3dTool: v }),
   cancelPattern3d: () => set({ pattern3dTool: null }),
-  startMirrorTool: (seed) => set({ mirrorTool: seed || {} }),
-  cancelMirrorTool: () => set({ mirrorTool: null }),
+  startMirror3d: (seed) => set({ mirror3dTool: seed || {} }),
+  cancelMirror3d: () => set({ mirror3dTool: null }),
 
   // ── Sweep tools (Revolve / Pipe / Loft) ─────────────────────────────────
   setSweepSelectMode: (v) =>

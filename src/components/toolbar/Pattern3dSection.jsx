@@ -12,7 +12,7 @@ const Pattern3dSection = ({ bare = false }) => {
   const selectedIds = useStore((s) => s.selectedIds);
   const items = useStore((s) => s.items);
   const startPattern3d = useStore((s) => s.startPattern3d);
-  const startMirrorTool = useStore((s) => s.startMirrorTool);
+  const startMirror3d = useStore((s) => s.startMirror3d);
 
   const sel = selectedIds
     .map((id) => items.find((i) => i.id === id))
@@ -44,7 +44,7 @@ const Pattern3dSection = ({ bare = false }) => {
 
   // Open the Mirror dialog (seeded from the current selection); it owns the
   // object/plane picking and the confirm.
-  const handleMirror = () => startMirrorTool();
+  const handleMirror = () => startMirror3d();
 
   const mirrorBtn = (
     <button
