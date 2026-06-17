@@ -397,7 +397,14 @@ export function createSketchSelectionOverlays({
   const buildRotationHandleFor = (shapes, indices, sketchMesh) => {
     const state = useStore.getState();
     const selItem = state.items.find((i) => i.id === selectedIdRef.current);
-    const idxSet = new Set(indices);
+    // Projected geometry is immovable — it can't be rotated, so a selection of
+    // only projected shapes shows no rotation handle.
+    const rotatable = indices.filter((i) => !shapes[i]?.projection);
+    if (rotatable.length === 0) {
+      clearRotationHandle();
+      return;
+    }
+    const idxSet = new Set(rotatable);
     const locked = (selItem?.constraints || []).some(
       (c) =>
         (c.type === "horizontal" || c.type === "vertical") &&
@@ -408,7 +415,7 @@ export function createSketchSelectionOverlays({
       return;
     }
     const pts = [];
-    indices.forEach((idx) => {
+    rotatable.forEach((idx) => {
       for (const p of localExtentPoints(shapes[idx])) pts.push(p);
     });
     if (pts.length < 2) {
