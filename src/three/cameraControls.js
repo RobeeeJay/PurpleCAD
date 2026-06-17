@@ -1054,7 +1054,8 @@ export function attachCameraControls(ctx) {
     projectHoverGroup = null;
   };
   controls.projectHoverAt = (screenX, screenY) => {
-    if (!activeSketchForProject()) {
+    const ctx = activeSketchForProject();
+    if (!ctx) {
       controls.clearProjectHover();
       return;
     }
