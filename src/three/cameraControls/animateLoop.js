@@ -16,6 +16,12 @@ import {
 import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+
+// Width of the left objects/timeline overlay (`.left-panel` in App.css). The
+// axis indicator is nudged right by half this so it reads centred in the 3D
+// area the user can actually see, not the canvas centre hidden behind the panel.
+const LEFT_PANEL_PX = 250;
 
 export function createAnimateLoop({
   scene,
@@ -98,7 +104,15 @@ export function createAnimateLoop({
         // Pin the XYZ indicator to the view centre (the camera target) so it
         // stays on-screen as the view pans, rather than scrolling off with the
         // world origin.  The arrows still point along the true world axes.
-        axisGroupRef.current.position.copy(targetRef.current);
+        // Then shift it right by half the left overlay's width so it sits in the
+        // centre of the *visible* 3D area, clear of the objects/timeline panel.
+        const canvasH = renderer.domElement.clientHeight || 1;
+        const worldPerPx =
+          (gizmoScale(targetRef.current) * REFERENCE_HEIGHT) / canvasH;
+        _camRight.set(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
+        axisGroupRef.current.position
+          .copy(targetRef.current)
+          .addScaledVector(_camRight, (LEFT_PANEL_PX / 2) * worldPerPx);
         // 0.5: render the XYZ indicator at half the authored on-screen size.
         const s = gizmoScale(axisGroupRef.current.position) * 0.5;
         axisGroupRef.current.scale.setScalar(s);
