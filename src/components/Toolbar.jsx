@@ -39,8 +39,8 @@ const Toolbar = () => {
         </ToolbarSection>
       )}
       <ConstrainSection isSketchMode={isSketchMode} />
-      <RenderSection />
-      <MaterialSection />
+      {!isSketchMode && <RenderSection />}
+      {!isSketchMode && <MaterialSection />}
       <OptionsSection />
     </div>
   );
