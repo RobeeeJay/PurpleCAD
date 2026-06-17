@@ -130,7 +130,10 @@ const RULER_TIERS = {
   ultra: { fontSize: 18, scaleX: 1.05, scaleY: 0.2625 },
 };
 
-function makeRulerSprite(text, tier = "coarse", theme) {
+// Shared unit quad — each label is the same geometry, sized via mesh.scale.
+const RULER_LABEL_GEO = new THREE.PlaneGeometry(1, 1);
+
+function makeRulerLabel(text, tier = "coarse", theme) {
   const t = RULER_TIERS[tier];
   const canvas = document.createElement("canvas");
   canvas.width = 160;
@@ -143,17 +146,23 @@ function makeRulerSprite(text, tier = "coarse", theme) {
   ctx.textBaseline = "middle";
   ctx.fillStyle = toCssHex(rulerTickColorFor(theme));
   ctx.fillText(text, 80, 20);
-  const mat = new THREE.SpriteMaterial({
+  const mat = new THREE.MeshBasicMaterial({
     map: new THREE.CanvasTexture(canvas),
     depthTest: false,
     transparent: true,
+    side: THREE.DoubleSide,
   });
-  const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(t.scaleX, t.scaleY, 1);
-  sprite.userData.baseScale = { x: t.scaleX, y: t.scaleY, z: 1 };
-  sprite.userData.isRulerLabel = true;
-  sprite.renderOrder = 1;
-  return sprite;
+  // A flat quad lying on the ground (XZ) instead of a camera-facing sprite, so
+  // the numbers read painted on the floor. -90° about X lays the quad down with
+  // its texture facing up; mesh.scale (x = width along X, y = height along Z) is
+  // driven each frame for constant on-screen size.
+  const mesh = new THREE.Mesh(RULER_LABEL_GEO, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.scale.set(t.scaleX, t.scaleY, 1);
+  mesh.userData.baseScale = { x: t.scaleX, y: t.scaleY, z: 1 };
+  mesh.userData.isRulerLabel = true;
+  mesh.renderOrder = 1;
+  return mesh;
 }
 
 export function createGrid(scene, theme) {
@@ -289,7 +298,7 @@ export function updateRuler3D(rulerGroup, cx, cz, viewHeight, theme) {
       needed.add(key);
       let sp = pool.get(key);
       if (!sp) {
-        sp = makeRulerSprite(
+        sp = makeRulerLabel(
           `${Math.round(k * step * MM_PER_UNIT)}`,
           name,
           theme,
