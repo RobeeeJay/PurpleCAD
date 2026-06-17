@@ -798,10 +798,24 @@ export function createSketchInteraction(
         for (const f of varFields(s)) fixed.add(`${idx}:${f}`);
       }
     }
-    const { shapes } = solveConstraints(input, selItem.constraints || [], {
-      fixed,
-      maxIter: warmed ? 30 : 60,
-    });
+    const { shapes, maxResidual } = solveConstraints(
+      input,
+      selItem.constraints || [],
+      { fixed, maxIter: warmed ? 30 : 60 },
+    );
+    // If the dragged target can't satisfy the constraints — e.g. dragging a
+    // square's edge so far that a chamfered corner would collapse or invert —
+    // committing the solver's best (constraint-violating) guess visibly breaks
+    // the sketch. Instead hold the last valid configuration, so the geometry
+    // simply stops following until the cursor returns to a satisfiable range.
+    // The threshold sits well above a converged solve (~0) and below a genuine
+    // miss (which jumps to a large residual).
+    if (maxResidual > 1e-2) {
+      const prev = warmed ? warm : selItem.shapes || [];
+      const out = new Map();
+      prev.forEach((s, i) => out.set(i, s));
+      return out;
+    }
     const out = new Map();
     shapes.forEach((s, i) => out.set(i, s));
     return out;

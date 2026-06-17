@@ -256,3 +256,85 @@ describe("drag locality (nearest connected points absorb the change)", () => {
     expect(dB - dD).toBeGreaterThan(0.1);
   });
 });
+
+describe("dragging an edge past a chamfer's feasible range", () => {
+  // A unit-ish square (top0 right1 bottom2 left3) with H/V sides and the
+  // top-left corner chamfered.
+  const chamferedSquare = () => {
+    const shapes = [L(0, 2, 2, 2), L(2, 2, 2, 0), L(2, 0, 0, 0), L(0, 0, 0, 2)];
+    const base = [
+      coin(0, "end", 1, "start"),
+      coin(1, "end", 2, "start"),
+      coin(2, "end", 3, "start"),
+      coin(3, "end", 0, "start"),
+      { type: "horizontal", shapeIdx: 0 },
+      { type: "vertical", shapeIdx: 1 },
+      { type: "horizontal", shapeIdx: 2 },
+      { type: "vertical", shapeIdx: 3 },
+    ];
+    const edit = buildChamferEdit(
+      shapes,
+      { aIdx: 3, aKey: "end", bIdx: 0, bKey: "start" },
+      "chamfer",
+      0.5,
+      base,
+    );
+    const cShapes = shapes.map((s, i) => {
+      const u = edit.updates.find(([x]) => x === i);
+      return u ? u[1] : s;
+    });
+    cShapes.push(edit.newShape);
+    const rm = new Set(edit.removeConstraints);
+    return {
+      shapes: cShapes,
+      constraints: [...base.filter((c) => !rm.has(c)), ...edit.newConstraints],
+    };
+  };
+
+  // Solve with the top edge body-dragged left by xShift, mirroring solveDrag's
+  // reject-on-infeasible rule (hold the warm state when the solve can't satisfy).
+  const dragTopLeft = (constraints, xShift, warm) => {
+    const input = warm.slice();
+    input[0] = L(0.5 - xShift, 2, 2 - xShift, 2);
+    const fixedSet = new Set(["x1", "y1", "x2", "y2"].map((f) => `0:${f}`));
+    const { shapes: r, maxResidual } = solveConstraints(input, constraints, {
+      fixed: fixedSet,
+      maxIter: 60,
+    });
+    return maxResidual > 1e-2
+      ? { shapes: warm, held: true }
+      : { shapes: r, held: false };
+  };
+
+  it("a moderate drag is feasible; a far drag is not", () => {
+    const { shapes, constraints } = chamferedSquare();
+    expect(dragTopLeft(constraints, 0.3, shapes).held).toBe(false);
+    // Far past the corner there is no valid configuration — the raw solve misses
+    // badly, which is exactly what solveDrag uses to reject.
+    const input = shapes.slice();
+    input[0] = L(0.5 - 1.4, 2, 2 - 1.4, 2);
+    const fixedSet = new Set(["x1", "y1", "x2", "y2"].map((f) => `0:${f}`));
+    const { maxResidual } = solveConstraints(input, constraints, {
+      fixed: fixedSet,
+      maxIter: 60,
+    });
+    expect(maxResidual).toBeGreaterThan(1e-2);
+  });
+
+  it("holds the last valid shape (chamfer stays joined) instead of breaking", () => {
+    const { shapes, constraints } = chamferedSquare();
+    let warm = shapes;
+    warm = dragTopLeft(constraints, 0.3, warm).shapes; // feasible step
+    const res = dragTopLeft(constraints, 1.4, warm); // past the break
+    expect(res.held).toBe(true);
+    // The held geometry keeps the chamfer (idx 4) joined to both legs.
+    const r = res.shapes;
+    const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-6;
+    expect(near({ x: r[4].x1, y: r[4].y1 }, { x: r[3].x2, y: r[3].y2 })).toBe(
+      true,
+    );
+    expect(near({ x: r[4].x2, y: r[4].y2 }, { x: r[0].x1, y: r[0].y1 })).toBe(
+      true,
+    );
+  });
+});
