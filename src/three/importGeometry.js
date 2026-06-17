@@ -132,3 +132,55 @@ export function parseSvgToSketchShapes(svgText) {
       : { type: "bezier", p0: c[0], p1: c[1], p2: c[2], p3: c[3] };
   });
 }
+
+// The endpoints of a line / bezier sketch shape, as {key, x, y}.  Bezier
+// endpoints are p0/p3 (p1/p2 are control handles, not joinable corners).
+function shapeEndpoints(s) {
+  if (s.type === "line")
+    return [
+      { key: "start", x: s.x1, y: s.y1 },
+      { key: "end", x: s.x2, y: s.y2 },
+    ];
+  if (s.type === "bezier")
+    return [
+      { key: "p0", x: s.p0.x, y: s.p0.y },
+      { key: "p3", x: s.p3.x, y: s.p3.y },
+    ];
+  return [];
+}
+
+// Coincident constraints joining endpoints of `shapes` that land on the same
+// location.  Consecutive curves in an SVG subpath share an exact endpoint, so
+// without this an imported outline reads as disconnected segments and tools that
+// rely on coincident junctions (chamfer/bevel, region detection) don't see a
+// closed corner.  `baseIdx` offsets the shape indices to their position in the
+// sketch's full shapes array.  Endpoints are bucketed on an `eps` grid so only
+// genuinely-coincident points join.
+export function svgCoincidentConstraints(shapes, baseIdx = 0, eps = 1e-3) {
+  const buckets = new Map();
+  shapes.forEach((s, i) => {
+    for (const ep of shapeEndpoints(s)) {
+      const key = `${Math.round(ep.x / eps)}:${Math.round(ep.y / eps)}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push({ idx: i, key: ep.key });
+    }
+  });
+  const constraints = [];
+  for (const group of buckets.values()) {
+    if (group.length < 2) continue;
+    // Chain each later endpoint to the first; transitivity covers the rest.
+    const a = group[0];
+    for (let j = 1; j < group.length; j++) {
+      const b = group[j];
+      if (b.idx === a.idx) continue;
+      constraints.push({
+        type: "coincident",
+        shapeAIdx: baseIdx + a.idx,
+        pointA: a.key,
+        shapeBIdx: baseIdx + b.idx,
+        pointB: b.key,
+      });
+    }
+  }
+  return constraints;
+}

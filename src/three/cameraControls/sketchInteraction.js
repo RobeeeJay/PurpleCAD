@@ -41,6 +41,7 @@ import {
   selectedSketchLineIndices,
   offsetSelectedSketchGeometry,
 } from "../sketchModifyActions.js";
+import { svgCoincidentConstraints } from "../importGeometry.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
@@ -203,9 +204,19 @@ export function createSketchInteraction(
     const store = useStore.getState();
     const svg = store.svgImport;
     if (svg) {
+      const placed = transformSvgShapes(
+        svg.shapes,
+        svg.scale,
+        svg.offsetX,
+        svg.offsetY,
+      );
+      const baseIdx = (
+        store.items.find((i) => i.id === svg.sketchId)?.shapes || []
+      ).length;
       store.addSketchShapes(
         svg.sketchId,
-        transformSvgShapes(svg.shapes, svg.scale, svg.offsetX, svg.offsetY),
+        placed,
+        svgCoincidentConstraints(placed, baseIdx),
       );
     }
     clearSvgPreview();

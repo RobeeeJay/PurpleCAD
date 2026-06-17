@@ -15,7 +15,10 @@ vi.mock("../../store", () => {
   return { useStore };
 });
 
-import { finalizeImportedMesh } from "../importGeometry.js";
+import {
+  finalizeImportedMesh,
+  svgCoincidentConstraints,
+} from "../importGeometry.js";
 import { ensureOcc } from "../occ/init.js";
 import { exportSTEP, importStep, performCsg } from "../occClient.js";
 
@@ -47,6 +50,61 @@ describe("finalizeImportedMesh", () => {
     const xs = geometryData.positions.filter((_, i) => i % 3 === 0);
     expect((Math.min(...xs) + Math.max(...xs)) / 2).toBeCloseTo(0, 6);
     expect(center).toBeTruthy();
+  });
+});
+
+describe("svgCoincidentConstraints", () => {
+  it("joins shared endpoints of consecutive segments", () => {
+    // Three lines forming a chain: L0 end == L1 start, L1 end == L2 start.
+    const shapes = [
+      { type: "line", x1: 0, y1: 0, x2: 10, y2: 0 },
+      { type: "line", x1: 10, y1: 0, x2: 10, y2: 10 },
+      { type: "line", x1: 10, y1: 10, x2: 0, y2: 10 },
+    ];
+    const cons = svgCoincidentConstraints(shapes);
+    expect(cons).toContainEqual({
+      type: "coincident",
+      shapeAIdx: 0,
+      pointA: "end",
+      shapeBIdx: 1,
+      pointB: "start",
+    });
+    expect(cons).toContainEqual({
+      type: "coincident",
+      shapeAIdx: 1,
+      pointA: "end",
+      shapeBIdx: 2,
+      pointB: "start",
+    });
+  });
+
+  it("offsets indices by baseIdx and joins bezier p0/p3 to lines", () => {
+    const shapes = [
+      { type: "line", x1: 0, y1: 0, x2: 5, y2: 0 },
+      {
+        type: "bezier",
+        p0: { x: 5, y: 0 },
+        p1: { x: 6, y: 1 },
+        p2: { x: 7, y: 2 },
+        p3: { x: 8, y: 3 },
+      },
+    ];
+    const cons = svgCoincidentConstraints(shapes, 4);
+    expect(cons).toContainEqual({
+      type: "coincident",
+      shapeAIdx: 4,
+      pointA: "end",
+      shapeBIdx: 5,
+      pointB: "p0",
+    });
+  });
+
+  it("leaves disjoint endpoints unconstrained", () => {
+    const shapes = [
+      { type: "line", x1: 0, y1: 0, x2: 1, y2: 0 },
+      { type: "line", x1: 5, y1: 5, x2: 6, y2: 5 },
+    ];
+    expect(svgCoincidentConstraints(shapes)).toEqual([]);
   });
 });
 
