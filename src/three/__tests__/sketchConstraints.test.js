@@ -6,6 +6,7 @@ import {
   allConstraintsSatisfied,
   computeChamfer,
   chamferConstraints,
+  buildBevelArc,
 } from "../sketchConstraints.js";
 
 // ── Mock sceneObjects.js ─────────────────────────────────────────────────────
@@ -2606,6 +2607,28 @@ describe("enforceConstraints", () => {
       expect(geom.trimA.y).toBeCloseTo(1);
       expect(geom.trimB.x).toBeCloseTo(1 + Math.cos(Math.PI / 3) * 0.5);
       expect(geom.trimB.y).toBeCloseTo(1 + Math.sin(Math.PI / 3) * 0.5);
+    });
+
+    it("bevel radius: trimming r/tan(theta/2) along each leg yields an arc of radius r", () => {
+      // The bevel tool treats its input as a fillet radius. At a non-right
+      // corner the tangent points must sit legDist = r / tan(theta/2) back, or
+      // the fitted arc comes out the wrong size. Verify both a 90° and a 60°
+      // corner land on the requested radius.
+      const check = (legA, legB, thetaRad, r) => {
+        const legDist = r / Math.tan(thetaRad / 2);
+        const g = computeChamfer(legA, legB, "start", "start", legDist);
+        const arc = buildBevelArc(g.P, g.uA, g.uB, g.trimA, g.trimB);
+        expect(arc.r).toBeCloseTo(r, 6);
+      };
+      // 90° corner at the origin
+      check(L(0, 0, 2, 0), L(0, 0, 0, 2), Math.PI / 2, 0.4);
+      // 60° corner: legB at 60° from legA
+      check(
+        L(0, 0, 2, 0),
+        L(0, 0, 2 * Math.cos(Math.PI / 3), 2 * Math.sin(Math.PI / 3)),
+        Math.PI / 3,
+        0.4,
+      );
     });
 
     it("chamferConstraints: 2 coincidents joining the chamfer line + 2 angle locks", () => {

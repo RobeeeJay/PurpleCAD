@@ -7,6 +7,8 @@ const SketchModifySection = () => {
   const selectedId = useStore((s) => s.selectedId);
   const sketchModifyMode = useStore((s) => s.sketchModifyMode);
   const setSketchModifyMode = useStore((s) => s.setSketchModifyMode);
+  const sketchModifyDistMm = useStore((s) => s.sketchModifyDistMm);
+  const setSketchModifyDistMm = useStore((s) => s.setSketchModifyDistMm);
   const activeSketchTool = useStore((s) => s.activeSketchTool);
   const startMirrorTool = useStore((s) => s.startMirrorTool);
   const cancelMirrorTool = useStore((s) => s.cancelMirrorTool);
@@ -222,6 +224,37 @@ const SketchModifySection = () => {
           />
         </svg>
       </button>
+      {(sketchModifyMode === "chamfer" || sketchModifyMode === "bevel") && (
+        <label
+          title={
+            sketchModifyMode === "chamfer"
+              ? "Chamfer setback (mm) along each edge"
+              : "Bevel arc radius (mm)"
+          }
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            padding: "0 4px",
+          }}
+        >
+          {sketchModifyMode === "chamfer" ? "Setback" : "Radius"}
+          <input
+            type="number"
+            min="0"
+            step="0.5"
+            value={sketchModifyDistMm}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v) && v > 0) setSketchModifyDistMm(v);
+            }}
+            style={{ width: 46 }}
+          />
+          mm
+        </label>
+      )}
       <button
         className="toolbar-btn"
         title="Toggle Dashed — dashed lines constrain geometry but don't form closed regions or extrusions"

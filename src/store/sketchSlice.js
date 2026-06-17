@@ -262,6 +262,11 @@ export const createSketchSlice = (set) => ({
   sketchModifyMode: null, // 'chamfer' | 'bevel' | null
   setSketchModifyMode: (mode) => set({ sketchModifyMode: mode }),
 
+  // Chamfer setback / bevel radius, in mm (scene units × MM_PER_UNIT). Drives
+  // both the modify preview and the committed cut.
+  sketchModifyDistMm: 2.5,
+  setSketchModifyDistMm: (mm) => set({ sketchModifyDistMm: mm }),
+
   sketchConstraintFirstPoint: null, // { shapeIdx, pointKey } | null
   setSketchConstraintFirstPoint: (pt) =>
     set({ sketchConstraintFirstPoint: pt }),

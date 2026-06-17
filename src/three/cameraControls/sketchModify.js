@@ -6,7 +6,11 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
-import { moveShapePoint, getSketchShapePoints } from "../sceneObjects.js";
+import {
+  moveShapePoint,
+  getSketchShapePoints,
+  MM_PER_UNIT,
+} from "../sceneObjects.js";
 import {
   buildBevelArc,
   computeChamfer,
@@ -14,7 +18,10 @@ import {
 } from "../sketchConstraints.js";
 import { SKETCH_MODIFY_HIGHLIGHT } from "../theme.js";
 
-const MODIFY_DIST = 0.25;
+// Setback (chamfer) / radius (bevel), in scene units, read live from the store
+// so the toolbar input drives the same value the preview and commit use.
+const modifyDist = () =>
+  (useStore.getState().sketchModifyDistMm ?? 2.5) / MM_PER_UNIT;
 
 export function createSketchModifyHelpers(
   { scene, renderer, objectsRef, itemsRef, selectedIdRef },
@@ -51,12 +58,27 @@ export function createSketchModifyHelpers(
     return null;
   };
 
-  const computeModify = (shapes, junc, dist) => {
+  const computeModify = (shapes, junc, dist, mode) => {
     const { aIdx, aKey, bIdx, bKey } = junc;
     const sA = shapes[aIdx],
       sB = shapes[bIdx];
-    const geom = computeChamfer(sA, sB, aKey, bKey, dist);
-    return { ...geom, sA, sB, aIdx, aKey, bIdx, bKey };
+    let legDist = dist;
+    if (mode === "bevel") {
+      // For a bevel, `dist` is the desired fillet radius. The tangent points
+      // sit r / tan(theta/2) back along each leg (theta = corner angle), so the
+      // arc buildBevelArc fits through them actually has that radius. Without
+      // this, the value was used as the leg setback and the radius came out
+      // wrong at any non-right corner.
+      const dirs = computeChamfer(sA, sB, aKey, bKey, 1);
+      const dot = Math.max(
+        -1,
+        Math.min(1, dirs.uA.x * dirs.uB.x + dirs.uA.y * dirs.uB.y),
+      );
+      const halfTan = Math.tan(Math.acos(dot) / 2);
+      legDist = halfTan > 1e-6 ? dist / halfTan : dist;
+    }
+    const geom = computeChamfer(sA, sB, aKey, bKey, legDist);
+    return { ...geom, sA, sB, aIdx, aKey, bIdx, bKey, legDist };
   };
 
   const applyModify = (screenX, screenY, mode) => {
@@ -71,7 +93,7 @@ export function createSketchModifyHelpers(
     if (!snap) return;
     const junc = findJunction(snap, shapes, constraints);
     if (!junc) return;
-    const m = computeModify(shapes, junc, MODIFY_DIST);
+    const m = computeModify(shapes, junc, modifyDist(), mode);
     const newSA = moveShapePoint(m.sA, m.aKey, m.trimA);
     const newSB = moveShapePoint(m.sB, m.bKey, m.trimB);
     if (!newSA || !newSB) return;
@@ -128,7 +150,7 @@ export function createSketchModifyHelpers(
           aKey: m.aKey,
           bIdx: m.bIdx,
           bKey: m.bKey,
-          dist: MODIFY_DIST,
+          dist: m.legDist,
         };
       }
     }
@@ -192,7 +214,7 @@ export function createSketchModifyHelpers(
     }
     clearModifyPreview();
     renderer.domElement.style.cursor = "pointer";
-    const m = computeModify(shapes, junc, MODIFY_DIST);
+    const m = computeModify(shapes, junc, modifyDist(), mode);
     const toW = (lx, ly) => {
       const v = new THREE.Vector3(lx, ly, 0.006);
       v.applyQuaternion(sketchMesh.quaternion);
