@@ -239,12 +239,17 @@ export function createAnimateLoop({
       } else if (rulerGroup) {
         rulerGroup.visible = true;
         const viewHeight = gizmoScale(targetRef.current) * REFERENCE_HEIGHT;
-        // Recycle the labels around the camera target so they follow the view
-        // (tier visibility + which absolute mm labels are shown live here).
+        // Recycle the labels around the camera target, but shifted right by half
+        // the left overlay's width (same as the axis indicator) so the ruler is
+        // centred on the visible 3D area rather than the canvas centre half-
+        // hidden behind the objects/timeline panel.
+        const canvasH = renderer.domElement.clientHeight || 1;
+        const worldPerPx = (viewHeight / canvasH) * (LEFT_PANEL_PX / 2);
+        _camRight.set(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
         updateRuler3D(
           rulerGroup,
-          targetRef.current.x,
-          targetRef.current.z,
+          targetRef.current.x + _camRight.x * worldPerPx,
+          targetRef.current.z + _camRight.z * worldPerPx,
           viewHeight,
           useStore.getState().theme,
         );
