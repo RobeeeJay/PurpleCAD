@@ -129,6 +129,90 @@ export function buildBevelArc(P, uA, uB, trimA, trimB) {
   return { type: "arc", cx, cy, r, startAngle, endAngle };
 }
 
+const setLineEnd = (line, key, p) =>
+  key === "start"
+    ? { ...line, x1: p.x, y1: p.y }
+    : { ...line, x2: p.x, y2: p.y };
+
+// A coincident joining the new element's endpoint to a trimmed leg's corner.
+const coincident = (newIdx, newKey, legIdx, legKey) => ({
+  type: "coincident",
+  shapeAIdx: newIdx,
+  pointA: newKey,
+  shapeBIdx: legIdx,
+  pointB: legKey,
+});
+
+// The full local edit a chamfer ("chamfer") or fillet ("bevel") makes at a
+// two-line junction: the two legs trimmed back along their own directions, the
+// bridging element (a line for a chamfer, a tangent arc for a fillet), and the
+// constraints that join them.  This is deliberately *local* — it touches only
+// the two legs, so chamfering never drags geometry the user didn't constrain.
+// Both new corners always get a coincident constraint to the bridge; a chamfer
+// additionally angle-locks each corner so it holds its shape under later edits.
+// `junc` = {aIdx, aKey, bIdx, bKey}; `dist` is the chamfer setback or, for a
+// fillet, the desired arc radius (converted to the leg setback so the arc comes
+// out that radius at any corner angle).  Returns null on degenerate geometry.
+export function buildChamferEdit(shapes, junc, mode, dist) {
+  const { aIdx, aKey, bIdx, bKey } = junc;
+  const sA = shapes[aIdx],
+    sB = shapes[bIdx];
+  if (sA?.type !== "line" || sB?.type !== "line") return null;
+
+  let legDist = dist;
+  if (mode === "bevel") {
+    const dirs = computeChamfer(sA, sB, aKey, bKey, 1);
+    const dot = Math.max(
+      -1,
+      Math.min(1, dirs.uA.x * dirs.uB.x + dirs.uA.y * dirs.uB.y),
+    );
+    const halfTan = Math.tan(Math.acos(dot) / 2);
+    legDist = halfTan > 1e-6 ? dist / halfTan : dist;
+  }
+
+  const m = computeChamfer(sA, sB, aKey, bKey, legDist);
+  const newSA = setLineEnd(sA, aKey, m.trimA);
+  const newSB = setLineEnd(sB, bKey, m.trimB);
+  const newIdx = shapes.length;
+  const straight = {
+    type: "line",
+    x1: m.trimA.x,
+    y1: m.trimA.y,
+    x2: m.trimB.x,
+    y2: m.trimB.y,
+  };
+
+  let newShape;
+  let newConstraints;
+  if (mode === "chamfer") {
+    newShape = straight;
+    newConstraints = chamferConstraints(newIdx, aIdx, aKey, bIdx, bKey, m);
+  } else {
+    const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
+    if (arc) {
+      arc.kind = "bevel";
+      arc.bevelData = { aIdx, aKey, bIdx, bKey, dist: legDist };
+      newShape = arc;
+    } else {
+      newShape = straight; // collinear legs: fall back to a straight bridge
+    }
+    newConstraints = [
+      coincident(newIdx, "start", aIdx, aKey),
+      coincident(newIdx, "end", bIdx, bKey),
+    ];
+  }
+
+  return {
+    updates: [
+      [aIdx, newSA],
+      [bIdx, newSB],
+    ],
+    newShape,
+    newConstraints,
+    legDist,
+  };
+}
+
 // Translate any sketch shape by (dx, dy).  Returns a new shape, or null for
 // unknown types.  Used by sketch-element body-drag and clipboard paste.
 export function translateShape(shape, dx, dy) {

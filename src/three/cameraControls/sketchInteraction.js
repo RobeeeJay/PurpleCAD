@@ -815,7 +815,7 @@ export function createSketchInteraction(
   // ── Chamfer / Bevel helpers ───────────────────────────────────────────────
   const sketchModify = createSketchModifyHelpers(
     { scene, renderer, objectsRef, itemsRef, selectedIdRef },
-    { findSnap, propagateConstraints },
+    { findSnap },
   );
   const { clearModifyPreview, applyModify, showModifyPreview } = sketchModify;
 
