@@ -64,7 +64,13 @@ export function createSketchModifyHelpers(
     if (!snap) return null;
     const junc = findJunction(snap, shapes, constraints);
     if (!junc) return null;
-    const edit = buildChamferEdit(shapes, junc, mode, modifyDist());
+    const edit = buildChamferEdit(
+      shapes,
+      junc,
+      mode,
+      modifyDist(),
+      constraints,
+    );
     if (!edit) return null;
     return { selItem, sketchMesh, shapes, junc, edit };
   };
@@ -72,18 +78,19 @@ export function createSketchModifyHelpers(
   const applyModify = (screenX, screenY, mode) => {
     const found = editAt(screenX, screenY, mode);
     if (!found) return;
-    const { junc, edit } = found;
+    const { edit } = found;
     const updates = new Map(edit.updates);
-    const juncConstraint = junc.constraint;
-    // Replace the old corner coincident with the bridge element + its joins; the
-    // two trimmed legs are the only existing shapes that change.
+    // Replace the old corner joins (coincident + any angle lock spanning the
+    // split corner) with the bridge element and its own joins; the two trimmed
+    // legs are the only existing shapes that change.
+    const removeSet = new Set(edit.removeConstraints);
     useStore
       .getState()
       .applySketchModify(
         selectedIdRef.current,
         updates,
         edit.newShape,
-        (c) => c === juncConstraint,
+        (c) => removeSet.has(c),
         edit.newConstraints,
       );
     clearModifyPreview();

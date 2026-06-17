@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { solveConstraints, fieldsForPoint } from "../sketchSolver.js";
+import { buildChamferEdit } from "../sketchGeometry.js";
 
 const L = (x1, y1, x2, y2) => ({ type: "line", x1, y1, x2, y2 });
 const coin = (ai, pa, bi, pb) => ({
@@ -139,5 +140,67 @@ describe("solveConstraints", () => {
     ];
     const { ok } = solveConstraints(shapes, constraints);
     expect(ok).toBe(false);
+  });
+});
+
+describe("chamfering a square corner then dragging a side", () => {
+  // Build the chamfered sketch from a square's constraint set, mirroring what
+  // applySketchModify commits: apply the leg trims, append the bridge, drop the
+  // removed constraints, append the new joins.
+  const chamfer = (junc, dist = 0.2) => {
+    const { shapes, constraints } = squareWithAngles();
+    const edit = buildChamferEdit(shapes, junc, "chamfer", dist, constraints);
+    const cShapes = shapes.map((s, i) => {
+      const u = edit.updates.find(([idx]) => idx === i);
+      return u ? u[1] : s;
+    });
+    cShapes.push(edit.newShape);
+    const rm = new Set(edit.removeConstraints);
+    const cCons = [
+      ...constraints.filter((c) => !rm.has(c)),
+      ...edit.newConstraints,
+    ];
+    return { edit, shapes: cShapes, constraints: cCons, bridge: shapes.length };
+  };
+
+  it("drops the corner's coincident AND its stale 90° angle lock", () => {
+    // Chamfer the BR corner (L1.end ↔ L2.start). The rectangle's 90° angle at
+    // that corner must go too — once the corner splits, an angle between two
+    // now-separate points corrupts later solves.
+    const { edit } = chamfer({ aIdx: 1, aKey: "end", bIdx: 2, bKey: "start" });
+    expect(edit.removeConstraints).toContainEqual(coin(1, "end", 2, "start"));
+    expect(edit.removeConstraints).toContainEqual(ang(1, 2));
+    // a coincident at a different corner is untouched
+    expect(edit.removeConstraints).not.toContainEqual(
+      coin(0, "end", 1, "start"),
+    );
+  });
+
+  it("keeps the chamfer joined to both legs when a far side is dragged", () => {
+    const { shapes, constraints, bridge } = chamfer({
+      aIdx: 1,
+      aKey: "end",
+      bIdx: 2,
+      bKey: "start",
+    });
+    // Drag the top edge (idx 0) up by pinning both its endpoints higher.
+    const dragged = shapes.slice();
+    dragged[0] = L(0, 1.5, 1, 1.5);
+    const fixedSet = new Set([
+      ...fieldsForPoint(dragged[0], "start").map((f) => `0:${f}`),
+      ...fieldsForPoint(dragged[0], "end").map((f) => `0:${f}`),
+    ]);
+    const { shapes: r, ok } = solveConstraints(dragged, constraints, {
+      fixed: fixedSet,
+    });
+    expect(ok).toBe(true);
+    const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-3;
+    // bridge.start ↔ L1.end and bridge.end ↔ L2.start both still hold.
+    expect(
+      near({ x: r[bridge].x1, y: r[bridge].y1 }, { x: r[1].x2, y: r[1].y2 }),
+    ).toBe(true);
+    expect(
+      near({ x: r[bridge].x2, y: r[bridge].y2 }, { x: r[2].x1, y: r[2].y1 }),
+    ).toBe(true);
   });
 });

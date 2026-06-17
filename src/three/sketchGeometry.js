@@ -152,8 +152,13 @@ const coincident = (newIdx, newKey, legIdx, legKey) => ({
 // additionally angle-locks each corner so it holds its shape under later edits.
 // `junc` = {aIdx, aKey, bIdx, bKey}; `dist` is the chamfer setback or, for a
 // fillet, the desired arc radius (converted to the leg setback so the arc comes
-// out that radius at any corner angle).  Returns null on degenerate geometry.
-export function buildChamferEdit(shapes, junc, mode, dist) {
+// out that radius at any corner angle).  `constraints` is the sketch's current
+// constraint list — every constraint that joined the two corner endpoints
+// (coincident *and* angle, e.g. a rectangle's 90 degree lock) is returned in
+// `removeConstraints`, since once the corner is split those endpoints are no
+// longer one point and such a constraint would span two vertices and corrupt
+// later drags.  Returns null on degenerate geometry.
+export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
   const { aIdx, aKey, bIdx, bKey } = junc;
   const sA = shapes[aIdx],
     sB = shapes[bIdx];
@@ -202,6 +207,18 @@ export function buildChamferEdit(shapes, junc, mode, dist) {
     ];
   }
 
+  const joinsCorner = (c) => {
+    const m2 = (i1, k1, i2, k2) =>
+      c.shapeAIdx === i1 &&
+      c.pointA === k1 &&
+      c.shapeBIdx === i2 &&
+      c.pointB === k2;
+    return (
+      (c.type === "coincident" || c.type === "angle") &&
+      (m2(aIdx, aKey, bIdx, bKey) || m2(bIdx, bKey, aIdx, aKey))
+    );
+  };
+
   return {
     updates: [
       [aIdx, newSA],
@@ -209,6 +226,7 @@ export function buildChamferEdit(shapes, junc, mode, dist) {
     ],
     newShape,
     newConstraints,
+    removeConstraints: constraints.filter(joinsCorner),
     legDist,
   };
 }
