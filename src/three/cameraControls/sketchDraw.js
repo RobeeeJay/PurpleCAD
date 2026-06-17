@@ -26,6 +26,36 @@ const gridSnapLocal = (pt) => {
   };
 };
 
+// When a freshly-drawn line lands within ~1.1° of an axis, snap it exactly onto
+// that axis and report the matching horizontal/vertical constraint, so drawing
+// a level line auto-constrains it.  Only the endpoint that isn't pinned to
+// existing geometry is moved (moving a snapped endpoint would break its
+// coincident join); if both ends are pinned, the slope isn't ours to change so
+// we leave it alone.  Returns { shape, constraint } or null.
+const AXIS_TOL = 0.02; // sin of the angle tolerance, ~1.1°
+export function axisAlignLine(shape, shapeIdx, startSnapped, endSnapped) {
+  if (!shape || shape.type !== "line") return null;
+  if (startSnapped && endSnapped) return null;
+  const dx = shape.x2 - shape.x1;
+  const dy = shape.y2 - shape.y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return null;
+  const tol = AXIS_TOL * len;
+  if (Math.abs(dy) <= tol) {
+    const shape2 = endSnapped
+      ? { ...shape, y1: shape.y2 }
+      : { ...shape, y2: shape.y1 };
+    return { shape: shape2, constraint: { type: "horizontal", shapeIdx } };
+  }
+  if (Math.abs(dx) <= tol) {
+    const shape2 = endSnapped
+      ? { ...shape, x1: shape.x2 }
+      : { ...shape, x2: shape.x1 };
+    return { shape: shape2, constraint: { type: "vertical", shapeIdx } };
+  }
+  return null;
+}
+
 export function createSketchDrawHelpers(
   {
     scene,
@@ -384,10 +414,24 @@ export function createSketchDrawHelpers(
       clearSnapIndicator();
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
       if (draw.tool === "line") {
-        if (shape)
+        let finalShape = shape;
+        let endPt = localPt;
+        if (shape) {
+          const hv = axisAlignLine(
+            shape,
+            shapes.length,
+            !!draw.snaps[0],
+            !!clickSnap,
+          );
+          if (hv) {
+            finalShape = hv.shape;
+            constraints.push(hv.constraint);
+            endPt = { x: hv.shape.x2, y: hv.shape.y2 };
+          }
           useStore
             .getState()
-            .addSketchShape(selectedIdRef.current, shape, constraints);
+            .addSketchShape(selectedIdRef.current, finalShape, constraints);
+        }
         // End the chain whenever the user clicks on ANY existing snap point
         // (not just the chain's start) — connecting back to another shape's
         // endpoint or midpoint is a natural "I'm done drawing" gesture.
@@ -407,13 +451,13 @@ export function createSketchDrawHelpers(
           const contSnap = clickSnap ?? {
             shapeIdx: shapes.length,
             pointKey: "end",
-            x: localPt.x,
-            y: localPt.y,
+            x: endPt.x,
+            y: endPt.y,
           };
           sketchDrawRef.current = {
             tool: "line",
-            startLocal: localPt,
-            points: [localPt],
+            startLocal: endPt,
+            points: [endPt],
             snaps: [contSnap],
             chainStartPoint: chainStart,
             previewObjects: [],
