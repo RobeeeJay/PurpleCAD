@@ -1253,12 +1253,15 @@ export function createSketchInteraction(
       const sy = ((-gw.y + 1) / 2) * rect.height + rect.top;
       if (Math.hypot(screenX - sx, screenY - sy) < 16) {
         const sel = useStore.getState().selectedSketchElement;
-        const indices =
+        const indices = (
           multiSelectedIndices.length > 0
             ? [...multiSelectedIndices]
             : sel?.type === "line"
               ? [sel.shapeIdx]
-              : [];
+              : []
+        )
+          // Projected geometry is immovable until released — never rotate it.
+          .filter((i) => !shapes[i]?.projection);
         const start = screenToSketchLocal(screenX, screenY, sketchMesh);
         if (indices.length > 0 && start) {
           sketchDrag = {
@@ -1298,13 +1301,17 @@ export function createSketchInteraction(
           multiSelectedIndices.length > 1 &&
           multiSelectedIndices.includes(snap.shapeIdx)
         ) {
+          // Projected geometry is immovable — exclude it from the dragged set.
+          const movable = multiSelectedIndices.filter(
+            (i) => !shapes[i]?.projection,
+          );
           sketchDrag = {
             kind: "multi",
             sketchMesh,
             selItemId: selItem.id,
             anchorLocal: { x: snap.x, y: snap.y },
-            multiIndices: [...multiSelectedIndices],
-            multiOrigShapes: multiSelectedIndices.map((i) => shapes[i]),
+            multiIndices: movable,
+            multiOrigShapes: movable.map((i) => shapes[i]),
           };
         } else {
           clearMultiSelectOverlays();
@@ -1366,13 +1373,15 @@ export function createSketchInteraction(
         if (dragSet) {
           multiSelectedIndices = dragSet;
           showMultiSelectOverlays(dragSet);
+          // Projected geometry stays selected but isn't moved.
+          const movable = dragSet.filter((i) => !shapes[i]?.projection);
           sketchDrag = {
             kind: "multi",
             sketchMesh,
             selItemId: selItem.id,
             anchorLocal: localAnchor,
-            multiIndices: [...dragSet],
-            multiOrigShapes: dragSet.map((i) => shapes[i]),
+            multiIndices: movable,
+            multiOrigShapes: movable.map((i) => shapes[i]),
           };
         } else {
           clearMultiSelectOverlays();
