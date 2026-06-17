@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { solveConstraints, fieldsForPoint } from "../sketchSolver.js";
+import {
+  solveConstraints,
+  fieldsForPoint,
+  shapeHopDistance,
+} from "../sketchSolver.js";
 import { buildChamferEdit } from "../sketchGeometry.js";
 
 const L = (x1, y1, x2, y2) => ({ type: "line", x1, y1, x2, y2 });
@@ -202,5 +206,53 @@ describe("chamfering a square corner then dragging a side", () => {
     expect(
       near({ x: r[bridge].x2, y: r[bridge].y2 }, { x: r[2].x1, y: r[2].y1 }),
     ).toBe(true);
+  });
+});
+
+describe("drag locality (nearest connected points absorb the change)", () => {
+  // A free-jointed chain of three unit bars: A–B–C–D, each length 1, joints
+  // coincident.  Dragging end A should be taken up mostly by the near bar; the
+  // far end D should move least.
+  const chain = () => {
+    const shapes = [L(0, 0, 1, 0), L(1, 0, 2, 0), L(2, 0, 3, 0)];
+    const constraints = [
+      coin(0, "end", 1, "start"),
+      coin(1, "end", 2, "start"),
+      fixed(0, "start", 0, "end", 1),
+      fixed(1, "start", 1, "end", 1),
+      fixed(2, "start", 2, "end", 1),
+    ];
+    return { shapes, constraints };
+  };
+
+  it("shapeHopDistance grows with constraint hops from the dragged shape", () => {
+    const { constraints } = chain();
+    expect(shapeHopDistance(3, constraints, new Set([0]))).toEqual([0, 1, 2]);
+    // unreachable geometry is Infinity (maximally stiff)
+    expect(
+      shapeHopDistance(4, [coin(0, "end", 1, "start")], new Set([0])),
+    ).toEqual([0, 1, Infinity, Infinity]);
+  });
+
+  it("a dragged end's near point moves more than the far point", () => {
+    const { shapes, constraints } = chain();
+    const dragged = shapes.slice();
+    dragged[0] = { ...dragged[0], x1: 0.5, y1: 0 }; // pull A toward the chain
+    const fixedSet = new Set(
+      fieldsForPoint(dragged[0], "start").map((f) => `0:${f}`),
+    );
+    const { shapes: r, ok } = solveConstraints(dragged, constraints, {
+      fixed: fixedSet,
+    });
+    expect(ok).toBe(true);
+    const disp = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+    const dB = disp({ x: r[0].x2, y: r[0].y2 }, { x: 1, y: 0 });
+    const dC = disp({ x: r[1].x2, y: r[1].y2 }, { x: 2, y: 0 });
+    const dD = disp({ x: r[2].x2, y: r[2].y2 }, { x: 3, y: 0 });
+    // Strictly decreasing with distance from the drag.
+    expect(dB).toBeGreaterThan(dC);
+    expect(dC).toBeGreaterThan(dD);
+    // and a clear gap end-to-end, not a near-uniform shift.
+    expect(dB - dD).toBeGreaterThan(0.1);
   });
 });

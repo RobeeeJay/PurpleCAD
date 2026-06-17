@@ -190,6 +190,44 @@ function residuals(shapes, constraints, variables) {
   return out;
 }
 
+// Hop distance (number of coupling constraints) from each shape to the nearest
+// fixed shape.  Two shapes are coupled when a constraint references both; H/V
+// constraints touch a single shape and add no edge.  Used during a drag to make
+// far-away geometry stiffer than near geometry, so a drag is absorbed by the
+// points closest to it and distant points stay put.  Shapes unreachable from
+// the drag are Infinity (treated as maximally stiff).
+export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
+  const adj = Array.from({ length: numShapes }, () => []);
+  const link = (a, b) => {
+    if (a == null || b == null || a === b) return;
+    if (a < 0 || b < 0 || a >= numShapes || b >= numShapes) return;
+    adj[a].push(b);
+    adj[b].push(a);
+  };
+  for (const c of constraints) {
+    if (c.type === "coincident" || c.type === "distance" || c.type === "angle")
+      link(c.shapeAIdx, c.shapeBIdx);
+    else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);
+    else if (c.type === "offset") link(c.shapeIdx, c.origIdx);
+  }
+  const dist = new Array(numShapes).fill(Infinity);
+  const queue = [];
+  for (const i of fixedShapeIdxs)
+    if (i >= 0 && i < numShapes && dist[i] !== 0) {
+      dist[i] = 0;
+      queue.push(i);
+    }
+  for (let head = 0; head < queue.length; head++) {
+    const i = queue[head];
+    for (const j of adj[i])
+      if (dist[j] > dist[i] + 1) {
+        dist[j] = dist[i] + 1;
+        queue.push(j);
+      }
+  }
+  return dist;
+}
+
 // Solve A·x = b in place (Gaussian elimination with partial pivoting).  A is
 // N×N (row-major arrays), b length N.  Returns x, or null if singular.
 function solveLinear(A, b) {
@@ -246,6 +284,35 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   const fixedW = 1e4;
   const isFixed = specs.map(({ i, f }) => fixed.has(`${i}:${f}`));
 
+  // During a drag (a non-empty fixed set), pull distant geometry toward its
+  // start position more firmly than nearby geometry: the regularization weight
+  // grows with hop distance from the dragged shape, so the change is absorbed
+  // by the nearest connected points and far points barely move.  All weights
+  // stay far below the unit constraint weight, so this only chooses among
+  // otherwise-equivalent solutions — it never fights a constraint.  With no
+  // fixed set (e.g. a dimension edit) the weight is uniform, as before.
+  const fixedShapeIdxs = new Set();
+  for (const key of fixed) {
+    const i = parseInt(key, 10);
+    if (Number.isInteger(i)) fixedShapeIdxs.add(i);
+  }
+  const HOP_GROWTH = 4; // weight multiplier per hop away from the drag
+  const HOP_MAX_MULT = 100; // cap so even far points stay well under weight 1
+  const hop =
+    fixedShapeIdxs.size > 0
+      ? shapeHopDistance(base.length, cs, fixedShapeIdxs)
+      : null;
+  const regWeight = specs.map(({ i }, j) => {
+    if (isFixed[j]) return fixedW;
+    if (!hop) return regW;
+    const d = hop[i];
+    // The drag shape and its immediate neighbours are the freest (mult 1);
+    // stiffness ramps up beyond them.  Unreachable geometry is maximally stiff.
+    const steps = Number.isFinite(d) ? Math.max(0, d - 1) : Infinity;
+    const mult = Math.min(HOP_MAX_MULT, HOP_GROWTH ** steps);
+    return regW * mult;
+  });
+
   const shapesAt = (xv) => {
     const out = base.map((s) => ({ ...s }));
     specs.forEach(({ i, f }, j) => {
@@ -256,8 +323,7 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   // Full residual: constraints first, then one regularization row per variable.
   const fullRes = (xv) => {
     const r = residuals(shapesAt(xv), cs, variables);
-    for (let j = 0; j < N; j++)
-      r.push((xv[j] - x0[j]) * (isFixed[j] ? fixedW : regW));
+    for (let j = 0; j < N; j++) r.push((xv[j] - x0[j]) * regWeight[j]);
     return r;
   };
   const cost = (r) => r.reduce((a, v) => a + v * v, 0);
