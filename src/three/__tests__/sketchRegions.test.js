@@ -7,6 +7,7 @@ import {
   polyArea,
   groupLoopsWithHoles,
 } from "../sceneObjects.js";
+import { buildChamferEdit } from "../sketchGeometry.js";
 
 // ── Stub out THREE.js and other heavy dependencies ────────────────────────────
 // The pure geometry functions under test use no THREE symbols at all; we only
@@ -392,6 +393,28 @@ describe("sketch region detection", () => {
         { ...L(0, 0, 0, 4), dashed: true }, // this edge excluded
       ];
       expect(findClosedLoopsWithShapes(shapes)).toHaveLength(0);
+    });
+
+    it("a bevel (fillet) arc closes a filleted corner's region", () => {
+      // Square with the top-left corner filleted: the two legs are trimmed back
+      // and a bevel arc bridges them.  The arc must participate in region
+      // detection, or the profile reads as open and won't extrude.
+      const edit = buildChamferEdit(
+        squareLines(),
+        { aIdx: 3, aKey: "end", bIdx: 0, bKey: "start" },
+        "bevel",
+        1,
+      );
+      const shapes = squareLines().map((s, i) => {
+        const u = edit.updates.find(([x]) => x === i);
+        return u ? u[1] : s;
+      });
+      shapes.push(edit.newShape); // the bevel arc, index 4
+      expect(edit.newShape.kind).toBe("bevel");
+      const loops = findClosedLoopsWithShapes(shapes);
+      expect(loops).toHaveLength(1);
+      // The closed loop includes the bevel arc.
+      expect(loops[0].shapeIndices).toContain(4);
     });
 
     it("two separate rect shapes → 2 independent loops", () => {

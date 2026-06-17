@@ -37,8 +37,10 @@ export function findClosedLoopsWithShapes(
   // zero-length segments at projection time so it isn't a degenerate input.
   const solidEntries = [];
   shapes.forEach((s, i) => {
-    if (!s.dashed && s.kind !== "bevel")
-      solidEntries.push({ shape: s, origIdx: i });
+    // Bevel (fillet) arcs are real profile geometry — they bridge the two
+    // trimmed legs, so a filleted corner only closes if the arc participates.
+    // Only construction (dashed) geometry is excluded.
+    if (!s.dashed) solidEntries.push({ shape: s, origIdx: i });
   });
 
   // ── Expand rects to 4 line segments so they participate in intersection

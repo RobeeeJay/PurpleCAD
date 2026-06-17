@@ -17,7 +17,6 @@ import {
   polyCentroid,
 } from "./closedLoops.js";
 import {
-  BEVEL_COLOR,
   SKETCH_FACE_HIGHLIGHT,
   sketchConstructionColorFor,
   sketchLineColorFor,
@@ -111,7 +110,6 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     const circularPatternIdxs = circularPatternShapeIdxSet(item);
     const rectangularPatternIdxs = rectangularPatternShapeIdxSet(item);
     item.shapes.forEach((shape, shapeIdx) => {
-      if (shape.kind === "bevel") return; // bevel arcs not shown in object view
       const pts = getSketchShapePoints(shape, sketchMesh);
       if (pts.length < 2) return;
       const geo = new LineGeometry();
@@ -311,7 +309,8 @@ export function buildSketchShapesGroup(
       return;
     }
 
-    const isBevel = shape.kind === "bevel";
+    // A bevel (fillet) arc is real profile geometry, so it draws like any other
+    // solid sketch line — not as a dashed reference curve.
     const isDashed = !!shape.dashed;
     const isOffset = offsetIdxs.has(shapeIdx);
     const isMirror = mirrorIdxs.has(shapeIdx);
@@ -329,27 +328,25 @@ export function buildSketchShapesGroup(
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     const mat = new LineMaterial({
-      color: isBevel
-        ? BEVEL_COLOR
-        : isProjected
-          ? 0x37b8a0
-          : isOffset
-            ? sketchOffsetColorFor(theme)
-            : isMirror
-              ? sketchMirrorColorFor(theme)
-              : isCircularPattern
-                ? sketchCircularPatternColorFor(theme)
-                : isRectangularPattern
-                  ? sketchRectangularPatternColorFor(theme)
-                  : sketchLineColorFor(theme),
-      linewidth: isBevel ? 1.0 : 1.5,
+      color: isProjected
+        ? 0x37b8a0
+        : isOffset
+          ? sketchOffsetColorFor(theme)
+          : isMirror
+            ? sketchMirrorColorFor(theme)
+            : isCircularPattern
+              ? sketchCircularPatternColorFor(theme)
+              : isRectangularPattern
+                ? sketchRectangularPatternColorFor(theme)
+                : sketchLineColorFor(theme),
+      linewidth: 1.5,
       depthTest: false,
       resolution: res,
-      transparent: isBevel || isDashed,
-      opacity: isBevel ? 0.55 : isDashed ? 0.75 : 1.0,
-      dashed: isDashed || isBevel,
-      dashSize: isDashed || isBevel ? 0.1 : 0,
-      gapSize: isDashed || isBevel ? 0.06 : 0,
+      transparent: isDashed,
+      opacity: isDashed ? 0.75 : 1.0,
+      dashed: isDashed,
+      dashSize: isDashed ? 0.1 : 0,
+      gapSize: isDashed ? 0.06 : 0,
     });
     const line = new Line2(geo, mat);
     line.computeLineDistances();
