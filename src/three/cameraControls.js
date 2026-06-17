@@ -1032,6 +1032,7 @@ export function attachCameraControls(ctx) {
         }),
       );
       line.renderOrder = 1011;
+      line.frustumCulled = false;
       group.add(line);
     }
     scene.add(group);
@@ -1074,39 +1075,49 @@ export function attachCameraControls(ctx) {
     const solid = hit.object;
     const bodyId = solid.userData.itemId;
     solid.updateMatrixWorld(true);
-    const sig = solid.matrixWorld.elements
-      .map((e) => Math.round(e * 1e3))
-      .join(",");
+    ctx.sketchMesh.updateMatrixWorld(true);
+    const sig = `${solid.matrixWorld.elements.map((e) => Math.round(e * 1e3)).join(",")}|${ctx.sketchMesh.matrixWorld.elements.map((e) => Math.round(e * 1e3)).join(",")}`;
     const bodyKey = `${bodyId}|${sig}`;
-    // The highlight sits on the (fixed) body, so only rebuild it when the hovered
-    // body changes — not on every mouse-move, which would churn the GPU buffers.
+    // The outline is fixed for a given body+sketch, so only recompute when the
+    // hovered body changes — not on every mouse-move.
     if (projectHoverGroup && projectHoverGroup.userData.bodyKey === bodyKey)
       return;
     if (!projectHoverCache || projectHoverCache.bodyKey !== bodyKey) {
       const built = bodyEdgeGraph(solid);
-      projectHoverCache = {
-        bodyKey,
-        chains: built ? decomposeFeatureEdges(built.graph) : [],
-      };
+      let shapes = [];
+      if (built) {
+        for (const chain of decomposeFeatureEdges(built.graph)) {
+          const pts2d = worldPolylineToLocal2D(
+            chain,
+            ctx.sketchMesh.position,
+            ctx.sketchMesh.quaternion,
+          );
+          shapes.push(...fitProjectedShapes(pts2d));
+        }
+        shapes = dedupProjectedShapes(shapes);
+      }
+      projectHoverCache = { bodyKey, shapes };
     }
     controls.clearProjectHover();
-    if (projectHoverCache.chains.length === 0) return;
+    if (projectHoverCache.shapes.length === 0) return;
+    // Draw the would-be projection ON the sketch plane (where the user is
+    // looking), in gold to distinguish it from the teal staged preview.
     const group = new THREE.Group();
     group.userData.bodyKey = bodyKey;
-    for (const chain of projectHoverCache.chains) {
-      const geo = new THREE.BufferGeometry().setFromPoints(
-        chain.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
-      );
+    for (const shape of projectHoverCache.shapes) {
+      const pts = getSketchShapePoints(shape, ctx.sketchMesh);
+      if (!pts || pts.length < 2) continue;
       const line = new THREE.Line(
-        geo,
+        new THREE.BufferGeometry().setFromPoints(pts),
         new THREE.LineBasicMaterial({
-          color: 0x37b8a0,
+          color: 0xffcc44,
           depthTest: false,
           transparent: true,
           opacity: 0.95,
         }),
       );
-      line.renderOrder = 1012;
+      line.renderOrder = 1013;
+      line.frustumCulled = false;
       group.add(line);
     }
     scene.add(group);
