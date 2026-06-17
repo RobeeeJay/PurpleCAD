@@ -13,6 +13,8 @@ const RenderSection = () => {
   const toggleCrossSectionView = useStore((s) => s.toggleCrossSectionView);
   const pathTraceView = useStore((s) => s.pathTraceView);
   const setPathTraceView = useStore((s) => s.setPathTraceView);
+  const projectionMode = useStore((s) => s.projectionMode);
+  const toggleProjectionMode = useStore((s) => s.toggleProjectionMode);
   // The raster modes read as selected only when the path-traced view is off, so
   // all four behave as one mutually-exclusive radio group.
   const rasterMode = (m) => renderMode === m && !pathTraceView;
@@ -590,6 +592,73 @@ const RenderSection = () => {
             y2="21"
           />
           <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.5" cx="21" cy="21" />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${projectionMode === "isometric" ? "active" : ""}`}
+        title={`Switch to ${projectionMode === "perspective" ? "isometric" : "perspective"} projection`}
+        onClick={toggleProjectionMode}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="12"
+            x2="12"
+            y2="3"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="12"
+            x2="4"
+            y2="17"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="12"
+            x2="20"
+            y2="17"
+          />
+          <polygon
+            fill="#6C3FD4"
+            stroke="#6C3FD4"
+            strokeWidth="0.5"
+            points="12,3 10.5,6 13.5,6"
+          />
+          <polygon
+            fill="#6C3FD4"
+            stroke="#6C3FD4"
+            strokeWidth="0.5"
+            points="4,17 7,16.5 5.5,19"
+          />
+          <polygon
+            fill="#6C3FD4"
+            stroke="#6C3FD4"
+            strokeWidth="0.5"
+            points="20,17 18.5,19 21,16.5"
+          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="2" cx="12" cy="12" />
+          <text
+            x="11"
+            y="22"
+            fontSize="6"
+            fontFamily="monospace"
+            fill="#D4A33F"
+            fontWeight="600"
+          >
+            ISO
+          </text>
         </svg>
       </button>
     </ToolbarSection>
