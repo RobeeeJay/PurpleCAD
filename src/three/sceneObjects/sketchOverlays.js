@@ -12,7 +12,6 @@ import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
 import { textShapeContours } from "../sketchText.js";
 import { useStore } from "../../store";
 import {
-  findClosedLoops,
   findClosedLoopsWithShapes,
   groupLoopsWithHoles,
   polyCentroid,
@@ -185,11 +184,26 @@ export function buildExtrudeSelectGroup(
   sketchItems.forEach((item) => {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
-    const allLoops = findClosedLoops(
+    const loopsWithShapes = findClosedLoopsWithShapes(
       item.shapes || [],
       curveSegments,
       precision,
     );
+    // Track which loops belong to a text shape so its counters (e.g. the hole
+    // in "o") stay holes of the glyph rather than separately-selectable regions.
+    const textIdxs = new Set();
+    (item.shapes || []).forEach((s, i) => {
+      if (s.type === "text") textIdxs.add(i);
+    });
+    const isTextPoly = new Map();
+    const allLoops = loopsWithShapes.map((l) => {
+      isTextPoly.set(
+        l.polygon,
+        l.shapeIndices.length > 0 &&
+          l.shapeIndices.every((si) => textIdxs.has(si)),
+      );
+      return l.polygon;
+    });
     const grouped = groupLoopsWithHoles(allLoops);
     const euler = new THREE.Euler().setFromQuaternion(sketchMesh.quaternion);
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
@@ -231,7 +245,10 @@ export function buildExtrudeSelectGroup(
         normalWorld: { x: normal.x, y: normal.y, z: normal.z },
       };
       group.add(fill);
-      entries.forEach(addProfile);
+      // A text glyph's nested regions are its counters — keep them as holes,
+      // not separately-selectable profiles.  Non-text regions still expose
+      // their children (e.g. text sitting inside a rectangle).
+      if (!isTextPoly.get(polygon)) entries.forEach(addProfile);
     };
     grouped.forEach(addProfile);
   });
