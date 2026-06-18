@@ -6,7 +6,8 @@ import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js"
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
-import { getSketchShapePoints } from "./sceneObjects.js";
+import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
+import { textShapeContours, makeTextShape } from "./sketchText.js";
 import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
 import {
   featureEdgeGraph,
@@ -1037,6 +1038,55 @@ export function attachCameraControls(ctx) {
     }
     scene.add(group);
     projectionPreviewGroup = group;
+  };
+
+  // Live Text-tool preview: draw the draft text's glyph outlines on the active
+  // sketch plane while the Text dialog is open (driven by its inputs).
+  let textPreviewGroup = null;
+  controls.clearTextPreview = () => {
+    if (!textPreviewGroup) return;
+    scene.remove(textPreviewGroup);
+    textPreviewGroup.traverse((o) => {
+      o.geometry?.dispose();
+      o.material?.dispose();
+    });
+    textPreviewGroup = null;
+  };
+  controls.updateTextPreview = (draft) => {
+    controls.clearTextPreview();
+    const ctx = activeSketchForProject();
+    if (!ctx || !draft) return;
+    const shape = makeTextShape({
+      text: draft.text,
+      height: (draft.heightMm || 0) / MM_PER_UNIT,
+      font: draft.font,
+      x: draft.x,
+      y: draft.y,
+    });
+    const { sketchMesh } = ctx;
+    const toW = (lx, ly) =>
+      new THREE.Vector3(lx, ly, 0.004)
+        .applyQuaternion(sketchMesh.quaternion)
+        .add(sketchMesh.position);
+    const group = new THREE.Group();
+    for (const contour of textShapeContours(shape)) {
+      if (contour.length < 2) continue;
+      const pts = [...contour, contour[0]].map((p) => toW(p.x, p.y));
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({
+          color: 0x6c3fd4,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.9,
+        }),
+      );
+      line.renderOrder = 1011;
+      line.frustumCulled = false;
+      group.add(line);
+    }
+    scene.add(group);
+    textPreviewGroup = group;
   };
 
   // Hover feedback: highlight the connected feature edges of the body under the

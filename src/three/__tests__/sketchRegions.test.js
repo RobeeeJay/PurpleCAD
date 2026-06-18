@@ -417,6 +417,26 @@ describe("sketch region detection", () => {
       expect(loops[0].shapeIndices).toContain(4);
     });
 
+    it("locked text geometry is ignored by region detection", () => {
+      // A square plus a text shape → still exactly the square's one loop.
+      const shapes = [
+        ...squareLines(),
+        {
+          type: "text",
+          text: "Hi",
+          height: 1,
+          font: "helvetiker",
+          x: 1,
+          y: 1,
+          w: 1,
+          h: 1,
+        },
+      ];
+      const loops = findClosedLoopsWithShapes(shapes);
+      expect(loops).toHaveLength(1);
+      expect(loops[0].shapeIndices.sort()).toEqual([0, 1, 2, 3]);
+    });
+
     it("two separate rect shapes → 2 independent loops", () => {
       const shapes = [R(0, 0, 3, 3), R(5, 0, 8, 3)];
       const loops = findClosedLoopsWithShapes(shapes);

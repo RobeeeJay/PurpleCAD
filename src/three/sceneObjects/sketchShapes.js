@@ -106,6 +106,19 @@ export function getSketchShapePoints(shape, sketchMesh) {
       );
       return curve.getPoints(48).map(({ x, y }) => toWorld(x, y));
     }
+    case "text": {
+      // The actual glyph outlines are drawn separately (they need the font);
+      // here return the cached ink bounding box (anchor = top-left), used for
+      // selection highlight, hit-testing, and extent.
+      const { x, y, w = 0, h = 0 } = shape;
+      return [
+        toWorld(x, y),
+        toWorld(x + w, y),
+        toWorld(x + w, y - h),
+        toWorld(x, y - h),
+        toWorld(x, y),
+      ];
+    }
     default:
       return [];
   }

@@ -9,6 +9,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { addConstraintIconsToGroup } from "./constraintIcons.js";
 import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
+import { textShapeContours } from "../sketchText.js";
 import { useStore } from "../../store";
 import {
   findClosedLoops,
@@ -110,6 +111,31 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     const circularPatternIdxs = circularPatternShapeIdxSet(item);
     const rectangularPatternIdxs = rectangularPatternShapeIdxSet(item);
     item.shapes.forEach((shape, shapeIdx) => {
+      if (shape.type === "text") {
+        const toW = (lx, ly) =>
+          new THREE.Vector3(lx, ly, 0.003)
+            .applyQuaternion(sketchMesh.quaternion)
+            .add(sketchMesh.position);
+        for (const contour of textShapeContours(shape)) {
+          if (contour.length < 2) continue;
+          const wpts = [...contour, contour[0]].map((p) => toW(p.x, p.y));
+          const tgeo = new LineGeometry();
+          tgeo.setPositions(wpts.flatMap((p) => [p.x, p.y, p.z]));
+          const tline = new Line2(
+            tgeo,
+            new LineMaterial({
+              color: sketchLineColorFor(theme),
+              linewidth: 1.5,
+              depthTest: false,
+              resolution: res,
+            }),
+          );
+          tline.computeLineDistances();
+          tline.renderOrder = 1001;
+          group.add(tline);
+        }
+        return;
+      }
       const pts = getSketchShapePoints(shape, sketchMesh);
       if (pts.length < 2) return;
       const geo = new LineGeometry();
@@ -298,6 +324,33 @@ export function buildSketchShapesGroup(
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
     if (editHidden.has(shapeIdx)) return;
+    if (shape.type === "text") {
+      // Locked text: draw each glyph contour as its own loop, all tagged with
+      // the same shapeIdx so a click selects (and whole-shape drags) the text.
+      for (const contour of textShapeContours(shape)) {
+        if (contour.length < 2) continue;
+        const wpts = [...contour, contour[0]].map((p) =>
+          toWorld(p.x, p.y, 0.003),
+        );
+        const tgeo = new LineGeometry();
+        tgeo.setPositions(wpts.flatMap((p) => [p.x, p.y, p.z]));
+        const tline = new Line2(
+          tgeo,
+          new LineMaterial({
+            color: sketchLineColorFor(theme),
+            linewidth: 1.5,
+            depthTest: false,
+            resolution: res,
+          }),
+        );
+        tline.computeLineDistances();
+        tline.renderOrder = 1001;
+        tline.userData.shapeIdx = shapeIdx;
+        tline.userData.isText = true;
+        group.add(tline);
+      }
+      return;
+    }
     const pts = getSketchShapePoints(shape, sketchMesh);
     if (pts.length < 2) {
       // A standalone point has no polyline; still emit its node dot so it's

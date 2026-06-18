@@ -39,8 +39,9 @@ export function findClosedLoopsWithShapes(
   shapes.forEach((s, i) => {
     // Bevel (fillet) arcs are real profile geometry — they bridge the two
     // trimmed legs, so a filleted corner only closes if the arc participates.
-    // Only construction (dashed) geometry is excluded.
-    if (!s.dashed) solidEntries.push({ shape: s, origIdx: i });
+    // Construction (dashed) and locked text geometry are excluded.
+    if (!s.dashed && s.type !== "text")
+      solidEntries.push({ shape: s, origIdx: i });
   });
 
   // ── Expand rects to 4 line segments so they participate in intersection

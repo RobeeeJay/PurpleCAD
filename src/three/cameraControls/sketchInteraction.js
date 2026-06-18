@@ -21,6 +21,7 @@ import {
   rebuildPointDotsForDrag,
   polyArea,
   snapUnitToIntervalMm,
+  MM_PER_UNIT,
 } from "../sceneObjects.js";
 import {
   applyHVEnforcement,
@@ -42,6 +43,7 @@ import {
   offsetSelectedSketchGeometry,
 } from "../sketchModifyActions.js";
 import { svgCoincidentConstraints } from "../importGeometry.js";
+import { DEFAULT_FONT_ID as TEXT_DEFAULT_FONT_ID } from "../sketchText.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
@@ -1827,6 +1829,34 @@ export function createSketchInteraction(
         );
       return true;
     }
+    // Text tool: a click sets the anchor and opens the Text dialog (with a live
+    // preview) rather than drawing directly.
+    if (activeSketchToolRef.current === "text") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) {
+        const selItem = itemsRef.current.find(
+          (i) => i.id === selectedIdRef.current,
+        );
+        const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+        const local = sketchMesh
+          ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
+          : null;
+        if (local) {
+          const store = useStore.getState();
+          store.setActiveSketchTool(null);
+          store.setTextDraft({
+            x: local.x,
+            y: local.y,
+            text: "Text",
+            heightMm: 10,
+            font: TEXT_DEFAULT_FONT_ID,
+            editIdx: null,
+          });
+        }
+      }
+      return true;
+    }
     if (activeSketchToolRef.current) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
@@ -1948,6 +1978,19 @@ export function createSketchInteraction(
                     selectedIdRef.current,
                     cObj.userData.constraintIdx,
                   );
+              } else if (c && c.type === "text") {
+                // Re-open the Text dialog seeded from this text shape so its
+                // contents / height / font can be edited and re-committed.
+                const ts = (dblSel.shapes || [])[c.shapeIdx];
+                if (ts && ts.type === "text")
+                  useStore.getState().setTextDraft({
+                    x: ts.x,
+                    y: ts.y,
+                    text: ts.text,
+                    heightMm: ts.height * MM_PER_UNIT,
+                    font: ts.font,
+                    editIdx: c.shapeIdx,
+                  });
               }
               return;
             }

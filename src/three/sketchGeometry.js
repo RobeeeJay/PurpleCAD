@@ -265,6 +265,8 @@ export function translateShape(shape, dx, dy) {
         p2: { x: shape.p2.x + dx, y: shape.p2.y + dy },
         p3: { x: shape.p3.x + dx, y: shape.p3.y + dy },
       };
+    case "text":
+      return { ...shape, x: shape.x + dx, y: shape.y + dy };
     default:
       return null;
   }

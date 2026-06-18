@@ -16,6 +16,7 @@ import Pattern3dDialog from "./components/Pattern3dDialog";
 import MirrorDialog from "./components/MirrorDialog";
 import SplitDialog from "./components/SplitDialog";
 import ProjectDialog from "./components/ProjectDialog";
+import TextDialog from "./components/TextDialog";
 import ShortcutsOverlay from "./components/ShortcutsOverlay";
 import StatusLine from "./components/StatusLine";
 import "./styles/StatusLine.css";
@@ -106,6 +107,7 @@ function App() {
       <MirrorDialog />
       <SplitDialog />
       <ProjectDialog />
+      <TextDialog />
       <ShortcutsOverlay />
       <StatusLine />
       <VersionTag />

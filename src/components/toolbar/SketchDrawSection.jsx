@@ -267,6 +267,35 @@ const SKETCH_TOOLS = [
       </svg>
     ),
   },
+  {
+    id: "text",
+    label: "Text — click a start point, then type in the dialog",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="5"
+          y1="5"
+          x2="19"
+          y2="5"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="12"
+          y1="5"
+          x2="12"
+          y2="19"
+        />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="5" cy="5" />
+      </svg>
+    ),
+  },
 ];
 
 const SketchDrawSection = () => {

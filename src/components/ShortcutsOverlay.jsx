@@ -69,8 +69,7 @@ const ShortcutsOverlay = () => {
   const [open, setOpen] = useState(false);
   const selectedId = useStore((s) => s.selectedId);
   const items = useStore((s) => s.items);
-  const isSketch =
-    items.find((i) => i.id === selectedId)?.type === "sketch";
+  const isSketch = items.find((i) => i.id === selectedId)?.type === "sketch";
   const timerRef = useRef(null);
 
   useEffect(() => {

@@ -271,6 +271,17 @@ export const createSketchSlice = (set) => ({
   setSketchConstraintFirstPoint: (pt) =>
     set({ sketchConstraintFirstPoint: pt }),
 
+  // In-progress Text tool: the anchor point + current text/height/font being
+  // edited in the Text dialog (drives its live preview).  editIdx is the shape
+  // index when editing an existing text, or null when creating a new one.
+  textDraft: null, // { x, y, text, heightMm, font, editIdx } | null
+  setTextDraft: (v) => set({ textDraft: v }),
+  updateTextDraft: (partial) =>
+    set((s) =>
+      s.textDraft ? { textDraft: { ...s.textDraft, ...partial } } : {},
+    ),
+  clearTextDraft: () => set({ textDraft: null }),
+
   sketchMultiSelectedIndices: [],
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
@@ -867,6 +878,40 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Replace one shape in place (used to re-commit an edited text shape — its
+  // `text` constraint keeps pointing at the same index).
+  updateSketchTextShape: (sketchId, idx, shape) =>
+    set((state) => {
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((item) =>
+        item.id === sketchId
+          ? Object.assign({}, item, {
+              shapes: (item.shapes || []).map((s, i) =>
+                i === idx ? shape : s,
+              ),
+            })
+          : item,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) =>
+        entry.instruction?.type === "create" &&
+        entry.instruction.item?.id === sketchId
+          ? Object.assign({}, entry, {
+              instruction: Object.assign({}, entry.instruction, {
+                item: Object.assign({}, entry.instruction.item, {
+                  shapes: updatedItem?.shapes,
+                }),
+              }),
+            })
+          : entry,
+      );
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         items: markCsgDirty(updatedItems),

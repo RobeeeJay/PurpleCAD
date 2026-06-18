@@ -319,6 +319,25 @@ export function addConstraintIconsToGroup(
       tag(cLine, { x: mx, y: my }, [c.shapeIdx], CONSTRAINT_HORIZONTAL_COLOR);
       group.add(cLine);
       markFixedSize(cLine, toWorld(mx, my, 0.005));
+    } else if (c.type === "text") {
+      // A small "T" mark at the text's top-left anchor — double-click to edit.
+      const shape = shapes[c.shapeIdx];
+      if (!shape || shape.type !== "text") return;
+      const ax = shape.x,
+        ay = shape.y;
+      const tIcon = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(ax - R, ay, 0.005),
+          toWorld(ax + R, ay, 0.005),
+          toWorld(ax, ay, 0.005),
+          toWorld(ax, ay - 2 * R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0x6c3fd4, depthTest: false }),
+      );
+      tIcon.renderOrder = 1004;
+      tag(tIcon, { x: ax, y: ay }, [c.shapeIdx], 0x6c3fd4);
+      group.add(tIcon);
+      markFixedSize(tIcon, toWorld(ax, ay, 0.005));
     } else if (c.type === "angle") {
       const sA = shapes[c.shapeAIdx],
         sB = shapes[c.shapeBIdx];
