@@ -40,6 +40,22 @@ function App() {
   const notification = useStore((state) => state.notification);
   const clearNotification = useStore((state) => state.clearNotification);
 
+  // One-time backfill of glyph contours on text shapes that predate contour
+  // caching (so they fill / extrude / explode).  Gated on a boolean so it
+  // settles after the single migrating update rather than looping.
+  const needsTextContours = useStore((state) =>
+    state.items.some(
+      (it) =>
+        it.type === "sketch" &&
+        (it.shapes || []).some(
+          (s) => s.type === "text" && !Array.isArray(s.contours),
+        ),
+    ),
+  );
+  useEffect(() => {
+    if (needsTextContours) useStore.getState().ensureTextContours();
+  }, [needsTextContours]);
+
   useEffect(() => {
     if (!notification) return;
     const t = setTimeout(clearNotification, 4000);

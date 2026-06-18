@@ -31,7 +31,7 @@ import {
 } from "../three/sketchRectangularPattern.js";
 import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
 import { explodeContours } from "../three/sketchGeometry.js";
-import { textShapeContours } from "../three/sketchText.js";
+import { textShapeContours, makeTextShape } from "../three/sketchText.js";
 
 // Shape types the Offset tool can copy.
 export const OFFSETTABLE_TYPES = ["line", "circle", "arc", "ellipse", "bezier"];
@@ -283,6 +283,50 @@ export const createSketchSlice = (set) => ({
       s.textDraft ? { textDraft: { ...s.textDraft, ...partial } } : {},
     ),
   clearTextDraft: () => set({ textDraft: null }),
+
+  // Backfill glyph contours on text shapes that predate contour caching, so the
+  // font-free consumers (region detection → fills, extrude, explode-on-unlock)
+  // see their outlines.  Idempotent; a no-op once every text shape has contours.
+  ensureTextContours: () =>
+    set((state) => {
+      const needs = (s) => s.type === "text" && !Array.isArray(s.contours);
+      let changed = false;
+      const updatedItems = state.items.map((item) => {
+        if (item.type !== "sketch" || !(item.shapes || []).some(needs))
+          return item;
+        changed = true;
+        return Object.assign({}, item, {
+          shapes: item.shapes.map((s) =>
+            needs(s)
+              ? makeTextShape({
+                  text: s.text,
+                  height: s.height,
+                  font: s.font,
+                  x: s.x,
+                  y: s.y,
+                })
+              : s,
+          ),
+        });
+      });
+      if (!changed) return {};
+      const newHistory = state.history.map((entry) => {
+        if (entry.instruction?.type !== "create") return entry;
+        const ui = updatedItems.find(
+          (i) => i.id === entry.instruction.item?.id,
+        );
+        if (!ui || ui.type !== "sketch") return entry;
+        return Object.assign({}, entry, {
+          instruction: Object.assign({}, entry.instruction, {
+            item: Object.assign({}, entry.instruction.item, {
+              shapes: ui.shapes,
+            }),
+          }),
+        });
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+    }),
 
   sketchMultiSelectedIndices: [],
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
