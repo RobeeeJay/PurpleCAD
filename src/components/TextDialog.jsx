@@ -1,8 +1,18 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { TEXT_FONTS, makeTextShape } from "../three/sketchText.js";
+import {
+  TEXT_FONTS,
+  makeTextShape,
+  enumerateSystemFonts,
+  ensureFontLoaded,
+} from "../three/sketchText.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
 import "../styles/VariablesDialog.css";
+
+const BUNDLED_FONT_OPTIONS = TEXT_FONTS.map((f) => ({
+  id: f.id,
+  label: f.label,
+}));
 
 // Text tool dialog: edits the staged `textDraft` (anchor + text + height + font)
 // with a live on-plane preview, then commits a locked `text` shape joined to a
@@ -14,18 +24,42 @@ const TextDialog = () => {
   const clearTextDraft = useStore((s) => s.clearTextDraft);
   const selectedId = useStore((s) => s.selectedId);
   const items = useStore((s) => s.items);
+  const [fontOptions, setFontOptions] = useState(BUNDLED_FONT_OPTIONS);
 
-  // Drive the live preview from the current draft; clear it on close/unmount.
+  // Append installed system fonts (async, permission-gated) to the dropdown.
+  useEffect(() => {
+    let cancelled = false;
+    enumerateSystemFonts().then((sys) => {
+      if (!cancelled && sys.length)
+        setFontOptions([...BUNDLED_FONT_OPTIONS, ...sys]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Drive the live preview from the current draft; ensure the (possibly system)
+  // font is parsed, then refresh.  Clear it on close/unmount.
   useEffect(() => {
     const cc = useStore.getState()._cameraControls;
-    if (textDraft) cc?.updateTextPreview?.(textDraft);
-    return () => cc?.clearTextPreview?.();
+    if (!textDraft) return undefined;
+    let cancelled = false;
+    cc?.updateTextPreview?.(textDraft);
+    ensureFontLoaded(textDraft.font).then((ok) => {
+      if (ok && !cancelled)
+        cc?.updateTextPreview?.(useStore.getState().textDraft);
+    });
+    return () => {
+      cancelled = true;
+      cc?.clearTextPreview?.();
+    };
   }, [textDraft]);
 
   if (!textDraft) return null;
   const sketch = items.find((i) => i.id === selectedId);
-  const fontLabel =
-    TEXT_FONTS.find((f) => f.id === textDraft.font)?.label || "";
+  const fontLabel = textDraft.font?.startsWith("sys:")
+    ? textDraft.font.slice(4)
+    : TEXT_FONTS.find((f) => f.id === textDraft.font)?.label || "";
 
   const close = () => {
     useStore.getState()._cameraControls?.clearTextPreview?.();
@@ -39,10 +73,15 @@ const TextDialog = () => {
   };
 
   const onFontInput = (v) => {
+    const lc = v.toLowerCase();
     const match =
-      TEXT_FONTS.find((f) => f.label.toLowerCase() === v.toLowerCase()) ||
-      TEXT_FONTS.find((f) => f.label.toLowerCase().startsWith(v.toLowerCase()));
-    if (match) updateTextDraft({ font: match.id });
+      fontOptions.find((f) => f.label.toLowerCase() === lc) ||
+      fontOptions.find((f) => f.label.toLowerCase().startsWith(lc));
+    if (!match) return;
+    // Parse a system font before switching so the preview/commit have outlines.
+    ensureFontLoaded(match.id).then((ok) => {
+      if (ok) updateTextDraft({ font: match.id });
+    });
   };
 
   const canConfirm =
@@ -166,7 +205,7 @@ const TextDialog = () => {
                 onKeyDown={onFieldKey}
               />
               <datalist id="text-font-list">
-                {TEXT_FONTS.map((f) => (
+                {fontOptions.map((f) => (
                   <option key={f.id} value={f.label} />
                 ))}
               </datalist>

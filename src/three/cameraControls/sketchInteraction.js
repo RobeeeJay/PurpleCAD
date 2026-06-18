@@ -1923,7 +1923,8 @@ export function createSketchInteraction(
                 cObj.userData.constraintType !== "offset" &&
                 cObj.userData.constraintType !== "rectangularPattern" &&
                 cObj.userData.constraintType !== "mirror" &&
-                cObj.userData.constraintType !== "circularPattern")
+                cObj.userData.constraintType !== "circularPattern" &&
+                cObj.userData.constraintType !== "text")
             )
               continue;
             const lp = cObj.userData.constraintIconLocalPos;

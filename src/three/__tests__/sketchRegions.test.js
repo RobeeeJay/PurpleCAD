@@ -417,24 +417,27 @@ describe("sketch region detection", () => {
       expect(loops[0].shapeIndices).toContain(4);
     });
 
-    it("locked text geometry is ignored by region detection", () => {
-      // A square plus a text shape → still exactly the square's one loop.
-      const shapes = [
-        ...squareLines(),
-        {
-          type: "text",
-          text: "Hi",
-          height: 1,
-          font: "helvetiker",
-          x: 1,
-          y: 1,
-          w: 1,
-          h: 1,
-        },
-      ];
+    it("text glyph contours become extrudable loops", () => {
+      // A square (1 loop) plus a text shape whose stored contour is a unit
+      // square → the text contributes its own loop (so it can fill / extrude)
+      // without going through the intersection/DFS machinery.
+      const textShape = {
+        type: "text",
+        x: 1,
+        y: 1,
+        contours: [
+          [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 1, y: -1 },
+            { x: 0, y: -1 },
+          ],
+        ],
+      };
+      const shapes = [...squareLines(), textShape];
       const loops = findClosedLoopsWithShapes(shapes);
-      expect(loops).toHaveLength(1);
-      expect(loops[0].shapeIndices.sort()).toEqual([0, 1, 2, 3]);
+      expect(loops).toHaveLength(2);
+      expect(loops.some((l) => l.shapeIndices.includes(4))).toBe(true);
     });
 
     it("two separate rect shapes → 2 independent loops", () => {

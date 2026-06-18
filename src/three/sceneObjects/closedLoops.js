@@ -39,9 +39,26 @@ export function findClosedLoopsWithShapes(
   shapes.forEach((s, i) => {
     // Bevel (fillet) arcs are real profile geometry — they bridge the two
     // trimmed legs, so a filleted corner only closes if the arc participates.
-    // Construction (dashed) and locked text geometry are excluded.
+    // Construction (dashed) geometry is excluded; text is handled separately
+    // below (its stored glyph contours are already closed loops).
     if (!s.dashed && s.type !== "text")
       solidEntries.push({ shape: s, origIdx: i });
+  });
+
+  // Text: each stored glyph contour is already a closed loop positioned at the
+  // shape's anchor.  Feed them in directly — NOT through the pairwise-intersect
+  // + cycle DFS, which dense glyph geometry would choke — so filled/extruded
+  // text works.  groupLoopsWithHoles nests the counters (e.g. the hole in "o").
+  const textLoops = [];
+  shapes.forEach((s, i) => {
+    if (s.type !== "text" || !Array.isArray(s.contours)) return;
+    for (const c of s.contours) {
+      if (c.length < 3) continue;
+      textLoops.push({
+        polygon: c.map((p) => ({ x: p.x + s.x, y: p.y + s.y })),
+        shapeIndices: [i],
+      });
+    }
   });
 
   // ── Expand rects to 4 line segments so they participate in intersection
@@ -198,7 +215,7 @@ export function findClosedLoopsWithShapes(
   // Too many split segments → the O(n²) node merge and the cycle DFS below get
   // pathologically slow (a dense projected wireframe of crossing edges).  Bail
   // out of region detection rather than freeze; the geometry still draws.
-  if (subEntries.length > 2500) return [];
+  if (subEntries.length > 2500) return textLoops;
 
   // ── Build adjacency graph from sub-shapes ────────────────────────────
   const nodes = [];
@@ -408,7 +425,7 @@ export function findClosedLoopsWithShapes(
     // cycle.
   });
 
-  return results;
+  return results.concat(textLoops);
 }
 
 export function findClosedLoops(shapes, curveSegments = 32, precision = null) {

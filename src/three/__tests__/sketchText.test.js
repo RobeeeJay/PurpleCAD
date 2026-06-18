@@ -9,6 +9,8 @@ import {
   measureText,
   makeTextShape,
   textShapeContours,
+  enumerateSystemFonts,
+  ensureFontLoaded,
 } from "../sketchText.js";
 import { translateShape } from "../sketchGeometry.js";
 
@@ -70,6 +72,27 @@ describe("sketchText", () => {
     // top-left of the ink box sits at the anchor
     expect(minX).toBeCloseTo(5, 5);
     expect(maxY).toBeCloseTo(7, 5);
+  });
+
+  it("caches glyph contours on the shape for font-free re-rendering", () => {
+    const s = makeTextShape({
+      text: "o",
+      height: 2,
+      font: DEFAULT_FONT_ID,
+      x: 0,
+      y: 0,
+    });
+    // 'o' has an outer ring and an inner counter (hole) → 2 contours.
+    expect(s.contours.length).toBe(2);
+    // textShapeContours uses the stored contours without re-parsing the font.
+    const stripped = { ...s, text: "", font: "missing" };
+    expect(textShapeContours(stripped).length).toBe(2);
+  });
+
+  it("degrades gracefully without the Local Font Access API", async () => {
+    expect(await enumerateSystemFonts()).toEqual([]); // no window in node
+    expect(await ensureFontLoaded(DEFAULT_FONT_ID)).toBe(true); // bundled
+    expect(await ensureFontLoaded("sys:Nope")).toBe(false); // unknown system
   });
 
   it("translateShape moves a text shape by its anchor", () => {

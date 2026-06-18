@@ -4,6 +4,7 @@
 // pure geometry, so it's safe to import from rendering, preview, and the store.
 
 import { FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
+import { TTFLoader } from "three/examples/jsm/loaders/TTFLoader.js";
 import helvetiker from "three/examples/fonts/helvetiker_regular.typeface.json";
 import helvetikerBold from "three/examples/fonts/helvetiker_bold.typeface.json";
 import optimer from "three/examples/fonts/optimer_regular.typeface.json";
@@ -11,7 +12,7 @@ import gentilis from "three/examples/fonts/gentilis_regular.typeface.json";
 
 const loader = new FontLoader();
 
-// The fonts offered in the Text dialog's dropdown.
+// The always-available bundled fonts (offered first in the dialog dropdown).
 export const TEXT_FONTS = [
   { id: "helvetiker", label: "Helvetiker", font: loader.parse(helvetiker) },
   {
@@ -25,13 +26,69 @@ export const TEXT_FONTS = [
 export const DEFAULT_FONT_ID = "helvetiker";
 
 const FONT_BY_ID = Object.fromEntries(TEXT_FONTS.map((f) => [f.id, f.font]));
+
+// ── Installed system fonts (Local Font Access API) ───────────────────────────
+// queryLocalFonts() lists installed fonts and hands back each font file's blob.
+// We enumerate names up front and parse a font's outlines (TTF/OTF → typeface)
+// only when it's actually selected. System font ids are "sys:<Family>".
+const SYS_PREFIX = "sys:";
+let systemFontData = null; // Map<family, FontData> for lazy blob loading
+const loadedSystemFonts = new Map(); // id → parsed Font
+
+// List installed font families (after the bundled ones). Returns [] when the
+// API or permission is unavailable, so the bundled fonts always work.
+export async function enumerateSystemFonts() {
+  if (typeof window === "undefined" || !window.queryLocalFonts) return [];
+  if (!systemFontData) {
+    try {
+      const fonts = await window.queryLocalFonts();
+      systemFontData = new Map();
+      for (const f of fonts) {
+        // Keep one representative file per family, preferring its Regular cut.
+        const have = systemFontData.get(f.family);
+        if (!have || /regular|book/i.test(f.style || ""))
+          systemFontData.set(f.family, f);
+      }
+    } catch {
+      systemFontData = new Map();
+    }
+  }
+  return [...systemFontData.keys()]
+    .sort()
+    .map((family) => ({ id: SYS_PREFIX + family, label: family }));
+}
+
+// Parse and cache a system font's outlines on demand. Returns true once the
+// font is usable (bundled fonts are always ready).
+export async function ensureFontLoaded(id) {
+  if (!id || !id.startsWith(SYS_PREFIX)) return true;
+  if (loadedSystemFonts.has(id)) return true;
+  const fd = systemFontData?.get(id.slice(SYS_PREFIX.length));
+  if (!fd) return false;
+  try {
+    const buf = await (await fd.blob()).arrayBuffer();
+    const font = loader.parse(new TTFLoader().parse(buf));
+    loadedSystemFonts.set(id, font);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getFont(fontId) {
+  return (
+    loadedSystemFonts.get(fontId) ||
+    FONT_BY_ID[fontId] ||
+    FONT_BY_ID[DEFAULT_FONT_ID]
+  );
+}
 const LINE_SPACING = 1.35; // baseline-to-baseline as a multiple of the font size
 
 // Closed contour polylines for `text` at the given font size, baseline of the
 // first line at the origin, glyphs reading rightward (+x) and lines stacking
 // downward (-y).  Each contour (glyph outer ring and each hole) is its own loop.
 export function textToContours(text, size, fontId, divisions = 6) {
-  const font = FONT_BY_ID[fontId] || FONT_BY_ID[DEFAULT_FONT_ID];
+  const font = getFont(fontId);
   if (!font || !(size > 0)) return [];
   const out = [];
   String(text)
@@ -78,19 +135,34 @@ export function measureText(text, size, fontId, divisions = 6) {
   return { w: b.maxX - b.minX, h: b.maxY - b.minY };
 }
 
-// Contours for a committed text shape, positioned so the shape's (x, y) anchor
-// is the top-left corner of the text's ink bounding box.
-export function textShapeContours(shape, divisions = 6) {
-  const base = textToContours(shape.text, shape.height, shape.font, divisions);
-  if (base.length === 0) return [];
+// Anchor-relative contours (top-left of the ink box at the origin, reading
+// right/down) plus the ink size.  Cached on the shape so rendering AND region
+// detection use plain stored geometry — no font re-parse, and region detection
+// stays font-free (important: it runs in font-less/mocked environments).
+function relContours(text, height, font, divisions = 6) {
+  const base = textToContours(text, height, font, divisions);
+  if (base.length === 0) return { contours: [], w: 0, h: 0 };
   const b = bboxOf(base);
-  const ox = shape.x - b.minX;
-  const oy = shape.y - b.maxY;
-  return base.map((c) => c.map((p) => ({ x: p.x + ox, y: p.y + oy })));
+  const contours = base.map((c) =>
+    c.map((p) => ({ x: p.x - b.minX, y: p.y - b.maxY })),
+  );
+  return { contours, w: b.maxX - b.minX, h: b.maxY - b.minY };
 }
 
-// Build a complete text shape (anchor at top-left) with its cached ink size.
+// Absolute contours for a committed text shape (anchor = top-left).  Uses the
+// stored contours when present, falling back to a font re-parse.
+export function textShapeContours(shape) {
+  const base =
+    shape.contours ||
+    relContours(shape.text, shape.height, shape.font).contours;
+  return base.map((c) =>
+    c.map((p) => ({ x: p.x + shape.x, y: p.y + shape.y })),
+  );
+}
+
+// Build a complete text shape (anchor at top-left) with its cached ink size and
+// glyph contours.
 export function makeTextShape({ text, height, font, x, y }) {
-  const { w, h } = measureText(text, height, font);
-  return { type: "text", text, height, font, x, y, w, h };
+  const { contours, w, h } = relContours(text, height, font);
+  return { type: "text", text, height, font, x, y, w, h, contours };
 }

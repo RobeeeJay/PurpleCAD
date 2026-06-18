@@ -22,7 +22,7 @@ if (process.env.ELECTRON_START_URL) {
 }
 
 const electron = require("electron");
-const { app, BrowserWindow, ipcMain, protocol } = electron;
+const { app, BrowserWindow, ipcMain, protocol, session } = electron;
 const fsMod = require("fs");
 const urlMod = require("url");
 
@@ -90,6 +90,13 @@ const APP_ICON = path.join(
 const { version: APP_VERSION } = require("../package.json");
 
 function createWindow() {
+  // Allow the renderer's Local Font Access API (queryLocalFonts) to enumerate
+  // installed fonts for the sketch Text tool. The app only loads its own
+  // bundled content, so granting this is safe; other permissions are denied.
+  session.defaultSession.setPermissionRequestHandler(
+    (_wc, permission, callback) => callback(permission === "local-fonts"),
+  );
+
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
