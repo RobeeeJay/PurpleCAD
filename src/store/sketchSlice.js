@@ -30,7 +30,8 @@ import {
   applyRectangularPatternConstraints,
 } from "../three/sketchRectangularPattern.js";
 import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
-import { explodeTextShape } from "../three/sketchGeometry.js";
+import { explodeContours } from "../three/sketchGeometry.js";
+import { textShapeContours } from "../three/sketchText.js";
 
 // Shape types the Offset tool can copy.
 export const OFFSETTABLE_TYPES = ["line", "circle", "arc", "ellipse", "bezier"];
@@ -1292,18 +1293,30 @@ export const createSketchSlice = (set) => ({
           oldShapes[removed.shapeIdx]?.type === "text"
         ) {
           const textIdx = removed.shapeIdx;
+          // Absolute glyph contours — regenerated from the font when the shape
+          // predates contour caching, so the text is never silently lost.
+          const absContours = textShapeContours(oldShapes[textIdx]);
+          const keptShapes = oldShapes.filter((_, i) => i !== textIdx);
+          const { shapes: lineShapes, constraints: lineCons } = explodeContours(
+            absContours,
+            keptShapes.length,
+          );
+          // No usable outlines → keep the text shape, just drop the constraint.
+          // Never delete the geometry.
+          if (lineShapes.length === 0) {
+            return Object.assign({}, item, {
+              constraints: oldConstraints.filter((_, i) => i !== constraintIdx),
+            });
+          }
           const indexMap = new Map();
           let ni = 0;
           oldShapes.forEach((_, i) =>
             indexMap.set(i, i === textIdx ? -1 : ni++),
           );
-          const keptShapes = oldShapes.filter((_, i) => i !== textIdx);
           const keptConstraints = oldConstraints
             .filter((_, i) => i !== constraintIdx)
             .map((c) => remapConstraintShapeIndices(c, indexMap))
             .filter(Boolean);
-          const { shapes: lineShapes, constraints: lineCons } =
-            explodeTextShape(oldShapes[textIdx], keptShapes.length);
           return Object.assign({}, item, {
             shapes: [...keptShapes, ...lineShapes],
             constraints: [...keptConstraints, ...lineCons],
