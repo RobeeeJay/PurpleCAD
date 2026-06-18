@@ -26,6 +26,12 @@ const SettingsDialog = () => {
   const toggleTheme = useStore((s) => s.toggleTheme);
   const widgetVisible = useStore((s) => s.widgetVisible);
   const toggleWidgetVisibility = useStore((s) => s.toggleWidgetVisibility);
+  const alwaysExtrudeSingleObject = useStore(
+    (s) => s.alwaysExtrudeSingleObject,
+  );
+  const setAlwaysExtrudeSingleObject = useStore(
+    (s) => s.setAlwaysExtrudeSingleObject,
+  );
   const setAboutDialogOpen = useStore((s) => s.setAboutDialogOpen);
 
   if (!open) return null;
@@ -221,6 +227,24 @@ const SettingsDialog = () => {
               style={{ minWidth: 56 }}
             >
               {widgetVisible ? "On" : "Off"}
+            </button>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
+              <span>Always extrude as single object</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                combine disjoint profiles (e.g. text glyphs) into one body
+              </span>
+            </span>
+            <button
+              className="variables-btn"
+              onClick={() =>
+                setAlwaysExtrudeSingleObject(!alwaysExtrudeSingleObject)
+              }
+              style={{ minWidth: 56 }}
+            >
+              {alwaysExtrudeSingleObject ? "On" : "Off"}
             </button>
           </div>
 

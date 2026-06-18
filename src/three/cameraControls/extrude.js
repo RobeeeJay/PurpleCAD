@@ -613,8 +613,13 @@ export function createExtrudeHelpers(
       const unionTargets = isCut
         ? []
         : unionTargetIdsFor(profiles, store.items);
+      // "Always extrude as single object" (default on): multiple disjoint
+      // profiles fuse into one body.  When off, pure-sketch multi-profile
+      // extrudes stay as separate objects; a boss still merges into its host.
+      const combineSingle = store.alwaysExtrudeSingleObject !== false;
       const willUnion =
-        !isCut && (profiles.length > 1 || unionTargets.length > 0);
+        !isCut &&
+        (unionTargets.length > 0 || (profiles.length > 1 && combineSingle));
       if (willUnion) {
         // Create the prisms in ONE timeline step (a multi-area extrude reads as
         // a single "Extruded" entry), then fuse them — and any host solids — in

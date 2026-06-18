@@ -408,6 +408,12 @@ export const createUiSlice = (set) => ({
       saveSnapSettings(next);
       return { snapEnabled: next.snapEnabled };
     }),
+  setAlwaysExtrudeSingleObject: (v) =>
+    set((state) => {
+      const alwaysExtrudeSingleObject = !!v;
+      saveSnapSettings({ ...state, alwaysExtrudeSingleObject });
+      return { alwaysExtrudeSingleObject };
+    }),
   setSnapDistanceMm: (v) =>
     set((state) => {
       const n = Number(v);
