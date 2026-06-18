@@ -272,6 +272,43 @@ export function translateShape(shape, dx, dy) {
   }
 }
 
+// Explode a locked `text` shape into ordinary editable geometry: each stored
+// glyph contour becomes a closed chain of `line` segments joined by coincident
+// constraints.  Indices are offset by `baseIdx` (where the lines are appended).
+// Uses the cached contours, so it needs no font.
+export function explodeTextShape(textShape, baseIdx) {
+  const shapes = [];
+  const constraints = [];
+  for (const raw of textShape.contours || []) {
+    const pts = raw.map((p) => ({
+      x: p.x + textShape.x,
+      y: p.y + textShape.y,
+    }));
+    // Drop a duplicated closing point so the loop isn't degenerate.
+    if (pts.length >= 2) {
+      const a = pts[0],
+        b = pts[pts.length - 1];
+      if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) pts.pop();
+    }
+    if (pts.length < 3) continue;
+    const start = baseIdx + shapes.length;
+    pts.forEach((p, i) => {
+      const q = pts[(i + 1) % pts.length];
+      shapes.push({ type: "line", x1: p.x, y1: p.y, x2: q.x, y2: q.y });
+    });
+    pts.forEach((_, i) => {
+      constraints.push({
+        type: "coincident",
+        shapeAIdx: start + i,
+        pointA: "end",
+        shapeBIdx: start + ((i + 1) % pts.length),
+        pointB: "start",
+      });
+    });
+  }
+  return { shapes, constraints };
+}
+
 // Rotate every defining point of a shape about (cx, cy) by `angle` radians.
 // Rects are returned unchanged (they can't represent a non-axis-aligned box).
 export function rotateShape(shape, cx, cy, angle) {

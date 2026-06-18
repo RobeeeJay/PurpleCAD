@@ -30,6 +30,7 @@ import {
   applyRectangularPatternConstraints,
 } from "../three/sketchRectangularPattern.js";
 import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
+import { explodeTextShape } from "../three/sketchGeometry.js";
 
 // Shape types the Offset tool can copy.
 export const OFFSETTABLE_TYPES = ["line", "circle", "arc", "ellipse", "bezier"];
@@ -1277,10 +1278,40 @@ export const createSketchSlice = (set) => ({
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
+        const oldShapes = item.shapes || [];
+        const oldConstraints = item.constraints || [];
+        const removed = oldConstraints[constraintIdx];
+
+        // Deleting a `text` constraint unlocks the text: explode its glyph
+        // contours into ordinary editable line segments in place of the (now
+        // unconstrained) text shape.
+        if (
+          removed &&
+          removed.type === "text" &&
+          typeof removed.shapeIdx === "number" &&
+          oldShapes[removed.shapeIdx]?.type === "text"
+        ) {
+          const textIdx = removed.shapeIdx;
+          const indexMap = new Map();
+          let ni = 0;
+          oldShapes.forEach((_, i) =>
+            indexMap.set(i, i === textIdx ? -1 : ni++),
+          );
+          const keptShapes = oldShapes.filter((_, i) => i !== textIdx);
+          const keptConstraints = oldConstraints
+            .filter((_, i) => i !== constraintIdx)
+            .map((c) => remapConstraintShapeIndices(c, indexMap))
+            .filter(Boolean);
+          const { shapes: lineShapes, constraints: lineCons } =
+            explodeTextShape(oldShapes[textIdx], keptShapes.length);
+          return Object.assign({}, item, {
+            shapes: [...keptShapes, ...lineShapes],
+            constraints: [...keptConstraints, ...lineCons],
+          });
+        }
+
         return Object.assign({}, item, {
-          constraints: (item.constraints || []).filter(
-            (_, i) => i !== constraintIdx,
-          ),
+          constraints: oldConstraints.filter((_, i) => i !== constraintIdx),
         });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
@@ -1292,6 +1323,7 @@ export const createSketchSlice = (set) => ({
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
                 constraints: updatedItem?.constraints,
               }),
             }),
