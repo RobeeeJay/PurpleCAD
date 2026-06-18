@@ -394,6 +394,66 @@ export function createExtrudeHelpers(
     rebuildPreviews(currentDepthValue());
   };
 
+  // ── Drag-select marquee (sketch-region profiles) ──────────────────────────
+  let marqueeEl = null;
+  const showExtrudeMarquee = (x1, y1, x2, y2) => {
+    if (!marqueeEl) {
+      marqueeEl = document.createElement("div");
+      marqueeEl.style.cssText =
+        "position:fixed;border:1px solid #5b8de8;background:rgba(91,141,232,0.15);" +
+        "pointer-events:none;z-index:50;";
+      document.body.appendChild(marqueeEl);
+    }
+    marqueeEl.style.left = `${Math.min(x1, x2)}px`;
+    marqueeEl.style.top = `${Math.min(y1, y2)}px`;
+    marqueeEl.style.width = `${Math.abs(x2 - x1)}px`;
+    marqueeEl.style.height = `${Math.abs(y2 - y1)}px`;
+    marqueeEl.style.display = "block";
+  };
+  const clearExtrudeMarquee = () => {
+    if (marqueeEl) marqueeEl.style.display = "none";
+  };
+
+  // Drag-select: add (or, when `remove`, take away) every sketch-region profile
+  // whose centre falls inside the screen box.  Faces aren't box-selectable.
+  const handleExtrudeProfileBox = (x1, y1, x2, y2, remove) => {
+    clearExtrudeMarquee();
+    const fills = extrudeSelectGroupRef?.current?.children ?? [];
+    if (fills.length === 0) return;
+    if (extrudeProfileList[0] && extrudeProfileList[0].type !== "sketchLoop")
+      return; // can't mix a face selection with region box-select
+    const minX = Math.min(x1, x2),
+      maxX = Math.max(x1, x2),
+      minY = Math.min(y1, y2),
+      maxY = Math.max(y1, y2);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const cam = makeRay(0, 0).camera;
+    let changed = false;
+    for (const fill of fills) {
+      const profile = fill.userData.extrudeProfile;
+      if (!profile || profile.type !== "sketchLoop") continue;
+      const c = profile.profileCentroid;
+      const ndc = new THREE.Vector3(c.x, c.y, 0)
+        .applyQuaternion(fill.quaternion)
+        .add(fill.position)
+        .project(cam);
+      const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
+      const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+      if (sx < minX || sx > maxX || sy < minY || sy > maxY) continue;
+      const selected = selectedFills.has(fill);
+      if (remove && selected) {
+        selectedFills.delete(fill);
+        extrudeProfileList = extrudeProfileList.filter((p) => p._fill !== fill);
+        changed = true;
+      } else if (!remove && !selected) {
+        selectedFills.add(fill);
+        extrudeProfileList.push({ ...profile, _fill: fill });
+        changed = true;
+      }
+    }
+    if (changed) rebuildPreviews(currentDepthValue());
+  };
+
   // The extrude item definition for a profile.  Used both for items added to the
   // store and as the EMBEDDED prism recipes inside a multi-area union (so the
   // whole multi-area extrude is one timeline entry, not N prisms + a union).
@@ -724,6 +784,7 @@ export function createExtrudeHelpers(
       m.material.opacity = 0;
     });
     clearFaceHighlight();
+    clearExtrudeMarquee();
     renderer.domElement.style.cursor = "";
     const store = useStore.getState();
     store.setExtrudeSelectMode(null);
@@ -738,6 +799,9 @@ export function createExtrudeHelpers(
     rebuildPreviews,
     handleExtrudeHover,
     handleExtrudeProfileClick,
+    handleExtrudeProfileBox,
+    showExtrudeMarquee,
+    clearExtrudeMarquee,
     startFaceExtrudeFromSelection,
     preselectRetargetProfile,
     beginExtrudeStartPick,

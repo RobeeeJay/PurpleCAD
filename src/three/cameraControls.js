@@ -308,6 +308,9 @@ export function attachCameraControls(ctx) {
     rebuildPreviews,
     handleExtrudeHover,
     handleExtrudeProfileClick,
+    handleExtrudeProfileBox,
+    showExtrudeMarquee,
+    clearExtrudeMarquee,
     preselectRetargetProfile,
     beginExtrudeStartPick,
     handleExtrudeStartHover,
@@ -1476,9 +1479,24 @@ export function attachCameraControls(ctx) {
     if (!currentCamera) return;
 
     if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
-      if (extrudeSelectModeRef.current === "profile")
-        handleExtrudeHover(e.clientX, e.clientY);
-      else if (extrudeSelectModeRef.current === "start")
+      if (extrudeSelectModeRef.current === "profile") {
+        // Left button held + moved → draw the drag-select box instead of hover.
+        const dragging =
+          (e.buttons & 1) === 1 &&
+          controls.mouseDownX != null &&
+          Math.hypot(
+            e.clientX - controls.mouseDownX,
+            e.clientY - controls.mouseDownY,
+          ) >= 5;
+        if (dragging)
+          showExtrudeMarquee(
+            controls.mouseDownX,
+            controls.mouseDownY,
+            e.clientX,
+            e.clientY,
+          );
+        else handleExtrudeHover(e.clientX, e.clientY);
+      } else if (extrudeSelectModeRef.current === "start")
         handleExtrudeStartHover(e.clientX, e.clientY);
       controls.mouseX = e.clientX;
       controls.mouseY = e.clientY;
@@ -1512,7 +1530,17 @@ export function attachCameraControls(ctx) {
           handleExtrudeProfileClick(e.clientX, e.clientY);
         else if (extrudeSelectModeRef.current === "start")
           handleExtrudeStartClick(e.clientX, e.clientY);
+      } else if (extrudeSelectModeRef.current === "profile") {
+        // Drag-select: add the boxed regions, or remove them with Alt held.
+        handleExtrudeProfileBox(
+          controls.mouseDownX,
+          controls.mouseDownY,
+          e.clientX,
+          e.clientY,
+          e.altKey,
+        );
       }
+      clearExtrudeMarquee();
       return;
     }
 
