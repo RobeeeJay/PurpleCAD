@@ -287,9 +287,14 @@ export const createSketchSlice = (set) => ({
   // Backfill glyph contours on text shapes that predate contour caching, so the
   // font-free consumers (region detection → fills, extrude, explode-on-unlock)
   // see their outlines.  Idempotent; a no-op once every text shape has contours.
-  ensureTextContours: () =>
+  // `divisions` is the active resolution's glyph subdivision count; a text shape
+  // is (re)tessellated when it lacks contours OR was built at a different
+  // density, so toggling print/preview resolution re-smooths extruded text.
+  ensureTextContours: (divisions = 6) =>
     set((state) => {
-      const needs = (s) => s.type === "text" && !Array.isArray(s.contours);
+      const needs = (s) =>
+        s.type === "text" &&
+        (!Array.isArray(s.contours) || s.contourDivisions !== divisions);
       let changed = false;
       const updatedItems = state.items.map((item) => {
         if (item.type !== "sketch" || !(item.shapes || []).some(needs))
@@ -304,6 +309,7 @@ export const createSketchSlice = (set) => ({
                   font: s.font,
                   x: s.x,
                   y: s.y,
+                  divisions,
                 })
               : s,
           ),
@@ -325,7 +331,10 @@ export const createSketchSlice = (set) => ({
         });
       });
       saveTimeline(newHistory, state.activeHistoryId);
-      return { items: updatedItems, history: withOrphanFlags(newHistory) };
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
     }),
 
   sketchMultiSelectedIndices: [],

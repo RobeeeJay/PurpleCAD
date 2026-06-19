@@ -306,7 +306,7 @@ export const SNAP_DEFAULTS = {
   snapAngleDeg: 9,
   fov: 35,
   curveDetectionAngleDeg: 5,
-  previewPrecisionMm: 0.5,
+  previewPrecisionMm: 0.1,
   printPrecisionMm: 0.01,
   alwaysExtrudeSingleObject: true,
 };

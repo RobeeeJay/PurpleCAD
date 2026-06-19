@@ -178,8 +178,21 @@ export function textShapeContours(shape) {
 }
 
 // Build a complete text shape (anchor at top-left) with its cached ink size and
-// glyph contours.
-export function makeTextShape({ text, height, font, x, y }) {
-  const { contours, w, h } = relContours(text, height, font);
-  return { type: "text", text, height, font, x, y, w, h, contours };
+// glyph contours.  `divisions` is the active resolution's glyph subdivision
+// count (cached as contourDivisions so a resolution change can detect staleness
+// and re-tessellate).
+export function makeTextShape({ text, height, font, x, y, divisions = 6 }) {
+  const { contours, w, h } = relContours(text, height, font, divisions);
+  return {
+    type: "text",
+    text,
+    height,
+    font,
+    x,
+    y,
+    w,
+    h,
+    contours,
+    contourDivisions: divisions,
+  };
 }

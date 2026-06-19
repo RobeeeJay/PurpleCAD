@@ -23,6 +23,7 @@ import "./styles/StatusLine.css";
 import VersionTag from "./components/VersionTag";
 import "./styles/App.css";
 import { useStore } from "./store";
+import { textDivisions } from "./three/resolution.js";
 
 // __APP_VERSION__ is baked in at build time by Vite's `define` (see
 // vite.config.js). Vitest doesn't run through that config so guard with
@@ -40,21 +41,26 @@ function App() {
   const notification = useStore((state) => state.notification);
   const clearNotification = useStore((state) => state.clearNotification);
 
-  // One-time backfill of glyph contours on text shapes that predate contour
-  // caching (so they fill / extrude / explode).  Gated on a boolean so it
-  // settles after the single migrating update rather than looping.
+  // Keep text glyph contours in sync with the active resolution: backfill
+  // shapes that predate contour caching AND re-tessellate ones built at a
+  // different density when the print/preview toggle changes.  Gated on a
+  // boolean so it settles after the migrating update rather than looping.
+  const textDiv = useStore(textDivisions);
   const needsTextContours = useStore((state) =>
     state.items.some(
       (it) =>
         it.type === "sketch" &&
         (it.shapes || []).some(
-          (s) => s.type === "text" && !Array.isArray(s.contours),
+          (s) =>
+            s.type === "text" &&
+            (!Array.isArray(s.contours) ||
+              s.contourDivisions !== textDivisions(state)),
         ),
     ),
   );
   useEffect(() => {
-    if (needsTextContours) useStore.getState().ensureTextContours();
-  }, [needsTextContours]);
+    if (needsTextContours) useStore.getState().ensureTextContours(textDiv);
+  }, [needsTextContours, textDiv]);
 
   useEffect(() => {
     if (!notification) return;

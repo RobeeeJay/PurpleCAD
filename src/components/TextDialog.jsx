@@ -7,6 +7,7 @@ import {
   ensureFontLoaded,
 } from "../three/sketchText.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
+import { textDivisions } from "../three/resolution.js";
 import "../styles/VariablesDialog.css";
 
 const BUNDLED_FONT_OPTIONS = TEXT_FONTS.map((f) => ({
@@ -94,6 +95,7 @@ const TextDialog = () => {
       font: textDraft.font,
       x: textDraft.x,
       y: textDraft.y,
+      divisions: textDivisions(),
     });
     const store = useStore.getState();
     if (textDraft.editIdx != null) {

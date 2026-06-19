@@ -95,6 +95,29 @@ describe("sketchText", () => {
     expect(await ensureFontLoaded("sys:Nope")).toBe(false); // unknown system
   });
 
+  it("samples glyph curves more finely at higher divisions", () => {
+    const coarse = makeTextShape({
+      text: "o",
+      height: 4,
+      font: DEFAULT_FONT_ID,
+      x: 0,
+      y: 0,
+      divisions: 3,
+    });
+    const fine = makeTextShape({
+      text: "o",
+      height: 4,
+      font: DEFAULT_FONT_ID,
+      x: 0,
+      y: 0,
+      divisions: 18,
+    });
+    const pts = (s) => s.contours.reduce((n, c) => n + c.length, 0);
+    expect(coarse.contourDivisions).toBe(3);
+    expect(fine.contourDivisions).toBe(18);
+    expect(pts(fine)).toBeGreaterThan(pts(coarse));
+  });
+
   it("translateShape moves a text shape by its anchor", () => {
     const s = makeTextShape({
       text: "x",

@@ -14,3 +14,12 @@ export function activePrecision(state) {
     ? s.printPrecisionMm
     : s.previewPrecisionMm;
 }
+
+// Glyph-curve subdivision count for the active resolution — text contours are
+// sampled this finely, so the print/preview toggle changes how smooth extruded
+// (and drawn) text is.  Derived from the same mm deviation as everything else,
+// clamped to a sane range.
+export function textDivisions(state) {
+  const p = activePrecision(state);
+  return Math.max(3, Math.min(24, Math.round(2 / (p > 0 ? p : 0.5))));
+}
