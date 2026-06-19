@@ -4,7 +4,7 @@ import { MM_PER_UNIT } from "../three/sceneObjects.js";
 import { activePrecision } from "../three/resolution.js";
 import { commitShell } from "../three/cameraControls/shell.js";
 import FormulaInput from "./FormulaInput";
-import { evalValue } from "./inputs.jsx";
+import { evalValue, useDebouncedPreview } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
 // Shell tool dialog: hollow the selected body to a wall of `thickness`.  Opens
@@ -35,13 +35,33 @@ const ShellDialog = () => {
     else setThicknessMm(String(DEFAULT_THICKNESS_MM));
   }, [target, regenerator]);
 
-  if (!target) return null;
-  if (isEdit && !regenerator) return null;
-
   const thickVal = evalValue(thicknessMm, variables);
   const valid = Number.isFinite(thickVal) && thickVal > 0;
 
-  const close = () => setTarget(null);
+  // Live preview: ghost the body and overlay the hollowed result, debounced and
+  // cleared the moment the thickness goes blank/invalid or the dialog closes.
+  useDebouncedPreview(
+    !!target && valid,
+    () =>
+      useStore.getState()._cameraControls?.updateShellPreview?.({
+        itemId: target?.itemId,
+        regenerator,
+        thicknessMm: thickVal,
+      }),
+    () => useStore.getState()._cameraControls?.clearShellPreview?.(),
+    [thickVal, target?.itemId, regenerator],
+  );
+  useEffect(() => {
+    return () => useStore.getState()._cameraControls?.clearShellPreview?.();
+  }, [target]);
+
+  if (!target) return null;
+  if (isEdit && !regenerator) return null;
+
+  const close = () => {
+    useStore.getState()._cameraControls?.clearShellPreview?.();
+    setTarget(null);
+  };
 
   const confirm = async () => {
     if (!valid || busy) return;

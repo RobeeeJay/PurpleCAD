@@ -4,6 +4,7 @@ import { createHighlightHelpers } from "./cameraControls/highlights.js";
 import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
+import { createShellPreviewHelpers } from "./cameraControls/shell.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
@@ -382,6 +383,14 @@ export function attachCameraControls(ctx) {
   controls.updatePushPullEditPreview = (regenerator, distanceMm, itemId) =>
     pushPullPreview.updatePushPullEditPreview(regenerator, distanceMm, itemId);
   controls.clearPushPullPreview = () => pushPullPreview.clearPushPullPreview();
+
+  const shellPreview = createShellPreviewHelpers({
+    scene,
+    itemsRef,
+    objectsRef,
+  });
+  controls.updateShellPreview = (args) => shellPreview.updateShellPreview(args);
+  controls.clearShellPreview = () => shellPreview.clearShellPreview();
 
   // Sweep tools (Revolve / Pipe / Loft): profile + axis picking, live preview,
   // and the Confirm-time commit.  The SweepOverlay drives them via these.
