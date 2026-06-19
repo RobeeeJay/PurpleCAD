@@ -300,7 +300,7 @@ export const markCsgDirty = (items) => {
 // mm) for the two resolution modes — lower = denser/smoother, more triangles.
 // Preview is the interactive/editing density; print ("Normal/High") is the
 // final density used when the resolution toggle is on.
-const SNAP_DEFAULTS = {
+export const SNAP_DEFAULTS = {
   snapEnabled: false,
   snapDistanceMm: 5,
   snapAngleDeg: 9,

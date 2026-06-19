@@ -32,6 +32,7 @@ const SettingsDialog = () => {
   const setAlwaysExtrudeSingleObject = useStore(
     (s) => s.setAlwaysExtrudeSingleObject,
   );
+  const resetSettings = useStore((s) => s.resetSettings);
   const setAboutDialogOpen = useStore((s) => s.setAboutDialogOpen);
 
   if (!open) return null;
@@ -245,6 +246,17 @@ const SettingsDialog = () => {
               style={{ minWidth: 56 }}
             >
               {alwaysExtrudeSingleObject ? "On" : "Off"}
+            </button>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>Reset all settings</span>
+            <button
+              className="variables-btn"
+              onClick={resetSettings}
+              style={{ minWidth: 56 }}
+            >
+              Reset
             </button>
           </div>
 

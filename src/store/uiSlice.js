@@ -7,6 +7,7 @@ import {
   getSystemTheme,
   loadSnapSettings,
   saveSnapSettings,
+  SNAP_DEFAULTS,
 } from "./internals.js";
 
 export const uiInitial = {
@@ -413,6 +414,17 @@ export const createUiSlice = (set) => ({
       const alwaysExtrudeSingleObject = !!v;
       saveSnapSettings({ ...state, alwaysExtrudeSingleObject });
       return { alwaysExtrudeSingleObject };
+    }),
+  // Restore every configurable setting to its default (the snap/precision group
+  // plus the session-only theme + orientation widget).
+  resetSettings: () =>
+    set(() => {
+      saveSnapSettings(SNAP_DEFAULTS);
+      return {
+        ...SNAP_DEFAULTS,
+        theme: getSystemTheme(),
+        widgetVisible: true,
+      };
     }),
   setSnapDistanceMm: (v) =>
     set((state) => {
