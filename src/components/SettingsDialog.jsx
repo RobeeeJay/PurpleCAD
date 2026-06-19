@@ -3,7 +3,7 @@ import { useStore } from "../store";
 import "../styles/VariablesDialog.css";
 
 // App settings: perspective field of view + snap-to-grid interval / angle.
-// Values are live (no Save button) and persist to localStorage via the store.
+// Values are live (no Save button) and persist via the store.
 const SettingsDialog = () => {
   const open = useStore((s) => s.settingsDialogOpen);
   const setOpen = useStore((s) => s.setSettingsDialogOpen);

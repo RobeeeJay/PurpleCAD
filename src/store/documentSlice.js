@@ -11,6 +11,7 @@ import {
   saveFolders,
   setNextHistoryId,
 } from "./internals.js";
+import { kvRemove } from "./kv.js";
 
 export const createDocumentSlice = (set) => ({
   newDocument: () =>
@@ -29,7 +30,7 @@ export const createDocumentSlice = (set) => ({
       saveTimeline(freshHistory, null);
       saveVariables([]);
       saveFolders([]);
-      localStorage.removeItem("cad-camera-state");
+      kvRemove("cad-camera-state");
       return {
         items: [],
         history: freshHistory,
@@ -62,7 +63,7 @@ export const createDocumentSlice = (set) => ({
       const newActiveHistoryId =
         data.activeHistoryId !== undefined ? data.activeHistoryId : null;
       saveTimeline(data.history, newActiveHistoryId);
-      localStorage.removeItem("cad-camera-state");
+      kvRemove("cad-camera-state");
       const targetIdx =
         newActiveHistoryId !== null
           ? data.history.findIndex((h) => h.id === newActiveHistoryId)

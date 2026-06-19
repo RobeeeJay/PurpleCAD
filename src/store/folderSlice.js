@@ -1,6 +1,6 @@
 // Tree-view folders: purely organizational groupings for the Objects list.
 // Folders have no geometry and aren't part of the undo/redo timeline —
-// they're persisted to localStorage on their own. Folder ids are
+// they're persisted to the kv store on their own. Folder ids are
 // "folder-N" strings so they never collide with numeric item ids when
 // items and folders share the same parentId namespace.
 

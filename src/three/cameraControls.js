@@ -8,6 +8,7 @@ import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
 import { textShapeContours, makeTextShape } from "./sketchText.js";
+import { kvGet, kvSet } from "../store/kv.js";
 import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
 import {
   featureEdgeGraph,
@@ -28,7 +29,7 @@ import { createSketchInteraction } from "./cameraControls/sketchInteraction.js";
 
 export function loadCameraState() {
   try {
-    const saved = localStorage.getItem("cad-camera-state");
+    const saved = kvGet("cad-camera-state");
     if (saved) return JSON.parse(saved);
   } catch (e) {
     console.warn("Failed to load camera state:", e);
@@ -46,7 +47,7 @@ export function loadCameraState() {
 export function saveCameraState(cameraRef, targetRef, cameraControlsRef) {
   if (!cameraRef.current || !cameraControlsRef.current) return;
   try {
-    localStorage.setItem(
+    kvSet(
       "cad-camera-state",
       JSON.stringify({
         positionX: cameraRef.current.position.x,

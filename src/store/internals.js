@@ -6,6 +6,10 @@
 // changing semantics: every helper here is pure or operates on the
 // module-local singletons defined below.
 
+// Persistence goes through the kv facade (SQLite in Electron, localStorage in a
+// plain browser, in-memory under tests) rather than touching localStorage here.
+import { kvGet, kvSet, kvRemove } from "./kv.js";
+
 // ---------------------------------------------------------------------------
 // Instruction application
 // ---------------------------------------------------------------------------
@@ -163,18 +167,15 @@ export const makeEntry = (label, itemId, instruction) => ({
 
 export const saveTimeline = (history, activeHistoryId) => {
   try {
-    localStorage.setItem(
-      "cad-timeline",
-      JSON.stringify({ history, activeHistoryId }),
-    );
+    kvSet("cad-timeline", JSON.stringify({ history, activeHistoryId }));
   } catch (e) {
-    console.warn("Failed to save timeline to localStorage:", e);
+    console.warn("Failed to save timeline to storage:", e);
   }
 };
 
 export const loadTimeline = () => {
   try {
-    const saved = localStorage.getItem("cad-timeline");
+    const saved = kvGet("cad-timeline");
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed.history) && parsed.history.length > 0) {
@@ -182,7 +183,7 @@ export const loadTimeline = () => {
           parsed.history[0].items !== undefined ||
           parsed.history[0].hiddenIds === undefined
         ) {
-          localStorage.removeItem("cad-timeline");
+          kvRemove("cad-timeline");
           return null;
         }
         const maxId = Math.max(...parsed.history.map((h) => h.id));
@@ -191,16 +192,16 @@ export const loadTimeline = () => {
       }
     }
   } catch (e) {
-    console.warn("Failed to load timeline from localStorage:", e);
+    console.warn("Failed to load timeline from storage:", e);
   }
   return null;
 };
 
 export const saveVariables = (variables) => {
   try {
-    localStorage.setItem("cad-variables", JSON.stringify(variables));
+    kvSet("cad-variables", JSON.stringify(variables));
   } catch (e) {
-    console.warn("Failed to save variables to localStorage:", e);
+    console.warn("Failed to save variables to storage:", e);
   }
 };
 
@@ -208,22 +209,22 @@ export const saveVariables = (variables) => {
 // undo/redo timeline) so they're persisted separately from history.
 export const loadFolders = () => {
   try {
-    const raw = localStorage.getItem("cad-folders");
+    const raw = kvGet("cad-folders");
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
   } catch (e) {
-    console.warn("Failed to load folders from localStorage:", e);
+    console.warn("Failed to load folders from storage:", e);
   }
   return [];
 };
 
 export const saveFolders = (folders) => {
   try {
-    localStorage.setItem("cad-folders", JSON.stringify(folders));
+    kvSet("cad-folders", JSON.stringify(folders));
   } catch (e) {
-    console.warn("Failed to save folders to localStorage:", e);
+    console.warn("Failed to save folders to storage:", e);
   }
 };
 
@@ -231,7 +232,7 @@ export const saveFolders = (folders) => {
 // persisted together under one key so the Material dialog survives reload.
 export const loadMaterialSettings = () => {
   try {
-    const raw = localStorage.getItem("cad-material");
+    const raw = kvGet("cad-material");
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
@@ -242,19 +243,16 @@ export const loadMaterialSettings = () => {
       };
     }
   } catch (e) {
-    console.warn("Failed to load material settings from localStorage:", e);
+    console.warn("Failed to load material settings from storage:", e);
   }
   return { defaultMaterial: null, materialPresets: [] };
 };
 
 export const saveMaterialSettings = (defaultMaterial, materialPresets) => {
   try {
-    localStorage.setItem(
-      "cad-material",
-      JSON.stringify({ defaultMaterial, materialPresets }),
-    );
+    kvSet("cad-material", JSON.stringify({ defaultMaterial, materialPresets }));
   } catch (e) {
-    console.warn("Failed to save material settings to localStorage:", e);
+    console.warn("Failed to save material settings to storage:", e);
   }
 };
 
@@ -313,7 +311,7 @@ export const SNAP_DEFAULTS = {
 
 export const loadSnapSettings = () => {
   try {
-    const raw = localStorage.getItem("cad-snap");
+    const raw = kvGet("cad-snap");
     if (!raw) return { ...SNAP_DEFAULTS };
     const parsed = JSON.parse(raw);
     return {
@@ -337,7 +335,7 @@ export const loadSnapSettings = () => {
 
 export const saveSnapSettings = (snap) => {
   try {
-    localStorage.setItem(
+    kvSet(
       "cad-snap",
       JSON.stringify({
         snapEnabled: snap.snapEnabled,
@@ -351,19 +349,19 @@ export const saveSnapSettings = (snap) => {
       }),
     );
   } catch (e) {
-    console.warn("Failed to save snap settings to localStorage:", e);
+    console.warn("Failed to save snap settings to storage:", e);
   }
 };
 
 export const loadVariables = () => {
   try {
-    const raw = localStorage.getItem("cad-variables");
+    const raw = kvGet("cad-variables");
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
   } catch (e) {
-    console.warn("Failed to load variables from localStorage:", e);
+    console.warn("Failed to load variables from storage:", e);
   }
   return [];
 };

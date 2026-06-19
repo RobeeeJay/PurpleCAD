@@ -187,7 +187,7 @@ export const uiInitial = {
   // Snap-to-grid + perspective FOV: when snap is enabled, dragged/moved objects
   // (3D gizmo translate and sketch drags) snap to snapDistanceMm in world space,
   // and gizmo rotations snap to snapAngleDeg.  `fov` is the perspective camera's
-  // field of view.  Persisted to localStorage so they survive a reload.
+  // field of view.  Persisted (SQLite/localStorage) so they survive a reload.
   ...loadSnapSettings(),
 };
 

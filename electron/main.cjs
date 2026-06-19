@@ -74,6 +74,21 @@ try {
   console.warn("[main] native OCC addon unavailable:", err.message);
 }
 
+// SQLite-backed persistence for renderer settings/data (replaces localStorage).
+// Synchronous IPC keeps the renderer's load-at-init code path unchanged.
+const kvStore = require("./kvStore.cjs");
+ipcMain.on("kv:get", (e, key) => {
+  e.returnValue = kvStore.get(key);
+});
+ipcMain.on("kv:set", (e, { key, value }) => {
+  kvStore.set(key, value);
+  e.returnValue = true;
+});
+ipcMain.on("kv:remove", (e, key) => {
+  kvStore.remove(key);
+  e.returnValue = true;
+});
+
 // 512px source covers window/taskbar icon use across platforms; packaged
 // builds get their app icon from `build.icon` in package.json instead.
 const APP_ICON = path.join(
@@ -138,6 +153,14 @@ app.whenReady().then(() => {
   // a bare Electron binary) still show Electron's default unless set here.
   if (process.platform === "darwin" && app.dock) {
     app.dock.setIcon(APP_ICON);
+  }
+
+  // Open the KV database before the window loads so the renderer's first
+  // synchronous kv:get (during store init) finds it ready.
+  try {
+    kvStore.init(app.getPath("userData"));
+  } catch (err) {
+    console.warn("[main] SQLite KV store unavailable:", err.message);
   }
 
   // Serve dist files over `app://./<path>`.  Handler decodes the URL
