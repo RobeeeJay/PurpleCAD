@@ -12,6 +12,7 @@ import {
 import {
   chamferOrFilletItem,
   pushPullFaces,
+  shellItem,
   revolveItem,
   pipeItem,
   loftItem,
@@ -162,6 +163,58 @@ async function regeneratePushPull(
   // Keep the item's existing position (same rationale as regenerateChamfer):
   // the re-tessellated geometry is bbox-centred, so the rendered centre is
   // already item.position regardless of precision.
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
+// Rebuild a shell from its live source.  Mirrors regeneratePushPull without a
+// face selection: re-derive the source, hollow it, and (if the source tracks a
+// sketch and the position was dropped) recompute the bbox-centred position.
+async function regenerateShell(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    regenerator.source,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await shellItem({
+      source,
+      thickness: regenerator.thickness ?? 0,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Shell regen failed (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
   let position = currentPosition;
   if (!position) {
     const { cx, cy, cz } = result.centerOffset;
@@ -493,6 +546,8 @@ export async function regenerateItemsForResolution(
         item.position,
         item.depth,
       );
+    } else if (r.kind === "shell") {
+      result = await regenerateShell(r, out, printPrecision, item.position);
     } else if (r.kind === "revolve") {
       result = await regenerateRevolve(r, out, printPrecision, item.position);
     } else if (r.kind === "pipe") {
@@ -517,6 +572,7 @@ export async function regenerateItemsForResolution(
       if (
         r.kind === "chamfer" ||
         r.kind === "pushpull" ||
+        r.kind === "shell" ||
         r.kind === "revolve" ||
         r.kind === "pipe" ||
         r.kind === "loft" ||
@@ -548,6 +604,7 @@ export async function regenerateItemsForResolution(
     if (
       (r.kind === "chamfer" ||
         r.kind === "pushpull" ||
+        r.kind === "shell" ||
         r.kind === "revolve" ||
         r.kind === "pipe" ||
         r.kind === "loft" ||

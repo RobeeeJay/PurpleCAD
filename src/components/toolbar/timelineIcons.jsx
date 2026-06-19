@@ -363,6 +363,49 @@ export const ChamferIcon = () => (
   </svg>
 );
 
+export const ShellIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <polygon
+      points="4,8 12,4 20,8 12,12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="miter"
+    />
+    <line
+      x1="4"
+      y1="8"
+      x2="4"
+      y2="16"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <line
+      x1="20"
+      y1="8"
+      x2="20"
+      y2="16"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <polyline
+      points="4,16 12,20 20,16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="miter"
+    />
+    <polygon
+      points="7,8.5 12,6 17,8.5 12,11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="miter"
+      opacity="0.6"
+    />
+  </svg>
+);
+
 export const FilletIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14">
     <line

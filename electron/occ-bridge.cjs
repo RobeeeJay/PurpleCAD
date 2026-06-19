@@ -413,6 +413,25 @@ function buildItemShapeLocal(item, allItems, precision) {
       return resultId;
     }
 
+    if (regen.kind === "shell") {
+      const sourceId = buildItemShapeLocal(regen.source, allItems, precision);
+      if (sourceId == null) return null;
+      let resultId;
+      try {
+        resultId = occ.makeShell(sourceId, regen.thickness ?? 0);
+      } finally {
+        occ.releaseShape(sourceId);
+      }
+      if (!resultId) return null;
+      const off = regen.centerOffset;
+      if (off) {
+        const corrected = occ.transformShape(resultId, -off.cx, -off.cy, -off.cz, 0, 0, 0);
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
     if (regen.kind === "revolve") {
       const args = revolveArgs(regen.source, regen.axis, allItems);
       if (!args) return null;
@@ -747,6 +766,51 @@ function pushPullFaces({ source, subGeo, distance, allItems, printPrecision }) {
     geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo: subGeo,
+  };
+}
+
+// Mirrors occOps.js#shellItem — hollow the source solid into a shell of
+// `thickness` (scene units), then bbox-centre the result.
+function shellItem({ source, thickness, allItems, printPrecision }) {
+  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  if (sourceId == null) {
+    throw new Error(
+      "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs."
+    );
+  }
+
+  let resultId;
+  try {
+    resultId = occ.makeShell(sourceId, thickness);
+  } finally {
+    occ.releaseShape(sourceId);
+  }
+
+  if (!resultId) {
+    throw new Error(
+      "Shell failed — the wall thickness is too large for this body. Try a smaller value."
+    );
+  }
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
+  }
+
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
   };
 }
 
@@ -1260,4 +1324,4 @@ function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision
   return result;
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };

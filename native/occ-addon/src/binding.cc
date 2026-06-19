@@ -8,9 +8,10 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 
-// ── Sweep / loft ─────────────────────────────────────────────────────────
+// ── Sweep / loft / shell ─────────────────────────────────────────────────
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <gp_Ax3.hxx>
 
 // ── Wire / face builders (extrude) ──────────────────────────────────────
@@ -1248,6 +1249,44 @@ Napi::Number PushPullFaces(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// MakeShell(shapeId, thickness) → hollow the solid inward by |thickness|,
+// leaving a closed shell of that wall thickness (no faces removed).  Uses the
+// "simple" thick-solid path so it works on any solid without a face selection.
+// 0 = sentinel "operation rejected" — the JS bridge turns it into an error.
+Napi::Number MakeShell(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id           = info[0].As<Napi::Number>().Int32Value();
+    double thickness = GetDouble(info[1], 0.0);
+
+    TopoDS_Shape shape = FetchShape(id);
+    if (std::abs(thickness) < 1e-9)
+      return Napi::Number::New(env, StoreShape(shape));
+
+    // Closed hollow with a wall of |thickness|: offset every face inward to get
+    // the inner void solid, then cut it from the original.  (MakeThickSolid's
+    // join/simple paths need a face to remove or an open shell; this works on
+    // any closed solid with no face selection.)
+    TopoDS_Shape inner;
+    try {
+      BRepOffsetAPI_MakeOffsetShape off;
+      off.PerformByJoin(shape, -std::abs(thickness), 1e-3);
+      if (!off.IsDone()) return Napi::Number::New(env, 0);
+      inner = off.Shape();
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+        std::string("Shell failed — try a smaller thickness (") + e.what() + ")");
+    }
+    if (inner.IsNull()) return Napi::Number::New(env, 0);
+
+    BRepAlgoAPI_Cut cut(shape, inner);
+    cut.SetFuzzyValue(1.0e-5);
+    cut.Build();
+    if (!cut.IsDone()) return Napi::Number::New(env, 0);
+    return Napi::Number::New(env, StoreShape(cut.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // enrichSubGeo(shapeId, subGeo) → subGeo with each edge's two adjacent face
 // normals resolved (n1, n2).  Called once at chamfer/fillet creation — when
 // the stored endpoint coordinates still line up with the (pre-resize) shape —
@@ -1575,6 +1614,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("chamferShape",       Napi::Function::New(env, ChamferShape));
   exports.Set("filletShape",        Napi::Function::New(env, FilletShape));
   exports.Set("pushPullFaces",      Napi::Function::New(env, PushPullFaces));
+  exports.Set("makeShell",          Napi::Function::New(env, MakeShell));
   exports.Set("enrichSubGeo",       Napi::Function::New(env, EnrichSubGeo));
 
   // Tessellation

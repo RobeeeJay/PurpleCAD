@@ -8,6 +8,17 @@ const BevelSection = ({ bare = false }) => {
   const setChamferSelectMode = useStore((s) => s.setChamferSelectMode);
   const pushPullSelectMode = useStore((s) => s.pushPullSelectMode);
   const setPushPullSelectMode = useStore((s) => s.setPushPullSelectMode);
+  const selectedId = useStore((s) => s.selectedId);
+  const items = useStore((s) => s.items);
+  const setShellTarget = useStore((s) => s.setShellTarget);
+
+  // Shell hollows the whole selected body, so it only needs a solid selected
+  // (no face/edge pick).  Sketches and the empty selection are ineligible.
+  const selectedBody = items.find((i) => i.id === selectedId);
+  const canShell = !!selectedBody && selectedBody.type !== "sketch";
+  const openShell = () => {
+    if (canShell) setShellTarget({ itemId: selectedId });
+  };
 
   const toggleMode = (mode) => {
     if (chamferSelectMode === mode) {
@@ -202,6 +213,65 @@ const BevelSection = ({ bare = false }) => {
             strokeWidth="1.5"
             strokeLinejoin="miter"
             points="17.5,5.5 20,3 22.5,5.5"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title="Shell — hollow the selected body to a wall thickness"
+        disabled={!canShell}
+        onClick={openShell}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* Outer open box */}
+          <polygon
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="4,8 12,4 20,8 12,12"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            x1="4"
+            y1="8"
+            x2="4"
+            y2="16"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            x1="20"
+            y1="8"
+            x2="20"
+            y2="16"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            x1="12"
+            y1="12"
+            x2="12"
+            y2="20"
+          />
+          <polyline
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="4,16 12,20 20,16"
+          />
+          {/* Inner wall, showing the hollow */}
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.25)"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="7,8.5 12,6 17,8.5 12,11"
           />
         </svg>
       </button>

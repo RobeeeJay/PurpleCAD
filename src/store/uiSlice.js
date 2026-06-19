@@ -79,6 +79,11 @@ export const uiInitial = {
   // timeline: { entryId }.  Mirrors chamferEditTarget.
   pushPullEditTarget: null,
 
+  // Shell dialog target.  { itemId } opens a fresh shell on a selected body;
+  // { itemId, entryId } reopens a committed shell's timeline step to edit its
+  // thickness.  Null = closed.
+  shellTarget: null,
+
   // Sketch→solid sweep tools (Revolve / Pipe / Loft), all sharing one select
   // mode driven by the Modify toolbar.  Shape:
   //   { kind:"revolve"|"pipe"|"loft", profile, axis, secondProfile, params }
@@ -229,6 +234,7 @@ export const createUiSlice = (set) => ({
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
+  setShellTarget: (target) => set({ shellTarget: target }),
 
   // ── Plane object + 3D pattern tools ─────────────────────────────────────
   // false when off, else a mode string ("points" | "face") naming what a

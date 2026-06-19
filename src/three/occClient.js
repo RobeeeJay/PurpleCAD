@@ -94,6 +94,10 @@ export function pushPullFaces(args) {
   return runOp("pushPullFaces", args);
 }
 
+export function shellItem(args) {
+  return runOp("shellItem", args);
+}
+
 export function revolveItem(args) {
   return runOp("revolveItem", args);
 }

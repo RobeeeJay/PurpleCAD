@@ -101,6 +101,7 @@ export async function recalculateTimeline() {
       const recenter =
         ((it.regenerator.kind === "chamfer" ||
           it.regenerator.kind === "pushpull" ||
+          it.regenerator.kind === "shell" ||
           it.regenerator.kind === "revolve") &&
           (src?.type === "extrude" || src?.regenerator?.kind === "boolean")) ||
         // Pipe and loft are built in world and their position IS the bbox

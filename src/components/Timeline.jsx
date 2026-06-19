@@ -20,6 +20,7 @@ import {
   SplitIcon,
   ChamferIcon,
   FilletIcon,
+  ShellIcon,
   PlaneIcon,
   RevolveIcon,
   PipeIcon,
@@ -48,6 +49,15 @@ const pushPullInfo = (entry) => {
   const r = inst.patches?.regenerator;
   if (r?.kind !== "pushpull") return null;
   return { distance: r.distance ?? 0 };
+};
+
+// Detect shell entries — a modify whose regenerator is a shell op.
+const shellInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  const r = inst.patches?.regenerator;
+  if (r?.kind !== "shell") return null;
+  return { thickness: r.thickness ?? 0 };
 };
 
 // Detect revolve (sweep) entries — a CREATE whose item carries a revolve recipe.
@@ -116,6 +126,7 @@ const CSG_ICONS = {
 const entryIcon = (entry) => {
   const ci = chamferInfo(entry);
   if (ci) return ci.isFillet ? <FilletIcon /> : <ChamferIcon />;
+  if (shellInfo(entry)) return <ShellIcon />;
 
   const inst = entry.instruction;
   if (entry.label === "Split") return <SplitIcon />;
@@ -344,6 +355,7 @@ const Timeline = () => {
   const setPushPullEditTarget = useStore(
     (state) => state.setPushPullEditTarget,
   );
+  const setShellTarget = useStore((state) => state.setShellTarget);
   const pushPullRetargetTarget = useStore(
     (state) => state.pushPullRetargetTarget,
   );
@@ -744,6 +756,18 @@ const Timeline = () => {
                     </svg>
                   </button>
                 </>
+              )}
+              {shellInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit shell thickness"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShellTarget({ itemId: entry.itemId, entryId: entry.id });
+                  }}
+                >
+                  <ShellIcon />
+                </button>
               )}
               {revolveInfo(entry) && (
                 <button
