@@ -287,14 +287,15 @@ export const createSketchSlice = (set) => ({
   // Backfill glyph contours on text shapes that predate contour caching, so the
   // font-free consumers (region detection → fills, extrude, explode-on-unlock)
   // see their outlines.  Idempotent; a no-op once every text shape has contours.
-  // `divisions` is the active resolution's glyph subdivision count; a text shape
-  // is (re)tessellated when it lacks contours OR was built at a different
-  // density, so toggling print/preview resolution re-smooths extruded text.
-  ensureTextContours: (divisions = 6) =>
+  // `tolerance` is the active resolution's glyph simplification deviation; a
+  // text shape is (re)simplified when it lacks contours OR was built at a
+  // different tolerance, so toggling print/preview resolution re-coarsens or
+  // re-smooths extruded text.
+  ensureTextContours: (tolerance = 0) =>
     set((state) => {
       const needs = (s) =>
         s.type === "text" &&
-        (!Array.isArray(s.contours) || s.contourDivisions !== divisions);
+        (!Array.isArray(s.contours) || s.contourTol !== tolerance);
       let changed = false;
       const updatedItems = state.items.map((item) => {
         if (item.type !== "sketch" || !(item.shapes || []).some(needs))
@@ -309,7 +310,7 @@ export const createSketchSlice = (set) => ({
                   font: s.font,
                   x: s.x,
                   y: s.y,
-                  divisions,
+                  tolerance,
                 })
               : s,
           ),

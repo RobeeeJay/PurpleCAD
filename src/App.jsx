@@ -23,7 +23,7 @@ import "./styles/StatusLine.css";
 import VersionTag from "./components/VersionTag";
 import "./styles/App.css";
 import { useStore } from "./store";
-import { textDivisions } from "./three/resolution.js";
+import { textSimplifyTol } from "./three/resolution.js";
 
 // __APP_VERSION__ is baked in at build time by Vite's `define` (see
 // vite.config.js). Vitest doesn't run through that config so guard with
@@ -45,7 +45,7 @@ function App() {
   // shapes that predate contour caching AND re-tessellate ones built at a
   // different density when the print/preview toggle changes.  Gated on a
   // boolean so it settles after the migrating update rather than looping.
-  const textDiv = useStore(textDivisions);
+  const textTol = useStore(textSimplifyTol);
   const needsTextContours = useStore((state) =>
     state.items.some(
       (it) =>
@@ -54,13 +54,13 @@ function App() {
           (s) =>
             s.type === "text" &&
             (!Array.isArray(s.contours) ||
-              s.contourDivisions !== textDivisions(state)),
+              s.contourTol !== textSimplifyTol(state)),
         ),
     ),
   );
   useEffect(() => {
-    if (needsTextContours) useStore.getState().ensureTextContours(textDiv);
-  }, [needsTextContours, textDiv]);
+    if (needsTextContours) useStore.getState().ensureTextContours(textTol);
+  }, [needsTextContours, textTol]);
 
   useEffect(() => {
     if (!notification) return;

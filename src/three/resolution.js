@@ -7,6 +7,7 @@
 // the value is reactive to both the mode toggle and the density settings.
 
 import { useStore } from "../store";
+import { MM_PER_UNIT } from "./sceneObjects/dimensions.js";
 
 export function activePrecision(state) {
   const s = state || useStore.getState();
@@ -15,11 +16,10 @@ export function activePrecision(state) {
     : s.previewPrecisionMm;
 }
 
-// Glyph-curve subdivision count for the active resolution — text contours are
-// sampled this finely, so the print/preview toggle changes how smooth extruded
-// (and drawn) text is.  Derived from the same mm deviation as everything else,
-// clamped to a sane range.
-export function textDivisions(state) {
-  const p = activePrecision(state);
-  return Math.max(3, Math.min(24, Math.round(2 / (p > 0 ? p : 0.5))));
+// Glyph-outline simplification deviation for the active resolution, in sketch
+// units.  Text contours are simplified to this tolerance, so the print/preview
+// toggle (and the mm precision settings) directly govern how many faces an
+// extruded letter has — the same mm deviation everything else tessellates to.
+export function textSimplifyTol(state) {
+  return activePrecision(state) / MM_PER_UNIT;
 }

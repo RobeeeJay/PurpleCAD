@@ -84,6 +84,11 @@ function getFont(fontId) {
 }
 const LINE_SPACING = 1.35; // baseline-to-baseline as a multiple of the font size
 
+// Subdivisions per font curve segment when sampling glyph outlines.  Fixed and
+// generous so the print path stays smooth; the print/preview face count is then
+// governed by simplifyLoop's deviation tolerance, not by this.
+const SOURCE_DIVISIONS = 12;
+
 // Drop consecutive-duplicate and closing-duplicate points so the loop is a
 // clean open polygon — font glyph contours repeat the start point at the end,
 // which makes a zero-length wire segment that OCC's makeExtrude rejects.
@@ -101,10 +106,53 @@ function cleanLoop(pts) {
   return out;
 }
 
+// Perpendicular distance from p to the infinite line through a,b.
+function perpDist(p, a, b) {
+  const dx = b.x - a.x,
+    dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+// Ramer–Douglas–Peucker on a (closing-point-stripped) loop: drop vertices that
+// sit within `tol` of the chord spanning their neighbours.  Typeface glyphs are
+// emitted as many short segments — even straight runs get subdivided — so
+// without this an extruded letter has hundreds of faces regardless of
+// resolution.  `tol` is an absolute deviation in sketch units, so the precision
+// setting (preview vs print mm) directly drives how coarse the text is.
+function simplifyLoop(pts, tol) {
+  if (!(tol > 0) || pts.length < 4) return pts;
+  const n = pts.length;
+  const keep = new Array(n).fill(false);
+  keep[0] = keep[n - 1] = true;
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [s, e] = stack.pop();
+    let maxD = -1,
+      idx = -1;
+    for (let i = s + 1; i < e; i++) {
+      const d = perpDist(pts[i], pts[s], pts[e]);
+      if (d > maxD) {
+        maxD = d;
+        idx = i;
+      }
+    }
+    if (maxD > tol && idx > 0) {
+      keep[idx] = true;
+      stack.push([s, idx], [idx, e]);
+    }
+  }
+  const out = pts.filter((_, i) => keep[i]);
+  return out.length >= 3 ? out : pts;
+}
+
 // Closed contour polylines for `text` at the given font size, baseline of the
 // first line at the origin, glyphs reading rightward (+x) and lines stacking
 // downward (-y).  Each contour (glyph outer ring and each hole) is its own loop.
-export function textToContours(text, size, fontId, divisions = 6) {
+// `tolerance` (sketch units) simplifies each loop; 0 keeps full detail.
+export function textToContours(text, size, fontId, tolerance = 0) {
   const font = getFont(fontId);
   if (!font || !(size > 0)) return [];
   const out = [];
@@ -119,11 +167,17 @@ export function textToContours(text, size, fontId, divisions = 6) {
         return;
       }
       const dy = -li * size * LINE_SPACING;
+      const add = (poly) =>
+        out.push(
+          simplifyLoop(
+            cleanLoop(poly.map((p) => ({ x: p.x, y: p.y + dy }))),
+            tolerance,
+          ),
+        );
       for (const s of shapes) {
-        const { shape, holes } = s.extractPoints(divisions);
-        out.push(cleanLoop(shape.map((p) => ({ x: p.x, y: p.y + dy }))));
-        for (const h of holes)
-          out.push(cleanLoop(h.map((p) => ({ x: p.x, y: p.y + dy }))));
+        const { shape, holes } = s.extractPoints(SOURCE_DIVISIONS);
+        add(shape);
+        for (const h of holes) add(h);
       }
     });
   return out.filter((c) => c.length >= 3);
@@ -146,8 +200,8 @@ function bboxOf(contours) {
 
 // Ink width/height of the rendered text, in sketch units.  Cached on the shape
 // (as w/h) so the bounding box can be drawn without re-parsing the font.
-export function measureText(text, size, fontId, divisions = 6) {
-  const b = bboxOf(textToContours(text, size, fontId, divisions));
+export function measureText(text, size, fontId) {
+  const b = bboxOf(textToContours(text, size, fontId));
   if (!isFinite(b.minX)) return { w: 0, h: 0 };
   return { w: b.maxX - b.minX, h: b.maxY - b.minY };
 }
@@ -155,12 +209,14 @@ export function measureText(text, size, fontId, divisions = 6) {
 // Anchor-relative contours (top-left of the ink box at the origin, reading
 // right/down) plus the ink size.  Cached on the shape so rendering AND region
 // detection use plain stored geometry — no font re-parse, and region detection
-// stays font-free (important: it runs in font-less/mocked environments).
-function relContours(text, height, font, divisions = 6) {
-  const base = textToContours(text, height, font, divisions);
-  if (base.length === 0) return { contours: [], w: 0, h: 0 };
-  const b = bboxOf(base);
-  const contours = base.map((c) =>
+// stays font-free (important: it runs in font-less/mocked environments).  The
+// bbox comes from full-detail outlines so w/h stays stable across resolutions;
+// only the stored contours are simplified to `tolerance`.
+function relContours(text, height, font, tolerance = 0) {
+  const full = textToContours(text, height, font);
+  if (full.length === 0) return { contours: [], w: 0, h: 0 };
+  const b = bboxOf(full);
+  const contours = textToContours(text, height, font, tolerance).map((c) =>
     c.map((p) => ({ x: p.x - b.minX, y: p.y - b.maxY })),
   );
   return { contours, w: b.maxX - b.minX, h: b.maxY - b.minY };
@@ -178,11 +234,11 @@ export function textShapeContours(shape) {
 }
 
 // Build a complete text shape (anchor at top-left) with its cached ink size and
-// glyph contours.  `divisions` is the active resolution's glyph subdivision
-// count (cached as contourDivisions so a resolution change can detect staleness
-// and re-tessellate).
-export function makeTextShape({ text, height, font, x, y, divisions = 6 }) {
-  const { contours, w, h } = relContours(text, height, font, divisions);
+// glyph contours.  `tolerance` is the active resolution's simplification
+// deviation in sketch units (cached as contourTol so a resolution change can
+// detect staleness and re-simplify).
+export function makeTextShape({ text, height, font, x, y, tolerance = 0 }) {
+  const { contours, w, h } = relContours(text, height, font, tolerance);
   return {
     type: "text",
     text,
@@ -193,6 +249,6 @@ export function makeTextShape({ text, height, font, x, y, divisions = 6 }) {
     w,
     h,
     contours,
-    contourDivisions: divisions,
+    contourTol: tolerance,
   };
 }

@@ -95,27 +95,31 @@ describe("sketchText", () => {
     expect(await ensureFontLoaded("sys:Nope")).toBe(false); // unknown system
   });
 
-  it("samples glyph curves more finely at higher divisions", () => {
-    const coarse = makeTextShape({
-      text: "o",
-      height: 4,
-      font: DEFAULT_FONT_ID,
-      x: 0,
-      y: 0,
-      divisions: 3,
-    });
-    const fine = makeTextShape({
-      text: "o",
-      height: 4,
-      font: DEFAULT_FONT_ID,
-      x: 0,
-      y: 0,
-      divisions: 18,
-    });
+  it("coarsens glyph outlines at a larger simplification tolerance", () => {
     const pts = (s) => s.contours.reduce((n, c) => n + c.length, 0);
-    expect(coarse.contourDivisions).toBe(3);
-    expect(fine.contourDivisions).toBe(18);
-    expect(pts(fine)).toBeGreaterThan(pts(coarse));
+    const fine = makeTextShape({
+      text: "Sample",
+      height: 4,
+      font: DEFAULT_FONT_ID,
+      x: 0,
+      y: 0,
+      tolerance: 0.001, // print-like deviation
+    });
+    const coarse = makeTextShape({
+      text: "Sample",
+      height: 4,
+      font: DEFAULT_FONT_ID,
+      x: 0,
+      y: 0,
+      tolerance: 0.05, // preview-like deviation
+    });
+    expect(coarse.contourTol).toBe(0.05);
+    // A preview deviation should drop the extruded letter to a fraction of the
+    // point count, which is the whole point of the resolution toggle for text.
+    expect(pts(coarse)).toBeLessThan(pts(fine) * 0.5);
+    // ...while leaving the ink size unchanged (bbox is full-detail).
+    expect(coarse.w).toBeCloseTo(fine.w, 6);
+    expect(coarse.h).toBeCloseTo(fine.h, 6);
   });
 
   it("translateShape moves a text shape by its anchor", () => {
