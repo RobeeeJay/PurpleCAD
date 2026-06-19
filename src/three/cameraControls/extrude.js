@@ -517,6 +517,10 @@ export function createExtrudeHelpers(
     const retargetId = store.extrudeRetargetId;
     const isCut = !!store.extrudeDepthInput?.cut;
     const startOffset = store.extrudeDepthInput?.startOffset ?? 0;
+    // "Always extrude as single object" (default on): multiple disjoint
+    // profiles fuse into one body.  When off, pure-sketch multi-profile
+    // extrudes stay separate; a boss still merges into its host.
+    const combineSingle = store.alwaysExtrudeSingleObject !== false;
     // Persist the depth signed — the sign controls direction (positive =
     // along face normal, negative = opposite) for both cut and non-cut
     // extrudes.
@@ -552,7 +556,7 @@ export function createExtrudeHelpers(
           )
             maxId = e.instruction.item.id;
         });
-        if (!isCut) {
+        if (!isCut && combineSingle) {
           // The extra regions become new prisms in ONE timeline step; a separate
           // Union step then fuses them with the retargeted original (by id) and
           // any hosts.  So the extras stay one entry, not N separate ones.
@@ -581,7 +585,8 @@ export function createExtrudeHelpers(
             maxId + defs.length + 1,
           ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
         } else {
-          // Cut: each extra region cuts its target independently.
+          // Cut differences each extra region against its target; with the
+          // single-object setting off, non-cut extras become separate solids.
           profiles.slice(1).forEach((profile, i) => {
             createOneExtrude(
               store,
@@ -613,10 +618,6 @@ export function createExtrudeHelpers(
       const unionTargets = isCut
         ? []
         : unionTargetIdsFor(profiles, store.items);
-      // "Always extrude as single object" (default on): multiple disjoint
-      // profiles fuse into one body.  When off, pure-sketch multi-profile
-      // extrudes stay as separate objects; a boss still merges into its host.
-      const combineSingle = store.alwaysExtrudeSingleObject !== false;
       const willUnion =
         !isCut &&
         (unionTargets.length > 0 || (profiles.length > 1 && combineSingle));
