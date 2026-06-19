@@ -355,6 +355,29 @@ export function createExtrudeHelpers(
   // preview.  Distance is never set by the click — only via the input field.
   // The selection is homogeneous: once a sketch region is picked only regions
   // can be added; once a face is picked only coplanar faces can be added.
+  // A glyph fill's text group: every fill from the same text shape (one word).
+  // Selecting one letter selects them all, since text is extruded as a unit.
+  const textGroupKey = (profile) =>
+    profile && profile.type === "sketchLoop" && profile.textShapeIdx != null
+      ? `${profile.sketchId}:${profile.textShapeIdx}`
+      : null;
+  const textGroupFills = (fill) => {
+    const key = textGroupKey(fill.userData.extrudeProfile);
+    if (!key) return [fill];
+    const fills = extrudeSelectGroupRef?.current?.children ?? [];
+    return fills.filter((f) => textGroupKey(f.userData.extrudeProfile) === key);
+  };
+  // Add or remove a single region fill from the selection (no rebuild).
+  const setFillSelected = (fill, selected) => {
+    if (selected && !selectedFills.has(fill)) {
+      selectedFills.add(fill);
+      extrudeProfileList.push({ ...fill.userData.extrudeProfile, _fill: fill });
+    } else if (!selected && selectedFills.has(fill)) {
+      selectedFills.delete(fill);
+      extrudeProfileList = extrudeProfileList.filter((p) => p._fill !== fill);
+    }
+  };
+
   const handleExtrudeProfileClick = (screenX, screenY) => {
     const found = findProfileAt(screenX, screenY);
     if (!found) return;
@@ -377,16 +400,10 @@ export function createExtrudeHelpers(
       return;
     }
     if (found.fill) {
-      // Region pick: identity is the fill mesh.
-      if (selectedFills.has(found.fill)) {
-        selectedFills.delete(found.fill);
-        extrudeProfileList = extrudeProfileList.filter(
-          (p) => p._fill !== found.fill,
-        );
-      } else {
-        selectedFills.add(found.fill);
-        extrudeProfileList.push({ ...found.profile, _fill: found.fill });
-      }
+      // Region pick: identity is the fill mesh.  For a text glyph, toggle the
+      // whole word (all its letters) as one unit.
+      const selecting = !selectedFills.has(found.fill);
+      textGroupFills(found.fill).forEach((f) => setFillSelected(f, selecting));
     } else {
       // Face pick: de-dup by plane + anchor.
       const idx = extrudeProfileList.findIndex((p) =>
@@ -445,13 +462,12 @@ export function createExtrudeHelpers(
       const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
       if (sx < minX || sx > maxX || sy < minY || sy > maxY) continue;
       const selected = selectedFills.has(fill);
+      // A glyph dragged over pulls in (or releases) its whole word.
       if (remove && selected) {
-        selectedFills.delete(fill);
-        extrudeProfileList = extrudeProfileList.filter((p) => p._fill !== fill);
+        textGroupFills(fill).forEach((f) => setFillSelected(f, false));
         changed = true;
       } else if (!remove && !selected) {
-        selectedFills.add(fill);
-        extrudeProfileList.push({ ...profile, _fill: fill });
+        textGroupFills(fill).forEach((f) => setFillSelected(f, true));
         changed = true;
       }
     }

@@ -196,12 +196,14 @@ export function buildExtrudeSelectGroup(
       if (s.type === "text") textIdxs.add(i);
     });
     const isTextPoly = new Map();
+    const polyShapeIndices = new Map();
     const allLoops = loopsWithShapes.map((l) => {
       isTextPoly.set(
         l.polygon,
         l.shapeIndices.length > 0 &&
           l.shapeIndices.every((si) => textIdxs.has(si)),
       );
+      polyShapeIndices.set(l.polygon, l.shapeIndices);
       return l.polygon;
     });
     const grouped = groupLoopsWithHoles(allLoops);
@@ -234,9 +236,15 @@ export function buildExtrudeSelectGroup(
       fill.position.copy(pos).addScaledVector(normal, 0.005);
       fill.quaternion.copy(sketchMesh.quaternion);
       fill.renderOrder = 995;
+      // For a glyph loop, remember which text shape it came from so selecting
+      // one letter can select the whole word (all glyphs share this index).
+      const textShapeIdx = isTextPoly.get(polygon)
+        ? (polyShapeIndices.get(polygon) || [])[0]
+        : null;
       fill.userData.extrudeProfile = {
         type: "sketchLoop",
         sketchId: item.id,
+        textShapeIdx: textShapeIdx ?? null,
         profileCentroid: polyCentroid(polygon),
         polygon2D: polygon,
         holes: holes.filter((h) => h.length >= 3),
