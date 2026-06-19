@@ -96,10 +96,21 @@ export function extrudeWithLivePolygon(item, allItems, precision) {
       polyContainsPoint(g.polygon, pc),
     );
     const pool = containing.length > 0 ? containing : allEntries;
+    // Rank by spatial distance from the stored centroid first, area only as a
+    // tiebreaker.  Area-alone fallback once mismatched a glyph whose centroid
+    // (in its counter) stopped landing inside its own re-simplified loop to a
+    // same-area letter elsewhere in the word — collapsing the real one.
+    const dist2 = (g) => {
+      const c = polyCentroid(g.polygon);
+      return (c.x - pc.x) ** 2 + (c.y - pc.y) ** 2;
+    };
     match = pool.reduce((best, g) => {
-      const da = Math.abs(polyArea(g.polygon) - storedArea);
-      const db = Math.abs(polyArea(best.polygon) - storedArea);
-      return da < db ? g : best;
+      const dg = dist2(g),
+        db = dist2(best);
+      if (Math.abs(dg - db) > 1e-9) return dg < db ? g : best;
+      const ag = Math.abs(polyArea(g.polygon) - storedArea);
+      const ab = Math.abs(polyArea(best.polygon) - storedArea);
+      return ag < ab ? g : best;
     });
   }
   if (!match || match.polygon.length < 3) return item;
