@@ -84,6 +84,23 @@ function getFont(fontId) {
 }
 const LINE_SPACING = 1.35; // baseline-to-baseline as a multiple of the font size
 
+// Drop consecutive-duplicate and closing-duplicate points so the loop is a
+// clean open polygon — font glyph contours repeat the start point at the end,
+// which makes a zero-length wire segment that OCC's makeExtrude rejects.
+function cleanLoop(pts) {
+  const out = [];
+  for (const p of pts) {
+    const last = out[out.length - 1];
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 1e-7) out.push(p);
+  }
+  if (out.length > 1) {
+    const a = out[0],
+      b = out[out.length - 1];
+    if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-7) out.pop();
+  }
+  return out;
+}
+
 // Closed contour polylines for `text` at the given font size, baseline of the
 // first line at the origin, glyphs reading rightward (+x) and lines stacking
 // downward (-y).  Each contour (glyph outer ring and each hole) is its own loop.
@@ -104,12 +121,12 @@ export function textToContours(text, size, fontId, divisions = 6) {
       const dy = -li * size * LINE_SPACING;
       for (const s of shapes) {
         const { shape, holes } = s.extractPoints(divisions);
-        out.push(shape.map((p) => ({ x: p.x, y: p.y + dy })));
+        out.push(cleanLoop(shape.map((p) => ({ x: p.x, y: p.y + dy }))));
         for (const h of holes)
-          out.push(h.map((p) => ({ x: p.x, y: p.y + dy })));
+          out.push(cleanLoop(h.map((p) => ({ x: p.x, y: p.y + dy }))));
       }
     });
-  return out;
+  return out.filter((c) => c.length >= 3);
 }
 
 function bboxOf(contours) {

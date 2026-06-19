@@ -53,9 +53,18 @@ export function findClosedLoopsWithShapes(
   shapes.forEach((s, i) => {
     if (s.type !== "text" || !Array.isArray(s.contours)) return;
     for (const c of s.contours) {
-      if (c.length < 3) continue;
+      // Drop a duplicated closing point (font glyph contours repeat the start
+      // point) so the loop is a clean polygon — a zero-length closing segment
+      // makes OCC's extrude wire-builder reject the profile.
+      let pts = c;
+      if (pts.length >= 2) {
+        const a = pts[0],
+          b = pts[pts.length - 1];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) pts = pts.slice(0, -1);
+      }
+      if (pts.length < 3) continue;
       textLoops.push({
-        polygon: c.map((p) => ({ x: p.x + s.x, y: p.y + s.y })),
+        polygon: pts.map((p) => ({ x: p.x + s.x, y: p.y + s.y })),
         shapeIndices: [i],
       });
     }

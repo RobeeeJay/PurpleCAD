@@ -3,9 +3,12 @@
 // regen, and the fused body can chain into further booleans.
 
 import { describe, it, expect, beforeAll } from "vitest";
+import * as THREE from "three";
 import { ensureOcc } from "../occ/init.js";
 import { performCsg } from "../occClient.js";
 import { regenerateItemsForResolution } from "../regenerateItems.js";
+import { buildExtrudeSelectGroup } from "../sceneObjects/sketchOverlays.js";
+import { makeTextShape } from "../sketchText.js";
 
 beforeAll(async () => {
   await ensureOcc();
@@ -93,6 +96,44 @@ describe("extrudeUnion", () => {
     const res = await performCsg({
       selectedItems: items,
       allItems: items,
+      operation: "union",
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+    expect(verts(res.geometryData)).toBeGreaterThan(0);
+  });
+
+  it("a real text glyph profile extrudes (no zero-length closing segment)", async () => {
+    // Glyph contours repeat the start point at the end; that closing duplicate
+    // made OCC's extrude wire-builder reject the profile.  Build the actual
+    // profiles a text sketch produces and fuse them.
+    const text = makeTextShape({
+      text: "AB",
+      height: 4,
+      font: "helvetiker",
+      x: 0,
+      y: 0,
+    });
+    const item = { id: 50, type: "sketch", shapes: [text], visible: true };
+    const grp = buildExtrudeSelectGroup(
+      [item],
+      { current: { 50: new THREE.Object3D() } },
+      16,
+      null,
+    );
+    const defs = grp.children.map((f, i) => ({
+      id: 100 + i,
+      type: "extrude",
+      profile: f.userData.extrudeProfile,
+      depth: "40",
+      position: f.userData.extrudeProfile.position,
+      rotation: f.userData.extrudeProfile.rotation,
+      scale: S,
+    }));
+    expect(defs.length).toBe(2); // A and B, counters kept as holes
+    const res = await performCsg({
+      selectedItems: defs,
+      allItems: defs,
       operation: "union",
       printPrecision: 0.1,
     });
