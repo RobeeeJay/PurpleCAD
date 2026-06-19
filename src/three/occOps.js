@@ -618,6 +618,67 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       }
       return worldId;
     }
+
+    if (r.kind === "extrudeUnion") {
+      // A multi-area extrude fused into one body: build each embedded prism
+      // recipe (and any host solid) in world space, then union them.
+      const buildWorld = (inp) => {
+        const localId = buildItemShapeLocal(inp, allItems, precision);
+        if (localId == null) return null;
+        const t = buildBrushTransform(inp);
+        let scaledId = localId;
+        if (Math.abs(t.scale - 1) > 1e-9) {
+          scaledId = occ.scaleShape(localId, t.scale);
+          occ.releaseShape(localId);
+        }
+        const worldId = occ.transformShape(
+          scaledId,
+          t.position.x,
+          t.position.y,
+          t.position.z,
+          t.rotation.x || 0,
+          t.rotation.y || 0,
+          t.rotation.z || 0,
+        );
+        if (scaledId !== localId) occ.releaseShape(scaledId);
+        else occ.releaseShape(localId);
+        return worldId;
+      };
+      const ids = [
+        ...(r.extrudeDefs || []),
+        ...(r.inputIds || [])
+          .map((id) => allItems.find((i) => i.id === id))
+          .filter(Boolean),
+      ]
+        .map(buildWorld)
+        .filter((id) => id != null);
+      if (ids.length === 0) return null;
+      let worldId;
+      if (ids.length === 1) worldId = ids[0];
+      else {
+        try {
+          worldId = occ.booleanOp(ids, "union");
+        } finally {
+          ids.forEach((id) => occ.releaseShape(id));
+        }
+      }
+      if (!worldId) return null;
+      const center = r.originalCenter || item.position;
+      if (center) {
+        const localId = occ.transformShape(
+          worldId,
+          -center.x,
+          -center.y,
+          -center.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(worldId);
+        return localId;
+      }
+      return worldId;
+    }
   }
 
   return null;

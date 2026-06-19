@@ -17,7 +17,11 @@ import {
   makeExtrudePreviewMesh,
   extractFaceProfile,
 } from "./extrudeGeometry.js";
-import { runCutExtrusion, runUnionExtrudes } from "./extrudeBoolean.js";
+import {
+  runCutExtrusion,
+  runUnionExtrudes,
+  runExtrudeUnion,
+} from "./extrudeBoolean.js";
 import {
   EXTRUDE_FACE_HIGHLIGHT,
   EXTRUDE_FACE_HIGHLIGHT_ALT,
@@ -622,9 +626,25 @@ export function createExtrudeHelpers(
         !isCut &&
         (unionTargets.length > 0 || (profiles.length > 1 && combineSingle));
       if (willUnion) {
-        // Create the prisms in ONE timeline step (a multi-area extrude reads as
-        // a single "Extruded" entry), then fuse them — and any host solids — in
-        // a separate Union step.  A lone prism is just a normal extrude entry.
+        // Fuse into ONE self-contained object in ONE timeline entry: the prism
+        // recipes are embedded in the result's regenerator (no separate prism
+        // items + Union step), and any host solids are merged in.
+        const defs = profiles.map((profile, i) =>
+          buildExtrudeDef(
+            profile,
+            depthStored,
+            false,
+            startOffset,
+            maxId + 2 + i,
+          ),
+        );
+        store.setCutExtrudeInProgress(true);
+        void runExtrudeUnion(defs, unionTargets, maxId + 1).finally(() =>
+          useStore.getState().setCutExtrudeInProgress(false),
+        );
+      } else if (!isCut && profiles.length > 1) {
+        // "Single object" off: N separate prisms, but committed as ONE timeline
+        // entry (a createGroup), not N.
         const defs = profiles.map((profile, i) =>
           buildExtrudeDef(
             profile,
@@ -634,15 +654,8 @@ export function createExtrudeHelpers(
             maxId + 1 + i,
           ),
         );
-        if (defs.length > 1) store.addItems(defs, "Extruded");
-        else store.addItem(defs[0]);
+        store.addItems(defs, "Extruded");
         store.selectItem(null);
-        store.setCutExtrudeInProgress(true);
-        void runUnionExtrudes(
-          defs.map((d) => d.id),
-          unionTargets,
-          maxId + defs.length + 1,
-        ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
       } else {
         // Cut prisms each difference their target; a lone non-cut prism is a
         // standalone extrude.

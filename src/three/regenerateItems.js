@@ -416,6 +416,33 @@ async function regenerateBoolean(
   });
 }
 
+// A multi-area extrude fused into one body, self-contained: the prism recipes
+// (extrude item defs) are embedded in `extrudeDefs` rather than referenced as
+// separate store items, so the whole multi-area extrude is ONE timeline entry.
+// Optional `inputIds` are host solids (a boss) fused in too.  Each prism is
+// rebuilt from its live sketch polygon so the union tracks sketch edits.
+async function regenerateExtrudeUnion(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+) {
+  const prisms = (regenerator.extrudeDefs || []).map((d) =>
+    withLivePolygons(d, accumulatedItems, printPrecision),
+  );
+  const hosts = (regenerator.inputIds || [])
+    .map((id) => accumulatedItems.find((i) => i.id === id))
+    .filter(Boolean)
+    .map((i) => withLivePolygons(i, accumulatedItems, printPrecision));
+  const inputs = [...prisms, ...hosts];
+  if (inputs.length < 1) return null;
+  return performCsg({
+    selectedItems: inputs,
+    operation: "union",
+    printPrecision,
+    allItems: accumulatedItems,
+  });
+}
+
 // `onProgress({ current, total })` fires after each item that ACTUALLY
 // needed regeneration completes — used by the orchestrator to drive the
 // busy-indicator's timeline-recalculation progress bar.  Items that
@@ -476,6 +503,8 @@ export async function regenerateItemsForResolution(
       result = await regenerate3dPattern(r, out, printPrecision, item.position);
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
+    } else if (r.kind === "extrudeUnion") {
+      result = await regenerateExtrudeUnion(r, out, printPrecision);
     }
     progressed += 1;
     if (onProgress) onProgress({ current: progressed, total });
