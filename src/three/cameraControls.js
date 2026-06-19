@@ -1496,7 +1496,7 @@ export function attachCameraControls(ctx) {
             e.clientX,
             e.clientY,
           );
-        else handleExtrudeHover(e.clientX, e.clientY);
+        else handleExtrudeHover(e.clientX, e.clientY, e.shiftKey);
       } else if (extrudeSelectModeRef.current === "start")
         handleExtrudeStartHover(e.clientX, e.clientY);
       controls.mouseX = e.clientX;
@@ -1528,17 +1528,19 @@ export function attachCameraControls(ctx) {
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5) {
         if (extrudeSelectModeRef.current === "profile")
-          handleExtrudeProfileClick(e.clientX, e.clientY);
+          handleExtrudeProfileClick(e.clientX, e.clientY, e.shiftKey);
         else if (extrudeSelectModeRef.current === "start")
           handleExtrudeStartClick(e.clientX, e.clientY);
       } else if (extrudeSelectModeRef.current === "profile") {
         // Drag-select: add the boxed regions, or remove them with Alt held.
+        // Shift restricts text to the single glyph instead of the whole word.
         handleExtrudeProfileBox(
           controls.mouseDownX,
           controls.mouseDownY,
           e.clientX,
           e.clientY,
           e.altKey,
+          e.shiftKey,
         );
       }
       clearExtrudeMarquee();

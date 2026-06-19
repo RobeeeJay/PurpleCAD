@@ -147,7 +147,7 @@ export function createExtrudeHelpers(
     );
   };
 
-  const handleExtrudeHover = (screenX, screenY) => {
+  const handleExtrudeHover = (screenX, screenY, shift = false) => {
     const fills =
       extrudeSelectGroupRef && extrudeSelectGroupRef.current
         ? extrudeSelectGroupRef.current.children
@@ -161,9 +161,12 @@ export function createExtrudeHelpers(
     if (fills.length > 0) {
       const hits = ray.intersectObjects(fills, false);
       if (hits.length > 0) {
-        hits[0].object.material.opacity = selectedFills.has(hits[0].object)
-          ? 0.55
-          : 0.3;
+        // Preview the whole word a click would take, unless Shift restricts the
+        // pick to the single hovered glyph.
+        const group = shift ? [hits[0].object] : textGroupFills(hits[0].object);
+        group.forEach((m) => {
+          m.material.opacity = selectedFills.has(m) ? 0.55 : 0.3;
+        });
         renderer.domElement.style.cursor = "pointer";
         clearFaceHighlight();
         return;
@@ -378,7 +381,7 @@ export function createExtrudeHelpers(
     }
   };
 
-  const handleExtrudeProfileClick = (screenX, screenY) => {
+  const handleExtrudeProfileClick = (screenX, screenY, shift = false) => {
     const found = findProfileAt(screenX, screenY);
     if (!found) return;
     const kind = extrudeProfileList[0]?.type;
@@ -400,10 +403,12 @@ export function createExtrudeHelpers(
       return;
     }
     if (found.fill) {
-      // Region pick: identity is the fill mesh.  For a text glyph, toggle the
-      // whole word (all its letters) as one unit.
+      // Region pick: identity is the fill mesh.  A text glyph toggles the whole
+      // word (all its letters) as one unit; Shift restricts it to this glyph so
+      // a single letter can be extruded on its own.
       const selecting = !selectedFills.has(found.fill);
-      textGroupFills(found.fill).forEach((f) => setFillSelected(f, selecting));
+      const group = shift ? [found.fill] : textGroupFills(found.fill);
+      group.forEach((f) => setFillSelected(f, selecting));
     } else {
       // Face pick: de-dup by plane + anchor.
       const idx = extrudeProfileList.findIndex((p) =>
@@ -437,7 +442,7 @@ export function createExtrudeHelpers(
 
   // Drag-select: add (or, when `remove`, take away) every sketch-region profile
   // whose centre falls inside the screen box.  Faces aren't box-selectable.
-  const handleExtrudeProfileBox = (x1, y1, x2, y2, remove) => {
+  const handleExtrudeProfileBox = (x1, y1, x2, y2, remove, shift = false) => {
     clearExtrudeMarquee();
     const fills = extrudeSelectGroupRef?.current?.children ?? [];
     if (fills.length === 0) return;
@@ -462,12 +467,14 @@ export function createExtrudeHelpers(
       const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
       if (sx < minX || sx > maxX || sy < minY || sy > maxY) continue;
       const selected = selectedFills.has(fill);
-      // A glyph dragged over pulls in (or releases) its whole word.
+      // A glyph dragged over pulls in (or releases) its whole word, unless Shift
+      // restricts the box to the individual glyphs it covers.
+      const group = shift ? [fill] : textGroupFills(fill);
       if (remove && selected) {
-        textGroupFills(fill).forEach((f) => setFillSelected(f, false));
+        group.forEach((f) => setFillSelected(f, false));
         changed = true;
       } else if (!remove && !selected) {
-        textGroupFills(fill).forEach((f) => setFillSelected(f, true));
+        group.forEach((f) => setFillSelected(f, true));
         changed = true;
       }
     }
