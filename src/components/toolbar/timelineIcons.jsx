@@ -406,6 +406,47 @@ export const ShellIcon = () => (
   </svg>
 );
 
+export const HoleIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <rect
+      x="3"
+      y="6"
+      width="18"
+      height="12"
+      rx="1"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <circle
+      cx="12"
+      cy="12"
+      r="3.6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <line
+      x1="8.6"
+      y1="10.4"
+      x2="15.4"
+      y2="10.4"
+      stroke="currentColor"
+      strokeWidth="1"
+      opacity="0.7"
+    />
+    <line
+      x1="8.6"
+      y1="13.6"
+      x2="15.4"
+      y2="13.6"
+      stroke="currentColor"
+      strokeWidth="1"
+      opacity="0.7"
+    />
+  </svg>
+);
+
 export const FilletIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14">
     <line

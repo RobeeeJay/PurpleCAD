@@ -313,6 +313,36 @@ export const createUiSlice = (set) => ({
       },
     }),
   cancelHoleTool: () => set({ holeTool: null }),
+  // Re-open a committed hole's timeline step to edit its params.  Replays the
+  // frozen pre-hole source so changes re-cut the original body.
+  beginHoleEdit: (entryId) =>
+    set((state) => {
+      const entry = state.history.find((h) => h.id === entryId);
+      const r = entry?.instruction?.patches?.regenerator;
+      if (r?.kind !== "hole") return {};
+      const h = r.hole;
+      return {
+        holeTool: {
+          phase: "params",
+          itemId: entry.itemId,
+          editEntryId: entryId,
+          source: r.source,
+          face: {
+            normal: { x: -h.dir.x, y: -h.dir.y, z: -h.dir.z },
+            point: h.point,
+          },
+          point: h.point,
+          params: {
+            lengthMm: h.length,
+            diameterMm: h.diameter,
+            pitchMm: h.pitch || 0,
+            toleranceMm: h.tolerance || 0,
+            threaded: !!h.threaded,
+            threadType: h.threadType || "none",
+          },
+        },
+      };
+    }),
   setHoleFace: (itemId, face) =>
     set((s) =>
       s.holeTool

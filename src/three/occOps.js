@@ -995,7 +995,17 @@ export function buildHoleShape(partId, h) {
     ? Math.max(1e-4, diameter - 1.0825 * pitch)
     : diameter;
 
-  const bore = occ.makeHole(p.x, p.y, p.z, d.x, d.y, d.z, length, boreDia, tol);
+  // Start the bore OUTSIDE the face (back up along the normal by `length`) and
+  // extend it, so it always breaks through the surface into an open hole even
+  // when the picked entry lands a little below it.  Depth into the part stays
+  // `length` (the bore still ends at point + length·dir).
+  const m = length;
+  const sx = p.x - d.x * m,
+    sy = p.y - d.y * m,
+    sz = p.z - d.z * m;
+  const len = length + m;
+
+  const bore = occ.makeHole(sx, sy, sz, d.x, d.y, d.z, len, boreDia, tol);
   if (!bore) return null;
   let cut = occ.booleanOp([partId, bore], "difference");
   occ.releaseShape(bore);
@@ -1003,13 +1013,13 @@ export function buildHoleShape(partId, h) {
 
   if (useThread) {
     const groove = occ.makeThread(
-      p.x,
-      p.y,
-      p.z,
+      sx,
+      sy,
+      sz,
       d.x,
       d.y,
       d.z,
-      length,
+      len,
       diameter,
       pitch,
       tol,

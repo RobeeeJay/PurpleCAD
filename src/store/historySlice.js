@@ -640,6 +640,50 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Update a committed hole step in place with re-edited params (geometry
+  // already rebuilt by commitHole).  `patch` = { hole, position, centerOffset,
+  // geometryData, regeneratedAt }.
+  updateHoleEntry: (entryId, patch) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        const r = inst.patches?.regenerator;
+        if (r?.kind !== "hole") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches: {
+              ...inst.patches,
+              position: patch.position,
+              geometryData: patch.geometryData,
+              regenerator: {
+                ...r,
+                hole: patch.hole,
+                centerOffset: patch.centerOffset,
+                regeneratedAt: patch.regeneratedAt,
+              },
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
   // Update an existing push/pull history entry's patches in place — used by
   // PushPullOverlay's retarget confirm (geometry already rebuilt against the
   // new face selection).  Mirrors retargetChamferEntry.

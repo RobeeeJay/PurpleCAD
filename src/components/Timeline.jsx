@@ -21,6 +21,7 @@ import {
   ChamferIcon,
   FilletIcon,
   ShellIcon,
+  HoleIcon,
   PlaneIcon,
   RevolveIcon,
   PipeIcon,
@@ -58,6 +59,13 @@ const shellInfo = (entry) => {
   const r = inst.patches?.regenerator;
   if (r?.kind !== "shell") return null;
   return { thickness: r.thickness ?? 0 };
+};
+
+// Detect hole entries — a modify whose regenerator is a hole op.
+const holeInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  return inst.patches?.regenerator?.kind === "hole" ? {} : null;
 };
 
 // Detect revolve (sweep) entries — a CREATE whose item carries a revolve recipe.
@@ -127,6 +135,7 @@ const entryIcon = (entry) => {
   const ci = chamferInfo(entry);
   if (ci) return ci.isFillet ? <FilletIcon /> : <ChamferIcon />;
   if (shellInfo(entry)) return <ShellIcon />;
+  if (holeInfo(entry)) return <HoleIcon />;
 
   const inst = entry.instruction;
   if (entry.label === "Split") return <SplitIcon />;
@@ -356,6 +365,7 @@ const Timeline = () => {
     (state) => state.setPushPullEditTarget,
   );
   const setShellTarget = useStore((state) => state.setShellTarget);
+  const beginHoleEdit = useStore((state) => state.beginHoleEdit);
   const pushPullRetargetTarget = useStore(
     (state) => state.pushPullRetargetTarget,
   );
@@ -767,6 +777,19 @@ const Timeline = () => {
                   }}
                 >
                   <ShellIcon />
+                </button>
+              )}
+              {holeInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit hole — length / thread / diameter / tolerance"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    restoreToHistory(entry.id);
+                    beginHoleEdit(entry.id);
+                  }}
+                >
+                  <HoleIcon />
                 </button>
               )}
               {revolveInfo(entry) && (

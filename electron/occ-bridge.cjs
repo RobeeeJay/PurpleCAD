@@ -844,14 +844,19 @@ function buildHoleShape(partId, h) {
   const useThread = !!h.threaded && pitch > 1e-6;
   const boreDia = useThread ? Math.max(1e-4, diameter - 1.0825 * pitch) : diameter;
 
-  const bore = occ.makeHole(p.x, p.y, p.z, d.x, d.y, d.z, length, boreDia, tol);
+  // Start the bore outside the face so it always breaks through (see occOps.js).
+  const m = length;
+  const sx = p.x - d.x * m, sy = p.y - d.y * m, sz = p.z - d.z * m;
+  const len = length + m;
+
+  const bore = occ.makeHole(sx, sy, sz, d.x, d.y, d.z, len, boreDia, tol);
   if (!bore) return null;
   let cut = occ.booleanOp([partId, bore], "difference");
   occ.releaseShape(bore);
   if (!cut) return null;
 
   if (useThread) {
-    const groove = occ.makeThread(p.x, p.y, p.z, d.x, d.y, d.z, length, diameter, pitch, tol);
+    const groove = occ.makeThread(sx, sy, sz, d.x, d.y, d.z, len, diameter, pitch, tol);
     if (groove) {
       const threadedCut = occ.booleanOp([cut, groove], "difference");
       occ.releaseShape(groove);

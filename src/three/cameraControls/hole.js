@@ -19,7 +19,11 @@ export function buildHoleRecipe(items, printPrecision) {
   if (!ht || !ht.face || !ht.point) return null;
   const item = items.find((i) => i.id === ht.itemId);
   if (!item) return null;
-  const source = withLivePolygons({ ...item }, items, printPrecision);
+  // Editing replays the FROZEN pre-hole source so changing params re-cuts the
+  // original body; a fresh hole snapshots the live item.
+  const source = ht.source
+    ? ht.source
+    : withLivePolygons({ ...item }, items, printPrecision);
   const n = ht.face.normal,
     fp = ht.face.point,
     cp = ht.point;
@@ -40,6 +44,7 @@ export function buildHoleRecipe(items, printPrecision) {
     pitch: p.threaded ? p.pitchMm : 0,
     tolerance: p.toleranceMm,
     threaded: !!p.threaded,
+    threadType: p.threadType,
   };
   return { item, source, hole };
 }
@@ -59,23 +64,35 @@ export async function commitHole({ items, printPrecision }) {
   const { geometryData, centerOffset } = result;
   const { position } = chamferResultTransform(source, centerOffset);
   const store = useStore.getState();
+  const editEntryId = store.holeTool?.editEntryId;
   store._cameraControls?.clearHolePreview?.();
-  store.modifyItem(
-    item.id,
-    {
-      type: "csg",
+  if (editEntryId != null) {
+    // Editing a committed hole: update the existing step in place.
+    store.updateHoleEntry(editEntryId, {
+      hole,
       position,
-      regenerator: {
-        kind: "hole",
-        hole,
-        source,
-        centerOffset,
-        regeneratedAt: printPrecision,
-      },
+      centerOffset,
       geometryData,
-    },
-    "Hole",
-  );
+      regeneratedAt: printPrecision,
+    });
+  } else {
+    store.modifyItem(
+      item.id,
+      {
+        type: "csg",
+        position,
+        regenerator: {
+          kind: "hole",
+          hole,
+          source,
+          centerOffset,
+          regeneratedAt: printPrecision,
+        },
+        geometryData,
+      },
+      "Hole",
+    );
+  }
   store.cancelHoleTool();
   return true;
 }

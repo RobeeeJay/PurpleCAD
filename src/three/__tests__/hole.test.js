@@ -58,6 +58,33 @@ describe("hole op", () => {
     );
   });
 
+  it("opens through the surface even when the entry lands below it", async () => {
+    // The bore starts outside the face, so a slightly-sunken pick still cuts an
+    // OPEN hole (not an internal void).  Check the top face (y=1) keeps a ring.
+    const ringTris = async (yEntry) => {
+      const res = await holeItem({
+        source: cube,
+        hole: holeRecipe({ point: { x: 0, y: yEntry, z: 0 }, length: 8 }),
+        allItems: [cube],
+        printPrecision: 0.05,
+      });
+      const { positions: pos, indices: idx } = res.geometryData;
+      let n = 0;
+      for (let i = 0; i < idx.length; i += 3) {
+        let onTop = true;
+        for (let k = 0; k < 3; k++)
+          if (Math.abs(pos[idx[i + k] * 3 + 1] - 1) > 1e-3) {
+            onTop = false;
+            break;
+          }
+        if (onTop) n++;
+      }
+      return n;
+    };
+    expect(await ringTris(1)).toBeGreaterThan(8); // entry on the face
+    expect(await ringTris(0.7)).toBeGreaterThan(8); // entry 3mm below
+  });
+
   it("rebuilds a hole regenerator from its embedded source", async () => {
     const item = {
       id: 2,
