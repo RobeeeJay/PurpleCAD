@@ -8,6 +8,9 @@ import ChamferOverlay from "./viewport/ChamferOverlay";
 import PushPullOverlay from "./viewport/PushPullOverlay";
 import SweepOverlay from "./viewport/SweepOverlay";
 import SvgPlacementOverlay from "./viewport/SvgPlacementOverlay";
+import PlaneDialog from "./PlaneDialog";
+import MirrorDialog from "./MirrorDialog";
+import Pattern3dDialog from "./Pattern3dDialog";
 import PlanePickHint from "./viewport/PlanePickHint";
 import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
@@ -308,6 +311,9 @@ const Viewport = () => {
       <ChamferOverlay />
       <PushPullOverlay />
       <SweepOverlay />
+      <PlaneDialog />
+      <MirrorDialog />
+      <Pattern3dDialog />
       <SvgPlacementOverlay />
       <PlanePickHint />
       {widgetVisible && (

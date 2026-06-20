@@ -2,10 +2,16 @@ import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
 import { evalValue } from "./inputs.jsx";
+import {
+  BAR_STYLE,
+  LBL,
+  barInput,
+  barBtn,
+  pickBtn,
+} from "./viewport/overlayBar.js";
 import { applyPlaneAdjust } from "../three/planeFrame.js";
 import { maxItemId } from "../store/internals.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
-import "../styles/VariablesDialog.css";
 
 // Create a Plane object from a base frame (a selected sketch's plane, or the
 // default XY), adjusting its rotation (degrees per axis) and an offset along the
@@ -85,23 +91,6 @@ const PlaneDialog = () => {
     close();
   };
 
-  const field = (ok) => ({
-    background: "var(--bg-tertiary)",
-    border: `1px solid ${ok ? "var(--border-color)" : "#e87575"}`,
-    color: "var(--text-primary)",
-    padding: "6px 8px",
-    borderRadius: 3,
-    fontFamily: "monospace",
-    fontSize: 13,
-    width: 80,
-  });
-  const row = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    fontSize: 12,
-    color: "var(--text-secondary)",
-  };
   const onKey = (e) => {
     e.stopPropagation();
     if (e.key === "Enter") confirm();
@@ -121,154 +110,96 @@ const PlaneDialog = () => {
     cancelPlaneTool();
     setPlanePickActive(mode);
   };
-  const baseBtn = {
-    fontSize: 11,
-    padding: "4px 8px",
-    borderRadius: 3,
-    border: "1px solid var(--border-color)",
-    background: "var(--bg-tertiary)",
-    color: "var(--text-primary)",
-    cursor: "pointer",
-  };
 
   return (
-    <div
-      className="variables-dialog-backdrop"
-      style={{
-        background: "transparent",
-        alignItems: "flex-end",
-        paddingBottom: 72,
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        className="variables-dialog"
-        style={{ minWidth: 320, pointerEvents: "auto" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="variables-dialog-header">
-          <h2>Create plane</h2>
-          <button
-            className="variables-dialog-close"
-            onClick={close}
-            title="Cancel"
-          >
-            ×
-          </button>
-        </div>
-        <div
-          style={{
-            padding: 16,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <span
-              style={{
-                fontSize: 12,
-                color: "var(--text-secondary)",
-                marginRight: 2,
-              }}
-            >
-              Base:
-            </span>
-            <button
-              type="button"
-              style={baseBtn}
-              onClick={() => setBase({ x: 0, y: 0, z: 0 })}
-            >
-              XY
-            </button>
-            <button
-              type="button"
-              style={baseBtn}
-              onClick={() => setBase({ x: -Math.PI / 2, y: 0, z: 0 })}
-            >
-              XZ
-            </button>
-            <button
-              type="button"
-              style={baseBtn}
-              onClick={() => setBase({ x: 0, y: Math.PI / 2, z: 0 })}
-            >
-              YZ
-            </button>
-            <button
-              type="button"
-              style={baseBtn}
-              onClick={() => startPick("points")}
-            >
-              Pick 3 points
-            </button>
-            <button
-              type="button"
-              style={baseBtn}
-              onClick={() => startPick("face")}
-            >
-              Select face
-            </button>
-          </div>
-          <label style={row}>
-            <span>Rotate X (°)</span>
-            <FormulaInput
-              variables={variables}
-              autoFocus
-              value={rx}
-              onChange={(e) => setRx(e.target.value)}
-              onKeyDown={onKey}
-              style={field(Number.isFinite(rxv))}
-            />
-          </label>
-          <label style={row}>
-            <span>Rotate Y (°)</span>
-            <FormulaInput
-              variables={variables}
-              value={ry}
-              onChange={(e) => setRy(e.target.value)}
-              onKeyDown={onKey}
-              style={field(Number.isFinite(ryv))}
-            />
-          </label>
-          <label style={row}>
-            <span>Rotate Z (°)</span>
-            <FormulaInput
-              variables={variables}
-              value={rz}
-              onChange={(e) => setRz(e.target.value)}
-              onKeyDown={onKey}
-              style={field(Number.isFinite(rzv))}
-            />
-          </label>
-          <label style={row}>
-            <span>Offset (mm)</span>
-            <FormulaInput
-              variables={variables}
-              value={offset}
-              onChange={(e) => setOffset(e.target.value)}
-              onKeyDown={onKey}
-              style={field(Number.isFinite(offv))}
-            />
-          </label>
-        </div>
-        <div className="variables-dialog-footer">
-          <div />
-          <div className="variables-dialog-actions">
-            <button className="variables-btn" onClick={close}>
-              Cancel
-            </button>
-            <button
-              className="variables-btn primary"
-              disabled={!valid}
-              onClick={confirm}
-            >
-              Create
-            </button>
-          </div>
-        </div>
+    <>
+      <div className="sketch-placement-hint">
+        Set the plane options, then Confirm · Esc to cancel
       </div>
-    </div>
+      <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
+        <span style={LBL}>Base:</span>
+        <button
+          type="button"
+          style={pickBtn()}
+          onClick={() => setBase({ x: 0, y: 0, z: 0 })}
+        >
+          XY
+        </button>
+        <button
+          type="button"
+          style={pickBtn()}
+          onClick={() => setBase({ x: -Math.PI / 2, y: 0, z: 0 })}
+        >
+          XZ
+        </button>
+        <button
+          type="button"
+          style={pickBtn()}
+          onClick={() => setBase({ x: 0, y: Math.PI / 2, z: 0 })}
+        >
+          YZ
+        </button>
+        <button
+          type="button"
+          style={pickBtn()}
+          onClick={() => startPick("points")}
+        >
+          3 points
+        </button>
+        <button
+          type="button"
+          style={pickBtn()}
+          onClick={() => startPick("face")}
+        >
+          Face
+        </button>
+        <span style={LBL}>Rot X°</span>
+        <FormulaInput
+          variables={variables}
+          autoFocus
+          value={rx}
+          onChange={(e) => setRx(e.target.value)}
+          onKeyDown={onKey}
+          style={barInput(Number.isFinite(rxv))}
+        />
+        <span style={LBL}>Y°</span>
+        <FormulaInput
+          variables={variables}
+          value={ry}
+          onChange={(e) => setRy(e.target.value)}
+          onKeyDown={onKey}
+          style={barInput(Number.isFinite(ryv))}
+        />
+        <span style={LBL}>Z°</span>
+        <FormulaInput
+          variables={variables}
+          value={rz}
+          onChange={(e) => setRz(e.target.value)}
+          onKeyDown={onKey}
+          style={barInput(Number.isFinite(rzv))}
+        />
+        <span style={LBL}>Offset(mm)</span>
+        <FormulaInput
+          variables={variables}
+          value={offset}
+          onChange={(e) => setOffset(e.target.value)}
+          onKeyDown={onKey}
+          style={barInput(Number.isFinite(offv))}
+        />
+        <button type="button" onClick={close} title="Cancel" style={barBtn()}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!valid}
+          title={valid ? "Create the plane" : "Enter valid values"}
+          style={barBtn(true, !valid)}
+        >
+          Create
+        </button>
+      </div>
+    </>
   );
 };
 

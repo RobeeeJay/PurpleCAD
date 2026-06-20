@@ -2,10 +2,10 @@ import React, { useState, useEffect } from "react";
 import * as THREE from "three";
 import { useStore } from "../store";
 import { useDebouncedPreview } from "./inputs.jsx";
+import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";
 import { pattern3dItem } from "../three/occClient.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
-import "../styles/VariablesDialog.css";
 
 const SOLID_TYPES = ["cube", "sphere", "cylinder", "torus", "extrude", "csg"];
 const PLANE_TYPES = ["plane", "sketch"];
@@ -169,90 +169,43 @@ const MirrorDialog = () => {
         ? (items.find((i) => i.id === objectIds[0])?.name ?? "1 object")
         : `${objectIds.length} objects`;
 
-  const pickBtn = (active) => ({
-    flex: 1,
-    fontSize: 12,
-    padding: "8px 10px",
-    borderRadius: 4,
-    border: `1px solid ${active ? "#6C3FD4" : "var(--border-color)"}`,
-    background: active ? "rgba(108,63,212,0.18)" : "var(--bg-tertiary)",
-    color: "var(--text-primary)",
-    cursor: "pointer",
-    textAlign: "left",
-  });
-  const sub = { fontSize: 11, color: "var(--text-secondary)", marginTop: 3 };
-
   return (
-    <div
-      className="variables-dialog-backdrop"
-      style={{
-        background: "transparent",
-        alignItems: "flex-end",
-        paddingBottom: 72,
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        className="variables-dialog"
-        style={{ minWidth: 320, pointerEvents: "auto" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="variables-dialog-header">
-          <h2>Mirror</h2>
-          <button
-            className="variables-dialog-close"
-            onClick={close}
-            title="Cancel"
-          >
-            ×
-          </button>
-        </div>
-        <div
-          style={{
-            padding: 16,
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-          }}
-        >
-          <button
-            type="button"
-            style={pickBtn(pick === "objects")}
-            onClick={pickObjects}
-          >
-            <div>Select objects</div>
-            <div style={sub}>{objectsLabel}</div>
-          </button>
-          <button
-            type="button"
-            style={pickBtn(pick === "plane")}
-            onClick={pickPlane}
-          >
-            <div>Select plane</div>
-            <div style={sub}>{planeName}</div>
-          </button>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-            Click objects / a plane in the view (shift-click to add). The
-            highlighted button shows what your clicks pick.
-          </div>
-        </div>
-        <div className="variables-dialog-footer">
-          <div />
-          <div className="variables-dialog-actions">
-            <button className="variables-btn" onClick={close}>
-              Cancel
-            </button>
-            <button
-              className="variables-btn primary"
-              disabled={!valid}
-              onClick={confirm}
-            >
-              Confirm
-            </button>
-          </div>
-        </div>
+    <>
+      <div className="sketch-placement-hint">
+        Click objects / a plane in the view (shift-click to add) · the lit
+        button is what your clicks pick · Esc to cancel
       </div>
-    </div>
+      <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
+        <button
+          type="button"
+          style={pickBtn(pick === "objects")}
+          onClick={pickObjects}
+          title="Pick the objects to mirror"
+        >
+          Objects: {objectsLabel}
+        </button>
+        <button
+          type="button"
+          style={pickBtn(pick === "plane")}
+          onClick={pickPlane}
+          title="Pick the mirror plane"
+        >
+          Plane: {planeName}
+        </button>
+        <button type="button" onClick={close} title="Cancel" style={barBtn()}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!valid}
+          title={valid ? "Create the mirror" : "Pick objects and a plane"}
+          style={barBtn(true, !valid)}
+        >
+          Confirm
+        </button>
+      </div>
+    </>
   );
 };
 

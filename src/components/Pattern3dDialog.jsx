@@ -2,11 +2,17 @@ import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
 import { evalValue, useDebouncedPreview } from "./inputs.jsx";
+import {
+  BAR_STYLE,
+  LBL,
+  barInput,
+  barBtn,
+  pickBtn,
+} from "./viewport/overlayBar.js";
 import { pattern3dItem } from "../three/occClient.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
-import "../styles/VariablesDialog.css";
 
 // Parameters for a circular or rectangular 3D pattern, with a live preview.
 // Circular tiles `count` copies over `angle` about the plane's normal axis;
@@ -226,23 +232,6 @@ const Pattern3dDialog = () => {
     close();
   };
 
-  const field = (ok) => ({
-    background: "var(--bg-tertiary)",
-    border: `1px solid ${ok ? "var(--border-color)" : "#e87575"}`,
-    color: "var(--text-primary)",
-    padding: "6px 8px",
-    borderRadius: 3,
-    fontFamily: "monospace",
-    fontSize: 13,
-    width: 80,
-  });
-  const row = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    fontSize: 12,
-    color: "var(--text-secondary)",
-  };
   const onKey = (e) => {
     e.stopPropagation();
     if (e.key === "Enter") confirm();
@@ -255,156 +244,74 @@ const Pattern3dDialog = () => {
       value={value}
       onChange={(e) => setter(e.target.value)}
       onKeyDown={onKey}
-      style={field(ok)}
+      style={barInput(ok)}
     />
   );
 
   return (
-    <div
-      className="variables-dialog-backdrop"
-      style={{
-        background: "transparent",
-        alignItems: "flex-end",
-        paddingBottom: 72,
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        className="variables-dialog"
-        style={{ minWidth: 320, pointerEvents: "auto" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="variables-dialog-header">
-          <h2>{circular ? "Circular pattern" : "Rectangular pattern"}</h2>
-          <button
-            className="variables-dialog-close"
-            onClick={close}
-            title="Cancel"
-          >
-            ×
-          </button>
-        </div>
-        <div
-          style={{
-            padding: 16,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          {circular ? (
-            <>
-              <div style={row}>
-                <span>Rotation axis</span>
-                <button
-                  type="button"
-                  onClick={pickAxis}
-                  style={{
-                    fontSize: 12,
-                    padding: "6px 10px",
-                    borderRadius: 3,
-                    border: `1px solid ${
-                      circularAxisPick
-                        ? "#44aaff"
-                        : tool?.axis
-                          ? "var(--border-color)"
-                          : "#e87575"
-                    }`,
-                    background: circularAxisPick
-                      ? "rgba(68,170,255,0.18)"
-                      : "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {circularAxisPick
-                    ? "Click a line/edge…"
-                    : tool?.axis
-                      ? "Axis set — re-pick"
-                      : "Pick axis"}
-                </button>
-              </div>
-              <label style={row}>
-                <span>Count</span>
-                {inp(
-                  count,
-                  setCount,
-                  Number.isFinite(countV) && countV >= 2,
-                  true,
-                )}
-              </label>
-              <label style={row}>
-                <span>Total angle (°)</span>
-                {inp(angle, setAngle, Number.isFinite(angleV) && angleV > 0)}
-              </label>
-              <label style={row}>
-                <span>Offset / 360° (mm)</span>
-                {inp(
-                  axialOffset,
-                  setAxialOffset,
-                  Number.isFinite(axialOffsetV),
-                )}
-              </label>
-            </>
-          ) : (
-            <>
-              <label style={row}>
-                <span>Count X</span>
-                {inp(
-                  countX,
-                  setCountX,
-                  Number.isFinite(countXV) && countXV >= 1,
-                  true,
-                )}
-              </label>
-              <label style={row}>
-                <span>Spacing X (mm)</span>
-                {inp(dx, setDx, Number.isFinite(dxV))}
-              </label>
-              <label style={row}>
-                <span>Count Y</span>
-                {inp(
-                  countY,
-                  setCountY,
-                  Number.isFinite(countYV) && countYV >= 1,
-                )}
-              </label>
-              <label style={row}>
-                <span>Spacing Y (mm)</span>
-                {inp(dy, setDy, Number.isFinite(dyV))}
-              </label>
-              <label style={row}>
-                <span>Count Z</span>
-                {inp(
-                  countZ,
-                  setCountZ,
-                  Number.isFinite(countZV) && countZV >= 1,
-                )}
-              </label>
-              <label style={row}>
-                <span>Spacing Z (mm)</span>
-                {inp(dz, setDz, Number.isFinite(dzV))}
-              </label>
-            </>
-          )}
-        </div>
-        <div className="variables-dialog-footer">
-          <div />
-          <div className="variables-dialog-actions">
-            <button className="variables-btn" onClick={close}>
-              Cancel
-            </button>
-            <button
-              className="variables-btn primary"
-              disabled={!valid}
-              onClick={confirm}
-            >
-              Create
-            </button>
-          </div>
-        </div>
+    <>
+      <div className="sketch-placement-hint">
+        Set the {circular ? "circular" : "rectangular"} pattern options, then
+        Confirm · Esc to cancel
       </div>
-    </div>
+      <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
+        {circular ? (
+          <>
+            <span style={LBL}>Axis</span>
+            <button
+              type="button"
+              onClick={pickAxis}
+              style={pickBtn(circularAxisPick)}
+              title="Pick the rotation axis (a line or edge)"
+            >
+              {circularAxisPick
+                ? "Click a line/edge…"
+                : tool?.axis
+                  ? "Axis set — re-pick"
+                  : "Pick axis"}
+            </button>
+            <span style={LBL}>Count</span>
+            {inp(count, setCount, Number.isFinite(countV) && countV >= 2, true)}
+            <span style={LBL}>Angle°</span>
+            {inp(angle, setAngle, Number.isFinite(angleV) && angleV > 0)}
+            <span style={LBL}>Offset/360°(mm)</span>
+            {inp(axialOffset, setAxialOffset, Number.isFinite(axialOffsetV))}
+          </>
+        ) : (
+          <>
+            <span style={LBL}>Count X</span>
+            {inp(
+              countX,
+              setCountX,
+              Number.isFinite(countXV) && countXV >= 1,
+              true,
+            )}
+            <span style={LBL}>Sp X(mm)</span>
+            {inp(dx, setDx, Number.isFinite(dxV))}
+            <span style={LBL}>Count Y</span>
+            {inp(countY, setCountY, Number.isFinite(countYV) && countYV >= 1)}
+            <span style={LBL}>Sp Y(mm)</span>
+            {inp(dy, setDy, Number.isFinite(dyV))}
+            <span style={LBL}>Count Z</span>
+            {inp(countZ, setCountZ, Number.isFinite(countZV) && countZV >= 1)}
+            <span style={LBL}>Sp Z(mm)</span>
+            {inp(dz, setDz, Number.isFinite(dzV))}
+          </>
+        )}
+        <button type="button" onClick={close} title="Cancel" style={barBtn()}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!valid}
+          title={valid ? "Create the pattern" : "Enter valid values"}
+          style={barBtn(true, !valid)}
+        >
+          Create
+        </button>
+      </div>
+    </>
   );
 };
 

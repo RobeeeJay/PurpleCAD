@@ -12,9 +12,6 @@ import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
-import PlaneDialog from "./components/PlaneDialog";
-import Pattern3dDialog from "./components/Pattern3dDialog";
-import MirrorDialog from "./components/MirrorDialog";
 import SplitDialog from "./components/SplitDialog";
 import ProjectDialog from "./components/ProjectDialog";
 import TextDialog from "./components/TextDialog";
@@ -126,9 +123,6 @@ function App() {
       <MaterialDialog />
       <SettingsDialog />
       <AboutDialog />
-      <PlaneDialog />
-      <Pattern3dDialog />
-      <MirrorDialog />
       <SplitDialog />
       <ProjectDialog />
       <TextDialog />
