@@ -314,6 +314,55 @@ export function createViewInteraction(
         return;
       }
 
+      // Hole tool: phase "face" captures the drilled face; phase "point"
+      // captures the hole centre (a vertex if near one, else the spot on the
+      // face).  Both stored in the target's local geometry frame.
+      const holeTool = useStore.getState().holeTool;
+      if (
+        holeTool &&
+        (holeTool.phase === "face" || holeTool.phase === "point")
+      ) {
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          const mesh = hit.object;
+          const id = mesh.userData.itemId;
+          if (holeTool.phase === "face") {
+            const it = itemsRef.current.find((i) => i.id === id);
+            const isPrim = ["sphere", "cylinder", "torus"].includes(it?.type);
+            const worldN = hit.face
+              ? hit.face.normal.clone()
+              : new THREE.Vector3(0, 1, 0);
+            if (!isPrim && hit.face)
+              worldN.applyMatrix3(
+                new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld),
+              );
+            worldN.normalize();
+            const invQ = mesh
+              .getWorldQuaternion(new THREE.Quaternion())
+              .invert();
+            const localN = worldN.clone().applyQuaternion(invQ).normalize();
+            const localP = mesh.worldToLocal(hit.point.clone());
+            useStore.getState().setHoleFace(id, {
+              normal: { x: localN.x, y: localN.y, z: localN.z },
+              point: { x: localP.x, y: localP.y, z: localP.z },
+            });
+          } else if (id === holeTool.itemId) {
+            // Snap to the nearest vertex when close, else use the hit point.
+            const lp = mesh.worldToLocal(hit.point.clone());
+            const pos = mesh.geometry?.attributes?.position?.array;
+            let p = { x: lp.x, y: lp.y, z: lp.z };
+            if (pos) {
+              const v = nearestVertexOf(pos, lp.x, lp.y, lp.z);
+              const d = Math.hypot(v.x - lp.x, v.y - lp.y, v.z - lp.z);
+              if (d < 0.12) p = v;
+            }
+            useStore.getState().setHolePoint(p);
+          }
+        }
+        save();
+        return;
+      }
+
       // The selection widget decides what a click commits — matching the hover
       // priority (point > edge > face) captured in lastHoverType.  Shift stays
       // additive within a sub-type.

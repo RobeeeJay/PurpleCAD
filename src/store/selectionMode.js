@@ -7,6 +7,8 @@ function toolSelectionLock(s) {
   if (s.splitTool) return ["object"];
   if (s.planeTool || s.planePickActive)
     return s.planePickActive === "points" ? ["point"] : ["face"];
+  // Hole: pick a face, then a point (vertex / spot on the face).
+  if (s.holeTool) return s.holeTool.phase === "face" ? ["face"] : ["point"];
   return null;
 }
 

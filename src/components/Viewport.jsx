@@ -14,6 +14,7 @@ import Pattern3dDialog from "./Pattern3dDialog";
 import SplitDialog from "./SplitDialog";
 import ShellDialog from "./ShellDialog";
 import OriginDialog from "./OriginDialog";
+import HoleDialog from "./HoleDialog";
 import SelectionWidget from "./SelectionWidget";
 import PlanePickHint from "./viewport/PlanePickHint";
 import { useViewportInit } from "./viewport/useViewportInit";
@@ -321,6 +322,7 @@ const Viewport = () => {
       <SplitDialog />
       <ShellDialog />
       <OriginDialog />
+      <HoleDialog />
       <SelectionWidget />
       <SvgPlacementOverlay />
       <PlanePickHint />

@@ -11,8 +11,15 @@
 // ── Sweep / loft / shell ─────────────────────────────────────────────────
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <gp_Ax3.hxx>
+
+// ── Helical thread (hole tool) ───────────────────────────────────────────
+#include <Geom_CylindricalSurface.hxx>
+#include <GCE2d_MakeSegment.hxx>
+#include <gp_Pnt2d.hxx>
+#include <BRepLib.hxx>
 
 // ── Wire / face builders (extrude) ──────────────────────────────────────
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -1287,6 +1294,111 @@ Napi::Number MakeShell(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// Build the helical thread groove solid for an internal (tapped) hole: an ISO
+// 60° V profile swept along a helix on the bore wall.  Returns a null shape on
+// failure so the caller can fall back to a plain bore.
+static TopoDS_Shape BuildThreadGroove(
+    const gp_Pnt& start, const gp_Dir& axisDir,
+    double minR, double majR, double pitch, double length) {
+  try {
+    if (pitch < 1e-6 || majR <= minR) return TopoDS_Shape();
+    gp_Ax3 cylAx(start, axisDir);
+    Handle(Geom_CylindricalSurface) surf = new Geom_CylindricalSurface(cylAx, minR);
+    const double TWO_PI = 2.0 * M_PI;
+    // Cover the bore length plus an extra turn each end so the groove runs out
+    // cleanly past the cut faces.
+    double vEnd = length + 2.0 * pitch;
+    double uEnd = (vEnd / pitch) * TWO_PI;
+    // Straight line in (u = angle, v = height) param space → a helix in 3D.
+    Handle(Geom2d_Curve) seg =
+      GCE2d_MakeSegment(gp_Pnt2d(0.0, -pitch), gp_Pnt2d(uEnd, vEnd - pitch))
+        .Value();
+    TopoDS_Edge helixE = BRepBuilderAPI_MakeEdge(seg, surf);
+    BRepLib::BuildCurves3d(helixE);
+    TopoDS_Wire helixW = BRepBuilderAPI_MakeWire(helixE);
+
+    // Triangular V profile in the axial plane at the helix start, base on the
+    // bore wall (minR) and apex outward at majR.
+    gp_Dir xdir = cylAx.XDirection();
+    gp_Vec vx(xdir), vz(axisDir);
+    double axialHalf = (majR - minR) * 0.5774; // tan(30°) for a 60° thread
+    gp_Pnt base(start.XYZ() + (minR * vx).XYZ());
+    gp_Pnt pTop(base.XYZ() + (axialHalf * vz).XYZ());
+    gp_Pnt pBot(base.XYZ() + (-axialHalf * vz).XYZ());
+    gp_Pnt pApex(start.XYZ() + (majR * vx).XYZ());
+    BRepBuilderAPI_MakePolygon poly(pTop, pApex, pBot, Standard_True);
+    if (!poly.IsDone()) return TopoDS_Shape();
+    TopoDS_Wire profile = poly.Wire();
+
+    BRepOffsetAPI_MakePipeShell pipe(helixW);
+    pipe.Add(profile);
+    pipe.SetMode(Standard_True); // Frenet frame — stable on a constant helix
+    pipe.Build();
+    if (!pipe.IsDone()) return TopoDS_Shape();
+    if (!pipe.MakeSolid()) return TopoDS_Shape();
+    return pipe.Shape();
+  } catch (const std::exception&) {
+    return TopoDS_Shape();
+  }
+}
+
+// MakeHole(px,py,pz, dx,dy,dz, length, diameter, tolerance) → a plain bore
+// cylinder (the hole's negative volume) drilled from (p) along (d).  For a
+// threaded hole the caller passes the MINOR diameter here and cuts MakeThread's
+// groove as a second step (separate cuts are far more robust than fusing a
+// helical solid).  `tolerance` adds radial clearance.
+Napi::Number MakeHole(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    double px = GetDouble(info[0], 0.0), py = GetDouble(info[1], 0.0),
+           pz = GetDouble(info[2], 0.0);
+    double dx = GetDouble(info[3], 0.0), dy = GetDouble(info[4], -1.0),
+           dz = GetDouble(info[5], 0.0);
+    double length    = GetDouble(info[6], 1.0);
+    double diameter  = GetDouble(info[7], 0.5);
+    double tolerance = GetDouble(info[8], 0.0);
+
+    if (length <= 1e-7 || diameter <= 1e-7) return Napi::Number::New(env, 0);
+    gp_Vec dv(dx, dy, dz);
+    if (dv.Magnitude() < 1e-9) return Napi::Number::New(env, 0);
+    gp_Ax2 ax(gp_Pnt(px, py, pz), gp_Dir(dv));
+    BRepPrimAPI_MakeCylinder cyl(ax, diameter / 2.0 + tolerance, length);
+    cyl.Build();
+    if (!cyl.IsDone()) return Napi::Number::New(env, 0);
+    return Napi::Number::New(env, StoreShape(cyl.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// MakeThread(px,py,pz, dx,dy,dz, length, majorDia, pitch, tolerance) → the ISO
+// internal thread groove solid (cut as a second tool after the bore).  Returns
+// 0 when the helical sweep can't be built, so the caller just leaves a plain
+// bore.  Crests at the minor radius, roots at majorDia/2.
+Napi::Number MakeThread(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    double px = GetDouble(info[0], 0.0), py = GetDouble(info[1], 0.0),
+           pz = GetDouble(info[2], 0.0);
+    double dx = GetDouble(info[3], 0.0), dy = GetDouble(info[4], -1.0),
+           dz = GetDouble(info[5], 0.0);
+    double length    = GetDouble(info[6], 1.0);
+    double majorDia  = GetDouble(info[7], 0.6);
+    double pitch     = GetDouble(info[8], 0.1);
+    double tolerance = GetDouble(info[9], 0.0);
+
+    gp_Vec dv(dx, dy, dz);
+    if (dv.Magnitude() < 1e-9 || pitch <= 1e-6) return Napi::Number::New(env, 0);
+    gp_Dir axisDir(dv);
+    gp_Pnt start(px, py, pz);
+    double majR = majorDia / 2.0 + tolerance;
+    double minR = majR - 0.5413 * pitch;
+    if (minR < 1e-4) return Napi::Number::New(env, 0);
+    TopoDS_Shape groove =
+      BuildThreadGroove(start, axisDir, minR, majR, pitch, length);
+    if (groove.IsNull()) return Napi::Number::New(env, 0);
+    return Napi::Number::New(env, StoreShape(groove));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // enrichSubGeo(shapeId, subGeo) → subGeo with each edge's two adjacent face
 // normals resolved (n1, n2).  Called once at chamfer/fillet creation — when
 // the stored endpoint coordinates still line up with the (pre-resize) shape —
@@ -1615,6 +1727,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("filletShape",        Napi::Function::New(env, FilletShape));
   exports.Set("pushPullFaces",      Napi::Function::New(env, PushPullFaces));
   exports.Set("makeShell",          Napi::Function::New(env, MakeShell));
+  exports.Set("makeHole",           Napi::Function::New(env, MakeHole));
+  exports.Set("makeThread",         Napi::Function::New(env, MakeThread));
   exports.Set("enrichSubGeo",       Napi::Function::New(env, EnrichSubGeo));
 
   // Tessellation

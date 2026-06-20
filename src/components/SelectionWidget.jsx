@@ -98,6 +98,7 @@ const SelectionWidget = () => {
   const splitTool = useStore((s) => s.splitTool);
   const planeTool = useStore((s) => s.planeTool);
   const planePickActive = useStore((s) => s.planePickActive);
+  const holeTool = useStore((s) => s.holeTool);
   const state = {
     selObject,
     selFace,
@@ -107,6 +108,7 @@ const SelectionWidget = () => {
     splitTool,
     planeTool,
     planePickActive,
+    holeTool,
   };
   const toggleSelObject = useStore((s) => s.toggleSelObject);
   const toggleSelFace = useStore((s) => s.toggleSelFace);

@@ -11,6 +11,9 @@ const BevelSection = ({ bare = false }) => {
   const selectedId = useStore((s) => s.selectedId);
   const items = useStore((s) => s.items);
   const setShellTarget = useStore((s) => s.setShellTarget);
+  const holeTool = useStore((s) => s.holeTool);
+  const startHoleTool = useStore((s) => s.startHoleTool);
+  const cancelHoleTool = useStore((s) => s.cancelHoleTool);
 
   // Shell hollows the whole selected body, so it only needs a solid selected
   // (no face/edge pick).  Sketches and the empty selection are ineligible.
@@ -18,6 +21,11 @@ const BevelSection = ({ bare = false }) => {
   const canShell = !!selectedBody && selectedBody.type !== "sketch";
   const openShell = () => {
     if (canShell) setShellTarget({ itemId: selectedId });
+  };
+  // Hole guides its own face + point pick, so it needs no pre-selection.
+  const toggleHole = () => {
+    if (holeTool) cancelHoleTool();
+    else startHoleTool();
   };
 
   const toggleMode = (mode) => {
@@ -272,6 +280,58 @@ const BevelSection = ({ bare = false }) => {
             strokeWidth="1.5"
             strokeLinejoin="miter"
             points="7,8.5 12,6 17,8.5 12,11"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${holeTool ? "active" : ""}`}
+        title="Hole — pick a face then a point, then cut a (optionally threaded) hole"
+        onClick={toggleHole}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* a plate with a counterbored/threaded hole */}
+          <rect
+            x="3"
+            y="6"
+            width="18"
+            height="12"
+            rx="1"
+            fill="none"
+            stroke="#c4c2b8"
+            strokeWidth="1.5"
+          />
+          <ellipse
+            cx="12"
+            cy="12"
+            rx="4"
+            ry="4"
+            fill="rgba(108,63,212,0.25)"
+            stroke="#6C3FD4"
+            strokeWidth="1.5"
+          />
+          <line
+            stroke="#D4A33F"
+            strokeWidth="1"
+            x1="8.5"
+            y1="10"
+            x2="15.5"
+            y2="10"
+          />
+          <line
+            stroke="#D4A33F"
+            strokeWidth="1"
+            x1="8.5"
+            y1="12"
+            x2="15.5"
+            y2="12"
+          />
+          <line
+            stroke="#D4A33F"
+            strokeWidth="1"
+            x1="8.5"
+            y1="14"
+            x2="15.5"
+            y2="14"
           />
         </svg>
       </button>

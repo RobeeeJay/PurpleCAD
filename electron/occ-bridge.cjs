@@ -432,6 +432,25 @@ function buildItemShapeLocal(item, allItems, precision) {
       return resultId;
     }
 
+    if (regen.kind === "hole") {
+      const sourceId = buildItemShapeLocal(regen.source, allItems, precision);
+      if (sourceId == null) return null;
+      let resultId;
+      try {
+        resultId = buildHoleShape(sourceId, regen.hole);
+      } finally {
+        occ.releaseShape(sourceId);
+      }
+      if (!resultId) return null;
+      const off = regen.centerOffset;
+      if (off) {
+        const corrected = occ.transformShape(resultId, -off.cx, -off.cy, -off.cz, 0, 0, 0);
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
     if (regen.kind === "revolve") {
       const args = revolveArgs(regen.source, regen.axis, allItems);
       if (!args) return null;
@@ -808,6 +827,76 @@ function shellItem({ source, thickness, allItems, printPrecision }) {
     centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
   }
 
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
+  };
+}
+
+// Mirrors occOps.js#buildHoleShape — cut a bore (+ optional ISO thread groove)
+// into partId.  Returns a new shape id (caller releases) or null.
+function buildHoleShape(partId, h) {
+  const p = h.point, d = h.dir;
+  const length = h.length / MM_PER_UNIT;
+  const diameter = h.diameter / MM_PER_UNIT;
+  const pitch = (h.pitch || 0) / MM_PER_UNIT;
+  const tol = (h.tolerance || 0) / MM_PER_UNIT;
+  const useThread = !!h.threaded && pitch > 1e-6;
+  const boreDia = useThread ? Math.max(1e-4, diameter - 1.0825 * pitch) : diameter;
+
+  const bore = occ.makeHole(p.x, p.y, p.z, d.x, d.y, d.z, length, boreDia, tol);
+  if (!bore) return null;
+  let cut = occ.booleanOp([partId, bore], "difference");
+  occ.releaseShape(bore);
+  if (!cut) return null;
+
+  if (useThread) {
+    const groove = occ.makeThread(p.x, p.y, p.z, d.x, d.y, d.z, length, diameter, pitch, tol);
+    if (groove) {
+      const threadedCut = occ.booleanOp([cut, groove], "difference");
+      occ.releaseShape(groove);
+      if (threadedCut) {
+        occ.releaseShape(cut);
+        cut = threadedCut;
+      }
+    }
+  }
+  return cut;
+}
+
+// Mirrors occOps.js#holeItem — drill a hole into the source body, bbox-centred.
+function holeItem({ source, hole, allItems, printPrecision }) {
+  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  if (sourceId == null) {
+    throw new Error(
+      "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs."
+    );
+  }
+  let resultId;
+  try {
+    resultId = buildHoleShape(sourceId, hole);
+  } finally {
+    occ.releaseShape(sourceId);
+  }
+  if (!resultId) {
+    throw new Error(
+      "Hole failed — the cut produced nothing. Check the diameter/length and that the point is on the body."
+    );
+  }
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
+  }
   return {
     geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx, cy, cz },
@@ -1324,4 +1413,4 @@ function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision
   return result;
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };

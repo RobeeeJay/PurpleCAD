@@ -481,6 +481,38 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       return resultId;
     }
 
+    if (r.kind === "hole") {
+      const sourceId = buildItemShapeLocal(r.source, allItems, precision);
+      if (sourceId == null) return null;
+      let resultId;
+      try {
+        resultId = buildHoleShape(sourceId, r.hole);
+      } finally {
+        occ.releaseShape(sourceId);
+      }
+      if (!resultId) return null;
+      const offset = chamferCenterOffset(r, item);
+      if (
+        offset &&
+        (Math.abs(offset.x) > 1e-9 ||
+          Math.abs(offset.y) > 1e-9 ||
+          Math.abs(offset.z) > 1e-9)
+      ) {
+        const corrected = occ.transformShape(
+          resultId,
+          -offset.x,
+          -offset.y,
+          -offset.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
     if (r.kind === "revolve") {
       const args = revolveArgs(r.source, r.axis, allItems, precision);
       if (!args) return null;
@@ -914,6 +946,105 @@ async function shellItem({ source, thickness, allItems, printPrecision }) {
   if (!resultId) {
     throw new Error(
       "Shell failed — the wall thickness is too large for this body. Try a smaller value.",
+    );
+  }
+
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2,
+    cy = (minY + maxY) / 2,
+    cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx;
+    centered[i + 1] -= cy;
+    centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: {
+      positions: centered,
+      normals: null,
+      indices: Array.from(tess.indices),
+    },
+    centerOffset: { cx, cy, cz },
+  };
+}
+
+// Cut a hole into `partId`: a bore cylinder plus, for a threaded hole, a real
+// ISO thread groove (cut as a SECOND tool — far more robust than fusing the
+// helix).  `h` carries point/dir in the part's local frame and sizes in mm.
+// Returns a new shape id (caller releases) or null; does not release `partId`.
+export function buildHoleShape(partId, h) {
+  const p = h.point,
+    d = h.dir;
+  const length = h.length / MM_PER_UNIT;
+  const diameter = h.diameter / MM_PER_UNIT;
+  const pitch = (h.pitch || 0) / MM_PER_UNIT;
+  const tol = (h.tolerance || 0) / MM_PER_UNIT;
+  const useThread = !!h.threaded && pitch > 1e-6;
+  // A threaded hole bores to the minor diameter; the groove opens it to major.
+  const boreDia = useThread
+    ? Math.max(1e-4, diameter - 1.0825 * pitch)
+    : diameter;
+
+  const bore = occ.makeHole(p.x, p.y, p.z, d.x, d.y, d.z, length, boreDia, tol);
+  if (!bore) return null;
+  let cut = occ.booleanOp([partId, bore], "difference");
+  occ.releaseShape(bore);
+  if (!cut) return null;
+
+  if (useThread) {
+    const groove = occ.makeThread(
+      p.x,
+      p.y,
+      p.z,
+      d.x,
+      d.y,
+      d.z,
+      length,
+      diameter,
+      pitch,
+      tol,
+    );
+    if (groove) {
+      const threadedCut = occ.booleanOp([cut, groove], "difference");
+      occ.releaseShape(groove);
+      if (threadedCut) {
+        occ.releaseShape(cut);
+        cut = threadedCut;
+      }
+    }
+  }
+  return cut;
+}
+
+// Drill a hole into the source body.  Mirrors shellItem: rebuild the source, cut
+// the hole, tessellate, and bbox-centre.
+async function holeItem({ source, hole, allItems, printPrecision }) {
+  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  if (sourceId == null) {
+    throw new Error(
+      "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs.",
+    );
+  }
+
+  let resultId;
+  try {
+    resultId = buildHoleShape(sourceId, hole);
+  } finally {
+    occ.releaseShape(sourceId);
+  }
+  if (!resultId) {
+    throw new Error(
+      "Hole failed — the cut produced nothing. Check the diameter/length and that the point is on the body.",
     );
   }
 
@@ -1697,6 +1828,7 @@ export const ops = {
   chamferOrFilletItem,
   pushPullFaces,
   shellItem,
+  holeItem,
   revolveItem,
   pipeItem,
   loftItem,

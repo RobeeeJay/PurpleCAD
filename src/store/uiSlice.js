@@ -103,6 +103,12 @@ export const uiInitial = {
   originDialogItemId: null,
   originVertexPick: null,
 
+  // Hole tool: a guided flow — pick a face, then a point (a vertex or a spot on
+  // the face plane), then set length / diameter / metric thread / tolerance and
+  // confirm.  face/point are in the target's local geometry frame.
+  //   { phase:"face"|"point"|"params", itemId, face:{normal,point}, point, params }
+  holeTool: null,
+
   // Sketch→solid sweep tools (Revolve / Pipe / Loft), all sharing one select
   // mode driven by the Modify toolbar.  Shape:
   //   { kind:"revolve"|"pipe"|"loft", profile, axis, secondProfile, params }
@@ -288,6 +294,46 @@ export const createUiSlice = (set) => ({
     set({ originDialogItemId: itemId, originVertexPick: null }),
   closeOriginDialog: () => set({ originDialogItemId: null }),
   setOriginVertexPick: (itemId) => set({ originVertexPick: itemId }),
+
+  startHoleTool: () =>
+    set({
+      holeTool: {
+        phase: "face",
+        itemId: null,
+        face: null,
+        point: null,
+        params: {
+          lengthMm: 10,
+          threadType: "M6",
+          diameterMm: 6,
+          pitchMm: 1.0,
+          toleranceMm: 0.1,
+          threaded: true,
+        },
+      },
+    }),
+  cancelHoleTool: () => set({ holeTool: null }),
+  setHoleFace: (itemId, face) =>
+    set((s) =>
+      s.holeTool
+        ? { holeTool: { ...s.holeTool, itemId, face, phase: "point" } }
+        : {},
+    ),
+  setHolePoint: (point) =>
+    set((s) =>
+      s.holeTool ? { holeTool: { ...s.holeTool, point, phase: "params" } } : {},
+    ),
+  updateHoleParams: (partial) =>
+    set((s) =>
+      s.holeTool
+        ? {
+            holeTool: {
+              ...s.holeTool,
+              params: { ...s.holeTool.params, ...partial },
+            },
+          }
+        : {},
+    ),
 
   // ── Plane object + 3D pattern tools ─────────────────────────────────────
   // false when off, else a mode string ("points" | "face") naming what a

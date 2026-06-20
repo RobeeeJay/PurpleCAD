@@ -98,6 +98,10 @@ export function shellItem(args) {
   return runOp("shellItem", args);
 }
 
+export function holeItem(args) {
+  return runOp("holeItem", args);
+}
+
 export function revolveItem(args) {
   return runOp("revolveItem", args);
 }
