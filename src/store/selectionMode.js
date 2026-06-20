@@ -6,7 +6,7 @@ export function effectiveSelectionTypes(s) {
   if (s.selectionOverride) {
     const set = new Set(s.selectionOverride);
     return {
-      object: false,
+      object: set.has("object"),
       face: set.has("face"),
       edge: set.has("edge"),
       point: set.has("point"),

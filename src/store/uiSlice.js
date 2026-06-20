@@ -280,6 +280,8 @@ export const createUiSlice = (set) => ({
   setOriginToolActive: (v) =>
     set({
       originToolActive: !!v,
+      // Origin works on whole objects → lock the selection widget to Object.
+      selectionOverride: v ? ["object"] : null,
       ...(v ? null : { originDialogItemId: null, originVertexPick: null }),
     }),
   openOriginDialog: (itemId) =>
@@ -298,17 +300,26 @@ export const createUiSlice = (set) => ({
       state.planeTool ? { planeTool: { ...state.planeTool, ...partial } } : {},
     ),
   cancelPlaneTool: () => set({ planeTool: null }),
-  startPattern3d: (v) => set({ pattern3dTool: v }),
+  // Mirror / circular / rectangular patterns all act on whole objects, so they
+  // lock the selection widget to Object mode while active.
+  startPattern3d: (v) =>
+    set({ pattern3dTool: v, selectionOverride: ["object"] }),
   updatePattern3d: (partial) =>
     set((state) =>
       state.pattern3dTool
         ? { pattern3dTool: { ...state.pattern3dTool, ...partial } }
         : {},
     ),
-  cancelPattern3d: () => set({ pattern3dTool: null, circularAxisPick: false }),
+  cancelPattern3d: () =>
+    set({
+      pattern3dTool: null,
+      circularAxisPick: false,
+      selectionOverride: null,
+    }),
   setCircularAxisPick: (v) => set({ circularAxisPick: !!v }),
-  startMirror3d: (seed) => set({ mirror3dTool: seed || {} }),
-  cancelMirror3d: () => set({ mirror3dTool: null }),
+  startMirror3d: (seed) =>
+    set({ mirror3dTool: seed || {}, selectionOverride: ["object"] }),
+  cancelMirror3d: () => set({ mirror3dTool: null, selectionOverride: null }),
 
   startProjectTool: () => set({ projectTool: { shapes: [] } }),
   addProjectShapes: (shapes) =>

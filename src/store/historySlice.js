@@ -330,6 +330,7 @@ export const createHistorySlice = (set) => ({
           originToolActive: false,
           originDialogItemId: null,
           originVertexPick: null,
+          selectionOverride: null,
         },
         withUndo(state),
       );

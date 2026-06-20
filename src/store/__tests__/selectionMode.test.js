@@ -46,6 +46,22 @@ describe("effectiveSelectionTypes", () => {
     });
   });
 
+  it("an object override (mirror/pattern/origin) locks to object mode", () => {
+    const s = {
+      ...base,
+      selObject: false,
+      selFace: true,
+      selectionOverride: ["object"],
+    };
+    expect(effectiveSelectionTypes(s)).toMatchObject({
+      object: true,
+      face: false,
+      edge: false,
+      point: false,
+      overridden: true,
+    });
+  });
+
   it("chamfer's edge+face override enables exactly those", () => {
     const s = { ...base, selectionOverride: ["edge", "face"] };
     const eff = effectiveSelectionTypes(s);
