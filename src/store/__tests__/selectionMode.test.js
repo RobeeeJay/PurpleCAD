@@ -70,4 +70,25 @@ describe("effectiveSelectionTypes", () => {
     expect(eff.point).toBe(false);
     expect(eff.object).toBe(false);
   });
+
+  it("the Split tool derives an object lock", () => {
+    const s = { ...base, selObject: false, selFace: true, splitTool: {} };
+    expect(effectiveSelectionTypes(s)).toMatchObject({
+      object: true,
+      overridden: true,
+    });
+  });
+
+  it("the Plane tool derives a face lock, points-mode a point lock", () => {
+    expect(effectiveSelectionTypes({ ...base, planeTool: {} })).toMatchObject({
+      face: true,
+      overridden: true,
+    });
+    expect(
+      effectiveSelectionTypes({ ...base, planePickActive: "points" }),
+    ).toMatchObject({ point: true, overridden: true });
+    expect(
+      effectiveSelectionTypes({ ...base, planePickActive: "face" }),
+    ).toMatchObject({ face: true, overridden: true });
+  });
 });

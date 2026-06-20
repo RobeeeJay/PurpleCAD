@@ -94,7 +94,20 @@ const SelectionWidget = () => {
   const selEdge = useStore((s) => s.selEdge);
   const selPoint = useStore((s) => s.selPoint);
   const selectionOverride = useStore((s) => s.selectionOverride);
-  const state = { selObject, selFace, selEdge, selPoint, selectionOverride };
+  // Tool states the derived lock (Split / Plane) reads.
+  const splitTool = useStore((s) => s.splitTool);
+  const planeTool = useStore((s) => s.planeTool);
+  const planePickActive = useStore((s) => s.planePickActive);
+  const state = {
+    selObject,
+    selFace,
+    selEdge,
+    selPoint,
+    selectionOverride,
+    splitTool,
+    planeTool,
+    planePickActive,
+  };
   const toggleSelObject = useStore((s) => s.toggleSelObject);
   const toggleSelFace = useStore((s) => s.toggleSelFace);
   const toggleSelEdge = useStore((s) => s.toggleSelEdge);
