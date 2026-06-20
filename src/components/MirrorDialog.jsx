@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import * as THREE from "three";
 import { useStore } from "../store";
-import { useDebouncedPreview } from "./inputs.jsx";
+import { useDebouncedPreview, useEscapeKey } from "./inputs.jsx";
 import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";
 import { pattern3dItem } from "../three/occClient.js";
 import { activePrecision } from "../three/resolution.js";
@@ -103,12 +103,13 @@ const MirrorDialog = () => {
     return () => useStore.getState()._cameraControls?.clearPattern3dPreview?.();
   }, [mirror3dTool]);
 
-  if (!open) return null;
-
   const close = () => {
     useStore.getState()._cameraControls?.clearPattern3dPreview?.();
     cancelMirror3d();
   };
+  useEscapeKey(open, close);
+
+  if (!open) return null;
 
   // Re-highlight the already-captured set so refining a pick doesn't start blank
   // (and switching back from "plane" doesn't wipe the captured objects).

@@ -42,6 +42,22 @@ export function useDebouncedPreview(valid, run, clear, deps) {
   }, [valid, ...deps]);
 }
 
+// Window-level Escape handler for the bottom-bar tool overlays (which often
+// have no focusable input, so an input-level onKeyDown can't catch Esc).  Active
+// only while the tool is open; `onEscape` is always read fresh.
+export function useEscapeKey(active, onEscape) {
+  const ref = useRef(onEscape);
+  ref.current = onEscape;
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") ref.current?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active]);
+}
+
 const fmt = (v) => (v == null ? "" : String(v));
 
 // A numeric <input> that owns local string state so it can be cleared to blank

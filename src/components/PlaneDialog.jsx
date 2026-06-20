@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
-import { evalValue } from "./inputs.jsx";
+import { evalValue, useEscapeKey } from "./inputs.jsx";
 import {
   BAR_STYLE,
   LBL,
@@ -68,12 +68,14 @@ const PlaneDialog = () => {
     return () => useStore.getState()._cameraControls?.clearPlanePreview?.();
   }, [open, valid, rxv, ryv, rzv, offv, planeTool?.base]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!open) return null;
-
   const close = () => {
     useStore.getState()._cameraControls?.clearPlanePreview?.();
     cancelPlaneTool();
   };
+  useEscapeKey(open, close);
+
+  if (!open) return null;
+
   const confirm = () => {
     if (!valid) return;
     const { position, rotation } = finalFrame();

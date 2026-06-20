@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
-import { evalValue, useDebouncedPreview } from "./inputs.jsx";
+import { evalValue, useDebouncedPreview, useEscapeKey } from "./inputs.jsx";
 import {
   BAR_STYLE,
   LBL,
@@ -179,14 +179,16 @@ const Pattern3dDialog = () => {
     };
   }, [tool]);
 
-  if (!open) return null;
-
   const close = () => {
     const cc = useStore.getState()._cameraControls;
     cc?.clearPattern3dPreview?.();
     cc?.clearCircularAxisHighlight?.();
     cancelPattern3d();
   };
+  useEscapeKey(open, close);
+
+  if (!open) return null;
+
   const pickAxis = () => {
     useStore.getState()._cameraControls?.clearPattern3dPreview?.();
     setCircularAxisPick(true);

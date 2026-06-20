@@ -4,8 +4,8 @@ import { MM_PER_UNIT } from "../three/sceneObjects.js";
 import { activePrecision } from "../three/resolution.js";
 import { commitShell } from "../three/cameraControls/shell.js";
 import FormulaInput from "./FormulaInput";
-import { evalValue, useDebouncedPreview } from "./inputs.jsx";
-import "../styles/VariablesDialog.css";
+import { evalValue, useDebouncedPreview, useEscapeKey } from "./inputs.jsx";
+import { BAR_STYLE, LBL, barInput, barBtn } from "./viewport/overlayBar.js";
 
 // Shell tool dialog: hollow the selected body to a wall of `thickness`.  Opens
 // fresh from the Modify toolbar ({ itemId }) or to edit a committed shell's
@@ -55,13 +55,14 @@ const ShellDialog = () => {
     return () => useStore.getState()._cameraControls?.clearShellPreview?.();
   }, [target]);
 
-  if (!target) return null;
-  if (isEdit && !regenerator) return null;
-
   const close = () => {
     useStore.getState()._cameraControls?.clearShellPreview?.();
     setTarget(null);
   };
+  useEscapeKey(!!target, close);
+
+  if (!target) return null;
+  if (isEdit && !regenerator) return null;
 
   const confirm = async () => {
     if (!valid || busy) return;
@@ -92,87 +93,39 @@ const ShellDialog = () => {
   };
 
   return (
-    <div
-      className="variables-dialog-backdrop"
-      style={{
-        background: "transparent",
-        alignItems: "flex-end",
-        paddingBottom: 72,
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        className="variables-dialog"
-        style={{ minWidth: 400, pointerEvents: "auto" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="variables-dialog-header">
-          <h2>{isEdit ? "Edit shell" : "Shell"}</h2>
-          <button
-            className="variables-dialog-close"
-            onClick={close}
-            title="Close without applying"
-          >
-            ×
-          </button>
-        </div>
-        <div
-          style={{
-            padding: 16,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          <label
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              fontSize: 12,
-              color: "var(--text-secondary)",
-            }}
-          >
-            <span>Wall thickness (mm)</span>
-            <FormulaInput
-              variables={variables}
-              autoFocus
-              value={thicknessMm}
-              onChange={(e) => setThicknessMm(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") confirm();
-                else if (e.key === "Escape") close();
-              }}
-              style={{
-                background: "var(--bg-tertiary)",
-                border: `1px solid ${valid ? "var(--border-color)" : "#e87575"}`,
-                color: "var(--text-primary)",
-                padding: "6px 8px",
-                borderRadius: 3,
-                fontFamily: "monospace",
-                fontSize: 13,
-              }}
-            />
-          </label>
-        </div>
-        <div className="variables-dialog-footer">
-          <div />
-          <div className="variables-dialog-actions">
-            <button className="variables-btn" onClick={close}>
-              Cancel
-            </button>
-            <button
-              className="variables-btn primary"
-              disabled={!valid || busy}
-              onClick={confirm}
-            >
-              {busy ? "Working…" : isEdit ? "Save" : "Shell"}
-            </button>
-          </div>
-        </div>
+    <>
+      <div className="sketch-placement-hint">
+        {isEdit ? "Edit the shell thickness" : "Set the wall thickness"}, then
+        Confirm · Esc to cancel
       </div>
-    </div>
+      <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
+        <span style={LBL}>Wall thickness (mm)</span>
+        <FormulaInput
+          variables={variables}
+          autoFocus
+          value={thicknessMm}
+          onChange={(e) => setThicknessMm(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") confirm();
+            else if (e.key === "Escape") close();
+          }}
+          style={barInput(valid)}
+        />
+        <button type="button" onClick={close} title="Cancel" style={barBtn()}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!valid || busy}
+          title={valid ? "Apply the shell" : "Enter a valid thickness"}
+          style={barBtn(true, !valid || busy)}
+        >
+          {busy ? "Working…" : isEdit ? "Save" : "Shell"}
+        </button>
+      </div>
+    </>
   );
 };
 

@@ -7,12 +7,10 @@ import VariablesDialog from "./components/VariablesDialog";
 import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
 import ChamferEditDialog from "./components/ChamferEditDialog";
 import PushPullEditDialog from "./components/PushPullEditDialog";
-import ShellDialog from "./components/ShellDialog";
 import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
-import SplitDialog from "./components/SplitDialog";
 import ProjectDialog from "./components/ProjectDialog";
 import TextDialog from "./components/TextDialog";
 import ShortcutsOverlay from "./components/ShortcutsOverlay";
@@ -118,12 +116,10 @@ function App() {
       <ExtrudeLengthDialog />
       <ChamferEditDialog />
       <PushPullEditDialog />
-      <ShellDialog />
       <RevolveEditDialog />
       <MaterialDialog />
       <SettingsDialog />
       <AboutDialog />
-      <SplitDialog />
       <ProjectDialog />
       <TextDialog />
       <ShortcutsOverlay />
