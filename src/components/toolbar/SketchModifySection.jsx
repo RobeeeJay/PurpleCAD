@@ -103,6 +103,14 @@ const SketchModifySection = () => {
     else startRectangularPatternTool();
   };
 
+  // Trim: click or drag over a line to remove the part up to its nearest
+  // crossing with another line/point.
+  const handleTrim = () => {
+    const turningOn = activeSketchTool !== "trim";
+    setSketchModifyMode(null);
+    setActiveSketchTool(turningOn ? "trim" : null);
+  };
+
   return (
     <ToolbarSection label="Modify">
       <button
@@ -255,6 +263,61 @@ const SketchModifySection = () => {
           mm
         </label>
       )}
+      <button
+        className={`toolbar-btn ${activeSketchTool === "trim" ? "active" : ""}`}
+        title="Trim — click or drag over a line to remove it up to where it crosses another line or point"
+        onClick={handleTrim}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* scissors: two blades crossing at a pivot, cutting a dashed line */}
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 2"
+            x1="3"
+            y1="12"
+            x2="21"
+            y2="12"
+          />
+          <circle
+            cx="7"
+            cy="8"
+            r="2.4"
+            fill="none"
+            stroke="#6C3FD4"
+            strokeWidth="1.5"
+          />
+          <circle
+            cx="7"
+            cy="16"
+            r="2.4"
+            fill="none"
+            stroke="#6C3FD4"
+            strokeWidth="1.5"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            x1="9"
+            y1="9.3"
+            x2="20"
+            y2="15"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            x1="9"
+            y1="14.7"
+            x2="20"
+            y2="9"
+          />
+        </svg>
+      </button>
       <button
         className="toolbar-btn"
         title="Toggle Dashed — dashed lines constrain geometry but don't form closed regions or extrusions"

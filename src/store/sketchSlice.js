@@ -32,6 +32,7 @@ import {
 import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
 import { explodeContours } from "../three/sketchGeometry.js";
 import { textShapeContours, makeTextShape } from "../three/sketchText.js";
+import { computeLineTrim } from "../three/sketchTrim.js";
 
 // Shape types the Offset tool can copy.
 export const OFFSETTABLE_TYPES = ["line", "circle", "arc", "ellipse", "bezier"];
@@ -65,6 +66,67 @@ export const remapConstraintShapeIndices = (constraint, indexMap) => {
       if (next == null || next === -1) return null;
       out[f] = next;
     }
+  }
+  return out;
+};
+
+// Does a constraint reference shape index `idx` in any of its index fields?
+const constraintRefsShape = (c, idx) =>
+  SHAPE_INDEX_FIELDS.some((f) => c[f] === idx);
+
+// Does a constraint attach to a specific endpoint of shape `idx`?
+const constraintTouchesPoint = (c, idx, pt) =>
+  (c.shapeAIdx === idx && c.pointA === pt) ||
+  (c.shapeBIdx === idx && c.pointB === pt) ||
+  (c.pointShapeIdx === idx && c.pointKey === pt);
+
+// Constraint rebuild when a trim SHRINKS a line in place (one endpoint moved to
+// the cut point): drop distance constraints on the line and any constraint
+// attached to the endpoint that moved; the line keeps its index, direction, and
+// other endpoint, so H/V + the retained endpoint's constraints stay valid.
+const trimShrinkConstraints = (constraints, lineIdx, movedPoint) =>
+  constraints.filter((c) => {
+    if (
+      c.type === "distance" &&
+      (c.shapeAIdx === lineIdx || c.shapeBIdx === lineIdx)
+    )
+      return false;
+    if (constraintTouchesPoint(c, lineIdx, movedPoint)) return false;
+    return true;
+  });
+
+// Constraint rebuild when a trim SPLITS a line into segA (kept at lineIdx, owns
+// the original "start") and segB (appended at segBIdx, owns the original "end").
+// Distance constraints on the line are dropped; "end"-anchored constraints move
+// to segB; H/V apply to both collinear halves; anything else referencing the
+// line on a split is dropped to avoid ambiguous over-/under-constraint.
+const trimSplitConstraints = (constraints, lineIdx, segBIdx) => {
+  const out = [];
+  for (const c of constraints) {
+    if (
+      c.type === "distance" &&
+      (c.shapeAIdx === lineIdx || c.shapeBIdx === lineIdx)
+    )
+      continue;
+    if (!constraintRefsShape(c, lineIdx)) {
+      out.push(c);
+      continue;
+    }
+    if (c.type === "horizontal" || c.type === "vertical") {
+      out.push(c);
+      if (c.shapeIdx === lineIdx) out.push({ ...c, shapeIdx: segBIdx });
+      continue;
+    }
+    if (c.type === "coincident" || c.type === "angle") {
+      const nc = { ...c };
+      if (nc.shapeAIdx === lineIdx && nc.pointA === "end")
+        nc.shapeAIdx = segBIdx;
+      if (nc.shapeBIdx === lineIdx && nc.pointB === "end")
+        nc.shapeBIdx = segBIdx;
+      out.push(nc);
+      continue;
+    }
+    // onLine / offset referencing the split line → drop (rare, keeps it safe).
   }
   return out;
 };
@@ -1017,6 +1079,95 @@ export const createSketchSlice = (set) => ({
       return {
         items: markCsgDirty(updatedItems),
         history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Trim the part of line `lineIdx` under (x,y) up to the nearest crossings on
+  // either side — deleting the line, shrinking it, or splitting it in two.
+  // Skips offset/text geometry and drops the line's distance constraints.
+  // `snapshot` is false for the continued trims of a single click-drag so the
+  // whole drag is one undo step.
+  trimSketchLine: (sketchId, lineIdx, x, y, snapshot = true) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const shapes = item.shapes || [];
+      const line = shapes[lineIdx];
+      if (!line || line.type !== "line") return {};
+      const constraints = item.constraints || [];
+      // Offset lines are linked copies — never trim them.
+      const offsetIdxs = new Set(
+        constraints.filter((c) => c.type === "offset").map((c) => c.shapeIdx),
+      );
+      if (offsetIdxs.has(lineIdx)) return {};
+
+      const plan = computeLineTrim(shapes, lineIdx, x, y);
+      if (!plan) return {};
+      const { keepStart, keepEnd } = plan;
+
+      let newShapes, newConstraints;
+      if (!keepStart && !keepEnd) {
+        // Whole segment between two crossings (or the bare line) → delete it.
+        const indexMap = new Map();
+        let ni = 0;
+        shapes.forEach((_, i) => indexMap.set(i, i === lineIdx ? -1 : ni++));
+        newShapes = shapes.filter((_, i) => i !== lineIdx);
+        newConstraints = constraints
+          .map((c) => remapConstraintShapeIndices(c, indexMap))
+          .filter(Boolean);
+      } else if (keepStart && keepEnd) {
+        // Interior chunk removed → split into the two surviving stubs.
+        const segBIdx = shapes.length;
+        newShapes = [
+          ...shapes.map((s, i) => (i === lineIdx ? keepStart : s)),
+          keepEnd,
+        ];
+        newConstraints = trimSplitConstraints(constraints, lineIdx, segBIdx);
+      } else {
+        // One end removed → shrink the line in place.
+        const seg = keepStart || keepEnd;
+        // keepStart retains the original start, so the END moved (and vice versa).
+        const movedPoint = keepStart ? "end" : "start";
+        newShapes = shapes.map((s, i) => (i === lineIdx ? seg : s));
+        newConstraints = trimShrinkConstraints(
+          constraints,
+          lineIdx,
+          movedPoint,
+        );
+      }
+
+      if (snapshot) pushSketchSnapshot(state, sketchId);
+
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: newShapes,
+              constraints: newConstraints,
+            })
+          : it,
+      );
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: newShapes,
+                constraints: newConstraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+        selectedSketchElement: null,
+        sketchMultiSelectedIndices: [],
       };
     }),
 

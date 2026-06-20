@@ -737,6 +737,10 @@ export function createSketchInteraction(
   };
   // ── Sketch element dragging ───────────────────────────────────────────────
   let sketchDrag = null; // { kind:"point"|"shape", shapeIdx, pointKey?, sketchMesh, selItemId, anchorLocal, origShape }
+  // Trim tool: while the button is held the tool keeps trimming any line under
+  // the cursor; the whole drag is one undo step (snapshot taken on first trim).
+  let trimming = false;
+  let trimSnapshotTaken = false;
 
   const updateSketchLineGeo = (lineObj, newShape, sketchMesh) => {
     const pts = getSketchShapePoints(newShape, sketchMesh);
@@ -1498,6 +1502,15 @@ export function createSketchInteraction(
       marqueeStartScreen = { x: e.clientX, y: e.clientY };
       return true;
     }
+    // Trim: start trimming immediately and keep trimming on drag (no marquee).
+    if (activeSketchToolRef.current === "trim") {
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      trimming = true;
+      trimSnapshotTaken = false;
+      tryTrimAt(e.clientX, e.clientY);
+      return true;
+    }
     if (activeSketchToolRef.current) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
@@ -1665,6 +1678,14 @@ export function createSketchInteraction(
       controls.mouseY = e.clientY;
       return true;
     }
+    if (activeSketchToolRef.current === "trim") {
+      clearAllSketchHover();
+      if (trimming) tryTrimAt(e.clientX, e.clientY);
+      else trimHoverAt(e.clientX, e.clientY);
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
     if (activeSketchToolRef.current) {
       clearAllSketchHover();
       updateSketchPreview(e.clientX, e.clientY, e.shiftKey);
@@ -1766,6 +1787,73 @@ export function createSketchInteraction(
       );
   };
 
+  // The trim tool's pickable lines: original (non-copy, non-offset) shapes only.
+  const trimLineObjs = () => {
+    const group = sketchShapesGroupRef?.current;
+    if (!group) return [];
+    return group.children.filter(
+      (c) =>
+        c.userData.shapeIdx != null &&
+        !c.userData.isOffset &&
+        !c.userData.isMirror &&
+        !c.userData.isCircularPattern &&
+        !c.userData.isRectangularPattern,
+    );
+  };
+
+  const trimHitIdx = (clientX, clientY, selItem) => {
+    const hits = hitTestSketchLines(makeRay(clientX, clientY), trimLineObjs());
+    const idx = hits[0]?.object?.userData?.shapeIdx;
+    if (idx == null) return null;
+    return (selItem.shapes || [])[idx]?.type === "line" ? idx : null;
+  };
+
+  // Trim whatever plain line is under the cursor.  Called on click and on every
+  // move while dragging, so a drag "eats" lines continuously.
+  const tryTrimAt = (clientX, clientY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const lineIdx = trimHitIdx(clientX, clientY, selItem);
+    if (lineIdx == null) return;
+    const local = screenToSketchLocal(clientX, clientY, sketchMesh);
+    if (!local) return;
+    useStore
+      .getState()
+      .trimSketchLine(
+        selItem.id,
+        lineIdx,
+        local.x,
+        local.y,
+        !trimSnapshotTaken,
+      );
+    trimSnapshotTaken = true;
+  };
+
+  // Hover feedback for the trim tool: light the line a click would trim.
+  const trimHoverAt = (clientX, clientY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    if (!selItem || !sketchShapesGroupRef?.current) {
+      clearHoverLineHighlight();
+      renderer.domElement.style.cursor = "";
+      return;
+    }
+    const hits = hitTestSketchLines(makeRay(clientX, clientY), trimLineObjs());
+    const obj = hits[0]?.object;
+    const idx = obj?.userData?.shapeIdx;
+    if (idx != null && (selItem.shapes || [])[idx]?.type === "line") {
+      applyHoverLineHighlight(obj);
+      renderer.domElement.style.cursor = "crosshair";
+    } else {
+      clearHoverLineHighlight();
+      renderer.domElement.style.cursor = "";
+    }
+  };
+
   const onSketchMouseUp = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
     if (useStore.getState().svgImport) {
@@ -1855,6 +1943,11 @@ export function createSketchInteraction(
           });
         }
       }
+      return true;
+    }
+    if (activeSketchToolRef.current === "trim") {
+      trimming = false;
+      trimSnapshotTaken = false;
       return true;
     }
     if (activeSketchToolRef.current) {
