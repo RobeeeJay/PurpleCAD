@@ -37,6 +37,17 @@ export const uiInitial = {
   // Sub-geometry selection used by the 3D Bevel/Chamfer toolbar buttons.
   selectedSubGeometry: null,
 
+  // Selection widget (top-left of the 3D view): what a click selects.  Object
+  // mode (default) greys the sub-types; with it off, the face/edge/point toggles
+  // decide, with hover priority point > edge > face.  `selectionOverride` is a
+  // tool-forced set of allowed sub-types (e.g. extrude → ["face"]) that wins
+  // over the user's toggles until the tool clears it.
+  selObject: true,
+  selFace: false,
+  selEdge: false,
+  selPoint: false,
+  selectionOverride: null,
+
   // Active extrude-depth input overlay.  Populated when the user enters
   // "depth" mode after picking a profile; cleared when they confirm or
   // cancel the extrude.  defaultDepth is in scene units (multiply by
@@ -236,9 +247,32 @@ export const createUiSlice = (set) => ({
   // Setting either face-select mode clears the other — only one pick/confirm
   // overlay can be active at a time.
   setChamferSelectMode: (mode) =>
-    set({ chamferSelectMode: mode, pushPullSelectMode: null }),
+    set({
+      chamferSelectMode: mode,
+      pushPullSelectMode: null,
+      // Chamfer/fillet pick edges and faces; nothing else.
+      selectionOverride: mode ? ["edge", "face"] : null,
+    }),
   setPushPullSelectMode: (mode) =>
-    set({ pushPullSelectMode: mode, chamferSelectMode: null }),
+    set({
+      pushPullSelectMode: mode,
+      chamferSelectMode: null,
+      selectionOverride: mode ? ["face"] : null,
+    }),
+
+  // Selection-widget toggles.  Turning a sub-type on leaves object mode; turning
+  // object off keeps at least one sub-type so something stays selectable.
+  toggleSelObject: () =>
+    set((s) => {
+      if (!s.selObject) return { selObject: true };
+      const any = s.selFace || s.selEdge || s.selPoint;
+      return { selObject: false, ...(any ? null : { selFace: true }) };
+    }),
+  toggleSelFace: () => set((s) => ({ selObject: false, selFace: !s.selFace })),
+  toggleSelEdge: () => set((s) => ({ selObject: false, selEdge: !s.selEdge })),
+  toggleSelPoint: () =>
+    set((s) => ({ selObject: false, selPoint: !s.selPoint })),
+  setSelectionOverride: (types) => set({ selectionOverride: types }),
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
@@ -315,7 +349,13 @@ export const createUiSlice = (set) => ({
     set({
       sweepSelectMode: v,
       // A sweep tool is exclusive with the face-select tools.
-      ...(v ? { chamferSelectMode: null, pushPullSelectMode: null } : null),
+      ...(v
+        ? {
+            chamferSelectMode: null,
+            pushPullSelectMode: null,
+            selectionOverride: null,
+          }
+        : null),
     }),
   startSweepTool: (kind) =>
     set({
@@ -328,6 +368,7 @@ export const createUiSlice = (set) => ({
       },
       chamferSelectMode: null,
       pushPullSelectMode: null,
+      selectionOverride: null,
     }),
   cancelSweepTool: () =>
     set({ sweepSelectMode: null, sweepRetargetTarget: null }),
@@ -393,7 +434,8 @@ export const createUiSlice = (set) => ({
     })),
 
   setSketchPlacementMode: (active) => set({ sketchPlacementMode: active }),
-  setExtrudeSelectMode: (mode) => set({ extrudeSelectMode: mode }),
+  setExtrudeSelectMode: (mode) =>
+    set({ extrudeSelectMode: mode, selectionOverride: mode ? ["face"] : null }),
   setCutExtrudeInProgress: (v) => set({ cutExtrudeInProgress: !!v }),
   setExtrudeRetargetId: (id) => set({ extrudeRetargetId: id }),
   setExtrudeRetargetGroup: (ids) => set({ extrudeRetargetGroup: ids }),

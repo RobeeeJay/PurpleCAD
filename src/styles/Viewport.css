@@ -11,6 +11,55 @@
   height: 100%;
 }
 
+/* Selection widget: a row of selection-type toggles at the top-left of the 3D
+   view, clear of the 250px Objects/Timeline panel. */
+.selection-widget {
+  position: absolute;
+  top: 12px;
+  left: 262px;
+  z-index: 12;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 6px;
+  background: rgba(var(--panel-bg-rgb), 0.82);
+  border: 1px solid rgba(var(--color-info-rgb), 0.3);
+}
+
+.selection-widget-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+
+.selection-widget-btn:hover:not(:disabled) {
+  background: rgba(var(--color-info-rgb), 0.16);
+  color: var(--text-primary);
+}
+
+.selection-widget-btn.active {
+  background: rgba(var(--accent-rgb), 0.32);
+  border-color: rgba(var(--accent-rgb), 0.75);
+  color: var(--color-white);
+}
+
+.selection-widget-btn.greyed {
+  opacity: 0.32;
+}
+
+.selection-widget-btn:disabled {
+  cursor: default;
+}
+
 .viewport canvas {
   display: block;
   width: 100%;

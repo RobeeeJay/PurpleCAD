@@ -52,7 +52,8 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
   if (!hitMesh || !subGeo) return null;
   const faces = subGeo.faces || [];
   const edges = subGeo.edges || [];
-  if (!faces.length && !edges.length) return null;
+  const points = subGeo.points || [];
+  if (!faces.length && !edges.length && !points.length) return null;
 
   // Face-select hover uses FACE_HOVER_COLOR (light blue); the selected colour
   // is a visibly darker version of the same blue so the user recognises this
@@ -299,6 +300,23 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
     hlLine.renderOrder = 997;
     hlLine.userData.kind = "edge";
     group.add(hlLine);
+  }
+
+  // ── Point markers ───────────────────────────────────────────────────────
+  // Local-frame vertices selected via the widget's Point mode.  The group is
+  // placed at the mesh transform below, so these sit on the geometry.
+  for (const p of points) {
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: options.edgeColor ?? EDGE_SELECT_COLOR,
+        depthTest: false,
+      }),
+    );
+    dot.position.set(p.x, p.y, p.z);
+    dot.renderOrder = 999;
+    dot.userData.kind = "point";
+    group.add(dot);
   }
 
   if (group.children.length === 0) return null;

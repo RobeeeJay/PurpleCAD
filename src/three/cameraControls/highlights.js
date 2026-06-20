@@ -382,7 +382,7 @@ export function createHighlightHelpers({
         bestIdx = i;
       }
     }
-    if (bestIdx < 0) return;
+    if (bestIdx < 0) return null;
 
     // Curve detection: highlight (and select) the whole smooth chain of
     // connected edges, so a tessellated curve reads/selects as one edge.
@@ -437,6 +437,16 @@ export function createHighlightHelpers({
         };
       }),
     };
+    // World-space distance from the cursor's hit point to the nearest edge —
+    // used by the selection-widget priority (point > edge > face).
+    va.set(best.ax, best.ay, best.az).applyMatrix4(hitMesh.matrixWorld);
+    vb.set(best.bx, best.by, best.bz).applyMatrix4(hitMesh.matrixWorld);
+    const ab = vb.clone().sub(va);
+    const t = Math.max(
+      0,
+      Math.min(1, hit.point.clone().sub(va).dot(ab) / (ab.lengthSq() || 1)),
+    );
+    return hit.point.distanceTo(va.add(ab.multiplyScalar(t)));
   };
 
   const applyPointHighlight = (hit) => {
@@ -474,20 +484,22 @@ export function createHighlightHelpers({
       }
     }
     if (primitiveType) srcGeo.dispose();
-    if (bestV) {
-      bestV.applyMatrix4(hitMesh.matrixWorld);
-      const hlMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06, 10, 8),
-        new THREE.MeshBasicMaterial({
-          color: CHAMFER_PREVIEW_COLOR,
-          depthTest: false,
-        }),
-      );
-      hlMesh.position.copy(bestV);
-      hlMesh.renderOrder = 999;
-      scene.add(hlMesh);
-      pointHighlightRef.current = hlMesh;
-    }
+    if (!bestV) return null;
+    const worldV = bestV.clone().applyMatrix4(hitMesh.matrixWorld);
+    const hlMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: CHAMFER_PREVIEW_COLOR,
+        depthTest: false,
+      }),
+    );
+    hlMesh.position.copy(worldV);
+    hlMesh.renderOrder = 999;
+    scene.add(hlMesh);
+    pointHighlightRef.current = hlMesh;
+    // World-space distance from the cursor's hit point to the chosen vertex —
+    // the selection-widget priority uses it to gate point vs edge vs face.
+    return hit.point.distanceTo(worldV);
   };
 
   return {

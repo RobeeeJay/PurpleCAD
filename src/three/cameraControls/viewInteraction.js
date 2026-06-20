@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { START_FACE_HIGHLIGHT, FACE_HOVER_COLOR } from "../theme.js";
 import { nearestVertexOf } from "../objectOrigin.js";
+import { effectiveSelectionTypes } from "../../store/selectionMode.js";
 
 export function createViewInteraction(
   {
@@ -37,6 +38,9 @@ export function createViewInteraction(
   },
 ) {
   const controls = cameraControlsRef.current;
+  // What the last hover settled on ("object" | "face" | "edge" | "point" | null)
+  // so the click commits the same entity the priority highlighted.
+  let lastHoverType = null;
 
   const onViewHover = (e) => {
     const currentCamera = cameraRef.current;
@@ -72,45 +76,47 @@ export function createViewInteraction(
         clearFaceHighlight();
       }
     } else {
-      // Modifier-key scheme:
-      //   • CTRL (Cmd on Mac)        → edge selection mode
-      //   • ALT                      → face selection mode
-      //   • CTRL + ALT               → point selection mode
-      //   • SHIFT (orthogonal)       → additive selection in any of the
-      //                                above modes (incl. plain object mode).
-      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
-      const edgeMode = cmdOrCtrl && !e.altKey;
-      const faceMode = !cmdOrCtrl && e.altKey;
-      const pointMode = cmdOrCtrl && e.altKey;
-
-      if (pointMode) {
-        setHoveredId(null);
-        clearFaceHighlight();
-        clearEdgeHighlight();
-        if (intersects.length > 0) applyPointHighlight(intersects[0]);
-        else clearPointHighlight();
-      } else if (edgeMode) {
-        setHoveredId(null);
-        clearFaceHighlight();
-        clearPointHighlight();
-        if (intersects.length > 0) applyEdgeHighlight(intersects[0]);
-        else clearEdgeHighlight();
-      } else if (faceMode) {
-        setHoveredId(null);
-        clearEdgeHighlight();
-        clearPointHighlight();
-        if (intersects.length > 0)
-          applyFaceHighlight(intersects[0], FACE_HOVER_COLOR);
-        else clearFaceHighlight();
-      } else {
-        clearFaceHighlight();
-        clearEdgeHighlight();
-        clearPointHighlight();
+      // Selection widget drives what hovering highlights (no modifier keys).
+      const eff = effectiveSelectionTypes(useStore.getState());
+      clearFaceHighlight();
+      clearEdgeHighlight();
+      clearPointHighlight();
+      if (eff.object) {
+        lastHoverType = "object";
         setHoveredId(
           intersects.length > 0
             ? intersects[0].object.userData.itemId || null
             : null,
         );
+      } else {
+        setHoveredId(null);
+        lastHoverType = null;
+        const hit = intersects[0];
+        if (hit) {
+          // Priority point > edge > face, gated by a pixel budget converted to
+          // world units at the hit depth so corners/edges win only when near.
+          const cam = currentCamera;
+          const worldPerPx = cam.isPerspectiveCamera
+            ? (2 * Math.tan((cam.fov * Math.PI) / 360) * hit.distance) /
+              rect.height
+            : (cam.top - cam.bottom) / rect.height;
+          const vThr = 11 * worldPerPx;
+          const eThr = 9 * worldPerPx;
+          if (eff.point) {
+            const d = applyPointHighlight(hit);
+            if (d != null && d <= vThr) lastHoverType = "point";
+            else clearPointHighlight();
+          }
+          if (!lastHoverType && eff.edge) {
+            const d = applyEdgeHighlight(hit);
+            if (d != null && d <= eThr) lastHoverType = "edge";
+            else clearEdgeHighlight();
+          }
+          if (!lastHoverType && eff.face) {
+            applyFaceHighlight(hit, FACE_HOVER_COLOR);
+            lastHoverType = "face";
+          }
+        }
       }
     }
 
@@ -308,19 +314,13 @@ export function createViewInteraction(
         return;
       }
 
-      // Modifier-key scheme (must match the hover branch above):
-      //   • CTRL/Cmd            → edge selection mode
-      //   • ALT                 → face selection mode
-      //   • CTRL/Cmd + ALT      → point selection mode (hover only)
-      //   • SHIFT (orthogonal)  → additive: append/toggle within the
-      //                           existing selection of the current mode.
-      const cmdOrCtrl3d = isMac ? e.metaKey : e.ctrlKey;
-      const edgeMode3d = cmdOrCtrl3d && !e.altKey;
-      const faceMode3d = !cmdOrCtrl3d && e.altKey;
+      // The selection widget decides what a click commits — matching the hover
+      // priority (point > edge > face) captured in lastHoverType.  Shift stays
+      // additive within a sub-type.
       if (intersects.length > 0) {
         const clickedId = intersects[0].object.userData.itemId || null;
         if (
-          faceMode3d &&
+          lastHoverType === "face" &&
           highlights.pendingFaceSelection &&
           highlights.pendingFaceSelection.itemId === clickedId
         ) {
@@ -371,7 +371,7 @@ export function createViewInteraction(
           // making the click appear to have no visual effect.
           clearFaceHighlight();
         } else if (
-          edgeMode3d &&
+          lastHoverType === "edge" &&
           highlights.pendingEdgeSelection &&
           highlights.pendingEdgeSelection.itemId === clickedId
         ) {
@@ -424,6 +424,24 @@ export function createViewInteraction(
           // becomes immediately visible at click time (same rationale as in
           // the face-commit branch above).
           clearEdgeHighlight();
+        } else if (lastHoverType === "point") {
+          // Point selection: snap to the nearest vertex and record it (the hover
+          // sphere stays as the marker until the next pointer move).
+          const mesh = intersects[0].object;
+          const lp = mesh.worldToLocal(intersects[0].point.clone());
+          const posArr = mesh.geometry?.attributes?.position?.array;
+          if (posArr) {
+            // Stored in the mesh's local frame (like edges) so the persistent
+            // selection-highlight group can place it with the mesh transform.
+            const v = nearestVertexOf(posArr, lp.x, lp.y, lp.z);
+            useStore.getState().setSelectedSubGeometry({
+              itemId: clickedId,
+              edges: [],
+              faces: [],
+              points: [{ x: v.x, y: v.y, z: v.z }],
+            });
+            selectItem(null);
+          }
         } else {
           // Normal (object-mode) click: shift adds to multi-object selection.
           useStore.getState().clearSelectedSubGeometry();
