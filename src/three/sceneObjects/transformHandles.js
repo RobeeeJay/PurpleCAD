@@ -7,6 +7,7 @@ import {
   MM_PER_UNIT,
   getMeshDimensions,
   getMeshBBoxCenter,
+  gizmoCenterFor,
   makeDimSprite,
   placeDimLabels,
 } from "./dimensions.js";
@@ -35,9 +36,11 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   // is resized.  (It is still scaled per-frame for zoom + the GIZMO_SCALE
   // factor in animateLoop.)  Only its CENTRE tracks the object.
   const ext = GIZMO_EXT;
-  // Centre the gizmo on the object's real bounding box so it sits on geometry
-  // that isn't centred on the mesh origin (e.g. extrudes).
-  const center = getMeshBBoxCenter(mesh);
+  // The rotation/move/scale handle cluster sits on the object's pivot — its
+  // custom origin when set, else the bbox centre.  The bounding box + dimension
+  // labels stay around the geometry (bbox centre) regardless.
+  const center = gizmoCenterFor(item, mesh);
+  const bboxCenter = getMeshBBoxCenter(mesh);
 
   // `transparent: true` is REQUIRED (alongside depthTest:false +
   // renderOrder) so the gizmo lands in three.js's transparent render
@@ -98,7 +101,7 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   );
   boxMesh.renderOrder = 998;
   boxMesh.scale.set(dim.w, dim.h, dim.d);
-  boxMesh.position.copy(center);
+  boxMesh.position.copy(bboxCenter);
 
   const mmX = Math.round(dim.w * MM_PER_UNIT);
   const mmY = Math.round(dim.h * MM_PER_UNIT);
@@ -108,7 +111,7 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   const labelZ = makeDimSprite(mmZ + "mm", toCssHex(AXIS_Z_COLOR));
 
   const boundingBox = { boxMesh, labelX, labelY, labelZ };
-  placeDimLabels(boundingBox, center, dim);
+  placeDimLabels(boundingBox, bboxCenter, dim);
 
   return { handles, boundingBox };
 }

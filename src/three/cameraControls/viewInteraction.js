@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { START_FACE_HIGHLIGHT, FACE_HOVER_COLOR } from "../theme.js";
+import { nearestVertexOf } from "../objectOrigin.js";
 
 export function createViewInteraction(
   {
@@ -280,6 +281,33 @@ export function createViewInteraction(
         selectableMeshes,
         false,
       );
+
+      // Change-origin tool intercepts the click before normal selection.
+      const { originVertexPick, originToolActive } = useStore.getState();
+      if (originVertexPick != null || originToolActive) {
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          const clickedId = hit.object.userData.itemId;
+          if (originVertexPick != null) {
+            // Snap the origin to the nearest vertex of the picked object.
+            if (clickedId === originVertexPick) {
+              const mesh = hit.object;
+              const lp = mesh.worldToLocal(hit.point.clone());
+              const pos = mesh.geometry?.attributes?.position?.array;
+              if (pos) {
+                const v = nearestVertexOf(pos, lp.x, lp.y, lp.z);
+                useStore.getState().setItemOrigin(clickedId, v);
+              }
+            }
+          } else if (clickedId != null) {
+            // Tool armed: open the origin chooser for the clicked object.
+            useStore.getState().openOriginDialog(clickedId);
+          }
+        }
+        save();
+        return;
+      }
+
       // Modifier-key scheme (must match the hover branch above):
       //   • CTRL/Cmd            → edge selection mode
       //   • ALT                 → face selection mode

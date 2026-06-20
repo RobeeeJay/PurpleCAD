@@ -84,6 +84,14 @@ export const uiInitial = {
   // thickness.  Null = closed.
   shellTarget: null,
 
+  // Change-origin tool.  `originToolActive` arms it (click an object to pick its
+  // origin); `originDialogItemId` is the object whose OriginDialog is open;
+  // `originVertexPick` is the object whose next click snaps the origin to a
+  // vertex.
+  originToolActive: false,
+  originDialogItemId: null,
+  originVertexPick: null,
+
   // Sketch→solid sweep tools (Revolve / Pipe / Loft), all sharing one select
   // mode driven by the Modify toolbar.  Shape:
   //   { kind:"revolve"|"pipe"|"loft", profile, axis, secondProfile, params }
@@ -235,6 +243,15 @@ export const createUiSlice = (set) => ({
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
   setShellTarget: (target) => set({ shellTarget: target }),
+  setOriginToolActive: (v) =>
+    set({
+      originToolActive: !!v,
+      ...(v ? null : { originDialogItemId: null, originVertexPick: null }),
+    }),
+  openOriginDialog: (itemId) =>
+    set({ originDialogItemId: itemId, originVertexPick: null }),
+  closeOriginDialog: () => set({ originDialogItemId: null }),
+  setOriginVertexPick: (itemId) => set({ originVertexPick: itemId }),
 
   // ── Plane object + 3D pattern tools ─────────────────────────────────────
   // false when off, else a mode string ("points" | "face") naming what a

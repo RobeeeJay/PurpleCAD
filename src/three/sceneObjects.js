@@ -16,6 +16,7 @@ export {
   getMeshDimensions,
   getMeshExtent,
   getMeshBBoxCenter,
+  gizmoCenterFor,
   makeDimSprite,
   redrawDimSprite,
   placeDimLabels,

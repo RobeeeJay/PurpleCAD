@@ -13,6 +13,7 @@ import MirrorDialog from "./MirrorDialog";
 import Pattern3dDialog from "./Pattern3dDialog";
 import SplitDialog from "./SplitDialog";
 import ShellDialog from "./ShellDialog";
+import OriginDialog from "./OriginDialog";
 import PlanePickHint from "./viewport/PlanePickHint";
 import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
@@ -318,6 +319,7 @@ const Viewport = () => {
       <Pattern3dDialog />
       <SplitDialog />
       <ShellDialog />
+      <OriginDialog />
       <SvgPlacementOverlay />
       <PlanePickHint />
       {widgetVisible && (

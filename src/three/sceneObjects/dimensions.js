@@ -102,6 +102,18 @@ export function getMeshBBoxCenter(mesh) {
   return c.add(mesh.position);
 }
 
+// World-space rotation/scale pivot for an item: its custom origin (a point in
+// the local geometry frame) when set, otherwise the bbox centre.  The transform
+// gizmo sits here and rotation/scale hold this point fixed.
+export function gizmoCenterFor(item, mesh) {
+  const o = item?.origin;
+  if (o) {
+    mesh.updateMatrixWorld();
+    return mesh.localToWorld(new THREE.Vector3(o.x, o.y, o.z));
+  }
+  return getMeshBBoxCenter(mesh);
+}
+
 // Half the mesh's largest real dimension — used to place the gizmo handles just
 // outside the object.
 export function getMeshExtent(mesh) {

@@ -9,6 +9,7 @@ import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
 import { textShapeContours, makeTextShape } from "./sketchText.js";
+import { bboxCenterOf, massCentroidOf } from "./objectOrigin.js";
 import { kvGet, kvSet } from "../store/kv.js";
 import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
 import {
@@ -404,6 +405,19 @@ export function attachCameraControls(ctx) {
   });
   const { handleSweepHover, handleSweepClick } = sweep;
   controls.updateSweepPreview = () => sweep.updateSweepPreview();
+
+  // Change-origin (centre of mass / centre of object): compute the pivot from
+  // the live mesh geometry in its LOCAL frame and store it as item.origin.
+  controls.applyObjectOrigin = (itemId, mode) => {
+    const mesh = objectsRef.current[itemId];
+    const pos = mesh?.geometry?.attributes?.position?.array;
+    if (!pos) return;
+    const index = mesh.geometry.index ? mesh.geometry.index.array : null;
+    const local =
+      mode === "mass" ? massCentroidOf(pos, index) : bboxCenterOf(pos);
+    useStore.getState().setItemOrigin(itemId, local);
+  };
+
   controls.setRevolveEditHidden = (itemId) =>
     sweep.setRevolveEditHidden(itemId);
   controls.restoreRevolveEditHidden = () => sweep.restoreRevolveEditHidden();

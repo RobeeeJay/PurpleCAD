@@ -11,6 +11,7 @@ import {
   snapUnitToIntervalMm,
   getMeshDimensions,
   getMeshBBoxCenter,
+  gizmoCenterFor,
   redrawDimSprite,
   placeDimLabels,
 } from "../sceneObjects.js";
@@ -31,8 +32,29 @@ export function createTransformHandleDrag({
 }) {
   const controls = cameraControlsRef.current;
 
+  // item.position to store from a mesh: for extrudes the mesh sits at
+  // item.position + rotated centroid offset, so subtract that back out.
+  const meshCommitPos = (mesh) => {
+    const elo = mesh.userData.extrudeLocalOffset;
+    if (!elo) {
+      return { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z };
+    }
+    const off = new THREE.Vector3(elo.x, elo.y, elo.z).applyEuler(
+      mesh.rotation,
+    );
+    return {
+      x: mesh.position.x - off.x,
+      y: mesh.position.y - off.y,
+      z: mesh.position.z - off.z,
+    };
+  };
+
   // Returns true if a handle was hit (drag started) so the caller can return.
   const tryBeginHandleDrag = (e) => {
+    // While the change-origin tool is armed, clicks pick an origin — never grab
+    // a transform handle.
+    const { originToolActive, originVertexPick } = useStore.getState();
+    if (originToolActive || originVertexPick != null) return false;
     const rect = renderer.domElement.getBoundingClientRect();
     const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -51,6 +73,21 @@ export function createTransformHandleDrag({
           if (mesh) {
             const cam = cameraRef.current;
             const startPos = mesh.position.clone();
+            // Custom origin: a point in the mesh's local frame whose WORLD
+            // position must stay fixed through rotate/scale (the pivot).
+            const dragItem = itemsRef.current.find((i) => i.id === selId);
+            const originLocal = dragItem?.origin
+              ? new THREE.Vector3(
+                  dragItem.origin.x,
+                  dragItem.origin.y,
+                  dragItem.origin.z,
+                )
+              : null;
+            let pivot = null;
+            if (originLocal) {
+              mesh.updateMatrixWorld();
+              pivot = mesh.localToWorld(originLocal.clone());
+            }
             const isRotHandle = hitHandle.type.startsWith("rot");
             let axisDirScreen = null;
             if (!isRotHandle && hitHandle.type !== "scale") {
@@ -104,6 +141,8 @@ export function createTransformHandleDrag({
                 ? mesh.quaternion.clone()
                 : null,
               itemId: selId,
+              originLocal,
+              pivot,
               startDescendantPositions,
               startDescendantQuaternions,
             };
@@ -145,6 +184,15 @@ export function createTransformHandleDrag({
           snapRad,
         );
         if (newQuat) mesh.quaternion.copy(newQuat);
+        // Rotate around the custom origin: hold the pivot's world position fixed
+        // by moving the mesh so the (rotated, scaled) origin lands back on it.
+        if (drag.pivot && drag.originLocal) {
+          const off = drag.originLocal
+            .clone()
+            .multiplyScalar(mesh.scale.x)
+            .applyQuaternion(mesh.quaternion);
+          mesh.position.copy(drag.pivot).sub(off);
+        }
         const bb = boundingBoxRef.current;
         if (bb) bb.boxMesh.rotation.copy(mesh.rotation);
 
@@ -152,13 +200,15 @@ export function createTransformHandleDrag({
           const deltaQuat = mesh.quaternion
             .clone()
             .multiply(drag.startParentQuaternion.clone().invert());
+          // Children orbit the same fixed pivot (else the moved mesh.position).
+          const rotCenter = drag.pivot || mesh.position;
           Object.entries(drag.startDescendantPositions).forEach(
             ([idStr, startDPos]) => {
               const dMesh = objectsRef.current[parseInt(idStr, 10)];
               if (!dMesh) return;
-              const relPos = startDPos.clone().sub(mesh.position);
+              const relPos = startDPos.clone().sub(rotCenter);
               relPos.applyQuaternion(deltaQuat);
-              dMesh.position.copy(mesh.position).add(relPos);
+              dMesh.position.copy(rotCenter).add(relPos);
               const startDQuat = drag.startDescendantQuaternions?.[idStr];
               if (startDQuat)
                 dMesh.quaternion.copy(deltaQuat.clone().multiply(startDQuat));
@@ -169,6 +219,14 @@ export function createTransformHandleDrag({
         mesh.scale.setScalar(
           Math.max(0.05, drag.startScale * Math.pow(2, -dyPx / 200)),
         );
+        // Scale about the custom origin: keep its world position fixed.
+        if (drag.pivot && drag.originLocal) {
+          const off = drag.originLocal
+            .clone()
+            .multiplyScalar(mesh.scale.x)
+            .applyQuaternion(mesh.quaternion);
+          mesh.position.copy(drag.pivot).sub(off);
+        }
       } else {
         const dxNDC = (dxPx / rect.width) * 2;
         const dyNDC = (-dyPx / rect.height) * 2;
@@ -210,9 +268,13 @@ export function createTransformHandleDrag({
       }
 
       // Fixed gizmo radius (keep in sync with GIZMO_EXT in transformHandles.js)
-      // so the widget keeps its size while the object is resized.
+      // so the widget keeps its size while the object is resized.  The handle
+      // cluster rides the pivot (custom origin or bbox centre); the bounding box
+      // stays around the geometry.
       const ext = 1.0;
-      const center = getMeshBBoxCenter(mesh);
+      const item = itemsRef.current.find((i) => i.id === drag.itemId);
+      const center = gizmoCenterFor(item, mesh);
+      const bboxCenter = getMeshBBoxCenter(mesh);
       handlesRef.current.forEach(({ mesh: hm, dir }) => {
         hm.userData.baseOffsetDist = ext + 0.5;
         if (dir) hm.position.copy(center).addScaledVector(dir, ext + 0.5);
@@ -223,14 +285,14 @@ export function createTransformHandleDrag({
       if (bb) {
         const dim = getMeshDimensions(mesh);
         bb.boxMesh.scale.set(dim.w, dim.h, dim.d);
-        bb.boxMesh.position.copy(center);
+        bb.boxMesh.position.copy(bboxCenter);
         const mmX = Math.round(dim.w * MM_PER_UNIT);
         const mmY = Math.round(dim.h * MM_PER_UNIT);
         const mmZ = Math.round(dim.d * MM_PER_UNIT);
         redrawDimSprite(bb.labelX, mmX + "mm", "#ff4444");
         redrawDimSprite(bb.labelY, mmY + "mm", "#4488ff");
         redrawDimSprite(bb.labelZ, mmZ + "mm", "#44ff44");
-        placeDimLabels(bb, center, dim);
+        placeDimLabels(bb, bboxCenter, dim);
       }
     }
     controls.mouseX = e.clientX;
@@ -245,7 +307,10 @@ export function createTransformHandleDrag({
     const mesh = objectsRef.current[drag.itemId];
     if (mesh) {
       if (drag.handleType.startsWith("rot")) {
-        useStore.getState().setItemTransform(drag.itemId, null, null, {
+        // Rotating around a custom origin also moved the mesh, so commit the new
+        // position alongside the rotation.
+        const rotPos = drag.pivot ? meshCommitPos(mesh) : null;
+        useStore.getState().setItemTransform(drag.itemId, rotPos, null, {
           x: mesh.rotation.x,
           y: mesh.rotation.y,
           z: mesh.rotation.z,

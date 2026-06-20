@@ -293,6 +293,48 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Set an object's custom rotation/scale pivot (a point in its local geometry
+  // frame).  Recorded as a modify so it survives replay; also clears the origin
+  // tool.  Passing null clears the custom origin (back to the bbox centre).
+  setItemOrigin: (id, origin) =>
+    set((state) => {
+      const newEntry = makeEntry("Set origin", id, {
+        type: "modify",
+        itemId: id,
+        patches: { origin },
+      });
+      let insertIdx, newActiveId;
+      if (state.activeHistoryId !== null) {
+        const activeIdx = state.history.findIndex(
+          (h) => h.id === state.activeHistoryId,
+        );
+        insertIdx = activeIdx + 1;
+        newActiveId = newEntry.id;
+      } else {
+        insertIdx = state.history.length;
+        newActiveId = null;
+      }
+      newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
+      const rawHistory = [
+        ...state.history.slice(0, insertIdx),
+        newEntry,
+        ...state.history.slice(insertIdx),
+      ];
+      const items = replayUpTo(rawHistory, insertIdx);
+      saveTimeline(rawHistory, newActiveId);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(rawHistory),
+          activeHistoryId: newActiveId,
+          originToolActive: false,
+          originDialogItemId: null,
+          originVertexPick: null,
+        },
+        withUndo(state),
+      );
+    }),
+
   deleteItem: (id) =>
     set((state) => {
       const deletedItem = state.items.find((item) => item.id === id);
