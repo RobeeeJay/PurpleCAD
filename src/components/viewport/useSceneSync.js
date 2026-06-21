@@ -18,6 +18,7 @@ import {
 import {
   updateEmissive,
   finalizeVisibility,
+  updateSketchPlaneVisibility,
 } from "../../three/objectMaterials.js";
 import { resolveItemDepth } from "../../three/geometryParams.js";
 import { reconcileSelectionHighlight } from "../../three/selectionHighlights.js";
@@ -646,6 +647,14 @@ export function useSceneSync({
     } else {
       updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
     }
+    // Reveal a sketch's reference plane while it's hovered in the objects list.
+    updateSketchPlaneVisibility(
+      objectsRef,
+      itemsRef,
+      materialDialogTarget != null ? null : hoveredId,
+      sketchModeRef.current,
+      selectedId,
+    );
     finalizeVisibility(
       objectsRef,
       itemsRef,

@@ -63,7 +63,10 @@ export function buildSceneObjects(
         geometry = new THREE.BoxGeometry(3, 1.2, 3);
         break;
       case "sketch":
-        geometry = new THREE.PlaneGeometry(3, 3);
+        // Large so that, when revealed on hover, the plane reads as an infinite
+        // reference surface spanning the view rather than a small card.  It is
+        // hidden by default (renderMode) — only the sketch geometry shows.
+        geometry = new THREE.PlaneGeometry(1000, 1000);
         break;
       case "plane":
         geometry = new THREE.PlaneGeometry(6, 6);

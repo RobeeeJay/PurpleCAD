@@ -106,7 +106,8 @@ export function applyRenderMode(renderMode, ctx) {
         return;
       }
       if (itemData?.type === "sketch") {
-        mesh.visible = false;
+        // Reference plane: hidden unless hovered in the objects list.
+        mesh.visible = itemData.id === useStore.getState().hoveredId;
         return;
       }
       if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
@@ -183,14 +184,16 @@ export function applyRenderMode(renderMode, ctx) {
         return;
       }
       if (itemData?.type === "sketch") {
-        // When the user is INSIDE this sketch we want the plane to stay
-        // visible but barely-there so the 3D geometry behind it shows
-        // through.  All other (non-active) sketches stay at their normal
-        // appearance — only this one is the active drawing surface.
+        // The grey plane is a reference surface only — keep it hidden in the 3D
+        // view (the sketch's lines render separately) and reveal it when the
+        // sketch is the active drawing surface, or hovered in the objects list.
+        // When the user is INSIDE this sketch the plane goes barely-there so the
+        // 3D geometry behind it shows through.
         const activeSketchId = useStore.getState().selectedId;
         const isActive =
           sketchModeRef.current && itemData.id === activeSketchId;
-        mesh.visible = true;
+        const isHovered = itemData.id === useStore.getState().hoveredId;
+        mesh.visible = isActive || isHovered;
         if (mesh.material && "opacity" in mesh.material) {
           mesh.material.transparent = true;
           mesh.material.opacity = isActive ? 0.05 : 0.18;

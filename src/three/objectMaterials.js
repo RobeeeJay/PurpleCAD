@@ -370,6 +370,30 @@ export function updateEmissive(objectsRef, selectedId, selectedIds, hoveredId) {
   });
 }
 
+// The sketch plane is a reference surface, not part of the model: keep it hidden
+// in the 3D view (the sketch's lines render separately and stay visible) and
+// reveal it only while the sketch is hovered in the objects list, or while it is
+// the active drawing surface in sketch mode.  Runs on hover changes so the plane
+// appears/disappears without a full render-mode pass.
+export function updateSketchPlaneVisibility(
+  objectsRef,
+  itemsRef,
+  hoveredId,
+  sketchMode,
+  activeSketchId,
+) {
+  Object.values(objectsRef.current).forEach((mesh) => {
+    const item = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
+    if (!item || item.type !== "sketch") return;
+    if (item.visible === false) {
+      mesh.visible = false;
+      return;
+    }
+    const isActive = sketchMode && item.id === activeSketchId;
+    mesh.visible = isActive || item.id === hoveredId;
+  });
+}
+
 // While a hidden object is selected, reveal it at 25% opacity (75% transparent)
 // so the user can see what they've picked in the objects list; hidden objects
 // that aren't selected stay hidden.  applyRenderMode forces hidden meshes
