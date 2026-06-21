@@ -280,8 +280,11 @@ const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
 // and read true mm; only labels entering the range get a fresh texture, the
 // rest are just repositioned, so this is cheap to call every frame.
 export function updateRuler3D(rulerGroup, cx, cz, viewHeight, theme) {
-  const rowZ = Math.round(cz) + RULER_AXIS_OFFSET; // X-labels' row follows target Z
-  const rowX = Math.round(cx) + RULER_AXIS_OFFSET; // Z-labels' row follows target X
+  // Track the target continuously (no rounding) so the rows glide with a pan and
+  // stay centred on the view instead of snapping a whole unit each time the
+  // target crosses a half-integer.
+  const rowZ = cz + RULER_AXIS_OFFSET; // X-labels' row follows target Z
+  const rowX = cx + RULER_AXIS_OFFSET; // Z-labels' row follows target X
   for (const tier of rulerGroup.userData.tiers) {
     const visible = viewHeight < tier.showBelow;
     tier.group.visible = visible;
