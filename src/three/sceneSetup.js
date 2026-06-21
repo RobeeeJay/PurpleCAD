@@ -282,9 +282,12 @@ const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
 export function updateRuler3D(rulerGroup, cx, cz, viewHeight, theme) {
   // Track the target continuously (no rounding) so the rows glide with a pan and
   // stay centred on the view instead of snapping a whole unit each time the
-  // target crosses a half-integer.
-  const rowZ = cz + RULER_AXIS_OFFSET; // X-labels' row follows target Z
-  const rowX = cx + RULER_AXIS_OFFSET; // Z-labels' row follows target X
+  // target crosses a half-integer.  Scale the off-axis nudge with the zoom so a
+  // fixed world offset can't push the rows off-screen when zoomed right in
+  // (capped at the default so the zoomed-out look is unchanged).
+  const off = Math.min(viewHeight * 0.1, RULER_AXIS_OFFSET);
+  const rowZ = cz + off; // X-labels' row follows target Z
+  const rowX = cx + off; // Z-labels' row follows target X
   for (const tier of rulerGroup.userData.tiers) {
     const visible = viewHeight < tier.showBelow;
     tier.group.visible = visible;
