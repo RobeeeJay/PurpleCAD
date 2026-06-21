@@ -130,6 +130,10 @@ const RULER_TIERS = {
   ultra: { fontSize: 18, scaleX: 1.05, scaleY: 0.2625 },
 };
 
+// The ground labels lie flat (foreshortened), so they read smaller than their
+// raw scale suggests — this lifts them all to a legible on-screen size.
+const RULER_LABEL_SCALE = 1.5;
+
 // Shared unit quad — each label is the same geometry, sized via mesh.scale.
 const RULER_LABEL_GEO = new THREE.PlaneGeometry(1, 1);
 
@@ -158,8 +162,10 @@ function makeRulerLabel(text, tier = "coarse", theme) {
   // driven each frame for constant on-screen size.
   const mesh = new THREE.Mesh(RULER_LABEL_GEO, mat);
   mesh.rotation.x = -Math.PI / 2;
-  mesh.scale.set(t.scaleX, t.scaleY, 1);
-  mesh.userData.baseScale = { x: t.scaleX, y: t.scaleY, z: 1 };
+  const sx = t.scaleX * RULER_LABEL_SCALE;
+  const sy = t.scaleY * RULER_LABEL_SCALE;
+  mesh.scale.set(sx, sy, 1);
+  mesh.userData.baseScale = { x: sx, y: sy, z: 1 };
   mesh.userData.isRulerLabel = true;
   mesh.renderOrder = 1;
   return mesh;
