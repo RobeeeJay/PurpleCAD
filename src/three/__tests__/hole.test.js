@@ -85,6 +85,29 @@ describe("hole op", () => {
     expect(await ringTris(0.7)).toBeGreaterThan(8); // entry 3mm below
   });
 
+  it("bores no smaller than the thread crest, so no cylinder hides the thread", async () => {
+    // With a tolerance the groove grows outward; the bore must grow with it, or
+    // a smooth cylindrical wall is left standing in front of (hiding) the thread.
+    const res = await holeItem({
+      source: cube,
+      // 6 mm major, 1 mm pitch, 1 mm tolerance (all ÷10 in local units).
+      hole: holeRecipe({ threaded: true, tolerance: 1, length: 12 }),
+      allItems: [cube],
+      printPrecision: 0.05,
+    });
+    const pos = res.geometryData.positions;
+    // Innermost cut surface radius about the hole axis (x = z = 0, along Y).
+    let minR = Infinity;
+    for (let i = 0; i < pos.length; i += 3) {
+      const y = pos[i + 1];
+      if (y > 0.95 || y < -0.5) continue; // skip the top face + far side
+      const r = Math.hypot(pos[i], pos[i + 2]);
+      if (r > 0.05 && r < minR) minR = r;
+    }
+    // Thread crest ≈ 0.346 local; the pre-fix smooth bore sat at ≈ 0.246.
+    expect(minR).toBeGreaterThan(0.31);
+  });
+
   it("keeps the thread inside the bore, not spiralling across the face", async () => {
     // The thread is offset into the part so its lead-in turn lands on the entry
     // face — no groove geometry should poke above the top face (y=1).

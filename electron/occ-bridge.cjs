@@ -842,7 +842,11 @@ function buildHoleShape(partId, h) {
   const pitch = (h.pitch || 0) / MM_PER_UNIT;
   const tol = (h.tolerance || 0) / MM_PER_UNIT;
   const useThread = !!h.threaded && pitch > 1e-6;
-  const boreDia = useThread ? Math.max(1e-4, diameter - 1.0825 * pitch) : diameter;
+  // Bore to the thread crest (minor) radius incl. tolerance so the bore wall is
+  // flush with the crests and the groove stays visible (see occOps.js).
+  const boreDia = useThread
+    ? Math.max(1e-4, diameter - 1.0825 * pitch + 2 * tol)
+    : diameter;
 
   // Bore starts outside the face so it always breaks through (see occOps.js).
   const m = length;

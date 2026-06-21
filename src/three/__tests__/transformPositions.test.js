@@ -379,7 +379,6 @@ vi.mock("../objectMaterials.js", () => ({
   createMaterial: () => ({ dispose() {} }),
   resolveItemMaterial: (item, items, defaultMaterial) =>
     item?.material ?? defaultMaterial,
-  currentTheme: () => "dark",
 }));
 vi.mock("../../store", () => ({ useStore: () => null }));
 

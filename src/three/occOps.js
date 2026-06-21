@@ -990,9 +990,15 @@ export function buildHoleShape(partId, h) {
   const pitch = (h.pitch || 0) / MM_PER_UNIT;
   const tol = (h.tolerance || 0) / MM_PER_UNIT;
   const useThread = !!h.threaded && pitch > 1e-6;
-  // A threaded hole bores to the minor diameter; the groove opens it to major.
+  // Bore to the thread's MINOR (crest) diameter so the bore wall sits flush with
+  // the crests and the groove valleys stay visible.  The crest radius includes
+  // the tolerance the groove is grown by (native: majR = D/2 + tol, minR = majR
+  // - 0.5413·pitch), so the +2·tol matches it; the 1.0825 (vs 2·0.5413) leaves
+  // the bore a hair larger than the crest, which both avoids a coincident-face
+  // boolean and keeps no smooth wall standing in front of the thread.  Omitting
+  // the +2·tol (the old formula) bored SMALLER than the crest, hiding it.
   const boreDia = useThread
-    ? Math.max(1e-4, diameter - 1.0825 * pitch)
+    ? Math.max(1e-4, diameter - 1.0825 * pitch + 2 * tol)
     : diameter;
 
   // Start the BORE outside the face (back up along the normal by `length`) and

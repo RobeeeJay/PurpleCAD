@@ -7,11 +7,7 @@
 // pre-tessellated `geometryData` for csg results).
 
 import * as THREE from "three";
-import {
-  createMaterial,
-  resolveItemMaterial,
-  currentTheme,
-} from "../objectMaterials.js";
+import { createMaterial, resolveItemMaterial } from "../objectMaterials.js";
 import { resolveItemDepth } from "../geometryParams.js";
 import { DEFAULT_MATERIAL } from "../materialPresets.js";
 import {
@@ -26,16 +22,17 @@ import {
   DEFAULT_MESH_COLOR,
   WIREFRAME_EDGE_COLOR,
   NO_EMISSIVE,
-  gridMinorColorFor,
-  gridMajorColorFor,
 } from "../theme.js";
+
+// Green so the revealed plane stands out clearly against the model.
+const GRID_MINOR_COLOR = 0x2ecc71;
+const GRID_MAJOR_COLOR = 0x55ff88;
 
 // A two-tier grid laid in the sketch plane's local XY, spanning the 1000-unit
 // reference plane.  Added as a child of the (hover-revealed) plane mesh so it
 // inherits the plane's transform and visibility — when the plane appears on
 // hover the grid makes its position and orientation in space obvious.
 function buildSketchPlaneGrid() {
-  const theme = currentTheme();
   const half = 500; // matches the PlaneGeometry(1000, 1000)
   const majorStep = 10; // 10 scene units = 100 mm
   const minorPts = [];
@@ -62,8 +59,8 @@ function buildSketchPlaneGrid() {
       }),
     );
   };
-  group.add(tier(minorPts, gridMinorColorFor(theme), 0.12));
-  group.add(tier(majorPts, gridMajorColorFor(theme), 0.35));
+  group.add(tier(minorPts, GRID_MINOR_COLOR, 0.22));
+  group.add(tier(majorPts, GRID_MAJOR_COLOR, 0.5));
   return group;
 }
 
