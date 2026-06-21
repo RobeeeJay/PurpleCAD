@@ -502,10 +502,28 @@ export function createHighlightHelpers({
     return hit.point.distanceTo(worldV);
   };
 
+  // Show the point-highlight marker at an arbitrary world position (eg a sketch
+  // point the hole tool snaps to, which isn't a mesh vertex).
+  const highlightWorldPoint = (world) => {
+    clearPointHighlight();
+    const hlMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: CHAMFER_PREVIEW_COLOR,
+        depthTest: false,
+      }),
+    );
+    hlMesh.position.copy(world);
+    hlMesh.renderOrder = 999;
+    scene.add(hlMesh);
+    pointHighlightRef.current = hlMesh;
+  };
+
   return {
     clearFaceHighlight,
     clearEdgeHighlight,
     clearPointHighlight,
+    highlightWorldPoint,
     // Visual-only clearer (does NOT reset pendingFaceSelection /
     // pendingEdgeSelection).  Used by the modifier-keyup handler in
     // cameraControls.js so a stray keyup between hover and click doesn't

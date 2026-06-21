@@ -1,5 +1,6 @@
 import React from "react";
 import { useStore } from "../store";
+import { NumberInput } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
 // App settings: perspective field of view + snap-to-grid interval / angle.
@@ -100,13 +101,12 @@ const SettingsDialog = () => {
                 onChange={(e) => setFov(e.target.value)}
                 onKeyDown={stop}
               />
-              <input
-                type="number"
+              <NumberInput
                 min="5"
                 max="90"
                 step="1"
                 value={fov}
-                onChange={(e) => setFov(e.target.value)}
+                onCommit={(n, raw) => setFov(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -117,12 +117,11 @@ const SettingsDialog = () => {
           <div style={rowStyle}>
             <span style={labelStyle}>Snap distance</span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
+              <NumberInput
                 min="0.1"
                 step="0.5"
                 value={snapDistanceMm}
-                onChange={(e) => setSnapDistanceMm(e.target.value)}
+                onCommit={(n, raw) => setSnapDistanceMm(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -133,12 +132,11 @@ const SettingsDialog = () => {
           <div style={rowStyle}>
             <span style={labelStyle}>Snap angle</span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
+              <NumberInput
                 min="0.1"
                 step="1"
                 value={snapAngleDeg}
-                onChange={(e) => setSnapAngleDeg(e.target.value)}
+                onCommit={(n, raw) => setSnapAngleDeg(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -154,12 +152,11 @@ const SettingsDialog = () => {
               </span>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
+              <NumberInput
                 min="0"
                 step="1"
                 value={curveDetectionAngleDeg}
-                onChange={(e) => setCurveDetectionAngleDeg(e.target.value)}
+                onCommit={(n, raw) => setCurveDetectionAngleDeg(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -175,12 +172,11 @@ const SettingsDialog = () => {
               </span>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
+              <NumberInput
                 min="0.001"
                 step="0.05"
                 value={previewPrecisionMm}
-                onChange={(e) => setPreviewPrecisionMm(e.target.value)}
+                onCommit={(n, raw) => setPreviewPrecisionMm(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -196,12 +192,11 @@ const SettingsDialog = () => {
               </span>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
+              <NumberInput
                 min="0.001"
                 step="0.005"
                 value={printPrecisionMm}
-                onChange={(e) => setPrintPrecisionMm(e.target.value)}
+                onCommit={(n, raw) => setPrintPrecisionMm(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />

@@ -8,6 +8,7 @@ import {
 } from "../three/sketchText.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
 import { textSimplifyTol } from "../three/resolution.js";
+import { NumberInput } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
 const BUNDLED_FONT_OPTIONS = TEXT_FONTS.map((f) => ({
@@ -177,16 +178,11 @@ const TextDialog = () => {
               }}
             >
               Height (mm)
-              <input
-                type="number"
+              <NumberInput
                 min="0"
                 step="1"
-                value={
-                  Number.isFinite(textDraft.heightMm) ? textDraft.heightMm : ""
-                }
-                onChange={(e) =>
-                  updateTextDraft({ heightMm: parseFloat(e.target.value) })
-                }
+                value={textDraft.heightMm}
+                onCommit={(n) => updateTextDraft({ heightMm: n })}
                 onKeyDown={onFieldKey}
               />
             </label>

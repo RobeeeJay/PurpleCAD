@@ -3,7 +3,7 @@ import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitHole } from "../three/cameraControls/hole.js";
 import { METRIC_THREADS, threadById } from "../three/metricThreads.js";
-import { useEscapeKey, useDebouncedPreview } from "./inputs.jsx";
+import { useEscapeKey, useDebouncedPreview, NumberInput } from "./inputs.jsx";
 import { BAR_STYLE, LBL, barInput, barBtn } from "./viewport/overlayBar.js";
 
 // Hole tool overlay.  Per-phase hint while picking the face then the centre
@@ -71,22 +71,6 @@ const HoleDialog = () => {
       </div>
     );
 
-  const num = (v) => {
-    const n = parseFloat(v);
-    return Number.isFinite(n) ? n : NaN;
-  };
-  const setLen = (e) => {
-    const n = num(e.target.value);
-    if (n > 0) updateHoleParams({ lengthMm: n });
-  };
-  const setDia = (e) => {
-    const n = num(e.target.value);
-    if (n > 0) updateHoleParams({ diameterMm: n });
-  };
-  const setTol = (e) => {
-    const n = num(e.target.value);
-    if (Number.isFinite(n)) updateHoleParams({ toleranceMm: n });
-  };
   const setThread = (e) => {
     const id = e.target.value;
     if (id === "none")
@@ -126,12 +110,13 @@ const HoleDialog = () => {
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
         <span style={LBL}>Length(mm)</span>
-        <input
-          type="number"
+        <NumberInput
           min="0"
           step="0.5"
           value={params.lengthMm}
-          onChange={setLen}
+          onCommit={(n) => {
+            if (n > 0) updateHoleParams({ lengthMm: n });
+          }}
           onKeyDown={onKey}
           style={barInput(true)}
         />
@@ -149,13 +134,14 @@ const HoleDialog = () => {
           ))}
         </select>
         <span style={LBL}>{"Ø(mm)"}</span>
-        <input
-          type="number"
+        <NumberInput
           min="0"
           step="0.5"
           value={params.diameterMm}
           disabled={params.threaded}
-          onChange={setDia}
+          onCommit={(n) => {
+            if (n > 0) updateHoleParams({ diameterMm: n });
+          }}
           onKeyDown={onKey}
           style={barInput(true)}
           title={
@@ -163,11 +149,12 @@ const HoleDialog = () => {
           }
         />
         <span style={LBL}>Tol(mm)</span>
-        <input
-          type="number"
+        <NumberInput
           step="0.05"
           value={params.toleranceMm}
-          onChange={setTol}
+          onCommit={(n) => {
+            if (Number.isFinite(n)) updateHoleParams({ toleranceMm: n });
+          }}
           onKeyDown={onKey}
           style={barInput(true)}
         />

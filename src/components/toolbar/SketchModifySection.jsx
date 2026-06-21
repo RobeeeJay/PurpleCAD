@@ -2,6 +2,7 @@ import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { offsetSelectedSketchGeometry } from "../../three/sketchModifyActions.js";
+import { NumberInput } from "../inputs.jsx";
 
 const SketchModifySection = () => {
   const selectedId = useStore((s) => s.selectedId);
@@ -249,13 +250,11 @@ const SketchModifySection = () => {
           }}
         >
           {sketchModifyMode === "chamfer" ? "Setback" : "Radius"}
-          <input
-            type="number"
+          <NumberInput
             min="0"
             step="0.5"
             value={sketchModifyDistMm}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value);
+            onCommit={(v) => {
               if (Number.isFinite(v) && v > 0) setSketchModifyDistMm(v);
             }}
             style={{ width: 46 }}

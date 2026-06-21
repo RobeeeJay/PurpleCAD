@@ -4,6 +4,7 @@ import {
   DEFAULT_MATERIAL,
   BUILTIN_MATERIAL_PRESETS,
 } from "../three/materialPresets.js";
+import { NumberInput } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
 const rowStyle = {
@@ -181,15 +182,14 @@ const MaterialDialog = () => {
                 }
                 onKeyDown={stop}
               />
-              <input
-                type="number"
+              <NumberInput
                 min="0"
                 max="1"
                 step="0.01"
                 value={draft.opacity}
-                onChange={(e) =>
-                  update({ opacity: parseFloat(e.target.value) })
-                }
+                onCommit={(n) => {
+                  if (Number.isFinite(n)) update({ opacity: n });
+                }}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -210,15 +210,14 @@ const MaterialDialog = () => {
                 }
                 onKeyDown={stop}
               />
-              <input
-                type="number"
+              <NumberInput
                 min="0"
                 max="1"
                 step="0.01"
                 value={draft.metalness}
-                onChange={(e) =>
-                  update({ metalness: parseFloat(e.target.value) })
-                }
+                onCommit={(n) => {
+                  if (Number.isFinite(n)) update({ metalness: n });
+                }}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -239,15 +238,14 @@ const MaterialDialog = () => {
                 }
                 onKeyDown={stop}
               />
-              <input
-                type="number"
+              <NumberInput
                 min="0"
                 max="1"
                 step="0.01"
                 value={draft.roughness}
-                onChange={(e) =>
-                  update({ roughness: parseFloat(e.target.value) })
-                }
+                onCommit={(n) => {
+                  if (Number.isFinite(n)) update({ roughness: n });
+                }}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -273,15 +271,14 @@ const MaterialDialog = () => {
                 }
                 onKeyDown={stop}
               />
-              <input
-                type="number"
+              <NumberInput
                 min="0"
                 max="1"
                 step="0.01"
                 value={draft.clearcoat}
-                onChange={(e) =>
-                  update({ clearcoat: parseFloat(e.target.value) })
-                }
+                onCommit={(n) => {
+                  if (Number.isFinite(n)) update({ clearcoat: n });
+                }}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -303,15 +300,14 @@ const MaterialDialog = () => {
                   }
                   onKeyDown={stop}
                 />
-                <input
-                  type="number"
+                <NumberInput
                   min="0"
                   max="1"
                   step="0.01"
                   value={draft.clearcoatRoughness}
-                  onChange={(e) =>
-                    update({ clearcoatRoughness: parseFloat(e.target.value) })
-                  }
+                  onCommit={(n) => {
+                    if (Number.isFinite(n)) update({ clearcoatRoughness: n });
+                  }}
                   onKeyDown={stop}
                   style={numStyle}
                 />

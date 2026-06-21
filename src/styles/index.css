@@ -1,5 +1,17 @@
 @import "./theme.css";
 
+/* Number inputs are keyboard-entry only: strip the up/down spinner buttons
+   everywhere (the wheel is disabled in JS — see NumberInput in inputs.jsx). */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 :root {
   --bg-primary: #121212;
   --bg-secondary: #1e1e1e;

@@ -275,6 +275,7 @@ export function attachCameraControls(ctx) {
     applyFaceHighlight,
     applyEdgeHighlight,
     applyPointHighlight,
+    highlightWorldPoint,
   } = highlights;
 
   // ── Extrude profile selection ─────────────────────────────────────────────
@@ -1396,6 +1397,7 @@ export function attachCameraControls(ctx) {
       clearEdgeHighlight,
       applyPointHighlight,
       clearPointHighlight,
+      highlightWorldPoint,
       isMac,
     },
   );

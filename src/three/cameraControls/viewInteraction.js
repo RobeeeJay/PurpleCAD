@@ -9,6 +9,44 @@ import { START_FACE_HIGHLIGHT, FACE_HOVER_COLOR } from "../theme.js";
 import { nearestVertexOf } from "../objectOrigin.js";
 import { effectiveSelectionTypes } from "../../store/selectionMode.js";
 
+// The snappable 2D points of a sketch shape (endpoints, corners, centres) — the
+// candidates the hole tool highlights/snaps its centre to.
+function shapeSnapPoints2D(shape) {
+  switch (shape.type) {
+    case "line":
+      return [
+        { x: shape.x1, y: shape.y1 },
+        { x: shape.x2, y: shape.y2 },
+      ];
+    case "rect":
+      return [
+        { x: shape.x1, y: shape.y1 },
+        { x: shape.x2, y: shape.y1 },
+        { x: shape.x2, y: shape.y2 },
+        { x: shape.x1, y: shape.y2 },
+      ];
+    case "circle":
+    case "ellipse":
+      return [{ x: shape.cx, y: shape.cy }];
+    case "arc":
+      return [
+        { x: shape.cx, y: shape.cy },
+        {
+          x: shape.cx + Math.cos(shape.startAngle) * shape.r,
+          y: shape.cy + Math.sin(shape.startAngle) * shape.r,
+        },
+        {
+          x: shape.cx + Math.cos(shape.endAngle) * shape.r,
+          y: shape.cy + Math.sin(shape.endAngle) * shape.r,
+        },
+      ];
+    case "point":
+      return [{ x: shape.x, y: shape.y }];
+    default:
+      return [];
+  }
+}
+
 export function createViewInteraction(
   {
     renderer,
@@ -34,10 +72,47 @@ export function createViewInteraction(
     clearEdgeHighlight,
     applyPointHighlight,
     clearPointHighlight,
+    highlightWorldPoint,
     isMac,
   },
 ) {
   const controls = cameraControlsRef.current;
+  // World-space hole-centre snap captured on hover (a sketch point), consumed by
+  // the click handler so it commits exactly what was highlighted.
+  let holeSketchSnap = null;
+
+  // Nearest visible sketch point to the cursor, in world space, within `maxPx`
+  // screen distance — or null.  Sketch meshes carry the plane transform even
+  // while hidden, so the points project correctly.
+  const nearestSketchPoint = (clientX, clientY, cam, rect, maxPx = 14) => {
+    const cx = clientX - rect.left,
+      cy = clientY - rect.top;
+    let best = null,
+      bestD = maxPx;
+    for (const item of itemsRef.current) {
+      if (item.type !== "sketch" || item.visible === false || !item.shapes)
+        continue;
+      const mesh = objectsRef.current[item.id];
+      if (!mesh) continue;
+      for (const shape of item.shapes) {
+        for (const pt of shapeSnapPoints2D(shape)) {
+          const w = new THREE.Vector3(pt.x, pt.y, 0)
+            .applyQuaternion(mesh.quaternion)
+            .add(mesh.position);
+          const p = w.clone().project(cam);
+          if (p.z > 1) continue; // behind the camera
+          const sx = (p.x * 0.5 + 0.5) * rect.width;
+          const sy = (-p.y * 0.5 + 0.5) * rect.height;
+          const d = Math.hypot(sx - cx, sy - cy);
+          if (d < bestD) {
+            bestD = d;
+            best = w;
+          }
+        }
+      }
+    }
+    return best;
+  };
   // What the last hover settled on ("object" | "face" | "edge" | "point" | null)
   // so the click commits the same entity the priority highlighted.
   let lastHoverType = null;
@@ -54,6 +129,44 @@ export function createViewInteraction(
       return it?.type !== "sketch" && m.visible !== false;
     });
     const intersects = raycasterRef.current.intersectObjects(meshArray, false);
+
+    // Hole tool, point phase: snap-highlight the hole centre to the nearest
+    // object vertex (on the body under the cursor) or sketch point.
+    const holeToolHover = useStore.getState().holeTool;
+    if (holeToolHover && holeToolHover.phase === "point") {
+      clearFaceHighlight();
+      clearEdgeHighlight();
+      clearPointHighlight();
+      setHoveredId(null);
+      holeSketchSnap = null;
+      const hit = intersects[0];
+      let onVertex = false;
+      if (hit) {
+        const d = applyPointHighlight(hit);
+        const cam = currentCamera;
+        const worldPerPx = cam.isPerspectiveCamera
+          ? (2 * Math.tan((cam.fov * Math.PI) / 360) * hit.distance) /
+            rect.height
+          : (cam.top - cam.bottom) / rect.height;
+        if (d != null && d <= 11 * worldPerPx) onVertex = true;
+        else clearPointHighlight();
+      }
+      if (!onVertex) {
+        const sp = nearestSketchPoint(
+          e.clientX,
+          e.clientY,
+          currentCamera,
+          rect,
+        );
+        if (sp) {
+          highlightWorldPoint(sp);
+          holeSketchSnap = sp;
+        }
+      }
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return;
+    }
 
     if (sketchPlacementModeRef.current) {
       setHoveredId(null);
@@ -322,6 +435,17 @@ export function createViewInteraction(
         holeTool &&
         (holeTool.phase === "face" || holeTool.phase === "point")
       ) {
+        // A sketch point was snap-highlighted on hover: commit it (in the body's
+        // local frame) regardless of what the ray hit.
+        if (holeTool.phase === "point" && holeSketchSnap) {
+          const mesh = objectsRef.current[holeTool.itemId];
+          if (mesh) {
+            const lp = mesh.worldToLocal(holeSketchSnap.clone());
+            useStore.getState().setHolePoint({ x: lp.x, y: lp.y, z: lp.z });
+          }
+          save();
+          return;
+        }
         if (intersects.length > 0) {
           const hit = intersects[0];
           const mesh = hit.object;

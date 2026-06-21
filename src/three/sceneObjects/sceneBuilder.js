@@ -59,8 +59,8 @@ function buildSketchPlaneGrid() {
       }),
     );
   };
-  group.add(tier(minorPts, GRID_MINOR_COLOR, 0.22));
-  group.add(tier(majorPts, GRID_MAJOR_COLOR, 0.5));
+  group.add(tier(minorPts, GRID_MINOR_COLOR, 0.45));
+  group.add(tier(majorPts, GRID_MAJOR_COLOR, 0.85));
   return group;
 }
 

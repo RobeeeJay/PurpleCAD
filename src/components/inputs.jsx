@@ -58,7 +58,64 @@ export function useEscapeKey(active, onEscape) {
   }, [active]);
 }
 
-const fmt = (v) => (v == null ? "" : String(v));
+const fmt = (v) =>
+  v == null || (typeof v === "number" && !Number.isFinite(v)) ? "" : String(v);
+
+// A debounced, spinner-free number <input>.  Owns its raw string so it can be
+// cleared while typing; pushes the parsed value to `onCommit(num, raw)` once
+// editing settles (PREVIEW_DEBOUNCE_MS), on blur, and on Enter — so a keystroke
+// no longer triggers a store write / re-render.  Re-seeds only when `value`
+// changes from the OUTSIDE (not our own committed echo).  The wheel is disabled
+// globally (main.jsx) and spinners via CSS, so it is keyboard-entry only.
+export function NumberInput({
+  value,
+  onCommit,
+  debounceMs = PREVIEW_DEBOUNCE_MS,
+  onKeyDown,
+  ...rest
+}) {
+  const [raw, setRaw] = useState(() => fmt(value));
+  const seeded = useRef(fmt(value));
+  useEffect(() => {
+    const f = fmt(value);
+    if (f !== seeded.current) {
+      seeded.current = f;
+      setRaw(f);
+    }
+  }, [value]);
+
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+  const rawRef = useRef(raw);
+  rawRef.current = raw;
+  const flush = () => {
+    const r = rawRef.current;
+    seeded.current = r;
+    onCommitRef.current?.(r.trim() === "" ? NaN : Number(r), r);
+  };
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+
+  useEffect(() => {
+    if (raw === seeded.current) return; // mount / external echo — nothing new
+    const t = setTimeout(() => flushRef.current(), debounceMs);
+    return () => clearTimeout(t);
+  }, [raw, debounceMs]);
+
+  return (
+    <input
+      type="number"
+      value={raw}
+      onChange={(e) => setRaw(e.target.value)}
+      onBlur={() => flushRef.current()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") flushRef.current();
+        onKeyDown?.(e);
+      }}
+      {...rest}
+    />
+  );
+}
 
 // A numeric <input> that owns local string state so it can be cleared to blank
 // while typing, validates each keystroke, and pushes valid values to `commit`
