@@ -379,6 +379,7 @@ vi.mock("../objectMaterials.js", () => ({
   createMaterial: () => ({ dispose() {} }),
   resolveItemMaterial: (item, items, defaultMaterial) =>
     item?.material ?? defaultMaterial,
+  currentTheme: () => "dark",
 }));
 vi.mock("../../store", () => ({ useStore: () => null }));
 
@@ -1064,5 +1065,15 @@ describe("extrude drag-commit round-trip (no offset drift)", () => {
     expect(meshAfter.position.x).toBeCloseTo(startMeshPos.x + 5);
     expect(meshAfter.position.y).toBeCloseTo(startMeshPos.y);
     expect(meshAfter.position.z).toBeCloseTo(startMeshPos.z);
+  });
+
+  it("attaches a grid child to a sketch plane mesh", () => {
+    const mesh = buildAndGetMesh(
+      [{ id: 7, type: "sketch", position: pos(0, 0, 0), shapes: [] }],
+      7,
+    );
+    // The grid group carries two LineSegments tiers (minor + major).
+    const grid = mesh.children.find((c) => c.children?.length === 2);
+    expect(grid).toBeTruthy();
   });
 });

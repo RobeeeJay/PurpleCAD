@@ -10,6 +10,11 @@ import {
 import { DEFAULT_MATERIAL } from "./materialPresets.js";
 import { useStore } from "../store";
 
+// The active UI theme key, for theme-aware colours built outside React (eg the
+// sketch-plane grid in sceneBuilder).  Exposed here so callers reuse this
+// module's store binding rather than adding their own import.
+export const currentTheme = () => useStore.getState().theme;
+
 export const SPHERE_VERTEX_SHADER = `
   varying vec3 vViewPos;
   varying vec3 vSphereCenter;

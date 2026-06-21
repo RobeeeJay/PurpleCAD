@@ -7,7 +7,11 @@
 // pre-tessellated `geometryData` for csg results).
 
 import * as THREE from "three";
-import { createMaterial, resolveItemMaterial } from "../objectMaterials.js";
+import {
+  createMaterial,
+  resolveItemMaterial,
+  currentTheme,
+} from "../objectMaterials.js";
 import { resolveItemDepth } from "../geometryParams.js";
 import { DEFAULT_MATERIAL } from "../materialPresets.js";
 import {
@@ -22,7 +26,46 @@ import {
   DEFAULT_MESH_COLOR,
   WIREFRAME_EDGE_COLOR,
   NO_EMISSIVE,
+  gridMinorColorFor,
+  gridMajorColorFor,
 } from "../theme.js";
+
+// A two-tier grid laid in the sketch plane's local XY, spanning the 1000-unit
+// reference plane.  Added as a child of the (hover-revealed) plane mesh so it
+// inherits the plane's transform and visibility — when the plane appears on
+// hover the grid makes its position and orientation in space obvious.
+function buildSketchPlaneGrid() {
+  const theme = currentTheme();
+  const half = 500; // matches the PlaneGeometry(1000, 1000)
+  const majorStep = 10; // 10 scene units = 100 mm
+  const minorPts = [];
+  const majorPts = [];
+  for (let i = -half; i <= half; i++) {
+    const target = i % majorStep === 0 ? majorPts : minorPts;
+    target.push(i, -half, 0, i, half, 0); // line parallel to local Y
+    target.push(-half, i, 0, half, i, 0); // line parallel to local X
+  }
+  const group = new THREE.Group();
+  const tier = (pts, color, opacity) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(pts), 3),
+    );
+    return new THREE.LineSegments(
+      g,
+      new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+      }),
+    );
+  };
+  group.add(tier(minorPts, gridMinorColorFor(theme), 0.12));
+  group.add(tier(majorPts, gridMajorColorFor(theme), 0.35));
+  return group;
+}
 
 export function buildSceneObjects(
   items,
@@ -391,7 +434,9 @@ export function buildSceneObjects(
           object: mesh,
         });
       };
-    } else if (item.type !== "sketch") {
+    } else if (item.type === "sketch") {
+      mesh.add(buildSketchPlaneGrid());
+    } else {
       mesh.add(
         new THREE.LineSegments(
           new THREE.EdgesGeometry(geometry),
