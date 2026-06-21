@@ -85,6 +85,21 @@ describe("hole op", () => {
     expect(await ringTris(0.7)).toBeGreaterThan(8); // entry 3mm below
   });
 
+  it("keeps the thread inside the bore, not spiralling across the face", async () => {
+    // The thread is offset into the part so its lead-in turn lands on the entry
+    // face — no groove geometry should poke above the top face (y=1).
+    const res = await holeItem({
+      source: cube,
+      hole: holeRecipe({ threaded: true, length: 12 }),
+      allItems: [cube],
+      printPrecision: 0.05,
+    });
+    const pos = res.geometryData.positions;
+    let above = 0;
+    for (let i = 1; i < pos.length; i += 3) if (pos[i] > 1.002) above++;
+    expect(above).toBe(0);
+  });
+
   it("rebuilds a hole regenerator from its embedded source", async () => {
     const item = {
       id: 2,

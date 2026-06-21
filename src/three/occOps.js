@@ -995,7 +995,7 @@ export function buildHoleShape(partId, h) {
     ? Math.max(1e-4, diameter - 1.0825 * pitch)
     : diameter;
 
-  // Start the bore OUTSIDE the face (back up along the normal by `length`) and
+  // Start the BORE outside the face (back up along the normal by `length`) and
   // extend it, so it always breaks through the surface into an open hole even
   // when the picked entry lands a little below it.  Depth into the part stays
   // `length` (the bore still ends at point + length·dir).
@@ -1003,23 +1003,46 @@ export function buildHoleShape(partId, h) {
   const sx = p.x - d.x * m,
     sy = p.y - d.y * m,
     sz = p.z - d.z * m;
-  const len = length + m;
 
-  const bore = occ.makeHole(sx, sy, sz, d.x, d.y, d.z, len, boreDia, tol);
+  const bore = occ.makeHole(
+    sx,
+    sy,
+    sz,
+    d.x,
+    d.y,
+    d.z,
+    length + m,
+    boreDia,
+    tol,
+  );
   if (!bore) return null;
   let cut = occ.booleanOp([partId, bore], "difference");
   occ.releaseShape(bore);
   if (!cut) return null;
 
   if (useThread) {
+    // The groove sweep has a one-pitch lead-in turn at each end.  Offset the
+    // thread one pitch INTO the part so that lead-in lands on the entry face
+    // instead of spiralling across it around the opening, and shorten it to end
+    // at the bore bottom.  Skip the offset for holes too short to fit it.
+    let tx = p.x,
+      ty = p.y,
+      tz = p.z,
+      tLen = length;
+    if (length > 2 * pitch) {
+      tx = p.x + d.x * pitch;
+      ty = p.y + d.y * pitch;
+      tz = p.z + d.z * pitch;
+      tLen = length - 2 * pitch;
+    }
     const groove = occ.makeThread(
-      sx,
-      sy,
-      sz,
+      tx,
+      ty,
+      tz,
       d.x,
       d.y,
       d.z,
-      len,
+      tLen,
       diameter,
       pitch,
       tol,

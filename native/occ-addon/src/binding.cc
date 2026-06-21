@@ -1306,7 +1306,8 @@ static TopoDS_Shape BuildThreadGroove(
     Handle(Geom_CylindricalSurface) surf = new Geom_CylindricalSurface(cylAx, minR);
     const double TWO_PI = 2.0 * M_PI;
     // Cover the bore length plus an extra turn each end so the groove runs out
-    // cleanly past the cut faces.
+    // cleanly past the cut faces.  The caller offsets `start` into the part by
+    // one pitch so this lead-in lands on the entry face, not above it.
     double vEnd = length + 2.0 * pitch;
     double uEnd = (vEnd / pitch) * TWO_PI;
     // Straight line in (u = angle, v = height) param space → a helix in 3D.
