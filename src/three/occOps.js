@@ -516,18 +516,11 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
     if (r.kind === "emboss") {
       const sourceId = buildItemShapeLocal(r.source, allItems, precision);
       if (sourceId == null) return null;
-      let stampId = 0;
-      let resultId;
+      let resultId = 0;
       try {
-        stampId = buildEmbossStampShape(r.stamp);
-        if (!stampId) return null;
-        resultId = occ.booleanOp(
-          [sourceId, stampId],
-          r.stamp.deboss ? "difference" : "union",
-        );
+        resultId = embossResultShape(sourceId, r.stamp);
       } finally {
         occ.releaseShape(sourceId);
-        if (stampId) occ.releaseShape(stampId);
       }
       if (!resultId) return null;
       const offset = chamferCenterOffset(r, item);
@@ -1156,6 +1149,68 @@ export function buildEmbossStampShape(stamp) {
   return placed;
 }
 
+// Run the emboss against a body shape id and return a new result id (caller
+// releases) or 0; does NOT release `targetId`.  Conform booleans the wrapped
+// mesh directly.  Center INTERSECTS a deep profile prism with the body to get
+// the projected footprint — which exists ONLY where the geometry touches a face,
+// clipping anything that would float — then raises (emboss) / removes a top layer
+// (deboss) of it by `distance` along the face normal.
+function embossResultShape(targetId, stamp) {
+  if (!stamp) return 0;
+  if (stamp.mode === "conform") {
+    const s = buildEmbossStampShape(stamp);
+    if (!s) return 0;
+    const r = occ.booleanOp(
+      [targetId, s],
+      stamp.deboss ? "difference" : "union",
+    );
+    occ.releaseShape(s);
+    return r || 0;
+  }
+  const tool = buildEmbossStampShape(stamp);
+  if (!tool) return 0;
+  const imprint = occ.booleanOp([tool, targetId], "intersection");
+  occ.releaseShape(tool);
+  if (!imprint) return 0;
+  const n = stamp.normal || { nx: 0, ny: 1, nz: 0 };
+  const d = stamp.distance || 0;
+  let result = 0;
+  if (stamp.deboss) {
+    const lowered = occ.transformShape(
+      imprint,
+      -d * n.nx,
+      -d * n.ny,
+      -d * n.nz,
+      0,
+      0,
+      0,
+    );
+    const cutter = lowered
+      ? occ.booleanOp([imprint, lowered], "difference")
+      : 0;
+    if (lowered) occ.releaseShape(lowered);
+    occ.releaseShape(imprint);
+    if (!cutter) return 0;
+    result = occ.booleanOp([targetId, cutter], "difference");
+    occ.releaseShape(cutter);
+  } else {
+    const raised = occ.transformShape(
+      imprint,
+      d * n.nx,
+      d * n.ny,
+      d * n.nz,
+      0,
+      0,
+      0,
+    );
+    occ.releaseShape(imprint);
+    if (!raised) return 0;
+    result = occ.booleanOp([targetId, raised], "union");
+    occ.releaseShape(raised);
+  }
+  return result || 0;
+}
+
 async function embossItem({ source, stamp, allItems, printPrecision }) {
   const targetId = buildItemShapeLocal(source, allItems, printPrecision);
   if (targetId == null) {
@@ -1164,29 +1219,11 @@ async function embossItem({ source, stamp, allItems, printPrecision }) {
     );
   }
 
-  let stampId = 0;
+  let resultId = 0;
   try {
-    stampId = buildEmbossStampShape(stamp);
-  } catch (e) {
-    occ.releaseShape(targetId);
-    throw e;
-  }
-  if (!stampId) {
-    occ.releaseShape(targetId);
-    throw new Error(
-      "Emboss failed — the selected sketch geometry produced no solid.",
-    );
-  }
-
-  let resultId;
-  try {
-    resultId = occ.booleanOp(
-      [targetId, stampId],
-      stamp.deboss ? "difference" : "union",
-    );
+    resultId = embossResultShape(targetId, stamp);
   } finally {
     occ.releaseShape(targetId);
-    occ.releaseShape(stampId);
   }
   if (!resultId) {
     throw new Error(

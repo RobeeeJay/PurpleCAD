@@ -190,26 +190,16 @@ export function buildEmbossStamp(
   const deboss = !!params.deboss;
   const inPlaneX = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
   const inPlaneY = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-  // On a curved (cylindrical) face the flat stamp would float where the surface
-  // drops away from the tangent plane; sink the cutter by the sagitta over the
-  // stamp's footprint so it actually reaches the surface.
-  let sink = 0;
-  const Rcyl = faceSet?.cylinder?.radius;
-  if (Rcyl > 1e-3) {
-    let fr = 0;
-    for (const lp of loops)
-      for (const p of lp.outer) fr = Math.max(fr, Math.hypot(p.x, p.y));
-    sink = Rcyl - Math.sqrt(Math.max(0, Rcyl * Rcyl - fr * fr));
-  }
+  // The center stamp is a DEEP prism that passes all the way through the body
+  // along the face normal.  embossItem intersects it with the body to get the
+  // projected footprint (which exists only where the geometry actually touches a
+  // face), then raises/lowers that by `distance` — so anything that doesn't hit
+  // a face is clipped rather than left floating.
+  const TOOL_HALF = 50; // local units; covers any reasonable body
   const base = F.clone()
-    .add(
-      Nf.clone().multiplyScalar(
-        deboss ? EMBOSS_MARGIN : -(EMBOSS_MARGIN + sink),
-      ),
-    )
+    .add(Nf.clone().multiplyScalar(-TOOL_HALF))
     .add(inPlaneX.multiplyScalar(offsetH))
     .add(inPlaneY.multiplyScalar(offsetV));
-  const depth = (deboss ? -1 : 1) * (distance + EMBOSS_MARGIN + sink);
 
   return {
     mode: "center",
@@ -222,7 +212,9 @@ export function buildEmbossStamp(
       ry: euler.y,
       rz: euler.z,
     },
-    depth,
+    depth: 2 * TOOL_HALF,
+    normal: { nx: Nf.x, ny: Nf.y, nz: Nf.z },
+    distance,
     deboss,
   };
 }

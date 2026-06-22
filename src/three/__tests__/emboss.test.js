@@ -102,6 +102,35 @@ describe("emboss op", () => {
     expect(topRing(res.geometryData)).toBeGreaterThan(2);
   });
 
+  it("clips the relief to the face — geometry off the body isn't added", async () => {
+    // Shoving the pad a full unit off-centre lands it half over the cube's edge;
+    // the half hanging in space must be clipped, so nothing exceeds the cube's
+    // ±1 footprint in X/Z (an un-clipped pad would reach ~1.3).
+    const stamp = buildEmbossStamp(
+      [profile],
+      topFace,
+      params({ offsetMm: 10, distanceMm: 3 }),
+      [],
+      null,
+    );
+    const res = await embossItem({
+      source: cube,
+      stamp,
+      allItems: [cube],
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+    const p = res.geometryData.positions;
+    let mx = 0,
+      mz = 0;
+    for (let i = 0; i < p.length; i += 3) {
+      mx = Math.max(mx, Math.abs(p[i]));
+      mz = Math.max(mz, Math.abs(p[i + 2]));
+    }
+    expect(mx).toBeLessThan(1.05);
+    expect(mz).toBeLessThan(1.05);
+  });
+
   it("keeps the body anchored when the offset changes (no bbox drift)", async () => {
     // Not bbox-centring means the cube stays at its local frame (bottom y = -1)
     // no matter where the relief is offset to — so the object doesn't move.
