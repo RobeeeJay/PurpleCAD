@@ -309,6 +309,7 @@ async function regenerateEmboss(
       regenerator.params,
       liveItems,
       printPrecision,
+      regenerator.faceSet,
     ) || regenerator.stamp;
   let result;
   try {

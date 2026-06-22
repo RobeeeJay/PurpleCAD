@@ -2,10 +2,17 @@
 // recessed (deboss) relief, and rebuild an "emboss" regenerator from its recipe.
 
 import { describe, it, expect, beforeAll } from "vitest";
+import { createRequire } from "module";
 import { ensureOcc } from "../occ/init.js";
 import { embossItem } from "../occClient.js";
 import { buildEmbossStamp } from "../embossGeometry.js";
+import { buildItemShapeLocal } from "../occOps.js";
 import { regenerateItemsForResolution } from "../regenerateItems.js";
+
+const occ = createRequire(import.meta.url)(
+  "../../../native/occ-addon/build/Release/occ_addon.node",
+);
+const occTess = (id, prec) => occ.tessellate(id, prec);
 
 beforeAll(async () => {
   await ensureOcc();
@@ -88,6 +95,40 @@ describe("emboss op", () => {
     expect(res).toBeTruthy();
     // The top face is now an annulus around the recess opening, not one quad.
     expect(topRing(res.geometryData)).toBeGreaterThan(2);
+  });
+
+  it("wraps the relief around a cylinder (conform projection)", async () => {
+    const cyl = { id: 3, type: "cylinder", position: O, rotation: O, scale: S };
+    // A small square on a sketch (normal +Z), wrapped onto the cylinder side.
+    const smallProfile = {
+      polygon2D: square(0.15),
+      holes: [],
+      position: O,
+      rotation: O,
+      normalWorld: { x: 0, y: 0, z: 1 },
+    };
+    const sideFace = { nx: 1, ny: 0, nz: 0, cx: 1, cy: 0, cz: 0 };
+    const faceSet = { cylinder: { ax: 0, ay: 1, az: 0 } };
+    const stamp = buildEmbossStamp(
+      [smallProfile],
+      sideFace,
+      params({ projection: "conform", distanceMm: 3 }),
+      [cyl],
+      null,
+      faceSet,
+    );
+    expect(stamp).toBeTruthy();
+    expect(stamp.mode).toBe("conform");
+    const bareTris = tris(occTess(buildItemShapeLocal(cyl, [cyl], 0.1), 0.1));
+    const res = await embossItem({
+      source: cyl,
+      stamp,
+      allItems: [cyl],
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+    // The wrapped pad adds geometry to the smooth cylinder.
+    expect(tris(res.geometryData)).toBeGreaterThan(bareTris);
   });
 
   it("rebuilds an emboss regenerator from its embedded recipe", async () => {

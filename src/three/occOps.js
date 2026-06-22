@@ -1110,7 +1110,17 @@ export function buildHoleShape(partId, h) {
 // placement transform, computed renderer-side in embossGeometry.js so this stays
 // THREE-free for the Electron bridge).  Returns a shape id (caller releases) or 0.
 export function buildEmbossStampShape(stamp) {
-  if (!stamp || !stamp.loops || stamp.loops.length === 0) return 0;
+  if (!stamp) return 0;
+  // Conform: a pre-wrapped watertight mesh, sewn into a solid.
+  if (stamp.mode === "conform") {
+    const m = stamp.mesh;
+    if (!m || !m.positions || m.positions.length < 9) return 0;
+    const positions = new Float64Array(m.positions);
+    const indices =
+      m.indices && m.indices.length ? new Uint32Array(m.indices) : null;
+    return occ.makeSolidFromMesh(positions, indices) || 0;
+  }
+  if (!stamp.loops || stamp.loops.length === 0) return 0;
   const { placement: pl, depth } = stamp;
   let stampId = 0;
   for (const lp of stamp.loops) {

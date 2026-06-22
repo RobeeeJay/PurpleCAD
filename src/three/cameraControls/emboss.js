@@ -29,6 +29,7 @@ export function buildEmbossRecipe(items, printPrecision) {
     et.params,
     items,
     printPrecision,
+    et.faceSet,
   );
   if (!stamp) return null;
   return {

@@ -191,9 +191,9 @@ const EmbossDialog = () => {
           type="button"
           style={toggleStyle(params.projection === "conform")}
           onClick={() => updateEmbossParams({ projection: "conform" })}
-          title="Wrap around the faces (cylinder / wave) — coming soon; uses Center for now"
+          title="Wrap the geometry around a cylindrical face (falls back to Center on flat faces)"
         >
-          Conform*
+          Conform
         </button>
 
         <button type="button" onClick={cancel} title="Cancel" style={barBtn()}>

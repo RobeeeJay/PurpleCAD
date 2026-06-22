@@ -175,6 +175,11 @@ export function createEmbossInteraction({
     const invQ = mesh.getWorldQuaternion(new THREE.Quaternion()).invert();
     const localN = worldN.clone().applyQuaternion(invQ).normalize();
     const localP = mesh.worldToLocal(hit.point.clone());
+    // A cylinder primitive's side is a wrap target for the conform projection —
+    // its axis is local +Y (the radial click point gives the radius).  The flat
+    // caps (normal ≈ ±Y) are not curved, so leave them as plain center faces.
+    const onCurvedSide = it?.type === "cylinder" && Math.abs(localN.y) < 0.7;
+    const faceSet = onCurvedSide ? { cylinder: { ax: 0, ay: 1, az: 0 } } : null;
     store.setEmbossFace(
       id,
       {
@@ -185,7 +190,7 @@ export function createEmbossInteraction({
         cy: localP.y,
         cz: localP.z,
       },
-      null,
+      faceSet,
     );
     highlights.clearFaceHighlight();
     return true;
