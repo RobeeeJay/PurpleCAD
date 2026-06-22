@@ -25,6 +25,116 @@ const quatOf = (rot) =>
     new THREE.Euler(rot?.x || 0, rot?.y || 0, rot?.z || 0),
   );
 
+// Uniformly subdivide a triangle mesh (1→4 per pass, sharing edge midpoints) until
+// no edge is longer than maxEdge.  Input verts are deduped by position so a
+// non-indexed ExtrudeGeometry (duplicated seam verts) stays crack-free.  Used to
+// pre-tessellate the flat relief before wrapping it onto a curve, so the curved
+// result follows the surface instead of showing big faceted triangles.
+function subdivideToMaxEdge(positions, indices, maxEdge, maxPasses = 5) {
+  const verts = [];
+  const vMap = new Map();
+  const r5 = (v) => Math.round(v * 1e5) / 1e5;
+  const vid = (x, y, z) => {
+    const k = `${r5(x)},${r5(y)},${r5(z)}`;
+    let id = vMap.get(k);
+    if (id == null) {
+      id = verts.length;
+      verts.push([x, y, z]);
+      vMap.set(k, id);
+    }
+    return id;
+  };
+  let tris = [];
+  if (indices && indices.length) {
+    for (let i = 0; i < indices.length; i += 3) {
+      const a = indices[i] * 3,
+        b = indices[i + 1] * 3,
+        c = indices[i + 2] * 3;
+      tris.push([
+        vid(positions[a], positions[a + 1], positions[a + 2]),
+        vid(positions[b], positions[b + 1], positions[b + 2]),
+        vid(positions[c], positions[c + 1], positions[c + 2]),
+      ]);
+    }
+  } else {
+    for (let i = 0; i < positions.length; i += 9) {
+      tris.push([
+        vid(positions[i], positions[i + 1], positions[i + 2]),
+        vid(positions[i + 3], positions[i + 4], positions[i + 5]),
+        vid(positions[i + 6], positions[i + 7], positions[i + 8]),
+      ]);
+    }
+  }
+  const maxE2 = maxEdge * maxEdge;
+  const len2 = (a, b) => {
+    const dx = verts[a][0] - verts[b][0],
+      dy = verts[a][1] - verts[b][1],
+      dz = verts[a][2] - verts[b][2];
+    return dx * dx + dy * dy + dz * dz;
+  };
+  const midCache = new Map();
+  const mid = (a, b) => {
+    const k = a < b ? `${a}_${b}` : `${b}_${a}`;
+    let m = midCache.get(k);
+    if (m == null) {
+      m = verts.length;
+      verts.push([
+        (verts[a][0] + verts[b][0]) / 2,
+        (verts[a][1] + verts[b][1]) / 2,
+        (verts[a][2] + verts[b][2]) / 2,
+      ]);
+      midCache.set(k, m);
+    }
+    return m;
+  };
+  for (let pass = 0; pass < maxPasses; pass++) {
+    if (
+      !tris.some(
+        ([a, b, c]) =>
+          len2(a, b) > maxE2 || len2(b, c) > maxE2 || len2(c, a) > maxE2,
+      )
+    )
+      break;
+    const next = [];
+    for (const [a, b, c] of tris) {
+      const ab = mid(a, b),
+        bc = mid(b, c),
+        ca = mid(c, a);
+      next.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+    }
+    tris = next;
+  }
+  const outPos = new Array(verts.length * 3);
+  for (let i = 0; i < verts.length; i++) {
+    outPos[i * 3] = verts[i][0];
+    outPos[i * 3 + 1] = verts[i][1];
+    outPos[i * 3 + 2] = verts[i][2];
+  }
+  const outIdx = new Array(tris.length * 3);
+  for (let i = 0; i < tris.length; i++) {
+    outIdx[i * 3] = tris[i][0];
+    outIdx[i * 3 + 1] = tris[i][1];
+    outIdx[i * 3 + 2] = tris[i][2];
+  }
+  return { positions: outPos, indices: outIdx };
+}
+
+// Build the flat relief prism (extruded loops) and subdivide it so the wrap onto
+// a surface of radius R stays smooth — maxEdge ≈ a constant angular step on the
+// surface, so a tighter curve gets proportionally more triangles.
+function flatPrismMesh(shapes, depth, R) {
+  const geo = new THREE.ExtrudeGeometry(shapes, {
+    depth,
+    bevelEnabled: false,
+    curveSegments: 8,
+  });
+  const flatPos = Array.from(geo.attributes.position.array);
+  const flatIdx = geo.index ? Array.from(geo.index.array) : null;
+  geo.dispose();
+  const maxEdge = Math.max(0.02, (R > 1e-3 ? R : 1) * 0.12); // ~7° steps
+  return subdivideToMaxEdge(flatPos, flatIdx, maxEdge, 5);
+}
+
 // The selected sketch geometry, mapped into one common plane frame, centred on
 // its combined centroid and scaled.  Returns point-array loops ([{x,y}]) so they
 // can be wound flat (center mode) or fed to a Shape (conform mode).  invScale
@@ -131,11 +241,8 @@ function buildConformMesh(loops, cyl, face, params, invScale = 1) {
     );
     return s;
   });
-  const geo = new THREE.ExtrudeGeometry(shapes, {
-    depth: prismDepth,
-    bevelEnabled: false,
-    curveSegments: 8,
-  });
+  // Subdivide the flat prism so the wrap doesn't leave big faceted triangles.
+  const { positions: sp, indices } = flatPrismMesh(shapes, prismDepth, R);
 
   const ang = ((params.angleDeg || 0) * Math.PI) / 180;
   const ca = Math.cos(ang),
@@ -143,12 +250,11 @@ function buildConformMesh(loops, cyl, face, params, invScale = 1) {
   const offsetH = ((params.offsetMm || 0) / MM_PER_UNIT) * invScale; // around the cylinder
   const offsetV = ((params.offsetVMm || 0) / MM_PER_UNIT) * invScale; // along the axis
   const deboss = !!params.deboss;
-  const pos = geo.attributes.position;
-  const out = new Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i++) {
-    const px = pos.getX(i),
-      py = pos.getY(i),
-      pz = pos.getZ(i);
+  const out = new Array(sp.length);
+  for (let i = 0; i < sp.length; i += 3) {
+    const px = sp[i],
+      py = sp[i + 1],
+      pz = sp[i + 2];
     const u = px * ca - py * sa + offsetH; // arc length around the cylinder
     const w = px * sa + py * ca + offsetV; // axial position
     const theta = u / R;
@@ -156,12 +262,10 @@ function buildConformMesh(loops, cyl, face, params, invScale = 1) {
     const cos = Math.cos(theta) * r,
       sin = Math.sin(theta) * r;
     const axial = along + w;
-    out[i * 3] = C.x + A.x * axial + e1.x * cos + e2.x * sin;
-    out[i * 3 + 1] = C.y + A.y * axial + e1.y * cos + e2.y * sin;
-    out[i * 3 + 2] = C.z + A.z * axial + e1.z * cos + e2.z * sin;
+    out[i] = C.x + A.x * axial + e1.x * cos + e2.x * sin;
+    out[i + 1] = C.y + A.y * axial + e1.y * cos + e2.y * sin;
+    out[i + 2] = C.z + A.z * axial + e1.z * cos + e2.z * sin;
   }
-  const indices = geo.index ? Array.from(geo.index.array) : null;
-  geo.dispose();
   return { positions: out, indices };
 }
 
@@ -194,11 +298,8 @@ function buildSphereConformMesh(loops, sph, face, params, invScale = 1) {
     );
     return s;
   });
-  const geo = new THREE.ExtrudeGeometry(shapes, {
-    depth: prismDepth,
-    bevelEnabled: false,
-    curveSegments: 8,
-  });
+  // Subdivide the flat prism so the spherical wrap stays smooth in both axes.
+  const { positions: sp, indices } = flatPrismMesh(shapes, prismDepth, R);
 
   const ang = ((params.angleDeg || 0) * Math.PI) / 180;
   const ca = Math.cos(ang),
@@ -206,13 +307,12 @@ function buildSphereConformMesh(loops, sph, face, params, invScale = 1) {
   const offsetH = ((params.offsetMm || 0) / MM_PER_UNIT) * invScale;
   const offsetV = ((params.offsetVMm || 0) / MM_PER_UNIT) * invScale;
   const deboss = !!params.deboss;
-  const pos = geo.attributes.position;
-  const out = new Array(pos.count * 3);
+  const out = new Array(sp.length);
   const dir = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    const px = pos.getX(i),
-      py = pos.getY(i),
-      pz = pos.getZ(i);
+  for (let i = 0; i < sp.length; i += 3) {
+    const px = sp[i],
+      py = sp[i + 1],
+      pz = sp[i + 2];
     const u = px * ca - py * sa + offsetH;
     const w = px * sa + py * ca + offsetV;
     const d = Math.hypot(u, w); // geodesic distance from the anchor
@@ -232,12 +332,10 @@ function buildSphereConformMesh(loops, sph, face, params, invScale = 1) {
         .addScaledVector(t1, tu * sphi)
         .addScaledVector(t2, tw * sphi);
     }
-    out[i * 3] = C.x + dir.x * r;
-    out[i * 3 + 1] = C.y + dir.y * r;
-    out[i * 3 + 2] = C.z + dir.z * r;
+    out[i] = C.x + dir.x * r;
+    out[i + 1] = C.y + dir.y * r;
+    out[i + 2] = C.z + dir.z * r;
   }
-  const indices = geo.index ? Array.from(geo.index.array) : null;
-  geo.dispose();
   return { positions: out, indices };
 }
 

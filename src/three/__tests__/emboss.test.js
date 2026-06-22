@@ -283,6 +283,56 @@ describe("emboss op", () => {
     expect(tris(res.geometryData)).toBeGreaterThan(bareTris);
   });
 
+  it("subdivides the conform mesh so the wrap isn't jaggy", () => {
+    const cyl = { id: 3, type: "cylinder", position: O, rotation: O, scale: S };
+    const smallProfile = {
+      polygon2D: square(0.15),
+      holes: [],
+      position: O,
+      rotation: O,
+      normalWorld: { x: 0, y: 0, z: 1 },
+    };
+    const sideFace = { nx: 1, ny: 0, nz: 0, cx: 1, cy: 0, cz: 0 };
+    const faceSet = {
+      cylinder: { ax: 0, ay: 1, az: 0, cx: 0, cy: 0, cz: 0, radius: 1 },
+    };
+    const stamp = buildEmbossStamp(
+      [smallProfile],
+      sideFace,
+      params({ projection: "conform", distanceMm: 3 }),
+      [cyl],
+      null,
+      faceSet,
+      1,
+    );
+    expect(stamp.mode).toBe("conform");
+    const { positions, indices } = stamp.mesh;
+    // A bare extruded square is ~12 triangles; subdivision blows that up.
+    expect(indices.length / 3).toBeGreaterThan(100);
+    // No giant facets — every edge stays a small fraction of the R=1 radius, so
+    // the wrap reads as a smooth curve.
+    let maxEdge = 0;
+    for (let i = 0; i < indices.length; i += 3) {
+      for (const [a, b] of [
+        [0, 1],
+        [1, 2],
+        [2, 0],
+      ]) {
+        const ia = indices[i + a] * 3,
+          ib = indices[i + b] * 3;
+        maxEdge = Math.max(
+          maxEdge,
+          Math.hypot(
+            positions[ia] - positions[ib],
+            positions[ia + 1] - positions[ib + 1],
+            positions[ia + 2] - positions[ib + 2],
+          ),
+        );
+      }
+    }
+    expect(maxEdge).toBeLessThan(0.4);
+  });
+
   it("debosses a conform recess without dropping the cylinder", async () => {
     const cyl = { id: 3, type: "cylinder", position: O, rotation: O, scale: S };
     const smallProfile = {
