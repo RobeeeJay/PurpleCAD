@@ -10,6 +10,7 @@ import { polyArea } from "../sceneObjects/polygonUtil.js";
 import {
   growConnectedFaceSet,
   fitCylinderToFaceSet,
+  fitSphereToFaceSet,
   centerFaceOfSet,
 } from "../embossFaceSet.js";
 
@@ -117,6 +118,24 @@ export function createEmbossInteraction({
         setPositions: null,
       };
     }
+    // A sphere primitive wraps the relief over its surface (centre at origin,
+    // radius = the click point's distance from it in local geometry units).
+    if (it?.type === "sphere") {
+      return {
+        id,
+        mesh,
+        face: plane,
+        faceSet: {
+          sphere: {
+            cx: 0,
+            cy: 0,
+            cz: 0,
+            radius: Math.hypot(localP.x, localP.y, localP.z),
+          },
+        },
+        setPositions: null,
+      };
+    }
     if (isPrim)
       return { id, mesh, face: plane, faceSet: null, setPositions: null };
 
@@ -131,13 +150,16 @@ export function createEmbossInteraction({
     );
     if (!grown)
       return { id, mesh, face: plane, faceSet: null, setPositions: null };
+    // Prefer a cylinder fit (axis ⟂ normals); if the set's normals span all
+    // three axes it's a sphere, so fit one instead.
     const cyl = fitCylinderToFaceSet(grown.normals, grown.centroids);
+    const sph = cyl ? null : fitSphereToFaceSet(grown.normals, grown.positions);
     const center = centerFaceOfSet(grown.normals, grown.centroids) || plane;
     return {
       id,
       mesh,
       face: center,
-      faceSet: cyl ? { cylinder: cyl } : null,
+      faceSet: cyl ? { cylinder: cyl } : sph ? { sphere: sph } : null,
       setPositions: grown.positions,
     };
   };

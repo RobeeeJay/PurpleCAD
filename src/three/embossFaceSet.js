@@ -235,8 +235,11 @@ export function fitCylinderToFaceSet(normals, centroids) {
   }
   const eig = eigenSym3(M); // ascending
   // A cylinder's normals span a plane: smallest eigenvalue ≈ 0 (the axis), the
-  // other two sizeable.  A flat set has TWO tiny eigenvalues → reject.
+  // other two sizeable.  A flat set has TWO tiny eigenvalues → reject; a sphere
+  // has THREE sizeable ones (no axis), so reject it here too and let the sphere
+  // fit claim it.
   if (eig[1].value < 0.05 * eig[2].value) return null;
+  if (eig[0].value > 0.12 * eig[2].value) return null;
   const A = new THREE.Vector3(...eig[0].vec).normalize();
 
   // Basis in the plane ⟂ A.
@@ -300,4 +303,66 @@ export function fitCylinderToFaceSet(normals, centroids) {
     cz: center.z,
     radius,
   };
+}
+
+// Solve a 4x4 linear system (Gaussian elimination with partial pivoting).
+function solve4(A, b) {
+  const m = A.map((r, i) => [...r, b[i]]);
+  for (let col = 0; col < 4; col++) {
+    let piv = col;
+    for (let r = col + 1; r < 4; r++)
+      if (Math.abs(m[r][col]) > Math.abs(m[piv][col])) piv = r;
+    if (Math.abs(m[piv][col]) < 1e-12) return null;
+    [m[col], m[piv]] = [m[piv], m[col]];
+    for (let r = 0; r < 4; r++) {
+      if (r === col) continue;
+      const f = m[r][col] / m[col][col];
+      for (let c = col; c < 5; c++) m[r][c] -= f * m[col][c];
+    }
+  }
+  return [0, 1, 2, 3].map((i) => m[i][4] / m[i][i]);
+}
+
+// Fit a sphere to the face set's VERTICES (on-surface points) by the standard
+// algebraic least-squares fit: |p|² = 2·c·p + (R² − |c|²).  Returns null when the
+// normals don't span all three axes (a flat or cylindrical set, not a sphere).
+export function fitSphereToFaceSet(normals, positions) {
+  if (normals.length < 4 || positions.length < 12) return null;
+  const M = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ];
+  for (const n of normals)
+    for (let r = 0; r < 3; r++)
+      for (let c = 0; c < 3; c++) M[r][c] += n[r] * n[c];
+  const eig = eigenSym3(M);
+  // A near-zero smallest eigenvalue means an axis the normals avoid → plane or
+  // cylinder, not a sphere.
+  if (eig[0].value < 0.12 * eig[2].value) return null;
+
+  const A = [
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+  ];
+  const bb = [0, 0, 0, 0];
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i],
+      y = positions[i + 1],
+      z = positions[i + 2];
+    const row = [2 * x, 2 * y, 2 * z, 1];
+    const rhs = x * x + y * y + z * z;
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) A[r][c] += row[r] * row[c];
+      bb[r] += row[r] * rhs;
+    }
+  }
+  const sol = solve4(A, bb);
+  if (!sol) return null;
+  const [cx, cy, cz, d] = sol;
+  const r2 = d + cx * cx + cy * cy + cz * cz;
+  if (!(r2 > 1e-9) || !Number.isFinite(r2)) return null;
+  return { cx, cy, cz, radius: Math.sqrt(r2) };
 }

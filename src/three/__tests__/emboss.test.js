@@ -11,6 +11,7 @@ import { buildItemShapeLocal } from "../occOps.js";
 import {
   growConnectedFaceSet,
   fitCylinderToFaceSet,
+  fitSphereToFaceSet,
 } from "../embossFaceSet.js";
 import { regenerateItemsForResolution } from "../regenerateItems.js";
 
@@ -364,6 +365,124 @@ describe("emboss op", () => {
     const grown = growConnectedFaceSet(g, 0, { x: 0, y: 0, z: 1 }, 30);
     expect(grown).toBeTruthy();
     expect(fitCylinderToFaceSet(grown.normals, grown.centroids)).toBeNull();
+  });
+
+  it("divides the relief into the body's local frame on a scaled body", () => {
+    // The stamp is built unscaled (the committed csg re-applies the body scale),
+    // so a scale-2 body must halve the relief in local units or it'd render 2x
+    // too big.  Compare the centred loop extent at scale 1 vs 2.
+    const ext = (s) => {
+      const o = s.loops[0].outer;
+      let mn = Infinity,
+        mx = -Infinity;
+      for (let i = 0; i < o.length; i += 2) {
+        mn = Math.min(mn, o[i]);
+        mx = Math.max(mx, o[i]);
+      }
+      return mx - mn;
+    };
+    const s1 = buildEmbossStamp(
+      [profile],
+      topFace,
+      params(),
+      [],
+      null,
+      null,
+      1,
+    );
+    const s2 = buildEmbossStamp(
+      [profile],
+      topFace,
+      params(),
+      [],
+      null,
+      null,
+      2,
+    );
+    expect(ext(s2)).toBeCloseTo(ext(s1) / 2, 5);
+    expect(s2.distance).toBeCloseTo(s1.distance / 2, 5);
+  });
+
+  it("wraps the relief over a sphere (conform projection)", async () => {
+    const sph = { id: 4, type: "sphere", position: O, rotation: O, scale: S };
+    const R = 1.5; // the OCC sphere primitive's local radius
+    const smallProfile = {
+      polygon2D: square(0.15),
+      holes: [],
+      position: O,
+      rotation: O,
+      normalWorld: { x: 0, y: 0, z: 1 },
+    };
+    // Anchor on the sphere's +Z pole.
+    const face = { nx: 0, ny: 0, nz: 1, cx: 0, cy: 0, cz: R };
+    const faceSet = { sphere: { cx: 0, cy: 0, cz: 0, radius: R } };
+    const stamp = buildEmbossStamp(
+      [smallProfile],
+      face,
+      params({ projection: "conform", distanceMm: 3 }),
+      [sph],
+      null,
+      faceSet,
+      1,
+    );
+    expect(stamp.mode).toBe("conform");
+    // Every wrapped vertex sits on the sphere shell (R-margin .. R+relief).
+    const p = stamp.mesh.positions;
+    for (let i = 0; i < p.length; i += 3) {
+      const d = Math.hypot(p[i], p[i + 1], p[i + 2]);
+      expect(d).toBeGreaterThan(R - 0.1);
+      expect(d).toBeLessThan(R + 0.4);
+    }
+    const res = await embossItem({
+      source: sph,
+      stamp,
+      allItems: [sph],
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+    // The raised pad protrudes past the bare R=1.5 sphere shell, so the unioned
+    // result must reach beyond it somewhere (a flat projection never would).
+    const rp = res.geometryData.positions;
+    let maxD = 0;
+    for (let i = 0; i < rp.length; i += 3)
+      maxD = Math.max(maxD, Math.hypot(rp[i], rp[i + 1], rp[i + 2]));
+    expect(maxD).toBeGreaterThan(R + 0.1);
+  });
+
+  it("fits a sphere to a curved (3D-spanning) face set", () => {
+    const C = [1, 2, 3],
+      R = 2;
+    const normals = [],
+      positions = [];
+    for (let i = 0; i <= 8; i++) {
+      const theta = (i / 8) * 1.2; // a wide cap so the normals span 3D
+      for (let j = 0; j < 12; j++) {
+        const phi = (j / 12) * 2 * Math.PI;
+        const nx = Math.sin(theta) * Math.cos(phi),
+          ny = Math.sin(theta) * Math.sin(phi),
+          nz = Math.cos(theta);
+        normals.push([nx, ny, nz]);
+        const px = C[0] + R * nx,
+          py = C[1] + R * ny,
+          pz = C[2] + R * nz;
+        positions.push(px, py, pz, px, py, pz, px, py, pz);
+      }
+    }
+    const sph = fitSphereToFaceSet(normals, positions);
+    expect(sph).toBeTruthy();
+    expect(sph.cx).toBeCloseTo(1, 1);
+    expect(sph.cy).toBeCloseTo(2, 1);
+    expect(sph.cz).toBeCloseTo(3, 1);
+    expect(sph.radius).toBeCloseTo(2, 1);
+    // A flat patch is not a sphere.
+    const flatN = [
+      [0, 0, 1],
+      [0, 0, 1],
+      [0, 0, 1],
+      [0, 0, 1],
+    ];
+    const flatP = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0];
+    expect(fitSphereToFaceSet(flatN, flatP)).toBeNull();
   });
 
   it("rebuilds an emboss regenerator from its embedded recipe", async () => {
