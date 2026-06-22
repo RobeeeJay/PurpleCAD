@@ -135,6 +135,78 @@ export function growConnectedFaceSet(
   return { positions, normals, centroids };
 }
 
+// Per-triangle normals + centroids for a flat [x,y,z,…] positions array (9 per
+// triangle) — the form an accumulated multi-face selection is stored in.
+export function triData(positions) {
+  const normals = [];
+  const centroids = [];
+  const a = new THREE.Vector3(),
+    b = new THREE.Vector3(),
+    c = new THREE.Vector3();
+  for (let i = 0; i + 8 < positions.length; i += 9) {
+    a.set(positions[i], positions[i + 1], positions[i + 2]);
+    b.set(positions[i + 3], positions[i + 4], positions[i + 5]);
+    c.set(positions[i + 6], positions[i + 7], positions[i + 8]);
+    const n = new THREE.Vector3()
+      .crossVectors(b.clone().sub(a), c.clone().sub(a))
+      .normalize();
+    normals.push([n.x, n.y, n.z]);
+    centroids.push([
+      (a.x + b.x + c.x) / 3,
+      (a.y + b.y + c.y) / 3,
+      (a.z + b.z + c.z) / 3,
+    ]);
+  }
+  return { normals, centroids };
+}
+
+// True when every triangle of a flat positions array is reachable from the first
+// across shared edges whose dihedral is within maxAngleDeg — i.e. the selected
+// faces form ONE connected set with no neighbour bending more than that.  Used to
+// gate the emboss Confirm: a multi-face pick must be connected within 45°.
+export function validateFaceSetConnectivity(positions, maxAngleDeg = 45) {
+  const triCount = Math.floor(positions.length / 9);
+  if (triCount === 0) return false;
+  if (triCount === 1) return true;
+  const { normals } = triData(positions);
+  const nrm = normals.map((n) => new THREE.Vector3(n[0], n[1], n[2]));
+  const round = (x) => Math.round(x * 1000) / 1000;
+  const vKey = (i, k) =>
+    `${round(positions[i + k * 3])},${round(positions[i + k * 3 + 1])},${round(positions[i + k * 3 + 2])}`;
+  const eKey = (ka, kb) => (ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`);
+  const edgeToTris = new Map();
+  const triEdges = [];
+  for (let t = 0; t < triCount; t++) {
+    const i = t * 9;
+    const k0 = vKey(i, 0),
+      k1 = vKey(i, 1),
+      k2 = vKey(i, 2);
+    const es = [eKey(k0, k1), eKey(k1, k2), eKey(k2, k0)];
+    triEdges.push(es);
+    for (const e of es) {
+      let l = edgeToTris.get(e);
+      if (!l) edgeToTris.set(e, (l = []));
+      l.push(t);
+    }
+  }
+  const cosThr = Math.cos((Math.max(0, maxAngleDeg) * Math.PI) / 180);
+  const visited = new Set([0]);
+  const queue = [0];
+  while (queue.length) {
+    const t = queue.shift();
+    for (const e of triEdges[t]) {
+      for (const nt of edgeToTris.get(e) || []) {
+        if (visited.has(nt)) continue;
+        if (nrm[t].dot(nrm[nt]) > cosThr) {
+          visited.add(nt);
+          queue.push(nt);
+        }
+      }
+    }
+  }
+  return visited.size === triCount;
+}
+
 // The face of the set whose centroid is nearest the set's overall centroid —
 // the "centre-most face" whose plane drives centre-face projection.
 export function centerFaceOfSet(normals, centroids) {

@@ -12,7 +12,45 @@ import {
   fitCylinderToFaceSet,
   fitSphereToFaceSet,
   centerFaceOfSet,
+  triData,
+  validateFaceSetConnectivity,
 } from "../embossFaceSet.js";
+
+// Order-independent key for a triangle (3 rounded verts), so an accumulated
+// face selection can be deduped / toggled.
+const triKey = (p, i) => {
+  const r = (x) => Math.round(x * 1000) / 1000;
+  return [
+    `${r(p[i])},${r(p[i + 1])},${r(p[i + 2])}`,
+    `${r(p[i + 3])},${r(p[i + 4])},${r(p[i + 5])}`,
+    `${r(p[i + 6])},${r(p[i + 7])},${r(p[i + 8])}`,
+  ]
+    .sort()
+    .join("|");
+};
+
+// Add the clicked region's triangles to the accumulated set, or remove them if
+// that region is already selected (re-clicking a face toggles it off).
+const toggleRegion = (prev, region) => {
+  const prevKeys = new Set();
+  for (let i = 0; i + 8 < prev.length; i += 9) prevKeys.add(triKey(prev, i));
+  const firstKey = region.length >= 9 ? triKey(region, 0) : null;
+  const out = [];
+  if (firstKey && prevKeys.has(firstKey)) {
+    const remove = new Set();
+    for (let i = 0; i + 8 < region.length; i += 9)
+      remove.add(triKey(region, i));
+    for (let i = 0; i + 8 < prev.length; i += 9)
+      if (!remove.has(triKey(prev, i)))
+        for (let k = 0; k < 9; k++) out.push(prev[i + k]);
+  } else {
+    for (let k = 0; k < prev.length; k++) out.push(prev[k]);
+    for (let i = 0; i + 8 < region.length; i += 9)
+      if (!prevKeys.has(triKey(region, i)))
+        for (let k = 0; k < 9; k++) out.push(region[i + k]);
+  }
+  return out;
+};
 
 const SEL_COLOR = 0x44dd88; // selected sketch geometry fill
 const HOVER_COLOR = 0x88ccff; // hovered fill
@@ -285,12 +323,62 @@ export function createEmbossInteraction({
       return true;
     }
 
-    // Face pick: grow the connected set, fit a cylinder, capture the centre-most
-    // face plane (all in the body's local frame).
+    // Face pick (all in the body's local frame).
     const hit = pickFaceHit(x, y);
     if (!hit) return true;
     const a = analyzeFace(hit);
-    store.setEmbossFace(a.id, a.face, a.faceSet);
+
+    // A primitive's curved face is parametric (no triangle set) — one click is
+    // the whole face, always valid.
+    if (!a.setPositions) {
+      store.setEmbossFaceSelection({
+        itemId: a.id,
+        face: a.face,
+        faceSet: a.faceSet,
+        faceTris: null,
+        valid: true,
+        keepPicking: false,
+      });
+      highlights.clearFaceHighlight();
+      highlights.clearSelectedFaces?.();
+      return true;
+    }
+
+    // Mesh faces: accumulate the clicked region (toggle), re-fit, and validate
+    // that the combined set is connected within 45° — that gates Confirm.
+    const startedNewBody = et.itemId != null && et.itemId !== a.id;
+    const prev = !startedNewBody && et.faceTris ? et.faceTris : [];
+    const combined = toggleRegion(prev, a.setPositions);
+    if (combined.length < 9) {
+      store.setEmbossFaceSelection({
+        itemId: null,
+        face: null,
+        faceSet: null,
+        faceTris: null,
+        valid: false,
+        keepPicking: true,
+      });
+      highlights.clearSelectedFaces?.();
+    } else {
+      const { normals, centroids } = triData(combined);
+      const cyl = fitCylinderToFaceSet(normals, centroids);
+      const sph = cyl ? null : fitSphereToFaceSet(normals, combined);
+      const center = centerFaceOfSet(normals, centroids) || a.face;
+      const valid = validateFaceSetConnectivity(combined, 45);
+      store.setEmbossFaceSelection({
+        itemId: a.id,
+        face: center,
+        faceSet: cyl ? { cylinder: cyl } : sph ? { sphere: sph } : null,
+        faceTris: combined,
+        valid,
+        keepPicking: true,
+      });
+      if (!valid)
+        store.showNotification?.(
+          "Selected faces aren't all connected within 45° — Confirm stays disabled.",
+        );
+      highlights.highlightSelectedFaces?.(a.mesh, combined, FACE_HOVER_COLOR);
+    }
     highlights.clearFaceHighlight();
     return true;
   };

@@ -527,6 +527,46 @@ export function createHighlightHelpers({
 
   // Highlight an arbitrary connected face set (the emboss tool grows it across
   // a curved surface) from its triangle positions in the mesh's local frame.
+  // A PERSISTENT highlight of the accumulated emboss multi-face selection (the
+  // hover highlight on faceHighlightRef is transient and cleared every move; this
+  // one stays until the selection changes or the tool ends).
+  let selectedFacesMesh = null;
+  const clearSelectedFaces = () => {
+    if (selectedFacesMesh) {
+      scene.remove(selectedFacesMesh);
+      selectedFacesMesh.geometry.dispose();
+      selectedFacesMesh.material.dispose();
+      selectedFacesMesh = null;
+    }
+  };
+  const highlightSelectedFaces = (mesh, positionsLocal, color) => {
+    clearSelectedFaces();
+    if (!mesh || !positionsLocal || positionsLocal.length < 9) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positionsLocal), 3),
+    );
+    const m = new THREE.Mesh(
+      g,
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.4,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }),
+    );
+    m.position.copy(mesh.position);
+    m.rotation.copy(mesh.rotation);
+    m.scale.copy(mesh.scale);
+    m.renderOrder = 995;
+    scene.add(m);
+    selectedFacesMesh = m;
+  };
+
   const highlightFaceSet = (mesh, positionsLocal, color) => {
     clearFaceHighlight();
     if (!positionsLocal || positionsLocal.length < 9) return;
@@ -561,6 +601,8 @@ export function createHighlightHelpers({
     clearPointHighlight,
     highlightWorldPoint,
     highlightFaceSet,
+    highlightSelectedFaces,
+    clearSelectedFaces,
     // Visual-only clearer (does NOT reset pendingFaceSelection /
     // pendingEdgeSelection).  Used by the modifier-keyup handler in
     // cameraControls.js so a stray keyup between hover and click doesn't

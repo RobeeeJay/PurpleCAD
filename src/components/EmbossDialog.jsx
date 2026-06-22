@@ -26,10 +26,12 @@ const EmbossDialog = () => {
   const params = embossTool?.params;
   const nProfiles = embossTool?.profiles?.length || 0;
   const hasFace = !!embossTool?.face;
-  const ready = nProfiles > 0 && hasFace;
+  const facesValid = !!embossTool?.facesValid;
+  const ready = nProfiles > 0 && hasFace && facesValid;
 
   const cancel = () => {
     useStore.getState()._cameraControls?.clearEmbossPreview?.();
+    useStore.getState()._cameraControls?.clearEmbossSelectedFaces?.();
     cancelEmbossTool();
   };
   useEscapeKey(open, cancel);
@@ -63,7 +65,10 @@ const EmbossDialog = () => {
     ],
   );
   useEffect(
-    () => () => useStore.getState()._cameraControls?.clearEmbossPreview?.(),
+    () => () => {
+      useStore.getState()._cameraControls?.clearEmbossPreview?.();
+      useStore.getState()._cameraControls?.clearEmbossSelectedFaces?.();
+    },
     [],
   );
 
@@ -119,9 +124,9 @@ const EmbossDialog = () => {
           type="button"
           style={{ ...pickBtn(embossTool.picking === "faces"), marginLeft: 6 }}
           onClick={() => setEmbossPicking("faces")}
-          title="Pick the face to emboss onto"
+          title="Pick one or more connected faces to emboss onto (click again to deselect)"
         >
-          {hasFace ? "Face ✓" : "Face"}
+          {!hasFace ? "Faces" : facesValid ? "Faces ✓" : "Faces ⚠"}
         </button>
 
         <button

@@ -341,6 +341,8 @@ export function attachCameraControls(ctx) {
       highlights,
     });
   controls.syncEmbossFills = syncEmbossFills;
+  // Clear the persistent multi-face selection highlight (on tool cancel/confirm).
+  controls.clearEmbossSelectedFaces = () => highlights.clearSelectedFaces();
 
   // Expose extrude-overlay control to the React layer:
   //   • finalizeExtrudeWithDepth(d)         — commit at numeric depth `d`.

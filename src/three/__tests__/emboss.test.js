@@ -12,6 +12,7 @@ import {
   growConnectedFaceSet,
   fitCylinderToFaceSet,
   fitSphereToFaceSet,
+  validateFaceSetConnectivity,
 } from "../embossFaceSet.js";
 import { regenerateItemsForResolution } from "../regenerateItems.js";
 
@@ -533,6 +534,31 @@ describe("emboss op", () => {
     ];
     const flatP = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0];
     expect(fitSphereToFaceSet(flatN, flatP)).toBeNull();
+  });
+
+  it("validateFaceSetConnectivity gates multi-face selections at 45 degrees", () => {
+    // A single coplanar quad (2 tris sharing an edge) — connected.
+    const quad = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0];
+    expect(validateFaceSetConnectivity(quad, 45)).toBe(true);
+    expect(validateFaceSetConnectivity([0, 0, 0, 1, 0, 0, 0, 1, 0], 45)).toBe(
+      true,
+    ); // single tri
+
+    // Two tris sharing edge (0,0,0)-(1,0,0), bent ~10° — within 45°, connected.
+    const c = Math.cos((10 * Math.PI) / 180),
+      s = Math.sin((10 * Math.PI) / 180);
+    const gentle = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, c, s];
+    expect(validateFaceSetConnectivity(gentle, 45)).toBe(true);
+
+    // Same shared edge but bent 90° — exceeds 45°, so NOT connected.
+    const sharp = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    expect(validateFaceSetConnectivity(sharp, 45)).toBe(false);
+
+    // Two coplanar tris that don't share an edge — disconnected.
+    const apart = [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0, 0, 6, 0, 0, 5, 1, 0];
+    expect(validateFaceSetConnectivity(apart, 45)).toBe(false);
+
+    expect(validateFaceSetConnectivity([], 45)).toBe(false);
   });
 
   it("rebuilds an emboss regenerator from its embedded recipe", async () => {

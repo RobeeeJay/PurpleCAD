@@ -383,6 +383,10 @@ export const createUiSlice = (set) => ({
         profiles: [],
         face: null,
         faceSet: null,
+        // Accumulated triangles of a multi-face selection (flat x,y,z; 9 per tri)
+        // and whether they form one set connected within 45° (gates Confirm).
+        faceTris: null,
+        facesValid: false,
         params: {
           deboss: false,
           angleDeg: 0,
@@ -413,16 +417,21 @@ export const createUiSlice = (set) => ({
     set((s) =>
       s.embossTool ? { embossTool: { ...s.embossTool, profiles } } : {},
     ),
-  setEmbossFace: (itemId, face, faceSet) =>
+  // Set the (possibly multi-face) emboss target.  `keepPicking` leaves the face
+  // pick armed so the user can keep adding faces; a primitive's single curved
+  // face clears it (one click is the whole face).
+  setEmbossFaceSelection: (sel) =>
     set((s) =>
       s.embossTool
         ? {
             embossTool: {
               ...s.embossTool,
-              itemId,
-              face,
-              faceSet,
-              picking: null,
+              itemId: sel.itemId,
+              face: sel.face,
+              faceSet: sel.faceSet,
+              faceTris: sel.faceTris ?? null,
+              facesValid: !!sel.valid,
+              picking: sel.keepPicking ? s.embossTool.picking : null,
             },
           }
         : {},
@@ -453,6 +462,9 @@ export const createUiSlice = (set) => ({
           profiles: r.profiles || [],
           face: r.face,
           faceSet: r.faceSet || null,
+          faceTris: r.faceTris || null,
+          // A committed emboss had a valid face selection.
+          facesValid: true,
           params: { ...r.params },
         },
       };
