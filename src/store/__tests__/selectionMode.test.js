@@ -118,4 +118,8 @@ describe("anyToolActive", () => {
     expect(anyToolActive({ activeSketchTool: "line" })).toBe(true);
     expect(anyToolActive({ sketchPlacementMode: true })).toBe(true);
   });
+
+  it("is true while the Point-to-Point move tool is open", () => {
+    expect(anyToolActive({ pointToPointTool: { picking: "A" } })).toBe(true);
+  });
 });

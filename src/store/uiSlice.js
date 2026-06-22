@@ -165,6 +165,11 @@ export const uiInitial = {
   splitTool: null,
   splitPick: null, // "object" | "cut" | null
 
+  // Point-to-Point move: pick a vertex on object A, then a vertex on a different
+  // object B; confirming shifts A so A's vertex lands on B's.  Points are world
+  // coords captured at pick time.  { picking:"A"|"B"|null, a:{itemId,point}, b:{…} }
+  pointToPointTool: null,
+
   // Solo: when set, the viewport shows ONLY this item (even if marked hidden)
   // and hides every other object.  Ephemeral (not history/persisted).  soloView
   // is the camera snapshot captured when solo turned on, restored when it ends.
@@ -514,6 +519,34 @@ export const createUiSlice = (set) => ({
     ),
   cancelSplit3d: () => set({ splitTool: null, splitPick: null }),
   setSplitPick: (v) => set({ splitPick: v || null }),
+
+  // ── Point-to-Point move ──────────────────────────────────────────────────
+  startPointToPointTool: () =>
+    set({ pointToPointTool: { picking: "A", a: null, b: null } }),
+  cancelPointToPointTool: () => set({ pointToPointTool: null }),
+  // Arm one of the two picks (toggles off if already armed).
+  setPointToPointPicking: (which) =>
+    set((s) =>
+      s.pointToPointTool
+        ? {
+            pointToPointTool: {
+              ...s.pointToPointTool,
+              picking: s.pointToPointTool.picking === which ? null : which,
+            },
+          }
+        : {},
+    ),
+  // Store a picked vertex { itemId, point } for A or B; auto-advance A→B.
+  setPointToPointPoint: (which, itemId, point) =>
+    set((s) => {
+      if (!s.pointToPointTool) return {};
+      const t = {
+        ...s.pointToPointTool,
+        [which === "A" ? "a" : "b"]: { itemId, point },
+      };
+      t.picking = which === "A" && !t.b ? "B" : null;
+      return { pointToPointTool: t };
+    }),
 
   setItemSolo: (id, view) => set({ soloItemId: id, soloView: view ?? null }),
   switchItemSolo: (id) => set({ soloItemId: id }),

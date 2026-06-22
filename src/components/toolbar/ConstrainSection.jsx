@@ -18,6 +18,9 @@ const ConstrainSection = ({ isSketchMode }) => {
   const applySketchHVConstraint = useStore((s) => s.applySketchHVConstraint);
   const snapEnabled = useStore((s) => s.snapEnabled);
   const toggleSnap = useStore((s) => s.toggleSnap);
+  const pointToPointTool = useStore((s) => s.pointToPointTool);
+  const startPointToPointTool = useStore((s) => s.startPointToPointTool);
+  const cancelPointToPointTool = useStore((s) => s.cancelPointToPointTool);
   const snapDistanceMm = useStore((s) => s.snapDistanceMm);
   const snapAngleDeg = useStore((s) => s.snapAngleDeg);
 
@@ -397,6 +400,46 @@ const ConstrainSection = ({ isSketchMode }) => {
               stroke="#6C3FD4"
               strokeWidth="0.5"
               points="11,21 9,18 13,18"
+            />
+          </svg>
+        </button>
+      )}
+      {!isSketchMode && (
+        <button
+          className={`toolbar-btn ${pointToPointTool ? "active" : ""}`}
+          title="Point to Point — pick a vertex on one object, then a vertex on another, to align them"
+          onClick={() =>
+            pointToPointTool
+              ? cancelPointToPointTool()
+              : startPointToPointTool()
+          }
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20">
+            <circle fill="#D4A33F" stroke="#D4A33F" r="2.5" cx="5" cy="18" />
+            <circle
+              stroke="#6C3FD4"
+              fill="none"
+              strokeWidth="1.5"
+              r="2.5"
+              cx="19"
+              cy="6"
+            />
+            <line
+              stroke="#6C3FD4"
+              fill="none"
+              strokeWidth="1.5"
+              strokeLinecap="square"
+              strokeDasharray="2.5 2"
+              x1="7"
+              y1="16"
+              x2="17"
+              y2="8"
+            />
+            <polygon
+              fill="#6C3FD4"
+              stroke="#6C3FD4"
+              strokeWidth="0.5"
+              points="17,8 13.5,9 15,11.5"
             />
           </svg>
         </button>

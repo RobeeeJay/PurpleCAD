@@ -12,6 +12,8 @@ function toolSelectionLock(s) {
   // Emboss: lock to faces while the face pick is armed; otherwise nothing (the
   // sketch-geometry pick raycasts the extrude-select fills, not objects).
   if (s.embossTool) return s.embossTool.picking === "faces" ? ["face"] : [];
+  // Point-to-Point: pick vertices while a point is armed.
+  if (s.pointToPointTool && s.pointToPointTool.picking) return ["point"];
   return null;
 }
 
@@ -50,7 +52,8 @@ export function anyToolActive(s) {
     s.splitPick ||
     s.originToolActive ||
     s.originDialogItemId ||
-    s.originVertexPick
+    s.originVertexPick ||
+    s.pointToPointTool
   );
 }
 

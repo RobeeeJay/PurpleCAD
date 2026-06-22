@@ -16,6 +16,7 @@ import ShellDialog from "./ShellDialog";
 import OriginDialog from "./OriginDialog";
 import HoleDialog from "./HoleDialog";
 import EmbossDialog from "./EmbossDialog";
+import PointToPointDialog from "./PointToPointDialog";
 import SelectionWidget from "./SelectionWidget";
 import PlanePickHint from "./viewport/PlanePickHint";
 import { useViewportInit } from "./viewport/useViewportInit";
@@ -325,6 +326,7 @@ const Viewport = () => {
       <OriginDialog />
       <HoleDialog />
       <EmbossDialog />
+      <PointToPointDialog />
       <SelectionWidget />
       <SvgPlacementOverlay />
       <PlanePickHint />

@@ -401,6 +401,41 @@ export function createViewInteraction(
         false,
       );
 
+      // Point-to-Point move: capture the nearest vertex (in world coords) of the
+      // clicked body for the armed point.  Point B must be a different object.
+      const ptp = useStore.getState().pointToPointTool;
+      if (ptp && ptp.picking) {
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          const mesh = hit.object;
+          const id = mesh.userData.itemId;
+          const it = itemsRef.current.find((i) => i.id === id);
+          if (it && it.type !== "sketch") {
+            if (ptp.picking === "B" && ptp.a && ptp.a.itemId === id) {
+              useStore
+                .getState()
+                .showNotification?.(
+                  "Pick a vertex on a different object for Point B.",
+                );
+            } else {
+              const lp = mesh.worldToLocal(hit.point.clone());
+              const pos = mesh.geometry?.attributes?.position?.array;
+              if (pos) {
+                const v = nearestVertexOf(pos, lp.x, lp.y, lp.z);
+                const w = mesh.localToWorld(new THREE.Vector3(v.x, v.y, v.z));
+                useStore.getState().setPointToPointPoint(ptp.picking, id, {
+                  x: w.x,
+                  y: w.y,
+                  z: w.z,
+                });
+              }
+            }
+          }
+        }
+        save();
+        return;
+      }
+
       // Change-origin tool intercepts the click before normal selection.
       const { originVertexPick, originToolActive } = useStore.getState();
       if (originVertexPick != null || originToolActive) {
