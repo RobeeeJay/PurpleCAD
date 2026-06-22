@@ -85,7 +85,14 @@ function commonFrameLoops(profiles, params, allItems, precision) {
   const cu = Number.isFinite(minX) ? (minX + maxX) / 2 : 0,
     cv = Number.isFinite(minY) ? (minY + maxY) / 2 : 0;
   const scale = params.scale > 0 ? params.scale : 1;
-  const center = (p) => ({ x: (p.x - cu) * scale, y: (p.y - cv) * scale });
+  // Mirror flips a centred axis; winding is re-normalised downstream (withWinding
+  // for center mode, OrientClosedSolid for the conform mesh) so the flip is safe.
+  const mx = params.mirrorH ? -1 : 1;
+  const my = params.mirrorV ? -1 : 1;
+  const center = (p) => ({
+    x: (p.x - cu) * scale * mx,
+    y: (p.y - cv) * scale * my,
+  });
   return refLoops.map((lp) => ({
     outer: lp.outer.map(center),
     holes: lp.holes.map((h) => h.map(center)),

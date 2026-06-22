@@ -147,6 +147,52 @@ describe("emboss op", () => {
     expect(c1[1]).toBeCloseTo(c2[1], 6);
   });
 
+  it("mirror H/V flip the stamp across the centred axes", () => {
+    // An asymmetric (right-triangle) profile so a flip is detectable — a
+    // symmetric one would map onto itself.
+    const tri = {
+      polygon2D: [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+        { x: 0, y: 2 },
+      ],
+      holes: [],
+      position: O,
+      rotation: O,
+      normalWorld: { x: 0, y: 0, z: 1 },
+    };
+    // The centred outer loop as a set of "x,y" keys.
+    const keys = (s, fx = 1, fy = 1) => {
+      const o = s.loops[0].outer;
+      const set = [];
+      for (let i = 0; i < o.length; i += 2)
+        set.push(`${(fx * o[i]).toFixed(4)},${(fy * o[i + 1]).toFixed(4)}`);
+      return set.sort();
+    };
+    const base = buildEmbossStamp([tri], topFace, params(), [], null);
+    const mH = buildEmbossStamp(
+      [tri],
+      topFace,
+      params({ mirrorH: true }),
+      [],
+      null,
+    );
+    const mV = buildEmbossStamp(
+      [tri],
+      topFace,
+      params({ mirrorV: true }),
+      [],
+      null,
+    );
+    // mirrorH negates x: the mirrored loop matches the base with x flipped...
+    expect(keys(mH)).toEqual(keys(base, -1, 1));
+    // ...and genuinely differs from the un-mirrored loop.
+    expect(keys(mH)).not.toEqual(keys(base));
+    // mirrorV negates y likewise.
+    expect(keys(mV)).toEqual(keys(base, 1, -1));
+    expect(keys(mV)).not.toEqual(keys(base));
+  });
+
   it("clips the relief to the face — geometry off the body isn't added", async () => {
     // Shoving the pad a full unit off-centre lands it half over the cube's edge;
     // the half hanging in space must be clipped, so nothing exceeds the cube's

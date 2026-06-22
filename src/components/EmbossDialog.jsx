@@ -52,6 +52,8 @@ const EmbossDialog = () => {
       params?.scale,
       params?.distanceMm,
       params?.projection,
+      params?.mirrorH,
+      params?.mirrorV,
       embossTool?.face,
       embossTool?.faceSet,
       nProfiles,
@@ -136,6 +138,24 @@ const EmbossDialog = () => {
           onClick={() => updateEmbossParams({ deboss: true })}
         >
           Deboss
+        </button>
+
+        <span style={{ ...LBL, marginLeft: 10 }}>Mirror</span>
+        <button
+          type="button"
+          style={toggleStyle(!!params.mirrorH)}
+          onClick={() => updateEmbossParams({ mirrorH: !params.mirrorH })}
+          title="Flip the geometry left-to-right"
+        >
+          Horizontal
+        </button>
+        <button
+          type="button"
+          style={toggleStyle(!!params.mirrorV)}
+          onClick={() => updateEmbossParams({ mirrorV: !params.mirrorV })}
+          title="Flip the geometry top-to-bottom"
+        >
+          Vertical
         </button>
 
         <span style={{ ...LBL, marginLeft: 10 }}>Angle°</span>
