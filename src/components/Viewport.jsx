@@ -71,7 +71,7 @@ const Viewport = () => {
   const allSketchGroupRef = useRef(null);
   const sketchGhostGroupRef = useRef(null);
   // Remembers the user's projection setting from before entering sketch
-  // mode so it can be restored on exit.  Sketch mode forces isometric
+  // mode so it can be restored on exit.  Sketch mode forces orthographic
   // (orthographic) projection so the sketch plane has no perspective
   // distortion.
   const preSketchProjectionRef = useRef(null);

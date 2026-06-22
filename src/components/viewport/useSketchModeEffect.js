@@ -1,6 +1,6 @@
 // Manages the lifecycle of "sketch mode" — what happens when the
 // selected item is a sketch.  Entering: save the user's camera state,
-// force isometric projection, animate a fly-in to the sketch plane,
+// force orthographic projection, animate a fly-in to the sketch plane,
 // build the grid + axis overlay, and re-run applyRenderMode so 3D
 // geometry behind the active sketch becomes see-through.  Leaving:
 // dispose the grid + preview overlays, restore the saved camera, and
@@ -223,11 +223,11 @@ export function useSketchModeEffect({
           axisGroupRef.current.visible = useStore.getState().axisVisible;
         if (planeRef.current) planeRef.current.visible = true;
         // Restore the projection mode the user had selected before
-        // entering sketch mode.  Sketch mode forces isometric so the
+        // entering sketch mode.  Sketch mode forces orthographic so the
         // sketch plane sits flat with no perspective distortion.
         if (
           preSketchProjectionRef.current &&
-          preSketchProjectionRef.current !== "isometric"
+          preSketchProjectionRef.current !== "orthographic"
         ) {
           useStore.getState().setProjectionMode(preSketchProjectionRef.current);
         }
@@ -321,8 +321,8 @@ export function useSketchModeEffect({
       // sketch plane — now the real geometry stays visible behind the
       // sketch, no ghost projection needed.
       preSketchProjectionRef.current = projectionMode;
-      if (projectionMode !== "isometric") {
-        useStore.getState().setProjectionMode("isometric");
+      if (projectionMode !== "orthographic") {
+        useStore.getState().setProjectionMode("orthographic");
       }
       applyRenderMode(useStore.getState().renderMode, {
         scene,

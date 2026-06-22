@@ -623,7 +623,7 @@ export const createUiSlice = (set) => ({
   toggleProjectionMode: () =>
     set((state) => ({
       projectionMode:
-        state.projectionMode === "perspective" ? "isometric" : "perspective",
+        state.projectionMode === "perspective" ? "orthographic" : "perspective",
     })),
 
   toggleTheme: () =>

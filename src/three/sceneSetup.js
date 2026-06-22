@@ -26,7 +26,7 @@ export function createCamera(
 ) {
   const frustumSize = 20;
   let camera;
-  if (projectionMode === "isometric") {
+  if (projectionMode === "orthographic") {
     camera = new THREE.OrthographicCamera(
       (-frustumSize * aspect) / 2,
       (frustumSize * aspect) / 2,

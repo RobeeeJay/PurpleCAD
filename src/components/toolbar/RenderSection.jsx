@@ -595,8 +595,8 @@ const RenderSection = () => {
         </svg>
       </button>
       <button
-        className={`toolbar-btn ${projectionMode === "isometric" ? "active" : ""}`}
-        title={`Switch to ${projectionMode === "perspective" ? "isometric" : "perspective"} projection`}
+        className={`toolbar-btn ${projectionMode === "orthographic" ? "active" : ""}`}
+        title={`Switch to ${projectionMode === "perspective" ? "orthographic" : "perspective"} projection`}
         onClick={toggleProjectionMode}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
