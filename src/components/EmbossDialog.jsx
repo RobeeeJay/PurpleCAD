@@ -50,7 +50,9 @@ const EmbossDialog = () => {
       params?.offsetMm,
       params?.scale,
       params?.distanceMm,
+      params?.projection,
       embossTool?.face,
+      embossTool?.faceSet,
       nProfiles,
       // Re-run when the body or any sketch changes size so the preview tracks a
       // resize (the commit always rebuilds from the live items).
