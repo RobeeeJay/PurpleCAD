@@ -1313,6 +1313,40 @@ export function createSketchInteraction(
       }
     }
 
+    // Bezier tangent handles: when a bezier is selected, its p1/p2 control
+    // points are grabbable (they aren't snap points, so check them explicitly).
+    {
+      const selEl = useStore.getState().selectedSketchElement;
+      const bez = selEl?.type === "line" ? shapes[selEl.shapeIdx] : null;
+      if (bez?.type === "bezier" && !bez.projection) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        for (const key of ["p1", "p2"]) {
+          const p = bez[key];
+          const w = new THREE.Vector3(p.x, p.y, 0.003)
+            .applyQuaternion(sketchMesh.quaternion)
+            .add(sketchMesh.position)
+            .project(cameraRef.current);
+          const px = ((w.x + 1) / 2) * rect.width + rect.left;
+          const py = ((-w.y + 1) / 2) * rect.height + rect.top;
+          if (Math.hypot(screenX - px, screenY - py) < 16) {
+            clearMultiSelectOverlays();
+            multiSelectedIndices = [];
+            sketchDrag = {
+              kind: "point",
+              shapeIdx: selEl.shapeIdx,
+              pointKey: key,
+              sketchMesh,
+              selItemId: selItem.id,
+              anchorLocal: { x: p.x, y: p.y },
+              origShape: bez,
+            };
+            renderer.domElement.style.cursor = "grabbing";
+            return true;
+          }
+        }
+      }
+    }
+
     // Point drag — check snap points first (higher priority, smaller target).
     // An offset copy's points are inert, so skip dragging by them.
     if (!shiftKey) {

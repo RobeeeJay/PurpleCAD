@@ -31,6 +31,7 @@ export {
   getSnapPoints,
   getShapePoint,
   getShapeLength,
+  defaultBezierControls,
 } from "./sceneObjects/sketchShapes.js";
 
 export {

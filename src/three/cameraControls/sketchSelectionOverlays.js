@@ -30,9 +30,61 @@ export function createSketchSelectionOverlays({
   let multiSelectOverlays = [];
   let currentDragIndicator = null;
   let rotationHandle = null; // { center:{x,y}, grip:{x,y}, objects:[...] }
+  let bezierHandles = []; // dotted tangent lines + control-point dots for a
+  // selected bezier (rebuilt on selection and while its handles drag)
 
   const setCoincidentFirstOverlay = (o) => {
     coincidentFirstOverlay = o;
+  };
+
+  const clearBezierHandles = () => {
+    bezierHandles.forEach((o) => {
+      scene.remove(o);
+      o.geometry?.dispose?.();
+      o.material?.dispose?.();
+    });
+    bezierHandles = [];
+  };
+
+  // Dotted tangent handles (p0→p1, p3→p2) plus a dot at each control point, so a
+  // selected bezier exposes draggable handles that reshape the curve.
+  const renderBezierHandles = (shape, sketchMesh) => {
+    clearBezierHandles();
+    if (!shape || shape.type !== "bezier") return;
+    const toW = (p) =>
+      new THREE.Vector3(p.x, p.y, 0.007)
+        .applyQuaternion(sketchMesh.quaternion)
+        .add(sketchMesh.position);
+    for (const [a, b] of [
+      [shape.p0, shape.p1],
+      [shape.p3, shape.p2],
+    ]) {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([toW(a), toW(b)]),
+        new THREE.LineDashedMaterial({
+          color: SKETCH_PIVOT_COLOR,
+          dashSize: 0.08,
+          gapSize: 0.05,
+          depthTest: false,
+        }),
+      );
+      line.computeLineDistances();
+      line.renderOrder = 1006;
+      scene.add(line);
+      bezierHandles.push(line);
+    }
+    for (const p of [shape.p1, shape.p2]) {
+      const dot = makeRingOverlay(
+        p,
+        sketchMesh,
+        SKETCH_PIVOT_COLOR,
+        0.14,
+        0.009,
+      );
+      dot.renderOrder = 1007;
+      scene.add(dot);
+      bezierHandles.push(dot);
+    }
   };
 
   const clearSketchSelectionOverlay = () => {
@@ -44,6 +96,7 @@ export function createSketchSelectionOverlays({
         sketchSelectionOverlay.material.dispose();
       sketchSelectionOverlay = null;
     }
+    clearBezierHandles();
     clearRotationHandle();
   };
 
@@ -125,6 +178,7 @@ export function createSketchSelectionOverlays({
     );
     if (selItem)
       buildRotationHandleFor(selItem.shapes || [], [shapeIdx], sketchMesh);
+    renderBezierHandles(shape, sketchMesh);
   };
 
   const clearMultiSelectOverlays = () => {
@@ -350,6 +404,9 @@ export function createSketchSelectionOverlays({
         sketchSelectionOverlay.computeLineDistances?.();
       }
     }
+    // Keep a selected bezier's tangent handles glued to the live curve.
+    if (sel?.type === "line" && shapes[sel.shapeIdx]?.type === "bezier")
+      renderBezierHandles(shapes[sel.shapeIdx], sketchMesh);
     if (rebuildHandle) {
       const indices = multiSelectOverlays
         .map((o) => o.userData.shapeIdx)

@@ -11,6 +11,7 @@ import {
   getSketchShapePoints,
   sketchDimText,
   snapUnitToIntervalMm,
+  defaultBezierControls,
 } from "../sceneObjects.js";
 import { SKETCH_DRAW_PREVIEW_COLOR } from "../theme.js";
 
@@ -120,50 +121,53 @@ export function createSketchDrawHelpers(
     clearHoverFills();
 
     if (draw.tool === "bezier") {
-      const allPts = [...draw.points, effectiveCur];
+      // Endpoint-only preview: p0 is placed, the cursor is p3, and the control
+      // points come from the default-bow so the user sees the curve they'll get.
+      const p0 = draw.points[0];
+      const p3 = effectiveCur;
       const toWorld = (p) => {
         const v = new THREE.Vector3(p.x, p.y, 0.003);
         v.applyQuaternion(sketchMesh.quaternion);
         v.add(sketchMesh.position);
         return v;
       };
-      // Control polygon
-      const ctrlWorldPts = allPts.map(toWorld);
-      const ctrlLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(ctrlWorldPts),
-        new THREE.LineBasicMaterial({
-          color: SKETCH_DRAW_PREVIEW_COLOR,
-          transparent: true,
-          opacity: 0.4,
-          depthTest: false,
-        }),
+      const { p1, p2 } = defaultBezierControls(p0, p3);
+      const curve = new THREE.CubicBezierCurve(
+        new THREE.Vector2(p0.x, p0.y),
+        new THREE.Vector2(p1.x, p1.y),
+        new THREE.Vector2(p2.x, p2.y),
+        new THREE.Vector2(p3.x, p3.y),
       );
-      ctrlLine.renderOrder = 1001;
-      scene.add(ctrlLine);
-      draw.previewObjects.push(ctrlLine);
-      // Bezier curve preview once we have all 4 points
-      if (allPts.length >= 4) {
-        const [q0, q1, q2, q3] = allPts;
-        const curve = new THREE.CubicBezierCurve(
-          new THREE.Vector2(q0.x, q0.y),
-          new THREE.Vector2(q1.x, q1.y),
-          new THREE.Vector2(q2.x, q2.y),
-          new THREE.Vector2(q3.x, q3.y),
+      const curvePts = curve.getPoints(48).map(({ x, y }) => toWorld({ x, y }));
+      const curveLine = makePreviewLine2(curvePts);
+      if (curveLine) {
+        scene.add(curveLine);
+        draw.previewObjects.push(curveLine);
+      }
+      // Dotted handle hints (p0→p1, p3→p2) so the tangents read while drawing.
+      for (const [a, b] of [
+        [p0, p1],
+        [p3, p2],
+      ]) {
+        const hl = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([toWorld(a), toWorld(b)]),
+          new THREE.LineDashedMaterial({
+            color: SKETCH_DRAW_PREVIEW_COLOR,
+            dashSize: 0.08,
+            gapSize: 0.05,
+            transparent: true,
+            opacity: 0.6,
+            depthTest: false,
+          }),
         );
-        const curvePts = curve
-          .getPoints(48)
-          .map(({ x, y }) => toWorld({ x, y }));
-        const curveLine = makePreviewLine2(curvePts);
-        if (curveLine) {
-          scene.add(curveLine);
-          draw.previewObjects.push(curveLine);
-        }
+        hl.computeLineDistances();
+        hl.renderOrder = 1001;
+        scene.add(hl);
+        draw.previewObjects.push(hl);
       }
       if (dimHintRef.current) {
         const rect = renderer.domElement.getBoundingClientRect();
-        const labels = ["Start", "Control 1", "Control 2", "End"];
-        dimHintRef.current.textContent =
-          labels[Math.min(draw.points.length, 3)];
+        dimHintRef.current.textContent = sketchDimText("line", p0, p3);
         dimHintRef.current.style.display = "block";
         dimHintRef.current.style.left = `${screenX - rect.left + 16}px`;
         dimHintRef.current.style.top = `${screenY - rect.top - 10}px`;
@@ -214,13 +218,14 @@ export function createSketchDrawHelpers(
     // Also creates coincident constraints for any existing points that are
     // already coincident with the snapped point, so the new shape is fully
     // connected at multi-point junctions.
-    const buildConstraints = (snaps, tool) => {
+    const buildConstraints = (snaps, tool, keysOverride) => {
       const newIdx = shapes.length;
       const existingConstraints = selItem?.constraints || [];
       return snaps.flatMap((snap, i) => {
         if (!snap) return [];
         const pointKeys =
-          tool === "bezier" ? ["p0", "p1", "p2", "p3"] : ["start", "end"];
+          keysOverride ??
+          (tool === "bezier" ? ["p0", "p1", "p2", "p3"] : ["start", "end"]);
         const newPointKey = pointKeys[i] ?? `p${i}`;
         const primary = {
           type: "coincident",
@@ -271,22 +276,27 @@ export function createSketchDrawHelpers(
       };
       setSketchDrawPhase("second");
     } else if (sketchDrawRef.current.tool === "bezier") {
+      // Endpoint-only flow: the first click placed p0; this second click places
+      // p3.  The control points start at a sensible default (a gentle bow) and
+      // are reshaped later by dragging the curve's handles when it's selected.
       const draw = sketchDrawRef.current;
-      draw.points.push(localPt);
+      const p0 = draw.points[0];
+      const p3 = localPt;
       draw.snaps.push(clickSnap);
-      if (draw.points.length === 4) {
-        const [p0, p1, p2, p3] = draw.points;
-        const constraints = buildConstraints(draw.snaps, "bezier");
-        clearSketchPreview();
-        clearSnapIndicator();
-        if (dimHintRef.current) dimHintRef.current.style.display = "none";
-        useStore
-          .getState()
-          .addSketchShape(
-            selectedIdRef.current,
-            { type: "bezier", p0, p1, p2, p3 },
-            constraints,
-          );
+      // snaps = [start(p0), end(p3)] — map them to the bezier's endpoint keys.
+      const constraints = buildConstraints(draw.snaps, "bezier", ["p0", "p3"]);
+      const { p1, p2 } = defaultBezierControls(p0, p3);
+      clearSketchPreview();
+      clearSnapIndicator();
+      if (dimHintRef.current) dimHintRef.current.style.display = "none";
+      useStore
+        .getState()
+        .addSketchShape(
+          selectedIdRef.current,
+          { type: "bezier", p0, p1, p2, p3 },
+          constraints,
+        );
+      {
         const chainStart = draw.chainStartPoint;
         const closesChain =
           clickSnap &&
@@ -297,7 +307,7 @@ export function createSketchDrawHelpers(
           setSketchDrawPhase("first");
           useStore.getState().setActiveSketchTool(null);
         } else {
-          const contSnap = draw.snaps[3] ?? {
+          const contSnap = draw.snaps[1] ?? {
             shapeIdx: shapes.length,
             pointKey: "p3",
             x: p3.x,

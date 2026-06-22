@@ -299,6 +299,25 @@ export function getShapePoint(shape, pointKey) {
   }
 }
 
+// Default cubic-bezier control points for an endpoint-only (start→end) curve:
+// the handles sit 1/3 along the chord and bow ~22% of its length to one side, so
+// the curve reads as a curve and the tangent handles are clearly off the chord.
+export function defaultBezierControls(p0, p3) {
+  const dx = p3.x - p0.x,
+    dy = p3.y - p0.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len,
+    uy = dy / len; // chord direction
+  const px = -uy,
+    py = ux; // left perpendicular
+  const along = len / 3;
+  const bow = len * 0.22;
+  return {
+    p1: { x: p0.x + ux * along + px * bow, y: p0.y + uy * along + py * bow },
+    p2: { x: p3.x - ux * along + px * bow, y: p3.y - uy * along + py * bow },
+  };
+}
+
 export function getShapeLength(shape) {
   switch (shape.type) {
     case "line": {

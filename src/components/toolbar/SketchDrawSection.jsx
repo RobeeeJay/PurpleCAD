@@ -230,7 +230,7 @@ const SKETCH_TOOLS = [
   },
   {
     id: "bezier",
-    label: "Bezier",
+    label: "Bezier — click start then end; select it to drag the handles",
     icon: (
       <svg viewBox="0 0 24 24" width="20" height="20">
         <path
