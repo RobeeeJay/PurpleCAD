@@ -31,7 +31,11 @@ import {
 } from "../three/sketchRectangularPattern.js";
 import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
 import { explodeContours } from "../three/sketchGeometry.js";
-import { textShapeContours, makeTextShape } from "../three/sketchText.js";
+import {
+  textShapeContours,
+  makeTextShape,
+  isFontAvailable,
+} from "../three/sketchText.js";
 import { computeLineTrim } from "../three/sketchTrim.js";
 
 // Shape types the Offset tool can copy.
@@ -355,8 +359,13 @@ export const createSketchSlice = (set) => ({
   // re-smooths extruded text.
   ensureTextContours: (tolerance = 0) =>
     set((state) => {
+      // Only re-tessellate a text shape whose EXACT font is loaded — otherwise
+      // makeTextShape would rebuild it in the default font (the shape still names
+      // the original).  Unloaded fonts keep their stored contours until the App
+      // effect loads the font and re-runs this.
       const needs = (s) =>
         s.type === "text" &&
+        isFontAvailable(s.font) &&
         (!Array.isArray(s.contours) || s.contourTol !== tolerance);
       let changed = false;
       const updatedItems = state.items.map((item) => {

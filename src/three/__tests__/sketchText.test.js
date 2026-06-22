@@ -11,6 +11,7 @@ import {
   textShapeContours,
   enumerateSystemFonts,
   ensureFontLoaded,
+  isFontAvailable,
 } from "../sketchText.js";
 import { translateShape } from "../sketchGeometry.js";
 
@@ -93,6 +94,13 @@ describe("sketchText", () => {
     expect(await enumerateSystemFonts()).toEqual([]); // no window in node
     expect(await ensureFontLoaded(DEFAULT_FONT_ID)).toBe(true); // bundled
     expect(await ensureFontLoaded("sys:Nope")).toBe(false); // unknown system
+  });
+
+  it("reports only exactly-available fonts (no silent default fallback)", () => {
+    // So a resolution-change re-tessellation won't rebuild text in the wrong font.
+    expect(isFontAvailable(DEFAULT_FONT_ID)).toBe(true); // built-in
+    expect(isFontAvailable("sys:NotLoaded")).toBe(false); // system, not loaded
+    expect(isFontAvailable(null)).toBe(false);
   });
 
   it("coarsens glyph outlines at a larger simplification tolerance", () => {

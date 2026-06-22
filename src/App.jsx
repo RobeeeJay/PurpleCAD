@@ -20,6 +20,7 @@ import VersionTag from "./components/VersionTag";
 import "./styles/App.css";
 import { useStore } from "./store";
 import { textSimplifyTol } from "./three/resolution.js";
+import { ensureFontLoaded } from "./three/sketchText.js";
 
 // __APP_VERSION__ is baked in at build time by Vite's `define` (see
 // vite.config.js). Vitest doesn't run through that config so guard with
@@ -55,7 +56,21 @@ function App() {
     ),
   );
   useEffect(() => {
-    if (needsTextContours) useStore.getState().ensureTextContours(textTol);
+    if (!needsTextContours) return;
+    // Load every text shape's font BEFORE re-tessellating, so a not-yet-loaded
+    // system font (eg after a reload) isn't silently rebuilt in the default font.
+    const fonts = new Set();
+    for (const it of useStore.getState().items)
+      if (it.type === "sketch")
+        for (const s of it.shapes || [])
+          if (s.type === "text" && s.font) fonts.add(s.font);
+    let cancelled = false;
+    Promise.all([...fonts].map((f) => ensureFontLoaded(f))).then(() => {
+      if (!cancelled) useStore.getState().ensureTextContours(textTol);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [needsTextContours, textTol]);
 
   useEffect(() => {

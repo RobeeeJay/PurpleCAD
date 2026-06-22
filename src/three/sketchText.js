@@ -82,6 +82,15 @@ function getFont(fontId) {
     FONT_BY_ID[DEFAULT_FONT_ID]
   );
 }
+
+// True only when the EXACT requested font is available (a loaded system font or
+// a built-in) — NOT the silent default fallback.  Callers that regenerate cached
+// glyph contours (eg the resolution-change re-tessellation) check this so a
+// not-yet-loaded system font doesn't quietly rebuild the text in the default
+// font while the shape still names the original.
+export function isFontAvailable(fontId) {
+  return !!(fontId && (loadedSystemFonts.has(fontId) || FONT_BY_ID[fontId]));
+}
 const LINE_SPACING = 1.35; // baseline-to-baseline as a multiple of the font size
 
 // Subdivisions per font curve segment when sampling glyph outlines.  Fixed and
