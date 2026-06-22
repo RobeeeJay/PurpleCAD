@@ -423,48 +423,32 @@ export function attachCameraControls(ctx) {
   controls.updateEmbossPreview = () => embossPreview.updateEmbossPreview();
   controls.clearEmbossPreview = () => embossPreview.clearEmbossPreview();
 
-  // Point-to-Point move: ghost a translucent copy of object A at its target spot
-  // (A's position + (B - A)) once both points are picked, so the user sees where
-  // it'll land before confirming.  The real mesh isn't touched — the commit moves
-  // it for real.
-  let ptpGhost = null;
+  // Point-to-Point move: preview by sliding the REAL mesh to its target spot
+  // (A's position + (B - A)) once both points are picked, restoring it on
+  // cancel.  Moving the real mesh (rather than a clone) is what makes primitives
+  // preview correctly — sphere/cylinder/torus are raymarched by a shader on a box
+  // hull, so a plain-material clone of mesh.geometry would draw the box, not the
+  // shape.  The commit then moves it for real via the store.
+  let ptpMoved = null; // { mesh, pos: Vector3 }
   controls.clearPointToPointPreview = () => {
-    if (!ptpGhost) return;
-    scene.remove(ptpGhost);
-    ptpGhost.material?.dispose?.();
-    ptpGhost = null;
+    if (!ptpMoved) return;
+    if (ptpMoved.mesh.parent) ptpMoved.mesh.position.copy(ptpMoved.pos);
+    ptpMoved = null;
   };
   controls.updatePointToPointPreview = () => {
     controls.clearPointToPointPreview();
     const t = useStore.getState().pointToPointTool;
     if (!t || !t.a || !t.b) return;
     const mesh = objectsRef.current[t.a.itemId];
-    if (!mesh || !mesh.geometry) return;
-    const ghost = new THREE.Mesh(
-      mesh.geometry, // shared (not disposed on clear) — only the material is ours
-      new THREE.MeshStandardMaterial({
-        color: 0x44aaff,
-        transparent: true,
-        opacity: 0.45,
-        roughness: 0.6,
-        metalness: 0,
-        depthWrite: false,
-      }),
+    if (!mesh) return;
+    ptpMoved = { mesh, pos: mesh.position.clone() };
+    mesh.position.add(
+      new THREE.Vector3(
+        t.b.point.x - t.a.point.x,
+        t.b.point.y - t.a.point.y,
+        t.b.point.z - t.a.point.z,
+      ),
     );
-    ghost.position
-      .copy(mesh.position)
-      .add(
-        new THREE.Vector3(
-          t.b.point.x - t.a.point.x,
-          t.b.point.y - t.a.point.y,
-          t.b.point.z - t.a.point.z,
-        ),
-      );
-    ghost.quaternion.copy(mesh.quaternion);
-    ghost.scale.copy(mesh.scale);
-    ghost.renderOrder = 990;
-    scene.add(ghost);
-    ptpGhost = ghost;
   };
 
   // Sweep tools (Revolve / Pipe / Loft): profile + axis picking, live preview,
