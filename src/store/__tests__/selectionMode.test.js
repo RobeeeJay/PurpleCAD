@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { effectiveSelectionTypes } from "../selectionMode.js";
+import { effectiveSelectionTypes, anyToolActive } from "../selectionMode.js";
 
 const base = {
   selObject: true,
@@ -90,5 +90,32 @@ describe("effectiveSelectionTypes", () => {
     expect(
       effectiveSelectionTypes({ ...base, planePickActive: "face" }),
     ).toMatchObject({ face: true, overridden: true });
+  });
+});
+
+describe("anyToolActive", () => {
+  it("is false when no tool is engaged", () => {
+    expect(anyToolActive({})).toBe(false);
+    expect(anyToolActive({ ...base, selectedId: 3 })).toBe(false);
+  });
+
+  it("is true for a guided pick flow (hole / emboss / split / plane)", () => {
+    expect(anyToolActive({ holeTool: { phase: "face" } })).toBe(true);
+    expect(anyToolActive({ embossTool: { picking: "geometry" } })).toBe(true);
+    expect(anyToolActive({ splitTool: {} })).toBe(true);
+    expect(anyToolActive({ planePickActive: true })).toBe(true);
+  });
+
+  it("is true while picking/editing chamfer, push-pull, extrude, sweep", () => {
+    expect(anyToolActive({ chamferSelectMode: "chamfer" })).toBe(true);
+    expect(anyToolActive({ pushPullRetargetTarget: { itemId: 1 } })).toBe(true);
+    expect(anyToolActive({ extrudeSelectMode: "profile" })).toBe(true);
+    expect(anyToolActive({ extrudeEditTarget: { itemId: 1 } })).toBe(true);
+    expect(anyToolActive({ sweepSelectMode: { kind: "revolve" } })).toBe(true);
+  });
+
+  it("is true for an active sketch drawing tool or placement", () => {
+    expect(anyToolActive({ activeSketchTool: "line" })).toBe(true);
+    expect(anyToolActive({ sketchPlacementMode: true })).toBe(true);
   });
 });

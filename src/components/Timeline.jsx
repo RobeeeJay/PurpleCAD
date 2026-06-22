@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import { useStore } from "../store";
+import { anyToolActive } from "../store/selectionMode.js";
 import { beginChamferRetarget } from "../three/cameraControls/chamferCommit.js";
 import { beginPushPullRetarget } from "../three/cameraControls/pushPull.js";
 import {
@@ -382,6 +383,9 @@ const Timeline = () => {
   const selectItem = useStore((state) => state.selectItem);
   const undoCount = useStore((state) => state.undoStack.length);
   const redoCount = useStore((state) => state.redoStack.length);
+  // While a create/modify/sketch tool is mid-flow, lock timeline navigation —
+  // jumping history out from under an active tool corrupts what it's targeting.
+  const toolLocked = useStore(anyToolActive);
 
   const [draggedId, setDraggedId] = useState(null);
   const [dropBeforeId, setDropBeforeId] = useState(undefined);
@@ -394,6 +398,7 @@ const Timeline = () => {
       : history.length - 1;
 
   const handleKeyDown = (e) => {
+    if (toolLocked) return;
     if (
       e.key === "ArrowUp" ||
       e.key === "ArrowDown" ||
@@ -415,6 +420,10 @@ const Timeline = () => {
   const canDelete = (index) => history.length > 1 && index > 0;
 
   const handleDragStart = (e, id) => {
+    if (toolLocked) {
+      e.preventDefault();
+      return;
+    }
     setDraggedId(id);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", String(id));
@@ -528,7 +537,7 @@ const Timeline = () => {
           const isFuture = index > activeIndex;
           const isDragging = entry.id === draggedId;
           const isDropTarget = dropBeforeId === entry.id;
-          const isDraggable = index > 0;
+          const isDraggable = index > 0 && !toolLocked;
           const failed = chamferFailed(entry);
 
           return (
@@ -542,6 +551,7 @@ const Timeline = () => {
                 failed ? "failed" : "",
                 isDragging ? "dragging" : "",
                 isDropTarget ? "drop-before" : "",
+                toolLocked ? "tool-locked" : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
@@ -553,6 +563,9 @@ const Timeline = () => {
               onDragOver={(e) => handleDragOver(e, entry.id, index)}
               onDrop={(e) => handleDrop(e, index)}
               onClick={() => {
+                // Locked while a tool is mid-flow — navigating history would pull
+                // the geometry the tool targets out from under it.
+                if (toolLocked) return;
                 restoreToHistory(entry.id);
                 containerRef.current?.focus();
               }}

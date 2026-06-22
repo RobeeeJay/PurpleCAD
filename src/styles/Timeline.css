@@ -80,6 +80,15 @@
   background-color: var(--bg-tertiary);
 }
 
+/* Navigation is locked while a create/modify/sketch tool is mid-flow. */
+.timeline-entry.tool-locked {
+  cursor: not-allowed;
+}
+
+.timeline-entry.tool-locked:hover {
+  background-color: transparent;
+}
+
 .timeline-entry.active {
   background-color: var(--selected-bg);
   color: var(--color-white);

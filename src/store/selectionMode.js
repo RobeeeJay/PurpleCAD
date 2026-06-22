@@ -15,6 +15,45 @@ function toolSelectionLock(s) {
   return null;
 }
 
+// True while any modal create / modify / sketch tool owns the interaction — a
+// guided pick flow, a retarget/edit pick, an open op dialog, or a sketch drawing
+// tool.  The Timeline uses this to lock navigation: jumping to another history
+// step mid-tool would pull the very geometry the tool is targeting out from
+// under it.  Add new modal tools here as they're introduced.
+export function anyToolActive(s) {
+  return !!(
+    s.sketchPlacementMode ||
+    s.activeSketchTool ||
+    s.extrudeSelectMode ||
+    s.extrudeRetargetId ||
+    s.extrudeRetargetGroup ||
+    s.extrudeEditTarget ||
+    s.extrudeDepthInput ||
+    s.chamferSelectMode ||
+    s.chamferRetargetTarget ||
+    s.chamferEditTarget ||
+    s.pushPullSelectMode ||
+    s.pushPullRetargetTarget ||
+    s.pushPullEditTarget ||
+    s.shellTarget ||
+    s.holeTool ||
+    s.embossTool ||
+    s.sweepSelectMode ||
+    s.sweepRetargetTarget ||
+    s.planeTool ||
+    s.planePickActive ||
+    s.pattern3dTool ||
+    s.circularAxisPick ||
+    s.mirror3dTool ||
+    s.projectTool ||
+    s.splitTool ||
+    s.splitPick ||
+    s.originToolActive ||
+    s.originDialogItemId ||
+    s.originVertexPick
+  );
+}
+
 // What the 3D view's selection widget currently allows.  A tool override (e.g.
 // extrude → ["face"]) wins; otherwise object mode greys the sub-types, and with
 // object off the face/edge/point toggles decide.  `overridden` lets the widget
