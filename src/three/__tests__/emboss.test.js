@@ -136,6 +136,46 @@ describe("emboss op", () => {
     expect(tris(res.geometryData)).toBeGreaterThan(bareTris);
   });
 
+  it("debosses a conform recess without dropping the cylinder", async () => {
+    const cyl = { id: 3, type: "cylinder", position: O, rotation: O, scale: S };
+    const smallProfile = {
+      polygon2D: square(0.15),
+      holes: [],
+      position: O,
+      rotation: O,
+      normalWorld: { x: 0, y: 0, z: 1 },
+    };
+    const sideFace = { nx: 1, ny: 0, nz: 0, cx: 1, cy: 0, cz: 0 };
+    const faceSet = {
+      cylinder: { ax: 0, ay: 1, az: 0, cx: 0, cy: 0, cz: 0, radius: 1 },
+    };
+    const stamp = buildEmbossStamp(
+      [smallProfile],
+      sideFace,
+      params({ projection: "conform", deboss: true, distanceMm: 3 }),
+      [cyl],
+      null,
+      faceSet,
+    );
+    const res = await embossItem({
+      source: cyl,
+      stamp,
+      allItems: [cyl],
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+    // The whole cylinder must survive the cut — its bbox spans the diameter (~2),
+    // not just the small recessed pad.  (An inside-out cutter dropped it before.)
+    const pos = res.geometryData.positions;
+    let minX = Infinity,
+      maxX = -Infinity;
+    for (let i = 0; i < pos.length; i += 3) {
+      minX = Math.min(minX, pos[i]);
+      maxX = Math.max(maxX, pos[i]);
+    }
+    expect(maxX - minX).toBeGreaterThan(1.5);
+  });
+
   it("grows a connected face set and fits a cylinder to it", () => {
     // A faceted tube along Z (radius 1, 24 facets) — a CSG-style cylinder.
     const N = 24,

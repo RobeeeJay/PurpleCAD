@@ -1632,7 +1632,15 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
       mk.Add(TopoDS::Shell(ex.Current()));
       anyShell = true;
     }
-    if (anyShell && mk.IsDone()) result = mk.Solid();
+    if (anyShell && mk.IsDone()) {
+      // Orient so the solid's material is on the inside of the shell (positive
+      // volume).  A mesh whose winding came out inverted — e.g. the deboss wrap,
+      // whose radial map flips handedness, or a badly-wound imported mesh — would
+      // otherwise become an inside-out solid that breaks the difference boolean.
+      TopoDS_Solid solid = mk.Solid();
+      BRepLib::OrientClosedSolid(solid);
+      result = solid;
+    }
 
     // Merge coplanar faces so a tessellated flat model collapses to a handful of
     // faces (a box: 12 triangles → 6 faces) the boolean can handle quickly.
