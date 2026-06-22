@@ -28,7 +28,7 @@ const Toolbar = () => {
       <DocumentSection />
       {isSketchMode ? <SketchDrawSection /> : <ObjectCreateSection />}
       {isSketchMode && <SketchModifySection />}
-      {/* Boolean, chamfer/bevel, and drop-to-ground combined into one
+      {/* Boolean, chamfer/bevel, split, and material combined into one
           object-editing section. */}
       {!isSketchMode && (
         <ToolbarSection label="Modify">
@@ -36,11 +36,11 @@ const Toolbar = () => {
           <BevelSection bare />
           <SplitSection bare />
           <ModifySection bare />
+          <MaterialSection bare />
         </ToolbarSection>
       )}
       <ConstrainSection isSketchMode={isSketchMode} />
       {!isSketchMode && <RenderSection />}
-      {!isSketchMode && <MaterialSection />}
       <OptionsSection />
     </div>
   );
