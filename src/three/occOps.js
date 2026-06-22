@@ -13,7 +13,7 @@ import {
   chamferCenterOffset,
   extrudeWithLivePolygon,
 } from "./csgUtils.js";
-import { polyCentroid } from "./sceneObjects.js";
+import { polyCentroid, polyAreaCentroid } from "./sceneObjects.js";
 import { MM_PER_UNIT } from "./sceneObjects.js";
 import { withWinding } from "./sceneObjects/closedLoops.js";
 import { resolveItemDepth } from "./geometryParams.js";
@@ -342,7 +342,10 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
     if (!poly || poly.length < 3) return null;
     const holes = live.profile?.holes || [];
     const depth = resolveItemDepth(live);
-    const c = polyCentroid(poly);
+    // Area centroid (density-invariant) so the prism's pivot — and thus the
+    // brush position it cancels against in buildBrushTransform — doesn't drift
+    // when the profile's curves re-tessellate at a different resolution.
+    const c = polyAreaCentroid(poly);
     const outerFlat = new Float64Array(
       withWinding(poly, true).flatMap((p) => [p.x, p.y]),
     );

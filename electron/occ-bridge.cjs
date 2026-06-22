@@ -19,6 +19,20 @@ function polyCentroid(poly) {
   return { x: cx / poly.length, y: cy / poly.length };
 }
 
+// Area (shoelace) centroid — density-invariant, so a re-tessellated curve
+// doesn't drift the extrude pivot (see polygonUtil.js polyAreaCentroid).
+function polyAreaCentroid(poly) {
+  if (!poly || poly.length === 0) return { x: 0, y: 0 };
+  let a2 = 0, cx = 0, cy = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    const cross = p.x * q.y - q.x * p.y;
+    a2 += cross; cx += (p.x + q.x) * cross; cy += (p.y + q.y) * cross;
+  }
+  if (Math.abs(a2) < 1e-12) return polyCentroid(poly);
+  return { x: cx / (3 * a2), y: cy / (3 * a2) };
+}
+
 // Signed area (CCW positive) + winding normalisation, mirroring
 // sceneObjects/polygonUtil.js.  The renderer forces outer wires CCW / holes CW
 // before building the prism, so its top-cap normal is +Z.  The OCC bridge must
@@ -283,7 +297,7 @@ function buildBrushTransform(item) {
   const r = item.rotation || { x: 0, y: 0, z: 0 };
   const s = item.scale ? item.scale.x : 1;
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
-    const c = polyCentroid(item.profile.polygon2D);
+    const c = polyAreaCentroid(item.profile.polygon2D);
     const rotated = applyEulerXYZ(c.x, c.y, 0, r.x||0, r.y||0, r.z||0);
     const base = item.position || { x: 0, y: 0, z: 0 };
     return {
@@ -333,7 +347,10 @@ function buildItemShapeLocal(item, allItems, precision) {
     // put its top face at the wrong Z, and a chamfer/fillet face selection on
     // the top then matched nothing.  Mirror occOps.js, which uses item.depth.
     const depth = resolveDepth(item.depth);
-    const c = polyCentroid(poly);
+    // Area centroid (density-invariant) so the prism pivot matches
+    // buildBrushTransform and the solid doesn't drift when a curved profile
+    // re-tessellates at a different resolution (mirrors occOps.js).
+    const c = polyAreaCentroid(poly);
     const outerFlat = new Float64Array(
       withWinding(poly, true).flatMap(p => [p.x, p.y]),
     );

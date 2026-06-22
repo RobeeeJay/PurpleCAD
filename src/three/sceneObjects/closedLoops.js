@@ -21,6 +21,7 @@ export {
   withWinding,
   polyContainsPoint,
   polyCentroid,
+  polyAreaCentroid,
   polyArea,
 } from "./polygonUtil.js";
 

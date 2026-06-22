@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   findClosedLoops,
   polyCentroid,
+  polyAreaCentroid,
   buildSceneObjects,
 } from "../sceneObjects.js";
 
@@ -519,6 +520,53 @@ describe("item transform logic", () => {
 //
 // For zero rotation the offset is just (cx,cy,depth/2) — these tests verify
 // that formula using only the pure polyCentroid helper.
+
+// ── Area centroid stays put when a curve re-tessellates ───────────────────────
+// The OCC extrude pivot (occOps makeExtrude / buildBrushTransform) uses the AREA
+// centroid, not the vertex mean, so toggling preview/print resolution — which
+// re-tessellates an arc/bezier edge to a different point set — doesn't drift the
+// solid.  These guard that property directly.
+describe("polyAreaCentroid is invariant to vertex density", () => {
+  // Same triangle, but the second has extra points subdividing one edge.
+  const tri = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 0, y: 4 },
+  ];
+  const denseEdge = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 3, y: 1 },
+    { x: 2, y: 2 },
+    { x: 1, y: 3 },
+    { x: 0, y: 4 },
+  ];
+
+  it("matches the geometric centre for a rectangle", () => {
+    const c = polyAreaCentroid(rectPoly(2, 3, 6, 7));
+    expect(c.x).toBeCloseTo(4);
+    expect(c.y).toBeCloseTo(5);
+  });
+
+  it("stays fixed when an edge is subdivided (vertex mean drifts)", () => {
+    const a = polyAreaCentroid(tri);
+    const b = polyAreaCentroid(denseEdge);
+    expect(b.x).toBeCloseTo(a.x, 9);
+    expect(b.y).toBeCloseTo(a.y, 9);
+    // The vertex mean is NOT invariant — that's the bug this replaces.
+    const m = polyCentroid(denseEdge);
+    expect(Math.hypot(m.x - a.x, m.y - a.y)).toBeGreaterThan(0.1);
+  });
+
+  it("falls back to the vertex mean for a degenerate (zero-area) loop", () => {
+    const line = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 4, y: 0 },
+    ];
+    expect(polyAreaCentroid(line)).toEqual(polyCentroid(line));
+  });
+});
 
 describe("extrude world-position formula (no rotation)", () => {
   it("centroid of an axis-aligned rectangle is its geometric centre", () => {

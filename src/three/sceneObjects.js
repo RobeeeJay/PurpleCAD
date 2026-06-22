@@ -38,6 +38,7 @@ export {
   findClosedLoopsWithShapes,
   polyContainsPoint,
   polyCentroid,
+  polyAreaCentroid,
   polyArea,
   groupLoopsWithHoles,
 } from "./sceneObjects/closedLoops.js";

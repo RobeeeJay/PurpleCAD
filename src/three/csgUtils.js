@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   polyContainsPoint,
   polyCentroid,
+  polyAreaCentroid,
   polyArea,
 } from "./sceneObjects/polygonUtil.js";
 import {
@@ -19,7 +20,9 @@ export function buildBrushTransform(item) {
 
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
     const poly = item.profile.polygon2D;
-    const c = polyCentroid(poly);
+    // Area centroid (not the vertex mean) so a re-tessellated curve doesn't shift
+    // the pivot — must match the centring in occOps.js makeExtrude.
+    const c = polyAreaCentroid(poly);
     const offset = new THREE.Vector3(c.x, c.y, 0);
     offset.applyEuler(new THREE.Euler(r.x || 0, r.y || 0, r.z || 0));
     const base = item.position || { x: 0, y: 0, z: 0 };
