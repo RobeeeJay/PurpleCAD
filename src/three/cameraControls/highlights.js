@@ -246,8 +246,14 @@ export function createHighlightHelpers({
         }
       }
 
-      // BFS from seed, only following neighbours with a matching normal.
+      // BFS from seed across shared edges.  Curve detection applies to faces
+      // just like edges: follow a neighbour when the LOCAL dihedral (this
+      // triangle vs the neighbour) is within the curve-detection angle, so a
+      // tessellated cylinder / fillet / wave selects as one face while a sharp
+      // edge (a larger bend than the setting) stops it.
       const seedN = triNormals[seedTri];
+      const maxAngle = useStore.getState().curveDetectionAngleDeg ?? 5;
+      const cosThr = Math.cos((Math.max(0, maxAngle) * Math.PI) / 180);
       const visited = new Set([seedTri]);
       const queue = [seedTri];
       while (queue.length > 0) {
@@ -262,7 +268,7 @@ export function createHighlightHelpers({
           if (!adj) continue;
           for (const nt of adj) {
             if (visited.has(nt)) continue;
-            if (triNormals[nt].dot(seedN) > 0.999) {
+            if (triNormals[nt].dot(triNormals[t]) > cosThr) {
               visited.add(nt);
               queue.push(nt);
             }

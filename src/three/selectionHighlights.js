@@ -4,6 +4,7 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "./sceneObjects.js";
 import { FACE_SELECT_COLOR, EDGE_SELECT_COLOR } from "./theme.js";
+import { useStore } from "../store";
 
 // Returns a geometry to source overlay triangles from.  For primitive types
 // (sphere/cylinder/torus) the on-mesh geometry is just a BoxGeometry stand-in
@@ -173,6 +174,14 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
         }
       }
 
+      // Faces respect the curve-detection angle (like edges): the region grows
+      // across a tessellated curve via the local dihedral and stops at a sharp
+      // edge — matching the hover highlight (applyFaceHighlight).
+      const cosThr = Math.cos(
+        (Math.max(0, useStore.getState?.()?.curveDetectionAngleDeg ?? 5) *
+          Math.PI) /
+          180,
+      );
       const visitedAll = new Set();
       for (const f of faces) {
         // Seed: triangle whose centre is closest to the stored centroid
@@ -225,7 +234,7 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
             if (!adj) continue;
             for (const nt of adj) {
               if (seenLocal.has(nt)) continue;
-              if (triNormals[nt].dot(triNormals[seed]) > 0.999) {
+              if (triNormals[nt].dot(triNormals[t]) > cosThr) {
                 seenLocal.add(nt);
                 queue.push(nt);
               }
