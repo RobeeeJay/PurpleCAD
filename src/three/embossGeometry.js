@@ -51,9 +51,10 @@ function commonFrameLoops(profiles, params, allItems, precision) {
       .applyQuaternion(Q0inv);
 
   const refLoops = [];
-  let sx = 0,
-    sy = 0,
-    n = 0;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
   for (const prof of live) {
     const Qi = quatOf(prof.rotation);
     const Pi = new THREE.Vector3(
@@ -69,16 +70,20 @@ function commonFrameLoops(profiles, params, allItems, precision) {
     const holes = (prof.holes || [])
       .filter((h) => h && h.length >= 3)
       .map((h) => h.map(map));
-    outer.forEach((p) => {
-      sx += p.x;
-      sy += p.y;
-      n++;
-    });
+    for (const p of outer) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
     refLoops.push({ outer, holes });
   }
 
-  const cu = n ? sx / n : 0,
-    cv = n ? sy / n : 0;
+  // Anchor on the BOUNDING-BOX centre, not the vertex mean.  The mean is biased
+  // by vertex density, so re-simplifying text at a different resolution shifts
+  // it and the emboss drifts; the bbox extremes are preserved, so it stays put.
+  const cu = Number.isFinite(minX) ? (minX + maxX) / 2 : 0,
+    cv = Number.isFinite(minY) ? (minY + maxY) / 2 : 0;
   const scale = params.scale > 0 ? params.scale : 1;
   const center = (p) => ({ x: (p.x - cu) * scale, y: (p.y - cv) * scale });
   return refLoops.map((lp) => ({

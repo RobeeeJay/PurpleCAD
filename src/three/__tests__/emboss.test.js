@@ -102,6 +102,51 @@ describe("emboss op", () => {
     expect(topRing(res.geometryData)).toBeGreaterThan(2);
   });
 
+  it("anchors the stamp on the bbox centre (invariant to vertex density)", () => {
+    // The same triangle with extra collinear points on one edge: the vertex mean
+    // shifts toward the denser edge, but the bbox centre doesn't — so the
+    // centred stamp must be identical (text won't drift when re-simplified).
+    const tri = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 0, y: 2 },
+    ];
+    const dense = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 1.34, y: 0.66 },
+      { x: 0.66, y: 1.34 },
+      { x: 0, y: 2 },
+    ];
+    const mk = (poly) => ({
+      polygon2D: poly,
+      holes: [],
+      position: O,
+      rotation: O,
+      normalWorld: { x: 0, y: 0, z: 1 },
+    });
+    const bboxCenter = (flat) => {
+      let a = Infinity,
+        b = -Infinity,
+        c = Infinity,
+        d = -Infinity;
+      for (let i = 0; i < flat.length; i += 2) {
+        a = Math.min(a, flat[i]);
+        b = Math.max(b, flat[i]);
+        c = Math.min(c, flat[i + 1]);
+        d = Math.max(d, flat[i + 1]);
+      }
+      return [(a + b) / 2, (c + d) / 2];
+    };
+    const s1 = buildEmbossStamp([mk(tri)], topFace, params(), [], null);
+    const s2 = buildEmbossStamp([mk(dense)], topFace, params(), [], null);
+    const c1 = bboxCenter(s1.loops[0].outer);
+    const c2 = bboxCenter(s2.loops[0].outer);
+    expect(c1[0]).toBeCloseTo(0, 6); // centred on the bbox → ≈ 0
+    expect(c1[0]).toBeCloseTo(c2[0], 6);
+    expect(c1[1]).toBeCloseTo(c2[1], 6);
+  });
+
   it("clips the relief to the face — geometry off the body isn't added", async () => {
     // Shoving the pad a full unit off-centre lands it half over the cube's edge;
     // the half hanging in space must be clipped, so nothing exceeds the cube's
