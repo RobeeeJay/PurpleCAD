@@ -8,8 +8,6 @@ const ModifySection = ({ bare = false }) => {
   const selectedIds = useStore((s) => s.selectedIds);
   const items = useStore((s) => s.items);
   const splitObject = useStore((s) => s.splitObject);
-  const originToolActive = useStore((s) => s.originToolActive);
-  const setOriginToolActive = useStore((s) => s.setOriginToolActive);
 
   const selectedItem = items.find((i) => i.id === selectedId);
   // Splittable when the single selected solid is geometrically more than one
@@ -26,10 +24,6 @@ const ModifySection = ({ bare = false }) => {
     if (!canSplit) return;
     splitObject(selectedId);
   };
-
-  // Change-origin: arm the tool, then click an object to pick its rotation/scale
-  // pivot (centre of mass / centre of object / a vertex).
-  const handleOrigin = () => setOriginToolActive(!originToolActive);
 
   const splitButton = (
     <button
@@ -117,65 +111,10 @@ const ModifySection = ({ bare = false }) => {
     </button>
   );
 
-  const originButton = (
-    <button
-      className={`toolbar-btn ${originToolActive ? "active" : ""}`}
-      title="Change origin — click an object, then pick its rotation/scale pivot (centre of mass, centre of object, or a vertex)"
-      onClick={handleOrigin}
-    >
-      <svg viewBox="0 0 24 24" width="20" height="20">
-        {/* crosshair pivot over a small cube */}
-        <polygon
-          stroke="#c4c2b8"
-          fill="none"
-          strokeWidth="1.3"
-          strokeLinejoin="miter"
-          points="13,9 18,11 18,17 13,19 8,17 8,11"
-        />
-        <line
-          stroke="#c4c2b8"
-          fill="none"
-          strokeWidth="1.3"
-          x1="8"
-          y1="11"
-          x2="13"
-          y2="13"
-        />
-        <line
-          stroke="#c4c2b8"
-          fill="none"
-          strokeWidth="1.3"
-          x1="18"
-          y1="11"
-          x2="13"
-          y2="13"
-        />
-        <line
-          stroke="#c4c2b8"
-          fill="none"
-          strokeWidth="1.3"
-          x1="13"
-          y1="13"
-          x2="13"
-          y2="19"
-        />
-        <circle fill="#6C3FD4" stroke="#6C3FD4" r="2" cx="8" cy="8" />
-        <line stroke="#D4A33F" strokeWidth="1.3" x1="2" y1="8" x2="14" y2="8" />
-        <line stroke="#D4A33F" strokeWidth="1.3" x1="8" y1="2" x2="8" y2="14" />
-      </svg>
-    </button>
-  );
-
   return bare ? (
-    <>
-      {splitButton}
-      {originButton}
-    </>
+    <>{splitButton}</>
   ) : (
-    <ToolbarSection label="Modify">
-      {splitButton}
-      {originButton}
-    </ToolbarSection>
+    <ToolbarSection label="Modify">{splitButton}</ToolbarSection>
   );
 };
 

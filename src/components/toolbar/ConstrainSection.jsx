@@ -21,6 +21,8 @@ const ConstrainSection = ({ isSketchMode }) => {
   const pointToPointTool = useStore((s) => s.pointToPointTool);
   const startPointToPointTool = useStore((s) => s.startPointToPointTool);
   const cancelPointToPointTool = useStore((s) => s.cancelPointToPointTool);
+  const originToolActive = useStore((s) => s.originToolActive);
+  const setOriginToolActive = useStore((s) => s.setOriginToolActive);
   const snapDistanceMm = useStore((s) => s.snapDistanceMm);
   const snapAngleDeg = useStore((s) => s.snapAngleDeg);
 
@@ -440,6 +442,68 @@ const ConstrainSection = ({ isSketchMode }) => {
               stroke="#6C3FD4"
               strokeWidth="0.5"
               points="17,8 13.5,9 15,11.5"
+            />
+          </svg>
+        </button>
+      )}
+      {!isSketchMode && (
+        <button
+          className={`toolbar-btn ${originToolActive ? "active" : ""}`}
+          title="Change origin — click an object, then pick its rotation/scale pivot (centre of mass, centre of object, or a vertex)"
+          onClick={() => setOriginToolActive(!originToolActive)}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20">
+            {/* crosshair pivot over a small cube */}
+            <polygon
+              stroke="#c4c2b8"
+              fill="none"
+              strokeWidth="1.3"
+              strokeLinejoin="miter"
+              points="13,9 18,11 18,17 13,19 8,17 8,11"
+            />
+            <line
+              stroke="#c4c2b8"
+              fill="none"
+              strokeWidth="1.3"
+              x1="8"
+              y1="11"
+              x2="13"
+              y2="13"
+            />
+            <line
+              stroke="#c4c2b8"
+              fill="none"
+              strokeWidth="1.3"
+              x1="18"
+              y1="11"
+              x2="13"
+              y2="13"
+            />
+            <line
+              stroke="#c4c2b8"
+              fill="none"
+              strokeWidth="1.3"
+              x1="13"
+              y1="13"
+              x2="13"
+              y2="19"
+            />
+            <circle fill="#6C3FD4" stroke="#6C3FD4" r="2" cx="8" cy="8" />
+            <line
+              stroke="#D4A33F"
+              strokeWidth="1.3"
+              x1="2"
+              y1="8"
+              x2="14"
+              y2="8"
+            />
+            <line
+              stroke="#D4A33F"
+              strokeWidth="1.3"
+              x1="8"
+              y1="2"
+              x2="8"
+              y2="14"
             />
           </svg>
         </button>
