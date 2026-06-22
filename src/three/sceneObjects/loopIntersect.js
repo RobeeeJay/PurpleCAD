@@ -97,9 +97,25 @@ export function lineCrossIntersect(li, lj) {
 // keeping polygon shapes stable for profile re-matching.
 export function arcSegsN(shape, arcAngle, curveSegments, precision) {
   if (precision != null) {
+    const sUnits = precision / MM_PER_UNIT;
+    // A cubic bezier has no radius; drive its segment count off the control
+    // points' deviation from the chord.  Flattening into N equal-t pieces leaves
+    // a chord error ≈ dev / N², so N ≈ √(dev / tol) keeps it within precision —
+    // otherwise a bezier ignores the resolution toggle entirely.
+    if (shape.type === "bezier" && shape.p0 && shape.p3) {
+      const cx = shape.p3.x - shape.p0.x,
+        cy = shape.p3.y - shape.p0.y;
+      const cl = Math.hypot(cx, cy) || 1e-6;
+      const dist = (p) =>
+        Math.abs((p.x - shape.p0.x) * cy - (p.y - shape.p0.y) * cx) / cl;
+      const dev = Math.max(dist(shape.p1), dist(shape.p2));
+      return Math.max(
+        8,
+        Math.min(512, Math.ceil(Math.sqrt(dev / Math.max(sUnits, 1e-9)))),
+      );
+    }
     const r = shape.r;
     if (r > 0) {
-      const sUnits = precision / MM_PER_UNIT;
       const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
       // Cap well below the old 65536: region detection only needs the loop
       // topology, and a huge segment count makes its O(n²) intersection pass
