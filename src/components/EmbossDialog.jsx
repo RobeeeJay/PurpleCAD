@@ -124,18 +124,11 @@ const EmbossDialog = () => {
           {hasFace ? "Face ✓" : "Face"}
         </button>
 
-        <span style={{ ...LBL, marginLeft: 10 }}>Mode</span>
         <button
           type="button"
-          style={toggleStyle(!params.deboss)}
-          onClick={() => updateEmbossParams({ deboss: false })}
-        >
-          Emboss
-        </button>
-        <button
-          type="button"
-          style={toggleStyle(params.deboss)}
-          onClick={() => updateEmbossParams({ deboss: true })}
+          style={{ ...toggleStyle(params.deboss), marginLeft: 10 }}
+          onClick={() => updateEmbossParams({ deboss: !params.deboss })}
+          title="On recesses the geometry (deboss); off raises it (emboss)"
         >
           Deboss
         </button>
@@ -211,20 +204,19 @@ const EmbossDialog = () => {
           style={barInput(true)}
         />
 
-        <span style={{ ...LBL, marginLeft: 10 }}>Projection</span>
         <button
           type="button"
-          style={toggleStyle(params.projection !== "conform")}
-          onClick={() => updateEmbossParams({ projection: "center" })}
-          title="Project all geometry from the centre-most face's plane"
-        >
-          Center
-        </button>
-        <button
-          type="button"
-          style={toggleStyle(params.projection === "conform")}
-          onClick={() => updateEmbossParams({ projection: "conform" })}
-          title="Wrap the geometry around a cylindrical face (falls back to Center on flat faces)"
+          style={{
+            ...toggleStyle(params.projection === "conform"),
+            marginLeft: 10,
+          }}
+          onClick={() =>
+            updateEmbossParams({
+              projection:
+                params.projection === "conform" ? "center" : "conform",
+            })
+          }
+          title="On wraps the geometry around a cylindrical face (conform, falls back to flat on a flat face); off projects from the centre-most face's plane (center)"
         >
           Conform
         </button>
