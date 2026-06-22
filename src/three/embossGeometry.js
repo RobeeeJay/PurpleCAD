@@ -87,15 +87,16 @@ function commonFrameLoops(profiles, params, allItems, precision) {
   }));
 }
 
-// Wrap the centred loops around a cylinder (axis through the local origin) and
-// bake a watertight mesh.  The loops' x maps to arc length, y to the axis, the
-// extrude depth to the radial relief.
+// Wrap the centred loops around a cylinder (axis A through centre C, radius R)
+// and bake a watertight mesh.  The loops' x maps to arc length, y to the axis,
+// the extrude depth to the radial relief.  The click point anchors the wrap.
 function buildConformMesh(loops, cyl, face, params) {
   const A = new THREE.Vector3(cyl.ax, cyl.ay, cyl.az).normalize();
-  const P = new THREE.Vector3(face.cx, face.cy, face.cz);
+  const C = new THREE.Vector3(cyl.cx || 0, cyl.cy || 0, cyl.cz || 0);
+  const P = new THREE.Vector3(face.cx, face.cy, face.cz).sub(C);
   const along = P.dot(A);
   const Pperp = P.clone().sub(A.clone().multiplyScalar(along));
-  const R = Math.max(1e-3, Pperp.length());
+  const R = cyl.radius > 1e-3 ? cyl.radius : Math.max(1e-3, Pperp.length());
   const e1 = Pperp.clone().normalize();
   const e2 = A.clone().cross(e1).normalize();
 
@@ -132,9 +133,9 @@ function buildConformMesh(loops, cyl, face, params) {
     const cos = Math.cos(theta) * r,
       sin = Math.sin(theta) * r;
     const axial = along + w;
-    out[i * 3] = A.x * axial + e1.x * cos + e2.x * sin;
-    out[i * 3 + 1] = A.y * axial + e1.y * cos + e2.y * sin;
-    out[i * 3 + 2] = A.z * axial + e1.z * cos + e2.z * sin;
+    out[i * 3] = C.x + A.x * axial + e1.x * cos + e2.x * sin;
+    out[i * 3 + 1] = C.y + A.y * axial + e1.y * cos + e2.y * sin;
+    out[i * 3 + 2] = C.z + A.z * axial + e1.z * cos + e2.z * sin;
   }
   const indices = geo.index ? Array.from(geo.index.array) : null;
   geo.dispose();

@@ -3,10 +3,15 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import { createRequire } from "module";
+import * as THREE from "three";
 import { ensureOcc } from "../occ/init.js";
 import { embossItem } from "../occClient.js";
 import { buildEmbossStamp } from "../embossGeometry.js";
 import { buildItemShapeLocal } from "../occOps.js";
+import {
+  growConnectedFaceSet,
+  fitCylinderToFaceSet,
+} from "../embossFaceSet.js";
 import { regenerateItemsForResolution } from "../regenerateItems.js";
 
 const occ = createRequire(import.meta.url)(
@@ -129,6 +134,50 @@ describe("emboss op", () => {
     expect(res).toBeTruthy();
     // The wrapped pad adds geometry to the smooth cylinder.
     expect(tris(res.geometryData)).toBeGreaterThan(bareTris);
+  });
+
+  it("grows a connected face set and fits a cylinder to it", () => {
+    // A faceted tube along Z (radius 1, 24 facets) — a CSG-style cylinder.
+    const N = 24,
+      R = 1,
+      H = 2;
+    const p = [];
+    for (let k = 0; k < N; k++) {
+      const a0 = (k / N) * 2 * Math.PI,
+        a1 = ((k + 1) / N) * 2 * Math.PI;
+      const x0 = R * Math.cos(a0),
+        y0 = R * Math.sin(a0),
+        x1 = R * Math.cos(a1),
+        y1 = R * Math.sin(a1);
+      p.push(x0, y0, -H / 2, x1, y1, -H / 2, x1, y1, H / 2);
+      p.push(x0, y0, -H / 2, x1, y1, H / 2, x0, y0, H / 2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(p), 3),
+    );
+    const grown = growConnectedFaceSet(g, 0, { x: 1, y: 0, z: 0 }, 30);
+    expect(grown).toBeTruthy();
+    // It should grab most facets (each 2 tris) by following the gentle dihedral.
+    expect(grown.normals.length).toBeGreaterThan(40);
+    const cyl = fitCylinderToFaceSet(grown.normals, grown.centroids);
+    expect(cyl).toBeTruthy();
+    expect(Math.abs(cyl.az)).toBeGreaterThan(0.99); // axis ≈ Z
+    expect(cyl.radius).toBeGreaterThan(0.9);
+    expect(cyl.radius).toBeLessThan(1.1);
+  });
+
+  it("fits no cylinder to a flat face set (falls back to center)", () => {
+    const p = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(p), 3),
+    );
+    const grown = growConnectedFaceSet(g, 0, { x: 0, y: 0, z: 1 }, 30);
+    expect(grown).toBeTruthy();
+    expect(fitCylinderToFaceSet(grown.normals, grown.centroids)).toBeNull();
   });
 
   it("rebuilds an emboss regenerator from its embedded recipe", async () => {

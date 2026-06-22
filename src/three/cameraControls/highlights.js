@@ -519,11 +519,42 @@ export function createHighlightHelpers({
     pointHighlightRef.current = hlMesh;
   };
 
+  // Highlight an arbitrary connected face set (the emboss tool grows it across
+  // a curved surface) from its triangle positions in the mesh's local frame.
+  const highlightFaceSet = (mesh, positionsLocal, color) => {
+    clearFaceHighlight();
+    if (!positionsLocal || positionsLocal.length < 9) return;
+    const hlGeo = new THREE.BufferGeometry();
+    hlGeo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positionsLocal), 3),
+    );
+    const hlMesh = new THREE.Mesh(
+      hlGeo,
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.5,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }),
+    );
+    hlMesh.position.copy(mesh.position);
+    hlMesh.rotation.copy(mesh.rotation);
+    hlMesh.scale.copy(mesh.scale);
+    hlMesh.renderOrder = 996;
+    scene.add(hlMesh);
+    faceHighlightRef.current = hlMesh;
+  };
+
   return {
     clearFaceHighlight,
     clearEdgeHighlight,
     clearPointHighlight,
     highlightWorldPoint,
+    highlightFaceSet,
     // Visual-only clearer (does NOT reset pendingFaceSelection /
     // pendingEdgeSelection).  Used by the modifier-keyup handler in
     // cameraControls.js so a stray keyup between hover and click doesn't

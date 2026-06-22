@@ -7,6 +7,11 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { FACE_HOVER_COLOR } from "../theme.js";
 import { polyArea } from "../sceneObjects/polygonUtil.js";
+import {
+  growConnectedFaceSet,
+  fitCylinderToFaceSet,
+  centerFaceOfSet,
+} from "../embossFaceSet.js";
 
 const SEL_COLOR = 0x44dd88; // selected sketch geometry fill
 const HOVER_COLOR = 0x88ccff; // hovered fill
@@ -63,6 +68,78 @@ export function createEmbossInteraction({
       return it && it.type !== "sketch" && m.visible !== false;
     });
     return raycasterRef.current.intersectObjects(meshes, false)[0] || null;
+  };
+
+  // Turn a face hit into { id, mesh, face (centre plane, body-local), faceSet
+  // (cylinder fit or null), setPositions (the connected set's tris for hover) }.
+  const analyzeFace = (hit) => {
+    const mesh = hit.object;
+    const id = mesh.userData.itemId;
+    const it = itemsRef.current.find((i) => i.id === id);
+    const isPrim = ["sphere", "cylinder", "torus"].includes(it?.type);
+    const worldN = hit.face
+      ? hit.face.normal.clone()
+      : new THREE.Vector3(0, 1, 0);
+    if (!isPrim && hit.face)
+      worldN.applyMatrix3(
+        new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld),
+      );
+    worldN.normalize();
+    const invQ = mesh.getWorldQuaternion(new THREE.Quaternion()).invert();
+    const localN = worldN.clone().applyQuaternion(invQ).normalize();
+    const localP = mesh.worldToLocal(hit.point.clone());
+    const plane = {
+      nx: localN.x,
+      ny: localN.y,
+      nz: localN.z,
+      cx: localP.x,
+      cy: localP.y,
+      cz: localP.z,
+    };
+
+    // A cylinder primitive's curved side is a known wrap target (axis +Y).
+    if (it?.type === "cylinder" && Math.abs(localN.y) < 0.7) {
+      return {
+        id,
+        mesh,
+        face: plane,
+        faceSet: {
+          cylinder: {
+            ax: 0,
+            ay: 1,
+            az: 0,
+            cx: 0,
+            cy: 0,
+            cz: 0,
+            radius: Math.hypot(localP.x, localP.z),
+          },
+        },
+        setPositions: null,
+      };
+    }
+    if (isPrim)
+      return { id, mesh, face: plane, faceSet: null, setPositions: null };
+
+    // CSG / cube: grow the connected face set across the curve-detection angle,
+    // fit a cylinder to it, and project from its centre-most face.
+    const maxAngle = useStore.getState().curveDetectionAngleDeg ?? 30;
+    const grown = growConnectedFaceSet(
+      mesh.geometry,
+      hit.faceIndex,
+      hit.face?.normal || localN,
+      maxAngle,
+    );
+    if (!grown)
+      return { id, mesh, face: plane, faceSet: null, setPositions: null };
+    const cyl = fitCylinderToFaceSet(grown.normals, grown.centroids);
+    const center = centerFaceOfSet(grown.normals, grown.centroids) || plane;
+    return {
+      id,
+      mesh,
+      face: center,
+      faceSet: cyl ? { cylinder: cyl } : null,
+      setPositions: grown.positions,
+    };
   };
 
   const cKey = (p) =>
@@ -140,7 +217,12 @@ export function createEmbossInteraction({
     }
     highlights.clearFaceHighlight();
     const hit = pickFaceHit(x, y);
-    if (hit) highlights.applyFaceHighlight(hit, FACE_HOVER_COLOR);
+    if (hit) {
+      const a = analyzeFace(hit);
+      if (a.setPositions)
+        highlights.highlightFaceSet(a.mesh, a.setPositions, FACE_HOVER_COLOR);
+      else highlights.applyFaceHighlight(hit, FACE_HOVER_COLOR);
+    }
     return true;
   };
 
@@ -181,42 +263,12 @@ export function createEmbossInteraction({
       return true;
     }
 
-    // Face pick: capture the clicked face's plane in the body's local frame
-    // (mirrors the hole tool's face capture).
+    // Face pick: grow the connected set, fit a cylinder, capture the centre-most
+    // face plane (all in the body's local frame).
     const hit = pickFaceHit(x, y);
     if (!hit) return true;
-    const mesh = hit.object;
-    const id = mesh.userData.itemId;
-    const it = itemsRef.current.find((i) => i.id === id);
-    const isPrim = ["sphere", "cylinder", "torus"].includes(it?.type);
-    const worldN = hit.face
-      ? hit.face.normal.clone()
-      : new THREE.Vector3(0, 1, 0);
-    if (!isPrim && hit.face)
-      worldN.applyMatrix3(
-        new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld),
-      );
-    worldN.normalize();
-    const invQ = mesh.getWorldQuaternion(new THREE.Quaternion()).invert();
-    const localN = worldN.clone().applyQuaternion(invQ).normalize();
-    const localP = mesh.worldToLocal(hit.point.clone());
-    // A cylinder primitive's side is a wrap target for the conform projection —
-    // its axis is local +Y (the radial click point gives the radius).  The flat
-    // caps (normal ≈ ±Y) are not curved, so leave them as plain center faces.
-    const onCurvedSide = it?.type === "cylinder" && Math.abs(localN.y) < 0.7;
-    const faceSet = onCurvedSide ? { cylinder: { ax: 0, ay: 1, az: 0 } } : null;
-    store.setEmbossFace(
-      id,
-      {
-        nx: localN.x,
-        ny: localN.y,
-        nz: localN.z,
-        cx: localP.x,
-        cy: localP.y,
-        cz: localP.z,
-      },
-      faceSet,
-    );
+    const a = analyzeFace(hit);
+    store.setEmbossFace(a.id, a.face, a.faceSet);
     highlights.clearFaceHighlight();
     return true;
   };
