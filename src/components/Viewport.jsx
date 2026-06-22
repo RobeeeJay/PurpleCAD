@@ -15,6 +15,7 @@ import SplitDialog from "./SplitDialog";
 import ShellDialog from "./ShellDialog";
 import OriginDialog from "./OriginDialog";
 import HoleDialog from "./HoleDialog";
+import EmbossDialog from "./EmbossDialog";
 import SelectionWidget from "./SelectionWidget";
 import PlanePickHint from "./viewport/PlanePickHint";
 import { useViewportInit } from "./viewport/useViewportInit";
@@ -323,6 +324,7 @@ const Viewport = () => {
       <ShellDialog />
       <OriginDialog />
       <HoleDialog />
+      <EmbossDialog />
       <SelectionWidget />
       <SvgPlacementOverlay />
       <PlanePickHint />

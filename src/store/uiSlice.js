@@ -109,6 +109,10 @@ export const uiInitial = {
   //   { phase:"face"|"point"|"params", itemId, face:{normal,point}, point, params }
   holeTool: null,
 
+  // Emboss/deboss tool: stamp sketch geometry onto a body face as relief.
+  //   { picking:null|"geometry"|"faces", itemId, profiles:[], face, faceSet, params }
+  embossTool: null,
+
   // Sketch→solid sweep tools (Revolve / Pipe / Loft), all sharing one select
   // mode driven by the Modify toolbar.  Shape:
   //   { kind:"revolve"|"pipe"|"loft", profile, axis, secondProfile, params }
@@ -364,6 +368,87 @@ export const createUiSlice = (set) => ({
           }
         : {},
     ),
+
+  // ── Emboss tool ─────────────────────────────────────────────────────────
+  startEmbossTool: () =>
+    set({
+      embossTool: {
+        picking: null,
+        itemId: null,
+        profiles: [],
+        face: null,
+        faceSet: null,
+        params: {
+          deboss: false,
+          angleDeg: 0,
+          offsetMm: 0,
+          scale: 1,
+          distanceMm: 2,
+          projection: "center",
+        },
+      },
+    }),
+  cancelEmbossTool: () => set({ embossTool: null }),
+  // Arm one of the two picks (toggles off if it was already armed).
+  setEmbossPicking: (kind) =>
+    set((s) =>
+      s.embossTool
+        ? {
+            embossTool: {
+              ...s.embossTool,
+              picking: s.embossTool.picking === kind ? null : kind,
+            },
+          }
+        : {},
+    ),
+  setEmbossProfiles: (profiles) =>
+    set((s) =>
+      s.embossTool ? { embossTool: { ...s.embossTool, profiles } } : {},
+    ),
+  setEmbossFace: (itemId, face, faceSet) =>
+    set((s) =>
+      s.embossTool
+        ? {
+            embossTool: {
+              ...s.embossTool,
+              itemId,
+              face,
+              faceSet,
+              picking: null,
+            },
+          }
+        : {},
+    ),
+  updateEmbossParams: (partial) =>
+    set((s) =>
+      s.embossTool
+        ? {
+            embossTool: {
+              ...s.embossTool,
+              params: { ...s.embossTool.params, ...partial },
+            },
+          }
+        : {},
+    ),
+  // Re-open a committed emboss step to edit its params, replaying the frozen recipe.
+  beginEmbossEdit: (entryId) =>
+    set((state) => {
+      const entry = state.history.find((h) => h.id === entryId);
+      const r = entry?.instruction?.patches?.regenerator;
+      if (r?.kind !== "emboss") return {};
+      return {
+        embossTool: {
+          picking: null,
+          editEntryId: entryId,
+          itemId: entry.itemId,
+          source: r.source,
+          profiles: r.profiles || [],
+          face: r.face,
+          faceSet: r.faceSet || null,
+          params: { ...r.params },
+        },
+      };
+    }),
 
   // ── Plane object + 3D pattern tools ─────────────────────────────────────
   // false when off, else a mode string ("points" | "face") naming what a

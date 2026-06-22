@@ -95,6 +95,10 @@ export function useSceneSync({
   const defaultMaterial = useStore((s) => s.defaultMaterial);
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
   const soloItemId = useStore((s) => s.soloItemId);
+  // The Emboss tool reuses the extrude-select fills to pick sketch geometry.
+  const embossGeomPicking = useStore(
+    (s) => s.embossTool?.picking === "geometry",
+  );
   // Tracks whether the path tracer was ever started, so unmount can tear down
   // its render loop without loading the (lazy) module when it was never used.
   const pathTraceUsedRef = useRef(false);
@@ -556,7 +560,9 @@ export function useSceneSync({
       (!sweepSelectMode.profile ||
         (sweepSelectMode.kind === "loft" && !sweepSelectMode.secondProfile));
     const active =
-      ["profile", "start"].includes(extrudeSelectMode) || sweepPicking;
+      ["profile", "start"].includes(extrudeSelectMode) ||
+      sweepPicking ||
+      embossGeomPicking;
     if (!active) {
       if (extrudeSelectGroupRef.current) {
         scene.remove(extrudeSelectGroupRef.current);
@@ -586,7 +592,13 @@ export function useSceneSync({
         }
       }
     }
-  }, [extrudeSelectMode, sweepSelectMode, items, printPrecision]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    extrudeSelectMode,
+    sweepSelectMode,
+    embossGeomPicking,
+    items,
+    printPrecision,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Extrude depth input init ──────────────────────────────────────────────
   // The distance overlay + Confirm button appear as soon as the unified

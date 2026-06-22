@@ -6,6 +6,7 @@ import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js"
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createShellPreviewHelpers } from "./cameraControls/shell.js";
 import { createHolePreviewHelpers } from "./cameraControls/hole.js";
+import { createEmbossPreviewHelpers } from "./cameraControls/emboss.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
@@ -28,6 +29,7 @@ import { createSketchHoverHelpers } from "./cameraControls/sketchHover.js";
 import { createNavigationHandlers } from "./cameraControls/navigation.js";
 import { createTransformHandleDrag } from "./cameraControls/transformHandleDrag.js";
 import { createViewInteraction } from "./cameraControls/viewInteraction.js";
+import { createEmbossInteraction } from "./cameraControls/embossPick.js";
 import { createSketchInteraction } from "./cameraControls/sketchInteraction.js";
 
 export function loadCameraState() {
@@ -325,6 +327,19 @@ export function attachCameraControls(ctx) {
     cancelExtrude,
   } = extrude;
 
+  const { handleEmbossHover, handleEmbossClick, syncEmbossFills } =
+    createEmbossInteraction({
+      renderer,
+      raycasterRef,
+      cameraRef,
+      mouseRef,
+      objectsRef,
+      itemsRef,
+      extrudeSelectGroupRef,
+      highlights,
+    });
+  controls.syncEmbossFills = syncEmbossFills;
+
   // Expose extrude-overlay control to the React layer:
   //   • finalizeExtrudeWithDepth(d)         — commit at numeric depth `d`.
   //   • finalizeExtrudeWithFormula(f, d)    — commit storing formula `f`
@@ -398,6 +413,13 @@ export function attachCameraControls(ctx) {
   const holePreview = createHolePreviewHelpers({ scene, itemsRef, objectsRef });
   controls.updateHolePreview = () => holePreview.updateHolePreview();
   controls.clearHolePreview = () => holePreview.clearHolePreview();
+  const embossPreview = createEmbossPreviewHelpers({
+    scene,
+    itemsRef,
+    objectsRef,
+  });
+  controls.updateEmbossPreview = () => embossPreview.updateEmbossPreview();
+  controls.clearEmbossPreview = () => embossPreview.clearEmbossPreview();
 
   // Sweep tools (Revolve / Pipe / Loft): profile + axis picking, live preview,
   // and the Confirm-time commit.  The SweepOverlay drives them via these.
@@ -1539,6 +1561,12 @@ export function attachCameraControls(ctx) {
       controls.mouseY = e.clientY;
       return;
     }
+    if (useStore.getState().embossTool?.picking) {
+      handleEmbossHover(e.clientX, e.clientY);
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return;
+    }
     if (onSketchMouseMove(e)) return;
 
     clearSketchVisualsFor3D();
@@ -1581,6 +1609,14 @@ export function attachCameraControls(ctx) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5) handleSweepClick(e.clientX, e.clientY);
+      return;
+    }
+
+    if (useStore.getState().embossTool?.picking && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleEmbossClick(e.clientX, e.clientY, e.shiftKey);
       return;
     }
 

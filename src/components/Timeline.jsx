@@ -22,6 +22,7 @@ import {
   FilletIcon,
   ShellIcon,
   HoleIcon,
+  EmbossIcon,
   PlaneIcon,
   RevolveIcon,
   PipeIcon,
@@ -66,6 +67,12 @@ const holeInfo = (entry) => {
   const inst = entry?.instruction;
   if (inst?.type !== "modify") return null;
   return inst.patches?.regenerator?.kind === "hole" ? {} : null;
+};
+
+const embossInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  return inst.patches?.regenerator?.kind === "emboss" ? {} : null;
 };
 
 // Detect revolve (sweep) entries — a CREATE whose item carries a revolve recipe.
@@ -136,6 +143,7 @@ const entryIcon = (entry) => {
   if (ci) return ci.isFillet ? <FilletIcon /> : <ChamferIcon />;
   if (shellInfo(entry)) return <ShellIcon />;
   if (holeInfo(entry)) return <HoleIcon />;
+  if (embossInfo(entry)) return <EmbossIcon />;
 
   const inst = entry.instruction;
   if (entry.label === "Split") return <SplitIcon />;
@@ -366,6 +374,7 @@ const Timeline = () => {
   );
   const setShellTarget = useStore((state) => state.setShellTarget);
   const beginHoleEdit = useStore((state) => state.beginHoleEdit);
+  const beginEmbossEdit = useStore((state) => state.beginEmbossEdit);
   const pushPullRetargetTarget = useStore(
     (state) => state.pushPullRetargetTarget,
   );
@@ -790,6 +799,19 @@ const Timeline = () => {
                   }}
                 >
                   <HoleIcon />
+                </button>
+              )}
+              {embossInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit emboss — mode / angle / offset / scale / depth"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    restoreToHistory(entry.id);
+                    beginEmbossEdit(entry.id);
+                  }}
+                >
+                  <EmbossIcon />
                 </button>
               )}
               {revolveInfo(entry) && (

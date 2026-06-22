@@ -102,6 +102,10 @@ export function holeItem(args) {
   return runOp("holeItem", args);
 }
 
+export function embossItem(args) {
+  return runOp("embossItem", args);
+}
+
 export function revolveItem(args) {
   return runOp("revolveItem", args);
 }

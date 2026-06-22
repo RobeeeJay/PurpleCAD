@@ -406,6 +406,29 @@ export const ShellIcon = () => (
   </svg>
 );
 
+export const EmbossIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <rect
+      x="3"
+      y="6"
+      width="18"
+      height="12"
+      rx="1"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <path
+      d="M9 15 L9 9 L12 9 Q14 9 14 11 Q14 13 12 13 L9 13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="miter"
+      strokeLinecap="square"
+    />
+  </svg>
+);
+
 export const HoleIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14">
     <rect

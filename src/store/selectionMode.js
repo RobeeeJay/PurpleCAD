@@ -9,6 +9,9 @@ function toolSelectionLock(s) {
     return s.planePickActive === "points" ? ["point"] : ["face"];
   // Hole: pick a face, then a point (vertex / spot on the face).
   if (s.holeTool) return s.holeTool.phase === "face" ? ["face"] : ["point"];
+  // Emboss: lock to faces while the face pick is armed; otherwise nothing (the
+  // sketch-geometry pick raycasts the extrude-select fills, not objects).
+  if (s.embossTool) return s.embossTool.picking === "faces" ? ["face"] : [];
   return null;
 }
 

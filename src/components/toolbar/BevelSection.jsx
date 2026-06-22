@@ -14,6 +14,9 @@ const BevelSection = ({ bare = false }) => {
   const holeTool = useStore((s) => s.holeTool);
   const startHoleTool = useStore((s) => s.startHoleTool);
   const cancelHoleTool = useStore((s) => s.cancelHoleTool);
+  const embossTool = useStore((s) => s.embossTool);
+  const startEmbossTool = useStore((s) => s.startEmbossTool);
+  const cancelEmbossTool = useStore((s) => s.cancelEmbossTool);
 
   // Shell hollows the whole selected body, so it only needs a solid selected
   // (no face/edge pick).  Sketches and the empty selection are ineligible.
@@ -26,6 +29,11 @@ const BevelSection = ({ bare = false }) => {
   const toggleHole = () => {
     if (holeTool) cancelHoleTool();
     else startHoleTool();
+  };
+  // Emboss guides its own geometry + face picks from its dialog.
+  const toggleEmboss = () => {
+    if (embossTool) cancelEmbossTool();
+    else startEmbossTool();
   };
 
   const toggleMode = (mode) => {
@@ -332,6 +340,33 @@ const BevelSection = ({ bare = false }) => {
             y1="14"
             x2="15.5"
             y2="14"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${embossTool ? "active" : ""}`}
+        title="Emboss — stamp sketch geometry onto a face as a raised or recessed relief"
+        onClick={toggleEmboss}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* a plate with a raised letter/relief */}
+          <rect
+            x="3"
+            y="6"
+            width="18"
+            height="12"
+            rx="1"
+            fill="none"
+            stroke="#c4c2b8"
+            strokeWidth="1.5"
+          />
+          <path
+            d="M9 15 L9 9 L12 9 Q14 9 14 11 Q14 13 12 13 L9 13"
+            fill="rgba(108,63,212,0.25)"
+            stroke="#6C3FD4"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            strokeLinecap="square"
           />
         </svg>
       </button>

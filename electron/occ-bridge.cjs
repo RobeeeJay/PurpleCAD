@@ -451,6 +451,29 @@ function buildItemShapeLocal(item, allItems, precision) {
       return resultId;
     }
 
+    if (regen.kind === "emboss") {
+      const sourceId = buildItemShapeLocal(regen.source, allItems, precision);
+      if (sourceId == null) return null;
+      let stampId = 0;
+      let resultId;
+      try {
+        stampId = buildEmbossStampShape(regen.stamp);
+        if (!stampId) return null;
+        resultId = occ.booleanOp([sourceId, stampId], regen.stamp.deboss ? "difference" : "union");
+      } finally {
+        occ.releaseShape(sourceId);
+        if (stampId) occ.releaseShape(stampId);
+      }
+      if (!resultId) return null;
+      const off = regen.centerOffset;
+      if (off) {
+        const corrected = occ.transformShape(resultId, -off.cx, -off.cy, -off.cz, 0, 0, 0);
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
     if (regen.kind === "revolve") {
       const args = revolveArgs(regen.source, regen.axis, allItems);
       if (!args) return null;
@@ -897,6 +920,77 @@ function holeItem({ source, hole, allItems, printPrecision }) {
     throw new Error(
       "Hole failed — the cut produced nothing. Check the diameter/length and that the point is on the body."
     );
+  }
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
+  }
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
+  };
+}
+
+// Build the emboss/deboss stamp tool from a baked recipe (see occOps.js).
+function buildEmbossStampShape(stamp) {
+  if (!stamp || !stamp.loops || stamp.loops.length === 0) return 0;
+  const { placement: pl, depth } = stamp;
+  let stampId = 0;
+  for (const lp of stamp.loops) {
+    if (!lp.outer || lp.outer.length < 6) continue;
+    const outer = new Float64Array(lp.outer);
+    const holes = (lp.holes || []).filter((h) => h && h.length >= 6).map((h) => new Float64Array(h));
+    const prism = occ.makeExtrude(outer, holes, 0, 0, depth);
+    if (!prism) continue;
+    if (!stampId) {
+      stampId = prism;
+    } else {
+      const u = occ.booleanOp([stampId, prism], "union");
+      occ.releaseShape(prism);
+      if (u) { occ.releaseShape(stampId); stampId = u; }
+    }
+  }
+  if (!stampId) return 0;
+  const placed = occ.transformShape(stampId, pl.tx, pl.ty, pl.tz, pl.rx, pl.ry, pl.rz);
+  occ.releaseShape(stampId);
+  return placed;
+}
+
+function embossItem({ source, stamp, allItems, printPrecision }) {
+  const targetId = buildItemShapeLocal(source, allItems, printPrecision);
+  if (targetId == null) {
+    throw new Error("Could not rebuild the body to emboss onto.");
+  }
+  let stampId = 0;
+  try {
+    stampId = buildEmbossStampShape(stamp);
+  } catch (e) {
+    occ.releaseShape(targetId);
+    throw e;
+  }
+  if (!stampId) {
+    occ.releaseShape(targetId);
+    throw new Error("Emboss failed — the selected sketch geometry produced no solid.");
+  }
+  let resultId;
+  try {
+    resultId = occ.booleanOp([targetId, stampId], stamp.deboss ? "difference" : "union");
+  } finally {
+    occ.releaseShape(targetId);
+    occ.releaseShape(stampId);
+  }
+  if (!resultId) {
+    throw new Error("Emboss failed — the geometry didn't reach the face. Check distance/scale/offset.");
   }
   let tess;
   try {
@@ -1428,4 +1522,4 @@ function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision
   return result;
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };
