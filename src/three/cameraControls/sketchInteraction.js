@@ -1000,9 +1000,18 @@ export function createSketchInteraction(
       }
     }
     // Snap-to-grid: when enabled and not already snapped to existing geometry,
-    // round the in-plane position to the configured world-space interval.
+    // round the in-plane position to the configured world-space interval.  A
+    // bezier's control points (p1/p2) shape the curve freely, so they bypass the
+    // grid — gridding them quantises the tangents and fights fine adjustment.
+    const isBezierControl =
+      origShape?.type === "bezier" && (pointKey === "p1" || pointKey === "p2");
     const snapCfg = useStore.getState();
-    if (!pointSnapped && snapCfg.snapEnabled && snapCfg.snapDistanceMm > 0) {
+    if (
+      !pointSnapped &&
+      !isBezierControl &&
+      snapCfg.snapEnabled &&
+      snapCfg.snapDistanceMm > 0
+    ) {
       localPt = {
         x: snapUnitToIntervalMm(localPt.x, snapCfg.snapDistanceMm),
         y: snapUnitToIntervalMm(localPt.y, snapCfg.snapDistanceMm),
