@@ -2,8 +2,12 @@ import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 
+// In sketch mode this is the "Constrain" group (coincident / distance / H / V);
+// in 3D it's the "Move" group (drop-to-ground, point-to-point).  Snap is shared.
 const ConstrainSection = ({ isSketchMode }) => {
   const selectedId = useStore((s) => s.selectedId);
+  const selectedIds = useStore((s) => s.selectedIds);
+  const items = useStore((s) => s.items);
   const sketchConstraintMode = useStore((s) => s.sketchConstraintMode);
   const setSketchConstraintMode = useStore((s) => s.setSketchConstraintMode);
   const setSketchConstraintFirstPoint = useStore(
@@ -44,8 +48,18 @@ const ConstrainSection = ({ isSketchMode }) => {
     }
   };
 
+  // Drop-to-ground (3D "Move" group): enabled when a non-sketch body is selected.
+  const dropEligible = (selectedIds.length > 0 ? selectedIds : [selectedId])
+    .map((id) => items.find((i) => i.id === id))
+    .filter((it) => it && it.type !== "sketch");
+  const canDrop = dropEligible.length > 0;
+  const handleDrop = () => {
+    if (!canDrop) return;
+    useStore.getState()._cameraControls?.dropSelectedToGround?.();
+  };
+
   return (
-    <ToolbarSection label="Constrain">
+    <ToolbarSection label={isSketchMode ? "Constrain" : "Move"}>
       {isSketchMode ? (
         <>
           <button
@@ -270,38 +284,120 @@ const ConstrainSection = ({ isSketchMode }) => {
           </button>
         </>
       ) : (
-        <button className="toolbar-btn" title="Perpendicular">
+        <button
+          className="toolbar-btn"
+          title="Drop to ground — moves the selection so its lowest point sits on Y=0"
+          disabled={!canDrop}
+          onClick={handleDrop}
+        >
           <svg viewBox="0 0 24 24" width="20" height="20">
             <line
-              stroke="#6C3FD4"
-              fill="none"
-              strokeWidth="1.5"
-              strokeLinecap="square"
-              x1="4"
-              y1="20"
-              x2="4"
-              y2="5"
-            />
-            <line
-              stroke="#6C3FD4"
-              fill="none"
-              strokeWidth="1.5"
-              strokeLinecap="square"
-              x1="4"
-              y1="20"
-              x2="20"
-              y2="20"
-            />
-            <polyline
               stroke="#D4A33F"
               fill="none"
               strokeWidth="1.5"
               strokeLinecap="square"
-              strokeLinejoin="miter"
-              points="4,14 10,14 10,20"
+              x1="2"
+              y1="21"
+              x2="22"
+              y2="21"
             />
-            <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="5" />
-            <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="20" cy="20" />
+            <line
+              stroke="#D4A33F"
+              fill="none"
+              strokeWidth="1"
+              x1="4"
+              y1="22.5"
+              x2="7"
+              y2="21"
+            />
+            <line
+              stroke="#D4A33F"
+              fill="none"
+              strokeWidth="1"
+              x1="9"
+              y1="22.5"
+              x2="12"
+              y2="21"
+            />
+            <line
+              stroke="#D4A33F"
+              fill="none"
+              strokeWidth="1"
+              x1="14"
+              y1="22.5"
+              x2="17"
+              y2="21"
+            />
+            <line
+              stroke="#D4A33F"
+              fill="none"
+              strokeWidth="1"
+              x1="19"
+              y1="22.5"
+              x2="22"
+              y2="21"
+            />
+            <rect
+              stroke="#c4c2b8"
+              fill="none"
+              strokeWidth="1.5"
+              strokeLinejoin="miter"
+              x="7"
+              y="7"
+              width="8"
+              height="8"
+            />
+            <polyline
+              stroke="#c4c2b8"
+              fill="none"
+              strokeWidth="1.5"
+              strokeLinejoin="miter"
+              points="7,7 9.5,4.5 17.5,4.5 17.5,12.5 15,15"
+            />
+            <line
+              stroke="#c4c2b8"
+              fill="none"
+              strokeWidth="1.5"
+              x1="15"
+              y1="7"
+              x2="15"
+              y2="15"
+            />
+            <line
+              stroke="#c4c2b8"
+              fill="none"
+              strokeWidth="1.5"
+              x1="7"
+              y1="7"
+              x2="15"
+              y2="7"
+            />
+            <line
+              stroke="#D4A33F"
+              fill="none"
+              strokeWidth="1"
+              strokeDasharray="1.5 1.5"
+              x1="9.5"
+              y1="4.5"
+              x2="9.5"
+              y2="12.5"
+            />
+            <line
+              stroke="#6C3FD4"
+              fill="none"
+              strokeWidth="1.5"
+              strokeLinecap="square"
+              x1="11"
+              y1="6"
+              x2="11"
+              y2="19"
+            />
+            <polygon
+              fill="#6C3FD4"
+              stroke="#6C3FD4"
+              strokeWidth="0.5"
+              points="11,21 9,18 13,18"
+            />
           </svg>
         </button>
       )}
