@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useStore } from "../store";
 import { useEscapeKey } from "./inputs.jsx";
 import { BAR_STYLE, LBL, barBtn, pickBtn } from "./viewport/overlayBar.js";
@@ -15,14 +15,28 @@ const PointToPointDialog = () => {
 
   const open = !!tool;
   useEscapeKey(open, cancel);
-  if (!open) return null;
 
-  const hasA = !!tool.a;
-  const hasB = !!tool.b;
+  const hasA = !!tool?.a;
+  const hasB = !!tool?.b;
   const ready = hasA && hasB;
+
+  // Ghost-preview the move whenever both points are set; clear it otherwise and
+  // on unmount.  Keyed on the point coords so re-picking either end re-previews.
+  const aKey = tool?.a ? JSON.stringify(tool.a) : null;
+  const bKey = tool?.b ? JSON.stringify(tool.b) : null;
+  useEffect(() => {
+    const cc = useStore.getState()._cameraControls;
+    if (ready) cc?.updatePointToPointPreview?.();
+    else cc?.clearPointToPointPreview?.();
+    return () =>
+      useStore.getState()._cameraControls?.clearPointToPointPreview?.();
+  }, [ready, aKey, bKey]);
+
+  if (!open) return null;
 
   const confirm = () => {
     if (!ready) return;
+    useStore.getState()._cameraControls?.clearPointToPointPreview?.();
     const itemA = items.find((i) => i.id === tool.a.itemId);
     if (!itemA) return;
     const dx = tool.b.point.x - tool.a.point.x;
