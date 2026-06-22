@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { FACE_HOVER_COLOR } from "../theme.js";
+import { polyArea } from "../sceneObjects/polygonUtil.js";
 
 const SEL_COLOR = 0x44dd88; // selected sketch geometry fill
 const HOVER_COLOR = 0x88ccff; // hovered fill
@@ -18,6 +19,8 @@ export function createEmbossInteraction({
   objectsRef,
   itemsRef,
   extrudeSelectGroupRef,
+  screenToSketchLocal,
+  pointInPolygon2D,
   highlights,
 }) {
   const setRay = (x, y) => {
@@ -27,14 +30,30 @@ export function createEmbossInteraction({
     raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
   };
 
+  // Point-in-polygon pick (matches extrude's findProfileAt): the smallest
+  // enclosing region wins, which reliably selects thin glyphs over a raycast.
   const pickFill = (x, y) => {
     const fills = extrudeSelectGroupRef?.current?.children ?? [];
-    if (!fills.length) return null;
-    setRay(x, y);
-    const hits = raycasterRef.current.intersectObjects(fills, false);
-    for (const h of hits)
-      if (h.object?.userData?.extrudeProfile) return h.object;
-    return null;
+    let best = null,
+      bestArea = Infinity;
+    for (const fill of fills) {
+      const profile = fill.userData.extrudeProfile;
+      if (!profile) continue;
+      const sketchMesh = objectsRef.current[profile.sketchId];
+      if (!sketchMesh) continue;
+      const lp = screenToSketchLocal(x, y, sketchMesh);
+      if (!lp) continue;
+      const inOuter = pointInPolygon2D(lp, profile.polygon2D);
+      const inHole = (profile.holes || []).some((h) => pointInPolygon2D(lp, h));
+      if (inOuter && !inHole) {
+        const area = polyArea(profile.polygon2D);
+        if (area < bestArea) {
+          best = fill;
+          bestArea = area;
+        }
+      }
+    }
+    return best;
   };
 
   const pickFaceHit = (x, y) => {
@@ -57,6 +76,14 @@ export function createEmbossInteraction({
     p && p.type === "sketchLoop" && p.textShapeIdx != null
       ? `${p.sketchId}:${p.textShapeIdx}`
       : null;
+  // Every fill belonging to the same text shape (one word), so picking a letter
+  // grabs the whole word — like extrude.  A non-text loop is just itself.
+  const textGroupFills = (fill) => {
+    const k = textKey(fill.userData.extrudeProfile);
+    if (!k) return [fill];
+    const fills = extrudeSelectGroupRef?.current?.children ?? [];
+    return fills.filter((f) => textKey(f.userData.extrudeProfile) === k);
+  };
 
   // Two profiles share a plane when their normals are parallel and one's origin
   // lies on the other's plane.
@@ -83,8 +110,9 @@ export function createEmbossInteraction({
     return Math.abs(d.dot(na)) < 0.02; // ~0.2mm
   };
 
-  // Paint the fills by current selection (and an optional hovered fill).
-  const syncEmbossFills = (hoverFill = null) => {
+  // Paint the fills by current selection (plus an optional set of hovered fills).
+  const syncEmbossFills = (hoverFills = []) => {
+    const hoverSet = new Set(hoverFills);
     const fills = extrudeSelectGroupRef?.current?.children ?? [];
     const list = useStore.getState().embossTool?.profiles ?? [];
     for (const f of fills) {
@@ -93,7 +121,7 @@ export function createEmbossInteraction({
       if (list.some((q) => sameProfile(q, p))) {
         f.material.color.setHex(SEL_COLOR);
         f.material.opacity = 0.45;
-      } else if (f === hoverFill) {
+      } else if (hoverSet.has(f)) {
         f.material.color.setHex(HOVER_COLOR);
         f.material.opacity = 0.3;
       } else {
@@ -106,7 +134,8 @@ export function createEmbossInteraction({
     const et = useStore.getState().embossTool;
     if (!et || !et.picking) return false;
     if (et.picking === "geometry") {
-      syncEmbossFills(pickFill(x, y));
+      const fill = pickFill(x, y);
+      syncEmbossFills(fill ? textGroupFills(fill) : []);
       return true;
     }
     highlights.clearFaceHighlight();
@@ -123,13 +152,9 @@ export function createEmbossInteraction({
     if (et.picking === "geometry") {
       const fill = pickFill(x, y);
       if (!fill) return true;
-      const clicked = fill.userData.extrudeProfile;
-      const k = textKey(clicked);
-      const fills = extrudeSelectGroupRef.current.children;
-      const group =
-        shift || k == null
-          ? [fill]
-          : fills.filter((f) => textKey(f.userData.extrudeProfile) === k);
+      // Shift restricts the pick to this single glyph; otherwise a text letter
+      // toggles the whole word, matching extrude.
+      const group = shift ? [fill] : textGroupFills(fill);
       const groupProfiles = group.map((f) => f.userData.extrudeProfile);
       const list = et.profiles.slice();
       const anySel = groupProfiles.some((p) =>

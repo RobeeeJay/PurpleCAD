@@ -336,6 +336,8 @@ export function attachCameraControls(ctx) {
       objectsRef,
       itemsRef,
       extrudeSelectGroupRef,
+      screenToSketchLocal,
+      pointInPolygon2D,
       highlights,
     });
   controls.syncEmbossFills = syncEmbossFills;
