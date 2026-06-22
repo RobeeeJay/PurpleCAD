@@ -651,6 +651,34 @@ describe("extrude world-position formula (no rotation)", () => {
 
 // ── 3. buildSceneObjects mesh positioning ─────────────────────────────────────
 
+describe("buildSceneObjects: extrude pivot matches the OCC pivot", () => {
+  // An emboss picks the face/cylinder off this rendered mesh but unions with the
+  // OCC body, so the mesh pivot (extrudeLocalOffset) must equal the OCC pivot —
+  // the AREA centroid — not the vertex mean.  They diverge when a curve edge is
+  // densely tessellated (a bezier wall); the triangle below stands in for one,
+  // with its hypotenuse subdivided so the vertex mean is pulled off the centroid.
+  const denseHyp = [
+    { x: 0, y: 0 },
+    { x: 6, y: 0 },
+    { x: 4.5, y: 1.5 },
+    { x: 3, y: 3 },
+    { x: 1.5, y: 4.5 },
+    { x: 0, y: 6 },
+  ];
+
+  it("uses the area centroid as the local pivot (not the vertex mean)", () => {
+    const mesh = buildAndGetMesh([mkExtrude(1, denseHyp, 2, pos(0, 0, 0))], 1);
+    const off = mesh.userData.extrudeLocalOffset;
+    const area = polyAreaCentroid(denseHyp); // triangle centroid (2,2)
+    const mean = polyCentroid(denseHyp); // pulled to (2.5,2.5) by the dense edge
+    expect(off.x).toBeCloseTo(area.x, 6);
+    expect(off.y).toBeCloseTo(area.y, 6);
+    // Guard that the two centroids genuinely differ for this profile, so the
+    // assertion above is actually distinguishing them.
+    expect(Math.hypot(area.x - mean.x, area.y - mean.y)).toBeGreaterThan(0.1);
+  });
+});
+
 describe("buildSceneObjects: regular item positioning", () => {
   it("cube placed at item.position exactly", () => {
     const mesh = buildAndGetMesh(

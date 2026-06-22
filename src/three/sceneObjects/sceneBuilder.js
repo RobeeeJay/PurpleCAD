@@ -15,6 +15,7 @@ import {
   groupLoopsWithHoles,
   polyContainsPoint,
   polyCentroid,
+  polyAreaCentroid,
   polyArea,
   withWinding,
 } from "./closedLoops.js";
@@ -212,8 +213,12 @@ export function buildSceneObjects(
         // Shift the 2D polygon so its centroid sits at the local
         // origin.  Without this the mesh pivot stays at the sketch
         // origin (often the world origin), making rotation and scaling
-        // feel completely wrong.
-        const profileCentroid2D = polyCentroid(poly);
+        // feel completely wrong.  Use the AREA centroid (density-invariant) so
+        // this rendered-mesh pivot matches the OCC pivot in occOps.js
+        // makeExtrude — otherwise an emboss face/cylinder picked off this mesh
+        // lands in a different local frame than the OCC body it unions with (the
+        // frames diverge for an asymmetric profile such as a bezier).
+        const profileCentroid2D = polyAreaCentroid(poly);
         const centeredPoly = poly.map((p) => ({
           x: p.x - profileCentroid2D.x,
           y: p.y - profileCentroid2D.y,
