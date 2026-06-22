@@ -102,6 +102,32 @@ describe("emboss op", () => {
     expect(topRing(res.geometryData)).toBeGreaterThan(2);
   });
 
+  it("keeps the body anchored when the offset changes (no bbox drift)", async () => {
+    // Not bbox-centring means the cube stays at its local frame (bottom y = -1)
+    // no matter where the relief is offset to — so the object doesn't move.
+    const minY = async (offsetMm) => {
+      const stamp = buildEmbossStamp(
+        [profile],
+        topFace,
+        params({ offsetMm }),
+        [],
+        null,
+      );
+      const res = await embossItem({
+        source: cube,
+        stamp,
+        allItems: [cube],
+        printPrecision: 0.1,
+      });
+      expect(res.centerOffset).toEqual({ cx: 0, cy: 0, cz: 0 });
+      let m = Infinity;
+      const p = res.geometryData.positions;
+      for (let i = 1; i < p.length; i += 3) m = Math.min(m, p[i]);
+      return m;
+    };
+    expect(await minY(0)).toBeCloseTo(await minY(6), 5);
+  });
+
   it("wraps the relief around a cylinder (conform projection)", async () => {
     const cyl = { id: 3, type: "cylinder", position: O, rotation: O, scale: S };
     // A small square on a sketch (normal +Z), wrapped onto the cylinder side.

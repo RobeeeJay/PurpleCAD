@@ -1202,24 +1202,17 @@ async function embossItem({ source, stamp, allItems, printPrecision }) {
   }
   if (!tess) return null;
 
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2,
-    cy = (minY + maxY) / 2,
-    cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx;
-    centered[i + 1] -= cy;
-    centered[i + 2] -= cz;
-  }
+  // Keep the result in the SOURCE's local frame (no bbox-centring): the relief
+  // can stand far off the body, and a bbox centre that shifts with offset/scale
+  // would drag the whole object as you tweak the offset.  Anchoring to the body
+  // (centerOffset 0 → position = the source's brush transform) keeps it put.
   return {
     geometryData: {
-      positions: centered,
+      positions: Array.from(tess.positions),
       normals: null,
       indices: Array.from(tess.indices),
     },
-    centerOffset: { cx, cy, cz },
+    centerOffset: { cx: 0, cy: 0, cz: 0 },
   };
 }
 

@@ -1007,16 +1007,11 @@ function embossItem({ source, stamp, allItems, printPrecision }) {
     occ.releaseShape(resultId);
   }
   if (!tess) return null;
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
+  // No bbox-centring — anchor to the body's frame so the offset doesn't drag the
+  // object (see occOps.js embossItem).
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
+    geometryData: { positions: Array.from(tess.positions), normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx: 0, cy: 0, cz: 0 },
   };
 }
 
