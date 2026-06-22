@@ -213,6 +213,11 @@ export function createEmbossPreviewHelpers({ scene, itemsRef, objectsRef }) {
     group.add(lines);
     group.position.set(position.x, position.y, position.z);
     group.rotation.set(rotation.x || 0, rotation.y || 0, rotation.z || 0);
+    // The result geometry is built UNSCALED (buildItemShapeLocal doesn't apply
+    // item.scale — the mesh does); the committed csg keeps the body's scale, so
+    // the preview must too or a scaled body previews at its base size.
+    const s = recipe.source?.scale?.x ?? 1;
+    group.scale.setScalar(s);
     scene.add(group);
     previewGroup = group;
   };
