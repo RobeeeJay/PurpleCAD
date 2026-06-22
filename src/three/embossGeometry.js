@@ -118,7 +118,8 @@ function buildConformMesh(loops, cyl, face, params) {
   const ang = ((params.angleDeg || 0) * Math.PI) / 180;
   const ca = Math.cos(ang),
     sa = Math.sin(ang);
-  const offset = (params.offsetMm || 0) / MM_PER_UNIT;
+  const offsetH = (params.offsetMm || 0) / MM_PER_UNIT; // around the cylinder
+  const offsetV = (params.offsetVMm || 0) / MM_PER_UNIT; // along the axis
   const deboss = !!params.deboss;
   const pos = geo.attributes.position;
   const out = new Array(pos.count * 3);
@@ -126,8 +127,8 @@ function buildConformMesh(loops, cyl, face, params) {
     const px = pos.getX(i),
       py = pos.getY(i),
       pz = pos.getZ(i);
-    const u = px * ca - py * sa + offset; // arc length around the cylinder
-    const w = px * sa + py * ca; // axial position
+    const u = px * ca - py * sa + offsetH; // arc length around the cylinder
+    const w = px * sa + py * ca + offsetV; // axial position
     const theta = u / R;
     const r = deboss ? R + EMBOSS_MARGIN - pz : R - EMBOSS_MARGIN + pz;
     const cos = Math.cos(theta) * r,
@@ -183,13 +184,16 @@ export function buildEmbossStamp(
     .multiply(qAlign);
   const euler = new THREE.Euler().setFromQuaternion(q, "XYZ");
 
-  const offset = (params.offsetMm || 0) / MM_PER_UNIT;
+  const offsetH = (params.offsetMm || 0) / MM_PER_UNIT;
+  const offsetV = (params.offsetVMm || 0) / MM_PER_UNIT;
   const distance = Math.max(1e-4, (params.distanceMm || 0) / MM_PER_UNIT);
   const deboss = !!params.deboss;
   const inPlaneX = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+  const inPlaneY = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
   const base = F.clone()
     .add(Nf.clone().multiplyScalar(deboss ? EMBOSS_MARGIN : -EMBOSS_MARGIN))
-    .add(inPlaneX.multiplyScalar(offset));
+    .add(inPlaneX.multiplyScalar(offsetH))
+    .add(inPlaneY.multiplyScalar(offsetV));
   const depth = (deboss ? -1 : 1) * (distance + EMBOSS_MARGIN);
 
   return {

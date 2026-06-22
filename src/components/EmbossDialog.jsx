@@ -48,6 +48,7 @@ const EmbossDialog = () => {
       params?.deboss,
       params?.angleDeg,
       params?.offsetMm,
+      params?.offsetVMm,
       params?.scale,
       params?.distanceMm,
       params?.projection,
@@ -147,12 +148,22 @@ const EmbossDialog = () => {
           onKeyDown={onKey}
           style={barInput(true)}
         />
-        <span style={LBL}>Offset(mm)</span>
+        <span style={LBL}>Offset H(mm)</span>
         <NumberInput
           step="0.5"
           value={params.offsetMm}
           onCommit={(n) => {
             if (Number.isFinite(n)) updateEmbossParams({ offsetMm: n });
+          }}
+          onKeyDown={onKey}
+          style={barInput(true)}
+        />
+        <span style={LBL}>Offset V(mm)</span>
+        <NumberInput
+          step="0.5"
+          value={params.offsetVMm}
+          onCommit={(n) => {
+            if (Number.isFinite(n)) updateEmbossParams({ offsetVMm: n });
           }}
           onKeyDown={onKey}
           style={barInput(true)}

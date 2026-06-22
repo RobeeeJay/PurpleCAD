@@ -382,6 +382,7 @@ export const createUiSlice = (set) => ({
           deboss: false,
           angleDeg: 0,
           offsetMm: 0,
+          offsetVMm: 0,
           scale: 1,
           distanceMm: 2,
           projection: "center",
