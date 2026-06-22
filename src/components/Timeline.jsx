@@ -476,7 +476,13 @@ const Timeline = () => {
   };
 
   return (
-    <div className="timeline">
+    <div
+      className={`timeline${toolLocked ? " tool-locked" : ""}`}
+      // Lock the whole area while a tool is mid-flow: every button (step
+      // restore, edit/retarget/delete, recalculate, reorder) is disabled, not
+      // just history navigation.  aria-disabled mirrors it for assistive tech.
+      aria-disabled={toolLocked || undefined}
+    >
       <div className="timeline-header">
         <span>Timeline</span>
         <button
@@ -551,7 +557,6 @@ const Timeline = () => {
                 failed ? "failed" : "",
                 isDragging ? "dragging" : "",
                 isDropTarget ? "drop-before" : "",
-                toolLocked ? "tool-locked" : "",
               ]
                 .filter(Boolean)
                 .join(" ")}

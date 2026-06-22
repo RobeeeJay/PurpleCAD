@@ -80,13 +80,12 @@
   background-color: var(--bg-tertiary);
 }
 
-/* Navigation is locked while a create/modify/sketch tool is mid-flow. */
-.timeline-entry.tool-locked {
-  cursor: not-allowed;
-}
-
-.timeline-entry.tool-locked:hover {
-  background-color: transparent;
+/* The whole timeline is locked while a create/modify/sketch tool is mid-flow:
+   pointer-events:none disables every button (restore / edit / retarget / delete /
+   recalculate / reorder) and the dim signals it's inert. */
+.timeline.tool-locked {
+  pointer-events: none;
+  opacity: 0.45;
 }
 
 .timeline-entry.active {
