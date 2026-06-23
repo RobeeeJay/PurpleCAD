@@ -121,6 +121,12 @@ export const uiInitial = {
   // the OCC message) and clears it on success; cleared when a tool starts.
   toolError: null,
 
+  // Measure tool: read-only inspection of distances / dimensions / lengths.
+  //   3D: { picks:[entity…] } accumulated by clicking (entity = world-space
+  //   point/segment/face/object, see three/measure.js); sketch reads the live
+  //   line/point selection instead.  null when off.
+  measureTool: null,
+
   // Draft tool: taper selected faces about a neutral (main) face's plane.
   //   { picking:null|"main"|"faces", itemId, source, neutral:{nx..,cx..},
   //     faces:[{nx..,cx..}], angleDeg, flip }
@@ -540,6 +546,21 @@ export const createUiSlice = (set) => ({
   // ── Draft tool ──────────────────────────────────────────────────────────
   // Guided like Hole/Emboss — no pre-selection needed; the body is learned from
   // the main-face pick.
+  // ── Measure tool ──────────────────────────────────────────────────────────
+  startMeasureTool: () => set({ measureTool: { picks: [] } }),
+  cancelMeasureTool: () => set({ measureTool: null }),
+  // Add a clicked entity (3D); keep at most the last two so a third click starts
+  // a fresh distance from the previous pick.
+  addMeasurePick: (entity) =>
+    set((s) => {
+      if (!s.measureTool || !entity) return {};
+      const picks = [...s.measureTool.picks, entity];
+      while (picks.length > 2) picks.shift();
+      return { measureTool: { ...s.measureTool, picks } };
+    }),
+  clearMeasurePicks: () =>
+    set((s) => (s.measureTool ? { measureTool: { picks: [] } } : {})),
+
   startDraftTool: () =>
     set({
       toolError: null,

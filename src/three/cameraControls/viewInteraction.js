@@ -7,7 +7,65 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { START_FACE_HIGHLIGHT, FACE_HOVER_COLOR } from "../theme.js";
 import { nearestVertexOf } from "../objectOrigin.js";
+import { growConnectedFaceSet } from "../embossFaceSet.js";
 import { effectiveSelectionTypes } from "../../store/selectionMode.js";
+
+// Turn a 3D click into a measure entity (world coords): snap to the nearest
+// vertex when close, else the clicked planar face (its triangles + normal); for a
+// raymarched primitive (box-hull geometry, so no real faces) use the clicked
+// surface point.
+function buildMeasureEntity(mesh, hit, isPrimitive) {
+  if (!hit) return null;
+  const localToWorldArr = (x, y, z) => {
+    const w = mesh.localToWorld(new THREE.Vector3(x, y, z));
+    return [w.x, w.y, w.z];
+  };
+  if (isPrimitive || !hit.face) {
+    return {
+      kind: "point",
+      p: [hit.point.x, hit.point.y, hit.point.z],
+      pick: "point",
+    };
+  }
+  const pos = mesh.geometry?.attributes?.position?.array;
+  const lp = mesh.worldToLocal(hit.point.clone());
+  if (pos) {
+    const v = nearestVertexOf(pos, lp.x, lp.y, lp.z);
+    const vw = mesh.localToWorld(new THREE.Vector3(v.x, v.y, v.z));
+    mesh.geometry.computeBoundingSphere?.();
+    const r = mesh.geometry.boundingSphere?.radius || 1;
+    const ws = mesh.getWorldScale(new THREE.Vector3()).x || 1;
+    if (vw.distanceTo(hit.point) < r * ws * 0.07)
+      return { kind: "point", p: [vw.x, vw.y, vw.z], pick: "vertex" };
+  }
+  const grown = growConnectedFaceSet(
+    mesh.geometry,
+    hit.faceIndex,
+    hit.face.normal,
+    1.5,
+  );
+  if (grown && grown.positions.length >= 9) {
+    const pts = [];
+    for (let i = 0; i < grown.positions.length; i += 3)
+      pts.push(
+        localToWorldArr(
+          grown.positions[i],
+          grown.positions[i + 1],
+          grown.positions[i + 2],
+        ),
+      );
+    const n = hit.face.normal
+      .clone()
+      .applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld))
+      .normalize();
+    return { kind: "face", pts, normal: [n.x, n.y, n.z], pick: "face" };
+  }
+  return {
+    kind: "point",
+    p: [hit.point.x, hit.point.y, hit.point.z],
+    pick: "point",
+  };
+}
 
 // The snappable 2D points of a sketch shape (endpoints, corners, centres) — the
 // candidates the hole tool highlights/snaps its centre to.
@@ -400,6 +458,25 @@ export function createViewInteraction(
         selectableMeshes,
         false,
       );
+
+      // Measure tool: each click adds an entity (vertex / face / surface point);
+      // the overlay shows its dimension or the distance to the previous pick.
+      const measure = useStore.getState().measureTool;
+      if (measure) {
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          const it = itemsRef.current.find(
+            (i) => i.id === hit.object.userData.itemId,
+          );
+          if (it && it.type !== "sketch") {
+            const isPrim = ["sphere", "cylinder", "torus"].includes(it.type);
+            const entity = buildMeasureEntity(hit.object, hit, isPrim);
+            if (entity) useStore.getState().addMeasurePick(entity);
+          }
+        }
+        save();
+        return;
+      }
 
       // Point-to-Point move: capture the nearest vertex (in world coords) of the
       // clicked body for the armed point.  Point B must be a different object.

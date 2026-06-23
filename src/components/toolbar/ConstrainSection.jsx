@@ -29,6 +29,9 @@ const ConstrainSection = ({ isSketchMode }) => {
   const setOriginToolActive = useStore((s) => s.setOriginToolActive);
   const snapDistanceMm = useStore((s) => s.snapDistanceMm);
   const snapAngleDeg = useStore((s) => s.snapAngleDeg);
+  const measureTool = useStore((s) => s.measureTool);
+  const startMeasureTool = useStore((s) => s.startMeasureTool);
+  const cancelMeasureTool = useStore((s) => s.cancelMeasureTool);
 
   const handleCoincidentConstraint = () => {
     if (sketchConstraintMode === "coincident") {
@@ -634,6 +637,56 @@ const ConstrainSection = ({ isSketchMode }) => {
           </svg>
         </button>
       )}
+      <button
+        className={`toolbar-btn ${measureTool ? "active" : ""}`}
+        title="Measure — distance between two picks (vertices/edges/faces/objects), a single face's dimensions, or selected line length"
+        onClick={() => (measureTool ? cancelMeasureTool() : startMeasureTool())}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <rect
+            x="2"
+            y="9"
+            width="20"
+            height="6"
+            fill="none"
+            stroke="#c4c2b8"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+          />
+          <line
+            stroke="#6C3FD4"
+            strokeWidth="1.3"
+            x1="6"
+            y1="9"
+            x2="6"
+            y2="12.5"
+          />
+          <line
+            stroke="#6C3FD4"
+            strokeWidth="1.3"
+            x1="10"
+            y1="9"
+            x2="10"
+            y2="13"
+          />
+          <line
+            stroke="#6C3FD4"
+            strokeWidth="1.3"
+            x1="14"
+            y1="9"
+            x2="14"
+            y2="12.5"
+          />
+          <line
+            stroke="#6C3FD4"
+            strokeWidth="1.3"
+            x1="18"
+            y1="9"
+            x2="18"
+            y2="13"
+          />
+        </svg>
+      </button>
       <button
         className={`toolbar-btn ${snapEnabled ? "active" : ""}`}
         title={`${snapEnabled ? "Disable" : "Enable"} snap to grid (${snapDistanceMm}mm / ${snapAngleDeg}°) — set values in Settings`}
