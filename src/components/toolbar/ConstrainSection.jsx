@@ -16,6 +16,10 @@ const ConstrainSection = ({ isSketchMode }) => {
   const setSketchDistanceInput = useStore((s) => s.setSketchDistanceInput);
   const selectedSketchElement = useStore((s) => s.selectedSketchElement);
   const applySketchHVConstraint = useStore((s) => s.applySketchHVConstraint);
+  const applySketchPairConstraint = useStore(
+    (s) => s.applySketchPairConstraint,
+  );
+  const multiSelectedIndices = useStore((s) => s.sketchMultiSelectedIndices);
   const snapEnabled = useStore((s) => s.snapEnabled);
   const toggleSnap = useStore((s) => s.toggleSnap);
   const pointToPointTool = useStore((s) => s.pointToPointTool);
@@ -287,6 +291,128 @@ const ConstrainSection = ({ isSketchMode }) => {
               />
             </svg>
           </button>
+          {(() => {
+            const ready = (multiSelectedIndices?.length || 0) === 2;
+            const applyPair = (type) => {
+              if (!ready) return;
+              applySketchPairConstraint(
+                selectedId,
+                multiSelectedIndices[0],
+                multiSelectedIndices[1],
+                type,
+              );
+              useStore
+                .getState()
+                ._cameraControls?.refreshSketchSelectionOverlay?.();
+            };
+            return (
+              <>
+                <button
+                  className="toolbar-btn"
+                  title="Parallel — make two selected lines parallel (select two lines)"
+                  disabled={!ready}
+                  onClick={() => applyPair("parallel")}
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20">
+                    <line
+                      stroke="#6C3FD4"
+                      strokeWidth="1.5"
+                      strokeLinecap="square"
+                      x1="5"
+                      y1="19"
+                      x2="13"
+                      y2="5"
+                    />
+                    <line
+                      stroke="#6C3FD4"
+                      strokeWidth="1.5"
+                      strokeLinecap="square"
+                      x1="11"
+                      y1="19"
+                      x2="19"
+                      y2="5"
+                    />
+                    <line
+                      stroke="#D4A33F"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                      x1="8"
+                      y1="14"
+                      x2="14"
+                      y2="14"
+                    />
+                  </svg>
+                </button>
+                <button
+                  className="toolbar-btn"
+                  title="Colinear — make two selected lines lie on the same line"
+                  disabled={!ready}
+                  onClick={() => applyPair("colinear")}
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20">
+                    <line
+                      stroke="#6C3FD4"
+                      strokeWidth="1.5"
+                      strokeLinecap="square"
+                      x1="3"
+                      y1="12"
+                      x2="10"
+                      y2="12"
+                    />
+                    <line
+                      stroke="#6C3FD4"
+                      strokeWidth="1.5"
+                      strokeLinecap="square"
+                      x1="14"
+                      y1="12"
+                      x2="21"
+                      y2="12"
+                    />
+                    <circle
+                      fill="#D4A33F"
+                      stroke="#D4A33F"
+                      r="1.4"
+                      cx="3"
+                      cy="12"
+                    />
+                    <circle
+                      fill="#D4A33F"
+                      stroke="#D4A33F"
+                      r="1.4"
+                      cx="21"
+                      cy="12"
+                    />
+                  </svg>
+                </button>
+                <button
+                  className="toolbar-btn"
+                  title="Tangent — make a line tangent to an arc/circle, or two arcs/circles tangent"
+                  disabled={!ready}
+                  onClick={() => applyPair("tangent")}
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20">
+                    <circle
+                      stroke="#6C3FD4"
+                      fill="none"
+                      strokeWidth="1.5"
+                      cx="9"
+                      cy="13"
+                      r="5.5"
+                    />
+                    <line
+                      stroke="#D4A33F"
+                      strokeWidth="1.5"
+                      strokeLinecap="square"
+                      x1="3"
+                      y1="4.5"
+                      x2="21"
+                      y2="11"
+                    />
+                  </svg>
+                </button>
+              </>
+            );
+          })()}
         </>
       ) : (
         <button

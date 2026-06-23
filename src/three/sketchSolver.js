@@ -185,6 +185,45 @@ function residuals(shapes, constraints, variables) {
         while (d < -Math.PI) d += 2 * Math.PI;
         out.push(Math.abs(d) - target); // magnitude; sign kept by regularization
       } else out.push(0);
+    } else if (c.type === "parallel" || c.type === "colinear") {
+      // Two lines parallel: the direction cross-product → 0.  Colinear adds a
+      // second residual — line B's start point lies on line A (perp dist 0).
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      if (a?.type === "line" && b?.type === "line") {
+        const adx = a.x2 - a.x1,
+          ady = a.y2 - a.y1,
+          al = Math.hypot(adx, ady) || 1e-9;
+        const bdx = b.x2 - b.x1,
+          bdy = b.y2 - b.y1,
+          bl = Math.hypot(bdx, bdy) || 1e-9;
+        out.push((adx * bdy - ady * bdx) / (al * bl));
+        if (c.type === "colinear")
+          out.push(((b.x1 - a.x1) * ady - (b.y1 - a.y1) * adx) / al);
+      } else out.push(0, ...(c.type === "colinear" ? [0] : []));
+    } else if (c.type === "tangent") {
+      // Line↔circle/arc: distance(centre, line) = radius.  Circle/arc↔circle/arc:
+      // centre distance = r1+r2 (external) or |r1−r2| (internal), whichever fits.
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      const isArc = (s) => s?.type === "circle" || s?.type === "arc";
+      const lineCircle = (ln, ci) => {
+        const dx = ln.x2 - ln.x1,
+          dy = ln.y2 - ln.y1,
+          len = Math.hypot(dx, dy) || 1e-9;
+        const d = ((ci.cx - ln.x1) * dy - (ci.cy - ln.y1) * dx) / len;
+        return Math.abs(d) - (ci.r ?? 0);
+      };
+      if (a?.type === "line" && isArc(b)) out.push(lineCircle(a, b));
+      else if (isArc(a) && b?.type === "line") out.push(lineCircle(b, a));
+      else if (isArc(a) && isArc(b)) {
+        const dist = Math.hypot(a.cx - b.cx, a.cy - b.cy);
+        const ra = a.r ?? 0,
+          rb = b.r ?? 0;
+        const ext = dist - (ra + rb),
+          int = dist - Math.abs(ra - rb);
+        out.push(Math.abs(ext) <= Math.abs(int) ? ext : int);
+      } else out.push(0);
     }
   }
   return out;
@@ -205,7 +244,14 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
     adj[b].push(a);
   };
   for (const c of constraints) {
-    if (c.type === "coincident" || c.type === "distance" || c.type === "angle")
+    if (
+      c.type === "coincident" ||
+      c.type === "distance" ||
+      c.type === "angle" ||
+      c.type === "parallel" ||
+      c.type === "colinear" ||
+      c.type === "tangent"
+    )
       link(c.shapeAIdx, c.shapeBIdx);
     else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);
     else if (c.type === "offset") link(c.shapeIdx, c.origIdx);

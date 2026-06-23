@@ -1243,6 +1243,83 @@ export const createSketchSlice = (set) => ({
       };
     }),
 
+  // Two-shape geometric constraint (parallel / colinear between two lines;
+  // tangent between a line and an arc/circle, or two arcs/circles).  Adds the
+  // constraint and re-solves the whole sketch; rejects if it can't be satisfied.
+  applySketchPairConstraint: (sketchId, idxA, idxB, type) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item || idxA === idxB) return {};
+      const shapes = item.shapes || [];
+      const a = shapes[idxA],
+        b = shapes[idxB];
+      if (!a || !b) return {};
+      const isLine = (s) => s?.type === "line";
+      const isArc = (s) => s?.type === "circle" || s?.type === "arc";
+      if (
+        (type === "parallel" || type === "colinear") &&
+        !(isLine(a) && isLine(b))
+      )
+        return { notification: `${type} needs two lines.` };
+      if (
+        type === "tangent" &&
+        !(
+          (isLine(a) && isArc(b)) ||
+          (isArc(a) && isLine(b)) ||
+          (isArc(a) && isArc(b))
+        )
+      )
+        return {
+          notification:
+            "Tangent needs a line + arc/circle, or two arcs/circles.",
+        };
+      const dup = (c) =>
+        c.type === type &&
+        ((c.shapeAIdx === idxA && c.shapeBIdx === idxB) ||
+          (c.shapeAIdx === idxB && c.shapeBIdx === idxA));
+      const constraints = [
+        ...(item.constraints || []).filter((c) => !dup(c)),
+        { type, shapeAIdx: idxA, shapeBIdx: idxB },
+      ];
+      const { shapes: solved, ok } = solveConstraints(
+        shapes.slice(),
+        constraints,
+      );
+      if (!ok)
+        return {
+          notification:
+            "Can't apply that constraint — it would break another constraint",
+        };
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, { shapes: solved, constraints })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
   // Offset the selected lines: create parallel copies at a signed distance,
   // each linked to its original by an `offset` constraint (so edits to the
   // original flow through the solver to the copy), with coincident constraints
