@@ -2187,10 +2187,20 @@ export function createSketchInteraction(
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
         if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
           const hitIdx = hits[0].object.userData.shapeIdx;
+          // Seed from a current single-line selection so the natural flow —
+          // click one line, shift-click a second — yields a 2-shape multiselect
+          // (what the parallel / colinear / tangent constraints need).
+          if (multiSelectedIndices.length === 0) {
+            const sel = useStore.getState().selectedSketchElement;
+            if (sel?.type === "line" && sel.shapeIdx !== hitIdx)
+              multiSelectedIndices = [sel.shapeIdx];
+          }
           multiSelectedIndices = multiSelectedIndices.includes(hitIdx)
             ? multiSelectedIndices.filter((i) => i !== hitIdx)
             : [...multiSelectedIndices, hitIdx];
           showMultiSelectOverlays(multiSelectedIndices);
+          if (multiSelectedIndices.length > 0)
+            useStore.getState().setSelectedSketchElement(null);
         }
         return;
       }
