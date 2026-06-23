@@ -324,6 +324,33 @@
   margin: 4px 10px;
 }
 
+.timeline-end-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.timeline-end-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+}
+
+.timeline-end-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .timeline-undo-status {
   padding: 6px 12px;
   font-size: var(--font-size-sm);

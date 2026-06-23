@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
 import { anyToolActive } from "../store/selectionMode.js";
 import { beginChamferRetarget } from "../three/cameraControls/chamferCommit.js";
@@ -409,6 +409,34 @@ const Timeline = () => {
     activeHistoryId !== null
       ? history.findIndex((h) => h.id === activeHistoryId)
       : history.length - 1;
+
+  // Keep the active step in view as it moves (arrow nav / restore / a new step).
+  // Priority: the active row must be visible; then the two AFTER it; then, if
+  // they still fit, the two BEFORE it — so context is shown around the cursor.
+  useEffect(() => {
+    const c = containerRef.current;
+    if (!c || activeIndex < 0) return;
+    const rows = c.querySelectorAll(".timeline-entry");
+    const active = rows[activeIndex];
+    if (!active) return;
+    const at = (i) => rows[Math.max(0, Math.min(rows.length - 1, i))];
+    const cr = c.getBoundingClientRect();
+    const top = (el) => el.getBoundingClientRect().top - cr.top + c.scrollTop;
+    const bot = (el) =>
+      el.getBoundingClientRect().bottom - cr.top + c.scrollTop;
+    const H = c.clientHeight;
+    const viewBot = c.scrollTop + H;
+    const afterBot = bot(at(activeIndex + 2));
+    const activeTop = top(active);
+    const beforeTop = top(at(activeIndex - 2));
+    let next = c.scrollTop;
+    if (afterBot > viewBot) next = afterBot - H; // reveal the two following
+    if (activeTop < next) next = activeTop; // but never scroll the active out
+    if (beforeTop < next && afterBot - beforeTop <= H) next = beforeTop; // + before
+    next = Math.max(0, next);
+    if (Math.abs(next - c.scrollTop) > 1)
+      c.scrollTo({ top: next, behavior: "smooth" });
+  }, [activeIndex, history.length]);
 
   const handleKeyDown = (e) => {
     if (toolLocked) return;
@@ -993,6 +1021,45 @@ const Timeline = () => {
           onDrop={handleEndZoneDrop}
         />
       </div>
+      <button
+        className="timeline-end-btn"
+        title="Jump to the latest step (end of the timeline)"
+        disabled={toolLocked || activeIndex >= history.length - 1}
+        onClick={() => {
+          if (toolLocked || history.length === 0) return;
+          restoreToHistory(history[history.length - 1].id);
+          containerRef.current?.focus();
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="13" height="13">
+          <polyline
+            points="6,4 12,10 18,4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <polyline
+            points="6,11 12,17 18,11"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <line
+            x1="6"
+            y1="20"
+            x2="18"
+            y2="20"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
+        <span>Move to end</span>
+      </button>
       <div className="timeline-undo-status">
         {undoCount > 0 || redoCount > 0
           ? `${undoCount} undo · ${redoCount} redo`
