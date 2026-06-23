@@ -137,6 +137,7 @@ const SketchSelectionWidget = () => {
   const projectTool = useStore((s) => s.projectTool);
   const sketchConstraintMode = useStore((s) => s.sketchConstraintMode);
   const toggleSketchSelType = useStore((s) => s.toggleSketchSelType);
+  const soloSketchSelType = useStore((s) => s.soloSketchSelType);
 
   if (!sketchMode) return null;
 
@@ -162,11 +163,18 @@ const SketchSelectionWidget = () => {
             }`}
             title={
               isAllowed
-                ? TITLES[k]
+                ? `${TITLES[k]} (⌘/Ctrl-click to isolate)`
                 : `${TITLES[k]} — not available for this tool`
             }
             disabled={!isAllowed}
-            onClick={isAllowed ? () => toggleSketchSelType(k) : undefined}
+            onClick={
+              isAllowed
+                ? (e) =>
+                    e.metaKey || e.ctrlKey
+                      ? soloSketchSelType(k)
+                      : toggleSketchSelType(k)
+                : undefined
+            }
           >
             <Icon />
           </button>

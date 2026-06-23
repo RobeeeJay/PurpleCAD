@@ -47,6 +47,9 @@ export const uiInitial = {
   selEdge: false,
   selPoint: false,
   selectionOverride: null,
+  // Saved selection-type set before a Cmd/Ctrl-click "solo" isolate, so a second
+  // solo-click restores it.  Cleared by any normal toggle.
+  selTypeSolo: null,
 
   // Active extrude-depth input overlay.  Populated when the user enters
   // "depth" mode after picking a profile; cleared when they confirm or
@@ -284,14 +287,56 @@ export const createUiSlice = (set) => ({
   // object off keeps at least one sub-type so something stays selectable.
   toggleSelObject: () =>
     set((s) => {
-      if (!s.selObject) return { selObject: true };
+      if (!s.selObject) return { selObject: true, selTypeSolo: null };
       const any = s.selFace || s.selEdge || s.selPoint;
-      return { selObject: false, ...(any ? null : { selFace: true }) };
+      return {
+        selObject: false,
+        selTypeSolo: null,
+        ...(any ? null : { selFace: true }),
+      };
     }),
-  toggleSelFace: () => set((s) => ({ selObject: false, selFace: !s.selFace })),
-  toggleSelEdge: () => set((s) => ({ selObject: false, selEdge: !s.selEdge })),
+  toggleSelFace: () =>
+    set((s) => ({ selObject: false, selFace: !s.selFace, selTypeSolo: null })),
+  toggleSelEdge: () =>
+    set((s) => ({ selObject: false, selEdge: !s.selEdge, selTypeSolo: null })),
   toggleSelPoint: () =>
-    set((s) => ({ selObject: false, selPoint: !s.selPoint })),
+    set((s) => ({
+      selObject: false,
+      selPoint: !s.selPoint,
+      selTypeSolo: null,
+    })),
+  // Cmd/Ctrl-click: isolate one type (others off), saving the prior set; a second
+  // solo-click on the isolated type restores it.
+  soloSelType: (key) =>
+    set((s) => {
+      const cur = {
+        selObject: s.selObject,
+        selFace: s.selFace,
+        selEdge: s.selEdge,
+        selPoint: s.selPoint,
+      };
+      const flag = {
+        object: "selObject",
+        face: "selFace",
+        edge: "selEdge",
+        point: "selPoint",
+      }[key];
+      if (!flag) return {};
+      const isolated = Object.entries(cur).every(([f, v]) =>
+        f === flag ? v : !v,
+      );
+      if (isolated && s.selTypeSolo) {
+        return { ...s.selTypeSolo, selTypeSolo: null };
+      }
+      const saved = s.selTypeSolo || cur;
+      return {
+        selObject: flag === "selObject",
+        selFace: flag === "selFace",
+        selEdge: flag === "selEdge",
+        selPoint: flag === "selPoint",
+        selTypeSolo: saved,
+      };
+    }),
   setSelectionOverride: (types) => set({ selectionOverride: types }),
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),

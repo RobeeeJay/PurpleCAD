@@ -114,6 +114,7 @@ const SelectionWidget = () => {
   const toggleSelFace = useStore((s) => s.toggleSelFace);
   const toggleSelEdge = useStore((s) => s.toggleSelEdge);
   const toggleSelPoint = useStore((s) => s.toggleSelPoint);
+  const soloSelType = useStore((s) => s.soloSelType);
 
   // Hidden in sketch mode — it only governs 3D-view selection.
   if (sketchMode) return null;
@@ -162,9 +163,17 @@ const SelectionWidget = () => {
             key={key}
             type="button"
             className={`selection-widget-btn${on ? " active" : ""}${greyed ? " greyed" : ""}`}
-            title={locked ? `${title} — locked by the active tool` : title}
+            title={
+              locked
+                ? `${title} — locked by the active tool`
+                : `${title} (⌘/Ctrl-click to isolate)`
+            }
             disabled={locked}
-            onClick={locked ? undefined : toggle}
+            onClick={
+              locked
+                ? undefined
+                : (e) => (e.metaKey || e.ctrlKey ? soloSelType(key) : toggle())
+            }
           >
             <Icon />
           </button>
