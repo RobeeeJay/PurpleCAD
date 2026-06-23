@@ -67,6 +67,10 @@ export async function commitEmboss({ items, printPrecision }) {
   const store = useStore.getState();
   const editEntryId = store.embossTool?.editEntryId;
   store._cameraControls?.clearEmbossPreview?.();
+  // Drop the picked-face highlight too, or it lingers on the body after Confirm
+  // (cancel already clears it; the dialog's unmount cleanup never fires because
+  // the component stays mounted and just renders null when the tool closes).
+  store._cameraControls?.clearEmbossSelectedFaces?.();
   const regenerator = {
     kind: "emboss",
     source,
