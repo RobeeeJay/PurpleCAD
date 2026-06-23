@@ -267,14 +267,22 @@ export function createSketchSelectionOverlays({
   // lingers at the pre-edit position when a dimension or variable edit moves
   // the line.  No-op unless something is actually selected.
   const refreshSketchSelectionOverlay = () => {
-    if (!sketchSelectionOverlay) return;
     const state = useStore.getState();
-    const sel = state.selectedSketchElement;
-    if (!sel) return;
     // Read items from the store, not itemsRef: this runs synchronously right
     // after a store update, before React re-renders and re-syncs itemsRef.
-    const selItem = state.items.find((i) => i.id === selectedIdRef.current);
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    const selItem0 = state.items.find((i) => i.id === selectedIdRef.current);
+    const sketchMesh0 = selItem0 ? objectsRef.current[selItem0.id] : null;
+    // A multi-selection (e.g. two lines a parallel/tangent constraint just moved)
+    // has no single green overlay — glue its blue highlights to the new geometry.
+    const multi = state.sketchMultiSelectedIndices;
+    if (selItem0 && sketchMesh0 && multi && multi.length > 0) {
+      updateSelectionForDrag(selItem0.shapes || [], sketchMesh0, true);
+    }
+    if (!sketchSelectionOverlay) return;
+    const sel = state.selectedSketchElement;
+    if (!sel) return;
+    const selItem = selItem0;
+    const sketchMesh = sketchMesh0;
     if (!selItem || !sketchMesh) return;
     const shape = (selItem.shapes || [])[sel.shapeIdx];
     if (!shape) return;

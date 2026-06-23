@@ -319,6 +319,125 @@ export function addConstraintIconsToGroup(
       tag(cLine, { x: mx, y: my }, [c.shapeIdx], CONSTRAINT_HORIZONTAL_COLOR);
       group.add(cLine);
       markFixedSize(cLine, toWorld(mx, my, 0.005));
+    } else if (c.type === "parallel" || c.type === "colinear") {
+      const a = shapes[c.shapeAIdx];
+      if (!a || a.type !== "line") return;
+      const mx = (a.x1 + a.x2) / 2,
+        my = (a.y1 + a.y2) / 2;
+      const ddx = a.x2 - a.x1,
+        ddy = a.y2 - a.y1,
+        len = Math.hypot(ddx, ddy) || 1;
+      const ux = ddx / len,
+        uy = ddy / len,
+        px = -uy,
+        py = ux;
+      const pts = [];
+      if (c.type === "parallel") {
+        // Two short segments parallel to the line ("=" along it).
+        const L = R * 0.8,
+          off = R * 0.45;
+        for (const s of [-1, 1])
+          pts.push(
+            toWorld(
+              mx + px * off * s - ux * L,
+              my + py * off * s - uy * L,
+              0.005,
+            ),
+            toWorld(
+              mx + px * off * s + ux * L,
+              my + py * off * s + uy * L,
+              0.005,
+            ),
+          );
+      } else {
+        // A segment along the line with a tick at each end (collinear marker).
+        const L = R,
+          t = R * 0.4;
+        pts.push(
+          toWorld(mx - ux * L, my - uy * L, 0.005),
+          toWorld(mx + ux * L, my + uy * L, 0.005),
+        );
+        for (const s of [-1, 1])
+          pts.push(
+            toWorld(mx + ux * L * s + px * t, my + uy * L * s + py * t, 0.005),
+            toWorld(mx + ux * L * s - px * t, my + uy * L * s - py * t, 0.005),
+          );
+      }
+      const seg = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({
+          color: CONSTRAINT_ON_LINE_COLOR,
+          depthTest: false,
+        }),
+      );
+      seg.renderOrder = 1004;
+      tag(
+        seg,
+        { x: mx, y: my },
+        [c.shapeAIdx, c.shapeBIdx],
+        CONSTRAINT_ON_LINE_COLOR,
+      );
+      group.add(seg);
+      markFixedSize(seg, toWorld(mx, my, 0.005));
+    } else if (c.type === "tangent") {
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      const isArc = (s) => s?.type === "circle" || s?.type === "arc";
+      // Anchor at (≈) the tangent point.
+      let ax, ay;
+      if (a?.type === "line" && isArc(b)) {
+        const dx = a.x2 - a.x1,
+          dy = a.y2 - a.y1,
+          l2 = dx * dx + dy * dy || 1;
+        const t = ((b.cx - a.x1) * dx + (b.cy - a.y1) * dy) / l2;
+        ax = a.x1 + dx * t;
+        ay = a.y1 + dy * t;
+      } else if (isArc(a) && b?.type === "line") {
+        const dx = b.x2 - b.x1,
+          dy = b.y2 - b.y1,
+          l2 = dx * dx + dy * dy || 1;
+        const t = ((a.cx - b.x1) * dx + (a.cy - b.y1) * dy) / l2;
+        ax = b.x1 + dx * t;
+        ay = b.y1 + dy * t;
+      } else if (isArc(a) && isArc(b)) {
+        const dx = b.cx - a.cx,
+          dy = b.cy - a.cy,
+          d = Math.hypot(dx, dy) || 1;
+        ax = a.cx + (dx / d) * (a.r || 0);
+        ay = a.cy + (dy / d) * (a.r || 0);
+      } else return;
+      // A small circle resting on a tangent line.
+      const r = R * 0.55;
+      const pts = [];
+      const N = 16;
+      for (let i = 0; i < N; i++) {
+        const t0 = (i / N) * 2 * Math.PI,
+          t1 = ((i + 1) / N) * 2 * Math.PI;
+        pts.push(
+          toWorld(ax + Math.cos(t0) * r, ay + r + Math.sin(t0) * r, 0.005),
+          toWorld(ax + Math.cos(t1) * r, ay + r + Math.sin(t1) * r, 0.005),
+        );
+      }
+      pts.push(
+        toWorld(ax - r * 1.4, ay, 0.005),
+        toWorld(ax + r * 1.4, ay, 0.005),
+      );
+      const seg = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({
+          color: CONSTRAINT_ON_LINE_COLOR,
+          depthTest: false,
+        }),
+      );
+      seg.renderOrder = 1004;
+      tag(
+        seg,
+        { x: ax, y: ay },
+        [c.shapeAIdx, c.shapeBIdx],
+        CONSTRAINT_ON_LINE_COLOR,
+      );
+      group.add(seg);
+      markFixedSize(seg, toWorld(ax, ay, 0.005));
     } else if (c.type === "text") {
       // A small "T" mark at the text's top-left anchor — double-click to edit.
       const shape = shapes[c.shapeIdx];
