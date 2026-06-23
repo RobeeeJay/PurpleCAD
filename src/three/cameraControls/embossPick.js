@@ -136,41 +136,46 @@ export function createEmbossInteraction({
       cz: localP.z,
     };
 
-    // A cylinder primitive's curved side is a known wrap target (axis +Y).
+    // A cylinder primitive's curved side is a known wrap target (axis +Y).  Like
+    // the sphere it's raymarched on a box hull, so project the box hit onto the
+    // actual surface (known radius 1, makeCylinder) for the anchor + radius.
     if (it?.type === "cylinder" && Math.abs(localN.y) < 0.7) {
+      const R = 1;
+      const rad = Math.hypot(localP.x, localP.z) || 1;
+      const sx = (localP.x / rad) * R,
+        sz = (localP.z / rad) * R;
       return {
         id,
         mesh,
-        face: plane,
+        face: { nx: sx / R, ny: 0, nz: sz / R, cx: sx, cy: localP.y, cz: sz },
         faceSet: {
-          cylinder: {
-            ax: 0,
-            ay: 1,
-            az: 0,
-            cx: 0,
-            cy: 0,
-            cz: 0,
-            radius: Math.hypot(localP.x, localP.z),
-          },
+          cylinder: { ax: 0, ay: 1, az: 0, cx: 0, cy: 0, cz: 0, radius: R },
         },
         setPositions: null,
       };
     }
-    // A sphere primitive wraps the relief over its surface (centre at origin,
-    // radius = the click point's distance from it in local geometry units).
+    // A sphere primitive is raymarched on a 3×3×3 box HULL, so the raycast hits
+    // the box — not the sphere.  Derive the surface anchor from the hit DIRECTION
+    // and the known local radius (makeSphere(1.5)) instead of the box point /
+    // axis-aligned box normal, or the relief wraps onto an oversized sphere and
+    // floats off the body.
     if (it?.type === "sphere") {
+      const R = 1.5;
+      const dir = new THREE.Vector3(localP.x, localP.y, localP.z);
+      if (dir.lengthSq() < 1e-9) dir.set(0, 1, 0);
+      dir.normalize();
       return {
         id,
         mesh,
-        face: plane,
-        faceSet: {
-          sphere: {
-            cx: 0,
-            cy: 0,
-            cz: 0,
-            radius: Math.hypot(localP.x, localP.y, localP.z),
-          },
+        face: {
+          nx: dir.x,
+          ny: dir.y,
+          nz: dir.z,
+          cx: dir.x * R,
+          cy: dir.y * R,
+          cz: dir.z * R,
         },
+        faceSet: { sphere: { cx: 0, cy: 0, cz: 0, radius: R } },
         setPositions: null,
       };
     }
