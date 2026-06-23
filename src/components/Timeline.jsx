@@ -410,14 +410,48 @@ const Timeline = () => {
       ? history.findIndex((h) => h.id === activeHistoryId)
       : history.length - 1;
 
+  // Restoring a step rebuilds geometry, so scrubbing fast (held arrows, rapid
+  // clicks) would fire a rebuild per step.  Move the cursor instantly via a local
+  // `navIndex` for the highlight + scroll, but DEBOUNCE the actual restore so only
+  // the step you settle on rebuilds.
+  const [navIndex, setNavIndex] = useState(null);
+  const navTimer = useRef(null);
+  const displayIndex = Math.min(
+    history.length - 1,
+    navIndex != null ? navIndex : activeIndex,
+  );
+
+  const navigateTo = (targetIndex) => {
+    if (toolLocked || targetIndex < 0 || targetIndex >= history.length) return;
+    if (targetIndex === displayIndex) return;
+    setNavIndex(targetIndex); // move the cursor now
+    if (navTimer.current) clearTimeout(navTimer.current);
+    navTimer.current = setTimeout(() => {
+      navTimer.current = null;
+      restoreToHistory(history[targetIndex].id); // rebuild once you settle
+    }, 150);
+  };
+
+  // Reconcile the local cursor once a restore lands (or history changes from
+  // elsewhere — undo/redo, a new step, a delete).
+  useEffect(() => {
+    setNavIndex(null);
+  }, [activeHistoryId, history.length]);
+  useEffect(
+    () => () => {
+      if (navTimer.current) clearTimeout(navTimer.current);
+    },
+    [],
+  );
+
   // Keep the active step in view as it moves (arrow nav / restore / a new step).
   // Priority: the active row must be visible; then the two AFTER it; then, if
   // they still fit, the two BEFORE it — so context is shown around the cursor.
   useEffect(() => {
     const c = containerRef.current;
-    if (!c || activeIndex < 0) return;
+    if (!c || displayIndex < 0) return;
     const rows = c.querySelectorAll(".timeline-entry");
-    const active = rows[activeIndex];
+    const active = rows[displayIndex];
     if (!active) return;
     const at = (i) => rows[Math.max(0, Math.min(rows.length - 1, i))];
     const cr = c.getBoundingClientRect();
@@ -426,9 +460,9 @@ const Timeline = () => {
       el.getBoundingClientRect().bottom - cr.top + c.scrollTop;
     const H = c.clientHeight;
     const viewBot = c.scrollTop + H;
-    const afterBot = bot(at(activeIndex + 2));
+    const afterBot = bot(at(displayIndex + 2));
     const activeTop = top(active);
-    const beforeTop = top(at(activeIndex - 2));
+    const beforeTop = top(at(displayIndex - 2));
     let next = c.scrollTop;
     if (afterBot > viewBot) next = afterBot - H; // reveal the two following
     if (activeTop < next) next = activeTop; // but never scroll the active out
@@ -436,7 +470,7 @@ const Timeline = () => {
     next = Math.max(0, next);
     if (Math.abs(next - c.scrollTop) > 1)
       c.scrollTo({ top: next, behavior: "smooth" });
-  }, [activeIndex, history.length]);
+  }, [displayIndex, history.length]);
 
   const handleKeyDown = (e) => {
     if (toolLocked) return;
@@ -448,13 +482,12 @@ const Timeline = () => {
     ) {
       e.preventDefault();
       let targetIndex;
-      if (e.key === "ArrowUp") targetIndex = Math.max(0, activeIndex - 1);
+      if (e.key === "ArrowUp") targetIndex = Math.max(0, displayIndex - 1);
       else if (e.key === "ArrowDown")
-        targetIndex = Math.min(history.length - 1, activeIndex + 1);
+        targetIndex = Math.min(history.length - 1, displayIndex + 1);
       else if (e.key === "ArrowLeft") targetIndex = 0;
       else targetIndex = history.length - 1;
-      if (targetIndex !== activeIndex)
-        restoreToHistory(history[targetIndex].id);
+      navigateTo(targetIndex);
     }
   };
 
@@ -580,8 +613,8 @@ const Timeline = () => {
         onKeyDown={handleKeyDown}
       >
         {history.map((entry, index) => {
-          const isActive = index === activeIndex;
-          const isFuture = index > activeIndex;
+          const isActive = index === displayIndex;
+          const isFuture = index > displayIndex;
           const isDragging = entry.id === draggedId;
           const isDropTarget = dropBeforeId === entry.id;
           const isDraggable = index > 0 && !toolLocked;
@@ -612,7 +645,7 @@ const Timeline = () => {
                 // Locked while a tool is mid-flow — navigating history would pull
                 // the geometry the tool targets out from under it.
                 if (toolLocked) return;
-                restoreToHistory(entry.id);
+                navigateTo(index);
                 containerRef.current?.focus();
               }}
             >
@@ -1024,10 +1057,10 @@ const Timeline = () => {
       <button
         className="timeline-end-btn"
         title="Jump to the latest step (end of the timeline)"
-        disabled={toolLocked || activeIndex >= history.length - 1}
+        disabled={toolLocked || displayIndex >= history.length - 1}
         onClick={() => {
           if (toolLocked || history.length === 0) return;
-          restoreToHistory(history[history.length - 1].id);
+          navigateTo(history.length - 1);
           containerRef.current?.focus();
         }}
       >
