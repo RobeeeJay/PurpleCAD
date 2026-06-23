@@ -391,9 +391,14 @@ const Timeline = () => {
   const selectItem = useStore((state) => state.selectItem);
   const undoCount = useStore((state) => state.undoStack.length);
   const redoCount = useStore((state) => state.redoStack.length);
-  // While a create/modify/sketch tool is mid-flow, lock timeline navigation —
-  // jumping history out from under an active tool corrupts what it's targeting.
-  const toolLocked = useStore(anyToolActive);
+  // While a create/modify/sketch tool is mid-flow — or a sketch is open for
+  // editing — lock the timeline: jumping history out from under it corrupts what
+  // it's targeting (and a sketch edit re-runs downstream steps on close anyway).
+  const editingSketch = useStore((s) => {
+    const it = s.items.find((i) => i.id === s.selectedId);
+    return it?.type === "sketch";
+  });
+  const toolLocked = useStore(anyToolActive) || editingSketch;
 
   const [draggedId, setDraggedId] = useState(null);
   const [dropBeforeId, setDropBeforeId] = useState(undefined);
