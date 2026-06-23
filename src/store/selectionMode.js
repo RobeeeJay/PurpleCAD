@@ -60,6 +60,38 @@ export function anyToolActive(s) {
   );
 }
 
+// Which sketch selection kinds a click resolves to, given the user's toggles AND
+// the active tool: constraint modes pick points, the Project tool picks objects.
+// Disallowed kinds are greyed in the widget but the user's choice is preserved,
+// so it's restored when the tool closes.  Returns { eff, allowed } maps.
+export function effectiveSketchSelTypes(s) {
+  const KEYS = ["line", "point", "shape", "constraint", "object"];
+  const user = s.sketchSelTypes || {
+    line: true,
+    point: true,
+    shape: true,
+    constraint: false,
+    object: false,
+  };
+  let allowed;
+  if (s.projectTool) allowed = { object: true };
+  else if (s.sketchConstraintMode) allowed = { point: true };
+  // `object` is only ever usable while projecting, so it's omitted by default.
+  else allowed = { line: true, point: true, shape: true, constraint: true };
+
+  const eff = {};
+  let any = false;
+  for (const k of KEYS) {
+    eff[k] = !!(user[k] && allowed[k]);
+    if (eff[k]) any = true;
+  }
+  // The tool requires a kind none of the user toggles cover (e.g. constraint mode
+  // needs a point but the user had only lines on) — fall back to the tool's
+  // allowed set so the required pick still works.
+  if (!any) for (const k of KEYS) eff[k] = !!allowed[k];
+  return { eff, allowed };
+}
+
 // What the 3D view's selection widget currently allows.  A tool override (e.g.
 // extrude → ["face"]) wins; otherwise object mode greys the sub-types, and with
 // object off the face/edge/point toggles decide.  `overridden` lets the widget

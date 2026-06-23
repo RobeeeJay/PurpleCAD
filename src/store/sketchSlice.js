@@ -412,6 +412,22 @@ export const createSketchSlice = (set) => ({
   sketchMultiSelectedIndices: [],
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
+  // Sketch selection-type filter (the top-right widget): which kinds a click
+  // resolves to.  line/point/shape on by default (the priority point > line >
+  // shape that was always the behaviour); constraint/object opt-in.  `object` is
+  // only usable while the Project tool is picking 3D geometry.
+  sketchSelTypes: {
+    line: true,
+    point: true,
+    shape: true,
+    constraint: true,
+    object: false,
+  },
+  toggleSketchSelType: (key) =>
+    set((s) => ({
+      sketchSelTypes: { ...s.sketchSelTypes, [key]: !s.sketchSelTypes[key] },
+    })),
+
   sketchLongPressMenu: null, // { x, y, items: [{kind, label, ...}] } | null
   setSketchLongPressMenu: (v) => set({ sketchLongPressMenu: v }),
 

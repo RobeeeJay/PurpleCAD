@@ -19,6 +19,7 @@ import EmbossDialog from "./EmbossDialog";
 import DraftDialog from "./DraftDialog";
 import PointToPointDialog from "./PointToPointDialog";
 import SelectionWidget from "./SelectionWidget";
+import SketchSelectionWidget from "./SketchSelectionWidget";
 import PlanePickHint from "./viewport/PlanePickHint";
 import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
@@ -330,6 +331,7 @@ const Viewport = () => {
       <DraftDialog />
       <PointToPointDialog />
       <SelectionWidget />
+      <SketchSelectionWidget />
       <SvgPlacementOverlay />
       <PlanePickHint />
       {widgetVisible && (

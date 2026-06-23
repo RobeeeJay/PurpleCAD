@@ -11,6 +11,7 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
+import { effectiveSketchSelTypes } from "../../store/selectionMode.js";
 import {
   getSketchShapePoints,
   getSnapPoints,
@@ -650,8 +651,12 @@ export function createSketchInteraction(
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     const shapes = selItem.shapes || [];
+    // The top-right selection-type widget gates which kinds a click resolves to.
+    const { eff } = effectiveSketchSelTypes(useStore.getState());
     // Point hit first (ignore offset-copy points — they're inert).
-    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+    const snap = eff.point
+      ? findSnap(screenX, screenY, shapes, sketchMesh)
+      : null;
     if (
       snap &&
       !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
@@ -664,7 +669,7 @@ export function createSketchInteraction(
       return;
     }
     // Line hit
-    const sketchGroup = sketchShapesGroupRef?.current;
+    const sketchGroup = eff.line ? sketchShapesGroupRef?.current : null;
     if (sketchGroup) {
       const rect = renderer.domElement.getBoundingClientRect();
       const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
@@ -706,9 +711,11 @@ export function createSketchInteraction(
         }
       }
     }
-    // Region-fill click: select all boundary shapes that form the hovered area
-    const localForFill = screenToSketchLocal(screenX, screenY, sketchMesh);
-    const sketchGroup2 = sketchShapesGroupRef?.current;
+    // Region-fill ("shape") click: select all boundary shapes of the area.
+    const localForFill = eff.shape
+      ? screenToSketchLocal(screenX, screenY, sketchMesh)
+      : null;
+    const sketchGroup2 = eff.shape ? sketchShapesGroupRef?.current : null;
     if (localForFill && sketchGroup2) {
       // Sort fills so higher renderOrder (inner fills) are checked first
       const fillMeshes = sketchGroup2.children
@@ -2189,7 +2196,8 @@ export function createSketchInteraction(
       }
 
       // Check for constraint icon click before doing normal element select
-      {
+      // (only when the Constraint selection type is enabled).
+      if (effectiveSketchSelTypes(useStore.getState()).eff.constraint) {
         const cg = sketchShapesGroupRef?.current;
         const cSelItem = itemsRef.current.find(
           (i) => i.id === selectedIdRef.current,

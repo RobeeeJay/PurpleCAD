@@ -1,5 +1,57 @@
 import { describe, it, expect } from "vitest";
-import { effectiveSelectionTypes, anyToolActive } from "../selectionMode.js";
+import {
+  effectiveSelectionTypes,
+  anyToolActive,
+  effectiveSketchSelTypes,
+} from "../selectionMode.js";
+
+describe("effectiveSketchSelTypes", () => {
+  const types = {
+    line: true,
+    point: true,
+    shape: true,
+    constraint: true,
+    object: false,
+  };
+
+  it("passes the user toggles through with no tool (object stays off)", () => {
+    const { eff, allowed } = effectiveSketchSelTypes({ sketchSelTypes: types });
+    expect(eff).toMatchObject({
+      line: true,
+      point: true,
+      shape: true,
+      constraint: true,
+      object: false,
+    });
+    expect(allowed.object).toBeFalsy();
+  });
+
+  it("constraint mode allows only points", () => {
+    const { eff, allowed } = effectiveSketchSelTypes({
+      sketchSelTypes: types,
+      sketchConstraintMode: "coincident",
+    });
+    expect(allowed).toEqual({ point: true });
+    expect(eff).toMatchObject({ point: true, line: false, shape: false });
+  });
+
+  it("the Project tool forces object on (even if the toggle was off)", () => {
+    const { eff, allowed } = effectiveSketchSelTypes({
+      sketchSelTypes: types,
+      projectTool: {},
+    });
+    expect(allowed).toEqual({ object: true });
+    expect(eff.object).toBe(true);
+    expect(eff.line).toBe(false);
+  });
+
+  it("returns to the user's kinds once the tool clears", () => {
+    // No persisted override: with no tool the result is just the user toggles.
+    const { eff } = effectiveSketchSelTypes({ sketchSelTypes: types });
+    expect(eff.line).toBe(true);
+    expect(eff.object).toBe(false);
+  });
+});
 
 const base = {
   selObject: true,

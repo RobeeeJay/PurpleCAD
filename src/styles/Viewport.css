@@ -26,6 +26,20 @@
   border: 1px solid rgba(var(--color-info-rgb), 0.3);
 }
 
+/* Sketch-mode selection-type widget: same chrome, anchored top-right. */
+.sketch-selection-widget {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 12;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 6px;
+  background: rgba(var(--panel-bg-rgb), 0.82);
+  border: 1px solid rgba(var(--color-info-rgb), 0.3);
+}
+
 .selection-widget-btn {
   display: inline-flex;
   align-items: center;
