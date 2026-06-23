@@ -131,7 +131,10 @@ function subdivideToMaxEdge(
 // Build the flat relief prism (extruded loops) and subdivide it so the wrap onto
 // a surface of radius R stays smooth — maxEdge ≈ a constant angular step on the
 // surface, so a tighter curve gets proportionally more triangles.
-function flatPrismMesh(shapes, depth, R) {
+// `edgeFactor` sets the target step as a fraction of R: a sphere curves in BOTH
+// directions, so it needs a finer step (more triangles) than a cylinder's
+// single-direction bend to avoid a jagged, faceted relief surface.
+function flatPrismMesh(shapes, depth, R, edgeFactor = 0.12) {
   const geo = new THREE.ExtrudeGeometry(shapes, {
     depth,
     bevelEnabled: false,
@@ -140,13 +143,14 @@ function flatPrismMesh(shapes, depth, R) {
   const flatPos = Array.from(geo.attributes.position.array);
   const flatIdx = geo.index ? Array.from(geo.index.array) : null;
   geo.dispose();
-  const maxEdge = Math.max(0.02, (R > 1e-3 ? R : 1) * 0.12); // ~7° steps
+  const maxEdge = Math.max(0.02, (R > 1e-3 ? R : 1) * edgeFactor);
   // Cap the triangle count: makeSolidFromMesh rejects a wrapped mesh over ~5000
   // faces (curved tris don't merge), so large text — or normal text on a
   // scaled-DOWN body, where invScale magnifies both the loops and the relief
   // depth — would explode past the limit and the boolean would silently return
-  // nothing.  The cap coarsens the wrap (slightly more faceted) but it works.
-  return subdivideToMaxEdge(flatPos, flatIdx, maxEdge, 6, 4000);
+  // nothing.  Cap just under the kernel limit so a finer step still fits when it
+  // can; the cap coarsens only when it must.
+  return subdivideToMaxEdge(flatPos, flatIdx, maxEdge, 7, 4800);
 }
 
 // The selected sketch geometry, mapped into one common plane frame, centred on
@@ -403,8 +407,9 @@ function buildSphereConformMesh(loops, sph, face, params, invScale = 1) {
     );
     return s;
   });
-  // Subdivide the flat prism so the spherical wrap stays smooth in both axes.
-  const { positions: sp, indices } = flatPrismMesh(shapes, prismDepth, R);
+  // Subdivide the flat prism finer than a cylinder — the sphere curves in both
+  // axes, so a coarser step leaves the relief faces visibly jagged.
+  const { positions: sp, indices } = flatPrismMesh(shapes, prismDepth, R, 0.05);
 
   const ang = ((params.angleDeg || 0) * Math.PI) / 180;
   const ca = Math.cos(ang),
