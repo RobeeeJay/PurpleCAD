@@ -131,6 +131,24 @@
   border: 1px solid rgba(var(--color-info-rgb), 0.4);
 }
 
+/* Error line under a tool dialog's bar (emboss/draft failure message). */
+.tool-error-line {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(92vw, 780px);
+  background: rgba(var(--black-rgb), 0.82);
+  color: var(--color-danger-text);
+  border: 1px solid var(--color-danger);
+  font-size: var(--font-size-base);
+  padding: 6px 14px;
+  border-radius: 5px;
+  text-align: center;
+  z-index: 21;
+  pointer-events: none;
+}
+
 .sketch-distance-input-overlay {
   position: absolute;
   bottom: 52px;

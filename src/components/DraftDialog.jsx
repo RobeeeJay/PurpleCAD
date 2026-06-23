@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitDraft } from "../three/cameraControls/draft.js";
 import { useEscapeKey, useDebouncedPreview, NumberInput } from "./inputs.jsx";
+import ToolErrorLine from "./ToolErrorLine.jsx";
 import {
   BAR_STYLE,
   LBL,
@@ -54,13 +55,8 @@ const DraftDialog = () => {
 
   const confirm = async () => {
     if (!ready) return;
-    const ok = await commitDraft({ items, printPrecision });
-    if (!ok)
-      useStore
-        .getState()
-        .showNotification?.(
-          "Draft failed — try a smaller angle, or faces that meet the main face.",
-        );
+    // A failure sets toolError (the OCC message), shown by the error line below.
+    await commitDraft({ items, printPrecision });
   };
   const onKey = (e) => {
     e.stopPropagation();
@@ -134,6 +130,7 @@ const DraftDialog = () => {
           Confirm
         </button>
       </div>
+      <ToolErrorLine />
     </>
   );
 };

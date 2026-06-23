@@ -47,8 +47,9 @@ export async function commitDraft({ items, printPrecision }) {
       allItems: items,
       printPrecision,
     });
-  } catch {
-    result = null;
+  } catch (e) {
+    useStore.getState().setToolError(e?.message || "Draft failed.");
+    return false;
   }
   if (!result) return false;
   const { geometryData, centerOffset } = result;
@@ -137,6 +138,7 @@ export function createDraftPreviewHelpers({ scene, itemsRef, objectsRef }) {
     requestId++;
     removePreview();
     unghostSource();
+    useStore.getState().setToolError(null);
   };
 
   const updateDraftPreview = async () => {
@@ -160,10 +162,13 @@ export function createDraftPreviewHelpers({ scene, itemsRef, objectsRef }) {
         allItems: items,
         printPrecision,
       });
-    } catch {
-      result = null;
+    } catch (e) {
+      if (myRequest === requestId)
+        useStore.getState().setToolError(e?.message || "Draft failed.");
+      return;
     }
     if (myRequest !== requestId || !result) return;
+    useStore.getState().setToolError(null);
 
     const { positions, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();

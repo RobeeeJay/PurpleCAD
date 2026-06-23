@@ -116,6 +116,11 @@ export const uiInitial = {
   //   { picking:null|"geometry"|"faces", itemId, profiles:[], face, faceSet, params }
   embossTool: null,
 
+  // The last operation error for the active tool dialog (emboss/draft/…), shown
+  // as a line under the dialog.  The tool's live preview sets it on failure (with
+  // the OCC message) and clears it on success; cleared when a tool starts.
+  toolError: null,
+
   // Draft tool: taper selected faces about a neutral (main) face's plane.
   //   { picking:null|"main"|"faces", itemId, source, neutral:{nx..,cx..},
   //     faces:[{nx..,cx..}], angleDeg, flip }
@@ -424,9 +429,13 @@ export const createUiSlice = (set) => ({
         : {},
     ),
 
+  // Operation error surfaced under a tool dialog (null clears the line).
+  setToolError: (msg) => set({ toolError: msg || null }),
+
   // ── Emboss tool ─────────────────────────────────────────────────────────
   startEmbossTool: () =>
     set({
+      toolError: null,
       embossTool: {
         picking: null,
         itemId: null,
@@ -533,6 +542,7 @@ export const createUiSlice = (set) => ({
   // the main-face pick.
   startDraftTool: () =>
     set({
+      toolError: null,
       draftTool: {
         picking: "main",
         itemId: null,

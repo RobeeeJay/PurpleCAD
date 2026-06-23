@@ -57,8 +57,9 @@ export async function commitEmboss({ items, printPrecision }) {
       allItems: items,
       printPrecision,
     });
-  } catch {
-    result = null;
+  } catch (e) {
+    useStore.getState().setToolError(e?.message || "Emboss failed.");
+    return false;
   }
   if (!result) return false;
   const { geometryData, centerOffset } = result;
@@ -150,6 +151,7 @@ export function createEmbossPreviewHelpers({ scene, itemsRef, objectsRef }) {
     requestId++;
     removePreview();
     unghostSource();
+    useStore.getState().setToolError(null);
   };
 
   const updateEmbossPreview = async () => {
@@ -170,10 +172,13 @@ export function createEmbossPreviewHelpers({ scene, itemsRef, objectsRef }) {
         allItems: items,
         printPrecision,
       });
-    } catch {
-      result = null;
+    } catch (e) {
+      if (myRequest === requestId)
+        useStore.getState().setToolError(e?.message || "Emboss failed.");
+      return;
     }
     if (myRequest !== requestId || !result) return;
+    useStore.getState().setToolError(null);
 
     const { positions, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();

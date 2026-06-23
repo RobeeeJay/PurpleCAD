@@ -36,6 +36,21 @@ describe("emboss projection auto-conform", () => {
     expect(s.getState().embossTool.params.projection).toBe("center");
   });
 
+  it("setToolError sets the line and starting a tool clears it", () => {
+    const s = makeStore();
+    s.getState().setToolError("Emboss failed — too many curved faces.");
+    expect(s.getState().toolError).toMatch(/too many curved faces/);
+    s.getState().setToolError(null);
+    expect(s.getState().toolError).toBe(null);
+    // A stale error from a prior op is cleared when a fresh tool opens.
+    s.getState().setToolError("Draft failed.");
+    s.getState().startDraftTool();
+    expect(s.getState().toolError).toBe(null);
+    s.getState().setToolError("Emboss failed.");
+    s.getState().startEmbossTool();
+    expect(s.getState().toolError).toBe(null);
+  });
+
   it("does not override a manual conform choice on re-pick", () => {
     const s = makeStore();
     s.getState().startEmbossTool();

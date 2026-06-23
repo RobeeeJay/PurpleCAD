@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitEmboss } from "../three/cameraControls/emboss.js";
 import { useEscapeKey, useDebouncedPreview, NumberInput } from "./inputs.jsx";
+import ToolErrorLine from "./ToolErrorLine.jsx";
 import {
   BAR_STYLE,
   LBL,
@@ -83,13 +84,8 @@ const EmbossDialog = () => {
 
   const confirm = async () => {
     if (!ready) return;
-    const ok = await commitEmboss({ items, printPrecision });
-    if (!ok)
-      useStore
-        .getState()
-        .showNotification?.(
-          "Emboss failed — check the distance/scale and that the geometry overlaps the face.",
-        );
+    // A failure sets toolError (the OCC message), shown by the error line below.
+    await commitEmboss({ items, printPrecision });
   };
   const onKey = (e) => {
     e.stopPropagation();
@@ -239,6 +235,7 @@ const EmbossDialog = () => {
           Confirm
         </button>
       </div>
+      <ToolErrorLine />
     </>
   );
 };
