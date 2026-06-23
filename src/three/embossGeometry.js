@@ -269,6 +269,97 @@ function buildConformMesh(loops, cyl, face, params, invScale = 1) {
   return { positions: out, indices };
 }
 
+// Wrap the centred loops onto a DEVELOPABLE extruded-curve wall — the body's wall
+// is a straight ruling (axis) over an arbitrary cross-section curve, so unroll
+// the actual curve: x → arc length along it, y → axial, depth → the curve's local
+// outward normal.  This follows non-circular walls (two joined beziers, S-curves)
+// that a single fitted cylinder can't.  `dev` is extractDevelopableProfile's data.
+function buildDevelopableConformMesh(loops, dev, face, params, invScale = 1) {
+  const A = new THREE.Vector3(...dev.axis);
+  const e1 = new THREE.Vector3(...dev.e1);
+  const e2 = new THREE.Vector3(...dev.e2);
+  const { curve, arc, norms } = dev;
+  const total = arc[arc.length - 1] || 1;
+
+  // Anchor the wrap at the curve point nearest the picked face point.
+  const fu = face.cx * e1.x + face.cy * e1.y + face.cz * e1.z;
+  const fv = face.cx * e2.x + face.cy * e2.y + face.cz * e2.z;
+  const fAlong = face.cx * A.x + face.cy * A.y + face.cz * A.z;
+  let sAnchor = 0,
+    bestD = Infinity;
+  for (let i = 0; i < curve.length; i++) {
+    const d = (curve[i].u - fu) ** 2 + (curve[i].v - fv) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      sAnchor = arc[i];
+    }
+  }
+  const sampleAt = (s) => {
+    const L = curve.length - 1;
+    if (s <= arc[0])
+      return { u: curve[0].u, v: curve[0].v, nu: norms[0].u, nv: norms[0].v };
+    if (s >= total)
+      return { u: curve[L].u, v: curve[L].v, nu: norms[L].u, nv: norms[L].v };
+    let i = 1;
+    while (i < arc.length && arc[i] < s) i++;
+    const t = (s - arc[i - 1]) / (arc[i] - arc[i - 1] || 1);
+    return {
+      u: curve[i - 1].u + (curve[i].u - curve[i - 1].u) * t,
+      v: curve[i - 1].v + (curve[i].v - curve[i - 1].v) * t,
+      nu: norms[i - 1].u + (norms[i].u - norms[i - 1].u) * t,
+      nv: norms[i - 1].v + (norms[i].v - norms[i - 1].v) * t,
+    };
+  };
+
+  const relief = Math.max(
+    1e-4,
+    ((params.distanceMm || 0) / MM_PER_UNIT) * invScale,
+  );
+  const prismDepth = relief + EMBOSS_MARGIN;
+  const shapes = loops.map((lp) => {
+    const s = new THREE.Shape(lp.outer.map((p) => new THREE.Vector2(p.x, p.y)));
+    lp.holes.forEach((h) =>
+      s.holes.push(new THREE.Path(h.map((p) => new THREE.Vector2(p.x, p.y)))),
+    );
+    return s;
+  });
+  // Subdivide to ~the curve's facet length so the wrap follows its bends.
+  const avgSeg = total / Math.max(1, curve.length - 1);
+  const { positions: sp, indices } = flatPrismMesh(
+    shapes,
+    prismDepth,
+    avgSeg / 0.12,
+  );
+
+  const ang = ((params.angleDeg || 0) * Math.PI) / 180;
+  const ca = Math.cos(ang),
+    sa = Math.sin(ang);
+  const offsetH = ((params.offsetMm || 0) / MM_PER_UNIT) * invScale;
+  const offsetV = ((params.offsetVMm || 0) / MM_PER_UNIT) * invScale;
+  const deboss = !!params.deboss;
+  const out = new Array(sp.length);
+  for (let i = 0; i < sp.length; i += 3) {
+    const px = sp[i],
+      py = sp[i + 1],
+      pz = sp[i + 2];
+    const uText = px * ca - py * sa + offsetH; // arc length along the curve
+    const w = px * sa + py * ca + offsetV; // axial
+    const c = sampleAt(sAnchor + uText);
+    const nl = Math.hypot(c.nu, c.nv) || 1;
+    const nu = c.nu / nl,
+      nv = c.nv / nl;
+    const off = deboss ? EMBOSS_MARGIN - pz : pz - EMBOSS_MARGIN; // outward relief
+    const along = fAlong + w;
+    out[i] =
+      e1.x * c.u + e2.x * c.v + A.x * along + (e1.x * nu + e2.x * nv) * off;
+    out[i + 1] =
+      e1.y * c.u + e2.y * c.v + A.y * along + (e1.y * nu + e2.y * nv) * off;
+    out[i + 2] =
+      e1.z * c.u + e2.z * c.v + A.z * along + (e1.z * nu + e2.z * nv) * off;
+  }
+  return { positions: out, indices };
+}
+
 // Wrap the centred loops over a SPHERE (centre C, radius R) via the exponential
 // map at the anchor (face point): a loop point at in-plane offset (u,w) lands a
 // geodesic distance hypot(u,w) from the anchor, so the relief curves over the
@@ -374,6 +465,21 @@ export function buildEmbossStamp(
     if (mesh && mesh.positions.length >= 9)
       return { mode: "conform", mesh, deboss: !!params.deboss };
     // Fall through to center if the wrap produced nothing.
+  }
+
+  // A developable (extruded-curve) wall is unrolled along its ACTUAL curve, so it
+  // follows non-circular walls a single cylinder can't.  Preferred over the
+  // cylinder fit for grown CSG face sets.
+  if (params.projection === "conform" && faceSet?.developable) {
+    const mesh = buildDevelopableConformMesh(
+      loops,
+      faceSet.developable,
+      face,
+      params,
+      invScale,
+    );
+    if (mesh && mesh.positions.length >= 9)
+      return { mode: "conform", mesh, deboss: !!params.deboss };
   }
 
   const cylinder = faceSet?.cylinder;

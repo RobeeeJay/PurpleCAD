@@ -11,6 +11,7 @@ import {
   growConnectedFaceSet,
   fitCylinderToFaceSet,
   fitSphereToFaceSet,
+  extractDevelopableProfile,
   centerFaceOfSet,
   triData,
   validateFaceSetConnectivity,
@@ -193,16 +194,27 @@ export function createEmbossInteraction({
     );
     if (!grown)
       return { id, mesh, face: plane, faceSet: null, setPositions: null };
-    // Prefer a cylinder fit (axis ⟂ normals); if the set's normals span all
-    // three axes it's a sphere, so fit one instead.
-    const cyl = fitCylinderToFaceSet(grown.normals, grown.centroids);
-    const sph = cyl ? null : fitSphereToFaceSet(grown.normals, grown.positions);
+    // Prefer unrolling the ACTUAL extruded curve (developable) so a non-circular
+    // wall (two joined beziers, an S-curve) is followed exactly; fall back to a
+    // single cylinder fit, then a sphere fit, then centre projection.
+    const dev = extractDevelopableProfile(grown.positions, grown.normals);
+    const cyl = dev
+      ? null
+      : fitCylinderToFaceSet(grown.normals, grown.centroids);
+    const sph =
+      dev || cyl ? null : fitSphereToFaceSet(grown.normals, grown.positions);
     const center = centerFaceOfSet(grown.normals, grown.centroids) || plane;
     return {
       id,
       mesh,
       face: center,
-      faceSet: cyl ? { cylinder: cyl } : sph ? { sphere: sph } : null,
+      faceSet: dev
+        ? { developable: dev }
+        : cyl
+          ? { cylinder: cyl }
+          : sph
+            ? { sphere: sph }
+            : null,
       setPositions: grown.positions,
     };
   };

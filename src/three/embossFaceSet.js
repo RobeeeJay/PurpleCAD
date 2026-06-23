@@ -377,6 +377,145 @@ export function fitCylinderToFaceSet(normals, centroids) {
   };
 }
 
+// Extract the developable (extruded-curve) profile of a face set: the body is a
+// curve extruded along an axis, so its wall is a straight ruling along that axis
+// over an arbitrary cross-section curve.  A single fitted cylinder can't follow a
+// non-circular curve (e.g. two joined beziers), so the conform wrap unrolls THIS
+// instead.  Returns { axis, e1, e2, curve:[{u,v}], arc:[s], norms:[{u,v}] } in an
+// orthonormal frame through the origin (world = u·e1 + v·e2 + along·axis), or null
+// when the set isn't a clean single-curve developable.
+export function extractDevelopableProfile(positions, normals) {
+  if (positions.length < 18 || normals.length < 2) return null;
+  const M = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ];
+  for (const n of normals)
+    for (let r = 0; r < 3; r++)
+      for (let c = 0; c < 3; c++) M[r][c] += n[r] * n[c];
+  const eig = eigenSym3(M);
+  // Developable like a cylinder: one tiny eigenvalue (the axis the normals avoid),
+  // two sizeable.  Reject flat (two tiny) and spherical (none tiny).
+  if (eig[1].value < 0.05 * eig[2].value) return null;
+  if (eig[0].value > 0.12 * eig[2].value) return null;
+  const A = new THREE.Vector3(...eig[0].vec).normalize();
+  const tmp =
+    Math.abs(A.x) < 0.9
+      ? new THREE.Vector3(1, 0, 0)
+      : new THREE.Vector3(0, 1, 0);
+  const e1 = new THREE.Vector3().crossVectors(A, tmp).normalize();
+  const e2 = new THREE.Vector3().crossVectors(A, e1).normalize();
+
+  // Collapse the wall's axial rulings into cross-section columns: vertices that
+  // project to the same (u,v) are the same curve point at different heights.
+  const round = (x) => Math.round(x * 1000) / 1000;
+  const colKey = new Map();
+  const cols = [];
+  const vertCol = [];
+  for (let i = 0; i < positions.length; i += 3) {
+    const u =
+        positions[i] * e1.x + positions[i + 1] * e1.y + positions[i + 2] * e1.z,
+      v =
+        positions[i] * e2.x + positions[i + 1] * e2.y + positions[i + 2] * e2.z;
+    const k = `${round(u)},${round(v)}`;
+    let c = colKey.get(k);
+    if (c == null) {
+      c = cols.length;
+      cols.push({ u, v });
+      colKey.set(k, c);
+    }
+    vertCol.push(c);
+  }
+  if (cols.length < 2) return null;
+
+  // Adjacency between columns from triangle edges that cross columns (rails).
+  const adj = cols.map(() => new Set());
+  for (let t = 0; t + 2 < vertCol.length; t += 3) {
+    const a = vertCol[t],
+      b = vertCol[t + 1],
+      c = vertCol[t + 2];
+    if (a !== b) {
+      adj[a].add(b);
+      adj[b].add(a);
+    }
+    if (b !== c) {
+      adj[b].add(c);
+      adj[c].add(b);
+    }
+    if (c !== a) {
+      adj[c].add(a);
+      adj[a].add(c);
+    }
+  }
+  // A clean single curve has max degree 2; branching → not a simple curve.
+  if (cols.some((_, i) => adj[i].size > 2)) return null;
+  let start = cols.findIndex((_, i) => adj[i].size === 1); // open-curve endpoint
+  if (start < 0) start = 0; // closed
+  const order = [start];
+  const seen = new Set([start]);
+  let cur = start,
+    prev = -1;
+  for (;;) {
+    const next = [...adj[cur]].find((n) => n !== prev && !seen.has(n));
+    if (next == null) break;
+    order.push(next);
+    seen.add(next);
+    prev = cur;
+    cur = next;
+  }
+  if (order.length < cols.length * 0.8) return null; // couldn't trace one curve
+
+  const curve = order.map((id) => ({ u: cols[id].u, v: cols[id].v }));
+  const arc = [0];
+  for (let i = 1; i < curve.length; i++)
+    arc.push(
+      arc[i - 1] +
+        Math.hypot(curve[i].u - curve[i - 1].u, curve[i].v - curve[i - 1].v),
+    );
+  // Outward normal per curve point = the LOCAL face normals at that column
+  // (projected to u,v).  Using the local (not a global average) normal is what
+  // makes an S-curve work: the outward direction rotates — even flips relative to
+  // the chord — along the curve, and each column's own face normals capture that.
+  const colNorm = cols.map(() => ({ u: 0, v: 0 }));
+  for (let t = 0; t < normals.length; t++) {
+    const nu =
+      normals[t][0] * e1.x + normals[t][1] * e1.y + normals[t][2] * e1.z;
+    const nv =
+      normals[t][0] * e2.x + normals[t][1] * e2.y + normals[t][2] * e2.z;
+    for (const vi of [3 * t, 3 * t + 1, 3 * t + 2]) {
+      const col = vertCol[vi];
+      if (col != null) {
+        colNorm[col].u += nu;
+        colNorm[col].v += nv;
+      }
+    }
+  }
+  const norms = order.map((colId, i) => {
+    const cn = colNorm[colId];
+    let nu = cn.u,
+      nv = cn.v;
+    if (Math.hypot(nu, nv) < 1e-9) {
+      // No face normal here (shouldn't happen) — fall back to the chord perp.
+      const a = curve[Math.max(0, i - 1)],
+        b = curve[Math.min(curve.length - 1, i + 1)];
+      nu = -(b.v - a.v);
+      nv = b.u - a.u;
+    }
+    const l = Math.hypot(nu, nv) || 1;
+    return { u: nu / l, v: nv / l };
+  });
+
+  return {
+    axis: [A.x, A.y, A.z],
+    e1: [e1.x, e1.y, e1.z],
+    e2: [e2.x, e2.y, e2.z],
+    curve,
+    arc,
+    norms,
+  };
+}
+
 // Solve a 4x4 linear system (Gaussian elimination with partial pivoting).
 function solve4(A, b) {
   const m = A.map((r, i) => [...r, b[i]]);

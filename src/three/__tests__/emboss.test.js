@@ -12,6 +12,7 @@ import {
   growConnectedFaceSet,
   fitCylinderToFaceSet,
   fitSphereToFaceSet,
+  extractDevelopableProfile,
   validateFaceSetConnectivity,
 } from "../embossFaceSet.js";
 import { regenerateItemsForResolution } from "../regenerateItems.js";
@@ -534,6 +535,70 @@ describe("emboss op", () => {
     ];
     const flatP = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0];
     expect(fitSphereToFaceSet(flatN, flatP)).toBeNull();
+  });
+
+  it("unrolls a developable (extruded-curve) wall so the wrap follows it", () => {
+    // A quarter-circle arc (radius 2, in XZ) extruded along +Y to height 3 — a
+    // developable wall a single cylinder COULD fit, but the unroll must follow the
+    // actual arc (this is what makes a non-circular/bezier wall work).
+    const N = 12,
+      R = 2,
+      H = 3;
+    const positions = [],
+      normals = [];
+    for (let k = 0; k < N; k++) {
+      const a0 = (k / N) * (Math.PI / 2),
+        a1 = ((k + 1) / N) * (Math.PI / 2);
+      const x0 = R * Math.cos(a0),
+        z0 = R * Math.sin(a0),
+        x1 = R * Math.cos(a1),
+        z1 = R * Math.sin(a1);
+      positions.push(x0, 0, z0, x1, 0, z1, x1, H, z1);
+      positions.push(x0, 0, z0, x1, H, z1, x0, H, z0);
+      const am = (a0 + a1) / 2;
+      normals.push([Math.cos(am), 0, Math.sin(am)]);
+      normals.push([Math.cos(am), 0, Math.sin(am)]);
+    }
+    const dev = extractDevelopableProfile(positions, normals);
+    expect(dev).toBeTruthy();
+    expect(Math.abs(dev.axis[1])).toBeGreaterThan(0.99); // axis ≈ Y
+    expect(dev.curve.length).toBe(N + 1);
+    expect(dev.arc[dev.arc.length - 1]).toBeCloseTo((R * Math.PI) / 2, 1);
+
+    const prof = {
+      polygon2D: square(0.2),
+      holes: [],
+      position: O,
+      rotation: O,
+      normalWorld: { x: 0, y: 0, z: 1 },
+    };
+    const am = Math.PI / 4;
+    const face = {
+      nx: Math.cos(am),
+      ny: 0,
+      nz: Math.sin(am),
+      cx: R * Math.cos(am),
+      cy: H / 2,
+      cz: R * Math.sin(am),
+    };
+    const stamp = buildEmbossStamp(
+      [prof],
+      face,
+      params({ projection: "conform", distanceMm: 3 }),
+      [],
+      null,
+      { developable: dev },
+      1,
+    );
+    expect(stamp.mode).toBe("conform");
+    // Every wrapped vertex sits on the arc surface (radius ≈ R from the Y axis),
+    // within the relief band — not floating off or buried.
+    const p = stamp.mesh.positions;
+    for (let i = 0; i < p.length; i += 3) {
+      const rad = Math.hypot(p[i], p[i + 2]);
+      expect(rad).toBeGreaterThan(R - 0.1);
+      expect(rad).toBeLessThan(R + 0.4);
+    }
   });
 
   it("validateFaceSetConnectivity gates multi-face selections at 45 degrees", () => {
