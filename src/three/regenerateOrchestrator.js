@@ -74,6 +74,20 @@ export async function recalculateTimeline() {
   let done = 0;
   useStore.getState().setRegenProgress({ current: 0, total });
 
+  // Yield a real animation frame at most this often so the render / camera loop
+  // keeps painting through a long recalc — the viewport stays orbitable while it
+  // runs — without adding a frame to every (often sub-millisecond) step.
+  let lastFrame = Date.now();
+  const breathe = async () => {
+    if (Date.now() - lastFrame < 80) return;
+    await new Promise((r) =>
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame(() => r())
+        : setTimeout(r, 0),
+    );
+    lastFrame = Date.now();
+  };
+
   let accItems = [];
   const newHistory = [];
   for (const entry of history) {
@@ -123,6 +137,7 @@ export async function recalculateTimeline() {
     accItems = await regenerateItemsForResolution(accItems, printPrecision);
     done += 1;
     useStore.getState().setRegenProgress({ current: done, total });
+    await breathe();
 
     const reg = accItems.find((it) => it.id === targetId);
     // A failed regen comes back without geometry — keep the entry's existing
