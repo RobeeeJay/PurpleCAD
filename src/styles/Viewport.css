@@ -26,11 +26,12 @@
   border: 1px solid rgba(var(--color-info-rgb), 0.3);
 }
 
-/* Sketch-mode selection-type widget: same chrome, anchored top-right. */
+/* Sketch-mode selection-type widget: same chrome, anchored top-left clear of the
+   Objects/Timeline panel (262px = .left-panel width). */
 .sketch-selection-widget {
   position: absolute;
   top: 12px;
-  right: 12px;
+  left: 262px;
   z-index: 12;
   display: flex;
   gap: 4px;
@@ -97,9 +98,7 @@
 .close-sketch-btn {
   position: absolute;
   top: 12px;
-  /* 250px = .left-panel width (App.css) — sit clear of the Objects/Timeline
-     overlay instead of under it. */
-  left: 262px;
+  right: 12px;
   z-index: 10;
   background: rgba(var(--panel-bg-rgb), 0.82);
   color: var(--color-white);
