@@ -62,6 +62,7 @@ try {
   ipcMain.handle("occ:shellItem", (_e, args) => occBridge.shellItem(args));
   ipcMain.handle("occ:holeItem", (_e, args) => occBridge.holeItem(args));
   ipcMain.handle("occ:embossItem", (_e, args) => occBridge.embossItem(args));
+  ipcMain.handle("occ:draftItem", (_e, args) => occBridge.draftItem(args));
   ipcMain.handle("occ:revolveItem", (_e, args) => occBridge.revolveItem(args));
   ipcMain.handle("occ:pipeItem", (_e, args) => occBridge.pipeItem(args));
   ipcMain.handle("occ:loftItem", (_e, args) => occBridge.loftItem(args));

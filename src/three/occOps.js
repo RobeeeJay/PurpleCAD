@@ -484,6 +484,45 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       return resultId;
     }
 
+    if (r.kind === "draft") {
+      const sourceId = buildItemShapeLocal(r.source, allItems, precision);
+      if (sourceId == null) return null;
+      let resultId;
+      try {
+        const angleRad =
+          (((r.angleDeg || 0) * Math.PI) / 180) * (r.flip ? -1 : 1);
+        resultId = occ.draftFaces(
+          sourceId,
+          r.neutral,
+          { faces: r.faces || [] },
+          angleRad,
+        );
+      } finally {
+        occ.releaseShape(sourceId);
+      }
+      if (!resultId) return null;
+      const offset = chamferCenterOffset(r, item);
+      if (
+        offset &&
+        (Math.abs(offset.x) > 1e-9 ||
+          Math.abs(offset.y) > 1e-9 ||
+          Math.abs(offset.z) > 1e-9)
+      ) {
+        const corrected = occ.transformShape(
+          resultId,
+          -offset.x,
+          -offset.y,
+          -offset.z,
+          0,
+          0,
+          0,
+        );
+        occ.releaseShape(resultId);
+        return corrected;
+      }
+      return resultId;
+    }
+
     if (r.kind === "hole") {
       const sourceId = buildItemShapeLocal(r.source, allItems, precision);
       if (sourceId == null) return null;
@@ -992,6 +1031,68 @@ async function shellItem({ source, thickness, allItems, printPrecision }) {
   }
   if (!tess) return null;
 
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2,
+    cy = (minY + maxY) / 2,
+    cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx;
+    centered[i + 1] -= cy;
+    centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: {
+      positions: centered,
+      normals: null,
+      indices: Array.from(tess.indices),
+    },
+    centerOffset: { cx, cy, cz },
+  };
+}
+
+// Apply a draft (taper) to selected faces about the neutral (main) face's plane.
+// Mirrors shellItem: rebuild source, draft, tessellate, bbox-centre.
+async function draftItem({
+  source,
+  neutral,
+  faces,
+  angleDeg,
+  flip,
+  allItems,
+  printPrecision,
+}) {
+  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  if (sourceId == null) {
+    throw new Error(
+      "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs.",
+    );
+  }
+  let resultId;
+  try {
+    const angleRad = (((angleDeg || 0) * Math.PI) / 180) * (flip ? -1 : 1);
+    resultId = occ.draftFaces(
+      sourceId,
+      neutral,
+      { faces: faces || [] },
+      angleRad,
+    );
+  } finally {
+    occ.releaseShape(sourceId);
+  }
+  if (!resultId) {
+    throw new Error(
+      "Draft failed — try a smaller angle, or faces that share an edge with the main face.",
+    );
+  }
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
+  } finally {
+    occ.releaseShape(resultId);
+  }
+  if (!tess) return null;
   const arr = Array.from(tess.positions);
   const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
   const cx = (minX + maxX) / 2,
@@ -2058,6 +2159,7 @@ export const ops = {
   shellItem,
   holeItem,
   embossItem,
+  draftItem,
   revolveItem,
   pipeItem,
   loftItem,

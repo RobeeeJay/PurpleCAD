@@ -13,6 +13,8 @@
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
+#include <BRepOffsetAPI_DraftAngle.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Ax3.hxx>
 
 // ── Helical thread (hole tool) ───────────────────────────────────────────
@@ -1256,6 +1258,56 @@ Napi::Number PushPullFaces(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// draftFaces(id, neutral{nx,ny,nz,cx,cy,cz}, subGeo, angleRad) → newShapeId
+// Applies a draft (taper) to each selected face, pivoting it about its
+// intersection with the NEUTRAL plane (the picked main face's plane) by
+// `angleRad` along the pull direction (= the main face's normal).  Used for
+// mould/cast draft.  0 = sentinel "operation rejected".
+Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id               = info[0].As<Napi::Number>().Int32Value();
+    Napi::Object neutral = info[1].As<Napi::Object>();
+    Napi::Object sg      = info[2].As<Napi::Object>();
+    double angle         = GetDouble(info[3], 0.0);
+
+    TopoDS_Shape shape = FetchShape(id);
+    EdgeFaceSpec spec  = ParseSubGeo(sg);
+    if (spec.faces.empty() || std::abs(angle) < 1e-9)
+      return Napi::Number::New(env, StoreShape(shape));
+
+    double nx = GetDouble(neutral.Get("nx")), ny = GetDouble(neutral.Get("ny")),
+           nz = GetDouble(neutral.Get("nz"));
+    double cx = GetDouble(neutral.Get("cx")), cy = GetDouble(neutral.Get("cy")),
+           cz = GetDouble(neutral.Get("cz"));
+    gp_Vec nv(nx, ny, nz);
+    if (nv.Magnitude() < 1e-9) return Napi::Number::New(env, 0);
+    gp_Dir pullDir(nv);
+    gp_Pln neutralPlane(gp_Pnt(cx, cy, cz), pullDir);
+
+    auto faces = SelectSubGeoFaces(shape, spec);
+    if (faces.empty()) return Napi::Number::New(env, 0);
+
+    try {
+      BRepOffsetAPI_DraftAngle draft(shape);
+      bool any = false;
+      for (const auto& face : faces) {
+        draft.Add(face, pullDir, angle, neutralPlane);
+        if (draft.AddDone()) any = true;
+        else draft.Remove(face);  // skip a face the draft can't take
+      }
+      if (!any) return Napi::Number::New(env, 0);
+      draft.Build();
+      if (!draft.IsDone()) return Napi::Number::New(env, 0);
+      return Napi::Number::New(env, StoreShape(draft.Shape()));
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+        std::string("Draft failed — try a smaller angle or a different face (") +
+        e.what() + ")");
+    }
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // MakeShell(shapeId, thickness) → hollow the solid inward by |thickness|,
 // leaving a closed shell of that wall thickness (no faces removed).  Uses the
 // "simple" thick-solid path so it works on any solid without a face selection.
@@ -1735,6 +1787,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("chamferShape",       Napi::Function::New(env, ChamferShape));
   exports.Set("filletShape",        Napi::Function::New(env, FilletShape));
   exports.Set("pushPullFaces",      Napi::Function::New(env, PushPullFaces));
+  exports.Set("draftFaces",         Napi::Function::New(env, DraftFaces));
   exports.Set("makeShell",          Napi::Function::New(env, MakeShell));
   exports.Set("makeHole",           Napi::Function::New(env, MakeHole));
   exports.Set("makeThread",         Napi::Function::New(env, MakeThread));

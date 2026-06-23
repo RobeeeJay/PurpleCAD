@@ -113,6 +113,11 @@ export const uiInitial = {
   //   { picking:null|"geometry"|"faces", itemId, profiles:[], face, faceSet, params }
   embossTool: null,
 
+  // Draft tool: taper selected faces about a neutral (main) face's plane.
+  //   { picking:null|"main"|"faces", itemId, source, neutral:{nx..,cx..},
+  //     faces:[{nx..,cx..}], angleDeg, flip }
+  draftTool: null,
+
   // Sketch→solid sweep tools (Revolve / Pipe / Loft), all sharing one select
   // mode driven by the Modify toolbar.  Shape:
   //   { kind:"revolve"|"pipe"|"loft", profile, axis, secondProfile, params }
@@ -466,6 +471,77 @@ export const createUiSlice = (set) => ({
           // A committed emboss had a valid face selection.
           facesValid: true,
           params: { ...r.params },
+        },
+      };
+    }),
+
+  // ── Draft tool ──────────────────────────────────────────────────────────
+  startDraftTool: (itemId, source) =>
+    set({
+      draftTool: {
+        picking: "main",
+        itemId,
+        source,
+        neutral: null,
+        faces: [],
+        angleDeg: 3,
+        flip: false,
+      },
+    }),
+  cancelDraftTool: () => set({ draftTool: null }),
+  setDraftPicking: (kind) =>
+    set((s) =>
+      s.draftTool
+        ? {
+            draftTool: {
+              ...s.draftTool,
+              picking: s.draftTool.picking === kind ? null : kind,
+            },
+          }
+        : {},
+    ),
+  // The neutral (main) face is the pivot plane; one click sets it, then arm the
+  // face pick automatically.
+  setDraftNeutral: (neutral) =>
+    set((s) =>
+      s.draftTool
+        ? { draftTool: { ...s.draftTool, neutral, picking: "faces" } }
+        : {},
+    ),
+  // Toggle a face in the drafted set (matched by normal + nearby centroid).
+  toggleDraftFace: (face) =>
+    set((s) => {
+      if (!s.draftTool) return {};
+      const same = (a, b) =>
+        Math.abs(a.nx - b.nx) < 0.02 &&
+        Math.abs(a.ny - b.ny) < 0.02 &&
+        Math.abs(a.nz - b.nz) < 0.02 &&
+        Math.hypot(a.cx - b.cx, a.cy - b.cy, a.cz - b.cz) < 0.1;
+      const has = s.draftTool.faces.some((f) => same(f, face));
+      const faces = has
+        ? s.draftTool.faces.filter((f) => !same(f, face))
+        : [...s.draftTool.faces, face];
+      return { draftTool: { ...s.draftTool, faces } };
+    }),
+  updateDraftParams: (partial) =>
+    set((s) =>
+      s.draftTool ? { draftTool: { ...s.draftTool, ...partial } } : {},
+    ),
+  beginDraftEdit: (entryId) =>
+    set((state) => {
+      const entry = state.history.find((h) => h.id === entryId);
+      const r = entry?.instruction?.patches?.regenerator;
+      if (r?.kind !== "draft") return {};
+      return {
+        draftTool: {
+          picking: null,
+          editEntryId: entryId,
+          itemId: entry.itemId,
+          source: r.source,
+          neutral: r.neutral,
+          faces: r.faces || [],
+          angleDeg: r.angleDeg ?? 3,
+          flip: !!r.flip,
         },
       };
     }),

@@ -76,6 +76,12 @@ const embossInfo = (entry) => {
   return inst.patches?.regenerator?.kind === "emboss" ? {} : null;
 };
 
+const draftInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  return inst.patches?.regenerator?.kind === "draft" ? {} : null;
+};
+
 // Detect revolve (sweep) entries — a CREATE whose item carries a revolve recipe.
 const revolveInfo = (entry) => {
   const inst = entry?.instruction;
@@ -145,6 +151,7 @@ const entryIcon = (entry) => {
   if (shellInfo(entry)) return <ShellIcon />;
   if (holeInfo(entry)) return <HoleIcon />;
   if (embossInfo(entry)) return <EmbossIcon />;
+  if (draftInfo(entry)) return <EmbossIcon />;
 
   const inst = entry.instruction;
   if (entry.label === "Split") return <SplitIcon />;
@@ -376,6 +383,7 @@ const Timeline = () => {
   const setShellTarget = useStore((state) => state.setShellTarget);
   const beginHoleEdit = useStore((state) => state.beginHoleEdit);
   const beginEmbossEdit = useStore((state) => state.beginEmbossEdit);
+  const beginDraftEdit = useStore((state) => state.beginDraftEdit);
   const pushPullRetargetTarget = useStore(
     (state) => state.pushPullRetargetTarget,
   );
@@ -827,6 +835,19 @@ const Timeline = () => {
                     e.stopPropagation();
                     restoreToHistory(entry.id);
                     beginEmbossEdit(entry.id);
+                  }}
+                >
+                  <EmbossIcon />
+                </button>
+              )}
+              {draftInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit draft — angle / flip / faces"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    restoreToHistory(entry.id);
+                    beginDraftEdit(entry.id);
                   }}
                 >
                   <EmbossIcon />

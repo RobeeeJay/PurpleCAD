@@ -7,6 +7,7 @@ import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createShellPreviewHelpers } from "./cameraControls/shell.js";
 import { createHolePreviewHelpers } from "./cameraControls/hole.js";
 import { createEmbossPreviewHelpers } from "./cameraControls/emboss.js";
+import { createDraftPreviewHelpers } from "./cameraControls/draft.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
@@ -424,6 +425,13 @@ export function attachCameraControls(ctx) {
   });
   controls.updateEmbossPreview = () => embossPreview.updateEmbossPreview();
   controls.clearEmbossPreview = () => embossPreview.clearEmbossPreview();
+  const draftPreview = createDraftPreviewHelpers({
+    scene,
+    itemsRef,
+    objectsRef,
+  });
+  controls.updateDraftPreview = () => draftPreview.updateDraftPreview();
+  controls.clearDraftPreview = () => draftPreview.clearDraftPreview();
 
   // Point-to-Point move: preview by sliding the REAL mesh to its target spot
   // (A's position + (B - A)) once both points are picked, restoring it on

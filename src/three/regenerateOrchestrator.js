@@ -104,6 +104,7 @@ export async function recalculateTimeline() {
           it.regenerator.kind === "shell" ||
           it.regenerator.kind === "hole" ||
           it.regenerator.kind === "emboss" ||
+          it.regenerator.kind === "draft" ||
           it.regenerator.kind === "revolve") &&
           (src?.type === "extrude" || src?.regenerator?.kind === "boolean")) ||
         // Pipe and loft are built in world and their position IS the bbox

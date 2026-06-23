@@ -17,11 +17,20 @@ const BevelSection = ({ bare = false }) => {
   const embossTool = useStore((s) => s.embossTool);
   const startEmbossTool = useStore((s) => s.startEmbossTool);
   const cancelEmbossTool = useStore((s) => s.cancelEmbossTool);
+  const draftTool = useStore((s) => s.draftTool);
+  const startDraftTool = useStore((s) => s.startDraftTool);
+  const cancelDraftTool = useStore((s) => s.cancelDraftTool);
 
   // Shell hollows the whole selected body, so it only needs a solid selected
   // (no face/edge pick).  Sketches and the empty selection are ineligible.
   const selectedBody = items.find((i) => i.id === selectedId);
   const canShell = !!selectedBody && selectedBody.type !== "sketch";
+  // Draft tapers faces of the selected solid; it guides its own face picks.
+  const canDraft = canShell;
+  const toggleDraft = () => {
+    if (draftTool) cancelDraftTool();
+    else if (canDraft) startDraftTool(selectedId, null);
+  };
   const openShell = () => {
     if (canShell) setShellTarget({ itemId: selectedId });
   };
@@ -367,6 +376,32 @@ const BevelSection = ({ bare = false }) => {
             strokeWidth="1.5"
             strokeLinejoin="miter"
             strokeLinecap="square"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${draftTool ? "active" : ""}`}
+        title="Draft — taper faces about a neutral (main) face for moulding/casting"
+        disabled={!canDraft && !draftTool}
+        onClick={toggleDraft}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          {/* a tapered (drafted) block: wide top, narrower base */}
+          <polygon
+            points="6,7 18,7 15,18 9,18"
+            fill="rgba(108,63,212,0.18)"
+            stroke="#6C3FD4"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+          />
+          <line
+            stroke="#D4A33F"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="3"
+            y1="7"
+            x2="21"
+            y2="7"
           />
         </svg>
       </button>

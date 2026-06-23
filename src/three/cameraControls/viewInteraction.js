@@ -436,6 +436,45 @@ export function createViewInteraction(
         return;
       }
 
+      // Draft tool: pick the neutral (main) face, then the faces to taper.  Each
+      // pick is a {normal, point} in the body's local frame (the native draft
+      // matches OCC faces by normal + nearby centroid).
+      const draft = useStore.getState().draftTool;
+      if (draft && draft.picking) {
+        if (intersects.length > 0 && intersects[0].face) {
+          const hit = intersects[0];
+          const mesh = hit.object;
+          const id = mesh.userData.itemId;
+          if (draft.itemId == null || draft.itemId === id) {
+            const wN = hit.face.normal
+              .clone()
+              .applyMatrix3(
+                new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld),
+              )
+              .normalize();
+            const lN = wN
+              .applyQuaternion(
+                mesh.getWorldQuaternion(new THREE.Quaternion()).invert(),
+              )
+              .normalize();
+            const lP = mesh.worldToLocal(hit.point.clone());
+            const desc = {
+              nx: lN.x,
+              ny: lN.y,
+              nz: lN.z,
+              cx: lP.x,
+              cy: lP.y,
+              cz: lP.z,
+            };
+            if (draft.picking === "main")
+              useStore.getState().setDraftNeutral(desc);
+            else useStore.getState().toggleDraftFace(desc);
+          }
+        }
+        save();
+        return;
+      }
+
       // Change-origin tool intercepts the click before normal selection.
       const { originVertexPick, originToolActive } = useStore.getState();
       if (originVertexPick != null || originToolActive) {
