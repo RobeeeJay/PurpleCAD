@@ -1259,15 +1259,32 @@ export function buildEmbossStampShape(stamp) {
 // the projected footprint — which exists ONLY where the geometry touches a face,
 // clipping anything that would float — then raises (emboss) / removes a top layer
 // (deboss) of it by `distance` along the face normal.
-function embossResultShape(targetId, stamp) {
+function embossResultShape(targetId, stamp, printPrecision) {
   if (!stamp) return 0;
   if (stamp.mode === "conform") {
     const s = buildEmbossStampShape(stamp);
     if (!s) return 0;
-    const r = occ.booleanOp(
-      [targetId, s],
-      stamp.deboss ? "difference" : "union",
-    );
+    // Boolean the wrapped mesh against a FACETED copy of the body, not the
+    // analytic primitive: OCC's fuse/cut of an analytic sphere vs a faceted stamp
+    // is fragile and silently drops the sphere for some stamp orientations (text
+    // rotated 90°/270°).  A faceted-vs-faceted boolean is robust.  Fall back to
+    // the analytic body if the re-mesh can't be sewn (e.g. too many faces).
+    let body = targetId;
+    let faceted = 0;
+    const t = occ.tessellate(targetId, printPrecision ?? 0.1);
+    if (t && t.positions && t.indices) {
+      try {
+        faceted = occ.makeSolidFromMesh(
+          new Float64Array(t.positions),
+          new Uint32Array(t.indices),
+        );
+      } catch {
+        faceted = 0;
+      }
+      if (faceted) body = faceted;
+    }
+    const r = occ.booleanOp([body, s], stamp.deboss ? "difference" : "union");
+    if (faceted) occ.releaseShape(faceted);
     occ.releaseShape(s);
     return r || 0;
   }
@@ -1325,7 +1342,7 @@ async function embossItem({ source, stamp, allItems, printPrecision }) {
 
   let resultId = 0;
   try {
-    resultId = embossResultShape(targetId, stamp);
+    resultId = embossResultShape(targetId, stamp, printPrecision);
   } finally {
     occ.releaseShape(targetId);
   }

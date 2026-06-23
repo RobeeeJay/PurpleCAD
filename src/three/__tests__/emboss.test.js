@@ -55,6 +55,24 @@ const params = (extra) => ({
   ...extra,
 });
 const tris = (g) => g.indices.length / 3;
+// Signed volume of a triangle mesh (origin tetra sum) — detects a boolean that
+// dropped/inverted the body (a clean R=1.5 sphere is ~14.1).
+const meshVolume = (g) => {
+  const p = g.positions,
+    idx = g.indices;
+  let v = 0;
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3,
+      b = idx[t + 1] * 3,
+      c = idx[t + 2] * 3;
+    v +=
+      (p[a] * (p[b + 1] * p[c + 2] - p[b + 2] * p[c + 1]) -
+        p[a + 1] * (p[b] * p[c + 2] - p[b + 2] * p[c]) +
+        p[a + 2] * (p[b] * p[c + 1] - p[b + 1] * p[c])) /
+      6;
+  }
+  return v;
+};
 const topRing = (g) => {
   const pos = g.positions,
     idx = g.indices;
@@ -501,48 +519,44 @@ describe("emboss op", () => {
     expect(maxD).toBeGreaterThan(R + 0.1);
   });
 
-  it("conform on a scaled-down sphere stays under the mesh face limit", async () => {
-    // A scaled-down sphere magnifies the stamp loops AND the relief depth by
-    // invScale, so a multi-glyph word used to subdivide into >5000 curved faces
-    // and makeSolidFromMesh rejected it ("too many curved faces") — the emboss
-    // silently produced nothing.  The triangle cap must keep it valid.
-    const scale = 0.25;
-    const sphS = {
-      id: 9,
-      type: "sphere",
-      position: O,
-      rotation: O,
-      scale: { x: scale, y: scale, z: scale },
-    };
+  it("conform keeps the body intact when the text is rotated (no eaten sphere)", async () => {
+    // OCC's fuse of an analytic sphere vs the faceted wrapped stamp silently
+    // dropped the sphere for some stamp orientations — a word rotated 90°/270°
+    // left "the letters but most of the sphere missing".  The faceted-vs-faceted
+    // boolean must keep the sphere whole at EVERY rotation.
     const R = 1.5;
+    const sph = { id: 9, type: "sphere", position: O, rotation: O, scale: S };
     const profs = [];
-    for (let gx = -1; gx <= 1.0001; gx += 0.5)
+    for (let gx = -0.6; gx <= 0.6001; gx += 0.3)
       profs.push({
-        polygon2D: square(0.18),
+        polygon2D: square(0.12),
         holes: [],
         position: { x: gx, y: 0, z: 0 },
         rotation: O,
         normalWorld: { x: 0, y: 0, z: 1 },
       });
     const face = { nx: 0, ny: 0, nz: 1, cx: 0, cy: 0, cz: R };
-    const stamp = buildEmbossStamp(
-      profs,
-      face,
-      params({ projection: "conform" }),
-      [sphS],
-      null,
-      { sphere: { cx: 0, cy: 0, cz: 0, radius: R } },
-      scale,
-    );
-    expect(stamp.mode).toBe("conform");
-    expect(tris(stamp.mesh)).toBeLessThan(5000);
-    const res = await embossItem({
-      source: sphS,
-      stamp,
-      allItems: [sphS],
-      printPrecision: 0.1,
-    });
-    expect(res).toBeTruthy();
+    for (const angleDeg of [0, 270]) {
+      const stamp = buildEmbossStamp(
+        profs,
+        face,
+        params({ projection: "conform", angleDeg }),
+        [sph],
+        null,
+        { sphere: { cx: 0, cy: 0, cz: 0, radius: R } },
+        1,
+      );
+      expect(tris(stamp.mesh)).toBeLessThan(5000); // the face-limit cap holds
+      const res = await embossItem({
+        source: sph,
+        stamp,
+        allItems: [sph],
+        printPrecision: 0.1,
+      });
+      expect(res).toBeTruthy();
+      // Full sphere ≈ 14.1; an eaten result collapses to ~1.5.
+      expect(meshVolume(res.geometryData)).toBeGreaterThan(12);
+    }
   });
 
   it("fits a sphere to a curved (3D-spanning) face set", () => {
