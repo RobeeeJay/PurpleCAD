@@ -501,6 +501,50 @@ describe("emboss op", () => {
     expect(maxD).toBeGreaterThan(R + 0.1);
   });
 
+  it("conform on a scaled-down sphere stays under the mesh face limit", async () => {
+    // A scaled-down sphere magnifies the stamp loops AND the relief depth by
+    // invScale, so a multi-glyph word used to subdivide into >5000 curved faces
+    // and makeSolidFromMesh rejected it ("too many curved faces") — the emboss
+    // silently produced nothing.  The triangle cap must keep it valid.
+    const scale = 0.25;
+    const sphS = {
+      id: 9,
+      type: "sphere",
+      position: O,
+      rotation: O,
+      scale: { x: scale, y: scale, z: scale },
+    };
+    const R = 1.5;
+    const profs = [];
+    for (let gx = -1; gx <= 1.0001; gx += 0.5)
+      profs.push({
+        polygon2D: square(0.18),
+        holes: [],
+        position: { x: gx, y: 0, z: 0 },
+        rotation: O,
+        normalWorld: { x: 0, y: 0, z: 1 },
+      });
+    const face = { nx: 0, ny: 0, nz: 1, cx: 0, cy: 0, cz: R };
+    const stamp = buildEmbossStamp(
+      profs,
+      face,
+      params({ projection: "conform" }),
+      [sphS],
+      null,
+      { sphere: { cx: 0, cy: 0, cz: 0, radius: R } },
+      scale,
+    );
+    expect(stamp.mode).toBe("conform");
+    expect(tris(stamp.mesh)).toBeLessThan(5000);
+    const res = await embossItem({
+      source: sphS,
+      stamp,
+      allItems: [sphS],
+      printPrecision: 0.1,
+    });
+    expect(res).toBeTruthy();
+  });
+
   it("fits a sphere to a curved (3D-spanning) face set", () => {
     const C = [1, 2, 3],
       R = 2;

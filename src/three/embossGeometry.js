@@ -30,7 +30,13 @@ const quatOf = (rot) =>
 // non-indexed ExtrudeGeometry (duplicated seam verts) stays crack-free.  Used to
 // pre-tessellate the flat relief before wrapping it onto a curve, so the curved
 // result follows the surface instead of showing big faceted triangles.
-function subdivideToMaxEdge(positions, indices, maxEdge, maxPasses = 5) {
+function subdivideToMaxEdge(
+  positions,
+  indices,
+  maxEdge,
+  maxPasses = 5,
+  maxTris = Infinity,
+) {
   const verts = [];
   const vMap = new Map();
   const r5 = (v) => Math.round(v * 1e5) / 1e5;
@@ -95,6 +101,9 @@ function subdivideToMaxEdge(positions, indices, maxEdge, maxPasses = 5) {
       )
     )
       break;
+    // Each pass quadruples the count; stop before exceeding the cap so the result
+    // stays under the downstream makeSolidFromMesh face limit.
+    if (tris.length * 4 > maxTris) break;
     const next = [];
     for (const [a, b, c] of tris) {
       const ab = mid(a, b),
@@ -132,7 +141,12 @@ function flatPrismMesh(shapes, depth, R) {
   const flatIdx = geo.index ? Array.from(geo.index.array) : null;
   geo.dispose();
   const maxEdge = Math.max(0.02, (R > 1e-3 ? R : 1) * 0.12); // ~7° steps
-  return subdivideToMaxEdge(flatPos, flatIdx, maxEdge, 5);
+  // Cap the triangle count: makeSolidFromMesh rejects a wrapped mesh over ~5000
+  // faces (curved tris don't merge), so large text — or normal text on a
+  // scaled-DOWN body, where invScale magnifies both the loops and the relief
+  // depth — would explode past the limit and the boolean would silently return
+  // nothing.  The cap coarsens the wrap (slightly more faceted) but it works.
+  return subdivideToMaxEdge(flatPos, flatIdx, maxEdge, 6, 4000);
 }
 
 // The selected sketch geometry, mapped into one common plane frame, centred on
