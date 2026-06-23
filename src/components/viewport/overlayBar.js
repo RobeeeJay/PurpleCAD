@@ -36,12 +36,26 @@ export const barBtn = (accent, disabled) => ({
 });
 
 // A small inline pick/base button; active = currently the live pick target.
+// A faint translucent fill is invisible on the light theme, so the active state
+// uses a SOLID accent with contrasting text — clearly readable in both themes.
 export const pickBtn = (active) => ({
   fontSize: 11,
   padding: "3px 8px",
   borderRadius: 3,
-  border: `1px solid ${active ? "#44aaff" : "var(--border-color)"}`,
-  background: active ? "rgba(68,170,255,0.18)" : "var(--bg-tertiary)",
-  color: "var(--text-primary)",
+  border: `1px solid ${active ? "var(--accent, #4488ff)" : "var(--border-color)"}`,
+  background: active ? "var(--accent, #4488ff)" : "var(--bg-tertiary)",
+  color: active ? "#fff" : "var(--text-primary)",
+  cursor: "pointer",
+});
+
+// A toggle button (emboss/deboss, mirror, projection, draft flip, …).  Shared so
+// the "on" state is the same clearly-visible accent fill across every dialog.
+export const toggleBtn = (on) => ({
+  fontSize: 11,
+  padding: "3px 8px",
+  borderRadius: 3,
+  border: `1px solid ${on ? "var(--accent, #4488ff)" : "var(--border-color)"}`,
+  background: on ? "var(--accent, #4488ff)" : "var(--bg-tertiary)",
+  color: on ? "#fff" : "var(--text-primary)",
   cursor: "pointer",
 });

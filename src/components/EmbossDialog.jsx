@@ -10,6 +10,7 @@ import {
   barInput,
   barBtn,
   pickBtn,
+  toggleBtn,
 } from "./viewport/overlayBar.js";
 
 // Emboss tool overlay.  Pick sketch geometry + a face, then stamp it onto the
@@ -93,16 +94,7 @@ const EmbossDialog = () => {
     else if (e.key === "Escape") cancel();
   };
 
-  const toggleStyle = (on) => ({
-    fontSize: 11,
-    padding: "3px 8px",
-    borderRadius: 3,
-    border: `1px solid ${on ? "#44aaff" : "var(--border-color)"}`,
-    background: on ? "rgba(68,170,255,0.18)" : "var(--bg-tertiary)",
-    color: "var(--text-primary)",
-    cursor: "pointer",
-    marginRight: 4,
-  });
+  const toggleStyle = (on) => ({ ...toggleBtn(on), marginRight: 4 });
 
   return (
     <>
