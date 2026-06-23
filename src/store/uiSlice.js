@@ -521,12 +521,14 @@ export const createUiSlice = (set) => ({
     }),
 
   // ── Draft tool ──────────────────────────────────────────────────────────
-  startDraftTool: (itemId, source) =>
+  // Guided like Hole/Emboss — no pre-selection needed; the body is learned from
+  // the main-face pick.
+  startDraftTool: () =>
     set({
       draftTool: {
         picking: "main",
-        itemId,
-        source,
+        itemId: null,
+        source: null,
         neutral: null,
         faces: [],
         angleDeg: 3,
@@ -545,12 +547,19 @@ export const createUiSlice = (set) => ({
           }
         : {},
     ),
-  // The neutral (main) face is the pivot plane; one click sets it, then arm the
-  // face pick automatically.
-  setDraftNeutral: (neutral) =>
+  // The neutral (main) face is the pivot plane; one click sets it (and the body
+  // it belongs to), then arm the face pick automatically.
+  setDraftNeutral: (neutral, itemId) =>
     set((s) =>
       s.draftTool
-        ? { draftTool: { ...s.draftTool, neutral, picking: "faces" } }
+        ? {
+            draftTool: {
+              ...s.draftTool,
+              neutral,
+              itemId: itemId ?? s.draftTool.itemId,
+              picking: "faces",
+            },
+          }
         : {},
     ),
   // Toggle a face in the drafted set (matched by normal + nearby centroid).

@@ -25,11 +25,11 @@ const BevelSection = ({ bare = false }) => {
   // (no face/edge pick).  Sketches and the empty selection are ineligible.
   const selectedBody = items.find((i) => i.id === selectedId);
   const canShell = !!selectedBody && selectedBody.type !== "sketch";
-  // Draft tapers faces of the selected solid; it guides its own face picks.
-  const canDraft = canShell;
+  // Draft guides its own picks (main face → faces to taper), so — like Hole /
+  // Emboss — it needs no pre-selection; the body comes from the main-face pick.
   const toggleDraft = () => {
     if (draftTool) cancelDraftTool();
-    else if (canDraft) startDraftTool(selectedId, null);
+    else startDraftTool();
   };
   const openShell = () => {
     if (canShell) setShellTarget({ itemId: selectedId });
@@ -382,7 +382,6 @@ const BevelSection = ({ bare = false }) => {
       <button
         className={`toolbar-btn ${draftTool ? "active" : ""}`}
         title="Draft — taper faces about a neutral (main) face for moulding/casting"
-        disabled={!canDraft && !draftTool}
         onClick={toggleDraft}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">

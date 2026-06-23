@@ -445,7 +445,9 @@ export function createViewInteraction(
           const hit = intersects[0];
           const mesh = hit.object;
           const id = mesh.userData.itemId;
-          if (draft.itemId == null || draft.itemId === id) {
+          const it = itemsRef.current.find((i) => i.id === id);
+          const okBody = it && it.type !== "sketch";
+          if (okBody && (draft.itemId == null || draft.itemId === id)) {
             const wN = hit.face.normal
               .clone()
               .applyMatrix3(
@@ -467,7 +469,7 @@ export function createViewInteraction(
               cz: lP.z,
             };
             if (draft.picking === "main")
-              useStore.getState().setDraftNeutral(desc);
+              useStore.getState().setDraftNeutral(desc, id);
             else useStore.getState().toggleDraftFace(desc);
           }
         }
