@@ -471,21 +471,29 @@ export const createUiSlice = (set) => ({
   // pick armed so the user can keep adding faces; a primitive's single curved
   // face clears it (one click is the whole face).
   setEmbossFaceSelection: (sel) =>
-    set((s) =>
-      s.embossTool
-        ? {
-            embossTool: {
-              ...s.embossTool,
-              itemId: sel.itemId,
-              face: sel.face,
-              faceSet: sel.faceSet,
-              faceTris: sel.faceTris ?? null,
-              facesValid: !!sel.valid,
-              picking: sel.keepPicking ? s.embossTool.picking : null,
-            },
-          }
-        : {},
-    ),
+    set((s) => {
+      if (!s.embossTool) return {};
+      // A curved surface (sphere / cylinder / developable all return a faceSet;
+      // flat faces return null) is degenerate under centre projection — a flat
+      // stamp tangent at one point barely intersects.  So nudge the still-default
+      // "center" to "conform" on a curved pick; a manual conform choice is kept.
+      const params =
+        sel.faceSet && s.embossTool.params.projection === "center"
+          ? { ...s.embossTool.params, projection: "conform" }
+          : s.embossTool.params;
+      return {
+        embossTool: {
+          ...s.embossTool,
+          itemId: sel.itemId,
+          face: sel.face,
+          faceSet: sel.faceSet,
+          faceTris: sel.faceTris ?? null,
+          facesValid: !!sel.valid,
+          picking: sel.keepPicking ? s.embossTool.picking : null,
+          params,
+        },
+      };
+    }),
   updateEmbossParams: (partial) =>
     set((s) =>
       s.embossTool
