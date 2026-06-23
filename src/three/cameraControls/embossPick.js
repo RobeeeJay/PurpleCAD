@@ -194,27 +194,15 @@ export function createEmbossInteraction({
     );
     if (!grown)
       return { id, mesh, face: plane, faceSet: null, setPositions: null };
-    // Prefer unrolling the ACTUAL extruded curve (developable) so a non-circular
-    // wall (two joined beziers, an S-curve) is followed exactly; fall back to a
-    // single cylinder fit, then a sphere fit, then centre projection.
-    const dev = extractDevelopableProfile(grown.positions, grown.normals);
-    const cyl = dev
-      ? null
-      : fitCylinderToFaceSet(grown.normals, grown.centroids);
-    const sph =
-      dev || cyl ? null : fitSphereToFaceSet(grown.normals, grown.positions);
+    // The committed face set is (re)fit from the accumulated triangles in
+    // handleEmbossClick — including the developable unroll — so here just hand back
+    // the grown triangles for the hover highlight; the centre plane is enough.
     const center = centerFaceOfSet(grown.normals, grown.centroids) || plane;
     return {
       id,
       mesh,
       face: center,
-      faceSet: dev
-        ? { developable: dev }
-        : cyl
-          ? { cylinder: cyl }
-          : sph
-            ? { sphere: sph }
-            : null,
+      faceSet: null,
       setPositions: grown.positions,
     };
   };
@@ -378,14 +366,25 @@ export function createEmbossInteraction({
       highlights.clearSelectedFaces?.();
     } else {
       const { normals, centroids } = triData(combined);
-      const cyl = fitCylinderToFaceSet(normals, centroids);
-      const sph = cyl ? null : fitSphereToFaceSet(normals, combined);
+      // Same preference order as analyzeFace: unroll the ACTUAL extruded curve
+      // (developable) so a non-circular wall — two joined beziers, an S-curve — is
+      // followed exactly, instead of a single mismatched cylinder the relief sinks
+      // through.  This is the committed face set, so it MUST do the dev fit too.
+      const dev = extractDevelopableProfile(combined, normals);
+      const cyl = dev ? null : fitCylinderToFaceSet(normals, centroids);
+      const sph = dev || cyl ? null : fitSphereToFaceSet(normals, combined);
       const center = centerFaceOfSet(normals, centroids) || a.face;
       const valid = validateFaceSetConnectivity(combined, 45);
       store.setEmbossFaceSelection({
         itemId: a.id,
         face: center,
-        faceSet: cyl ? { cylinder: cyl } : sph ? { sphere: sph } : null,
+        faceSet: dev
+          ? { developable: dev }
+          : cyl
+            ? { cylinder: cyl }
+            : sph
+              ? { sphere: sph }
+              : null,
         faceTris: combined,
         valid,
         keepPicking: true,
