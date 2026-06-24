@@ -4,7 +4,7 @@ import FormulaInput from "./FormulaInput";
 import { evalValue, useEscapeKey } from "./inputs.jsx";
 import {
   BAR_STYLE,
-  LBL,
+  Field,
   barInput,
   barBtn,
   pickBtn,
@@ -119,75 +119,80 @@ const PlaneDialog = () => {
         Set the plane options, then Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <span style={LBL}>Base:</span>
-        <button
-          type="button"
-          style={pickBtn()}
-          onClick={() => setBase({ x: 0, y: 0, z: 0 })}
-        >
-          XY
-        </button>
-        <button
-          type="button"
-          style={pickBtn()}
-          onClick={() => setBase({ x: -Math.PI / 2, y: 0, z: 0 })}
-        >
-          XZ
-        </button>
-        <button
-          type="button"
-          style={pickBtn()}
-          onClick={() => setBase({ x: 0, y: Math.PI / 2, z: 0 })}
-        >
-          YZ
-        </button>
-        <button
-          type="button"
-          style={pickBtn()}
-          onClick={() => startPick("points")}
-        >
-          3 points
-        </button>
-        <button
-          type="button"
-          style={pickBtn()}
-          onClick={() => startPick("face")}
-        >
-          Face
-        </button>
-        <span style={LBL}>Rot X°</span>
-        <FormulaInput
-          variables={variables}
-          autoFocus
-          value={rx}
-          onChange={(e) => setRx(e.target.value)}
-          onKeyDown={onKey}
-          style={barInput(Number.isFinite(rxv))}
-        />
-        <span style={LBL}>Y°</span>
-        <FormulaInput
-          variables={variables}
-          value={ry}
-          onChange={(e) => setRy(e.target.value)}
-          onKeyDown={onKey}
-          style={barInput(Number.isFinite(ryv))}
-        />
-        <span style={LBL}>Z°</span>
-        <FormulaInput
-          variables={variables}
-          value={rz}
-          onChange={(e) => setRz(e.target.value)}
-          onKeyDown={onKey}
-          style={barInput(Number.isFinite(rzv))}
-        />
-        <span style={LBL}>Offset(mm)</span>
-        <FormulaInput
-          variables={variables}
-          value={offset}
-          onChange={(e) => setOffset(e.target.value)}
-          onKeyDown={onKey}
-          style={barInput(Number.isFinite(offv))}
-        />
+        <Field label="Base:">
+          <button
+            type="button"
+            style={pickBtn()}
+            onClick={() => setBase({ x: 0, y: 0, z: 0 })}
+          >
+            XY
+          </button>
+          <button
+            type="button"
+            style={pickBtn()}
+            onClick={() => setBase({ x: -Math.PI / 2, y: 0, z: 0 })}
+          >
+            XZ
+          </button>
+          <button
+            type="button"
+            style={pickBtn()}
+            onClick={() => setBase({ x: 0, y: Math.PI / 2, z: 0 })}
+          >
+            YZ
+          </button>
+          <button
+            type="button"
+            style={pickBtn()}
+            onClick={() => startPick("points")}
+          >
+            3 points
+          </button>
+          <button
+            type="button"
+            style={pickBtn()}
+            onClick={() => startPick("face")}
+          >
+            Face
+          </button>
+        </Field>
+        <Field label="Rot X°">
+          <FormulaInput
+            variables={variables}
+            autoFocus
+            value={rx}
+            onChange={(e) => setRx(e.target.value)}
+            onKeyDown={onKey}
+            style={barInput(Number.isFinite(rxv))}
+          />
+        </Field>
+        <Field label="Y°">
+          <FormulaInput
+            variables={variables}
+            value={ry}
+            onChange={(e) => setRy(e.target.value)}
+            onKeyDown={onKey}
+            style={barInput(Number.isFinite(ryv))}
+          />
+        </Field>
+        <Field label="Z°">
+          <FormulaInput
+            variables={variables}
+            value={rz}
+            onChange={(e) => setRz(e.target.value)}
+            onKeyDown={onKey}
+            style={barInput(Number.isFinite(rzv))}
+          />
+        </Field>
+        <Field label="Offset(mm)">
+          <FormulaInput
+            variables={variables}
+            value={offset}
+            onChange={(e) => setOffset(e.target.value)}
+            onKeyDown={onKey}
+            style={barInput(Number.isFinite(offv))}
+          />
+        </Field>
         <button type="button" onClick={close} title="Cancel" style={barBtn()}>
           Cancel
         </button>

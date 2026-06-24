@@ -5,7 +5,7 @@ import { activePrecision } from "../three/resolution.js";
 import { commitShell } from "../three/cameraControls/shell.js";
 import FormulaInput from "./FormulaInput";
 import { evalValue, useDebouncedPreview, useEscapeKey } from "./inputs.jsx";
-import { BAR_STYLE, LBL, barInput, barBtn } from "./viewport/overlayBar.js";
+import { BAR_STYLE, Field, barInput, barBtn } from "./viewport/overlayBar.js";
 
 // Shell tool dialog: hollow the selected body to a wall of `thickness`.  Opens
 // fresh from the Modify toolbar ({ itemId }) or to edit a committed shell's
@@ -99,19 +99,20 @@ const ShellDialog = () => {
         Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <span style={LBL}>Wall thickness (mm)</span>
-        <FormulaInput
-          variables={variables}
-          autoFocus
-          value={thicknessMm}
-          onChange={(e) => setThicknessMm(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === "Enter") confirm();
-            else if (e.key === "Escape") close();
-          }}
-          style={barInput(valid)}
-        />
+        <Field label="Wall thickness (mm)">
+          <FormulaInput
+            variables={variables}
+            autoFocus
+            value={thicknessMm}
+            onChange={(e) => setThicknessMm(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") confirm();
+              else if (e.key === "Escape") close();
+            }}
+            style={barInput(valid)}
+          />
+        </Field>
         <button type="button" onClick={close} title="Cancel" style={barBtn()}>
           Cancel
         </button>

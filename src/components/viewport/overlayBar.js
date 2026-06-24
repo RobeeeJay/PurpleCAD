@@ -5,6 +5,8 @@
 // fields/buttons and let a busy bar (e.g. the 6-field rectangular pattern) wrap
 // onto a second centred row instead of running off-screen.
 
+import React from "react";
+
 export const BAR_STYLE = {
   flexWrap: "wrap",
   rowGap: 6,
@@ -13,6 +15,24 @@ export const BAR_STYLE = {
 };
 
 export const LBL = { fontSize: 11, color: "#aaa", marginRight: 4 };
+
+// Groups a label with its input as ONE flex item so the bar (flex-wrap) never
+// breaks the line BETWEEN a label and the field it names.  `style` lets a caller
+// keep the spacing it used on the bare label (e.g. marginLeft).
+export const Field = ({ label, style, children }) =>
+  React.createElement(
+    "span",
+    {
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        whiteSpace: "nowrap",
+        ...style,
+      },
+    },
+    React.createElement("span", { style: LBL }, label),
+    children,
+  );
 
 // Inline numeric field; the amber input look comes from the overlay CSS, so we
 // only set the width and flag invalid values with a red border.

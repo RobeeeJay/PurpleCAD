@@ -6,7 +6,7 @@ import { useEscapeKey, useDebouncedPreview, NumberInput } from "./inputs.jsx";
 import ToolErrorLine from "./ToolErrorLine.jsx";
 import {
   BAR_STYLE,
-  LBL,
+  Field,
   barInput,
   barBtn,
   pickBtn,
@@ -88,16 +88,17 @@ const DraftDialog = () => {
           {`Faces (${nFaces})`}
         </button>
 
-        <span style={{ ...LBL, marginLeft: 10 }}>Angle°</span>
-        <NumberInput
-          step="1"
-          value={draftTool.angleDeg}
-          onCommit={(n) => {
-            if (Number.isFinite(n)) updateDraftParams({ angleDeg: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-        />
+        <Field label="Angle°" style={{ marginLeft: 10 }}>
+          <NumberInput
+            step="1"
+            value={draftTool.angleDeg}
+            onCommit={(n) => {
+              if (Number.isFinite(n)) updateDraftParams({ angleDeg: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+          />
+        </Field>
         <button
           type="button"
           style={{ ...toggleStyle(draftTool.flip), marginLeft: 10 }}

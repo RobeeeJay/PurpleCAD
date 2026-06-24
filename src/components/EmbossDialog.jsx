@@ -6,7 +6,7 @@ import { useEscapeKey, useDebouncedPreview, NumberInput } from "./inputs.jsx";
 import ToolErrorLine from "./ToolErrorLine.jsx";
 import {
   BAR_STYLE,
-  LBL,
+  Field,
   barInput,
   barBtn,
   pickBtn,
@@ -126,76 +126,82 @@ const EmbossDialog = () => {
           Deboss
         </button>
 
-        <span style={{ ...LBL, marginLeft: 10 }}>Mirror</span>
-        <button
-          type="button"
-          style={toggleStyle(!!params.mirrorH)}
-          onClick={() => updateEmbossParams({ mirrorH: !params.mirrorH })}
-          title="Flip the geometry left-to-right"
-        >
-          Horizontal
-        </button>
-        <button
-          type="button"
-          style={toggleStyle(!!params.mirrorV)}
-          onClick={() => updateEmbossParams({ mirrorV: !params.mirrorV })}
-          title="Flip the geometry top-to-bottom"
-        >
-          Vertical
-        </button>
+        <Field label="Mirror" style={{ marginLeft: 10 }}>
+          <button
+            type="button"
+            style={toggleStyle(!!params.mirrorH)}
+            onClick={() => updateEmbossParams({ mirrorH: !params.mirrorH })}
+            title="Flip the geometry left-to-right"
+          >
+            Horizontal
+          </button>
+          <button
+            type="button"
+            style={toggleStyle(!!params.mirrorV)}
+            onClick={() => updateEmbossParams({ mirrorV: !params.mirrorV })}
+            title="Flip the geometry top-to-bottom"
+          >
+            Vertical
+          </button>
+        </Field>
 
-        <span style={{ ...LBL, marginLeft: 10 }}>Angle°</span>
-        <NumberInput
-          step="5"
-          value={params.angleDeg}
-          onCommit={(n) => {
-            if (Number.isFinite(n)) updateEmbossParams({ angleDeg: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-        />
-        <span style={LBL}>Offset H(mm)</span>
-        <NumberInput
-          step="0.5"
-          value={params.offsetMm}
-          onCommit={(n) => {
-            if (Number.isFinite(n)) updateEmbossParams({ offsetMm: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-        />
-        <span style={LBL}>Offset V(mm)</span>
-        <NumberInput
-          step="0.5"
-          value={params.offsetVMm}
-          onCommit={(n) => {
-            if (Number.isFinite(n)) updateEmbossParams({ offsetVMm: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-        />
-        <span style={LBL}>Scale</span>
-        <NumberInput
-          min="0.01"
-          step="0.1"
-          value={params.scale}
-          onCommit={(n) => {
-            if (n > 0) updateEmbossParams({ scale: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-        />
-        <span style={LBL}>Depth(mm)</span>
-        <NumberInput
-          min="0"
-          step="0.5"
-          value={params.distanceMm}
-          onCommit={(n) => {
-            if (n > 0) updateEmbossParams({ distanceMm: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-        />
+        <Field label="Angle°" style={{ marginLeft: 10 }}>
+          <NumberInput
+            step="5"
+            value={params.angleDeg}
+            onCommit={(n) => {
+              if (Number.isFinite(n)) updateEmbossParams({ angleDeg: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+          />
+        </Field>
+        <Field label="Offset H(mm)">
+          <NumberInput
+            step="0.5"
+            value={params.offsetMm}
+            onCommit={(n) => {
+              if (Number.isFinite(n)) updateEmbossParams({ offsetMm: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+          />
+        </Field>
+        <Field label="Offset V(mm)">
+          <NumberInput
+            step="0.5"
+            value={params.offsetVMm}
+            onCommit={(n) => {
+              if (Number.isFinite(n)) updateEmbossParams({ offsetVMm: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+          />
+        </Field>
+        <Field label="Scale">
+          <NumberInput
+            min="0.01"
+            step="0.1"
+            value={params.scale}
+            onCommit={(n) => {
+              if (n > 0) updateEmbossParams({ scale: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+          />
+        </Field>
+        <Field label="Depth(mm)">
+          <NumberInput
+            min="0"
+            step="0.5"
+            value={params.distanceMm}
+            onCommit={(n) => {
+              if (n > 0) updateEmbossParams({ distanceMm: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+          />
+        </Field>
 
         <button
           type="button"

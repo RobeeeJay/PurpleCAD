@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { useStore } from "../store";
 import { useEscapeKey } from "./inputs.jsx";
-import { BAR_STYLE, LBL, barBtn, pickBtn } from "./viewport/overlayBar.js";
+import { BAR_STYLE, Field, barBtn, pickBtn } from "./viewport/overlayBar.js";
 
 // Point-to-Point move overlay.  Pick a vertex on object A, then a vertex on a
 // different object B; Confirm shifts A so its vertex lands on B's.
@@ -58,23 +58,24 @@ const PointToPointDialog = () => {
     <>
       <div className="sketch-placement-hint">{hint}</div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <span style={LBL}>Move</span>
-        <button
-          type="button"
-          style={pickBtn(tool.picking === "A")}
-          onClick={() => setPicking("A")}
-          title="Pick the vertex on the object to move"
-        >
-          {hasA ? "Point A ✓" : "Point A"}
-        </button>
-        <button
-          type="button"
-          style={{ ...pickBtn(tool.picking === "B"), marginLeft: 6 }}
-          onClick={() => setPicking("B")}
-          title="Pick the target vertex on a different object"
-        >
-          {hasB ? "Point B ✓" : "Point B"}
-        </button>
+        <Field label="Move">
+          <button
+            type="button"
+            style={pickBtn(tool.picking === "A")}
+            onClick={() => setPicking("A")}
+            title="Pick the vertex on the object to move"
+          >
+            {hasA ? "Point A ✓" : "Point A"}
+          </button>
+          <button
+            type="button"
+            style={{ ...pickBtn(tool.picking === "B"), marginLeft: 6 }}
+            onClick={() => setPicking("B")}
+            title="Pick the target vertex on a different object"
+          >
+            {hasB ? "Point B ✓" : "Point B"}
+          </button>
+        </Field>
         <button type="button" onClick={cancel} title="Cancel" style={barBtn()}>
           Cancel
         </button>

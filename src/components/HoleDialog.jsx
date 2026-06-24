@@ -4,7 +4,7 @@ import { activePrecision } from "../three/resolution.js";
 import { commitHole } from "../three/cameraControls/hole.js";
 import { METRIC_THREADS, threadById } from "../three/metricThreads.js";
 import { useEscapeKey, useDebouncedPreview, NumberInput } from "./inputs.jsx";
-import { BAR_STYLE, LBL, barInput, barBtn } from "./viewport/overlayBar.js";
+import { BAR_STYLE, Field, barInput, barBtn } from "./viewport/overlayBar.js";
 
 // Hole tool overlay.  Per-phase hint while picking the face then the centre
 // point; once both are set, the bottom bar offers length / metric thread /
@@ -109,55 +109,59 @@ const HoleDialog = () => {
         Set the hole options, then Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <span style={LBL}>Length(mm)</span>
-        <NumberInput
-          min="0"
-          step="0.5"
-          value={params.lengthMm}
-          onCommit={(n) => {
-            if (n > 0) updateHoleParams({ lengthMm: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-        />
-        <span style={LBL}>Thread</span>
-        <select
-          value={params.threadType}
-          onChange={setThread}
-          style={selectStyle}
-        >
-          <option value="none">None</option>
-          {METRIC_THREADS.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.id}
-            </option>
-          ))}
-        </select>
-        <span style={LBL}>{"Ø(mm)"}</span>
-        <NumberInput
-          min="0"
-          step="0.5"
-          value={params.diameterMm}
-          disabled={params.threaded}
-          onCommit={(n) => {
-            if (n > 0) updateHoleParams({ diameterMm: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-          title={
-            params.threaded ? "Set by the selected thread" : "Hole diameter"
-          }
-        />
-        <span style={LBL}>Tol(mm)</span>
-        <NumberInput
-          step="0.05"
-          value={params.toleranceMm}
-          onCommit={(n) => {
-            if (Number.isFinite(n)) updateHoleParams({ toleranceMm: n });
-          }}
-          onKeyDown={onKey}
-          style={barInput(true)}
-        />
+        <Field label="Length(mm)">
+          <NumberInput
+            min="0"
+            step="0.5"
+            value={params.lengthMm}
+            onCommit={(n) => {
+              if (n > 0) updateHoleParams({ lengthMm: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+          />
+        </Field>
+        <Field label="Thread">
+          <select
+            value={params.threadType}
+            onChange={setThread}
+            style={selectStyle}
+          >
+            <option value="none">None</option>
+            {METRIC_THREADS.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.id}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={"Ø(mm)"}>
+          <NumberInput
+            min="0"
+            step="0.5"
+            value={params.diameterMm}
+            disabled={params.threaded}
+            onCommit={(n) => {
+              if (n > 0) updateHoleParams({ diameterMm: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+            title={
+              params.threaded ? "Set by the selected thread" : "Hole diameter"
+            }
+          />
+        </Field>
+        <Field label="Tol(mm)">
+          <NumberInput
+            step="0.05"
+            value={params.toleranceMm}
+            onCommit={(n) => {
+              if (Number.isFinite(n)) updateHoleParams({ toleranceMm: n });
+            }}
+            onKeyDown={onKey}
+            style={barInput(true)}
+          />
+        </Field>
         <button type="button" onClick={cancel} title="Cancel" style={barBtn()}>
           Cancel
         </button>

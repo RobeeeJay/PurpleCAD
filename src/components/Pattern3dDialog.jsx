@@ -4,7 +4,7 @@ import FormulaInput from "./FormulaInput";
 import { evalValue, useDebouncedPreview, useEscapeKey } from "./inputs.jsx";
 import {
   BAR_STYLE,
-  LBL,
+  Field,
   barInput,
   barBtn,
   pickBtn,
@@ -259,45 +259,60 @@ const Pattern3dDialog = () => {
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
         {circular ? (
           <>
-            <span style={LBL}>Axis</span>
-            <button
-              type="button"
-              onClick={pickAxis}
-              style={pickBtn(circularAxisPick)}
-              title="Pick the rotation axis (a line or edge)"
-            >
-              {circularAxisPick
-                ? "Click a line/edge…"
-                : tool?.axis
-                  ? "Axis set — re-pick"
-                  : "Pick axis"}
-            </button>
-            <span style={LBL}>Count</span>
-            {inp(count, setCount, Number.isFinite(countV) && countV >= 2, true)}
-            <span style={LBL}>Angle°</span>
-            {inp(angle, setAngle, Number.isFinite(angleV) && angleV > 0)}
-            <span style={LBL}>Offset/360°(mm)</span>
-            {inp(axialOffset, setAxialOffset, Number.isFinite(axialOffsetV))}
+            <Field label="Axis">
+              <button
+                type="button"
+                onClick={pickAxis}
+                style={pickBtn(circularAxisPick)}
+                title="Pick the rotation axis (a line or edge)"
+              >
+                {circularAxisPick
+                  ? "Click a line/edge…"
+                  : tool?.axis
+                    ? "Axis set — re-pick"
+                    : "Pick axis"}
+              </button>
+            </Field>
+            <Field label="Count">
+              {inp(
+                count,
+                setCount,
+                Number.isFinite(countV) && countV >= 2,
+                true,
+              )}
+            </Field>
+            <Field label="Angle°">
+              {inp(angle, setAngle, Number.isFinite(angleV) && angleV > 0)}
+            </Field>
+            <Field label="Offset/360°(mm)">
+              {inp(axialOffset, setAxialOffset, Number.isFinite(axialOffsetV))}
+            </Field>
           </>
         ) : (
           <>
-            <span style={LBL}>Count X</span>
-            {inp(
-              countX,
-              setCountX,
-              Number.isFinite(countXV) && countXV >= 1,
-              true,
-            )}
-            <span style={LBL}>Sp X(mm)</span>
-            {inp(dx, setDx, Number.isFinite(dxV))}
-            <span style={LBL}>Count Y</span>
-            {inp(countY, setCountY, Number.isFinite(countYV) && countYV >= 1)}
-            <span style={LBL}>Sp Y(mm)</span>
-            {inp(dy, setDy, Number.isFinite(dyV))}
-            <span style={LBL}>Count Z</span>
-            {inp(countZ, setCountZ, Number.isFinite(countZV) && countZV >= 1)}
-            <span style={LBL}>Sp Z(mm)</span>
-            {inp(dz, setDz, Number.isFinite(dzV))}
+            <Field label="Count X">
+              {inp(
+                countX,
+                setCountX,
+                Number.isFinite(countXV) && countXV >= 1,
+                true,
+              )}
+            </Field>
+            <Field label="Sp X(mm)">
+              {inp(dx, setDx, Number.isFinite(dxV))}
+            </Field>
+            <Field label="Count Y">
+              {inp(countY, setCountY, Number.isFinite(countYV) && countYV >= 1)}
+            </Field>
+            <Field label="Sp Y(mm)">
+              {inp(dy, setDy, Number.isFinite(dyV))}
+            </Field>
+            <Field label="Count Z">
+              {inp(countZ, setCountZ, Number.isFinite(countZV) && countZV >= 1)}
+            </Field>
+            <Field label="Sp Z(mm)">
+              {inp(dz, setDz, Number.isFinite(dzV))}
+            </Field>
           </>
         )}
         <button type="button" onClick={close} title="Cancel" style={barBtn()}>
