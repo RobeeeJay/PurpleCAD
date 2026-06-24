@@ -246,7 +246,22 @@ export function useSceneSync({
           }
         }
     }
-    upstreamSigRef.current = { map: itemSig, varsSig };
+    // The resolution pass only has work on first load, when the print precision
+    // changed, or when some item's cached geometry is stale for the current
+    // precision.  A plain add / delete / move at the same precision (e.g. dropping
+    // in a primitive) leaves every cache current — nothing to recompute.
+    const needsRegen =
+      isFirst ||
+      printPrecision !== prev?.precision ||
+      items.some((i) => {
+        const r = i.regenerator;
+        return r && !(r.regeneratedAt === printPrecision && i.geometryData);
+      });
+    upstreamSigRef.current = {
+      map: itemSig,
+      varsSig,
+      precision: printPrecision,
+    };
 
     // While a sketch is open, defer the full timeline recalc until it's closed
     // — recomputing every downstream step on each point drag is wasteful (and
@@ -256,6 +271,9 @@ export function useSceneSync({
       pendingRecalcRef.current = true;
       return;
     }
+    // Nothing upstream changed and no cache is stale — e.g. adding a primitive —
+    // so skip the regen pass entirely (no busy flash, no wasted work).
+    if (!upstreamChanged && !needsRegen) return;
 
     // The orchestrator is a UI-only module that's never reachable from
     // the OCC worker's transitive imports, so it can route per-item regen
