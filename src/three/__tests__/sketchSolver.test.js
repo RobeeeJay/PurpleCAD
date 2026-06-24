@@ -114,6 +114,38 @@ describe("equal constraint", () => {
   });
 });
 
+describe("lineAngle constraint (direction angle between two lines)", () => {
+  const legAngle = (a, b) => {
+    const ax = a.x2 - a.x1,
+      ay = a.y2 - a.y1,
+      bx = b.x2 - b.x1,
+      by = b.y2 - b.y1;
+    return (
+      (Math.atan2(Math.abs(ax * by - ay * bx), ax * bx + ay * by) * 180) /
+      Math.PI
+    );
+  };
+
+  it("rotates the free leg to hold the locked angle when the other is moved", () => {
+    // Two perpendicular legs sharing a corner; lock them at 90° between
+    // directions (no shared-vertex angle).  Pin one leg rotated 30° and the other
+    // must follow to keep them perpendicular.
+    const shapes = [L(0, 0, 2, 0), L(0, 0, 0, 2)];
+    const constraints = [
+      coin(0, "start", 1, "start"),
+      { type: "lineAngle", shapeAIdx: 0, shapeBIdx: 1, angle: 90 },
+    ];
+    const a = Math.PI / 6;
+    const rotated = shapes.slice();
+    rotated[0] = L(0, 0, 2 * Math.cos(a), 2 * Math.sin(a));
+    const { shapes: r, ok } = solveConstraints(rotated, constraints, {
+      fixed: new Set(["0:x1", "0:y1", "0:x2", "0:y2"]),
+    });
+    expect(ok).toBe(true);
+    expect(legAngle(r[0], r[1])).toBeCloseTo(90, 1);
+  });
+});
+
 describe("solveConstraints", () => {
   it("resizes one side of an angle-constrained square into a clean rectangle", () => {
     const { shapes, constraints } = squareWithAngles([

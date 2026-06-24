@@ -217,6 +217,29 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
     ];
   }
 
+  // Chamfering splits the corner, so its old vertex-angle lock (e.g. a box's 90°)
+  // is dropped below.  Replace it with a direction-angle lock BETWEEN the two legs
+  // so the corner stays rigid — without it the chamfered corner can flex freely
+  // when a connected line is dragged.  Held on the leg directions (not the bridge),
+  // it never over-constrains the bridge the way the old chamfer-to-leg locks did.
+  const legAngleDeg =
+    (Math.atan2(
+      Math.abs(
+        (newSA.x2 - newSA.x1) * (newSB.y2 - newSB.y1) -
+          (newSA.y2 - newSA.y1) * (newSB.x2 - newSB.x1),
+      ),
+      (newSA.x2 - newSA.x1) * (newSB.x2 - newSB.x1) +
+        (newSA.y2 - newSA.y1) * (newSB.y2 - newSB.y1),
+    ) *
+      180) /
+    Math.PI;
+  newConstraints.push({
+    type: "lineAngle",
+    shapeAIdx: aIdx,
+    shapeBIdx: bIdx,
+    angle: legAngleDeg,
+  });
+
   const joinsCorner = (c) => {
     const m2 = (i1, k1, i2, k2) =>
       c.shapeAIdx === i1 &&

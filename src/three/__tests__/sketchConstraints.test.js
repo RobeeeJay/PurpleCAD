@@ -2694,6 +2694,11 @@ describe("enforceConstraints", () => {
           bKey: "start",
         });
         expect(edit.newConstraints.some((c) => c.type === "angle")).toBe(false);
+        // The split corner's rigidity is restored by a direction-angle lock
+        // between the two legs (a square corner → 90°).
+        const la = edit.newConstraints.find((c) => c.type === "lineAngle");
+        expect(la).toMatchObject({ shapeAIdx: 0, shapeBIdx: 1 });
+        expect(la.angle).toBeCloseTo(90, 4);
       });
 
       it("adds a coincident at each new corner (fillet) and an arc bridge", () => {

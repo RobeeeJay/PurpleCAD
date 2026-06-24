@@ -186,6 +186,28 @@ function residuals(shapes, constraints, variables) {
         while (d < -Math.PI) d += 2 * Math.PI;
         out.push(Math.abs(d) - target); // magnitude; sign kept by regularization
       } else out.push(0);
+    } else if (c.type === "lineAngle") {
+      // Angle between two line DIRECTIONS (no shared vertex) — used to hold a
+      // chamfer/fillet corner rigid: its two legs no longer meet at a point, so
+      // the corner's old vertex-angle lock can't span them, but this can.  Sign-
+      // free (a line has no direction), so it reads the same [0,π] either way.
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      if (a?.type === "line" && b?.type === "line") {
+        const ax = a.x2 - a.x1,
+          ay = a.y2 - a.y1,
+          bx = b.x2 - b.x1,
+          by = b.y2 - b.y1;
+        const target =
+          ((typeof c.angle === "number" ? c.angle : parseFloat(c.angle)) *
+            Math.PI) /
+          180;
+        const actual = Math.atan2(
+          Math.abs(ax * by - ay * bx),
+          ax * bx + ay * by,
+        );
+        out.push(Number.isFinite(target) ? actual - target : 0);
+      } else out.push(0);
     } else if (c.type === "parallel" || c.type === "colinear") {
       // Two lines parallel: the direction cross-product → 0.  Colinear adds a
       // second residual — line B's start point lies on line A (perp dist 0).
@@ -262,7 +284,8 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
       c.type === "parallel" ||
       c.type === "colinear" ||
       c.type === "tangent" ||
-      c.type === "equal"
+      c.type === "equal" ||
+      c.type === "lineAngle"
     )
       link(c.shapeAIdx, c.shapeBIdx);
     else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);
