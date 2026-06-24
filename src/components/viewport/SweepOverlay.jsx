@@ -10,6 +10,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
 import FormulaInput from "../FormulaInput";
 import { evalValue } from "../inputs.jsx";
+import { pickBtn } from "./overlayBar.js";
 
 const btn = (accent, disabled) => ({
   fontSize: 11,
@@ -133,34 +134,6 @@ export default function SweepOverlay() {
     if (twistValid) useStore.getState()._cameraControls?.commitSweep?.();
   };
 
-  // Loft has no parameters: a per-phase hint, then a Confirm/Cancel bar once
-  // both picks are made.
-  const confirmBar = (label) => (
-    <>
-      <div className="sketch-placement-hint">
-        Confirm to create the {label} · Esc to cancel
-      </div>
-      <div className="sketch-distance-input-overlay">
-        <button
-          type="button"
-          onClick={cancel}
-          title="Cancel"
-          style={btn(false)}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => useStore.getState()._cameraControls?.commitSweep?.()}
-          title={`Confirm — create the ${label}`}
-          style={btn(true)}
-        >
-          Confirm
-        </button>
-      </div>
-    </>
-  );
-
   if (isPipe) {
     if (!sweepSelectMode.profile) {
       return (
@@ -242,22 +215,60 @@ export default function SweepOverlay() {
   }
 
   if (isLoft) {
-    if (!sweepSelectMode.profile) {
-      return (
-        <div className="sketch-placement-hint">
-          Click the first sketch region to loft from · Esc to cancel
+    const lp = sweepSelectMode.loftPick;
+    const hasStart = !!sweepSelectMode.profile;
+    const hasEnd = !!sweepSelectMode.secondProfile;
+    const both = hasStart && hasEnd;
+    const arm = (t) =>
+      useStore.getState().setSweepLoftPick(lp === t ? null : t);
+    const hint =
+      lp === "start"
+        ? "Click the start sketch region · Esc to cancel"
+        : lp === "end"
+          ? "Click the end region (on a parallel plane) · Esc to cancel"
+          : "Choose the start and end geometry, then Confirm · Esc to cancel";
+    return (
+      <>
+        <div className="sketch-placement-hint">{hint}</div>
+        <div className="sketch-distance-input-overlay">
+          <button
+            type="button"
+            style={pickBtn(lp === "start")}
+            onClick={() => arm("start")}
+            title="Pick the start sketch region"
+          >
+            {hasStart ? "Start ✓" : "Start geometry"}
+          </button>
+          <button
+            type="button"
+            style={{ ...pickBtn(lp === "end"), marginLeft: 6 }}
+            onClick={() => arm("end")}
+            title="Pick the end sketch region (on a plane parallel to the start)"
+          >
+            {hasEnd ? "End ✓" : "End geometry"}
+          </button>
+          <button
+            type="button"
+            onClick={cancel}
+            title="Cancel"
+            style={btn(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => useStore.getState()._cameraControls?.commitSweep?.()}
+            disabled={!both}
+            title={
+              both ? "Confirm — create the loft" : "Pick both regions first"
+            }
+            style={btn(true, !both)}
+          >
+            Confirm
+          </button>
         </div>
-      );
-    }
-    if (!sweepSelectMode.secondProfile) {
-      return (
-        <div className="sketch-placement-hint">
-          Click the second region (on a parallel plane) to loft to · Esc to
-          cancel
-        </div>
-      );
-    }
-    return confirmBar("loft");
+      </>
+    );
   }
 
   if (!isRevolve) return null;

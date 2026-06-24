@@ -217,8 +217,11 @@ export function createSweepHelpers({
 
   // A fill pick is the current phase when no profile is set, or for loft's
   // second profile (loft picks two regions; revolve/pipe pick a region + line).
+  // Loft also allows re-picking either end once its dialog arms a target.
   const needsFillPick = (sm) =>
-    !sm.profile || (sm.kind === "loft" && !sm.secondProfile);
+    !sm.profile ||
+    (sm.kind === "loft" && !sm.secondProfile) ||
+    (sm.kind === "loft" && !!sm.loftPick);
 
   // ── Hover ─────────────────────────────────────────────────────────────────
   const handleSweepHover = (screenX, screenY) => {
@@ -260,23 +263,29 @@ export function createSweepHelpers({
       const hit = ray(screenX, screenY).intersectObjects(fills, false)[0];
       const prof = hit?.object?.userData?.extrudeProfile;
       if (!prof) return;
-      if (!sm.profile) {
-        dimFill(hoveredFill, false);
-        hoveredFill = null;
-        store.setSweepProfile(prof);
-      } else {
-        // Loft's second profile must sit on a plane parallel to the first.
-        if (!planesParallel(sm.profile.normalWorld, prof.normalWorld)) {
+      if (sm.kind === "loft") {
+        // Which end this click sets — the dialog's armed target, else the next
+        // empty slot.  Both ends must sit on parallel planes.
+        const target = sm.loftPick || (sm.profile ? "end" : "start");
+        const other = target === "start" ? sm.secondProfile : sm.profile;
+        if (other && !planesParallel(other.normalWorld, prof.normalWorld)) {
           store.showNotification(
-            "Loft needs the second sketch on a parallel plane.",
+            "Loft needs both sketches on parallel planes.",
           );
           return;
         }
         dimFill(hoveredFill, false);
         hoveredFill = null;
-        store.setSweepSecondProfile(prof);
+        if (target === "start") store.setSweepProfile(prof);
+        else store.setSweepSecondProfile(prof);
+        store.setSweepLoftPick(null); // consume the armed pick
         updateSweepPreview();
+        return;
       }
+      // Revolve/pipe: the single region profile.
+      dimFill(hoveredFill, false);
+      hoveredFill = null;
+      store.setSweepProfile(prof);
       return;
     }
     if (sm.kind === "pipe") {

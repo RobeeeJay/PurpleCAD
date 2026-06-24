@@ -787,6 +787,14 @@ export const createUiSlice = (set) => ({
         ? { sweepSelectMode: { ...state.sweepSelectMode, secondProfile } }
         : {},
     ),
+  // Which loft profile the next click sets ("start" | "end") — driven by the loft
+  // dialog's pick buttons so either end can be (re)chosen.
+  setSweepLoftPick: (loftPick) =>
+    set((state) =>
+      state.sweepSelectMode
+        ? { sweepSelectMode: { ...state.sweepSelectMode, loftPick } }
+        : {},
+    ),
   setSweepParams: (partial) =>
     set((state) =>
       state.sweepSelectMode
