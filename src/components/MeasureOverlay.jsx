@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import { useStore } from "../store";
-import { measure, shapeMetrics } from "../three/measure.js";
+import { measure, shapeMetrics, loopArea } from "../three/measure.js";
 import { getSketchShapePoints } from "../three/sceneObjects/sketchShapes.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import "../styles/MeasureOverlay.css";
@@ -20,15 +20,21 @@ function sketchSelectionResult(sketch, sel, multi) {
   const sel2 = [...idxs].map((i) => shapes[i]).filter(Boolean);
   if (sel2.length === 0) return null;
   let total = 0;
+  const polys = [];
   for (const s of sel2) {
     const pts = getSketchShapePoints(s, IDENTITY_MESH);
+    polys.push(pts);
     for (let i = 1; i < pts.length; i++) total += pts[i].distanceTo(pts[i - 1]);
   }
   const res = { type: "length", value: total, count: sel2.length };
-  // A single circle / arc also reports its radius; a single closed shape its area.
+  // A single circle / arc also reports its radius; a single closed primitive its
+  // area.  Several shapes that chain into a closed loop report the loop's area.
   if (sel2.length === 1) {
     const { radius, area } = shapeMetrics(sel2[0]);
     if (radius != null) res.radius = radius;
+    if (area != null) res.area = area;
+  } else {
+    const area = loopArea(polys);
     if (area != null) res.area = area;
   }
   return res;

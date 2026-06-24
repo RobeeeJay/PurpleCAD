@@ -173,6 +173,61 @@ export function shapeMetrics(shape) {
   return { radius, area };
 }
 
+// Area enclosed by a set of sketch polylines (each an ordered list of [x,y] or
+// {x,y}/Vector3 points) IF they chain end-to-end into a single closed loop — for
+// the Measure readout when a closed region is drawn from several separate lines /
+// arcs.  Returns null when the pieces don't all connect into one closed loop.
+export function loopArea(polylines, tol) {
+  const xy = (p) => (Array.isArray(p) ? [p[0], p[1]] : [p.x, p.y]);
+  const lines = (polylines || [])
+    .filter((pl) => pl && pl.length >= 2)
+    .map((pl) => pl.map(xy));
+  if (lines.length < 2) return null;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const pl of lines)
+    for (const [x, y] of pl) {
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+  // Treat two endpoints as the same vertex within a small fraction of the extent,
+  // so a visually-closed loop counts even if its corners aren't bit-identical.
+  const diag = Math.hypot(maxX - minX, maxY - minY) || 1;
+  const t2 = (tol ?? Math.max(1e-6, diag * 1e-3)) ** 2;
+  const eq = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 <= t2;
+
+  const used = new Array(lines.length).fill(false);
+  used[0] = true;
+  const loop = lines[0].slice();
+  for (let step = 0; step < lines.length; step++) {
+    const tail = loop[loop.length - 1];
+    let found = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (used[i]) continue;
+      const pl = lines[i];
+      if (eq(tail, pl[0])) {
+        for (let k = 1; k < pl.length; k++) loop.push(pl[k]);
+      } else if (eq(tail, pl[pl.length - 1])) {
+        for (let k = pl.length - 2; k >= 0; k--) loop.push(pl[k]);
+      } else continue;
+      used[i] = true;
+      found = true;
+      break;
+    }
+    if (!found) break;
+  }
+  if (used.some((u) => !u)) return null; // pieces don't all connect → not one loop
+  if (!eq(loop[0], loop[loop.length - 1])) return null; // chain never closed
+  let A = 0;
+  for (let i = 0; i < loop.length - 1; i++)
+    A += loop[i][0] * loop[i + 1][1] - loop[i + 1][0] * loop[i][1];
+  return Math.abs(A) / 2;
+}
+
 export function measure(entities) {
   const es = (entities || []).filter(Boolean);
   if (es.length === 0) return null;

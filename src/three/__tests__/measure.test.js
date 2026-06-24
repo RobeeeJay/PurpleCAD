@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { measure, shapeMetrics } from "../measure.js";
+import { measure, shapeMetrics, loopArea } from "../measure.js";
 
 describe("measure", () => {
   it("segment length", () => {
@@ -127,5 +127,98 @@ describe("measure", () => {
       radius: null,
       area: null,
     });
+  });
+
+  it("loopArea: four lines form a unit square", () => {
+    const square = [
+      [
+        [0, 0],
+        [1, 0],
+      ],
+      [
+        [1, 0],
+        [1, 1],
+      ],
+      [
+        [1, 1],
+        [0, 1],
+      ],
+      [
+        [0, 1],
+        [0, 0],
+      ],
+    ];
+    expect(loopArea(square)).toBeCloseTo(1);
+  });
+
+  it("loopArea: independent of piece order and direction", () => {
+    const shuffled = [
+      [
+        [1, 1],
+        [0, 1],
+      ],
+      [
+        [0, 0],
+        [1, 0],
+      ],
+      [
+        [0, 0],
+        [0, 1],
+      ], // reversed
+      [
+        [1, 0],
+        [1, 1],
+      ],
+    ];
+    expect(loopArea(shuffled)).toBeCloseTo(1);
+  });
+
+  it("loopArea: accepts {x,y}/Vector3-like points", () => {
+    const tri = [
+      [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+      ],
+      [
+        { x: 2, y: 0 },
+        { x: 0, y: 2 },
+      ],
+      [
+        { x: 0, y: 2 },
+        { x: 0, y: 0 },
+      ],
+    ];
+    expect(loopArea(tri)).toBeCloseTo(2);
+  });
+
+  it("loopArea: open chain or disconnected pieces give null", () => {
+    expect(
+      loopArea([
+        [
+          [0, 0],
+          [1, 0],
+        ],
+        [
+          [1, 0],
+          [1, 1],
+        ],
+      ]),
+    ).toBeNull();
+    expect(
+      loopArea([
+        [
+          [0, 0],
+          [1, 0],
+        ],
+        [
+          [5, 5],
+          [6, 5],
+        ],
+        [
+          [1, 0],
+          [0, 0],
+        ],
+      ]),
+    ).toBeNull();
   });
 });
