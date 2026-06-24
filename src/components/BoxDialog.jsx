@@ -114,7 +114,14 @@ const PrimitiveDialog = () => {
       selectItem?.(newId);
       useStore.getState()._cameraControls?.clearPrimitivePreview?.();
     } else {
-      modifyItem(id, { dimensions: dims }, "Dimensions");
+      // Only commit (and trigger a rebuild) when a dimension actually changed —
+      // confirming an unedited box must NOT add a no-op step.
+      const cur = item.dimensions || {};
+      const changed = fields.some(
+        ([, k]) => Math.abs((cur[k] ?? 0) - dims[k]) > 1e-9,
+      );
+      if (changed) modifyItem(id, { dimensions: dims }, "Dimensions");
+      else useStore.getState()._cameraControls?.clearBoxPreview?.(id);
     }
     closeBoxDialog();
   };

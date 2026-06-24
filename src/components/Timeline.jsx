@@ -687,7 +687,6 @@ const Timeline = () => {
                     title="Edit dimensions"
                     onClick={(e) => {
                       e.stopPropagation();
-                      restoreToHistory(entry.id);
                       openBoxDialog(entry.instruction.item.id);
                     }}
                   >
