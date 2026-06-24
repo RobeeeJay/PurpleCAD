@@ -51,6 +51,38 @@ function squareWithAngles(extra = []) {
 
 const sideLen = (s) => Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
 
+// Mirror the dimension-edit commit (SketchOverlays): pin a line's start, move its
+// end to length `d` along the current direction, pin that too, add the distance
+// constraint, and solve.
+const dimensionLeg = (shapes, constraints, legIdx, d) => {
+  const leg = shapes[legIdx];
+  const dx = leg.x2 - leg.x1,
+    dy = leg.y2 - leg.y1,
+    cur = Math.hypot(dx, dy) || 1;
+  const input = shapes.slice();
+  input[legIdx] = {
+    ...leg,
+    x2: leg.x1 + (dx / cur) * d,
+    y2: leg.y1 + (dy / cur) * d,
+  };
+  const fixed = new Set(["x1", "y1", "x2", "y2"].map((f) => `${legIdx}:${f}`));
+  return solveConstraints(
+    input,
+    [
+      ...constraints,
+      {
+        type: "distance",
+        shapeAIdx: legIdx,
+        pointA: "start",
+        shapeBIdx: legIdx,
+        pointB: "end",
+        distance: d,
+      },
+    ],
+    { fixed },
+  );
+};
+
 describe("equal constraint", () => {
   it("equalises two lines' lengths", () => {
     const shapes = [L(0, 0, 4, 0), L(0, 2, 1, 2)]; // lengths 4 and 1
@@ -238,6 +270,20 @@ describe("chamfering a square corner then dragging a side", () => {
       near({ x: r[bridge].x2, y: r[bridge].y2 }, { x: r[2].x1, y: r[2].y1 }),
     ).toBe(true);
   });
+
+  it("can dimension a chamfered leg's length (no false constraint break)", () => {
+    // Chamfer the BR corner, then dimension the right leg (idx 1) to 0.5.  The
+    // pinned leg endpoints must NOT be overridden by the corner re-derive.
+    const { shapes, constraints } = chamfer({
+      aIdx: 1,
+      aKey: "end",
+      bIdx: 2,
+      bKey: "start",
+    });
+    const { shapes: r, ok } = dimensionLeg(shapes, constraints, 1, 0.5);
+    expect(ok).toBe(true);
+    expect(sideLen(r[1])).toBeCloseTo(0.5, 3);
+  });
 });
 
 describe("drag locality (nearest connected points absorb the change)", () => {
@@ -415,5 +461,13 @@ describe("bevel fillet survives a connected-line drag", () => {
     const c0 = { x: r[0].x1, y: r[0].y1 }; // L0.start
     expect(near(aEnd, c3) || near(aEnd, c0)).toBe(true);
     expect(near(bEnd, c3) || near(bEnd, c0)).toBe(true);
+  });
+
+  it("can dimension a bevelled leg's length (no false constraint break)", () => {
+    const { shapes, constraints } = bevel(0.25);
+    // Dimension the top leg (idx 0, trimmed at its start by the bevel) to 0.5.
+    const { shapes: r, ok } = dimensionLeg(shapes, constraints, 0, 0.5);
+    expect(ok).toBe(true);
+    expect(sideLen(r[0])).toBeCloseTo(0.5, 3);
   });
 });

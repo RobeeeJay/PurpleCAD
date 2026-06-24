@@ -331,12 +331,26 @@ export function rederiveCornerFromLegs(shapes, bridgeIdx) {
 }
 
 // Re-derive every chamfer/bevel corner in a shape list (post-solve repair).
-// Returns the same array reference when there are no corners to touch.
-export function rederiveAllCorners(shapes) {
+// Returns the same array reference when there are no corners to touch.  `fixed`
+// is the solver's pinned "idx:field" set: a corner whose trimmed leg endpoint is
+// pinned (e.g. the user is dimensioning that very leg, or dragging its corner) is
+// left alone — re-deriving it would move the pinned point and so reject the edit.
+export function rederiveAllCorners(shapes, fixed = null) {
+  const legPinned = (idx, key) => {
+    if (!fixed) return false;
+    const fs = key === "start" ? ["x1", "y1"] : ["x2", "y2"];
+    return fs.some((f) => fixed.has(`${idx}:${f}`));
+  };
   let out = null;
   for (let i = 0; i < shapes.length; i++) {
     const s = shapes[i];
     if (s?.kind !== "bevel" && s?.kind !== "chamfer") continue;
+    const data = s.chamferData || s.bevelData;
+    if (
+      data &&
+      (legPinned(data.aIdx, data.aKey) || legPinned(data.bIdx, data.bKey))
+    )
+      continue;
     const res = rederiveCornerFromLegs(out || shapes, i);
     if (!res) continue;
     if (!out) out = shapes.slice();
