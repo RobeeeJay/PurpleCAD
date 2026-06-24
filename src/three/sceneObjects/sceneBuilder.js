@@ -24,6 +24,7 @@ import {
   WIREFRAME_EDGE_COLOR,
   NO_EMISSIVE,
 } from "../theme.js";
+import { primitiveDimensions } from "./dimensions.js";
 
 // Green so the revealed plane stands out clearly against the model.
 const GRID_MINOR_COLOR = 0x2ecc71;
@@ -100,15 +101,28 @@ export function buildSceneObjects(
         );
         break;
       }
-      case "sphere":
-        geometry = new THREE.BoxGeometry(3, 3, 3);
+      case "sphere": {
+        const r = primitiveDimensions(item).radius;
+        geometry = new THREE.BoxGeometry(2 * r, 2 * r, 2 * r);
         break;
-      case "cylinder":
-        geometry = new THREE.BoxGeometry(2, 2, 2);
+      }
+      case "cylinder": {
+        const c = primitiveDimensions(item);
+        geometry = new THREE.BoxGeometry(2 * c.radius, c.height, 2 * c.radius);
         break;
-      case "torus":
-        geometry = new THREE.BoxGeometry(3, 1.2, 3);
+      }
+      case "torus": {
+        const tr = primitiveDimensions(item);
+        const o = 2 * (tr.major + tr.minor);
+        geometry = new THREE.BoxGeometry(o, 2 * tr.minor, o);
         break;
+      }
+      case "cone": {
+        const cn = primitiveDimensions(item);
+        const o = 2 * Math.max(cn.radiusBottom, cn.radiusTop);
+        geometry = new THREE.BoxGeometry(o, cn.height, o);
+        break;
+      }
       case "sketch":
         // Large so that, when revealed on hover, the plane reads as an infinite
         // reference surface spanning the view rather than a small card.  It is
@@ -340,7 +354,7 @@ export function buildSceneObjects(
         mesh.getWorldPosition(worldCenter);
         const worldScale = new THREE.Vector3();
         mesh.getWorldScale(worldScale);
-        const radius = 1.5 * worldScale.x;
+        const radius = primitiveDimensions(item).radius * worldScale.x;
         const sphere = new THREE.Sphere(worldCenter, radius);
         const target = new THREE.Vector3();
         if (!raycaster.ray.intersectSphere(sphere, target)) return;
@@ -360,8 +374,9 @@ export function buildSceneObjects(
         mesh.getWorldPosition(wc);
         const ws = new THREE.Vector3();
         mesh.getWorldScale(ws);
-        const radius = 1.0 * ws.x;
-        const halfH = 1.0 * ws.y;
+        const cdim = primitiveDimensions(item);
+        const radius = cdim.radius * ws.x;
+        const halfH = (cdim.height / 2) * ws.y;
         const axis = new THREE.Vector3(0, 1, 0)
           .applyQuaternion(mesh.quaternion)
           .normalize();
@@ -428,7 +443,8 @@ export function buildSceneObjects(
         mesh.getWorldPosition(wc);
         const ws = new THREE.Vector3();
         mesh.getWorldScale(ws);
-        const outerR = (1.0 + 0.4) * ws.x;
+        const tdim = primitiveDimensions(item);
+        const outerR = (tdim.major + tdim.minor) * ws.x;
         const sphere = new THREE.Sphere(wc, outerR);
         const target = new THREE.Vector3();
         if (!raycaster.ray.intersectSphere(sphere, target)) return;

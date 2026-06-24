@@ -58,6 +58,15 @@ const ObjectCreateSection = () => {
     // viewport handle isn't ready.
     const t = useStore.getState()._cameraControls?.getViewTarget?.();
     const position = t ? { x: t.x, y: t.y, z: t.z } : { x: 0, y: 2, z: 0 };
+    // Parametric primitives carry their own dimensions (scene units) and open
+    // the dimensions dialog on create.
+    const PRIM_DEFAULTS = {
+      cube: { width: 2, height: 2, depth: 2 },
+      sphere: { radius: 1.5 },
+      cylinder: { radius: 1, height: 2 },
+      torus: { major: 1, minor: 0.4 },
+      cone: { radiusBottom: 1, radiusTop: 0, height: 2 },
+    };
     addItem({
       id,
       name: `${label} ${id}`,
@@ -65,13 +74,9 @@ const ObjectCreateSection = () => {
       children: [],
       position,
       scale: { x: 1, y: 1, z: 1 },
-      // A box is parametric: it carries its own dimensions (scene units) and
-      // opens its dimensions dialog on create.
-      ...(type === "cube"
-        ? { dimensions: { width: 2, height: 2, depth: 2 } }
-        : {}),
+      ...(PRIM_DEFAULTS[type] ? { dimensions: PRIM_DEFAULTS[type] } : {}),
     });
-    if (type === "cube") useStore.getState().openBoxDialog(id);
+    if (PRIM_DEFAULTS[type]) useStore.getState().openBoxDialog(id);
   };
 
   return (

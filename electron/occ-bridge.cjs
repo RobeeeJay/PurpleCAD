@@ -337,9 +337,19 @@ function buildItemShapeLocal(item, allItems, precision) {
     const w = (d.width || 2) / 2, h = (d.height || 2) / 2, dp = (d.depth || 2) / 2;
     return occ.makeBox(-w, -h, -dp, w, h, dp);
   }
-  if (item.type === "sphere")   return occ.makeSphere(1.5);
-  if (item.type === "cylinder") return occ.makeCylinder(-1, 1, 2);
-  if (item.type === "torus")    return occ.makeTorus(1.0, 0.4);
+  if (item.type === "sphere") {
+    const d = item.dimensions || {};
+    return occ.makeSphere(d.radius ?? 1.5);
+  }
+  if (item.type === "cylinder") {
+    const d = item.dimensions || {};
+    const radius = d.radius ?? 1, height = d.height ?? 2;
+    return occ.makeCylinder(-height / 2, radius, height);
+  }
+  if (item.type === "torus") {
+    const d = item.dimensions || {};
+    return occ.makeTorus(d.major ?? 1, d.minor ?? 0.4);
+  }
 
   if (item.type === "extrude") {
     const poly = item.profile?.polygon2D;

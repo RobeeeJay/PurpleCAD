@@ -8,9 +8,30 @@ import {
   sketchPlaneFillColorFor,
 } from "./theme.js";
 import { DEFAULT_MATERIAL } from "./materialPresets.js";
+import { primitiveDimensions } from "./sceneObjects/dimensions.js";
 import { useStore } from "../store";
 
+// Shader uniforms carrying a primitive's parametric dimensions (object-space; the
+// analytic shaders multiply by the model scale).  Updated live by the dimensions
+// dialog's preview.  cone uses a generic vec for radii + half-height.
+export function primitiveUniforms(item) {
+  const d = primitiveDimensions(item);
+  if (item.type === "sphere") return { uRadius: { value: d.radius } };
+  if (item.type === "cylinder")
+    return { uRadius: { value: d.radius }, uHalfH: { value: d.height / 2 } };
+  if (item.type === "torus")
+    return { uMajor: { value: d.major }, uMinor: { value: d.minor } };
+  if (item.type === "cone")
+    return {
+      uRb: { value: d.radiusBottom },
+      uRt: { value: d.radiusTop },
+      uHalfH: { value: d.height / 2 },
+    };
+  return {};
+}
+
 export const SPHERE_VERTEX_SHADER = `
+  uniform float uRadius;
   varying vec3 vViewPos;
   varying vec3 vSphereCenter;
   varying float vSphereRadius;
@@ -18,7 +39,7 @@ export const SPHERE_VERTEX_SHADER = `
     vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
     vViewPos = mvPos.xyz;
     vSphereCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    vSphereRadius = 1.5 * length(modelViewMatrix[0].xyz);
+    vSphereRadius = uRadius * length(modelViewMatrix[0].xyz);
     gl_Position = projectionMatrix * mvPos;
   }
 `;
@@ -72,6 +93,8 @@ export const SPHERE_FRAGMENT_SHADER = `
 `;
 
 export const CYLINDER_VERTEX_SHADER = `
+  uniform float uRadius;
+  uniform float uHalfH;
   varying vec3 vViewPos;
   varying vec3 vCylCenter;
   varying vec3 vCylAxis;
@@ -82,8 +105,8 @@ export const CYLINDER_VERTEX_SHADER = `
     vViewPos = mvPos.xyz;
     vCylCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     vCylAxis   = normalize(modelViewMatrix[1].xyz);
-    vCylRadius = length(modelViewMatrix[0].xyz);
-    vCylHalfH  = length(modelViewMatrix[1].xyz);
+    vCylRadius = uRadius * length(modelViewMatrix[0].xyz);
+    vCylHalfH  = uHalfH * length(modelViewMatrix[1].xyz);
     gl_Position = projectionMatrix * mvPos;
   }
 `;
@@ -167,6 +190,8 @@ export const CYLINDER_FRAGMENT_SHADER = `
 `;
 
 export const TORUS_VERTEX_SHADER = `
+  uniform float uMajor;
+  uniform float uMinor;
   varying vec3 vViewPos;
   varying vec3 vTorusCenter;
   varying vec3 vTorusNormal;
@@ -178,8 +203,8 @@ export const TORUS_VERTEX_SHADER = `
     vTorusCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     vTorusNormal = normalize(modelViewMatrix[1].xyz);
     float scale  = length(modelViewMatrix[0].xyz);
-    vTorusR = 1.0 * scale;
-    vTorusr = 0.4 * scale;
+    vTorusR = uMajor * scale;
+    vTorusr = uMinor * scale;
     gl_Position = projectionMatrix * mvPos;
   }
 `;
@@ -288,7 +313,7 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
   }
   if (item.type === "sphere") {
     return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
+      uniforms: { ...uniforms(), ...primitiveUniforms(item) },
       vertexShader: SPHERE_VERTEX_SHADER,
       fragmentShader: SPHERE_FRAGMENT_SHADER,
       transparent,
@@ -296,7 +321,7 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
   }
   if (item.type === "cylinder") {
     return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
+      uniforms: { ...uniforms(), ...primitiveUniforms(item) },
       vertexShader: CYLINDER_VERTEX_SHADER,
       fragmentShader: CYLINDER_FRAGMENT_SHADER,
       transparent,
@@ -304,7 +329,7 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
   }
   if (item.type === "torus") {
     return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
+      uniforms: { ...uniforms(), ...primitiveUniforms(item) },
       vertexShader: TORUS_VERTEX_SHADER,
       fragmentShader: TORUS_FRAGMENT_SHADER,
       transparent,

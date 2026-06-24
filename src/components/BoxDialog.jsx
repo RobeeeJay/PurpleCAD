@@ -4,11 +4,33 @@ import { NumberInput, useEscapeKey } from "./inputs.jsx";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import { BAR_STYLE, Field, barInput, barBtn } from "./viewport/overlayBar.js";
 
-// Dimensions dialog for the Box (parametric cube).  Opens on create and from the
-// timeline's Edit-dimensions button.  Editing a field previews live (the mesh
-// scales in place); Confirm commits the dimensions via modifyItem (which rebuilds
-// the geometry), Cancel restores the mesh.
-const BoxDialog = () => {
+// Dimensions dialog for the parametric primitives (Box / Sphere / Cylinder /
+// Torus / Cone).  Opens on create and from the timeline's Edit-dimensions button.
+// Editing a field previews live (the mesh resizes / its shader uniforms update in
+// place); Confirm commits the dimensions via modifyItem (which rebuilds it).
+const FIELDS = {
+  cube: [
+    ["W(mm)", "width"],
+    ["H(mm)", "height"],
+    ["D(mm)", "depth"],
+  ],
+  sphere: [["Radius(mm)", "radius"]],
+  cylinder: [
+    ["Radius(mm)", "radius"],
+    ["Height(mm)", "height"],
+  ],
+  torus: [
+    ["Major R(mm)", "major"],
+    ["Minor R(mm)", "minor"],
+  ],
+  cone: [
+    ["Bottom R(mm)", "radiusBottom"],
+    ["Top R(mm)", "radiusTop"],
+    ["Height(mm)", "height"],
+  ],
+};
+
+const PrimitiveDialog = () => {
   const boxDialog = useStore((s) => s.boxDialog);
   const items = useStore((s) => s.items);
   const modifyItem = useStore((s) => s.modifyItem);
@@ -16,25 +38,28 @@ const BoxDialog = () => {
 
   const id = boxDialog?.id;
   const item = id != null ? items.find((i) => i.id === id) : null;
+  const fields = (item && FIELDS[item.type]) || null;
 
-  const [w, setW] = useState(20);
-  const [h, setH] = useState(20);
-  const [d, setD] = useState(20);
+  const [vals, setVals] = useState({});
 
   useEffect(() => {
-    if (!item) return;
-    const dim = item.dimensions || { width: 2, height: 2, depth: 2 };
-    setW(+(dim.width * MM_PER_UNIT).toFixed(2));
-    setH(+(dim.height * MM_PER_UNIT).toFixed(2));
-    setD(+(dim.depth * MM_PER_UNIT).toFixed(2));
+    if (!item || !fields) return;
+    const dim = item.dimensions || {};
+    const v = {};
+    for (const [, key] of fields)
+      v[key] = +((dim[key] ?? 0) * MM_PER_UNIT).toFixed(2);
+    setVals(v);
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const preview = (nw, nh, nd) =>
-    useStore.getState()._cameraControls?.previewBoxDimensions?.(id, {
-      width: nw / MM_PER_UNIT,
-      height: nh / MM_PER_UNIT,
-      depth: nd / MM_PER_UNIT,
-    });
+  const sceneDims = (v) => {
+    const out = {};
+    for (const [, key] of fields) out[key] = (v[key] ?? 0) / MM_PER_UNIT;
+    return out;
+  };
+  const previewWith = (v) =>
+    useStore
+      .getState()
+      ._cameraControls?.previewBoxDimensions?.(id, sceneDims(v));
 
   const close = () => {
     useStore.getState()._cameraControls?.clearBoxPreview?.(id);
@@ -42,20 +67,10 @@ const BoxDialog = () => {
   };
   useEscapeKey(!!boxDialog, close);
 
-  if (!boxDialog || !item) return null;
+  if (!boxDialog || !item || !fields) return null;
 
   const confirm = () => {
-    modifyItem(
-      id,
-      {
-        dimensions: {
-          width: w / MM_PER_UNIT,
-          height: h / MM_PER_UNIT,
-          depth: d / MM_PER_UNIT,
-        },
-      },
-      "Box dimensions",
-    );
+    modifyItem(id, { dimensions: sceneDims(vals) }, "Dimensions");
     closeBoxDialog();
   };
   const onKey = (e) => {
@@ -63,36 +78,33 @@ const BoxDialog = () => {
     if (e.key === "Enter") confirm();
     else if (e.key === "Escape") close();
   };
-  const field = (label, val, setter, axis) => (
-    <Field label={label}>
-      <NumberInput
-        min="0.01"
-        step="1"
-        value={val}
-        onCommit={(n) => {
-          if (!(n > 0)) return;
-          setter(n);
-          preview(
-            axis === "w" ? n : w,
-            axis === "h" ? n : h,
-            axis === "d" ? n : d,
-          );
-        }}
-        onKeyDown={onKey}
-        style={barInput(true)}
-      />
-    </Field>
-  );
 
   return (
     <>
       <div className="sketch-placement-hint">
-        Set the box dimensions (mm), then Confirm · Esc to cancel
+        Set the dimensions (mm), then Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        {field("W(mm)", w, setW, "w")}
-        {field("H(mm)", h, setH, "h")}
-        {field("D(mm)", d, setD, "d")}
+        {fields.map(([label, key]) => (
+          <Field label={label} key={key}>
+            <NumberInput
+              min="0"
+              step="1"
+              value={vals[key] ?? 0}
+              onCommit={(n) => {
+                if (!(n >= 0)) return;
+                // A cone's top radius may be 0 (an apex); every other dimension
+                // must be positive.
+                if (n === 0 && key !== "radiusTop") return;
+                const next = { ...vals, [key]: n };
+                setVals(next);
+                previewWith(next);
+              }}
+              onKeyDown={onKey}
+              style={barInput(true)}
+            />
+          </Field>
+        ))}
         <button type="button" onClick={close} title="Cancel" style={barBtn()}>
           Cancel
         </button>
@@ -109,4 +121,4 @@ const BoxDialog = () => {
   );
 };
 
-export default BoxDialog;
+export default PrimitiveDialog;

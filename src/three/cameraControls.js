@@ -25,6 +25,7 @@ import {
 } from "./sketchProjection.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
+import { primitiveDimensions } from "./sceneObjects/dimensions.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
 import { createSketchHoverHelpers } from "./cameraControls/sketchHover.js";
 import { createNavigationHandlers } from "./cameraControls/navigation.js";
@@ -399,28 +400,61 @@ export function attachCameraControls(ctx) {
     measureGroup = g;
   };
 
-  // Live box-dimensions preview: scale the existing mesh (and its edge children)
-  // to the dialog's dimensions WITHOUT rebuilding, so resizing is instant.  The
-  // commit (modifyItem) rebuilds the geometry at the new size and resets scale;
-  // clearBoxPreview restores the item's scale on cancel.
+  // Live primitive-dimensions preview (the dialog's dimensions, WITHOUT a store
+  // rebuild, so resizing is instant).  A box (real geometry) scales in place so
+  // its edges follow; a raymarched sphere/cylinder/torus/cone updates its shader
+  // dimension uniforms and re-sizes its box hull.  The commit (modifyItem)
+  // rebuilds from the store; clearBoxPreview reverts to the stored dimensions.
+  const primHull = (type, d) => {
+    if (type === "sphere") {
+      const r = d.radius * 2;
+      return new THREE.BoxGeometry(r, r, r);
+    }
+    if (type === "cylinder")
+      return new THREE.BoxGeometry(2 * d.radius, d.height, 2 * d.radius);
+    if (type === "torus") {
+      const o = 2 * (d.major + d.minor);
+      return new THREE.BoxGeometry(o, 2 * d.minor, o);
+    }
+    if (type === "cone") {
+      const o = 2 * Math.max(d.radiusBottom, d.radiusTop);
+      return new THREE.BoxGeometry(o, d.height, o);
+    }
+    return null;
+  };
   controls.previewBoxDimensions = (id, dims) => {
     const mesh = objectsRef.current[id];
     const item = itemsRef.current.find((i) => i.id === id);
     if (!mesh || !item) return;
-    const st = item.dimensions || { width: 2, height: 2, depth: 2 };
-    const sc = item.scale || { x: 1, y: 1, z: 1 };
-    mesh.scale.set(
-      (sc.x ?? 1) * (dims.width / (st.width || 2)),
-      (sc.y ?? 1) * (dims.height / (st.height || 2)),
-      (sc.z ?? 1) * (dims.depth / (st.depth || 2)),
-    );
+    if (item.type === "cube") {
+      const st = item.dimensions || { width: 2, height: 2, depth: 2 };
+      const sc = item.scale || { x: 1, y: 1, z: 1 };
+      mesh.scale.set(
+        (sc.x ?? 1) * (dims.width / (st.width || 2)),
+        (sc.y ?? 1) * (dims.height / (st.height || 2)),
+        (sc.z ?? 1) * (dims.depth / (st.depth || 2)),
+      );
+      return;
+    }
+    const u = mesh.material?.uniforms;
+    if (u) {
+      if (u.uRadius && dims.radius != null) u.uRadius.value = dims.radius;
+      if (u.uHalfH && dims.height != null) u.uHalfH.value = dims.height / 2;
+      if (u.uMajor && dims.major != null) u.uMajor.value = dims.major;
+      if (u.uMinor && dims.minor != null) u.uMinor.value = dims.minor;
+      if (u.uRb && dims.radiusBottom != null) u.uRb.value = dims.radiusBottom;
+      if (u.uRt && dims.radiusTop != null) u.uRt.value = dims.radiusTop;
+    }
+    const hull = primHull(item.type, dims);
+    if (hull) {
+      mesh.geometry.dispose();
+      mesh.geometry = hull;
+      mesh.userData.hullGeometry = hull;
+    }
   };
   controls.clearBoxPreview = (id) => {
-    const mesh = objectsRef.current[id];
     const item = itemsRef.current.find((i) => i.id === id);
-    if (!mesh || !item) return;
-    const sc = item.scale || { x: 1, y: 1, z: 1 };
-    mesh.scale.set(sc.x ?? 1, sc.y ?? 1, sc.z ?? 1);
+    if (item) controls.previewBoxDimensions(id, primitiveDimensions(item));
   };
 
   // Expose extrude-overlay control to the React layer:

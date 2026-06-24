@@ -679,10 +679,12 @@ const Timeline = () => {
                   <ExtrudeActions itemId={entry.instruction.item.id} />
                 )}
               {entry.instruction?.type === "create" &&
-                entry.instruction.item?.type === "cube" && (
+                ["cube", "sphere", "cylinder", "torus", "cone"].includes(
+                  entry.instruction.item?.type,
+                ) && (
                   <button
                     className="timeline-action-btn"
-                    title="Edit box dimensions"
+                    title="Edit dimensions"
                     onClick={(e) => {
                       e.stopPropagation();
                       restoreToHistory(entry.id);

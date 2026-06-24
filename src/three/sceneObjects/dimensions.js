@@ -54,6 +54,36 @@ export function fullCircleSegments(r, precision, defaultSegs = 32) {
   return Math.max(8, Math.min(256, Math.ceil(Math.PI / halfTheta)));
 }
 
+// Resolved dimensions (scene units) of a parametric primitive, with the legacy
+// defaults applied when an item carries no `dimensions`.  Shared by the hull
+// builder, the analytic shaders, the custom raycasts and the OCC builders, so
+// they all agree on a primitive's size.
+export function primitiveDimensions(item) {
+  const d = (item && item.dimensions) || {};
+  switch (item && item.type) {
+    case "cube":
+      return {
+        width: d.width ?? 2,
+        height: d.height ?? 2,
+        depth: d.depth ?? 2,
+      };
+    case "sphere":
+      return { radius: d.radius ?? 1.5 };
+    case "cylinder":
+      return { radius: d.radius ?? 1, height: d.height ?? 2 };
+    case "torus":
+      return { major: d.major ?? 1, minor: d.minor ?? 0.4 };
+    case "cone":
+      return {
+        radiusBottom: d.radiusBottom ?? 1,
+        radiusTop: d.radiusTop ?? 0,
+        height: d.height ?? 2,
+      };
+    default:
+      return {};
+  }
+}
+
 export function getObjectDimensions(itemType, uniformScale) {
   const s = uniformScale || 1;
   switch (itemType) {
