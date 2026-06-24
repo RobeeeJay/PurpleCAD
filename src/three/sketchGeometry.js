@@ -190,8 +190,18 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
   let newShape;
   let newConstraints;
   if (mode === "chamfer") {
+    // Carry the junction so the solver can re-derive the cut from its legs on
+    // every edit (see sketchConstraints' corner recomputation) — the same robust
+    // approach as the bevel arc.  Angle-lock constraints (chamferConstraints) used
+    // to hold the shape but break when a *connected* line is dragged, because the
+    // chamfer line ends up coincident- AND angle-bound to legs that have rotated.
+    straight.kind = "chamfer";
+    straight.chamferData = { aIdx, aKey, bIdx, bKey, dist: legDist };
     newShape = straight;
-    newConstraints = chamferConstraints(newIdx, aIdx, aKey, bIdx, bKey, m);
+    newConstraints = [
+      coincident(newIdx, "start", aIdx, aKey),
+      coincident(newIdx, "end", bIdx, bKey),
+    ];
   } else {
     const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
     if (arc) {

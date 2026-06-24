@@ -2683,6 +2683,17 @@ describe("enforceConstraints", () => {
           shapeBIdx: 1,
           pointB: "start",
         });
+        // The cut carries its junction so the solver re-derives it on edits, and
+        // it is held by coincidents ALONE — no angle locks (which broke under a
+        // connected-line drag).
+        expect(edit.newShape.kind).toBe("chamfer");
+        expect(edit.newShape.chamferData).toMatchObject({
+          aIdx: 0,
+          aKey: "end",
+          bIdx: 1,
+          bKey: "start",
+        });
+        expect(edit.newConstraints.some((c) => c.type === "angle")).toBe(false);
       });
 
       it("adds a coincident at each new corner (fillet) and an arc bridge", () => {

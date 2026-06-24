@@ -291,8 +291,7 @@ describe("dragging an edge past a chamfer's feasible range", () => {
     };
   };
 
-  // Solve with the top edge body-dragged left by xShift, mirroring solveDrag's
-  // reject-on-infeasible rule (hold the warm state when the solve can't satisfy).
+  // Solve with the top edge body-dragged left by xShift.
   const dragTopLeft = (constraints, xShift, warm) => {
     const input = warm.slice();
     input[0] = L(0.5 - xShift, 2, 2 - xShift, 2);
@@ -301,35 +300,26 @@ describe("dragging an edge past a chamfer's feasible range", () => {
       fixed: fixedSet,
       maxIter: 60,
     });
-    return maxResidual > 1e-2
-      ? { shapes: warm, held: true }
-      : { shapes: r, held: false };
+    return { shapes: r, maxResidual };
   };
 
-  it("a moderate drag is feasible; a far drag is not", () => {
+  it("stays feasible even on a far drag — the chamfer re-derives from its legs", () => {
     const { shapes, constraints } = chamferedSquare();
-    expect(dragTopLeft(constraints, 0.3, shapes).held).toBe(false);
-    // Far past the corner there is no valid configuration — the raw solve misses
-    // badly, which is exactly what solveDrag uses to reject.
-    const input = shapes.slice();
-    input[0] = L(0.5 - 1.4, 2, 2 - 1.4, 2);
-    const fixedSet = new Set(["x1", "y1", "x2", "y2"].map((f) => `0:${f}`));
-    const { maxResidual } = solveConstraints(input, constraints, {
-      fixed: fixedSet,
-      maxIter: 60,
-    });
-    expect(maxResidual).toBeGreaterThan(1e-2);
+    // The chamfer no longer holds its shape by an angle lock that a connected-edge
+    // drag can over-constrain; it re-derives from the leg intersection each solve,
+    // so both a moderate and a far drag stay solvable.
+    const moderate = dragTopLeft(constraints, 0.3, shapes);
+    expect(moderate.maxResidual).toBeLessThan(1e-2);
+    const far = dragTopLeft(constraints, 1.4, moderate.shapes);
+    expect(far.maxResidual).toBeLessThan(1e-2);
   });
 
-  it("holds the last valid shape (chamfer stays joined) instead of breaking", () => {
+  it("keeps the chamfer joined to both legs after a far drag", () => {
     const { shapes, constraints } = chamferedSquare();
-    let warm = shapes;
-    warm = dragTopLeft(constraints, 0.3, warm).shapes; // feasible step
-    const res = dragTopLeft(constraints, 1.4, warm); // past the break
-    expect(res.held).toBe(true);
-    // The held geometry keeps the chamfer (idx 4) joined to both legs.
-    const r = res.shapes;
-    const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-6;
+    const warm = dragTopLeft(constraints, 0.3, shapes).shapes;
+    const r = dragTopLeft(constraints, 1.4, warm).shapes;
+    const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-3;
+    // chamfer (idx 4) start ↔ left-leg (3) end, end ↔ top-leg (0) start.
     expect(near({ x: r[4].x1, y: r[4].y1 }, { x: r[3].x2, y: r[3].y2 })).toBe(
       true,
     );
