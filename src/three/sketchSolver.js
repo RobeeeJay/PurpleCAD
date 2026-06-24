@@ -224,6 +224,16 @@ function residuals(shapes, constraints, variables) {
           int = dist - Math.abs(ra - rb);
         out.push(Math.abs(ext) <= Math.abs(int) ? ext : int);
       } else out.push(0);
+    } else if (c.type === "equal") {
+      // Two lines → equal length; two circles/arcs (incl. bevels) → equal radius.
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      if (a?.type === "line" && b?.type === "line")
+        out.push(
+          Math.hypot(a.x2 - a.x1, a.y2 - a.y1) -
+            Math.hypot(b.x2 - b.x1, b.y2 - b.y1),
+        );
+      else out.push((a?.r ?? a?.rx ?? 0) - (b?.r ?? b?.rx ?? 0));
     }
   }
   return out;
@@ -250,7 +260,8 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
       c.type === "angle" ||
       c.type === "parallel" ||
       c.type === "colinear" ||
-      c.type === "tangent"
+      c.type === "tangent" ||
+      c.type === "equal"
     )
       link(c.shapeAIdx, c.shapeBIdx);
     else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);

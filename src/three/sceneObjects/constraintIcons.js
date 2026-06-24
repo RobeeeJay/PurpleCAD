@@ -438,6 +438,71 @@ export function addConstraintIconsToGroup(
       );
       group.add(seg);
       markFixedSize(seg, toWorld(ax, ay, 0.005));
+    } else if (c.type === "equal") {
+      // A matching double-tick marker on each equal entity: across the line
+      // (equal length), or a small "=" by the ring (equal radius).
+      const buildEq = (pts, cx, cy) => {
+        const seg = new THREE.LineSegments(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({
+            color: CONSTRAINT_ON_LINE_COLOR,
+            depthTest: false,
+          }),
+        );
+        seg.renderOrder = 1004;
+        tag(
+          seg,
+          { x: cx, y: cy },
+          [c.shapeAIdx, c.shapeBIdx],
+          CONSTRAINT_ON_LINE_COLOR,
+        );
+        group.add(seg);
+        markFixedSize(seg, toWorld(cx, cy, 0.005));
+      };
+      const mkEq = (s) => {
+        if (!s) return;
+        const pts = [];
+        if (s.type === "line") {
+          const cx = (s.x1 + s.x2) / 2,
+            cy = (s.y1 + s.y2) / 2;
+          const dx = s.x2 - s.x1,
+            dy = s.y2 - s.y1,
+            len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len,
+            uy = dy / len,
+            px = -uy,
+            py = ux;
+          const T = R * 0.7,
+            gap = R * 0.3;
+          for (const sgn of [-1, 1])
+            pts.push(
+              toWorld(
+                cx + ux * gap * sgn - px * T,
+                cy + uy * gap * sgn - py * T,
+                0.005,
+              ),
+              toWorld(
+                cx + ux * gap * sgn + px * T,
+                cy + uy * gap * sgn + py * T,
+                0.005,
+              ),
+            );
+          buildEq(pts, cx, cy);
+        } else if (s.type === "circle" || s.type === "arc") {
+          const cx = s.cx,
+            cy = s.cy + (s.r || 0) + R * 0.7;
+          const L = R * 0.7,
+            off = R * 0.3;
+          for (const sgn of [-1, 1])
+            pts.push(
+              toWorld(cx - L, cy + off * sgn, 0.005),
+              toWorld(cx + L, cy + off * sgn, 0.005),
+            );
+          buildEq(pts, cx, cy);
+        }
+      };
+      mkEq(shapes[c.shapeAIdx]);
+      mkEq(shapes[c.shapeBIdx]);
     } else if (c.type === "text") {
       // A small "T" mark at the text's top-left anchor — double-click to edit.
       const shape = shapes[c.shapeIdx];

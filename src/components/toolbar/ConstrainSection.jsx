@@ -413,6 +413,33 @@ const ConstrainSection = ({ isSketchMode }) => {
                     />
                   </svg>
                 </button>
+                <button
+                  className="toolbar-btn"
+                  title="Equal — match two lines' length, or two circles/arcs' radius (select two)"
+                  disabled={!ready}
+                  onClick={() => applyPair("equal")}
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20">
+                    <line
+                      stroke="#6C3FD4"
+                      strokeWidth="2"
+                      strokeLinecap="square"
+                      x1="5"
+                      y1="9"
+                      x2="19"
+                      y2="9"
+                    />
+                    <line
+                      stroke="#6C3FD4"
+                      strokeWidth="2"
+                      strokeLinecap="square"
+                      x1="5"
+                      y1="15"
+                      x2="19"
+                      y2="15"
+                    />
+                  </svg>
+                </button>
               </>
             );
           })()}

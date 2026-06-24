@@ -51,6 +51,37 @@ function squareWithAngles(extra = []) {
 
 const sideLen = (s) => Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
 
+describe("equal constraint", () => {
+  it("equalises two lines' lengths", () => {
+    const shapes = [L(0, 0, 4, 0), L(0, 2, 1, 2)]; // lengths 4 and 1
+    const eq = { type: "equal", shapeAIdx: 0, shapeBIdx: 1 };
+    const { shapes: r, ok } = solveConstraints(shapes, [eq]);
+    expect(ok).toBe(true);
+    expect(sideLen(r[0])).toBeCloseTo(sideLen(r[1]), 3);
+  });
+
+  it("equalises two circles' radii (covers bevels/arcs)", () => {
+    const shapes = [
+      { type: "circle", cx: 0, cy: 0, r: 3 },
+      { type: "circle", cx: 10, cy: 0, r: 1 },
+    ];
+    const eq = { type: "equal", shapeAIdx: 0, shapeBIdx: 1 };
+    const { shapes: r, ok } = solveConstraints(shapes, [eq]);
+    expect(ok).toBe(true);
+    expect(r[0].r).toBeCloseTo(r[1].r, 3);
+  });
+
+  it("couples the two shapes for drag stiffness", () => {
+    expect(
+      shapeHopDistance(
+        2,
+        [{ type: "equal", shapeAIdx: 0, shapeBIdx: 1 }],
+        new Set([0]),
+      ),
+    ).toEqual([0, 1]);
+  });
+});
+
 describe("solveConstraints", () => {
   it("resizes one side of an angle-constrained square into a clean rectangle", () => {
     const { shapes, constraints } = squareWithAngles([

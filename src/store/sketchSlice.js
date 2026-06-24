@@ -1355,6 +1355,14 @@ export const createSketchSlice = (set) => ({
           notification:
             "Tangent needs a line + arc/circle, or two arcs/circles.",
         };
+      if (
+        type === "equal" &&
+        !((isLine(a) && isLine(b)) || (isArc(a) && isArc(b)))
+      )
+        return {
+          notification:
+            "Equal needs two lines (length), or two circles/arcs (radius).",
+        };
       const dup = (c) =>
         c.type === type &&
         ((c.shapeAIdx === idxA && c.shapeBIdx === idxB) ||
