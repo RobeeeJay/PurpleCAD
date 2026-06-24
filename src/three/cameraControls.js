@@ -364,9 +364,19 @@ export function attachCameraControls(ctx) {
     controls.clearMeasureMarkers();
     const list = (picks || []).filter((p) => p && p.at);
     if (list.length === 0) return;
-    const box = new THREE.Box3().setFromObject(scene);
-    const diag = box.isEmpty() ? 1 : box.getSize(new THREE.Vector3()).length();
-    const r = Math.max(0.02, diag * 0.006);
+    // Size the markers off the PICKED objects, not the whole scene — the scene
+    // bbox includes the 1000-unit sketch reference plane, which made a giant
+    // sphere.  Fall back to a small fixed size if no object is under the pick.
+    let refSize = 0;
+    for (const pick of list) {
+      const mesh = objectsRef.current[pick.itemId];
+      if (!mesh || !mesh.geometry) continue;
+      mesh.geometry.computeBoundingSphere?.();
+      const br = mesh.geometry.boundingSphere?.radius || 0;
+      const ws = Math.abs(mesh.getWorldScale(new THREE.Vector3()).x) || 1;
+      refSize = Math.max(refSize, br * ws);
+    }
+    const r = Math.max(0.02, (refSize || 1) * 0.04);
     const g = new THREE.Group();
     const colors = [0xffaa33, 0x33ddff];
     list.forEach((pick, i) => {
