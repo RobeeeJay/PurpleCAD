@@ -345,6 +345,60 @@ export function attachCameraControls(ctx) {
   // Clear the persistent multi-face selection highlight (on tool cancel/confirm).
   controls.clearEmbossSelectedFaces = () => highlights.clearSelectedFaces();
 
+  // Measure tool markers: a coloured sphere at each picked point and a dashed
+  // line between two picks, so the user sees what was picked and what's measured.
+  let measureGroup = null;
+  controls.clearMeasureMarkers = () => {
+    if (!measureGroup) return;
+    scene.remove(measureGroup);
+    measureGroup.traverse((o) => {
+      o.geometry?.dispose?.();
+      o.material?.dispose?.();
+    });
+    measureGroup = null;
+  };
+  controls.updateMeasureMarkers = (picks) => {
+    controls.clearMeasureMarkers();
+    const pts = (picks || []).map((p) => p && p.at).filter(Boolean);
+    if (pts.length === 0) return;
+    const box = new THREE.Box3().setFromObject(scene);
+    const diag = box.isEmpty() ? 1 : box.getSize(new THREE.Vector3()).length();
+    const r = Math.max(0.02, diag * 0.006);
+    const g = new THREE.Group();
+    const colors = [0xffaa33, 0x33ddff];
+    pts.forEach((p, i) => {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 16, 12),
+        new THREE.MeshBasicMaterial({
+          color: colors[i % colors.length],
+          depthTest: false,
+        }),
+      );
+      m.position.set(p[0], p[1], p[2]);
+      m.renderOrder = 1000;
+      g.add(m);
+    });
+    if (pts.length >= 2) {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(...pts[0]),
+          new THREE.Vector3(...pts[1]),
+        ]),
+        new THREE.LineDashedMaterial({
+          color: 0xffffff,
+          dashSize: r * 2.5,
+          gapSize: r * 1.5,
+          depthTest: false,
+        }),
+      );
+      line.computeLineDistances();
+      line.renderOrder = 1000;
+      g.add(line);
+    }
+    scene.add(g);
+    measureGroup = g;
+  };
+
   // Expose extrude-overlay control to the React layer:
   //   • finalizeExtrudeWithDepth(d)         — commit at numeric depth `d`.
   //   • finalizeExtrudeWithFormula(f, d)    — commit storing formula `f`

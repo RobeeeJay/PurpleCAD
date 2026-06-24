@@ -59,6 +59,18 @@ const MeasureOverlay = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [measureTool, cancelMeasureTool]);
 
+  // Draw scene markers (spheres at each pick + a line between two) so the user
+  // sees what was picked; clear them when the tool closes.
+  useEffect(() => {
+    const cc = useStore.getState()._cameraControls;
+    if (measureTool) cc?.updateMeasureMarkers?.(measureTool.picks);
+    else cc?.clearMeasureMarkers?.();
+  }, [measureTool]);
+  useEffect(
+    () => () => useStore.getState()._cameraControls?.clearMeasureMarkers?.(),
+    [],
+  );
+
   if (!measureTool) return null;
 
   const sketch = items.find((i) => i.id === selectedId && i.type === "sketch");
@@ -69,17 +81,19 @@ const MeasureOverlay = () => {
   const text = describe(result);
 
   const nPicks = measureTool.picks.length;
+  const picked = measureTool.picks.map((p) => p.pick || "point").join(" → ");
   const hint = sketch
     ? "Select line(s) for length, or two points for distance · Esc to close"
     : nPicks === 0
-      ? "Click a vertex, edge or face. Pick two to measure the distance · Esc to close"
-      : nPicks === 1 && !text
+      ? "Click a vertex or face. Pick two to measure the distance · Esc to close"
+      : nPicks === 1
         ? "Pick another entity to measure the distance · Esc to close"
-        : "Click another entity to measure again · Esc to close";
+        : "Click again to measure from the last pick · Esc to close";
 
   return (
     <div className="measure-overlay">
       <span className="measure-readout">{text || "Measure"}</span>
+      {!sketch && picked && <span className="measure-picked">{picked}</span>}
       <span className="measure-hint">{hint}</span>
       {!sketch && nPicks > 0 && (
         <button

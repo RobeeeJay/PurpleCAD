@@ -22,6 +22,14 @@
   color: var(--color-info);
 }
 
+.measure-picked {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .measure-hint {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);

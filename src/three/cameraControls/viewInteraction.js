@@ -20,12 +20,10 @@ function buildMeasureEntity(mesh, hit, isPrimitive) {
     const w = mesh.localToWorld(new THREE.Vector3(x, y, z));
     return [w.x, w.y, w.z];
   };
+  const at = [hit.point.x, hit.point.y, hit.point.z];
+  const id = mesh.userData.itemId;
   if (isPrimitive || !hit.face) {
-    return {
-      kind: "point",
-      p: [hit.point.x, hit.point.y, hit.point.z],
-      pick: "point",
-    };
+    return { kind: "point", p: at, at, itemId: id, pick: "point" };
   }
   const pos = mesh.geometry?.attributes?.position?.array;
   const lp = mesh.worldToLocal(hit.point.clone());
@@ -35,8 +33,10 @@ function buildMeasureEntity(mesh, hit, isPrimitive) {
     mesh.geometry.computeBoundingSphere?.();
     const r = mesh.geometry.boundingSphere?.radius || 1;
     const ws = mesh.getWorldScale(new THREE.Vector3()).x || 1;
-    if (vw.distanceTo(hit.point) < r * ws * 0.07)
-      return { kind: "point", p: [vw.x, vw.y, vw.z], pick: "vertex" };
+    if (vw.distanceTo(hit.point) < r * ws * 0.07) {
+      const p = [vw.x, vw.y, vw.z];
+      return { kind: "point", p, at: p, itemId: id, pick: "vertex" };
+    }
   }
   const grown = growConnectedFaceSet(
     mesh.geometry,
@@ -58,13 +58,16 @@ function buildMeasureEntity(mesh, hit, isPrimitive) {
       .clone()
       .applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld))
       .normalize();
-    return { kind: "face", pts, normal: [n.x, n.y, n.z], pick: "face" };
+    return {
+      kind: "face",
+      pts,
+      normal: [n.x, n.y, n.z],
+      at,
+      itemId: id,
+      pick: "face",
+    };
   }
-  return {
-    kind: "point",
-    p: [hit.point.x, hit.point.y, hit.point.z],
-    pick: "point",
-  };
+  return { kind: "point", p: at, at, itemId: id, pick: "point" };
 }
 
 // The snappable 2D points of a sketch shape (endpoints, corners, centres) — the
@@ -459,11 +462,14 @@ export function createViewInteraction(
         false,
       );
 
-      // Measure tool: each click adds an entity (vertex / face / surface point);
-      // the overlay shows its dimension or the distance to the previous pick.
+      // Measure tool: a (non-drag) left click adds an entity (vertex / face /
+      // surface point); the overlay shows its dimension or the distance to the
+      // previous pick.  Guard against orbit/pan releases adding stray picks.
       const measure = useStore.getState().measureTool;
       if (measure) {
-        if (intersects.length > 0) {
+        const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+        const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+        if (e.button === 0 && Math.hypot(dx, dy) < 5 && intersects.length > 0) {
           const hit = intersects[0];
           const it = itemsRef.current.find(
             (i) => i.id === hit.object.userData.itemId,
