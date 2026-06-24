@@ -2181,8 +2181,23 @@ export function createSketchInteraction(
           );
           const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
           if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+            const hitIdx = hits[0].object.userData.shapeIdx;
+            const hs = (selItem.shapes || [])[hitIdx];
+            // Double-clicking a chamfer/bevel bridge edits its setback / radius.
+            if (hs && (hs.kind === "chamfer" || hs.kind === "bevel")) {
+              useStore.getState().setSketchDistanceInput({
+                cornerResize: {
+                  sketchId: selItem.id,
+                  shapeIdx: hitIdx,
+                  mode: hs.kind,
+                },
+                defaultDistance:
+                  hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0),
+              });
+              return;
+            }
             const connected = collectConnectedShapes(
-              hits[0].object.userData.shapeIdx,
+              hitIdx,
               selItem.shapes || [],
               selItem.constraints || [],
             );

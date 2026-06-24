@@ -8,7 +8,7 @@ import {
   chamferConstraints,
   buildBevelArc,
 } from "../sketchConstraints.js";
-import { buildChamferEdit } from "../sketchGeometry.js";
+import { buildChamferEdit, resizeCorner } from "../sketchGeometry.js";
 
 // ── Mock sceneObjects.js ─────────────────────────────────────────────────────
 // Only getShapePoint and moveShapePoint are used by enforceConstraints; the
@@ -2736,6 +2736,43 @@ describe("enforceConstraints", () => {
         const corner1 = { x: newL1.x1, y: newL1.y1 };
         expect(near(start, corner0) || near(start, corner1)).toBe(true);
         expect(near(end, corner0) || near(end, corner1)).toBe(true);
+      });
+
+      // Helper: chamfer/bevel the square's L0/L1 corner and return the committed
+      // shapes (the bridge lands at index 4).
+      const applied = (mode, dist) => {
+        const { shapes, junc } = square();
+        const edit = buildChamferEdit(shapes, junc, mode, dist);
+        const cShapes = shapes.map((s, i) => {
+          const u = edit.updates.find(([x]) => x === i);
+          return u ? u[1] : s;
+        });
+        cShapes.push(edit.newShape);
+        return cShapes;
+      };
+
+      it("resizeCorner: a chamfer re-trims its legs to the new setback", () => {
+        const res = resizeCorner(applied("chamfer", 0.5), 4, 0.8);
+        expect(res.dist).toBeCloseTo(0.8);
+        const byIdx = new Map(res.updates);
+        // legs trim 0.8 back from the (2,0) corner; the bridge spans them.
+        expect(byIdx.get(0).x2).toBeCloseTo(1.2);
+        expect(byIdx.get(1).y1).toBeCloseTo(0.8);
+        const b = byIdx.get(4);
+        expect(b.kind).toBe("chamfer");
+        expect(b.x1).toBeCloseTo(1.2);
+        expect(b.y2).toBeCloseTo(0.8);
+        expect(b.chamferData.dist).toBeCloseTo(0.8);
+      });
+
+      it("resizeCorner: a bevel re-derives the arc at the new radius", () => {
+        const cShapes = applied("bevel", 0.5);
+        expect(cShapes[4].r).toBeCloseTo(0.5);
+        const res = resizeCorner(cShapes, 4, 1.0);
+        const arc = new Map(res.updates).get(4);
+        expect(arc.type).toBe("arc");
+        expect(arc.kind).toBe("bevel");
+        expect(arc.r).toBeCloseTo(1.0);
       });
     });
 

@@ -30,7 +30,8 @@ import {
   applyRectangularPatternConstraints,
 } from "../three/sketchRectangularPattern.js";
 import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
-import { explodeContours } from "../three/sketchGeometry.js";
+import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
+import { explodeContours, resizeCorner } from "../three/sketchGeometry.js";
 import {
   textShapeContours,
   makeTextShape,
@@ -1042,6 +1043,50 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Resize an existing chamfer / bevel corner to a new size (mm) — re-derives the
+  // bridge + its two legs in place.  The geometry comes out self-consistent (the
+  // bridge ends sit exactly on the trimmed leg corners), so no re-solve is needed.
+  resizeSketchCorner: (sketchId, bridgeIdx, sizeMm) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const res = resizeCorner(
+        item.shapes || [],
+        bridgeIdx,
+        sizeMm / MM_PER_UNIT,
+      );
+      if (!res) return {};
+      pushSketchSnapshot(state, sketchId);
+      const map = new Map(res.updates);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: (it.shapes || []).map((s, i) =>
+                map.has(i) ? map.get(i) : s,
+              ),
+            })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) =>
+        entry.instruction?.type === "create" &&
+        entry.instruction.item?.id === sketchId
+          ? Object.assign({}, entry, {
+              instruction: Object.assign({}, entry.instruction, {
+                item: Object.assign({}, entry.instruction.item, {
+                  shapes: updatedItem?.shapes,
+                }),
+              }),
+            })
+          : entry,
+      );
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         items: markCsgDirty(updatedItems),

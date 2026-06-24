@@ -241,6 +241,74 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
   };
 }
 
+// Resize an existing chamfer / bevel corner to a new user size, in scene units
+// (the chamfer's leg setback, or the bevel's arc radius).  Re-derives from the
+// two legs' current directions exactly like the solver's corner recomputation:
+// finds the virtual corner P where the legs meet, trims each leg back, and
+// rebuilds the bridge.  Returns `{ updates: [[idx, shape]…], dist }` (bridge +
+// both legs) or null when the data is missing or the legs are degenerate.
+export function resizeCorner(shapes, bridgeIdx, sizeScene) {
+  const bridge = shapes[bridgeIdx];
+  const data = bridge?.chamferData || bridge?.bevelData;
+  if (!data) return null;
+  const { aIdx, aKey, bIdx, bKey } = data;
+  const sA = shapes[aIdx],
+    sB = shapes[bIdx];
+  if (sA?.type !== "line" || sB?.type !== "line") return null;
+  const end = (s, k) =>
+    k === "start" ? { x: s.x1, y: s.y1 } : { x: s.x2, y: s.y2 };
+  const aEnd = end(sA, aKey),
+    aOther = end(sA, aKey === "start" ? "end" : "start");
+  const bEnd = end(sB, bKey),
+    bOther = end(sB, bKey === "start" ? "end" : "start");
+  const dx1 = aEnd.x - aOther.x,
+    dy1 = aEnd.y - aOther.y;
+  const dx2 = bEnd.x - bOther.x,
+    dy2 = bEnd.y - bOther.y;
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < 1e-10) return null;
+  const tInter =
+    ((bOther.x - aOther.x) * dy2 - (bOther.y - aOther.y) * dx2) / denom;
+  const P = { x: aOther.x + tInter * dx1, y: aOther.y + tInter * dy1 };
+  const uA = norm2({ x: aOther.x - P.x, y: aOther.y - P.y });
+  const uB = norm2({ x: bOther.x - P.x, y: bOther.y - P.y });
+  let legDist = sizeScene;
+  if (bridge.kind === "bevel") {
+    const dot = Math.max(-1, Math.min(1, uA.x * uB.x + uA.y * uB.y));
+    const halfTan = Math.tan(Math.acos(dot) / 2);
+    legDist = halfTan > 1e-6 ? sizeScene / halfTan : sizeScene;
+  }
+  const trimA = { x: P.x + uA.x * legDist, y: P.y + uA.y * legDist };
+  const trimB = { x: P.x + uB.x * legDist, y: P.y + uB.y * legDist };
+  const newData = { ...data, dist: legDist };
+  let newBridge;
+  if (bridge.kind === "bevel") {
+    const arc = buildBevelArc(P, uA, uB, trimA, trimB);
+    if (!arc) return null;
+    arc.kind = "bevel";
+    arc.bevelData = newData;
+    newBridge = arc;
+  } else {
+    newBridge = {
+      type: "line",
+      x1: trimA.x,
+      y1: trimA.y,
+      x2: trimB.x,
+      y2: trimB.y,
+      kind: "chamfer",
+      chamferData: newData,
+    };
+  }
+  return {
+    updates: [
+      [bridgeIdx, newBridge],
+      [aIdx, setLineEnd(sA, aKey, trimA)],
+      [bIdx, setLineEnd(sB, bKey, trimB)],
+    ],
+    dist: legDist,
+  };
+}
+
 // Translate any sketch shape by (dx, dy).  Returns a new shape, or null for
 // unknown types.  Used by sketch-element body-drag and clipboard paste.
 export function translateShape(shape, dx, dy) {

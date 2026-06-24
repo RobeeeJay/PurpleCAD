@@ -716,11 +716,15 @@ export default function SketchOverlays({
       {sketchMode && sketchDistanceInput && (
         <div className="sketch-distance-input-overlay">
           <span>
-            {sketchDistanceInput.offsetConstraintIdx != null
-              ? "Offset (mm):"
-              : sketchDistanceInput.constraintIdx != null
-                ? "Edit distance (mm):"
-                : "Distance (mm):"}
+            {sketchDistanceInput.cornerResize
+              ? sketchDistanceInput.cornerResize.mode === "bevel"
+                ? "Radius (mm):"
+                : "Setback (mm):"
+              : sketchDistanceInput.offsetConstraintIdx != null
+                ? "Offset (mm):"
+                : sketchDistanceInput.constraintIdx != null
+                  ? "Edit distance (mm):"
+                  : "Distance (mm):"}
           </span>
           <FormulaInput
             type="text"
@@ -766,6 +770,20 @@ export default function SketchOverlays({
                 if (sketchDistanceInput.offsetConstraintIdx != null) {
                   offsetDraftRef.current = raw;
                   confirmOffset();
+                  return;
+                }
+                // Chamfer/bevel resize: apply the new setback / radius.
+                if (sketchDistanceInput.cornerResize) {
+                  if (Number.isFinite(mm) && mm > 0) {
+                    const { sketchId, shapeIdx } =
+                      sketchDistanceInput.cornerResize;
+                    useStore
+                      .getState()
+                      .resizeSketchCorner(sketchId, shapeIdx, mm);
+                    cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
+                  }
+                  useStore.getState().setSketchDistanceInput(null);
+                  useStore.getState().setSketchConstraintMode(null);
                   return;
                 }
                 if (Number.isFinite(mm) && mm > 0) {
@@ -923,6 +941,16 @@ export default function SketchOverlays({
         sketchDistanceInput.offsetConstraintIdx != null && (
           <div className="sketch-placement-hint">
             Set the offset distance, then Confirm · Esc to cancel
+          </div>
+        )}
+      {sketchMode &&
+        sketchDistanceInput &&
+        sketchDistanceInput.cornerResize && (
+          <div className="sketch-placement-hint">
+            {sketchDistanceInput.cornerResize.mode === "bevel"
+              ? "Type a new radius, then Enter"
+              : "Type a new setback, then Enter"}{" "}
+            · Esc to cancel
           </div>
         )}
       {sketchMode && sketchModifyMode && (
