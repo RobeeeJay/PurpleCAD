@@ -91,9 +91,15 @@ export function buildSceneObjects(
     let geometry;
     let extrudeLocalOffset = null; // set by the extrude case; used for mesh positioning
     switch (item.type) {
-      case "cube":
-        geometry = new THREE.BoxGeometry(2, 2, 2);
+      case "cube": {
+        const d = item.dimensions || {};
+        geometry = new THREE.BoxGeometry(
+          d.width || 2,
+          d.height || 2,
+          d.depth || 2,
+        );
         break;
+      }
       case "sphere":
         geometry = new THREE.BoxGeometry(3, 3, 3);
         break;

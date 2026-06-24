@@ -331,7 +331,13 @@ function loftArgs(profileSource, secondSource, allItems, precision) {
 // Returns a shape ID (integer >= 1) on success, or null on failure.
 // Caller MUST release the returned ID via occ.releaseShape().
 export function buildItemShapeLocal(item, allItems = [], precision = null) {
-  if (item.type === "cube") return occ.makeBox(-1, -1, -1, 1, 1, 1);
+  if (item.type === "cube") {
+    const d = item.dimensions || {};
+    const w = (d.width || 2) / 2,
+      h = (d.height || 2) / 2,
+      dp = (d.depth || 2) / 2;
+    return occ.makeBox(-w, -h, -dp, w, h, dp);
+  }
   if (item.type === "sphere") return occ.makeSphere(1.5);
   if (item.type === "cylinder") return occ.makeCylinder(-1, 1, 2);
   if (item.type === "torus") return occ.makeTorus(1.0, 0.4);

@@ -384,6 +384,7 @@ const Timeline = () => {
   const beginHoleEdit = useStore((state) => state.beginHoleEdit);
   const beginEmbossEdit = useStore((state) => state.beginEmbossEdit);
   const beginDraftEdit = useStore((state) => state.beginDraftEdit);
+  const openBoxDialog = useStore((state) => state.openBoxDialog);
   const pushPullRetargetTarget = useStore(
     (state) => state.pushPullRetargetTarget,
   );
@@ -676,6 +677,46 @@ const Timeline = () => {
               {entry.instruction?.type === "create" &&
                 entry.instruction.item?.type === "extrude" && (
                   <ExtrudeActions itemId={entry.instruction.item.id} />
+                )}
+              {entry.instruction?.type === "create" &&
+                entry.instruction.item?.type === "cube" && (
+                  <button
+                    className="timeline-action-btn"
+                    title="Edit box dimensions"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      restoreToHistory(entry.id);
+                      openBoxDialog(entry.instruction.item.id);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                      <rect
+                        x="3"
+                        y="9"
+                        width="18"
+                        height="6"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <line
+                        x1="8"
+                        y1="9"
+                        x2="8"
+                        y2="13"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                      <line
+                        x1="13"
+                        y1="9"
+                        x2="13"
+                        y2="13"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                    </svg>
+                  </button>
                 )}
               {entry.instruction?.type === "createGroup" &&
                 (() => {

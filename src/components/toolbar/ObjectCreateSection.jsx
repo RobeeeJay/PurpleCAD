@@ -51,7 +51,8 @@ const ObjectCreateSection = () => {
 
   const createItem = (type) => {
     const id = maxItemId(history) + 1;
-    const label = type.charAt(0).toUpperCase() + type.slice(1);
+    const label =
+      type === "cube" ? "Box" : type.charAt(0).toUpperCase() + type.slice(1);
     // Spawn at the current view centre (camera target) so the object appears
     // where the user is looking; fall back to a sensible default if the
     // viewport handle isn't ready.
@@ -64,7 +65,13 @@ const ObjectCreateSection = () => {
       children: [],
       position,
       scale: { x: 1, y: 1, z: 1 },
+      // A box is parametric: it carries its own dimensions (scene units) and
+      // opens its dimensions dialog on create.
+      ...(type === "cube"
+        ? { dimensions: { width: 2, height: 2, depth: 2 } }
+        : {}),
     });
+    if (type === "cube") useStore.getState().openBoxDialog(id);
   };
 
   return (
@@ -123,7 +130,7 @@ const ObjectCreateSection = () => {
       </button>
       <button
         className="toolbar-btn"
-        title="Cube"
+        title="Box — enter dimensions in a dialog"
         onClick={() => createItem("cube")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">

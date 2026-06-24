@@ -18,6 +18,7 @@ import OriginDialog from "./OriginDialog";
 import HoleDialog from "./HoleDialog";
 import EmbossDialog from "./EmbossDialog";
 import DraftDialog from "./DraftDialog";
+import BoxDialog from "./BoxDialog";
 import PointToPointDialog from "./PointToPointDialog";
 import SelectionWidget from "./SelectionWidget";
 import SketchSelectionWidget from "./SketchSelectionWidget";
@@ -331,6 +332,7 @@ const Viewport = () => {
       <HoleDialog />
       <EmbossDialog />
       <DraftDialog />
+      <BoxDialog />
       <PointToPointDialog />
       <SelectionWidget />
       <SketchSelectionWidget />

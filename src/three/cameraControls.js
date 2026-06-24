@@ -399,6 +399,30 @@ export function attachCameraControls(ctx) {
     measureGroup = g;
   };
 
+  // Live box-dimensions preview: scale the existing mesh (and its edge children)
+  // to the dialog's dimensions WITHOUT rebuilding, so resizing is instant.  The
+  // commit (modifyItem) rebuilds the geometry at the new size and resets scale;
+  // clearBoxPreview restores the item's scale on cancel.
+  controls.previewBoxDimensions = (id, dims) => {
+    const mesh = objectsRef.current[id];
+    const item = itemsRef.current.find((i) => i.id === id);
+    if (!mesh || !item) return;
+    const st = item.dimensions || { width: 2, height: 2, depth: 2 };
+    const sc = item.scale || { x: 1, y: 1, z: 1 };
+    mesh.scale.set(
+      (sc.x ?? 1) * (dims.width / (st.width || 2)),
+      (sc.y ?? 1) * (dims.height / (st.height || 2)),
+      (sc.z ?? 1) * (dims.depth / (st.depth || 2)),
+    );
+  };
+  controls.clearBoxPreview = (id) => {
+    const mesh = objectsRef.current[id];
+    const item = itemsRef.current.find((i) => i.id === id);
+    if (!mesh || !item) return;
+    const sc = item.scale || { x: 1, y: 1, z: 1 };
+    mesh.scale.set(sc.x ?? 1, sc.y ?? 1, sc.z ?? 1);
+  };
+
   // Expose extrude-overlay control to the React layer:
   //   • finalizeExtrudeWithDepth(d)         — commit at numeric depth `d`.
   //   • finalizeExtrudeWithFormula(f, d)    — commit storing formula `f`

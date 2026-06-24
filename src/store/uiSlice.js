@@ -127,6 +127,11 @@ export const uiInitial = {
   //   line/point selection instead.  null when off.
   measureTool: null,
 
+  // Box (parametric cube) dimensions dialog: the id of the box being created or
+  // edited, or null.  The dialog previews live (resizes the mesh in place) and
+  // commits the dimensions via modifyItem.
+  boxDialog: null,
+
   // Draft tool: taper selected faces about a neutral (main) face's plane.
   //   { picking:null|"main"|"faces", itemId, source, neutral:{nx..,cx..},
   //     faces:[{nx..,cx..}], angleDeg, flip }
@@ -546,6 +551,10 @@ export const createUiSlice = (set) => ({
   // ── Draft tool ──────────────────────────────────────────────────────────
   // Guided like Hole/Emboss — no pre-selection needed; the body is learned from
   // the main-face pick.
+  // ── Box dimensions dialog ────────────────────────────────────────────────
+  openBoxDialog: (id) => set({ boxDialog: { id } }),
+  closeBoxDialog: () => set({ boxDialog: null }),
+
   // ── Measure tool ──────────────────────────────────────────────────────────
   startMeasureTool: () => set({ measureTool: { picks: [] } }),
   cancelMeasureTool: () => set({ measureTool: null }),
