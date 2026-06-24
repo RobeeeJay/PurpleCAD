@@ -350,6 +350,11 @@ function buildItemShapeLocal(item, allItems, precision) {
     const d = item.dimensions || {};
     return occ.makeTorus(d.major ?? 1, d.minor ?? 0.4);
   }
+  if (item.type === "cone") {
+    const d = item.dimensions || {};
+    const rb = d.radiusBottom ?? 1, rt = d.radiusTop ?? 0, height = d.height ?? 2;
+    return occ.makeCone(-height / 2, rb, rt, height);
+  }
 
   if (item.type === "extrude") {
     const poly = item.profile?.polygon2D;

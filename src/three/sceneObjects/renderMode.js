@@ -11,7 +11,11 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { useStore } from "../../store";
-import { DISPLAY_PRECISION_MM, fullCircleSegments } from "./dimensions.js";
+import {
+  DISPLAY_PRECISION_MM,
+  fullCircleSegments,
+  primitiveDimensions,
+} from "./dimensions.js";
 import {
   DEFAULT_MESH_COLOR,
   WIREFRAME_DISPLAY_COLOR,
@@ -110,7 +114,7 @@ export function applyRenderMode(renderMode, ctx) {
         mesh.visible = itemData.id === useStore.getState().hoveredId;
         return;
       }
-      if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
+      if (["sphere", "cylinder", "torus", "cone"].includes(itemData?.type)) {
         if (
           mesh.userData.hullGeometry &&
           mesh.geometry !== mesh.userData.hullGeometry
@@ -216,7 +220,7 @@ export function applyRenderMode(renderMode, ctx) {
       }
       const isTransparent = renderMode === "transparent";
       const sketchOpacity = 0.5;
-      if (["sphere", "cylinder", "torus"].includes(itemData?.type)) {
+      if (["sphere", "cylinder", "torus", "cone"].includes(itemData?.type)) {
         if (renderMode === "wireframe") {
           // Wireframe is a DISPLAY overlay on the smooth shader render — it
           // must look as smooth as the shader, regardless of the user's CSG
@@ -228,18 +232,49 @@ export function applyRenderMode(renderMode, ctx) {
             printPrecision != null
               ? Math.min(printPrecision, DISPLAY_PRECISION_MM)
               : DISPLAY_PRECISION_MM;
+          const wdim = primitiveDimensions(itemData);
           let wfGeo;
           if (itemData.type === "sphere") {
-            const w = fullCircleSegments(1.5, wireframePrecision, 32);
+            const w = fullCircleSegments(wdim.radius, wireframePrecision, 32);
             const h = Math.max(8, Math.round(w / 2));
-            wfGeo = new THREE.SphereGeometry(1.5, w, h);
+            wfGeo = new THREE.SphereGeometry(wdim.radius, w, h);
           } else if (itemData.type === "cylinder") {
-            const s = fullCircleSegments(1, wireframePrecision, 32);
-            wfGeo = new THREE.CylinderGeometry(1, 1, 2, s);
+            const s = fullCircleSegments(wdim.radius, wireframePrecision, 32);
+            wfGeo = new THREE.CylinderGeometry(
+              wdim.radius,
+              wdim.radius,
+              wdim.height,
+              s,
+            );
+          } else if (itemData.type === "cone") {
+            const s = fullCircleSegments(
+              Math.max(wdim.radiusBottom, wdim.radiusTop),
+              wireframePrecision,
+              32,
+            );
+            wfGeo = new THREE.CylinderGeometry(
+              wdim.radiusTop,
+              wdim.radiusBottom,
+              wdim.height,
+              s,
+            );
           } else {
-            const tubular = fullCircleSegments(1.0, wireframePrecision, 32);
-            const radial = fullCircleSegments(0.4, wireframePrecision, 16);
-            wfGeo = new THREE.TorusGeometry(1.0, 0.4, radial, tubular);
+            const tubular = fullCircleSegments(
+              wdim.major,
+              wireframePrecision,
+              32,
+            );
+            const radial = fullCircleSegments(
+              wdim.minor,
+              wireframePrecision,
+              16,
+            );
+            wfGeo = new THREE.TorusGeometry(
+              wdim.major,
+              wdim.minor,
+              radial,
+              tubular,
+            );
           }
           if (mesh.geometry !== mesh.userData.hullGeometry)
             mesh.geometry.dispose();

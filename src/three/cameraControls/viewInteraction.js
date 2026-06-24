@@ -475,7 +475,9 @@ export function createViewInteraction(
             (i) => i.id === hit.object.userData.itemId,
           );
           if (it && it.type !== "sketch") {
-            const isPrim = ["sphere", "cylinder", "torus"].includes(it.type);
+            const isPrim = ["sphere", "cylinder", "torus", "cone"].includes(
+              it.type,
+            );
             const entity = buildMeasureEntity(hit.object, hit, isPrim);
             if (entity) useStore.getState().addMeasurePick(entity);
           }
@@ -611,7 +613,9 @@ export function createViewInteraction(
           const id = mesh.userData.itemId;
           if (holeTool.phase === "face") {
             const it = itemsRef.current.find((i) => i.id === id);
-            const isPrim = ["sphere", "cylinder", "torus"].includes(it?.type);
+            const isPrim = ["sphere", "cylinder", "torus", "cone"].includes(
+              it?.type,
+            );
             const worldN = hit.face
               ? hit.face.normal.clone()
               : new THREE.Vector3(0, 1, 0);

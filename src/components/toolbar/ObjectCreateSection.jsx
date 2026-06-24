@@ -357,6 +357,41 @@ const ObjectCreateSection = () => {
         </svg>
       </button>
       <button
+        className="toolbar-btn"
+        title="Cone — enter dimensions in a dialog"
+        onClick={() => createItem("cone")}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <polygon
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="12,3 19,18 5,18"
+          />
+          <ellipse
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            cx="12"
+            cy="18"
+            rx="7"
+            ry="2.5"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeDasharray="2 1.5"
+            x1="12"
+            y1="3"
+            x2="12"
+            y2="20.5"
+          />
+        </svg>
+      </button>
+      <button
         className={`toolbar-btn ${extrudeSelectMode ? "active" : ""}`}
         title={
           hasFaceSelected

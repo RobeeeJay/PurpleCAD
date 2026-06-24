@@ -7,7 +7,15 @@ import { pattern3dItem } from "../three/occClient.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 
-const SOLID_TYPES = ["cube", "sphere", "cylinder", "torus", "extrude", "csg"];
+const SOLID_TYPES = [
+  "cube",
+  "sphere",
+  "cylinder",
+  "torus",
+  "cone",
+  "extrude",
+  "csg",
+];
 const PLANE_TYPES = ["plane", "sketch"];
 
 const isSolid = (item) => item && SOLID_TYPES.includes(item.type);

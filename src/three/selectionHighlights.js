@@ -33,7 +33,7 @@ function overlayGeometryFor(hitMesh, itemType) {
   return hitMesh.geometry;
 }
 
-const PRIMITIVE_TYPES = new Set(["sphere", "cylinder", "torus"]);
+const PRIMITIVE_TYPES = new Set(["sphere", "cylinder", "torus", "cone"]);
 
 // Build persistent highlight objects for the user's current sub-geometry
 // selection (faces and/or edges). Returns a THREE.Group placed at the same

@@ -4,6 +4,7 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
@@ -593,6 +594,21 @@ Napi::Number MakeCylinder(const Napi::CallbackInfo& info) {
     double height  = GetDouble(info[2], 2.0);
     gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeCylinder mk(ax, radius, height);
+    return Napi::Number::New(env, StoreShape(mk.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// makeCone(originY, radiusBottom, radiusTop, height) → shapeId
+// Axis = +Y, centred (originY = -height/2).  radiusTop may be 0 (an apex).
+Napi::Number MakeCone(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    double originY = GetDouble(info[0], -1.0);
+    double r1      = GetDouble(info[1], 1.0);
+    double r2      = GetDouble(info[2], 0.0);
+    double height  = GetDouble(info[3], 2.0);
+    gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
+    BRepPrimAPI_MakeCone mk(ax, r1, r2, height);
     return Napi::Number::New(env, StoreShape(mk.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
@@ -1768,6 +1784,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("makeBox",            Napi::Function::New(env, MakeBox));
   exports.Set("makeSphere",         Napi::Function::New(env, MakeSphere));
   exports.Set("makeCylinder",       Napi::Function::New(env, MakeCylinder));
+  exports.Set("makeCone",           Napi::Function::New(env, MakeCone));
   exports.Set("makeTorus",          Napi::Function::New(env, MakeTorus));
   exports.Set("makeExtrude",        Napi::Function::New(env, MakeExtrude));
   exports.Set("makeRevolve",        Napi::Function::New(env, MakeRevolve));

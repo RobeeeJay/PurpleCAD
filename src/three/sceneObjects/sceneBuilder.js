@@ -314,7 +314,7 @@ export function buildSceneObjects(
     mesh.castShadow = item.type !== "sketch" && item.type !== "plane";
     mesh.receiveShadow = item.type !== "sketch" && item.type !== "plane";
     mesh.userData.itemId = item.id;
-    if (["sphere", "cylinder", "torus"].includes(item.type)) {
+    if (["sphere", "cylinder", "torus", "cone"].includes(item.type)) {
       mesh.userData.hullGeometry = geometry;
       mesh.userData.shaderMat = material;
     }
@@ -454,6 +454,75 @@ export function buildSceneObjects(
           distance: dist,
           point: target.clone(),
           face: { normal: target.clone().sub(wc).normalize() },
+          faceIndex: 0,
+          object: mesh,
+        });
+      };
+    } else if (item.type === "cone") {
+      // Selection ray against the cone's bounding cylinder (radius = the larger
+      // end) — close enough to pick it; the exact tapered surface is shader-drawn.
+      mesh.raycast = (raycaster, intersects) => {
+        const wc = new THREE.Vector3();
+        mesh.getWorldPosition(wc);
+        const ws = new THREE.Vector3();
+        mesh.getWorldScale(ws);
+        const cn = primitiveDimensions(item);
+        const radius = Math.max(cn.radiusBottom, cn.radiusTop) * ws.x;
+        const halfH = (cn.height / 2) * ws.y;
+        const axis = new THREE.Vector3(0, 1, 0)
+          .applyQuaternion(mesh.quaternion)
+          .normalize();
+        const ray = raycaster.ray;
+        const oc = new THREE.Vector3().subVectors(ray.origin, wc);
+        const da = ray.direction.dot(axis);
+        const oca = oc.dot(axis);
+        const A = 1.0 - da * da;
+        const B = 2.0 * (ray.direction.dot(oc) - da * oca);
+        const C = oc.dot(oc) - oca * oca - radius * radius;
+        let tHit = Infinity,
+          nHit = null;
+        if (Math.abs(A) > 1e-6) {
+          const disc = B * B - 4 * A * C;
+          if (disc >= 0) {
+            const sq = Math.sqrt(disc);
+            for (const t of [(-B - sq) / (2 * A), (-B + sq) / (2 * A)]) {
+              if (t > raycaster.near && t < tHit) {
+                const p = ray.origin.clone().addScaledVector(ray.direction, t);
+                const y = p.clone().sub(wc).dot(axis);
+                if (Math.abs(y) <= halfH) {
+                  tHit = t;
+                  nHit = p
+                    .clone()
+                    .sub(wc)
+                    .addScaledVector(axis, -y)
+                    .normalize();
+                }
+              }
+            }
+          }
+        }
+        for (const sign of Math.abs(da) > 1e-6 ? [1, -1] : []) {
+          const t = (sign * halfH - oca) / da;
+          if (t > raycaster.near && t < tHit) {
+            const p = ray.origin.clone().addScaledVector(ray.direction, t);
+            if (
+              p
+                .clone()
+                .sub(wc)
+                .addScaledVector(axis, -sign * halfH)
+                .lengthSq() <=
+              radius * radius
+            ) {
+              tHit = t;
+              nHit = axis.clone().multiplyScalar(sign);
+            }
+          }
+        }
+        if (tHit === Infinity || tHit > raycaster.far) return;
+        intersects.push({
+          distance: tHit,
+          point: ray.origin.clone().addScaledVector(ray.direction, tHit),
+          face: { normal: nHit || axis },
           faceIndex: 0,
           object: mesh,
         });

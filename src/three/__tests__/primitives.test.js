@@ -59,6 +59,11 @@ describe("parametric primitives", () => {
     expect(b.w).toBeCloseTo(2 * (3 + 0.5), 1); // outer diameter
     expect(b.h).toBeCloseTo(2 * 0.5, 1); // axial thickness
   });
+  it("cone uses bottom/top radius + height", () => {
+    const b = bbox("cone", { radiusBottom: 2, radiusTop: 0, height: 5 });
+    expect(b.w).toBeCloseTo(4, 1); // widest (bottom) diameter
+    expect(b.h).toBeCloseTo(5, 1); // height along Y
+  });
   it("a legacy primitive with no dimensions keeps its default size", () => {
     const b = bbox("sphere", undefined);
     expect(b.w).toBeCloseTo(3, 1); // radius 1.5 → diameter 3

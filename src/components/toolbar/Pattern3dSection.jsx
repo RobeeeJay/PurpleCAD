@@ -2,7 +2,15 @@ import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 
-const SOLID_TYPES = ["cube", "sphere", "cylinder", "torus", "extrude", "csg"];
+const SOLID_TYPES = [
+  "cube",
+  "sphere",
+  "cylinder",
+  "torus",
+  "cone",
+  "extrude",
+  "csg",
+];
 
 // 3D Mirror: clone the selected object across the selected plane.  The clone is
 // a regenerator item that rebuilds from the live source, so it tracks changes to

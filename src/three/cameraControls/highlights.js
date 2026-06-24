@@ -86,7 +86,7 @@ export function createHighlightHelpers({
     const itemData = itemsRef.current.find(
       (i) => i.id === hitMesh.userData.itemId,
     );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
+    const primitiveType = ["sphere", "cylinder", "torus", "cone"].includes(
       itemData?.type,
     )
       ? itemData.type
@@ -349,7 +349,7 @@ export function createHighlightHelpers({
     const itemData = itemsRef.current.find(
       (i) => i.id === hitMesh.userData.itemId,
     );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
+    const primitiveType = ["sphere", "cylinder", "torus", "cone"].includes(
       itemData?.type,
     )
       ? itemData.type
@@ -462,7 +462,7 @@ export function createHighlightHelpers({
     const itemData = itemsRef.current.find(
       (i) => i.id === hitMesh.userData.itemId,
     );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
+    const primitiveType = ["sphere", "cylinder", "torus", "cone"].includes(
       itemData?.type,
     )
       ? itemData.type

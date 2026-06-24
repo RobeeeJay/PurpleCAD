@@ -269,6 +269,97 @@ export const TORUS_FRAGMENT_SHADER = `
   }
 `;
 
+export const CONE_VERTEX_SHADER = `
+  uniform float uRb;
+  uniform float uRt;
+  uniform float uHalfH;
+  varying vec3 vViewPos;
+  varying vec3 vConeCenter;
+  varying vec3 vConeAxis;
+  varying float vRb;
+  varying float vRt;
+  varying float vHalfH;
+  void main() {
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    vViewPos     = mvPos.xyz;
+    vConeCenter  = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    vConeAxis    = normalize(modelViewMatrix[1].xyz);
+    float scale  = length(modelViewMatrix[0].xyz);
+    vRb = uRb * scale;
+    vRt = uRt * scale;
+    vHalfH = uHalfH * scale;
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+
+export const CONE_FRAGMENT_SHADER = `
+  uniform mat4 projectionMatrix;
+  uniform vec3 uColor;
+  uniform vec3 uEmissive;
+  uniform float uOpacity;
+  uniform vec3 uClipNormal;
+  uniform float uClipConstant;
+  uniform float uClipEnabled;
+  varying vec3 vViewPos;
+  varying vec3 vConeCenter;
+  varying vec3 vConeAxis;
+  varying float vRb;
+  varying float vRt;
+  varying float vHalfH;
+  bool clipped(vec3 p) {
+    return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
+  }
+  // IQ capped-cone SDF in (radial, axial) coords: bottom radius vRb at axial
+  // -vHalfH, top radius vRt at +vHalfH.
+  float sdCone(vec3 p) {
+    vec3 q3 = p - vConeCenter;
+    float axial  = dot(q3, vConeAxis);
+    float radial = length(q3 - axial * vConeAxis);
+    vec2 q = vec2(radial, axial);
+    float ra = vRb, rb = vRt, h = vHalfH;
+    vec2 k1 = vec2(rb, h);
+    vec2 k2 = vec2(rb - ra, 2.0 * h);
+    vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? ra : rb), abs(q.y) - h);
+    vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+    float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+    return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+  }
+  void main() {
+    vec3 rd = normalize(vViewPos);
+    float t  = max(0.01, length(vConeCenter) - max(vRb, vRt) - vHalfH - 0.2);
+    bool hit = false;
+    for (int i = 0; i < 160; i++) {
+      vec3 p = rd * t;
+      float d = sdCone(p);
+      if (d < 0.0002 * t) {
+        if (!clipped(p)) { hit = true; break; }
+        t += 0.02;
+        continue;
+      }
+      if (t > 60.0) break;
+      t += max(d, 0.001);
+    }
+    if (!hit) discard;
+    vec3 hitPos = rd * t;
+    const float eps = 0.002;
+    vec3 n = normalize(vec3(
+      sdCone(hitPos + vec3(eps,0.0,0.0)) - sdCone(hitPos - vec3(eps,0.0,0.0)),
+      sdCone(hitPos + vec3(0.0,eps,0.0)) - sdCone(hitPos - vec3(0.0,eps,0.0)),
+      sdCone(hitPos + vec3(0.0,0.0,eps)) - sdCone(hitPos - vec3(0.0,0.0,eps))
+    ));
+    vec3 L1 = normalize(vec3(10.0, 15.0, 10.0));
+    vec3 L2 = normalize(vec3(-10.0, 10.0, -10.0));
+    vec3 V  = normalize(-hitPos);
+    float d1 = max(dot(n, L1), 0.0);
+    float d2 = max(dot(n, L2), 0.0) * 0.4;
+    float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
+    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
+    vec4 cp = projectionMatrix * vec4(hitPos, 1.0);
+    gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
+  }
+`;
+
 // The material props an item should render with.  Mirror / circular /
 // rectangular pattern clones (kind:"pattern3d") track their originating object,
 // so they inherit ITS material live — a later change to the source's material
@@ -332,6 +423,14 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
       uniforms: { ...uniforms(), ...primitiveUniforms(item) },
       vertexShader: TORUS_VERTEX_SHADER,
       fragmentShader: TORUS_FRAGMENT_SHADER,
+      transparent,
+    });
+  }
+  if (item.type === "cone") {
+    return new THREE.ShaderMaterial({
+      uniforms: { ...uniforms(), ...primitiveUniforms(item) },
+      vertexShader: CONE_VERTEX_SHADER,
+      fragmentShader: CONE_FRAGMENT_SHADER,
       transparent,
     });
   }

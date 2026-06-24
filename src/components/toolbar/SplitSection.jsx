@@ -2,7 +2,15 @@ import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 
-const SOLID_TYPES = ["cube", "sphere", "cylinder", "torus", "extrude", "csg"];
+const SOLID_TYPES = [
+  "cube",
+  "sphere",
+  "cylinder",
+  "torus",
+  "cone",
+  "extrude",
+  "csg",
+];
 
 // Split object: opens a guided dialog (no pre-selection needed) that prompts you
 // to pick an object, then a face or plane to slice it along into two objects.
