@@ -9,6 +9,7 @@
 // the current one (and fixed points stay put).
 
 import { resolveConstraintDistance } from "./geometryParams.js";
+import { rederiveAllCorners } from "./sketchGeometry.js";
 
 // Which scalar fields of a shape the solver may move, in a stable order.
 export function varFields(s) {
@@ -439,7 +440,11 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
       if (lambda > 1e9) break;
     }
   }
-  const finalShapes = shapesAt(x);
+  // Repair any chamfer/bevel corners: the solver only pins a bridge's endpoints
+  // to its legs, so a bevel arc's radius/centre drift free and the fillet breaks
+  // as a connected line is dragged.  Re-deriving from the legs restores the proper
+  // tangent arc (and the chamfer's exact setback) before residuals are scored.
+  const finalShapes = rederiveAllCorners(shapesAt(x));
   const finalRes = residuals(finalShapes, cs, variables);
   let maxResidual = 0;
   for (const v of finalRes) maxResidual = Math.max(maxResidual, Math.abs(v));

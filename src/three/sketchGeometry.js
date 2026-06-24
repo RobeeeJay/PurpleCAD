@@ -247,7 +247,16 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
 // finds the virtual corner P where the legs meet, trims each leg back, and
 // rebuilds the bridge.  Returns `{ updates: [[idx, shape]…], dist }` (bridge +
 // both legs) or null when the data is missing or the legs are degenerate.
-export function resizeCorner(shapes, bridgeIdx, sizeScene) {
+// `sizeIsLegDist` distinguishes the two callers: a user resize passes the desired
+// setback (chamfer) / radius (bevel) and the radius is converted to the leg
+// setback at the corner's angle; the post-solve re-derive passes the already-known
+// leg setback (`bevelData.dist`) verbatim.
+export function resizeCorner(
+  shapes,
+  bridgeIdx,
+  sizeScene,
+  sizeIsLegDist = false,
+) {
   const bridge = shapes[bridgeIdx];
   const data = bridge?.chamferData || bridge?.bevelData;
   if (!data) return null;
@@ -273,7 +282,7 @@ export function resizeCorner(shapes, bridgeIdx, sizeScene) {
   const uA = norm2({ x: aOther.x - P.x, y: aOther.y - P.y });
   const uB = norm2({ x: bOther.x - P.x, y: bOther.y - P.y });
   let legDist = sizeScene;
-  if (bridge.kind === "bevel") {
+  if (!sizeIsLegDist && bridge.kind === "bevel") {
     const dot = Math.max(-1, Math.min(1, uA.x * uB.x + uA.y * uB.y));
     const halfTan = Math.tan(Math.acos(dot) / 2);
     legDist = halfTan > 1e-6 ? sizeScene / halfTan : sizeScene;
@@ -307,6 +316,33 @@ export function resizeCorner(shapes, bridgeIdx, sizeScene) {
     ],
     dist: legDist,
   };
+}
+
+// Re-derive a chamfer/bevel bridge from its legs at its STORED leg setback.  The
+// numeric solver only pins the bridge's endpoints to the legs; for a bevel arc
+// that leaves the radius/centre free to drift, so the fillet degenerates as a
+// connected line is dragged.  Re-running this after the solve restores the proper
+// tangent arc (and the chamfer's exact setback).
+export function rederiveCornerFromLegs(shapes, bridgeIdx) {
+  const bridge = shapes[bridgeIdx];
+  const data = bridge?.chamferData || bridge?.bevelData;
+  if (!data) return null;
+  return resizeCorner(shapes, bridgeIdx, data.dist, true);
+}
+
+// Re-derive every chamfer/bevel corner in a shape list (post-solve repair).
+// Returns the same array reference when there are no corners to touch.
+export function rederiveAllCorners(shapes) {
+  let out = null;
+  for (let i = 0; i < shapes.length; i++) {
+    const s = shapes[i];
+    if (s?.kind !== "bevel" && s?.kind !== "chamfer") continue;
+    const res = rederiveCornerFromLegs(out || shapes, i);
+    if (!res) continue;
+    if (!out) out = shapes.slice();
+    for (const [idx, sh] of res.updates) out[idx] = sh;
+  }
+  return out || shapes;
 }
 
 // Translate any sketch shape by (dx, dy).  Returns a new shape, or null for

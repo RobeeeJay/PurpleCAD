@@ -359,3 +359,61 @@ describe("dragging an edge past a chamfer's feasible range", () => {
     );
   });
 });
+
+describe("bevel fillet survives a connected-line drag", () => {
+  // Bevel the top-left corner (L3.end ↔ L0.start) of the unit square.
+  const bevel = (dist = 0.25) => {
+    const { shapes, constraints } = squareWithAngles();
+    const junc = { aIdx: 3, aKey: "end", bIdx: 0, bKey: "start" };
+    const edit = buildChamferEdit(shapes, junc, "bevel", dist, constraints);
+    const bShapes = shapes.map((s, i) => {
+      const u = edit.updates.find(([idx]) => idx === i);
+      return u ? u[1] : s;
+    });
+    bShapes.push(edit.newShape);
+    const rm = new Set(edit.removeConstraints);
+    return {
+      shapes: bShapes,
+      constraints: [
+        ...constraints.filter((c) => !rm.has(c)),
+        ...edit.newConstraints,
+      ],
+      arcIdx: shapes.length,
+    };
+  };
+
+  it("keeps a proper tangent arc (radius preserved, ends on the legs)", () => {
+    const { shapes, constraints, arcIdx } = bevel(0.25);
+    const r0 = shapes[arcIdx].r;
+    expect(shapes[arcIdx].type).toBe("arc");
+    // Drag the bottom edge (idx 2) down — a CONNECTED line, not a bevel leg.
+    const dragged = shapes.slice();
+    dragged[2] = L(1, -0.5, 0, -0.5);
+    const fixedSet = new Set([
+      ...fieldsForPoint(dragged[2], "start").map((f) => `2:${f}`),
+      ...fieldsForPoint(dragged[2], "end").map((f) => `2:${f}`),
+    ]);
+    const { shapes: r, ok } = solveConstraints(dragged, constraints, {
+      fixed: fixedSet,
+    });
+    expect(ok).toBe(true);
+    const arc = r[arcIdx];
+    expect(arc.type).toBe("arc");
+    // The fillet didn't collapse or blow up: same radius, real arc.
+    expect(arc.r).toBeCloseTo(r0, 3);
+    // Its endpoints still sit on the two legs' trimmed corners.
+    const aEnd = {
+      x: arc.cx + arc.r * Math.cos(arc.startAngle),
+      y: arc.cy + arc.r * Math.sin(arc.startAngle),
+    };
+    const bEnd = {
+      x: arc.cx + arc.r * Math.cos(arc.endAngle),
+      y: arc.cy + arc.r * Math.sin(arc.endAngle),
+    };
+    const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-3;
+    const c3 = { x: r[3].x2, y: r[3].y2 }; // L3.end
+    const c0 = { x: r[0].x1, y: r[0].y1 }; // L0.start
+    expect(near(aEnd, c3) || near(aEnd, c0)).toBe(true);
+    expect(near(bEnd, c3) || near(bEnd, c0)).toBe(true);
+  });
+});
