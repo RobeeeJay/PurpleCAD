@@ -664,10 +664,31 @@ export function createSketchInteraction(
       !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
       !isRectangularPatternShapeIdx(selItem, snap.shapeIdx)
     ) {
+      // Measure tool: accumulate the snapped point as a pick (highlighted by a
+      // marker, and measured between picks) rather than a normal point select.
+      if (useStore.getState().measureTool) {
+        const w = new THREE.Vector3(snap.x, snap.y, 0)
+          .applyQuaternion(sketchMesh.quaternion)
+          .add(sketchMesh.position);
+        const at = [w.x, w.y, w.z];
+        useStore
+          .getState()
+          .addMeasurePick({ kind: "point", pick: "point", p: at, at });
+        useStore.getState().setSelectedSketchElement(null);
+        clearSketchSelectionOverlay();
+        clearMultiSelectOverlays();
+        multiSelectedIndices = [];
+        if (dimHintRef.current) dimHintRef.current.style.display = "none";
+        return;
+      }
       sketchSelectPoint(snap, sketchMesh);
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
       return;
     }
+    // Measure tool: a non-point click starts a fresh selection (a line for
+    // length, two lines for distance), so drop any accumulated point picks.
+    if (useStore.getState().measureTool)
+      useStore.getState().clearMeasurePicks();
     // Line hit
     const sketchGroup = eff.line ? sketchShapesGroupRef?.current : null;
     if (sketchGroup) {
@@ -2173,7 +2194,10 @@ export function createSketchInteraction(
       }
 
       if (shift) {
-        // Shift+click: toggle the hit line in/out of the multi-selection
+        // Shift+click: toggle the hit line in/out of the multi-selection.
+        // Selecting lines for a distance/length drops any measure point picks.
+        if (useStore.getState().measureTool)
+          useStore.getState().clearMeasurePicks();
         const sketchGroup = sketchShapesGroupRef?.current;
         if (!sketchGroup) return;
         const lineObjs = sketchGroup.children.filter(

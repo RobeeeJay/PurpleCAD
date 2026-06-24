@@ -28,7 +28,8 @@ function sketchSelectionResult(sketch, sel, multi) {
   }
   const res = { type: "length", value: total, count: sel2.length };
   // A single circle / arc also reports its radius; a single closed primitive its
-  // area.  Several shapes that chain into a closed loop report the loop's area.
+  // area.  Several shapes that chain into a closed loop report the loop's area;
+  // exactly two open pieces (e.g. two lines) report the gap between them.
   if (sel2.length === 1) {
     const { radius, area } = shapeMetrics(sel2[0]);
     if (radius != null) res.radius = radius;
@@ -36,6 +37,13 @@ function sketchSelectionResult(sketch, sel, multi) {
   } else {
     const area = loopArea(polys);
     if (area != null) res.area = area;
+    else if (sel2.length === 2) {
+      const d = measure([
+        { kind: "polyline", pts: polys[0] },
+        { kind: "polyline", pts: polys[1] },
+      ]);
+      if (d) res.distance = d.value;
+    }
   }
   return res;
 }
@@ -55,6 +63,7 @@ function describe(result) {
         : `Length  ${mm(result.value)}`;
     if (result.radius != null) s += `   ·   Radius  ${mm(result.radius)}`;
     if (result.area != null) s += `   ·   Area  ${mm2(result.area)}`;
+    if (result.distance != null) s += `   ·   Distance  ${mm(result.distance)}`;
     return s;
   }
   return null;
@@ -81,16 +90,19 @@ const MeasureOverlay = () => {
       const sk = s.items.find(
         (i) => i.id === s.selectedId && i.type === "sketch",
       );
+      const hasPicks = s.measureTool.picks.length > 0;
       if (sk) {
-        const hasSel =
+        const hasSketchSel =
           (s.sketchMultiSelectedIndices?.length || 0) > 0 ||
           !!s.selectedSketchElement;
-        if (hasSel) {
+        // Point picks first, then the line/shape selection, then exit.
+        if (hasPicks) s.clearMeasurePicks();
+        else if (hasSketchSel) {
           s.setSelectedSketchElement(null);
           s.setSketchMultiSelectedIndices([]);
           s._cameraControls?.refreshSketchSelectionOverlay?.();
         } else s.cancelMeasureTool();
-      } else if (s.measureTool.picks.length > 0) {
+      } else if (hasPicks) {
         s.clearMeasurePicks();
       } else {
         s.cancelMeasureTool();
@@ -124,7 +136,7 @@ const MeasureOverlay = () => {
   const nPicks = measureTool.picks.length;
   const picked = measureTool.picks.map((p) => p.pick || "point").join(" → ");
   const hint = sketch
-    ? "Select line(s) for length, or two points for distance · Esc to close"
+    ? "Click points to measure between them; select line(s) for length, two lines/a closed loop for distance/area · Esc to close"
     : nPicks === 0
       ? "Click a vertex or face. Pick two to measure the distance · Esc to close"
       : nPicks === 1
@@ -136,7 +148,7 @@ const MeasureOverlay = () => {
       <span className="measure-readout">{text || "Measure"}</span>
       {!sketch && picked && <span className="measure-picked">{picked}</span>}
       <span className="measure-hint">{hint}</span>
-      {!sketch && nPicks > 0 && (
+      {nPicks > 0 && (
         <button
           type="button"
           className="measure-clear"

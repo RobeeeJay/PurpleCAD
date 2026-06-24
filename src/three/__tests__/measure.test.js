@@ -22,6 +22,26 @@ describe("measure", () => {
     expect(r.value).toBeCloseTo(4);
   });
 
+  it("two parallel lines report the gap between them", () => {
+    const r = measure([
+      {
+        kind: "polyline",
+        pts: [
+          [0, 0, 0],
+          [4, 0, 0],
+        ],
+      },
+      {
+        kind: "polyline",
+        pts: [
+          [0, 2, 0],
+          [4, 2, 0],
+        ],
+      },
+    ]);
+    expect(r).toEqual({ type: "distance", value: 2 });
+  });
+
   it("closed polyline includes the closing edge", () => {
     const r = measure([
       {
