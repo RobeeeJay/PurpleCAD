@@ -362,30 +362,55 @@ export function attachCameraControls(ctx) {
   };
   controls.updateMeasureMarkers = (picks) => {
     controls.clearMeasureMarkers();
-    const pts = (picks || []).map((p) => p && p.at).filter(Boolean);
-    if (pts.length === 0) return;
+    const list = (picks || []).filter((p) => p && p.at);
+    if (list.length === 0) return;
     const box = new THREE.Box3().setFromObject(scene);
     const diag = box.isEmpty() ? 1 : box.getSize(new THREE.Vector3()).length();
     const r = Math.max(0.02, diag * 0.006);
     const g = new THREE.Group();
     const colors = [0xffaa33, 0x33ddff];
-    pts.forEach((p, i) => {
+    list.forEach((pick, i) => {
+      const color = colors[i % colors.length];
+      // Highlight the actual clicked face (translucent overlay) so it stays lit.
+      if (pick.kind === "face" && pick.pts && pick.pts.length >= 3) {
+        const flat = new Float32Array(pick.pts.length * 3);
+        pick.pts.forEach((p, k) => {
+          flat[k * 3] = p[0];
+          flat[k * 3 + 1] = p[1];
+          flat[k * 3 + 2] = p[2];
+        });
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(flat, 3));
+        const face = new THREE.Mesh(
+          geo,
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.35,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1,
+          }),
+        );
+        face.renderOrder = 999;
+        g.add(face);
+      }
+      // A sphere on the exact clicked point / vertex.
       const m = new THREE.Mesh(
         new THREE.SphereGeometry(r, 16, 12),
-        new THREE.MeshBasicMaterial({
-          color: colors[i % colors.length],
-          depthTest: false,
-        }),
+        new THREE.MeshBasicMaterial({ color, depthTest: false }),
       );
-      m.position.set(p[0], p[1], p[2]);
+      m.position.set(pick.at[0], pick.at[1], pick.at[2]);
       m.renderOrder = 1000;
       g.add(m);
     });
-    if (pts.length >= 2) {
+    if (list.length >= 2) {
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(...pts[0]),
-          new THREE.Vector3(...pts[1]),
+          new THREE.Vector3(...list[0].at),
+          new THREE.Vector3(...list[1].at),
         ]),
         new THREE.LineDashedMaterial({
           color: 0xffffff,

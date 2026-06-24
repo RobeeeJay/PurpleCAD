@@ -50,14 +50,36 @@ const MeasureOverlay = () => {
   const clearMeasurePicks = useStore((s) => s.clearMeasurePicks);
   const cancelMeasureTool = useStore((s) => s.cancelMeasureTool);
 
+  // Escape clears the current selection first (3D picks, or the sketch
+  // line/point selection it's reading); it only exits the tool when there's
+  // nothing selected.  Reads fresh store state so it never acts on a stale set.
   useEffect(() => {
     if (!measureTool) return undefined;
     const onKey = (e) => {
-      if (e.key === "Escape") cancelMeasureTool();
+      if (e.key !== "Escape") return;
+      const s = useStore.getState();
+      if (!s.measureTool) return;
+      const sk = s.items.find(
+        (i) => i.id === s.selectedId && i.type === "sketch",
+      );
+      if (sk) {
+        const hasSel =
+          (s.sketchMultiSelectedIndices?.length || 0) > 0 ||
+          !!s.selectedSketchElement;
+        if (hasSel) {
+          s.setSelectedSketchElement(null);
+          s.setSketchMultiSelectedIndices([]);
+          s._cameraControls?.refreshSketchSelectionOverlay?.();
+        } else s.cancelMeasureTool();
+      } else if (s.measureTool.picks.length > 0) {
+        s.clearMeasurePicks();
+      } else {
+        s.cancelMeasureTool();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [measureTool, cancelMeasureTool]);
+  }, [measureTool]);
 
   // Draw scene markers (spheres at each pick + a line between two) so the user
   // sees what was picked; clear them when the tool closes.
