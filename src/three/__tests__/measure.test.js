@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { measure } from "../measure.js";
+import { measure, shapeMetrics } from "../measure.js";
 
 describe("measure", () => {
   it("segment length", () => {
@@ -98,5 +98,34 @@ describe("measure", () => {
       },
     ]);
     expect(r.value).toBeCloseTo(4); // (1,0,0) → (5,0,0)
+  });
+
+  it("shapeMetrics: circle has radius and area", () => {
+    const m = shapeMetrics({ type: "circle", cx: 0, cy: 0, r: 2 });
+    expect(m.radius).toBe(2);
+    expect(m.area).toBeCloseTo(Math.PI * 4);
+  });
+
+  it("shapeMetrics: arc has a radius but no area", () => {
+    const m = shapeMetrics({ type: "arc", cx: 0, cy: 0, r: 3, startAngle: 0 });
+    expect(m.radius).toBe(3);
+    expect(m.area).toBeNull();
+  });
+
+  it("shapeMetrics: rect/ellipse have area but no radius", () => {
+    expect(shapeMetrics({ type: "rect", x1: 0, y1: 0, x2: 2, y2: 3 })).toEqual({
+      radius: null,
+      area: 6,
+    });
+    const e = shapeMetrics({ type: "ellipse", cx: 0, cy: 0, rx: 2, ry: 4 });
+    expect(e.radius).toBeNull();
+    expect(e.area).toBeCloseTo(Math.PI * 8);
+  });
+
+  it("shapeMetrics: a plain line has neither", () => {
+    expect(shapeMetrics({ type: "line", x1: 0, y1: 0, x2: 1, y2: 0 })).toEqual({
+      radius: null,
+      area: null,
+    });
   });
 });

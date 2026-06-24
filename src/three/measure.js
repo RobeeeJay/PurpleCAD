@@ -158,6 +158,21 @@ function faceDimensions(e) {
   return { width: Math.max(d1, d2), height: Math.min(d1, d2) };
 }
 
+// Radius (circle / arc) and enclosed area (closed primitives) of a single sketch
+// shape, in sketch units — for the Measure readout alongside its length.  Each
+// is null when it doesn't apply (e.g. an arc has a radius but no area).
+export function shapeMetrics(shape) {
+  if (!shape) return { radius: null, area: null };
+  const radius =
+    shape.type === "circle" || shape.type === "arc" ? shape.r : null;
+  let area = null;
+  if (shape.type === "circle") area = Math.PI * shape.r * shape.r;
+  else if (shape.type === "ellipse") area = Math.PI * shape.rx * shape.ry;
+  else if (shape.type === "rect")
+    area = Math.abs((shape.x2 - shape.x1) * (shape.y2 - shape.y1));
+  return { radius, area };
+}
+
 export function measure(entities) {
   const es = (entities || []).filter(Boolean);
   if (es.length === 0) return null;

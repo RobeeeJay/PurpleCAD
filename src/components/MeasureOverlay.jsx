@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import { useStore } from "../store";
-import { measure } from "../three/measure.js";
+import { measure, shapeMetrics } from "../three/measure.js";
 import { getSketchShapePoints } from "../three/sceneObjects/sketchShapes.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import "../styles/MeasureOverlay.css";
@@ -24,20 +24,33 @@ function sketchSelectionResult(sketch, sel, multi) {
     const pts = getSketchShapePoints(s, IDENTITY_MESH);
     for (let i = 1; i < pts.length; i++) total += pts[i].distanceTo(pts[i - 1]);
   }
-  return { type: "length", value: total, count: sel2.length };
+  const res = { type: "length", value: total, count: sel2.length };
+  // A single circle / arc also reports its radius; a single closed shape its area.
+  if (sel2.length === 1) {
+    const { radius, area } = shapeMetrics(sel2[0]);
+    if (radius != null) res.radius = radius;
+    if (area != null) res.area = area;
+  }
+  return res;
 }
 
 const mm = (v) => `${(v * MM_PER_UNIT).toFixed(2)} mm`;
+const mm2 = (v) => `${(v * MM_PER_UNIT * MM_PER_UNIT).toFixed(2)} mm²`;
 
 function describe(result) {
   if (!result) return null;
   if (result.type === "distance") return `Distance  ${mm(result.value)}`;
   if (result.type === "faceDims")
     return `Face  ${mm(result.width)} × ${mm(result.height)}`;
-  if (result.type === "length")
-    return result.count > 1
-      ? `Length (${result.count})  ${mm(result.value)}`
-      : `Length  ${mm(result.value)}`;
+  if (result.type === "length") {
+    let s =
+      result.count > 1
+        ? `Length (${result.count})  ${mm(result.value)}`
+        : `Length  ${mm(result.value)}`;
+    if (result.radius != null) s += `   ·   Radius  ${mm(result.radius)}`;
+    if (result.area != null) s += `   ·   Area  ${mm2(result.area)}`;
+    return s;
+  }
   return null;
 }
 
