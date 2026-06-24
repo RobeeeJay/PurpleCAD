@@ -2306,6 +2306,35 @@ export function createSketchInteraction(
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable)
       return;
 
+    // Z X C V B toggle the selection-type filters, in widget order, for whichever
+    // selection widget is showing (sketch: line/point/shape/constraint/object;
+    // 3D: object/face/edge/point — no fifth type, so B is a no-op there).  Bare
+    // keys only — Ctrl/Cmd/Alt combos stay free for copy/undo/etc.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      const idx = { z: 0, x: 1, c: 2, v: 3, b: 4 }[e.key.toLowerCase()];
+      if (idx !== undefined) {
+        const store = useStore.getState();
+        if (sketchModeRef.current) {
+          e.preventDefault();
+          store.toggleSketchSelType(
+            ["line", "point", "shape", "constraint", "object"][idx],
+          );
+        } else {
+          const toggle = [
+            store.toggleSelObject,
+            store.toggleSelFace,
+            store.toggleSelEdge,
+            store.toggleSelPoint,
+          ][idx];
+          if (toggle) {
+            e.preventDefault();
+            toggle();
+          }
+        }
+        return;
+      }
+    }
+
     // Debug export: copy the whole active sketch (shapes + constraints) to the
     // clipboard as JSON, for sharing a reproducer.  Cmd/Ctrl+Shift+C.
     if (
@@ -2631,13 +2660,13 @@ export function createSketchInteraction(
         return;
       }
 
+      // C and B are reserved for selection-type toggles (handled above), so the
+      // circle / bezier tools have no key bind — use the toolbar.
       const toolMap = {
         l: "line",
         r: "rect",
-        c: "circle",
         e: "ellipse",
         a: "arc",
-        b: "bezier",
       };
       const tool = toolMap[key];
       if (tool) {
