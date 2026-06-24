@@ -26,6 +26,8 @@ import {
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import { createAnimateLoop } from "./cameraControls/animateLoop.js";
 import { primitiveDimensions } from "./sceneObjects/dimensions.js";
+import { createMaterial } from "./objectMaterials.js";
+import { DEFAULT_MESH_COLOR } from "./theme.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
 import { createSketchHoverHelpers } from "./cameraControls/sketchHover.js";
 import { createNavigationHandlers } from "./cameraControls/navigation.js";
@@ -406,6 +408,8 @@ export function attachCameraControls(ctx) {
   // dimension uniforms and re-sizes its box hull.  The commit (modifyItem)
   // rebuilds from the store; clearBoxPreview reverts to the stored dimensions.
   const primHull = (type, d) => {
+    if (type === "cube")
+      return new THREE.BoxGeometry(d.width, d.height, d.depth);
     if (type === "sphere") {
       const r = d.radius * 2;
       return new THREE.BoxGeometry(r, r, r);
@@ -455,6 +459,36 @@ export function attachCameraControls(ctx) {
   controls.clearBoxPreview = (id) => {
     const item = itemsRef.current.find((i) => i.id === id);
     if (item) controls.previewBoxDimensions(id, primitiveDimensions(item));
+  };
+
+  // Ghost preview for CREATING a primitive: a translucent copy of the actual
+  // shape (real shader, so a sphere reads as a sphere) at the spawn point, before
+  // anything is committed to the timeline.  Updated live as the dialog changes.
+  let primGhost = null;
+  controls.clearPrimitivePreview = () => {
+    if (!primGhost) return;
+    scene.remove(primGhost);
+    primGhost.geometry?.dispose();
+    primGhost.material?.dispose();
+    primGhost = null;
+  };
+  controls.showPrimitivePreview = ({ type, dimensions, position }) => {
+    const geo = primHull(type, dimensions);
+    if (!geo) return;
+    const mat = createMaterial({ type, dimensions }, DEFAULT_MESH_COLOR);
+    if (mat.uniforms?.uOpacity) {
+      mat.uniforms.uOpacity.value = 0.55;
+      mat.transparent = true;
+    } else {
+      mat.opacity = 0.55;
+      mat.transparent = true;
+    }
+    controls.clearPrimitivePreview();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(position.x, position.y, position.z);
+    mesh.renderOrder = 5;
+    scene.add(mesh);
+    primGhost = mesh;
   };
 
   // Expose extrude-overlay control to the React layer:

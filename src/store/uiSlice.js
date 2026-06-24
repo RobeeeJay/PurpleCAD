@@ -551,8 +551,13 @@ export const createUiSlice = (set) => ({
   // ── Draft tool ──────────────────────────────────────────────────────────
   // Guided like Hole/Emboss — no pre-selection needed; the body is learned from
   // the main-face pick.
-  // ── Box dimensions dialog ────────────────────────────────────────────────
+  // ── Primitive dimensions dialog ──────────────────────────────────────────
+  // Edit an existing primitive's dimensions ({ id }), or create a new one with a
+  // live ghost preview that's only added to the timeline on Confirm
+  // ({ create: { type, position } }).
   openBoxDialog: (id) => set({ boxDialog: { id } }),
+  openBoxCreate: (type, position) =>
+    set({ boxDialog: { create: { type, position } } }),
   closeBoxDialog: () => set({ boxDialog: null }),
 
   // ── Measure tool ──────────────────────────────────────────────────────────

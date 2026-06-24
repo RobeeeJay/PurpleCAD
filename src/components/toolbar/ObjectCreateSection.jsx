@@ -1,13 +1,10 @@
 import React from "react";
 import { useStore } from "../../store";
-import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
 import SweepSection from "./SweepSection";
 import Pattern3dSection from "./Pattern3dSection";
 
 const ObjectCreateSection = () => {
-  const addItem = useStore((s) => s.addItem);
-  const history = useStore((s) => s.history);
   const setSketchPlacementMode = useStore((s) => s.setSketchPlacementMode);
   const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
   const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
@@ -49,34 +46,13 @@ const ObjectCreateSection = () => {
     setExtrudeSelectMode("profile");
   };
 
+  // Every Create button here makes a parametric primitive: open its dimensions
+  // dialog with a live ghost preview at the view centre; nothing is added to the
+  // timeline until the user confirms.
   const createItem = (type) => {
-    const id = maxItemId(history) + 1;
-    const label =
-      type === "cube" ? "Box" : type.charAt(0).toUpperCase() + type.slice(1);
-    // Spawn at the current view centre (camera target) so the object appears
-    // where the user is looking; fall back to a sensible default if the
-    // viewport handle isn't ready.
     const t = useStore.getState()._cameraControls?.getViewTarget?.();
     const position = t ? { x: t.x, y: t.y, z: t.z } : { x: 0, y: 2, z: 0 };
-    // Parametric primitives carry their own dimensions (scene units) and open
-    // the dimensions dialog on create.
-    const PRIM_DEFAULTS = {
-      cube: { width: 2, height: 2, depth: 2 },
-      sphere: { radius: 1.5 },
-      cylinder: { radius: 1, height: 2 },
-      torus: { major: 1, minor: 0.4 },
-      cone: { radiusBottom: 1, radiusTop: 0, height: 2 },
-    };
-    addItem({
-      id,
-      name: `${label} ${id}`,
-      type,
-      children: [],
-      position,
-      scale: { x: 1, y: 1, z: 1 },
-      ...(PRIM_DEFAULTS[type] ? { dimensions: PRIM_DEFAULTS[type] } : {}),
-    });
-    if (PRIM_DEFAULTS[type]) useStore.getState().openBoxDialog(id);
+    useStore.getState().openBoxCreate(type, position);
   };
 
   return (
