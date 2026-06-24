@@ -192,10 +192,10 @@ export function useSceneSync({
     // geometry that later timeline steps were built from, so every subsequent
     // step has to be rebuilt — not just the items in the current view.  Run the
     // full per-step recalc only for such edits.  Crucially, ADDING a new item
-    // (a fresh sketch plane, an extrusion) must NOT recalc — nothing existing
-    // changed — so compare per-item signatures and trigger only when an id
-    // present both before and after differs (plus variable changes).  Object
-    // add/move and resolution toggles keep the cheap current-view regen.
+    // (a fresh sketch plane, an extrusion, a primitive) must NOT recalc — nothing
+    // existing changed — so compare per-item signatures and trigger only when an
+    // id present both before and after differs (plus variable changes).  A plain
+    // add / delete / move with nothing stale does NO regen at all.
     // Capture a boolean's inputIds (and those nested in a chamfer/fillet's
     // source snapshot, recursively) so a RETARGET — which re-points a union, and
     // any chamfer fused onto it, at a different prism set — counts as an upstream
@@ -246,43 +246,50 @@ export function useSceneSync({
           }
         }
     }
-    // The resolution pass only has work on first load, when the print precision
-    // changed, or when some item's cached geometry is stale for the current
-    // precision.  A plain add / delete / move at the same precision (e.g. dropping
-    // in a primitive) leaves every cache current — nothing to recompute.
-    const needsRegen =
-      isFirst ||
-      printPrecision !== prev?.precision ||
-      items.some((i) => {
-        const r = i.regenerator;
-        return r && !(r.regeneratedAt === printPrecision && i.geometryData);
-      });
+    const precisionChanged = !isFirst && printPrecision !== prev?.precision;
+    // Some item's cached geometry is stale for the current precision (a freshly
+    // loaded / dirtied csg).  A plain add / delete / move at the same precision
+    // (e.g. dropping in a primitive) leaves every cache current — nothing stale.
+    const hasStale = items.some((i) => {
+      const r = i.regenerator;
+      return r && !(r.regeneratedAt === printPrecision && i.geometryData);
+    });
     upstreamSigRef.current = {
       map: itemSig,
       varsSig,
       precision: printPrecision,
     };
 
+    // An upstream edit, a precision change, or a stale cache on first load takes
+    // the full per-step recalc: it stamps the fresh tessellation back into HISTORY,
+    // so a subsequent add doesn't keep re-deriving the csg as "stale".
+    // (regenerateForResolution only updates the live items, not the history they're
+    // replayed from — which is exactly why a precision change / load used to make
+    // every later add re-run the csg.)
+    const fullRecalc =
+      upstreamChanged || precisionChanged || (isFirst && hasStale);
+
     // While a sketch is open, defer the full timeline recalc until it's closed
     // — recomputing every downstream step on each point drag is wasteful (and
     // the 3D solids are hidden behind the sketch anyway).  The deferred recalc
     // runs in the sketch-close effect below.
-    if (upstreamChanged && sketchMode) {
+    if (fullRecalc && sketchMode) {
       pendingRecalcRef.current = true;
       return;
     }
-    // Nothing upstream changed and no cache is stale — e.g. adding a primitive —
-    // so skip the regen pass entirely (no busy flash, no wasted work).
-    if (!upstreamChanged && !needsRegen) return;
+    // Nothing to do: no upstream change, same precision, and no stale cache — e.g.
+    // adding a primitive — so skip the regen pass entirely (no busy flash).
+    if (!fullRecalc && !hasStale) return;
 
     // The orchestrator is a UI-only module that's never reachable from
     // the OCC worker's transitive imports, so it can route per-item regen
     // through occClient → worker without creating a bundling cycle.
     import("../../three/regenerateOrchestrator.js").then((m) => {
-      if (upstreamChanged) {
+      if (fullRecalc) {
         pendingRecalcRef.current = false;
         m.recalculateTimeline();
       } else {
+        // First load or a stale cache: the cheap current-view regen suffices.
         m.regenerateForResolution(printPrecision);
       }
     });
