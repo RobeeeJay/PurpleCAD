@@ -14,6 +14,7 @@ import * as THREE from "three";
 import { extrudeWithLivePolygon } from "./csgUtils.js";
 import { withWinding } from "./sceneObjects/closedLoops.js";
 import { MM_PER_UNIT } from "./sceneObjects.js";
+import { prismFromLoops } from "./embossTessellate.js";
 
 // Small overlap/lead (local units, ~0.4mm) so the boolean opens cleanly: the
 // emboss cutter sinks this far into the body, the deboss cutter starts this far
@@ -25,132 +26,14 @@ const quatOf = (rot) =>
     new THREE.Euler(rot?.x || 0, rot?.y || 0, rot?.z || 0),
   );
 
-// Uniformly subdivide a triangle mesh (1→4 per pass, sharing edge midpoints) until
-// no edge is longer than maxEdge.  Input verts are deduped by position so a
-// non-indexed ExtrudeGeometry (duplicated seam verts) stays crack-free.  Used to
-// pre-tessellate the flat relief before wrapping it onto a curve, so the curved
-// result follows the surface instead of showing big faceted triangles.
-function subdivideToMaxEdge(
-  positions,
-  indices,
-  maxEdge,
-  maxPasses = 5,
-  maxTris = Infinity,
-) {
-  const verts = [];
-  const vMap = new Map();
-  const r5 = (v) => Math.round(v * 1e5) / 1e5;
-  const vid = (x, y, z) => {
-    const k = `${r5(x)},${r5(y)},${r5(z)}`;
-    let id = vMap.get(k);
-    if (id == null) {
-      id = verts.length;
-      verts.push([x, y, z]);
-      vMap.set(k, id);
-    }
-    return id;
-  };
-  let tris = [];
-  if (indices && indices.length) {
-    for (let i = 0; i < indices.length; i += 3) {
-      const a = indices[i] * 3,
-        b = indices[i + 1] * 3,
-        c = indices[i + 2] * 3;
-      tris.push([
-        vid(positions[a], positions[a + 1], positions[a + 2]),
-        vid(positions[b], positions[b + 1], positions[b + 2]),
-        vid(positions[c], positions[c + 1], positions[c + 2]),
-      ]);
-    }
-  } else {
-    for (let i = 0; i < positions.length; i += 9) {
-      tris.push([
-        vid(positions[i], positions[i + 1], positions[i + 2]),
-        vid(positions[i + 3], positions[i + 4], positions[i + 5]),
-        vid(positions[i + 6], positions[i + 7], positions[i + 8]),
-      ]);
-    }
-  }
-  const maxE2 = maxEdge * maxEdge;
-  const len2 = (a, b) => {
-    const dx = verts[a][0] - verts[b][0],
-      dy = verts[a][1] - verts[b][1],
-      dz = verts[a][2] - verts[b][2];
-    return dx * dx + dy * dy + dz * dz;
-  };
-  const midCache = new Map();
-  const mid = (a, b) => {
-    const k = a < b ? `${a}_${b}` : `${b}_${a}`;
-    let m = midCache.get(k);
-    if (m == null) {
-      m = verts.length;
-      verts.push([
-        (verts[a][0] + verts[b][0]) / 2,
-        (verts[a][1] + verts[b][1]) / 2,
-        (verts[a][2] + verts[b][2]) / 2,
-      ]);
-      midCache.set(k, m);
-    }
-    return m;
-  };
-  for (let pass = 0; pass < maxPasses; pass++) {
-    if (
-      !tris.some(
-        ([a, b, c]) =>
-          len2(a, b) > maxE2 || len2(b, c) > maxE2 || len2(c, a) > maxE2,
-      )
-    )
-      break;
-    // Each pass quadruples the count; stop before exceeding the cap so the result
-    // stays under the downstream makeSolidFromMesh face limit.
-    if (tris.length * 4 > maxTris) break;
-    const next = [];
-    for (const [a, b, c] of tris) {
-      const ab = mid(a, b),
-        bc = mid(b, c),
-        ca = mid(c, a);
-      next.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
-    }
-    tris = next;
-  }
-  const outPos = new Array(verts.length * 3);
-  for (let i = 0; i < verts.length; i++) {
-    outPos[i * 3] = verts[i][0];
-    outPos[i * 3 + 1] = verts[i][1];
-    outPos[i * 3 + 2] = verts[i][2];
-  }
-  const outIdx = new Array(tris.length * 3);
-  for (let i = 0; i < tris.length; i++) {
-    outIdx[i * 3] = tris[i][0];
-    outIdx[i * 3 + 1] = tris[i][1];
-    outIdx[i * 3 + 2] = tris[i][2];
-  }
-  return { positions: outPos, indices: outIdx };
-}
-
-// Build the flat relief prism (extruded loops) and subdivide it so the wrap onto
-// a surface of radius R stays smooth — maxEdge ≈ a constant angular step on the
-// surface, so a tighter curve gets proportionally more triangles.
-// `edgeFactor` sets the target step as a fraction of R: a sphere curves in BOTH
-// directions, so it needs a finer step (more triangles) than a cylinder's
+// Build the flat relief prism from the centred 2D loops and quality-mesh it (see
+// embossTessellate) so the wrap onto a surface of radius R stays smooth.
+// `edgeFactor` sets the target edge as a fraction of R: a sphere curves in BOTH
+// directions, so it needs a finer step (smaller factor) than a cylinder's
 // single-direction bend to avoid a jagged, faceted relief surface.
-function flatPrismMesh(shapes, depth, R, edgeFactor = 0.12) {
-  const geo = new THREE.ExtrudeGeometry(shapes, {
-    depth,
-    bevelEnabled: false,
-    curveSegments: 8,
-  });
-  const flatPos = Array.from(geo.attributes.position.array);
-  const flatIdx = geo.index ? Array.from(geo.index.array) : null;
-  geo.dispose();
+function flatPrismMesh(loops, depth, R, edgeFactor = 0.12) {
   const maxEdge = Math.max(0.02, (R > 1e-3 ? R : 1) * edgeFactor);
-  // Cap the triangle count: makeSolidFromMesh rejects a wrapped mesh over ~5000
-  // faces (curved tris don't merge), so large text — or normal text on a
-  // scaled-DOWN body, where invScale magnifies both the loops and the relief
-  // depth — would explode past the limit and the boolean would silently return
-  // nothing.  Cap just under the kernel limit so a finer step still fits when it
-  // can; the cap coarsens only when it must.
-  return subdivideToMaxEdge(flatPos, flatIdx, maxEdge, 7, 4800);
+  return prismFromLoops(loops, depth, maxEdge);
 }
 
 // The selected sketch geometry, mapped into one common plane frame, centred on
@@ -252,15 +135,8 @@ function buildConformMesh(loops, cyl, face, params, invScale = 1) {
     ((params.distanceMm || 0) / MM_PER_UNIT) * invScale,
   );
   const prismDepth = relief + EMBOSS_MARGIN;
-  const shapes = loops.map((lp) => {
-    const s = new THREE.Shape(lp.outer.map((p) => new THREE.Vector2(p.x, p.y)));
-    lp.holes.forEach((h) =>
-      s.holes.push(new THREE.Path(h.map((p) => new THREE.Vector2(p.x, p.y)))),
-    );
-    return s;
-  });
   // Subdivide the flat prism so the wrap doesn't leave big faceted triangles.
-  const { positions: sp, indices } = flatPrismMesh(shapes, prismDepth, R);
+  const { positions: sp, indices } = flatPrismMesh(loops, prismDepth, R);
 
   const ang = ((params.angleDeg || 0) * Math.PI) / 180;
   const ca = Math.cos(ang),
@@ -334,17 +210,10 @@ function buildDevelopableConformMesh(loops, dev, face, params, invScale = 1) {
     ((params.distanceMm || 0) / MM_PER_UNIT) * invScale,
   );
   const prismDepth = relief + EMBOSS_MARGIN;
-  const shapes = loops.map((lp) => {
-    const s = new THREE.Shape(lp.outer.map((p) => new THREE.Vector2(p.x, p.y)));
-    lp.holes.forEach((h) =>
-      s.holes.push(new THREE.Path(h.map((p) => new THREE.Vector2(p.x, p.y)))),
-    );
-    return s;
-  });
   // Subdivide to ~the curve's facet length so the wrap follows its bends.
   const avgSeg = total / Math.max(1, curve.length - 1);
   const { positions: sp, indices } = flatPrismMesh(
-    shapes,
+    loops,
     prismDepth,
     avgSeg / 0.12,
   );
@@ -400,16 +269,9 @@ function buildSphereConformMesh(loops, sph, face, params, invScale = 1) {
     ((params.distanceMm || 0) / MM_PER_UNIT) * invScale,
   );
   const prismDepth = relief + EMBOSS_MARGIN;
-  const shapes = loops.map((lp) => {
-    const s = new THREE.Shape(lp.outer.map((p) => new THREE.Vector2(p.x, p.y)));
-    lp.holes.forEach((h) =>
-      s.holes.push(new THREE.Path(h.map((p) => new THREE.Vector2(p.x, p.y)))),
-    );
-    return s;
-  });
   // Subdivide the flat prism finer than a cylinder — the sphere curves in both
   // axes, so a coarser step leaves the relief faces visibly jagged.
-  const { positions: sp, indices } = flatPrismMesh(shapes, prismDepth, R, 0.05);
+  const { positions: sp, indices } = flatPrismMesh(loops, prismDepth, R, 0.05);
 
   const ang = ((params.angleDeg || 0) * Math.PI) / 180;
   const ca = Math.cos(ang),

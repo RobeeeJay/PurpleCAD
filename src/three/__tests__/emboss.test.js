@@ -327,10 +327,12 @@ describe("emboss op", () => {
     );
     expect(stamp.mode).toBe("conform");
     const { positions, indices } = stamp.mesh;
-    // A bare extruded square is ~12 triangles; subdivision blows that up.
-    expect(indices.length / 3).toBeGreaterThan(100);
-    // No giant facets — every edge stays a small fraction of the R=1 radius, so
-    // the wrap reads as a smooth curve.
+    // A bare extruded square is ~12 triangles; the quality cap mesh refines it
+    // well past that (fewer, better-shaped triangles than the old uniform
+    // subdivision, but still clearly tessellated).
+    expect(indices.length / 3).toBeGreaterThan(40);
+    // The real smoothness metric: no giant facets — every edge stays a small
+    // fraction of the R=1 radius, so the wrap reads as a smooth curve.
     let maxEdge = 0;
     for (let i = 0; i < indices.length; i += 3) {
       for (const [a, b] of [
