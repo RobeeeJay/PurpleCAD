@@ -354,26 +354,25 @@ export function rederiveCornerFromLegs(shapes, bridgeIdx) {
 }
 
 // Re-derive every chamfer/bevel corner in a shape list (post-solve repair).
-// Returns the same array reference when there are no corners to touch.  `fixed`
-// is the solver's pinned "idx:field" set: a corner whose trimmed leg endpoint is
-// pinned (e.g. the user is dimensioning that very leg, or dragging its corner) is
-// left alone — re-deriving it would move the pinned point and so reject the edit.
-export function rederiveAllCorners(shapes, fixed = null) {
-  const legPinned = (idx, key) => {
-    if (!fixed) return false;
-    const fs = key === "start" ? ["x1", "y1"] : ["x2", "y2"];
-    return fs.some((f) => fixed.has(`${idx}:${f}`));
-  };
+// Returns the same array reference when there are no corners to touch.  A corner
+// is skipped only when one of its legs has its OWN length dimensioned (a self
+// distance constraint): re-deriving retrims the leg and would fight that
+// dimension, rejecting the edit.  A plain drag — even body-dragging a leg, which
+// pins it just like a dimension does — carries no such constraint, so the corner
+// re-derives and holds its setback/angle instead of growing.
+export function rederiveAllCorners(shapes, constraints = null) {
+  const lengthPinned = (idx) =>
+    !!constraints &&
+    constraints.some(
+      (c) =>
+        c.type === "distance" && c.shapeAIdx === idx && c.shapeBIdx === idx,
+    );
   let out = null;
   for (let i = 0; i < shapes.length; i++) {
     const s = shapes[i];
     if (s?.kind !== "bevel" && s?.kind !== "chamfer") continue;
     const data = s.chamferData || s.bevelData;
-    if (
-      data &&
-      (legPinned(data.aIdx, data.aKey) || legPinned(data.bIdx, data.bKey))
-    )
-      continue;
+    if (data && (lengthPinned(data.aIdx) || lengthPinned(data.bIdx))) continue;
     const res = rederiveCornerFromLegs(out || shapes, i);
     if (!res) continue;
     if (!out) out = shapes.slice();

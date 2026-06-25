@@ -467,7 +467,7 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   // to its legs, so a bevel arc's radius/centre drift free and the fillet breaks
   // as a connected line is dragged.  Re-deriving from the legs restores the proper
   // tangent arc (and the chamfer's exact setback) before residuals are scored.
-  const finalShapes = rederiveAllCorners(shapesAt(x), fixed);
+  const finalShapes = rederiveAllCorners(shapesAt(x), cs);
   const finalRes = residuals(finalShapes, cs, variables);
   let maxResidual = 0;
   for (const v of finalRes) maxResidual = Math.max(maxResidual, Math.abs(v));

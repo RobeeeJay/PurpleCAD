@@ -316,6 +316,29 @@ describe("chamfering a square corner then dragging a side", () => {
     expect(ok).toBe(true);
     expect(sideLen(r[1])).toBeCloseTo(0.5, 3);
   });
+
+  it("holds the chamfer's size when its OWN leg (the top edge) is dragged", () => {
+    // Chamfer the top-left corner, then body-drag the top edge (idx 0 — a chamfer
+    // leg) up.  Dragging a leg pins it just like a dimension, but with no length
+    // constraint the corner must re-derive and keep its size, not grow.
+    const { shapes, constraints, bridge } = chamfer(
+      { aIdx: 3, aKey: "end", bIdx: 0, bKey: "start" },
+      0.25,
+    );
+    const len0 = sideLen(shapes[bridge]);
+    const top = shapes[0];
+    const dragged = shapes.slice();
+    dragged[0] = L(top.x1, top.y1 + 0.6, top.x2, top.y2 + 0.6);
+    const fixedSet = new Set([
+      ...fieldsForPoint(dragged[0], "start").map((f) => `0:${f}`),
+      ...fieldsForPoint(dragged[0], "end").map((f) => `0:${f}`),
+    ]);
+    const { shapes: r, ok } = solveConstraints(dragged, constraints, {
+      fixed: fixedSet,
+    });
+    expect(ok).toBe(true);
+    expect(sideLen(r[bridge])).toBeCloseTo(len0, 3);
+  });
 });
 
 describe("drag locality (nearest connected points absorb the change)", () => {
