@@ -2345,10 +2345,11 @@ export function createSketchInteraction(
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable)
       return;
 
-    // Z X C V B toggle the selection-type filters, in widget order, for whichever
-    // selection widget is showing (sketch: line/point/shape/constraint/object;
-    // 3D: object/face/edge/point — no fifth type, so B is a no-op there).  Bare
-    // keys only — Ctrl/Cmd/Alt combos stay free for copy/undo/etc.
+    // Z X C V B toggle the selection-type filters, in a shared widget order, for
+    // whichever selection widget is showing (object → region → edge/line → point,
+    // then constraint): 3D = object/face/edge/point (no fifth type, so B is a
+    // no-op there); sketch = object/shape/line/point/constraint.  Bare keys only —
+    // Ctrl/Cmd/Alt combos stay free for copy/undo/etc.
     if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
       const idx = { z: 0, x: 1, c: 2, v: 3, b: 4 }[e.key.toLowerCase()];
       if (idx !== undefined) {
@@ -2356,7 +2357,7 @@ export function createSketchInteraction(
         if (sketchModeRef.current) {
           e.preventDefault();
           store.toggleSketchSelType(
-            ["line", "point", "shape", "constraint", "object"][idx],
+            ["object", "shape", "line", "point", "constraint"][idx],
           );
         } else {
           const toggle = [

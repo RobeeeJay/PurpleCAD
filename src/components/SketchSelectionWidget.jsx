@@ -3,9 +3,11 @@ import { useStore } from "../store";
 import { effectiveSketchSelTypes } from "../store/selectionMode.js";
 
 // Sketch-mode selection-type widget (top-right of the view): choose what a click
-// resolves to — Line, Point, Shape (an enclosed area → all its boundary lines),
-// Constraint, or Object (only while the Project tool picks 3D geometry).  A tool
-// greys the kinds it can't use; the user's choice is restored when it closes.
+// resolves to — Object (only while the Project tool picks 3D geometry), Shape (an
+// enclosed area → all its boundary lines), Line, Point, or Constraint.  Ordered to
+// match the 3D selection widget (object → region → edge/line → point), so the
+// Z/X/C/V/B shortcuts pick the analogous kind in either view.  A tool greys the
+// kinds it can't use; the user's choice is restored when it closes.
 
 const LineIcon = () => (
   <svg viewBox="0 0 24 24" width="18" height="18">
@@ -146,7 +148,7 @@ const SketchSelectionWidget = () => {
     projectTool,
     sketchConstraintMode,
   });
-  const keys = ["line", "point", "shape", "constraint", "object"];
+  const keys = ["object", "shape", "line", "point", "constraint"];
 
   return (
     <div className="sketch-selection-widget">
