@@ -17,7 +17,14 @@
     "addon:build": "npm --prefix native/occ-addon run build",
     "addon:test": "npm --prefix native/occ-addon test",
     "sqlite:rebuild": "electron-rebuild -w better-sqlite3",
-    "electron:build": "npm run sqlite:rebuild && vite build && electron-builder --config.mac.target=dmg"
+    "electron:build": "npm run sqlite:rebuild && vite build && electron-builder --config.mac.target=dmg",
+    "dist": "npm run addon:build && vite build && electron-builder --publish never",
+    "dist:mac": "npm run addon:build && vite build && electron-builder --mac --publish never",
+    "dist:mac-arm64": "npm run addon:build && vite build && electron-builder --mac --arm64 --publish never",
+    "dist:mac-x64": "npm run addon:build && vite build && electron-builder --mac --x64 --publish never",
+    "dist:win": "npm run addon:build && vite build && electron-builder --win --publish never",
+    "dist:linux": "npm run addon:build && vite build && electron-builder --linux --publish never",
+    "dist:all": "npm run addon:build && vite build && electron-builder --mac --win --linux --publish never"
   },
   "build": {
     "appId": "com.purplecad",
@@ -45,11 +52,52 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
           ]
         }
       ],
       "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Graphics"
     },
     "afterPack": "scripts/afterPack.cjs"
   },

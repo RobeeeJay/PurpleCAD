@@ -9,10 +9,18 @@ const path = require("path");
 const fs = require("fs");
 const { execSync } = require("child_process");
 
-const OCC_SRC = path.join(process.env.HOME, "occ-arm64", "lib");
+// OCC dylib dir per target arch.  electron-builder's Arch enum: 1 = x64,
+// 3 = arm64.  Each mac arch links against its own OCC build (~/occ-arm64,
+// ~/occ-x64); override with OCC_LIB_DIR if installed elsewhere.
+const occLibDirForArch = (arch) => {
+  if (process.env.OCC_LIB_DIR) return process.env.OCC_LIB_DIR;
+  const name = { 1: "x64", 3: "arm64" }[arch] ?? "arm64";
+  return path.join(process.env.HOME, `occ-${name}`, "lib");
+};
 
-module.exports = async function afterPack({ appOutDir, packager }) {
+module.exports = async function afterPack({ appOutDir, packager, arch }) {
   if (packager.platform.name !== "mac") return;
+  const OCC_SRC = occLibDirForArch(arch);
 
   const appName = packager.appInfo.productFilename;
   const resourcesDir = path.join(
