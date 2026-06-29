@@ -118,11 +118,25 @@ export default function SketchOverlays({
     useStore.getState().setSketchConstraintMode(null);
   };
 
-  // Cancel discards the whole offset (it was created on entry) via the
-  // per-sketch undo, matching the extrude/chamfer "Cancel removes it" flow.
+  // Cancel.  For a freshly created offset, discard the whole thing via the
+  // per-sketch undo (matching the extrude/chamfer "Cancel removes it" flow).
+  // For an edit of an existing offset, the typed value was only live-previewed
+  // (no history), so restore the prior distance instead of undoing.
   const cancelOffset = () => {
+    const di = useStore.getState().sketchDistanceInput;
     offsetDraftRef.current = null;
-    useStore.getState().undoSketch(selectedId);
+    if (di?.created) {
+      useStore.getState().undoSketch(selectedId);
+    } else if (di) {
+      useStore
+        .getState()
+        .previewSketchOffsetDistance(
+          selectedId,
+          di.offsetGroup,
+          di.offsetConstraintIdx,
+          di.defaultDistance,
+        );
+    }
     cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
     useStore.getState().setSketchDistanceInput(null);
     useStore.getState().setSketchConstraintMode(null);

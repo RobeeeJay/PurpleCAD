@@ -38,6 +38,10 @@ export function offsetSelectedSketchGeometry(selectedId, indices, negative) {
       offsetConstraintIdx: lastIdx,
       offsetGroup: constraints[lastIdx].offsetGroup,
       defaultDistance: constraints[lastIdx].distance,
+      // Freshly created this entry — Cancel discards the whole offset.  Editing
+      // an existing offset (double-click) sets no flag, so Cancel restores the
+      // prior distance instead of deleting the user's offset.
+      created: true,
     });
     store.setSketchConstraintMode("distance");
   }
