@@ -141,7 +141,11 @@ function residuals(shapes, constraints, variables) {
         out.push((nl.r ?? 0) - ((ol.r ?? 0) + d));
       } else if (nl?.type === "arc" && ol?.type === "arc") {
         // Concentric arc offset: shared centre + angles, radius offset by d.
-        const d = resolveConstraintDistance(c, variables);
+        // sideSign (set when the offset was created for a fillet corner) flips the
+        // radius change so it matches which way the legs offset — without it a
+        // reversed-wound loop grows the fillet when it should shrink, tearing the
+        // arc off its legs.  Plain concentric arcs leave it 1 (grow with +d).
+        const d = resolveConstraintDistance(c, variables) * (c.sideSign ?? 1);
         out.push(nl.cx - ol.cx);
         out.push(nl.cy - ol.cy);
         out.push((nl.r ?? 0) - ((ol.r ?? 0) + d));
@@ -165,7 +169,10 @@ function residuals(shapes, constraints, variables) {
         const olen = Math.hypot(odx, ody) || 1e-9;
         // sin of the angle between the two directions → 0 when parallel.
         out.push((ndx * ody - ndy * odx) / (nlen * olen));
-        const d = resolveConstraintDistance(c, variables);
+        // sideSign flips the offset side for a chamfer-line bridge whose own
+        // right-normal points opposite the loop's (else it offsets the wrong way
+        // and stretches off the corner).  Plain offset lines leave it 1.
+        const d = resolveConstraintDistance(c, variables) * (c.sideSign ?? 1);
         out.push(((nl.x1 - ol.x1) * ody - (nl.y1 - ol.y1) * odx) / olen - d);
       } else out.push(0, 0);
     } else if (c.type === "angle") {

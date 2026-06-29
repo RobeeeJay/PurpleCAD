@@ -57,12 +57,14 @@ export const useStore = create((set, get) => ({
 // drive actions via page.evaluate, instead of trying to assert on opaque WebGL
 // canvas pixels.  Gated behind the __E2E__ compile-time flag (vite.config.js,
 // driven by the VITE_E2E shell var via the `e2e:build` npm script) so it never
-// ships in a normal build.  `typeof` guards keep it inert under vitest/node,
-// where __E2E__ isn't defined.
+// ships in a normal build.  Also exposed in the Vite dev server
+// (import.meta.env.DEV) so it's available for debugging via devtools; that flag
+// is false in a production `vite build`, so it still never ships.  `typeof`
+// guards keep it inert under vitest/node, where neither flag is defined.
 if (
   typeof window !== "undefined" &&
-  typeof __E2E__ !== "undefined" &&
-  __E2E__
+  ((typeof __E2E__ !== "undefined" && __E2E__) ||
+    (typeof import.meta !== "undefined" && import.meta.env?.DEV))
 ) {
   window.__store = useStore;
 }

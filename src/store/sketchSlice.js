@@ -1455,6 +1455,106 @@ export const createSketchSlice = (set) => ({
         });
       });
 
+      // Chamfer / fillet corners need their offset SIDE corrected.  Every other
+      // edge of a closed loop offsets to a consistent side via its own
+      // right-normal because the loop is consistently wound, but a chamfer
+      // line / bevel arc bridge is built from the junction's (arbitrary) a/b
+      // order, so its own normal can point the opposite way.  Then the
+      // perpendicular-offset residual drives it to the wrong side while the
+      // corner coincidents pull it to the legs — it stretches into a huge wedge
+      // off the corner.  Decide the correct side here (where the legs are) and
+      // record `sideSign` on the bridge's offset constraint so the solver and
+      // later distance edits keep it.  A bevel additionally needs coincidents
+      // tying its arc ends to the legs (the corner chaining below only links
+      // lines, so the arc would otherwise float and the re-solve under-determine);
+      // a chamfer's line bridge is already chained.
+      const rightNormal = (s) => {
+        const dx = s.x2 - s.x1,
+          dy = s.y2 - s.y1;
+        const l = Math.hypot(dx, dy) || 1e-9;
+        return { x: dy / l, y: -dx / l };
+      };
+      // Intersection of two infinite lines (each given as a segment), or null.
+      const lineLineIntersect = (p, q) => {
+        const r1x = p.x2 - p.x1,
+          r1y = p.y2 - p.y1;
+        const r2x = q.x2 - q.x1,
+          r2y = q.y2 - q.y1;
+        const den = r1x * r2y - r1y * r2x;
+        if (Math.abs(den) < 1e-12) return null;
+        const t = ((q.x1 - p.x1) * r2y - (q.y1 - p.y1) * r2x) / den;
+        return { x: p.x1 + t * r1x, y: p.y1 + t * r1y };
+      };
+      sel.forEach((origIdx) => {
+        const o = shapes[origIdx];
+        const data = o?.chamferData || o?.bevelData;
+        if ((o?.kind !== "chamfer" && o?.kind !== "bevel") || !data) return;
+        const { aIdx, aKey, bIdx, bKey } = data;
+        if (!newIdxOf.has(aIdx) || !newIdxOf.has(bIdx)) return;
+        const copyIdx = newIdxOf.get(origIdx);
+        const oc = newConstraints.find(
+          (c) => c.type === "offset" && c.origIdx === origIdx,
+        );
+
+        if (o.kind === "bevel" && o.type === "arc") {
+          // Concentric arc: its radius is the original centre's perpendicular
+          // distance to the offset leg, so the sign follows from rNew vs r.
+          const legA = newShapes[newIdxOf.get(aIdx) - base];
+          const lx = legA.x2 - legA.x1,
+            ly = legA.y2 - legA.y1;
+          const len = Math.hypot(lx, ly) || 1e-9;
+          const rNew = Math.abs(
+            ((o.cx - legA.x1) * ly - (o.cy - legA.y1) * lx) / len,
+          );
+          const sideSign = rNew - o.r >= 0 === dScene >= 0 ? 1 : -1;
+          newShapes[copyIdx - base].r = Math.max(1e-4, rNew);
+          if (oc) oc.sideSign = sideSign;
+          newConstraints.push(
+            {
+              type: "coincident",
+              shapeAIdx: copyIdx,
+              pointA: "start",
+              shapeBIdx: newIdxOf.get(aIdx),
+              pointB: aKey,
+            },
+            {
+              type: "coincident",
+              shapeAIdx: copyIdx,
+              pointA: "end",
+              shapeBIdx: newIdxOf.get(bIdx),
+              pointB: bKey,
+            },
+          );
+        } else if (o.type === "line") {
+          // Chamfer line.  A tool-built chamfer's bridge is wound opposite the
+          // loop, so a plain +d offset throws it to the far side (the wedge).
+          // Record sideSign so the offset residual sides it correctly, and seed
+          // the copy at the true parallel offset — the chamfer line shifted to
+          // the legs' side, clipped to where it crosses the two offset legs — so
+          // the solver starts at the answer and converges (a bare translation can
+          // fail, leaving every edge merely shifted with nothing rejoined).  The
+          // bridge keeps its offset constraint so the distance editor moves it.
+          const nC = rightNormal(o);
+          const nA = rightNormal(shapes[aIdx]);
+          const sideSign = nC.x * nA.x + nC.y * nA.y >= 0 ? 1 : -1;
+          if (oc) oc.sideSign = sideSign;
+          const chamOff = offsetShapeGeometry(o, dScene * sideSign);
+          const legACopy = newShapes[newIdxOf.get(aIdx) - base];
+          const legBCopy = newShapes[newIdxOf.get(bIdx) - base];
+          const s = lineLineIntersect(chamOff, legACopy);
+          const e = lineLineIntersect(chamOff, legBCopy);
+          if (s && e)
+            newShapes[copyIdx - base] = {
+              type: "line",
+              x1: s.x,
+              y1: s.y,
+              x2: e.x,
+              y2: e.y,
+            };
+          else newShapes[copyIdx - base] = chamOff;
+        }
+      });
+
       // Carry shared corners over to the copies: group the originals' endpoints
       // by position and chain a coincident between the matching new endpoints.
       const EPS = 1e-4;
