@@ -44,6 +44,12 @@ export function createSketchConstraintHandlers(
     if (!selItem || !sketchMesh) return;
     const shapes = selItem.shapes || [];
     const store = useStore.getState();
+    // Offset-result geometry is positioned by its offset constraint; a dimension
+    // on it would over-constrain and fight that.  Reject any pick on an offset
+    // copy (the original it was offset from stays dimensionable).
+    const constraints = selItem.constraints || [];
+    const isOffsetCopy = (idx) =>
+      constraints.some((c) => c.type === "offset" && c.shapeIdx === idx);
     const snap = findSnap(screenX, screenY, shapes, sketchMesh);
 
     if (!snap) {
@@ -62,7 +68,7 @@ export function createSketchConstraintHandlers(
       if (hits.length === 0 || hits[0].object.userData.shapeIdx == null) return;
       const lineIdx = hits[0].object.userData.shapeIdx;
       const shape = shapes[lineIdx];
-      if (!shape) return;
+      if (!shape || isOffsetCopy(lineIdx)) return;
       store.setSketchConstraintFirstPoint(null);
       clearCoincidentFirstOverlay();
       if (shape.type === "circle") {
@@ -85,6 +91,7 @@ export function createSketchConstraintHandlers(
       return;
     }
 
+    if (isOffsetCopy(snap.shapeIdx)) return;
     const firstPt = store.sketchConstraintFirstPoint;
     if (!firstPt) {
       store.setSketchConstraintFirstPoint({

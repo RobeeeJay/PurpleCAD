@@ -64,6 +64,11 @@ export function createSketchModifyHelpers(
     if (!snap) return null;
     const junc = findJunction(snap, shapes, constraints);
     if (!junc) return null;
+    // Offset-result lines are driven by their offset constraint — chamfering /
+    // filleting them would fight it.  Reject a junction touching an offset copy.
+    const isOffsetCopy = (idx) =>
+      constraints.some((c) => c.type === "offset" && c.shapeIdx === idx);
+    if (isOffsetCopy(junc.aIdx) || isOffsetCopy(junc.bIdx)) return null;
     const edit = buildChamferEdit(
       shapes,
       junc,
