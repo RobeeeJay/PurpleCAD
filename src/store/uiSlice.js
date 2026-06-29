@@ -448,7 +448,8 @@ export const createUiSlice = (set) => ({
     set({
       toolError: null,
       embossTool: {
-        picking: null,
+        // Open straight into geometry picking — the first thing the user does.
+        picking: "geometry",
         itemId: null,
         profiles: [],
         face: null,
