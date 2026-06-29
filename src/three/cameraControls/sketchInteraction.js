@@ -2345,6 +2345,55 @@ export function createSketchInteraction(
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable)
       return;
 
+    // Arrow keys nudge the selected sketch geometry by 1mm (one grid step in
+    // scene units).  Translates the whole selection rigidly, then solves the
+    // rest of the system around it — same path a body drag uses.
+    const nudge = {
+      ArrowUp: [0, 1],
+      ArrowDown: [0, -1],
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+    }[e.key];
+    if (
+      nudge &&
+      sketchModeRef.current &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
+      const sel = useStore.getState().selectedSketchElement;
+      const indices =
+        multiSelectedIndices.length > 0
+          ? [...multiSelectedIndices]
+          : sel?.shapeIdx != null
+            ? [sel.shapeIdx]
+            : null;
+      const selItem = itemsRef.current.find(
+        (i) => i.id === selectedIdRef.current,
+      );
+      if (indices && selItem) {
+        e.preventDefault();
+        const step = 1 / MM_PER_UNIT;
+        const dx = nudge[0] * step;
+        const dy = nudge[1] * step;
+        const placed = new Map();
+        const keys = new Map();
+        for (const idx of indices) {
+          const moved = translateShape(selItem.shapes[idx], dx, dy);
+          if (moved) {
+            placed.set(idx, moved);
+            keys.set(idx, null);
+          }
+        }
+        if (placed.size > 0) {
+          const solved = solveDrag(selItem.id, placed, keys, null);
+          useStore.getState().updateSketchShapes(selItem.id, solved);
+          refreshSketchSelectionOverlay();
+        }
+      }
+      return;
+    }
+
     // Z X C V B toggle the selection-type filters, in a shared widget order, for
     // whichever selection widget is showing (object → region → edge/line → point,
     // then constraint): 3D = object/face/edge/point (no fifth type, so B is a
