@@ -358,25 +358,76 @@ const BevelSection = ({ bare = false }) => {
         onClick={toggleEmboss}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          {/* a plate with a raised letter/relief */}
-          <rect
-            x="3"
-            y="6"
-            width="18"
-            height="12"
-            rx="1"
-            fill="none"
+          {/* Cylinder with a curved embossed E + relief-depth arrow */}
+          <ellipse
+            cx="12"
+            cy="6"
+            rx="8"
+            ry="3"
+            fill="rgba(108,63,212,0.15)"
             stroke="#c4c2b8"
-            strokeWidth="1.5"
+            strokeWidth="1.2"
+          />
+          <line
+            x1="4"
+            y1="6"
+            x2="4"
+            y2="18"
+            stroke="#c4c2b8"
+            strokeWidth="1.2"
+          />
+          <line
+            x1="20"
+            y1="6"
+            x2="20"
+            y2="18"
+            stroke="#c4c2b8"
+            strokeWidth="1.2"
           />
           <path
-            d="M9 15 L9 9 L12 9 Q14 9 14 11 Q14 13 12 13 L9 13"
-            fill="rgba(108,63,212,0.25)"
+            d="M 4,18 A 8 3 0 0 0 20,18"
+            fill="rgba(108,63,212,0.08)"
+            stroke="#c4c2b8"
+            strokeWidth="1.2"
+          />
+          <path
+            d="M 8.3,11.7 Q 7.7,14.5 8.3,17.3"
+            fill="none"
             stroke="#6C3FD4"
-            strokeWidth="1.5"
-            strokeLinejoin="miter"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+          <path
+            d="M 8.3,11.8 Q 11,12.8 13.4,12"
+            fill="none"
+            stroke="#6C3FD4"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+          <path
+            d="M 8.2,14.5 Q 10,15.2 11.8,14.7"
+            fill="none"
+            stroke="#6C3FD4"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+          <path
+            d="M 8.3,17.2 Q 11,18.2 13.4,17.4"
+            fill="none"
+            stroke="#6C3FD4"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+          <line
+            x1="17"
+            y1="4.5"
+            x2="19"
+            y2="2.5"
+            stroke="#D4A33F"
+            strokeWidth="1"
             strokeLinecap="square"
           />
+          <polygon fill="#D4A33F" points="19,2.5 16.7,2.9 18.6,4.8" />
         </svg>
       </button>
       <button
