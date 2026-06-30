@@ -408,24 +408,112 @@ export const ShellIcon = () => (
 
 export const EmbossIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14">
-    <rect
-      x="3"
-      y="6"
-      width="18"
-      height="12"
-      rx="1"
-      fill="none"
+    {/* Cylinder */}
+    <ellipse
+      cx="12"
+      cy="6"
+      rx="8"
+      ry="3"
+      fill="currentColor"
+      fillOpacity="0.15"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth="1.2"
+    />
+    <line
+      x1="4"
+      y1="6"
+      x2="4"
+      y2="18"
+      stroke="currentColor"
+      strokeWidth="1.2"
+    />
+    <line
+      x1="20"
+      y1="6"
+      x2="20"
+      y2="18"
+      stroke="currentColor"
+      strokeWidth="1.2"
     />
     <path
-      d="M9 15 L9 9 L12 9 Q14 9 14 11 Q14 13 12 13 L9 13"
+      d="M 4,18 A 8 3 0 0 0 20,18"
+      fill="currentColor"
+      fillOpacity="0.08"
+      stroke="currentColor"
+      strokeWidth="1.2"
+    />
+    {/* Curved embossed E, lowered toward the front of the cylinder */}
+    <path
+      d="M 8.3,11.7 Q 7.7,14.5 8.3,17.3"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinejoin="miter"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+    <path
+      d="M 8.4,11.9 Q 7.8,14.5 8.4,17.1"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="0.5"
+      opacity="0.55"
+      strokeLinecap="round"
+    />
+    <path
+      d="M 8.3,11.8 Q 11,12.8 13.4,12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+    <path
+      d="M 8.4,12.1 Q 11,13 13.3,12.3"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="0.5"
+      opacity="0.55"
+      strokeLinecap="round"
+    />
+    <path
+      d="M 8.2,14.5 Q 10,15.2 11.8,14.7"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+    <path
+      d="M 8.3,14.8 Q 10,15.5 11.7,15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="0.5"
+      opacity="0.55"
+      strokeLinecap="round"
+    />
+    <path
+      d="M 8.3,17.2 Q 11,18.2 13.4,17.4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+    <path
+      d="M 8.4,17.5 Q 11,18.4 13.3,17.7"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="0.5"
+      opacity="0.55"
+      strokeLinecap="round"
+    />
+    {/* Relief depth arrow */}
+    <line
+      x1="17"
+      y1="4.5"
+      x2="19"
+      y2="2.5"
+      stroke="currentColor"
+      strokeWidth="1"
       strokeLinecap="square"
     />
+    <polygon fill="currentColor" points="19,2.5 16.7,2.9 18.6,4.8" />
   </svg>
 );
 
