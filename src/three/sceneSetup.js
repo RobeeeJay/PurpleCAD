@@ -258,7 +258,7 @@ export function createGrid(scene, theme) {
       pool: new Map(),
       step: 1,
       skipMod: 5,
-      showBelow: 45,
+      showBelow: 17,
       maxSpan: 130,
     },
     {
@@ -298,7 +298,7 @@ export function updateRuler3D(rulerGroup, cx, cz, viewHeight, theme) {
     const visible = viewHeight < tier.showBelow;
     tier.group.visible = visible;
     if (!visible) continue;
-    const span = Math.min(viewHeight * 1.3, tier.maxSpan);
+    const span = Math.min(viewHeight * 2, tier.maxSpan);
     const { step, skipMod, pool, group, name } = tier;
     // Skip label indices that belong to a coarser tier (work in integer step
     // counts so 1/0.1 float error can't leak a 10 mm label into the 1 mm tier).
