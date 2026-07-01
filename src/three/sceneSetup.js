@@ -209,8 +209,8 @@ export function createGrid(scene, theme) {
         vec2 g01 = abs(fract(coord / 0.1 - 0.5) - 0.5) / fwidth(coord / 0.1);
         float ultra = 1.0 - min(min(g01.x, g01.y), 1.0);
         float dist = length(vWorldPos.xz - uCameraPos.xz);
-        float fadeFine   = 1.0 - smoothstep(8.0,  45.0, dist);
-        float fadeCoarse = 1.0 - smoothstep(20.0, 80.0, dist);
+        float fadeFine   = 1.0 - smoothstep(8.0,  120.0, dist);
+        float fadeCoarse = 1.0 - smoothstep(20.0, 260.0, dist);
         // Lighter than the 10 mm lines (0.3 vs 0.6), and only when zoomed in.
         float ultraA = ultra * fadeFine * 0.3 * uUltraFade;
         float alpha = max(max(coarse * fadeCoarse, fine * fadeFine * 0.6), ultraA);
@@ -247,10 +247,10 @@ export function createGrid(scene, theme) {
       pool: new Map(),
       step: 5,
       skipMod: 0,
-      // Hide the 50 mm markers too once zoomed very far out (view height > 400
-      // units ≈ 4 m), leaving the ruler clear.
-      showBelow: 40,
-      maxSpan: 120,
+      // Hide the 50 mm markers too once zoomed very far out, leaving the ruler
+      // clear.
+      showBelow: 80,
+      maxSpan: 320,
     },
     {
       name: "fine",
@@ -258,8 +258,8 @@ export function createGrid(scene, theme) {
       pool: new Map(),
       step: 1,
       skipMod: 5,
-      showBelow: 25,
-      maxSpan: 50,
+      showBelow: 45,
+      maxSpan: 130,
     },
     {
       name: "ultra",
