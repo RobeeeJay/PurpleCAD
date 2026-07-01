@@ -428,7 +428,7 @@ const DocumentSection = () => {
               Import STEP
             </button>
             <button className="toolbar-dropdown-item" disabled>
-              Import PNG
+              Import image (.png)
             </button>
           </div>,
           document.body,
