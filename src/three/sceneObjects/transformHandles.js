@@ -15,7 +15,6 @@ import {
   AXIS_X_COLOR,
   AXIS_Y_COLOR,
   AXIS_Z_COLOR,
-  FACE_HOVER_COLOR,
   toCssHex,
 } from "../theme.js";
 
@@ -23,6 +22,36 @@ import {
 // the axis/scale handle offset (ext + 0.5).  Object-size-independent so the
 // widget doesn't grow/shrink as the object is resized.
 const GIZMO_EXT = 1.0;
+
+// Unit-box (±0.5) wireframe whose 12 edges are vertex-coloured by their axis:
+// the 4 X-running edges red, the 4 Y-running green, the 4 Z-running blue.
+function buildAxisColoredBoxEdges() {
+  const s = 0.5;
+  const cX = new THREE.Color(AXIS_X_COLOR);
+  const cY = new THREE.Color(AXIS_Y_COLOR);
+  const cZ = new THREE.Color(AXIS_Z_COLOR);
+  const positions = [];
+  const colors = [];
+  const edge = (ax, ay, az, bx, by, bz, c) => {
+    positions.push(ax, ay, az, bx, by, bz);
+    colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
+  };
+  for (const y of [-s, s]) for (const z of [-s, s]) edge(-s, y, z, s, y, z, cX); // X edges
+  for (const x of [-s, s]) for (const z of [-s, s]) edge(x, -s, z, x, s, z, cY); // Y edges
+  for (const x of [-s, s]) for (const y of [-s, s]) edge(x, y, -s, x, y, s, cZ); // Z edges
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  return new THREE.LineSegments(
+    geo,
+    new THREE.LineBasicMaterial({
+      vertexColors: true,
+      depthTest: false,
+      transparent: true,
+      opacity: 0.9,
+    }),
+  );
+}
 
 export function buildTransformHandles(selectedId, items, objectsRef) {
   const mesh = objectsRef.current[selectedId];
@@ -90,15 +119,9 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   });
 
   const dim = getMeshDimensions(mesh);
-  const boxMesh = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
-    new THREE.LineBasicMaterial({
-      color: FACE_HOVER_COLOR,
-      depthTest: false,
-      transparent: true,
-      opacity: 0.7,
-    }),
-  );
+  // Colour each unit-box edge by the axis it runs along (X red, Y green, Z blue)
+  // so every dimension of the surrounding box is highlighted in its axis colour.
+  const boxMesh = buildAxisColoredBoxEdges();
   boxMesh.renderOrder = 998;
   boxMesh.scale.set(dim.w, dim.h, dim.d);
   boxMesh.position.copy(bboxCenter);

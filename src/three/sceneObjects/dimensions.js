@@ -165,6 +165,21 @@ export function getObjectExtent(itemType, uniformScale) {
   }
 }
 
+// Draw a dimension label as plain coloured text with a thin dark outline for
+// legibility — no filled/bordered background box.
+function drawDimText(ctx, W, H, text, cssColor) {
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "bold 30px monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "rgba(12,12,12,0.85)";
+  ctx.strokeText(text, W / 2, H / 2);
+  ctx.fillStyle = cssColor;
+  ctx.fillText(text, W / 2, H / 2);
+}
+
 export function makeDimSprite(text, cssColor) {
   const W = 168,
     H = 52;
@@ -172,17 +187,7 @@ export function makeDimSprite(text, cssColor) {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = "rgba(12,12,12,0.85)";
-  ctx.fillRect(3, 3, W - 6, H - 6);
-  ctx.strokeStyle = cssColor;
-  ctx.lineWidth = 2.5;
-  ctx.strokeRect(3, 3, W - 6, H - 6);
-  ctx.fillStyle = cssColor;
-  ctx.font = "bold 26px monospace";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, W / 2, H / 2);
+  drawDimText(ctx, W, H, text, cssColor);
   const tex = new THREE.CanvasTexture(canvas);
   const mat = new THREE.SpriteMaterial({
     map: tex,
@@ -197,31 +202,21 @@ export function makeDimSprite(text, cssColor) {
 
 export function redrawDimSprite(dimObj, text, cssColor) {
   const { canvas, ctx, mat } = dimObj;
-  const W = canvas.width,
-    H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = "rgba(12,12,12,0.85)";
-  ctx.fillRect(3, 3, W - 6, H - 6);
-  ctx.strokeStyle = cssColor;
-  ctx.lineWidth = 2.5;
-  ctx.strokeRect(3, 3, W - 6, H - 6);
-  ctx.fillStyle = cssColor;
-  ctx.font = "bold 26px monospace";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, W / 2, H / 2);
+  drawDimText(ctx, canvas.width, canvas.height, text, cssColor);
   mat.map.needsUpdate = true;
 }
 
+// Sit each label at the MIDPOINT of the matching-colour bounding-box edge: the
+// X label on a bottom-front X edge, Y on a front-right vertical edge, Z on a
+// bottom-right edge — so it reads as the length of that edge.
 export function placeDimLabels(boundingBox, pos, dim) {
   const { labelX, labelY, labelZ } = boundingBox;
-  const GAP = 0.75;
   const hw = dim.w / 2,
     hh = dim.h / 2,
     hd = dim.d / 2;
-  labelX.sprite.position.set(pos.x, pos.y + hh + GAP, pos.z - hd);
-  labelY.sprite.position.set(pos.x + hw + GAP, pos.y, pos.z - hd);
-  labelZ.sprite.position.set(pos.x + hw + GAP, pos.y + hh + GAP, pos.z);
+  labelX.sprite.position.set(pos.x, pos.y - hh, pos.z + hd);
+  labelY.sprite.position.set(pos.x + hw, pos.y, pos.z + hd);
+  labelZ.sprite.position.set(pos.x + hw, pos.y - hh, pos.z);
 }
 
 export function makeMeasureLabel(text, cssColor) {
