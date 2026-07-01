@@ -13,8 +13,6 @@ import {
 const DocumentSection = () => {
   const history = useStore((s) => s.history);
   const activeHistoryId = useStore((s) => s.activeHistoryId);
-  const loadDocument = useStore((s) => s.loadDocument);
-  const createProject = useStore((s) => s.createProject);
   const setProjectsDialogOpen = useStore((s) => s.setProjectsDialogOpen);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
@@ -28,7 +26,6 @@ const DocumentSection = () => {
   const selectedItem = items.find((i) => i.id === selectedId);
   const isSketch = selectedItem?.type === "sketch";
 
-  const fileInputRef = useRef(null);
   const importInputRef = useRef(null);
   const saveBtnRef = useRef(null);
   const saveMenuRef = useRef(null);
@@ -75,34 +72,6 @@ const DocumentSection = () => {
     a.click();
     URL.revokeObjectURL(url);
     setSaveMenuOpen(false);
-  };
-
-  const handleLoadClick = () => {
-    fileInputRef.current.value = "";
-    fileInputRef.current.click();
-  };
-
-  // Load a .cad.json as a NEW project (leaving existing projects untouched),
-  // then load its data into that fresh project.
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const baseName = file.name.replace(/\.(cad\.)?json$/i, "");
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!data.history || !Array.isArray(data.history)) {
-          alert("Invalid document file.");
-          return;
-        }
-        await createProject(baseName || "Imported");
-        loadDocument(data);
-      } catch (err) {
-        alert("Failed to read document: " + err.message);
-      }
-    };
-    reader.readAsText(file);
   };
 
   // Trigger a browser download for a Blob.
@@ -299,35 +268,25 @@ const DocumentSection = () => {
             strokeWidth="1.5"
             strokeLinecap="square"
             strokeLinejoin="miter"
-            d="M4 20 L4 4 L14 4 L20 10 L20 20 Z"
+            d="M4 14 L4 20 L20 20 L20 14"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="16"
+            x2="12"
+            y2="4"
           />
           <polyline
-            stroke="#D4A33F"
+            stroke="#6C3FD4"
             fill="none"
             strokeWidth="1.5"
             strokeLinecap="square"
             strokeLinejoin="miter"
-            points="14,4 14,10 20,10"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="8"
-            y1="14"
-            x2="16"
-            y2="14"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="8"
-            y1="17"
-            x2="14"
-            y2="17"
+            points="7,9 12,4 17,9"
           />
         </svg>
       </button>
@@ -357,30 +316,6 @@ const DocumentSection = () => {
           </div>,
           document.body,
         )}
-      <button
-        className="toolbar-btn"
-        title="Load document"
-        onClick={handleLoadClick}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            d="M4 20 L4 4 L14 4 L20 10 L20 20 Z"
-          />
-          <polyline
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="14,4 14,10 20,10"
-          />
-        </svg>
-      </button>
       <button
         className="toolbar-btn"
         title={
@@ -459,13 +394,6 @@ const DocumentSection = () => {
           </text>
         </svg>
       </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json,.cad.json"
-        style={{ display: "none" }}
-        onChange={handleFileChange}
-      />
       <input
         ref={importInputRef}
         type="file"
