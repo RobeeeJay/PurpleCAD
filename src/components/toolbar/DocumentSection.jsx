@@ -57,14 +57,6 @@ const DocumentSection = () => {
     };
   }, [saveMenuOpen]);
 
-  // "New" now creates a fresh project (the current one is kept in the DB and
-  // stays reachable from the Projects manager), so there's nothing to lose.
-  const handleNew = () => {
-    const name = window.prompt("Name for the new project:", "Untitled");
-    if (name == null) return;
-    createProject(name.trim() || "Untitled");
-  };
-
   const handleSave = () => {
     const blob = new Blob(
       [
@@ -291,41 +283,6 @@ const DocumentSection = () => {
             y="13"
             width="8"
             height="7"
-          />
-        </svg>
-      </button>
-      <button className="toolbar-btn" title="New project" onClick={handleNew}>
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            x="3"
-            y="3"
-            width="18"
-            height="18"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="12"
-            y1="7"
-            x2="12"
-            y2="17"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="7"
-            y1="12"
-            x2="17"
-            y2="12"
           />
         </svg>
       </button>
