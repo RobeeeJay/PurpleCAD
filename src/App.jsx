@@ -38,9 +38,15 @@ function App() {
   const notification = useStore((state) => state.notification);
   const clearNotification = useStore((state) => state.clearNotification);
 
-  // Prefix the window/tab title with the active project's name.
+  // Prefix the window/tab title with the active project's name.  Refresh the
+  // list once on mount too: at store-init the DB bridge may not have returned
+  // rows yet, so this backfills projects/activeProjectId when the app is ready.
   const activeProjectId = useStore((state) => state.activeProjectId);
   const projects = useStore((state) => state.projects);
+  const loadProjects = useStore((state) => state.loadProjects);
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
   useEffect(() => {
     const name = projects.find((p) => p.id === activeProjectId)?.name;
     document.title = name ? `${name} — PurpleCAD` : "PurpleCAD";

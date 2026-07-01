@@ -81,7 +81,11 @@ function projectStatePatch() {
 }
 
 export const createProjectSlice = (set, get) => ({
-  loadProjects: () => set({ projects: db.listProjects() }),
+  loadProjects: () =>
+    set({
+      projects: db.listProjects(),
+      activeProjectId: db.getActiveProjectId(),
+    }),
 
   // Capture the current viewport into the given project's thumbnail.
   refreshThumbnail: async (id) => {
