@@ -14,6 +14,8 @@ const DocumentSection = () => {
   const history = useStore((s) => s.history);
   const activeHistoryId = useStore((s) => s.activeHistoryId);
   const setProjectsDialogOpen = useStore((s) => s.setProjectsDialogOpen);
+  const loadDocument = useStore((s) => s.loadDocument);
+  const createProject = useStore((s) => s.createProject);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
@@ -27,32 +29,54 @@ const DocumentSection = () => {
   const isSketch = selectedItem?.type === "sketch";
 
   const importInputRef = useRef(null);
+  const fileInputRef = useRef(null);
   const saveBtnRef = useRef(null);
   const saveMenuRef = useRef(null);
   const [saveMenuOpen, setSaveMenuOpen] = useState(false);
   const [saveMenuPos, setSaveMenuPos] = useState(null);
+  const importBtnRef = useRef(null);
+  const importMenuRef = useRef(null);
+  const [importMenuOpen, setImportMenuOpen] = useState(false);
+  const [importMenuPos, setImportMenuPos] = useState(null);
 
-  useEffect(() => {
-    if (!saveMenuOpen) return;
-    const rect = saveBtnRef.current?.getBoundingClientRect();
-    if (rect) setSaveMenuPos({ top: rect.bottom + 4, left: rect.left });
-    const onPointerDown = (e) => {
-      if (
-        !saveMenuRef.current?.contains(e.target) &&
-        !saveBtnRef.current?.contains(e.target)
-      )
-        setSaveMenuOpen(false);
-    };
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") setSaveMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [saveMenuOpen]);
+  // Position a dropdown under its trigger and close it on outside-click / Esc.
+  const useDropdown = (open, setOpen, btnRef, menuRef, setPos) => {
+    useEffect(() => {
+      if (!open) return;
+      const rect = btnRef.current?.getBoundingClientRect();
+      if (rect) setPos({ top: rect.bottom + 4, left: rect.left });
+      const onPointerDown = (e) => {
+        if (
+          !menuRef.current?.contains(e.target) &&
+          !btnRef.current?.contains(e.target)
+        )
+          setOpen(false);
+      };
+      const onKeyDown = (e) => {
+        if (e.key === "Escape") setOpen(false);
+      };
+      document.addEventListener("pointerdown", onPointerDown);
+      document.addEventListener("keydown", onKeyDown);
+      return () => {
+        document.removeEventListener("pointerdown", onPointerDown);
+        document.removeEventListener("keydown", onKeyDown);
+      };
+    }, [open, setOpen, btnRef, menuRef, setPos]);
+  };
+  useDropdown(
+    saveMenuOpen,
+    setSaveMenuOpen,
+    saveBtnRef,
+    saveMenuRef,
+    setSaveMenuPos,
+  );
+  useDropdown(
+    importMenuOpen,
+    setImportMenuOpen,
+    importBtnRef,
+    importMenuRef,
+    setImportMenuPos,
+  );
 
   const handleSave = () => {
     const blob = new Blob(
@@ -135,12 +159,41 @@ const DocumentSection = () => {
     download(blob, "scene.png");
   };
 
-  // Import — STL/STEP solids in the 3D view, SVG geometry while editing a sketch.
-  const handleImportClick = () => {
+  // Import — open the file picker restricted to the chosen kind.
+  const handleImportKind = (accept) => {
+    setImportMenuOpen(false);
     if (!importInputRef.current) return;
-    importInputRef.current.accept = isSketch ? ".svg" : ".stl,.step,.stp";
+    importInputRef.current.accept = accept;
     importInputRef.current.value = "";
     importInputRef.current.click();
+  };
+
+  // Load a .cad.json document as a NEW project (existing projects untouched),
+  // then load its data into that fresh project.
+  const handleLoadClick = () => {
+    setImportMenuOpen(false);
+    fileInputRef.current.value = "";
+    fileInputRef.current.click();
+  };
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const baseName = file.name.replace(/\.(cad\.)?json$/i, "");
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.history || !Array.isArray(data.history)) {
+          alert("Invalid document file.");
+          return;
+        }
+        await createProject(baseName || "Imported");
+        loadDocument(data);
+      } catch (err) {
+        alert("Failed to read document: " + err.message);
+      }
+    };
+    reader.readAsText(file);
   };
 
   const addImportedSolid = (geometryData, name) => {
@@ -317,13 +370,10 @@ const DocumentSection = () => {
           document.body,
         )}
       <button
+        ref={importBtnRef}
         className="toolbar-btn"
-        title={
-          isSketch
-            ? "Import SVG geometry into this sketch"
-            : "Import an STL or STEP object"
-        }
-        onClick={handleImportClick}
+        title="Load / Import"
+        onClick={() => setImportMenuOpen((open) => !open)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <path
@@ -354,6 +404,35 @@ const DocumentSection = () => {
           />
         </svg>
       </button>
+      {importMenuOpen &&
+        importMenuPos &&
+        createPortal(
+          <div
+            className="toolbar-dropdown-menu"
+            ref={importMenuRef}
+            style={{ top: importMenuPos.top, left: importMenuPos.left }}
+          >
+            <button className="toolbar-dropdown-item" onClick={handleLoadClick}>
+              Load document (.cad.json)
+            </button>
+            <button
+              className="toolbar-dropdown-item"
+              onClick={() => handleImportKind(".stl")}
+            >
+              Import STL
+            </button>
+            <button
+              className="toolbar-dropdown-item"
+              onClick={() => handleImportKind(".step,.stp")}
+            >
+              Import STEP
+            </button>
+            <button className="toolbar-dropdown-item" disabled>
+              Import PNG
+            </button>
+          </div>,
+          document.body,
+        )}
       <button
         className="toolbar-btn"
         title="Variables"
@@ -399,6 +478,13 @@ const DocumentSection = () => {
         type="file"
         style={{ display: "none" }}
         onChange={handleImportFile}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json,.cad.json"
+        style={{ display: "none" }}
+        onChange={handleFileChange}
       />
     </ToolbarSection>
   );
