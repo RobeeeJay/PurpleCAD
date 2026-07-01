@@ -38,6 +38,14 @@ function App() {
   const notification = useStore((state) => state.notification);
   const clearNotification = useStore((state) => state.clearNotification);
 
+  // Prefix the window/tab title with the active project's name.
+  const activeProjectId = useStore((state) => state.activeProjectId);
+  const projects = useStore((state) => state.projects);
+  useEffect(() => {
+    const name = projects.find((p) => p.id === activeProjectId)?.name;
+    document.title = name ? `${name} — PurpleCAD` : "PurpleCAD";
+  }, [projects, activeProjectId]);
+
   // Keep text glyph contours in sync with the active resolution: backfill
   // shapes that predate contour caching AND re-tessellate ones built at a
   // different density when the print/preview toggle changes.  Gated on a
