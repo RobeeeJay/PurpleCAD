@@ -13,8 +13,9 @@ import {
 const DocumentSection = () => {
   const history = useStore((s) => s.history);
   const activeHistoryId = useStore((s) => s.activeHistoryId);
-  const newDocument = useStore((s) => s.newDocument);
   const loadDocument = useStore((s) => s.loadDocument);
+  const createProject = useStore((s) => s.createProject);
+  const setProjectsDialogOpen = useStore((s) => s.setProjectsDialogOpen);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
@@ -56,13 +57,12 @@ const DocumentSection = () => {
     };
   }, [saveMenuOpen]);
 
+  // "New" now creates a fresh project (the current one is kept in the DB and
+  // stays reachable from the Projects manager), so there's nothing to lose.
   const handleNew = () => {
-    if (
-      window.confirm(
-        "Create a new document? All current objects and timeline history will be cleared.",
-      )
-    )
-      newDocument();
+    const name = window.prompt("Name for the new project:", "Untitled");
+    if (name == null) return;
+    createProject(name.trim() || "Untitled");
   };
 
   const handleSave = () => {
@@ -90,23 +90,22 @@ const DocumentSection = () => {
     fileInputRef.current.click();
   };
 
+  // Load a .cad.json as a NEW project (leaving existing projects untouched),
+  // then load its data into that fresh project.
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    const baseName = file.name.replace(/\.(cad\.)?json$/i, "");
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
         if (!data.history || !Array.isArray(data.history)) {
           alert("Invalid document file.");
           return;
         }
-        if (
-          window.confirm(
-            "Load this document? All current objects and timeline history will be cleared.",
-          )
-        )
-          loadDocument(data);
+        await createProject(baseName || "Imported");
+        loadDocument(data);
       } catch (err) {
         alert("Failed to read document: " + err.message);
       }
@@ -247,7 +246,55 @@ const DocumentSection = () => {
 
   return (
     <ToolbarSection label="Document">
-      <button className="toolbar-btn" title="New document" onClick={handleNew}>
+      <button
+        className="toolbar-btn"
+        title="Projects — manage and switch between projects"
+        onClick={() => setProjectsDialogOpen(true)}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <rect
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            x="3"
+            y="4"
+            width="8"
+            height="7"
+          />
+          <rect
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            x="13"
+            y="4"
+            width="8"
+            height="7"
+          />
+          <rect
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            x="3"
+            y="13"
+            width="8"
+            height="7"
+          />
+          <rect
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            x="13"
+            y="13"
+            width="8"
+            height="7"
+          />
+        </svg>
+      </button>
+      <button className="toolbar-btn" title="New project" onClick={handleNew}>
         <svg viewBox="0 0 24 24" width="20" height="20">
           <rect
             stroke="#c4c2b8"

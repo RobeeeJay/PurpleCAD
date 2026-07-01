@@ -30,6 +30,7 @@ import {
 import { createUiSlice, uiInitial } from "./store/uiSlice.js";
 import { createMaterialSlice, materialInitial } from "./store/materialSlice.js";
 import { createFolderSlice, folderInitial } from "./store/folderSlice.js";
+import { createProjectSlice, projectInitial } from "./store/projectSlice.js";
 
 export const useStore = create((set, get) => ({
   // ---- Initial state ----
@@ -42,6 +43,7 @@ export const useStore = create((set, get) => ({
   ...variablesInitial,
   ...materialInitial,
   ...folderInitial,
+  ...projectInitial,
 
   // ---- Actions, composed from slices ----
   ...createUiSlice(set, get),
@@ -51,6 +53,7 @@ export const useStore = create((set, get) => ({
   ...createVariablesSlice(set, get),
   ...createMaterialSlice(set, get),
   ...createFolderSlice(set, get),
+  ...createProjectSlice(set, get),
 }));
 
 // E2E test hook: expose the store on window so Playwright can read state and

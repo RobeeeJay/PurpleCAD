@@ -13,7 +13,7 @@ import { meshBoolean, meshSplit } from "./meshBoolean.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
 import { textShapeContours, makeTextShape } from "./sketchText.js";
 import { bboxCenterOf, massCentroidOf } from "./objectOrigin.js";
-import { kvGet, kvSet } from "../store/kv.js";
+import { getCamera, saveCamera } from "../store/db.js";
 import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
 import {
   featureEdgeGraph,
@@ -38,7 +38,7 @@ import { createSketchInteraction } from "./cameraControls/sketchInteraction.js";
 
 export function loadCameraState() {
   try {
-    const saved = kvGet("cad-camera-state");
+    const saved = getCamera();
     if (saved) return JSON.parse(saved);
   } catch (e) {
     console.warn("Failed to load camera state:", e);
@@ -56,8 +56,7 @@ export function loadCameraState() {
 export function saveCameraState(cameraRef, targetRef, cameraControlsRef) {
   if (!cameraRef.current || !cameraControlsRef.current) return;
   try {
-    kvSet(
-      "cad-camera-state",
+    saveCamera(
       JSON.stringify({
         positionX: cameraRef.current.position.x,
         positionY: cameraRef.current.position.y,

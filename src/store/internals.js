@@ -6,9 +6,10 @@
 // changing semantics: every helper here is pure or operates on the
 // module-local singletons defined below.
 
-// Persistence goes through the kv facade (SQLite in Electron, localStorage in a
-// plain browser, in-memory under tests) rather than touching localStorage here.
-import { kvGet, kvSet, kvRemove } from "./kv.js";
+// Persistence goes through the project-aware db facade (normalised SQLite in
+// Electron, localStorage in a plain browser, in-memory under tests) rather than
+// touching localStorage here.  Everything here operates on the active project.
+import * as db from "./db.js";
 
 // ---------------------------------------------------------------------------
 // Instruction application
@@ -167,7 +168,7 @@ export const makeEntry = (label, itemId, instruction) => ({
 
 export const saveTimeline = (history, activeHistoryId) => {
   try {
-    kvSet("cad-timeline", JSON.stringify({ history, activeHistoryId }));
+    db.saveTimeline({ history, activeHistoryId });
   } catch (e) {
     console.warn("Failed to save timeline to storage:", e);
   }
@@ -175,21 +176,17 @@ export const saveTimeline = (history, activeHistoryId) => {
 
 export const loadTimeline = () => {
   try {
-    const saved = kvGet("cad-timeline");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed.history) && parsed.history.length > 0) {
-        if (
-          parsed.history[0].items !== undefined ||
-          parsed.history[0].hiddenIds === undefined
-        ) {
-          kvRemove("cad-timeline");
-          return null;
-        }
-        const maxId = Math.max(...parsed.history.map((h) => h.id));
-        setNextHistoryId(maxId + 1);
-        return parsed;
+    const parsed = db.getTimeline();
+    if (parsed && Array.isArray(parsed.history) && parsed.history.length > 0) {
+      if (
+        parsed.history[0].items !== undefined ||
+        parsed.history[0].hiddenIds === undefined
+      ) {
+        return null;
       }
+      const maxId = Math.max(...parsed.history.map((h) => h.id));
+      setNextHistoryId(maxId + 1);
+      return parsed;
     }
   } catch (e) {
     console.warn("Failed to load timeline from storage:", e);
@@ -199,7 +196,7 @@ export const loadTimeline = () => {
 
 export const saveVariables = (variables) => {
   try {
-    kvSet("cad-variables", JSON.stringify(variables));
+    db.saveVariables(variables);
   } catch (e) {
     console.warn("Failed to save variables to storage:", e);
   }
@@ -209,11 +206,8 @@ export const saveVariables = (variables) => {
 // undo/redo timeline) so they're persisted separately from history.
 export const loadFolders = () => {
   try {
-    const raw = kvGet("cad-folders");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
+    const parsed = db.getFolders();
+    if (Array.isArray(parsed)) return parsed;
   } catch (e) {
     console.warn("Failed to load folders from storage:", e);
   }
@@ -222,19 +216,17 @@ export const loadFolders = () => {
 
 export const saveFolders = (folders) => {
   try {
-    kvSet("cad-folders", JSON.stringify(folders));
+    db.saveFolders(folders);
   } catch (e) {
     console.warn("Failed to save folders to storage:", e);
   }
 };
 
-// Default material (applied to newly-created objects) + user-saved presets,
-// persisted together under one key so the Material dialog survives reload.
+// Default material (applied to newly-created objects) + user-saved presets.
 export const loadMaterialSettings = () => {
   try {
-    const raw = kvGet("cad-material");
-    if (raw) {
-      const parsed = JSON.parse(raw);
+    const parsed = db.getMaterial();
+    if (parsed) {
       return {
         defaultMaterial: parsed.defaultMaterial ?? null,
         materialPresets: Array.isArray(parsed.materialPresets)
@@ -250,7 +242,7 @@ export const loadMaterialSettings = () => {
 
 export const saveMaterialSettings = (defaultMaterial, materialPresets) => {
   try {
-    kvSet("cad-material", JSON.stringify({ defaultMaterial, materialPresets }));
+    db.saveMaterial({ defaultMaterial, materialPresets });
   } catch (e) {
     console.warn("Failed to save material settings to storage:", e);
   }
@@ -311,7 +303,7 @@ export const SNAP_DEFAULTS = {
 
 export const loadSnapSettings = () => {
   try {
-    const raw = kvGet("cad-snap");
+    const raw = db.settingGet("snap");
     if (!raw) return { ...SNAP_DEFAULTS };
     const parsed = JSON.parse(raw);
     return {
@@ -335,8 +327,8 @@ export const loadSnapSettings = () => {
 
 export const saveSnapSettings = (snap) => {
   try {
-    kvSet(
-      "cad-snap",
+    db.settingSet(
+      "snap",
       JSON.stringify({
         snapEnabled: snap.snapEnabled,
         snapDistanceMm: snap.snapDistanceMm,
@@ -355,11 +347,8 @@ export const saveSnapSettings = (snap) => {
 
 export const loadVariables = () => {
   try {
-    const raw = kvGet("cad-variables");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
+    const parsed = db.getVariables();
+    if (Array.isArray(parsed)) return parsed;
   } catch (e) {
     console.warn("Failed to load variables from storage:", e);
   }

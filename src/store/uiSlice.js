@@ -246,6 +246,7 @@ export const uiInitial = {
 
   settingsDialogOpen: false,
   aboutDialogOpen: false,
+  projectsDialogOpen: false,
 
   // Snap-to-grid + perspective FOV: when snap is enabled, dragged/moved objects
   // (3D gizmo translate and sketch drags) snap to snapDistanceMm in world space,
@@ -957,4 +958,5 @@ export const createUiSlice = (set) => ({
 
   setSettingsDialogOpen: (open) => set({ settingsDialogOpen: !!open }),
   setAboutDialogOpen: (open) => set({ aboutDialogOpen: !!open }),
+  setProjectsDialogOpen: (open) => set({ projectsDialogOpen: !!open }),
 });
