@@ -151,29 +151,29 @@ export function createAnimateLoop({
           }
         });
       }
-      // Bounding-box dimension labels (the "20mm" W/H/D sprites): place them at
-      // FIXED screen positions around the rotation gizmo (the gizmo sits at the
-      // selection centre) so they don't swing around as the camera orbits.  We
-      // offset along the camera's right/up axes — a screen-space ring of three
-      // slots 120° apart (W top, then H, D) — instead of world directions, which
-      // would rotate with the view.  Restamped every frame; constant on-screen
-      // size; each sprite caches its authored scale so we multiply not compound.
+      // Bounding-box dimension labels (the W/H/D "mm" sprites): sit each on the
+      // midpoint of its axis edge of the (object-oriented) bounding box, held at
+      // a constant on-screen SIZE only.  Restamped every frame; each sprite
+      // caches its authored scale so we multiply not compound.
       if (boundingBoxRef?.current) {
         const bbox = boundingBoxRef.current;
         const center = bbox.boxMesh.position;
         const s = gizmoScale(center);
-        const RAD = s * 1.85; // beyond the on-screen ring radius (~0.93·s)
-        const right = new THREE.Vector3()
-          .setFromMatrixColumn(cam.matrixWorld, 0)
-          .normalize();
-        const up = new THREE.Vector3()
-          .setFromMatrixColumn(cam.matrixWorld, 1)
-          .normalize();
-        const TWO_PI = Math.PI * 2;
-        const angles = [
-          Math.PI / 2, // W: top
-          Math.PI / 2 + TWO_PI / 3, // H: lower-left
-          Math.PI / 2 + (2 * TWO_PI) / 3, // D: lower-right
+        // Sit each dimension label at the midpoint of its axis edge on the
+        // bounding box (X bottom-front, Y front-right, Z bottom-right), nudged
+        // just outward so it hugs the edge.  Only the SIZE is held constant on
+        // screen (scale by s); the position tracks the box, not the gizmo.
+        const hw = bbox.boxMesh.scale.x / 2,
+          hh = bbox.boxMesh.scale.y / 2,
+          hd = bbox.boxMesh.scale.z / 2;
+        const G = 0.3 * s;
+        // Local (box-frame) edge-midpoint offsets, then rotated into the box's
+        // orientation so labels track the edges of a rotated bounding box.
+        const q = bbox.boxMesh.quaternion;
+        const edgeOff = [
+          [0, -hh - G, hd + G], // X
+          [hw + G, 0, hd + G], // Y
+          [hw + G, -hh - G, 0], // Z
         ];
         [bbox.labelX, bbox.labelY, bbox.labelZ].forEach((label, i) => {
           if (!label?.sprite) return;
@@ -187,11 +187,8 @@ export function createAnimateLoop({
           }
           const b = sp.userData.baseScale;
           sp.scale.set(b.x * s, b.y * s, b.z * s);
-          const a = angles[i];
-          sp.position
-            .copy(center)
-            .addScaledVector(right, Math.cos(a) * RAD)
-            .addScaledVector(up, Math.sin(a) * RAD);
+          const o = edgeOff[i];
+          sp.position.set(o[0], o[1], o[2]).applyQuaternion(q).add(center);
         });
       }
       // Constraint annotations: keep a constant on-screen size so they don't

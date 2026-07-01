@@ -125,6 +125,9 @@ export function buildTransformHandles(selectedId, items, objectsRef) {
   boxMesh.renderOrder = 998;
   boxMesh.scale.set(dim.w, dim.h, dim.d);
   boxMesh.position.copy(bboxCenter);
+  // Orient the box with the object so it hugs a rotated body instead of drawing
+  // a larger axis-aligned box around it.
+  boxMesh.quaternion.copy(mesh.quaternion);
 
   const mmX = Math.round(dim.w * MM_PER_UNIT);
   const mmY = Math.round(dim.h * MM_PER_UNIT);

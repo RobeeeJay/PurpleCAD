@@ -214,9 +214,12 @@ export function placeDimLabels(boundingBox, pos, dim) {
   const hw = dim.w / 2,
     hh = dim.h / 2,
     hd = dim.d / 2;
-  labelX.sprite.position.set(pos.x, pos.y - hh, pos.z + hd);
-  labelY.sprite.position.set(pos.x + hw, pos.y, pos.z + hd);
-  labelZ.sprite.position.set(pos.x + hw, pos.y - hh, pos.z);
+  // Centre each label on its axis edge, nudged just outward (along the two
+  // perpendicular axes) so it sits against the edge instead of over the box.
+  const G = 0.35;
+  labelX.sprite.position.set(pos.x, pos.y - hh - G, pos.z + hd + G);
+  labelY.sprite.position.set(pos.x + hw + G, pos.y, pos.z + hd + G);
+  labelZ.sprite.position.set(pos.x + hw + G, pos.y - hh - G, pos.z);
 }
 
 export function makeMeasureLabel(text, cssColor) {
