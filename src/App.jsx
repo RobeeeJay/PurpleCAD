@@ -6,11 +6,27 @@ import Timeline from "./components/Timeline";
 import VariablesDialog from "./components/VariablesDialog";
 import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
 import ChamferEditDialog from "./components/ChamferEditDialog";
+import PushPullEditDialog from "./components/PushPullEditDialog";
+import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
+import AboutDialog from "./components/AboutDialog";
+import ProjectDialog from "./components/ProjectDialog";
+import TextDialog from "./components/TextDialog";
+import ShortcutsOverlay from "./components/ShortcutsOverlay";
+import StatusLine from "./components/StatusLine";
+import "./styles/StatusLine.css";
 import VersionTag from "./components/VersionTag";
 import "./styles/App.css";
 import { useStore } from "./store";
+import { textSimplifyTol } from "./three/resolution.js";
+import { ensureFontLoaded } from "./three/sketchText.js";
+
+// __APP_VERSION__ is baked in at build time by Vite's `define` (see
+// vite.config.js). Vitest doesn't run through that config so guard with
+// `typeof` to keep the test bundle from blowing up.
+const APP_VERSION =
+  typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
 function App() {
   const items = useStore((state) => state.items);
@@ -22,6 +38,55 @@ function App() {
   const notification = useStore((state) => state.notification);
   const clearNotification = useStore((state) => state.clearNotification);
 
+  // Prefix the window/tab title with the active project's name.  Refresh the
+  // list once on mount too: at store-init the DB bridge may not have returned
+  // rows yet, so this backfills projects/activeProjectId when the app is ready.
+  const activeProjectId = useStore((state) => state.activeProjectId);
+  const projects = useStore((state) => state.projects);
+  const loadProjects = useStore((state) => state.loadProjects);
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+  useEffect(() => {
+    const name = projects.find((p) => p.id === activeProjectId)?.name;
+    document.title = name ? `${name} — PurpleCAD` : "PurpleCAD";
+  }, [projects, activeProjectId]);
+
+  // Keep text glyph contours in sync with the active resolution: backfill
+  // shapes that predate contour caching AND re-tessellate ones built at a
+  // different density when the print/preview toggle changes.  Gated on a
+  // boolean so it settles after the migrating update rather than looping.
+  const textTol = useStore(textSimplifyTol);
+  const needsTextContours = useStore((state) =>
+    state.items.some(
+      (it) =>
+        it.type === "sketch" &&
+        (it.shapes || []).some(
+          (s) =>
+            s.type === "text" &&
+            (!Array.isArray(s.contours) ||
+              s.contourTol !== textSimplifyTol(state)),
+        ),
+    ),
+  );
+  useEffect(() => {
+    if (!needsTextContours) return;
+    // Load every text shape's font BEFORE re-tessellating, so a not-yet-loaded
+    // system font (eg after a reload) isn't silently rebuilt in the default font.
+    const fonts = new Set();
+    for (const it of useStore.getState().items)
+      if (it.type === "sketch")
+        for (const s of it.shapes || [])
+          if (s.type === "text" && s.font) fonts.add(s.font);
+    let cancelled = false;
+    Promise.all([...fonts].map((f) => ensureFontLoaded(f))).then(() => {
+      if (!cancelled) useStore.getState().ensureTextContours(textTol);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsTextContours, textTol]);
+
   useEffect(() => {
     if (!notification) return;
     const t = setTimeout(clearNotification, 4000);
@@ -31,6 +96,12 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+
+  // Electron mirrors the page title into the window/title bar via
+  // `page-title-updated`, so this also covers the desktop title bar.
+  useEffect(() => {
+    document.title = `PurpleCAD v${APP_VERSION}`;
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -73,8 +144,15 @@ function App() {
       <VariablesDialog />
       <ExtrudeLengthDialog />
       <ChamferEditDialog />
+      <PushPullEditDialog />
+      <RevolveEditDialog />
       <MaterialDialog />
       <SettingsDialog />
+      <AboutDialog />
+      <ProjectDialog />
+      <TextDialog />
+      <ShortcutsOverlay />
+      <StatusLine />
       <VersionTag />
       {notification && (
         <div

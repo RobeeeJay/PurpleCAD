@@ -5,13 +5,13 @@
 // cameraControls.js.
 
 import * as THREE from "three";
+import { useStore } from "../../store";
 import {
-  CONSTRAINT_SELECTED_COLOR,
   SKETCH_HOVER_LINE_COLOR,
   SKETCH_HOVER_POINT_LINE_COLOR,
-  SKETCH_LINE_COLOR,
   SKETCH_PIVOT_COLOR,
-  constraintColor,
+  sketchLineColorFor,
+  sketchSelectedColorFor,
 } from "../theme.js";
 
 export function createSketchHoverHelpers(
@@ -35,7 +35,8 @@ export function createSketchHoverHelpers(
   const clearHoverLineHighlight = () => {
     if (hoveredSketchLine) {
       hoveredSketchLine.material.color.setHex(
-        hoveredSketchLineOrigColor ?? SKETCH_LINE_COLOR,
+        hoveredSketchLineOrigColor ??
+          sketchLineColorFor(useStore.getState().theme),
       );
       hoveredSketchLine = null;
       hoveredSketchLineOrigColor = null;
@@ -47,27 +48,20 @@ export function createSketchHoverHelpers(
   let hoveredConstraintLines = []; // [{ lineObj, origColor }]
   let selectedConstraintIdx = null;
   let selectedConstraintLineRefs = []; // [{ lineObj, origColor }]
+  let selectedConstraintIconRefs = []; // [{ obj, origColor }]
 
   const clearConstraintSelection = () => {
     selectedConstraintLineRefs.forEach(({ lineObj, origColor }) => {
       if (lineObj.material?.color) lineObj.material.color.setHex(origColor);
     });
     selectedConstraintLineRefs = [];
-    if (selectedConstraintIdx !== null) {
-      const g = sketchShapesGroupRef?.current;
-      if (g) {
-        for (const o of g.children) {
-          if (
-            o.userData.isConstraintObj &&
-            o.userData.constraintIdx === selectedConstraintIdx &&
-            o.material?.color &&
-            !o.isSprite
-          ) {
-            o.material.color.setHex(constraintColor(o.userData.constraintType));
-          }
-        }
-      }
-    }
+    // Restore each recolored icon to the EXACT colour it had when selected —
+    // recomputing from the type loses the mirror / pattern colours (and the
+    // grey dimension-line colour), which made deselected pattern icons vanish.
+    selectedConstraintIconRefs.forEach(({ obj, origColor }) => {
+      if (obj.material?.color) obj.material.color.setHex(origColor);
+    });
+    selectedConstraintIconRefs = [];
     selectedConstraintIdx = null;
   };
 
@@ -82,7 +76,13 @@ export function createSketchHoverHelpers(
         o.material?.color &&
         !o.isSprite
       ) {
-        o.material.color.setHex(CONSTRAINT_SELECTED_COLOR);
+        selectedConstraintIconRefs.push({
+          obj: o,
+          origColor: o.material.color.getHex(),
+        });
+        o.material.color.setHex(
+          sketchSelectedColorFor(useStore.getState().theme),
+        );
       }
     }
     const taggedObj = g.children.find(
@@ -102,7 +102,9 @@ export function createSketchHoverHelpers(
         lineObj,
         origColor: lineObj.material.color.getHex(),
       });
-      lineObj.material.color.setHex(CONSTRAINT_SELECTED_COLOR);
+      lineObj.material.color.setHex(
+        sketchSelectedColorFor(useStore.getState().theme),
+      );
     });
   };
 

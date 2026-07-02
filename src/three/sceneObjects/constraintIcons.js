@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
+import { useStore } from "../../store";
 import {
   ANGLE_LABEL_BG,
   ANGLE_LABEL_TEXT,
@@ -15,9 +16,13 @@ import {
   CONSTRAINT_COINCIDENT_COLOR,
   CONSTRAINT_HORIZONTAL_COLOR,
   CONSTRAINT_ON_LINE_COLOR,
-  DIM_COLOR,
-  DIM_LABEL_BG,
-  DIM_LABEL_TEXT,
+  dimLabelBgFor,
+  dimLineColorFor,
+  dimValueColorFor,
+  sketchMirrorColorFor,
+  sketchCircularPatternColorFor,
+  sketchRectangularPatternColorFor,
+  toCssHex,
 } from "../theme.js";
 
 // Builds constraint icon THREE.js objects into `group`. All objects are tagged
@@ -29,6 +34,7 @@ export function addConstraintIconsToGroup(
   toWorld,
   res,
   showDimensions = true,
+  editHidden = null,
 ) {
   const R = 0.14;
   // The sketch plane's normal in world space (toWorld maps sketch-local → world,
@@ -39,10 +45,19 @@ export function addConstraintIconsToGroup(
   const sketchNormal = toWorld(0, 0, 1)
     .sub(toWorld(0, 0, 0))
     .normalize();
+  const theme = useStore.getState().theme;
   // Offset constraints created together share an offsetGroup; render only one
   // editable dimension label per group (they all carry the same distance).
   const seenOffsetGroups = new Set();
   constraints.forEach((c, ci) => {
+    // Skip the icon of a mirror / pattern copy that's hidden while its
+    // operation is being edited (the copy shape itself is hidden too).
+    if (
+      editHidden &&
+      typeof c.shapeIdx === "number" &&
+      editHidden.has(c.shapeIdx)
+    )
+      return;
     const tag = (obj, iconLocalPos, shapeIndices, color) => {
       obj.userData.isConstraintObj = true;
       obj.userData.isConstraint = true;
@@ -82,7 +97,10 @@ export function addConstraintIconsToGroup(
     const addDimSeg = (p0, p1) => {
       const l = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([p0, p1]),
-        new THREE.LineBasicMaterial({ color: DIM_COLOR, depthTest: false }),
+        new THREE.LineBasicMaterial({
+          color: dimLineColorFor(theme),
+          depthTest: false,
+        }),
       );
       l.renderOrder = 1004;
       addTagged(l);
@@ -98,7 +116,10 @@ export function addConstraintIconsToGroup(
           tip.clone().addScaledVector(perp, TICK),
           tip.clone().addScaledVector(perp, -TICK),
         ]),
-        new THREE.LineBasicMaterial({ color: DIM_COLOR, depthTest: false }),
+        new THREE.LineBasicMaterial({
+          color: dimLineColorFor(theme),
+          depthTest: false,
+        }),
       );
       t.renderOrder = 1005;
       addTagged(t);
@@ -162,7 +183,7 @@ export function addConstraintIconsToGroup(
           leader,
           { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
           distShapes,
-          DIM_COLOR,
+          dimLineColorFor(theme),
         );
         addDimTick(wB, perpU);
         labelPos = wLineTo.clone().addScaledVector(dir, 0.45);
@@ -195,7 +216,7 @@ export function addConstraintIconsToGroup(
             y: (posA.y + posB.y) / 2 + lpy * OFF,
           },
           distShapes,
-          DIM_COLOR,
+          dimLineColorFor(theme),
         );
         addDimTick(A2, perpU);
         addDimTick(B2, perpU);
@@ -226,9 +247,9 @@ export function addConstraintIconsToGroup(
       canvas.width = Math.max(160, Math.ceil(measured) + 24);
       canvas.height = 32;
       const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = DIM_LABEL_BG;
+      ctx2d.fillStyle = dimLabelBgFor(theme);
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = DIM_LABEL_TEXT;
+      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
       ctx2d.font = labelFont;
       ctx2d.textAlign = "center";
       ctx2d.textBaseline = "middle";
@@ -298,6 +319,209 @@ export function addConstraintIconsToGroup(
       tag(cLine, { x: mx, y: my }, [c.shapeIdx], CONSTRAINT_HORIZONTAL_COLOR);
       group.add(cLine);
       markFixedSize(cLine, toWorld(mx, my, 0.005));
+    } else if (c.type === "parallel" || c.type === "colinear") {
+      const a = shapes[c.shapeAIdx];
+      if (!a || a.type !== "line") return;
+      const mx = (a.x1 + a.x2) / 2,
+        my = (a.y1 + a.y2) / 2;
+      const ddx = a.x2 - a.x1,
+        ddy = a.y2 - a.y1,
+        len = Math.hypot(ddx, ddy) || 1;
+      const ux = ddx / len,
+        uy = ddy / len,
+        px = -uy,
+        py = ux;
+      const pts = [];
+      if (c.type === "parallel") {
+        // Two short segments parallel to the line ("=" along it).
+        const L = R * 0.8,
+          off = R * 0.45;
+        for (const s of [-1, 1])
+          pts.push(
+            toWorld(
+              mx + px * off * s - ux * L,
+              my + py * off * s - uy * L,
+              0.005,
+            ),
+            toWorld(
+              mx + px * off * s + ux * L,
+              my + py * off * s + uy * L,
+              0.005,
+            ),
+          );
+      } else {
+        // A segment along the line with a tick at each end (collinear marker).
+        const L = R,
+          t = R * 0.4;
+        pts.push(
+          toWorld(mx - ux * L, my - uy * L, 0.005),
+          toWorld(mx + ux * L, my + uy * L, 0.005),
+        );
+        for (const s of [-1, 1])
+          pts.push(
+            toWorld(mx + ux * L * s + px * t, my + uy * L * s + py * t, 0.005),
+            toWorld(mx + ux * L * s - px * t, my + uy * L * s - py * t, 0.005),
+          );
+      }
+      const seg = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({
+          color: CONSTRAINT_ON_LINE_COLOR,
+          depthTest: false,
+        }),
+      );
+      seg.renderOrder = 1004;
+      tag(
+        seg,
+        { x: mx, y: my },
+        [c.shapeAIdx, c.shapeBIdx],
+        CONSTRAINT_ON_LINE_COLOR,
+      );
+      group.add(seg);
+      markFixedSize(seg, toWorld(mx, my, 0.005));
+    } else if (c.type === "tangent") {
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      const isArc = (s) => s?.type === "circle" || s?.type === "arc";
+      // Anchor at (≈) the tangent point.
+      let ax, ay;
+      if (a?.type === "line" && isArc(b)) {
+        const dx = a.x2 - a.x1,
+          dy = a.y2 - a.y1,
+          l2 = dx * dx + dy * dy || 1;
+        const t = ((b.cx - a.x1) * dx + (b.cy - a.y1) * dy) / l2;
+        ax = a.x1 + dx * t;
+        ay = a.y1 + dy * t;
+      } else if (isArc(a) && b?.type === "line") {
+        const dx = b.x2 - b.x1,
+          dy = b.y2 - b.y1,
+          l2 = dx * dx + dy * dy || 1;
+        const t = ((a.cx - b.x1) * dx + (a.cy - b.y1) * dy) / l2;
+        ax = b.x1 + dx * t;
+        ay = b.y1 + dy * t;
+      } else if (isArc(a) && isArc(b)) {
+        const dx = b.cx - a.cx,
+          dy = b.cy - a.cy,
+          d = Math.hypot(dx, dy) || 1;
+        ax = a.cx + (dx / d) * (a.r || 0);
+        ay = a.cy + (dy / d) * (a.r || 0);
+      } else return;
+      // A small circle resting on a tangent line.
+      const r = R * 0.55;
+      const pts = [];
+      const N = 16;
+      for (let i = 0; i < N; i++) {
+        const t0 = (i / N) * 2 * Math.PI,
+          t1 = ((i + 1) / N) * 2 * Math.PI;
+        pts.push(
+          toWorld(ax + Math.cos(t0) * r, ay + r + Math.sin(t0) * r, 0.005),
+          toWorld(ax + Math.cos(t1) * r, ay + r + Math.sin(t1) * r, 0.005),
+        );
+      }
+      pts.push(
+        toWorld(ax - r * 1.4, ay, 0.005),
+        toWorld(ax + r * 1.4, ay, 0.005),
+      );
+      const seg = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({
+          color: CONSTRAINT_ON_LINE_COLOR,
+          depthTest: false,
+        }),
+      );
+      seg.renderOrder = 1004;
+      tag(
+        seg,
+        { x: ax, y: ay },
+        [c.shapeAIdx, c.shapeBIdx],
+        CONSTRAINT_ON_LINE_COLOR,
+      );
+      group.add(seg);
+      markFixedSize(seg, toWorld(ax, ay, 0.005));
+    } else if (c.type === "equal") {
+      // A matching double-tick marker on each equal entity: across the line
+      // (equal length), or a small "=" by the ring (equal radius).
+      const buildEq = (pts, cx, cy) => {
+        const seg = new THREE.LineSegments(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({
+            color: CONSTRAINT_ON_LINE_COLOR,
+            depthTest: false,
+          }),
+        );
+        seg.renderOrder = 1004;
+        tag(
+          seg,
+          { x: cx, y: cy },
+          [c.shapeAIdx, c.shapeBIdx],
+          CONSTRAINT_ON_LINE_COLOR,
+        );
+        group.add(seg);
+        markFixedSize(seg, toWorld(cx, cy, 0.005));
+      };
+      const mkEq = (s) => {
+        if (!s) return;
+        const pts = [];
+        if (s.type === "line") {
+          const cx = (s.x1 + s.x2) / 2,
+            cy = (s.y1 + s.y2) / 2;
+          const dx = s.x2 - s.x1,
+            dy = s.y2 - s.y1,
+            len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len,
+            uy = dy / len,
+            px = -uy,
+            py = ux;
+          const T = R * 0.7,
+            gap = R * 0.3;
+          for (const sgn of [-1, 1])
+            pts.push(
+              toWorld(
+                cx + ux * gap * sgn - px * T,
+                cy + uy * gap * sgn - py * T,
+                0.005,
+              ),
+              toWorld(
+                cx + ux * gap * sgn + px * T,
+                cy + uy * gap * sgn + py * T,
+                0.005,
+              ),
+            );
+          buildEq(pts, cx, cy);
+        } else if (s.type === "circle" || s.type === "arc") {
+          const cx = s.cx,
+            cy = s.cy + (s.r || 0) + R * 0.7;
+          const L = R * 0.7,
+            off = R * 0.3;
+          for (const sgn of [-1, 1])
+            pts.push(
+              toWorld(cx - L, cy + off * sgn, 0.005),
+              toWorld(cx + L, cy + off * sgn, 0.005),
+            );
+          buildEq(pts, cx, cy);
+        }
+      };
+      mkEq(shapes[c.shapeAIdx]);
+      mkEq(shapes[c.shapeBIdx]);
+    } else if (c.type === "text") {
+      // A small "T" mark at the text's top-left anchor — double-click to edit.
+      const shape = shapes[c.shapeIdx];
+      if (!shape || shape.type !== "text") return;
+      const ax = shape.x,
+        ay = shape.y;
+      const tIcon = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(ax - R, ay, 0.005),
+          toWorld(ax + R, ay, 0.005),
+          toWorld(ax, ay, 0.005),
+          toWorld(ax, ay - 2 * R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0x6c3fd4, depthTest: false }),
+      );
+      tIcon.renderOrder = 1004;
+      tag(tIcon, { x: ax, y: ay }, [c.shapeIdx], 0x6c3fd4);
+      group.add(tIcon);
+      markFixedSize(tIcon, toWorld(ax, ay, 0.005));
     } else if (c.type === "angle") {
       const sA = shapes[c.shapeAIdx],
         sB = shapes[c.shapeBIdx];
@@ -397,7 +621,12 @@ export function addConstraintIconsToGroup(
           y: (aLocal.y + bLocal.y) / 2,
         };
         // The dimension line is a double-click hotspot too.
-        tag(dimLine, labelLocal, [c.shapeIdx, c.origIdx], DIM_COLOR);
+        tag(
+          dimLine,
+          labelLocal,
+          [c.shapeIdx, c.origIdx],
+          dimLineColorFor(theme),
+        );
       };
       if (nl.type === "circle") {
         // Concentric offset: a radial dimension from the original circle's edge
@@ -449,9 +678,9 @@ export function addConstraintIconsToGroup(
       canvas.width = Math.max(160, Math.ceil(measured) + 24);
       canvas.height = 32;
       const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = DIM_LABEL_BG;
+      ctx2d.fillStyle = dimLabelBgFor(theme);
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = DIM_LABEL_TEXT;
+      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
       ctx2d.font = labelFont;
       ctx2d.textAlign = "center";
       ctx2d.textBaseline = "middle";
@@ -467,8 +696,119 @@ export function addConstraintIconsToGroup(
       sprite.renderOrder = 1009;
       // Tag with the icon's local position so the double-click hit-test can
       // find it and open the edit overlay.
-      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], DIM_COLOR);
+      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimLineColorFor(theme));
       group.add(sprite);
+    } else if (c.type === "mirror") {
+      // Small fixed-size X glyph midway between the original's and the
+      // copy's reference points — click-select to enable Delete, which
+      // breaks the mirror link via the generic deleteSketchConstraint flow.
+      const orig = shapes[c.origIdx];
+      const copy = shapes[c.shapeIdx];
+      if (!orig || !copy) return;
+      const key =
+        orig.type === "line"
+          ? "start"
+          : orig.type === "bezier"
+            ? "p0"
+            : "center";
+      const pA = getShapePoint(orig, key);
+      const pB = getShapePoint(copy, key);
+      if (!pA || !pB) return;
+      const mid = { x: (pA.x + pB.x) / 2, y: (pA.y + pB.y) / 2 };
+      const cross = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(mid.x - R, mid.y - R, 0.005),
+          toWorld(mid.x + R, mid.y + R, 0.005),
+          toWorld(mid.x - R, mid.y + R, 0.005),
+          toWorld(mid.x + R, mid.y - R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({
+          color: sketchMirrorColorFor(theme),
+          depthTest: false,
+        }),
+      );
+      cross.renderOrder = 1004;
+      tag(
+        cross,
+        mid,
+        [c.shapeIdx, c.origIdx, c.lineIdx],
+        sketchMirrorColorFor(theme),
+      );
+      group.add(cross);
+      markFixedSize(cross, toWorld(mid.x, mid.y, 0.005));
+    } else if (c.type === "circularPattern") {
+      // Small fixed-size diamond at the copy's reference point — click-select
+      // to enable Delete, which breaks this copy's link via the generic
+      // deleteSketchConstraint flow.
+      const orig = shapes[c.origIdx];
+      const copy = shapes[c.shapeIdx];
+      if (!orig || !copy) return;
+      const key =
+        orig.type === "line"
+          ? "start"
+          : orig.type === "bezier"
+            ? "p0"
+            : "center";
+      const pB = getShapePoint(copy, key);
+      if (!pB) return;
+      const diamond = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(pB.x, pB.y + R, 0.005),
+          toWorld(pB.x + R, pB.y, 0.005),
+          toWorld(pB.x, pB.y - R, 0.005),
+          toWorld(pB.x - R, pB.y, 0.005),
+          toWorld(pB.x, pB.y + R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({
+          color: sketchCircularPatternColorFor(theme),
+          depthTest: false,
+        }),
+      );
+      diamond.renderOrder = 1004;
+      tag(
+        diamond,
+        pB,
+        [c.shapeIdx, c.origIdx, c.centerShapeIdx],
+        sketchCircularPatternColorFor(theme),
+      );
+      group.add(diamond);
+      markFixedSize(diamond, toWorld(pB.x, pB.y, 0.005));
+    } else if (c.type === "rectangularPattern") {
+      // Small fixed-size square at the copy's reference point — click-select
+      // to enable Delete, which breaks this copy's link via the generic
+      // deleteSketchConstraint flow.
+      const orig = shapes[c.origIdx];
+      const copy = shapes[c.shapeIdx];
+      if (!orig || !copy) return;
+      const key =
+        orig.type === "line"
+          ? "start"
+          : orig.type === "bezier"
+            ? "p0"
+            : "center";
+      const pB = getShapePoint(copy, key);
+      if (!pB) return;
+      const square = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints([
+          toWorld(pB.x - R, pB.y - R, 0.005),
+          toWorld(pB.x + R, pB.y - R, 0.005),
+          toWorld(pB.x + R, pB.y + R, 0.005),
+          toWorld(pB.x - R, pB.y + R, 0.005),
+        ]),
+        new THREE.LineBasicMaterial({
+          color: sketchRectangularPatternColorFor(theme),
+          depthTest: false,
+        }),
+      );
+      square.renderOrder = 1004;
+      tag(
+        square,
+        pB,
+        [c.shapeIdx, c.origIdx],
+        sketchRectangularPatternColorFor(theme),
+      );
+      group.add(square);
+      markFixedSize(square, toWorld(pB.x, pB.y, 0.005));
     }
   });
 }

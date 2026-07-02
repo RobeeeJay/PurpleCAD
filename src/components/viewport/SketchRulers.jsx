@@ -5,12 +5,21 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
+import { useStore } from "../../store";
+import {
+  rulerLabelColorFor,
+  rulerTickColorFor,
+  toCssHex,
+} from "../../three/theme.js";
 
 const RULER_W = 44; // left strip width (px) — keep in sync with Viewport.css
 const RULER_H = 22; // bottom strip height (px)
+// Width of the Objects/Timeline overlay (.left-panel in App.css) that the
+// left-panel sits in front of. The rulers are pushed past it so they stay
+// visible to its right instead of being covered by it.
+const LEFT_PANEL_W = 250;
 const X_AXIS_COLOR = "#ff6666";
 const Y_AXIS_COLOR = "#6699ff";
-const RULER_INK = "#0055ff";
 
 // Pick a "nice" major-tick step in mm (1/2/5 × 10ⁿ) ≈ targetPx apart on screen.
 function niceStepMm(mmPerPx, targetPx) {
@@ -25,7 +34,16 @@ function niceStepMm(mmPerPx, targetPx) {
 // (container px), `perUnit` is px per local unit (signed), `lead` is the px
 // offset between the canvas's 0 and the container's 0 (RULER_W for the bottom
 // strip, 0 for the left strip).
-function drawRulerStrip(canvas, orient, cssLen, perUnit, origin, lead, dpr) {
+function drawRulerStrip(
+  canvas,
+  orient,
+  cssLen,
+  perUnit,
+  origin,
+  lead,
+  dpr,
+  theme,
+) {
   const ctx = canvas.getContext("2d");
   const cw = orient === "h" ? cssLen : RULER_W;
   const ch = orient === "h" ? RULER_H : cssLen;
@@ -37,6 +55,8 @@ function drawRulerStrip(canvas, orient, cssLen, perUnit, origin, lead, dpr) {
   // lets sketch lines passing under the edge bars stay visible.
   ctx.fillStyle = "rgba(170, 170, 170, 0.15)";
   ctx.fillRect(0, 0, cw, ch);
+  const tickColor = toCssHex(rulerTickColorFor(theme));
+  const labelColor = toCssHex(rulerLabelColorFor(theme));
 
   const mmPerPx = MM_PER_UNIT / Math.abs(perUnit);
   const majorMm = niceStepMm(mmPerPx, 70);
@@ -63,7 +83,7 @@ function drawRulerStrip(canvas, orient, cssLen, perUnit, origin, lead, dpr) {
       ? orient === "h"
         ? X_AXIS_COLOR
         : Y_AXIS_COLOR
-      : "rgb(64, 127, 253)";
+      : tickColor;
     ctx.beginPath();
     if (orient === "h") {
       ctx.moveTo(pos, RULER_H);
@@ -78,7 +98,7 @@ function drawRulerStrip(canvas, orient, cssLen, perUnit, origin, lead, dpr) {
         ? orient === "h"
           ? X_AXIS_COLOR
           : Y_AXIS_COLOR
-        : RULER_INK;
+        : labelColor;
       const mm = Math.round(localV * MM_PER_UNIT);
       if (orient === "h") {
         ctx.textAlign = "center";
@@ -140,13 +160,23 @@ export default function SketchRulers({
       const uy = Y.y - O.y; // px per local unit, vertical (usually negative)
       if (Math.abs(ux) < 1e-3 || Math.abs(uy) < 1e-3) return;
 
+      const theme = useStore.getState().theme;
       // Skip redraw when the camera is idle (cheap change-detect).
-      const key = `${W}|${H}|${O.x.toFixed(2)}|${O.y.toFixed(2)}|${ux.toFixed(4)}|${uy.toFixed(4)}`;
+      const key = `${W}|${H}|${O.x.toFixed(2)}|${O.y.toFixed(2)}|${ux.toFixed(4)}|${uy.toFixed(4)}|${theme}`;
       if (key === lastKey.current) return;
       lastKey.current = key;
 
-      drawRulerStrip(hCanvas, "h", W - RULER_W, ux, O.x, RULER_W, dpr);
-      drawRulerStrip(vCanvas, "v", H, uy, O.y, 0, dpr);
+      drawRulerStrip(
+        hCanvas,
+        "h",
+        W - LEFT_PANEL_W - RULER_W,
+        ux,
+        O.x,
+        LEFT_PANEL_W + RULER_W,
+        dpr,
+        theme,
+      );
+      drawRulerStrip(vCanvas, "v", H, uy, O.y, 0, dpr, theme);
     };
     draw();
     return () => cancelAnimationFrame(raf);

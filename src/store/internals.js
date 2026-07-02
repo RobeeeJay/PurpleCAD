@@ -6,6 +6,11 @@
 // changing semantics: every helper here is pure or operates on the
 // module-local singletons defined below.
 
+// Persistence goes through the project-aware db facade (normalised SQLite in
+// Electron, localStorage in a plain browser, in-memory under tests) rather than
+// touching localStorage here.  Everything here operates on the active project.
+import * as db from "./db.js";
+
 // ---------------------------------------------------------------------------
 // Instruction application
 // ---------------------------------------------------------------------------
@@ -163,54 +168,65 @@ export const makeEntry = (label, itemId, instruction) => ({
 
 export const saveTimeline = (history, activeHistoryId) => {
   try {
-    localStorage.setItem(
-      "cad-timeline",
-      JSON.stringify({ history, activeHistoryId }),
-    );
+    db.saveTimeline({ history, activeHistoryId });
   } catch (e) {
-    console.warn("Failed to save timeline to localStorage:", e);
+    console.warn("Failed to save timeline to storage:", e);
   }
 };
 
 export const loadTimeline = () => {
   try {
-    const saved = localStorage.getItem("cad-timeline");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed.history) && parsed.history.length > 0) {
-        if (
-          parsed.history[0].items !== undefined ||
-          parsed.history[0].hiddenIds === undefined
-        ) {
-          localStorage.removeItem("cad-timeline");
-          return null;
-        }
-        const maxId = Math.max(...parsed.history.map((h) => h.id));
-        setNextHistoryId(maxId + 1);
-        return parsed;
+    const parsed = db.getTimeline();
+    if (parsed && Array.isArray(parsed.history) && parsed.history.length > 0) {
+      if (
+        parsed.history[0].items !== undefined ||
+        parsed.history[0].hiddenIds === undefined
+      ) {
+        return null;
       }
+      const maxId = Math.max(...parsed.history.map((h) => h.id));
+      setNextHistoryId(maxId + 1);
+      return parsed;
     }
   } catch (e) {
-    console.warn("Failed to load timeline from localStorage:", e);
+    console.warn("Failed to load timeline from storage:", e);
   }
   return null;
 };
 
 export const saveVariables = (variables) => {
   try {
-    localStorage.setItem("cad-variables", JSON.stringify(variables));
+    db.saveVariables(variables);
   } catch (e) {
-    console.warn("Failed to save variables to localStorage:", e);
+    console.warn("Failed to save variables to storage:", e);
   }
 };
 
-// Default material (applied to newly-created objects) + user-saved presets,
-// persisted together under one key so the Material dialog survives reload.
+// Tree-view folders are purely organizational (no geometry, not part of the
+// undo/redo timeline) so they're persisted separately from history.
+export const loadFolders = () => {
+  try {
+    const parsed = db.getFolders();
+    if (Array.isArray(parsed)) return parsed;
+  } catch (e) {
+    console.warn("Failed to load folders from storage:", e);
+  }
+  return [];
+};
+
+export const saveFolders = (folders) => {
+  try {
+    db.saveFolders(folders);
+  } catch (e) {
+    console.warn("Failed to save folders to storage:", e);
+  }
+};
+
+// Default material (applied to newly-created objects) + user-saved presets.
 export const loadMaterialSettings = () => {
   try {
-    const raw = localStorage.getItem("cad-material");
-    if (raw) {
-      const parsed = JSON.parse(raw);
+    const parsed = db.getMaterial();
+    if (parsed) {
       return {
         defaultMaterial: parsed.defaultMaterial ?? null,
         materialPresets: Array.isArray(parsed.materialPresets)
@@ -219,19 +235,16 @@ export const loadMaterialSettings = () => {
       };
     }
   } catch (e) {
-    console.warn("Failed to load material settings from localStorage:", e);
+    console.warn("Failed to load material settings from storage:", e);
   }
   return { defaultMaterial: null, materialPresets: [] };
 };
 
 export const saveMaterialSettings = (defaultMaterial, materialPresets) => {
   try {
-    localStorage.setItem(
-      "cad-material",
-      JSON.stringify({ defaultMaterial, materialPresets }),
-    );
+    db.saveMaterial({ defaultMaterial, materialPresets });
   } catch (e) {
-    console.warn("Failed to save material settings to localStorage:", e);
+    console.warn("Failed to save material settings to storage:", e);
   }
 };
 
@@ -273,17 +286,24 @@ export const markCsgDirty = (items) => {
 // perspective.  `curveDetectionAngleDeg` is the max bend between consecutive
 // connected lines for them to be treated as one smooth curve when highlighting.
 // Persisted alongside snap under the same `cad-snap` key.
-const SNAP_DEFAULTS = {
+// previewPrecisionMm / printPrecisionMm are the tessellation deviation (sagitta,
+// mm) for the two resolution modes — lower = denser/smoother, more triangles.
+// Preview is the interactive/editing density; print ("Normal/High") is the
+// final density used when the resolution toggle is on.
+export const SNAP_DEFAULTS = {
   snapEnabled: false,
   snapDistanceMm: 5,
   snapAngleDeg: 9,
   fov: 35,
   curveDetectionAngleDeg: 5,
+  previewPrecisionMm: 0.1,
+  printPrecisionMm: 0.01,
+  alwaysExtrudeSingleObject: true,
 };
 
 export const loadSnapSettings = () => {
   try {
-    const raw = localStorage.getItem("cad-snap");
+    const raw = db.settingGet("snap");
     if (!raw) return { ...SNAP_DEFAULTS };
     const parsed = JSON.parse(raw);
     return {
@@ -293,6 +313,12 @@ export const loadSnapSettings = () => {
       fov: parsed.fov > 0 ? parsed.fov : 35,
       curveDetectionAngleDeg:
         parsed.curveDetectionAngleDeg >= 0 ? parsed.curveDetectionAngleDeg : 5,
+      previewPrecisionMm:
+        parsed.previewPrecisionMm > 0 ? parsed.previewPrecisionMm : 0.5,
+      printPrecisionMm:
+        parsed.printPrecisionMm > 0 ? parsed.printPrecisionMm : 0.01,
+      // Default on (combine) — only an explicit false turns it off.
+      alwaysExtrudeSingleObject: parsed.alwaysExtrudeSingleObject !== false,
     };
   } catch {
     return { ...SNAP_DEFAULTS };
@@ -301,30 +327,30 @@ export const loadSnapSettings = () => {
 
 export const saveSnapSettings = (snap) => {
   try {
-    localStorage.setItem(
-      "cad-snap",
+    db.settingSet(
+      "snap",
       JSON.stringify({
         snapEnabled: snap.snapEnabled,
         snapDistanceMm: snap.snapDistanceMm,
         snapAngleDeg: snap.snapAngleDeg,
         fov: snap.fov,
         curveDetectionAngleDeg: snap.curveDetectionAngleDeg,
+        previewPrecisionMm: snap.previewPrecisionMm,
+        printPrecisionMm: snap.printPrecisionMm,
+        alwaysExtrudeSingleObject: snap.alwaysExtrudeSingleObject,
       }),
     );
   } catch (e) {
-    console.warn("Failed to save snap settings to localStorage:", e);
+    console.warn("Failed to save snap settings to storage:", e);
   }
 };
 
 export const loadVariables = () => {
   try {
-    const raw = localStorage.getItem("cad-variables");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
+    const parsed = db.getVariables();
+    if (Array.isArray(parsed)) return parsed;
   } catch (e) {
-    console.warn("Failed to load variables from localStorage:", e);
+    console.warn("Failed to load variables from storage:", e);
   }
   return [];
 };

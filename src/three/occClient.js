@@ -90,6 +90,38 @@ export function chamferOrFilletItem(args) {
   return runOp("chamferOrFilletItem", args);
 }
 
+export function pushPullFaces(args) {
+  return runOp("pushPullFaces", args);
+}
+
+export function shellItem(args) {
+  return runOp("shellItem", args);
+}
+
+export function holeItem(args) {
+  return runOp("holeItem", args);
+}
+
+export function embossItem(args) {
+  return runOp("embossItem", args);
+}
+
+export function draftItem(args) {
+  return runOp("draftItem", args);
+}
+
+export function revolveItem(args) {
+  return runOp("revolveItem", args);
+}
+
+export function pipeItem(args) {
+  return runOp("pipeItem", args);
+}
+
+export function loftItem(args) {
+  return runOp("loftItem", args);
+}
+
 export function performCsg(args) {
   return runOp("performCsg", args);
 }
@@ -100,4 +132,16 @@ export function exportSTL(args) {
 
 export function exportSTEP(args) {
   return runOp("exportSTEP", args);
+}
+
+export function importStep(args) {
+  return runOp("importStep", args);
+}
+
+export function splitItem(args) {
+  return runOp("splitItem", args);
+}
+
+export function pattern3dItem(args) {
+  return runOp("pattern3dItem", args);
 }

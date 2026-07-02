@@ -2,54 +2,81 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
-import { exportSTL, exportSTEP } from "../../three/occClient.js";
+import { exportSTL, exportSTEP, importStep } from "../../three/occClient.js";
+import { maxItemId } from "../../store/internals.js";
+import {
+  parseStl,
+  parseSvgToSketchShapes,
+  finalizeImportedMesh,
+} from "../../three/importGeometry.js";
 
 const DocumentSection = () => {
   const history = useStore((s) => s.history);
   const activeHistoryId = useStore((s) => s.activeHistoryId);
-  const newDocument = useStore((s) => s.newDocument);
+  const setProjectsDialogOpen = useStore((s) => s.setProjectsDialogOpen);
   const loadDocument = useStore((s) => s.loadDocument);
+  const createProject = useStore((s) => s.createProject);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
   const cameraControls = useStore((s) => s._cameraControls);
+  const selectedId = useStore((s) => s.selectedId);
+  const addItem = useStore((s) => s.addItem);
+  const setSvgImport = useStore((s) => s.setSvgImport);
+  const selectItem = useStore((s) => s.selectItem);
 
+  const selectedItem = items.find((i) => i.id === selectedId);
+  const isSketch = selectedItem?.type === "sketch";
+
+  const importInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const saveBtnRef = useRef(null);
   const saveMenuRef = useRef(null);
   const [saveMenuOpen, setSaveMenuOpen] = useState(false);
   const [saveMenuPos, setSaveMenuPos] = useState(null);
+  const importBtnRef = useRef(null);
+  const importMenuRef = useRef(null);
+  const [importMenuOpen, setImportMenuOpen] = useState(false);
+  const [importMenuPos, setImportMenuPos] = useState(null);
 
-  useEffect(() => {
-    if (!saveMenuOpen) return;
-    const rect = saveBtnRef.current?.getBoundingClientRect();
-    if (rect) setSaveMenuPos({ top: rect.bottom + 4, left: rect.left });
-    const onPointerDown = (e) => {
-      if (
-        !saveMenuRef.current?.contains(e.target) &&
-        !saveBtnRef.current?.contains(e.target)
-      )
-        setSaveMenuOpen(false);
-    };
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") setSaveMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [saveMenuOpen]);
-
-  const handleNew = () => {
-    if (
-      window.confirm(
-        "Create a new document? All current objects and timeline history will be cleared.",
-      )
-    )
-      newDocument();
+  // Position a dropdown under its trigger and close it on outside-click / Esc.
+  const useDropdown = (open, setOpen, btnRef, menuRef, setPos) => {
+    useEffect(() => {
+      if (!open) return;
+      const rect = btnRef.current?.getBoundingClientRect();
+      if (rect) setPos({ top: rect.bottom + 4, left: rect.left });
+      const onPointerDown = (e) => {
+        if (
+          !menuRef.current?.contains(e.target) &&
+          !btnRef.current?.contains(e.target)
+        )
+          setOpen(false);
+      };
+      const onKeyDown = (e) => {
+        if (e.key === "Escape") setOpen(false);
+      };
+      document.addEventListener("pointerdown", onPointerDown);
+      document.addEventListener("keydown", onKeyDown);
+      return () => {
+        document.removeEventListener("pointerdown", onPointerDown);
+        document.removeEventListener("keydown", onKeyDown);
+      };
+    }, [open, setOpen, btnRef, menuRef, setPos]);
   };
+  useDropdown(
+    saveMenuOpen,
+    setSaveMenuOpen,
+    saveBtnRef,
+    saveMenuRef,
+    setSaveMenuPos,
+  );
+  useDropdown(
+    importMenuOpen,
+    setImportMenuOpen,
+    importBtnRef,
+    importMenuRef,
+    setImportMenuPos,
+  );
 
   const handleSave = () => {
     const blob = new Blob(
@@ -69,35 +96,6 @@ const DocumentSection = () => {
     a.click();
     URL.revokeObjectURL(url);
     setSaveMenuOpen(false);
-  };
-
-  const handleLoadClick = () => {
-    fileInputRef.current.value = "";
-    fileInputRef.current.click();
-  };
-
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!data.history || !Array.isArray(data.history)) {
-          alert("Invalid document file.");
-          return;
-        }
-        if (
-          window.confirm(
-            "Load this document? All current objects and timeline history will be cleared.",
-          )
-        )
-          loadDocument(data);
-      } catch (err) {
-        alert("Failed to read document: " + err.message);
-      }
-    };
-    reader.readAsText(file);
   };
 
   // Trigger a browser download for a Blob.
@@ -161,37 +159,152 @@ const DocumentSection = () => {
     download(blob, "scene.png");
   };
 
+  // Import — open the file picker restricted to the chosen kind.
+  const handleImportKind = (accept) => {
+    setImportMenuOpen(false);
+    if (!importInputRef.current) return;
+    importInputRef.current.accept = accept;
+    importInputRef.current.value = "";
+    importInputRef.current.click();
+  };
+
+  // Load a .cad.json document as a NEW project (existing projects untouched),
+  // then load its data into that fresh project.
+  const handleLoadClick = () => {
+    setImportMenuOpen(false);
+    fileInputRef.current.value = "";
+    fileInputRef.current.click();
+  };
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const baseName = file.name.replace(/\.(cad\.)?json$/i, "");
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.history || !Array.isArray(data.history)) {
+          alert("Invalid document file.");
+          return;
+        }
+        await createProject(baseName || "Imported");
+        loadDocument(data);
+      } catch (err) {
+        alert("Failed to read document: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const addImportedSolid = (geometryData, name) => {
+    const id = maxItemId(history) + 1;
+    addItem({
+      id,
+      name,
+      type: "csg",
+      children: [],
+      geometryData,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    });
+    selectItem(id);
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = file.name.toLowerCase().split(".").pop();
+    const baseName = file.name.replace(/\.[^.]+$/, "");
+    try {
+      if (isSketch) {
+        if (ext !== "svg") {
+          alert("In a sketch, import SVG geometry.");
+          return;
+        }
+        const shapes = parseSvgToSketchShapes(await file.text());
+        if (shapes.length === 0) {
+          alert("No importable geometry found in the SVG.");
+          return;
+        }
+        // Don't commit yet — let the user scale/move it first.
+        setSvgImport({
+          sketchId: selectedId,
+          shapes,
+          scale: 1,
+          offsetX: 0,
+          offsetY: 0,
+        });
+        requestAnimationFrame(() =>
+          useStore.getState()._cameraControls?.updateSvgPreview?.(),
+        );
+      } else if (ext === "stl") {
+        addImportedSolid(
+          parseStl(await file.arrayBuffer()).geometryData,
+          `${baseName} (STL)`,
+        );
+      } else if (ext === "step" || ext === "stp") {
+        const res = await importStep({ stepText: await file.text() });
+        addImportedSolid(
+          finalizeImportedMesh(res.positions, res.indices).geometryData,
+          `${baseName} (STEP)`,
+        );
+      } else {
+        alert("Import STL or STEP files in the 3D view, or SVG in a sketch.");
+      }
+    } catch (err) {
+      console.error("Import failed:", err);
+      alert("Import failed: " + err.message);
+    }
+  };
+
   return (
     <ToolbarSection label="Document">
-      <button className="toolbar-btn" title="New document" onClick={handleNew}>
+      <button
+        className="toolbar-btn"
+        title="Projects — manage and switch between projects"
+        onClick={() => setProjectsDialogOpen(true)}
+      >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M6 2h9l5 5v15H6V2z"
+          <rect
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            x="3"
+            y="4"
+            width="8"
+            height="7"
           />
-          <path
-            d="M14 2v6h6"
+          <rect
+            stroke="#6C3FD4"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            x="13"
+            y="4"
+            width="8"
+            height="7"
           />
-          <line
-            x1="9"
-            y1="12"
-            x2="15"
-            y2="12"
-            stroke="currentColor"
-            strokeWidth="2"
+          <rect
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            x="3"
+            y="13"
+            width="8"
+            height="7"
           />
-          <line
-            x1="12"
-            y1="9"
-            x2="12"
-            y2="15"
-            stroke="currentColor"
-            strokeWidth="2"
+          <rect
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            x="13"
+            y="13"
+            width="8"
+            height="7"
           />
         </svg>
       </button>
@@ -202,34 +315,31 @@ const DocumentSection = () => {
         onClick={() => setSaveMenuOpen((open) => !open)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            x="3"
-            y="3"
-            width="18"
-            height="18"
-            rx="1"
+          <path
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <rect
-            x="7"
-            y="3"
-            width="10"
-            height="6"
-            fill="none"
-            stroke="currentColor"
             strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M4 14 L4 20 L20 20 L20 14"
           />
-          <rect
-            x="6"
-            y="13"
-            width="12"
-            height="7"
-            rx="1"
+          <line
+            stroke="#6C3FD4"
             fill="none"
-            stroke="currentColor"
             strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="16"
+            x2="12"
+            y2="4"
+          />
+          <polyline
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="7,9 12,4 17,9"
           />
         </svg>
       </button>
@@ -260,57 +370,115 @@ const DocumentSection = () => {
           document.body,
         )}
       <button
+        ref={importBtnRef}
         className="toolbar-btn"
-        title="Load document"
-        onClick={handleLoadClick}
+        title="Load / Import"
+        onClick={() => setImportMenuOpen((open) => !open)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <path
-            d="M3 7h5l2-3h6l2 3h3v13H3V7z"
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            d="M4 14 L4 20 L20 20 L20 14"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="3"
+            x2="12"
+            y2="15"
           />
           <polyline
-            points="12,11 12,18"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <polyline
-            points="9,15 12,18 15,15"
-            stroke="currentColor"
-            strokeWidth="2"
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="7,10 12,15 17,10"
           />
         </svg>
       </button>
+      {importMenuOpen &&
+        importMenuPos &&
+        createPortal(
+          <div
+            className="toolbar-dropdown-menu"
+            ref={importMenuRef}
+            style={{ top: importMenuPos.top, left: importMenuPos.left }}
+          >
+            <button className="toolbar-dropdown-item" onClick={handleLoadClick}>
+              Load document (.cad.json)
+            </button>
+            <button
+              className="toolbar-dropdown-item"
+              onClick={() => handleImportKind(".stl")}
+            >
+              Import STL
+            </button>
+            <button
+              className="toolbar-dropdown-item"
+              onClick={() => handleImportKind(".step,.stp")}
+            >
+              Import STEP
+            </button>
+            <button className="toolbar-dropdown-item" disabled>
+              Import image (.png)
+            </button>
+          </div>,
+          document.body,
+        )}
       <button
         className="toolbar-btn"
         title="Variables"
         onClick={() => setVariablesDialogOpen(true)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
+          <rect
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            x="2"
+            y="3"
+            width="20"
+            height="18"
+          />
+          <text
+            x="5"
+            y="16"
+            fontSize="13"
+            fontStyle="italic"
+            fontFamily="Georgia, serif"
+            fontWeight="700"
+            fill="#6C3FD4"
+          >
+            f
+          </text>
           <text
             x="12"
             y="16"
-            textAnchor="middle"
-            fontSize="14"
-            fontWeight="bold"
+            fontSize="11"
             fontStyle="italic"
-            fill="currentColor"
-            fontFamily="serif"
+            fontFamily="Georgia, serif"
+            fill="#D4A33F"
           >
             x
           </text>
-          <line
-            x1="5"
-            y1="20"
-            x2="19"
-            y2="20"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
         </svg>
       </button>
+      <input
+        ref={importInputRef}
+        type="file"
+        style={{ display: "none" }}
+        onChange={handleImportFile}
+      />
       <input
         ref={fileInputRef}
         type="file"

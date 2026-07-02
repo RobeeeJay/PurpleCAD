@@ -14,9 +14,148 @@ import {
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
 import { resolveValue } from "../three/geometryParams.js";
+import {
+  MIRRORABLE_TYPES,
+  mirrorShapeGeometry,
+  applyMirrorConstraints,
+} from "../three/sketchMirror.js";
+import {
+  CIRCULAR_PATTERNABLE_TYPES,
+  rotateShapeGeometry,
+  applyCircularPatternConstraints,
+} from "../three/sketchCircularPattern.js";
+import {
+  RECTANGULAR_PATTERNABLE_TYPES,
+  translateShapeGeometry,
+  applyRectangularPatternConstraints,
+} from "../three/sketchRectangularPattern.js";
+import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
+import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
+import { explodeContours, resizeCorner } from "../three/sketchGeometry.js";
+import {
+  textShapeContours,
+  makeTextShape,
+  isFontAvailable,
+} from "../three/sketchText.js";
+import { computeLineTrim } from "../three/sketchTrim.js";
 
 // Shape types the Offset tool can copy.
 export const OFFSETTABLE_TYPES = ["line", "circle", "arc", "ellipse", "bezier"];
+
+// Every field on a constraint that references a shape by index, across all
+// constraint types (coincident/distance/angle use A/B; onLine uses
+// point/line; H/V and the copy ops use shapeIdx; mirror/offset/pattern carry
+// a source origIdx; mirror adds lineIdx; circularPattern adds centerShapeIdx).
+// `i`, `j`, `index`, `count`, `offsetGroup` are NOT shape indices.
+const SHAPE_INDEX_FIELDS = [
+  "shapeAIdx",
+  "shapeBIdx",
+  "shapeIdx",
+  "origIdx",
+  "pointShapeIdx",
+  "lineShapeIdx",
+  "lineIdx",
+  "centerShapeIdx",
+];
+
+// Remap a constraint's shape-index fields through `indexMap` (old index → new
+// index, or -1 for a removed shape).  Returns null when the constraint
+// references any removed shape, so the caller can drop it.  Used when deleting
+// shapes (e.g. replacing a rectangular pattern's copies) so every surviving
+// constraint keeps pointing at the right geometry.
+export const remapConstraintShapeIndices = (constraint, indexMap) => {
+  const out = { ...constraint };
+  for (const f of SHAPE_INDEX_FIELDS) {
+    if (typeof constraint[f] === "number") {
+      const next = indexMap.get(constraint[f]);
+      if (next == null || next === -1) return null;
+      out[f] = next;
+    }
+  }
+  return out;
+};
+
+// Does a constraint reference shape index `idx` in any of its index fields?
+const constraintRefsShape = (c, idx) =>
+  SHAPE_INDEX_FIELDS.some((f) => c[f] === idx);
+
+// Does a constraint attach to a specific endpoint of shape `idx`?
+const constraintTouchesPoint = (c, idx, pt) =>
+  (c.shapeAIdx === idx && c.pointA === pt) ||
+  (c.shapeBIdx === idx && c.pointB === pt) ||
+  (c.pointShapeIdx === idx && c.pointKey === pt);
+
+// Constraint rebuild when a trim SHRINKS a line in place (one endpoint moved to
+// the cut point): drop distance constraints on the line and any constraint
+// attached to the endpoint that moved; the line keeps its index, direction, and
+// other endpoint, so H/V + the retained endpoint's constraints stay valid.
+const trimShrinkConstraints = (constraints, lineIdx, movedPoint) =>
+  constraints.filter((c) => {
+    if (
+      c.type === "distance" &&
+      (c.shapeAIdx === lineIdx || c.shapeBIdx === lineIdx)
+    )
+      return false;
+    if (constraintTouchesPoint(c, lineIdx, movedPoint)) return false;
+    return true;
+  });
+
+// Constraint rebuild when a trim SPLITS a line into segA (kept at lineIdx, owns
+// the original "start") and segB (appended at segBIdx, owns the original "end").
+// Distance constraints on the line are dropped; "end"-anchored constraints move
+// to segB; H/V apply to both collinear halves; anything else referencing the
+// line on a split is dropped to avoid ambiguous over-/under-constraint.
+const trimSplitConstraints = (constraints, lineIdx, segBIdx) => {
+  const out = [];
+  for (const c of constraints) {
+    if (
+      c.type === "distance" &&
+      (c.shapeAIdx === lineIdx || c.shapeBIdx === lineIdx)
+    )
+      continue;
+    if (!constraintRefsShape(c, lineIdx)) {
+      out.push(c);
+      continue;
+    }
+    if (c.type === "horizontal" || c.type === "vertical") {
+      out.push(c);
+      if (c.shapeIdx === lineIdx) out.push({ ...c, shapeIdx: segBIdx });
+      continue;
+    }
+    if (c.type === "coincident" || c.type === "angle") {
+      const nc = { ...c };
+      if (nc.shapeAIdx === lineIdx && nc.pointA === "end")
+        nc.shapeAIdx = segBIdx;
+      if (nc.shapeBIdx === lineIdx && nc.pointB === "end")
+        nc.shapeBIdx = segBIdx;
+      out.push(nc);
+      continue;
+    }
+    // onLine / offset referencing the split line → drop (rare, keeps it safe).
+  }
+  return out;
+};
+
+// Editing a mirror / pattern in place removes its old copy shapes and rebuilds
+// fresh ones.  This drops `copyIndices`, reindexes every surviving constraint,
+// and returns a `remapIdx` to bring any kept references (sources, a mirror line,
+// a pattern centre) into the reduced frame.  remapIdx returns null for a
+// removed index.
+const removeCopiesForEdit = (shapes, constraints, copyIndices) => {
+  const copySet = new Set(copyIndices);
+  const indexMap = new Map();
+  let ni = 0;
+  shapes.forEach((_, i) => indexMap.set(i, copySet.has(i) ? -1 : ni++));
+  const workShapes = shapes.filter((_, i) => !copySet.has(i));
+  const workConstraints = constraints
+    .map((c) => remapConstraintShapeIndices(c, indexMap))
+    .filter(Boolean);
+  const remapIdx = (i) => {
+    const m = indexMap.get(i);
+    return m == null || m === -1 ? null : m;
+  };
+  return { workShapes, workConstraints, remapIdx };
+};
 
 // Approximate parallel offset of a cubic bezier: shift each control point along
 // the curve normal at its parameter (endpoints exact, interior approximate).
@@ -134,12 +273,51 @@ const recomputeBezierOffsets = (shapes, constraints) => {
   return out;
 };
 
+// Commit a shapes-only change to a sketch: snapshot for undo, update items +
+// the matching CREATE history entry, persist.  Used by grouping (which only
+// adds/removes a `group` tag on shapes).
+const commitSketchShapesChange = (state, sketchId, newShapes) => {
+  pushSketchSnapshot(state, sketchId);
+  const updatedItems = state.items.map((item) =>
+    item.id === sketchId
+      ? Object.assign({}, item, { shapes: newShapes })
+      : item,
+  );
+  const newHistory = state.history.map((entry) =>
+    entry.instruction?.type === "create" &&
+    entry.instruction.item?.id === sketchId
+      ? Object.assign({}, entry, {
+          instruction: Object.assign({}, entry.instruction, {
+            item: Object.assign({}, entry.instruction.item, {
+              shapes: newShapes,
+            }),
+          }),
+        })
+      : entry,
+  );
+  saveTimeline(newHistory, state.activeHistoryId);
+  return {
+    items: markCsgDirty(updatedItems),
+    history: withOrphanFlags(newHistory),
+  };
+};
+
 export const createSketchSlice = (set) => ({
   ...createSketchUndoSlice(set),
 
   // --- Interaction state ---
   activeSketchTool: null,
-  setActiveSketchTool: (tool) => set({ activeSketchTool: tool }),
+  setActiveSketchTool: (tool) =>
+    set({
+      activeSketchTool: tool,
+      ...(tool !== "mirror" ? { sketchMirrorState: null } : null),
+      ...(tool !== "circularPattern"
+        ? { sketchCircularPatternState: null }
+        : null),
+      ...(tool !== "rectangularPattern"
+        ? { sketchRectangularPatternState: null }
+        : null),
+    }),
 
   selectedSketchElement: null, // { type:'point'|'line', shapeIdx, pointKey? }
   setSelectedSketchElement: (el) => set({ selectedSketchElement: el }),
@@ -153,15 +331,400 @@ export const createSketchSlice = (set) => ({
   sketchModifyMode: null, // 'chamfer' | 'bevel' | null
   setSketchModifyMode: (mode) => set({ sketchModifyMode: mode }),
 
+  // Chamfer setback / bevel radius, in mm (scene units × MM_PER_UNIT). Drives
+  // both the modify preview and the committed cut.
+  sketchModifyDistMm: 2.5,
+  setSketchModifyDistMm: (mm) => set({ sketchModifyDistMm: mm }),
+
   sketchConstraintFirstPoint: null, // { shapeIdx, pointKey } | null
   setSketchConstraintFirstPoint: (pt) =>
     set({ sketchConstraintFirstPoint: pt }),
 
+  // In-progress Text tool: the anchor point + current text/height/font being
+  // edited in the Text dialog (drives its live preview).  editIdx is the shape
+  // index when editing an existing text, or null when creating a new one.
+  textDraft: null, // { x, y, text, heightMm, font, editIdx } | null
+  setTextDraft: (v) => set({ textDraft: v }),
+  updateTextDraft: (partial) =>
+    set((s) =>
+      s.textDraft ? { textDraft: { ...s.textDraft, ...partial } } : {},
+    ),
+  clearTextDraft: () => set({ textDraft: null }),
+
+  // Backfill glyph contours on text shapes that predate contour caching, so the
+  // font-free consumers (region detection → fills, extrude, explode-on-unlock)
+  // see their outlines.  Idempotent; a no-op once every text shape has contours.
+  // `tolerance` is the active resolution's glyph simplification deviation; a
+  // text shape is (re)simplified when it lacks contours OR was built at a
+  // different tolerance, so toggling print/preview resolution re-coarsens or
+  // re-smooths extruded text.
+  ensureTextContours: (tolerance = 0) =>
+    set((state) => {
+      // Only re-tessellate a text shape whose EXACT font is loaded — otherwise
+      // makeTextShape would rebuild it in the default font (the shape still names
+      // the original).  Unloaded fonts keep their stored contours until the App
+      // effect loads the font and re-runs this.
+      const needs = (s) =>
+        s.type === "text" &&
+        isFontAvailable(s.font) &&
+        (!Array.isArray(s.contours) || s.contourTol !== tolerance);
+      let changed = false;
+      const updatedItems = state.items.map((item) => {
+        if (item.type !== "sketch" || !(item.shapes || []).some(needs))
+          return item;
+        changed = true;
+        return Object.assign({}, item, {
+          shapes: item.shapes.map((s) =>
+            needs(s)
+              ? makeTextShape({
+                  text: s.text,
+                  height: s.height,
+                  font: s.font,
+                  x: s.x,
+                  y: s.y,
+                  tolerance,
+                })
+              : s,
+          ),
+        });
+      });
+      if (!changed) return {};
+      const newHistory = state.history.map((entry) => {
+        if (entry.instruction?.type !== "create") return entry;
+        const ui = updatedItems.find(
+          (i) => i.id === entry.instruction.item?.id,
+        );
+        if (!ui || ui.type !== "sketch") return entry;
+        return Object.assign({}, entry, {
+          instruction: Object.assign({}, entry.instruction, {
+            item: Object.assign({}, entry.instruction.item, {
+              shapes: ui.shapes,
+            }),
+          }),
+        });
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
   sketchMultiSelectedIndices: [],
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
 
+  // Sketch selection-type filter (the top-right widget): which kinds a click
+  // resolves to.  line/point/shape on by default (the priority point > line >
+  // shape that was always the behaviour); constraint/object opt-in.  `object` is
+  // only usable while the Project tool is picking 3D geometry.
+  sketchSelTypes: {
+    line: true,
+    point: true,
+    shape: true,
+    constraint: true,
+    object: false,
+  },
+  // Saved set before a Cmd/Ctrl-click solo isolate (see soloSketchSelType).
+  sketchSelTypesSolo: null,
+  toggleSketchSelType: (key) =>
+    set((s) => ({
+      sketchSelTypes: { ...s.sketchSelTypes, [key]: !s.sketchSelTypes[key] },
+      sketchSelTypesSolo: null,
+    })),
+  // Cmd/Ctrl-click: isolate one kind (others off), saving the prior set; a second
+  // solo-click on the isolated kind restores it.
+  soloSketchSelType: (key) =>
+    set((s) => {
+      const KEYS = ["line", "point", "shape", "constraint", "object"];
+      const cur = s.sketchSelTypes;
+      const isolated = KEYS.every((k) => (k === key ? cur[k] : !cur[k]));
+      if (isolated && s.sketchSelTypesSolo) {
+        return {
+          sketchSelTypes: s.sketchSelTypesSolo,
+          sketchSelTypesSolo: null,
+        };
+      }
+      const saved = s.sketchSelTypesSolo || cur;
+      const next = {};
+      for (const k of KEYS) next[k] = k === key;
+      return { sketchSelTypes: next, sketchSelTypesSolo: saved };
+    }),
+
   sketchLongPressMenu: null, // { x, y, items: [{kind, label, ...}] } | null
   setSketchLongPressMenu: (v) => set({ sketchLongPressMenu: v }),
+
+  // Pending SVG import placement: the parsed shapes plus an interactive scale +
+  // offset the user adjusts before confirming.
+  // { sketchId, shapes, scale, offsetX, offsetY } | null
+  svgImport: null,
+  setSvgImport: (v) => set({ svgImport: v }),
+  updateSvgImport: (partial) =>
+    set((state) =>
+      state.svgImport ? { svgImport: { ...state.svgImport, ...partial } } : {},
+    ),
+  clearSvgImport: () => set({ svgImport: null }),
+
+  // Mirror tool: pick a mirror line, then toggle geometry to preview/mirror
+  // across it. { lineIdx: number|null, shapeIndices: number[] } | null
+  sketchMirrorState: null,
+  setSketchMirrorState: (v) => set({ sketchMirrorState: v }),
+
+  startMirrorTool: () =>
+    set({
+      activeSketchTool: "mirror",
+      sketchMirrorState: { lineIdx: null, shapeIndices: [] },
+    }),
+
+  cancelMirrorTool: () =>
+    set((state) => ({
+      activeSketchTool:
+        state.activeSketchTool === "mirror" ? null : state.activeSketchTool,
+      sketchMirrorState: null,
+    })),
+
+  setMirrorLine: (lineIdx) =>
+    set((state) => ({
+      sketchMirrorState: { ...(state.sketchMirrorState || {}), lineIdx },
+    })),
+
+  reselectMirrorLine: () =>
+    set((state) => ({
+      sketchMirrorState: { ...(state.sketchMirrorState || {}), lineIdx: null },
+    })),
+
+  toggleMirrorShape: (shapeIdx) =>
+    set((state) => {
+      const cur = state.sketchMirrorState;
+      if (!cur || cur.lineIdx == null) return {};
+      const shapeIndices = cur.shapeIndices.includes(shapeIdx)
+        ? cur.shapeIndices.filter((i) => i !== shapeIdx)
+        : [...cur.shapeIndices, shapeIdx];
+      return { sketchMirrorState: { ...cur, shapeIndices } };
+    }),
+
+  // Re-open the Mirror tool to edit an existing mirror, seeded from the
+  // constraint the user double-clicked.  A "mirror" is the set of mirror
+  // constraints sharing the same mirror line; its sources are their distinct
+  // origIdx and its copies are their shapeIdx.  editCopyIndices is carried so
+  // Confirm replaces those copies rather than adding a second mirror.
+  beginMirrorEdit: (sketchId, constraintIdx) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const clicked = (item?.constraints || [])[constraintIdx];
+      if (!clicked || clicked.type !== "mirror") return {};
+      const group = (item.constraints || []).filter(
+        (c) => c.type === "mirror" && c.lineIdx === clicked.lineIdx,
+      );
+      return {
+        activeSketchTool: "mirror",
+        sketchMirrorState: {
+          lineIdx: clicked.lineIdx,
+          shapeIndices: [...new Set(group.map((c) => c.origIdx))],
+          editCopyIndices: group.map((c) => c.shapeIdx),
+        },
+      };
+    }),
+
+  // Circular Pattern tool: pick a centre point, then toggle geometry to
+  // preview/copy as rotated repeats around it.
+  // { centerShapeIdx, centerPointKey, shapeIndices: number[], count } | null
+  sketchCircularPatternState: null,
+  setSketchCircularPatternState: (v) => set({ sketchCircularPatternState: v }),
+
+  // Document default for the "instances per 360°" input — remembers the last
+  // value entered so new circular patterns start from it.
+  circularPatternDefaultCount: 4,
+
+  startCircularPatternTool: () =>
+    set((state) => ({
+      activeSketchTool: "circularPattern",
+      sketchCircularPatternState: {
+        centerShapeIdx: null,
+        centerPointKey: null,
+        shapeIndices: [],
+        count: state.circularPatternDefaultCount,
+      },
+    })),
+
+  cancelCircularPatternTool: () =>
+    set((state) => ({
+      activeSketchTool:
+        state.activeSketchTool === "circularPattern"
+          ? null
+          : state.activeSketchTool,
+      sketchCircularPatternState: null,
+    })),
+
+  setCircularPatternCenter: (centerShapeIdx, centerPointKey) =>
+    set((state) => ({
+      sketchCircularPatternState: {
+        ...(state.sketchCircularPatternState || {}),
+        centerShapeIdx,
+        centerPointKey,
+      },
+    })),
+
+  reselectCircularPatternCenter: () =>
+    set((state) => ({
+      sketchCircularPatternState: {
+        ...(state.sketchCircularPatternState || {}),
+        centerShapeIdx: null,
+        centerPointKey: null,
+      },
+    })),
+
+  toggleCircularPatternShape: (shapeIdx) =>
+    set((state) => {
+      const cur = state.sketchCircularPatternState;
+      if (!cur || cur.centerShapeIdx == null) return {};
+      const shapeIndices = cur.shapeIndices.includes(shapeIdx)
+        ? cur.shapeIndices.filter((i) => i !== shapeIdx)
+        : [...cur.shapeIndices, shapeIdx];
+      return { sketchCircularPatternState: { ...cur, shapeIndices } };
+    }),
+
+  setCircularPatternCount: (count) =>
+    set((state) => {
+      const cur = state.sketchCircularPatternState;
+      if (!cur) return {};
+      return { sketchCircularPatternState: { ...cur, count } };
+    }),
+
+  // Re-open the Circular Pattern tool to edit an existing pattern, seeded from
+  // the constraint the user double-clicked.  A "pattern" is the set of
+  // circularPattern constraints sharing the same centre point + count; its
+  // sources are their distinct origIdx and its copies are their shapeIdx.
+  beginCircularPatternEdit: (sketchId, constraintIdx) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const clicked = (item?.constraints || [])[constraintIdx];
+      if (!clicked || clicked.type !== "circularPattern") return {};
+      const group = (item.constraints || []).filter(
+        (c) =>
+          c.type === "circularPattern" &&
+          c.centerShapeIdx === clicked.centerShapeIdx &&
+          c.centerPointKey === clicked.centerPointKey &&
+          c.count === clicked.count,
+      );
+      return {
+        activeSketchTool: "circularPattern",
+        sketchCircularPatternState: {
+          centerShapeIdx: clicked.centerShapeIdx,
+          centerPointKey: clicked.centerPointKey,
+          count: clicked.count,
+          shapeIndices: [...new Set(group.map((c) => c.origIdx))],
+          editCopyIndices: group.map((c) => c.shapeIdx),
+        },
+      };
+    }),
+
+  // Rectangular Pattern tool: toggle geometry to preview/copy as a grid of
+  // repeats offset in X and Y.
+  // { shapeIndices: number[], countX, countY, offsetX, offsetY } | null
+  sketchRectangularPatternState: null,
+  setSketchRectangularPatternState: (v) =>
+    set({ sketchRectangularPatternState: v }),
+
+  // Document defaults for the rectangular pattern inputs — remember the last
+  // values entered so new rectangular patterns start from them.
+  rectangularPatternDefaultCountX: 2,
+  rectangularPatternDefaultCountY: 2,
+  rectangularPatternDefaultOffsetX: 10,
+  rectangularPatternDefaultOffsetY: 10,
+
+  startRectangularPatternTool: () =>
+    set((state) => ({
+      activeSketchTool: "rectangularPattern",
+      sketchRectangularPatternState: {
+        shapeIndices: [],
+        countX: state.rectangularPatternDefaultCountX,
+        countY: state.rectangularPatternDefaultCountY,
+        offsetX: state.rectangularPatternDefaultOffsetX,
+        offsetY: state.rectangularPatternDefaultOffsetY,
+      },
+    })),
+
+  cancelRectangularPatternTool: () =>
+    set((state) => ({
+      activeSketchTool:
+        state.activeSketchTool === "rectangularPattern"
+          ? null
+          : state.activeSketchTool,
+      sketchRectangularPatternState: null,
+    })),
+
+  toggleRectangularPatternShape: (shapeIdx) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      const shapeIndices = cur.shapeIndices.includes(shapeIdx)
+        ? cur.shapeIndices.filter((i) => i !== shapeIdx)
+        : [...cur.shapeIndices, shapeIdx];
+      return { sketchRectangularPatternState: { ...cur, shapeIndices } };
+    }),
+
+  setRectangularPatternCountX: (countX) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      return { sketchRectangularPatternState: { ...cur, countX } };
+    }),
+
+  setRectangularPatternCountY: (countY) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      return { sketchRectangularPatternState: { ...cur, countY } };
+    }),
+
+  setRectangularPatternOffsetX: (offsetX) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      return { sketchRectangularPatternState: { ...cur, offsetX } };
+    }),
+
+  setRectangularPatternOffsetY: (offsetY) =>
+    set((state) => {
+      const cur = state.sketchRectangularPatternState;
+      if (!cur) return {};
+      return { sketchRectangularPatternState: { ...cur, offsetY } };
+    }),
+
+  // Re-open the Rectangular Pattern tool to edit an existing pattern, seeded
+  // from the constraint the user double-clicked.  A "pattern" is the set of
+  // rectangularPattern constraints sharing the same offsets + counts; its
+  // sources are their distinct origIdx and its copies are their shapeIdx.
+  // editCopyIndices is carried so Confirm replaces those copies rather than
+  // appending a second pattern.  No-op (and no tool change) if the index isn't
+  // a rectangularPattern constraint.
+  beginRectangularPatternEdit: (sketchId, constraintIdx) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const clicked = (item?.constraints || [])[constraintIdx];
+      if (!clicked || clicked.type !== "rectangularPattern") return {};
+      const group = (item.constraints || []).filter(
+        (c) =>
+          c.type === "rectangularPattern" &&
+          c.dx === clicked.dx &&
+          c.dy === clicked.dy &&
+          c.countX === clicked.countX &&
+          c.countY === clicked.countY,
+      );
+      const sourceIndices = [...new Set(group.map((c) => c.origIdx))];
+      const copyIndices = group.map((c) => c.shapeIdx);
+      return {
+        activeSketchTool: "rectangularPattern",
+        sketchRectangularPatternState: {
+          shapeIndices: sourceIndices,
+          countX: clicked.countX,
+          countY: clicked.countY,
+          offsetX: clicked.dx,
+          offsetY: clicked.dy,
+          editCopyIndices: copyIndices,
+        },
+      };
+    }),
 
   // --- Shape + constraint mutations ---
   addSketchConstraints: (sketchId, newConstraints) =>
@@ -202,9 +765,17 @@ export const createSketchSlice = (set) => ({
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
+        const shapes = (item.shapes || []).map((s, i) =>
+          updatesMap.has(i) ? updatesMap.get(i) : s,
+        );
+        const constraints = item.constraints || [];
         return Object.assign({}, item, {
-          shapes: (item.shapes || []).map((s, i) =>
-            updatesMap.has(i) ? updatesMap.get(i) : s,
+          shapes: applyRectangularPatternConstraints(
+            applyCircularPatternConstraints(
+              applyMirrorConstraints(shapes, constraints),
+              constraints,
+            ),
+            constraints,
           ),
         });
       });
@@ -234,15 +805,22 @@ export const createSketchSlice = (set) => ({
   updateSketchShape: (sketchId, shapeIdx, newShape) =>
     set((state) => {
       pushSketchSnapshot(state, sketchId);
-      const updatedItems = state.items.map((item) =>
-        item.id === sketchId
-          ? Object.assign({}, item, {
-              shapes: item.shapes.map((s, i) =>
-                i === shapeIdx ? newShape : s,
-              ),
-            })
-          : item,
-      );
+      const updatedItems = state.items.map((item) => {
+        if (item.id !== sketchId) return item;
+        const shapes = item.shapes.map((s, i) =>
+          i === shapeIdx ? newShape : s,
+        );
+        const constraints = item.constraints || [];
+        return Object.assign({}, item, {
+          shapes: applyRectangularPatternConstraints(
+            applyCircularPatternConstraints(
+              applyMirrorConstraints(shapes, constraints),
+              constraints,
+            ),
+            constraints,
+          ),
+        });
+      });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
       const newHistory = state.history.map((entry) => {
         if (
@@ -299,6 +877,97 @@ export const createSketchSlice = (set) => ({
         items: markCsgDirty(updatedItems),
         history: withOrphanFlags(newHistory),
       };
+    }),
+
+  // Live re-projection: replace the shapes of one projection group (projKey =
+  // `${sourceId}:${edgeKey}`) with freshly re-fitted ones.  No undo snapshot —
+  // this tracks the source automatically, it isn't a user edit.
+  updateProjectionShapes: (sketchId, projKey, newShapes) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const kept = (item.shapes || []).filter(
+        (s) => s.projection?.key !== projKey,
+      );
+      const shapes = [...kept, ...newShapes];
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId ? Object.assign({}, it, { shapes }) : it,
+      );
+      const newHistory = state.history.map((entry) =>
+        entry.instruction?.type === "create" &&
+        entry.instruction.item?.id === sketchId
+          ? Object.assign({}, entry, {
+              instruction: Object.assign({}, entry.instruction, {
+                item: Object.assign({}, entry.instruction.item, { shapes }),
+              }),
+            })
+          : entry,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Delete a projection constraint: strip the `projection` link from its shapes
+  // (or every projected shape when projKey is null), leaving plain editable
+  // sketch geometry behind.  A user action, so it snapshots for undo.
+  releaseProjection: (sketchId, projKey = null) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      let changed = false;
+      const shapes = (item.shapes || []).map((s) => {
+        if (!s.projection) return s;
+        if (projKey && s.projection.key !== projKey) return s;
+        changed = true;
+        const { projection, ...rest } = s; // eslint-disable-line no-unused-vars
+        return rest;
+      });
+      if (!changed) return {};
+      return commitSketchShapesChange(state, sketchId, shapes);
+    }),
+
+  // Tag the given shape indices with a shared, fresh group id so they select /
+  // move / delete as a unit.  Needs at least two shapes.
+  groupSketchShapes: (sketchId, indices) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const idxSet = new Set(indices || []);
+      if (!item || idxSet.size < 2) return {};
+      const shapes = item.shapes || [];
+      const maxGroup = shapes.reduce(
+        (m, s) => (typeof s.group === "number" ? Math.max(m, s.group) : m),
+        0,
+      );
+      const gid = maxGroup + 1;
+      const newShapes = shapes.map((s, i) =>
+        idxSet.has(i) ? { ...s, group: gid } : s,
+      );
+      return commitSketchShapesChange(state, sketchId, newShapes);
+    }),
+
+  // Dissolve every group that any of the given shapes belongs to.
+  ungroupSketchShapes: (sketchId, indices) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const shapes = item.shapes || [];
+      const groups = new Set();
+      (indices || []).forEach((i) => {
+        const g = shapes[i]?.group;
+        if (g != null) groups.add(g);
+      });
+      if (groups.size === 0) return {};
+      const newShapes = shapes.map((s) => {
+        if (s.group != null && groups.has(s.group)) {
+          const { group, ...rest } = s;
+          return rest;
+        }
+        return s;
+      });
+      return commitSketchShapesChange(state, sketchId, newShapes);
     }),
 
   addSketchShape: (sketchId, shape, newConstraints = []) =>
@@ -381,6 +1050,84 @@ export const createSketchSlice = (set) => ({
       };
     }),
 
+  // Resize an existing chamfer / bevel corner to a new size (mm) — re-derives the
+  // bridge + its two legs in place.  The geometry comes out self-consistent (the
+  // bridge ends sit exactly on the trimmed leg corners), so no re-solve is needed.
+  resizeSketchCorner: (sketchId, bridgeIdx, sizeMm) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const res = resizeCorner(
+        item.shapes || [],
+        bridgeIdx,
+        sizeMm / MM_PER_UNIT,
+      );
+      if (!res) return {};
+      pushSketchSnapshot(state, sketchId);
+      const map = new Map(res.updates);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: (it.shapes || []).map((s, i) =>
+                map.has(i) ? map.get(i) : s,
+              ),
+            })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) =>
+        entry.instruction?.type === "create" &&
+        entry.instruction.item?.id === sketchId
+          ? Object.assign({}, entry, {
+              instruction: Object.assign({}, entry.instruction, {
+                item: Object.assign({}, entry.instruction.item, {
+                  shapes: updatedItem?.shapes,
+                }),
+              }),
+            })
+          : entry,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Replace one shape in place (used to re-commit an edited text shape — its
+  // `text` constraint keeps pointing at the same index).
+  updateSketchTextShape: (sketchId, idx, shape) =>
+    set((state) => {
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((item) =>
+        item.id === sketchId
+          ? Object.assign({}, item, {
+              shapes: (item.shapes || []).map((s, i) =>
+                i === idx ? shape : s,
+              ),
+            })
+          : item,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) =>
+        entry.instruction?.type === "create" &&
+        entry.instruction.item?.id === sketchId
+          ? Object.assign({}, entry, {
+              instruction: Object.assign({}, entry.instruction, {
+                item: Object.assign({}, entry.instruction.item, {
+                  shapes: updatedItem?.shapes,
+                }),
+              }),
+            })
+          : entry,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
   deleteSketchShapes: (sketchId, indicesToDelete) =>
     set((state) => {
       pushSketchSnapshot(state, sketchId);
@@ -394,35 +1141,12 @@ export const createSketchSlice = (set) => ({
           indexMap.set(i, deleteSet.has(i) ? -1 : newIdx++);
         });
         const shapes = oldShapes.filter((_, i) => !deleteSet.has(i));
+        // Reindex every constraint type generically (covers mirror / offset /
+        // circular- & rectangular-pattern too, which the old per-type filter
+        // silently corrupted), dropping any that referenced a deleted shape.
         const constraints = (item.constraints || [])
-          .filter((c) => {
-            if (c.type === "onLine")
-              return (
-                indexMap.get(c.pointShapeIdx) !== -1 &&
-                indexMap.get(c.lineShapeIdx) !== -1
-              );
-            if (c.type === "horizontal" || c.type === "vertical")
-              return indexMap.get(c.shapeIdx) !== -1;
-            return (
-              indexMap.get(c.shapeAIdx) !== -1 &&
-              indexMap.get(c.shapeBIdx) !== -1
-            );
-          })
-          .map((c) => {
-            if (c.type === "onLine")
-              return {
-                ...c,
-                pointShapeIdx: indexMap.get(c.pointShapeIdx),
-                lineShapeIdx: indexMap.get(c.lineShapeIdx),
-              };
-            if (c.type === "horizontal" || c.type === "vertical")
-              return { ...c, shapeIdx: indexMap.get(c.shapeIdx) };
-            return {
-              ...c,
-              shapeAIdx: indexMap.get(c.shapeAIdx),
-              shapeBIdx: indexMap.get(c.shapeBIdx),
-            };
-          });
+          .map((c) => remapConstraintShapeIndices(c, indexMap))
+          .filter(Boolean);
         return Object.assign({}, item, { shapes, constraints });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
@@ -446,6 +1170,95 @@ export const createSketchSlice = (set) => ({
       return {
         items: markCsgDirty(updatedItems),
         history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Trim the part of line `lineIdx` under (x,y) up to the nearest crossings on
+  // either side — deleting the line, shrinking it, or splitting it in two.
+  // Skips offset/text geometry and drops the line's distance constraints.
+  // `snapshot` is false for the continued trims of a single click-drag so the
+  // whole drag is one undo step.
+  trimSketchLine: (sketchId, lineIdx, x, y, snapshot = true) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item) return {};
+      const shapes = item.shapes || [];
+      const line = shapes[lineIdx];
+      if (!line || line.type !== "line") return {};
+      const constraints = item.constraints || [];
+      // Offset lines are linked copies — never trim them.
+      const offsetIdxs = new Set(
+        constraints.filter((c) => c.type === "offset").map((c) => c.shapeIdx),
+      );
+      if (offsetIdxs.has(lineIdx)) return {};
+
+      const plan = computeLineTrim(shapes, lineIdx, x, y);
+      if (!plan) return {};
+      const { keepStart, keepEnd } = plan;
+
+      let newShapes, newConstraints;
+      if (!keepStart && !keepEnd) {
+        // Whole segment between two crossings (or the bare line) → delete it.
+        const indexMap = new Map();
+        let ni = 0;
+        shapes.forEach((_, i) => indexMap.set(i, i === lineIdx ? -1 : ni++));
+        newShapes = shapes.filter((_, i) => i !== lineIdx);
+        newConstraints = constraints
+          .map((c) => remapConstraintShapeIndices(c, indexMap))
+          .filter(Boolean);
+      } else if (keepStart && keepEnd) {
+        // Interior chunk removed → split into the two surviving stubs.
+        const segBIdx = shapes.length;
+        newShapes = [
+          ...shapes.map((s, i) => (i === lineIdx ? keepStart : s)),
+          keepEnd,
+        ];
+        newConstraints = trimSplitConstraints(constraints, lineIdx, segBIdx);
+      } else {
+        // One end removed → shrink the line in place.
+        const seg = keepStart || keepEnd;
+        // keepStart retains the original start, so the END moved (and vice versa).
+        const movedPoint = keepStart ? "end" : "start";
+        newShapes = shapes.map((s, i) => (i === lineIdx ? seg : s));
+        newConstraints = trimShrinkConstraints(
+          constraints,
+          lineIdx,
+          movedPoint,
+        );
+      }
+
+      if (snapshot) pushSketchSnapshot(state, sketchId);
+
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: newShapes,
+              constraints: newConstraints,
+            })
+          : it,
+      );
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: newShapes,
+                constraints: newConstraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+        selectedSketchElement: null,
+        sketchMultiSelectedIndices: [],
       };
     }),
 
@@ -477,6 +1290,91 @@ export const createSketchSlice = (set) => ({
       const inputShapes = (item.shapes || []).slice();
       inputShapes[shapeIdx] = snapped;
       const { shapes: solved, ok } = solveConstraints(inputShapes, constraints);
+      if (!ok)
+        return {
+          notification:
+            "Can't apply that constraint — it would break another constraint",
+        };
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, { shapes: solved, constraints })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Two-shape geometric constraint (parallel / colinear between two lines;
+  // tangent between a line and an arc/circle, or two arcs/circles).  Adds the
+  // constraint and re-solves the whole sketch; rejects if it can't be satisfied.
+  applySketchPairConstraint: (sketchId, idxA, idxB, type) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item || idxA === idxB) return {};
+      const shapes = item.shapes || [];
+      const a = shapes[idxA],
+        b = shapes[idxB];
+      if (!a || !b) return {};
+      const isLine = (s) => s?.type === "line";
+      const isArc = (s) => s?.type === "circle" || s?.type === "arc";
+      if (
+        (type === "parallel" || type === "colinear") &&
+        !(isLine(a) && isLine(b))
+      )
+        return { notification: `${type} needs two lines.` };
+      if (
+        type === "tangent" &&
+        !(
+          (isLine(a) && isArc(b)) ||
+          (isArc(a) && isLine(b)) ||
+          (isArc(a) && isArc(b))
+        )
+      )
+        return {
+          notification:
+            "Tangent needs a line + arc/circle, or two arcs/circles.",
+        };
+      if (
+        type === "equal" &&
+        !((isLine(a) && isLine(b)) || (isArc(a) && isArc(b)))
+      )
+        return {
+          notification:
+            "Equal needs two lines (length), or two circles/arcs (radius).",
+        };
+      const dup = (c) =>
+        c.type === type &&
+        ((c.shapeAIdx === idxA && c.shapeBIdx === idxB) ||
+          (c.shapeAIdx === idxB && c.shapeBIdx === idxA));
+      const constraints = [
+        ...(item.constraints || []).filter((c) => !dup(c)),
+        { type, shapeAIdx: idxA, shapeBIdx: idxB },
+      ];
+      const { shapes: solved, ok } = solveConstraints(
+        shapes.slice(),
+        constraints,
+      );
       if (!ok)
         return {
           notification:
@@ -555,6 +1453,106 @@ export const createSketchSlice = (set) => ({
           distance,
           offsetGroup,
         });
+      });
+
+      // Chamfer / fillet corners need their offset SIDE corrected.  Every other
+      // edge of a closed loop offsets to a consistent side via its own
+      // right-normal because the loop is consistently wound, but a chamfer
+      // line / bevel arc bridge is built from the junction's (arbitrary) a/b
+      // order, so its own normal can point the opposite way.  Then the
+      // perpendicular-offset residual drives it to the wrong side while the
+      // corner coincidents pull it to the legs — it stretches into a huge wedge
+      // off the corner.  Decide the correct side here (where the legs are) and
+      // record `sideSign` on the bridge's offset constraint so the solver and
+      // later distance edits keep it.  A bevel additionally needs coincidents
+      // tying its arc ends to the legs (the corner chaining below only links
+      // lines, so the arc would otherwise float and the re-solve under-determine);
+      // a chamfer's line bridge is already chained.
+      const rightNormal = (s) => {
+        const dx = s.x2 - s.x1,
+          dy = s.y2 - s.y1;
+        const l = Math.hypot(dx, dy) || 1e-9;
+        return { x: dy / l, y: -dx / l };
+      };
+      // Intersection of two infinite lines (each given as a segment), or null.
+      const lineLineIntersect = (p, q) => {
+        const r1x = p.x2 - p.x1,
+          r1y = p.y2 - p.y1;
+        const r2x = q.x2 - q.x1,
+          r2y = q.y2 - q.y1;
+        const den = r1x * r2y - r1y * r2x;
+        if (Math.abs(den) < 1e-12) return null;
+        const t = ((q.x1 - p.x1) * r2y - (q.y1 - p.y1) * r2x) / den;
+        return { x: p.x1 + t * r1x, y: p.y1 + t * r1y };
+      };
+      sel.forEach((origIdx) => {
+        const o = shapes[origIdx];
+        const data = o?.chamferData || o?.bevelData;
+        if ((o?.kind !== "chamfer" && o?.kind !== "bevel") || !data) return;
+        const { aIdx, aKey, bIdx, bKey } = data;
+        if (!newIdxOf.has(aIdx) || !newIdxOf.has(bIdx)) return;
+        const copyIdx = newIdxOf.get(origIdx);
+        const oc = newConstraints.find(
+          (c) => c.type === "offset" && c.origIdx === origIdx,
+        );
+
+        if (o.kind === "bevel" && o.type === "arc") {
+          // Concentric arc: its radius is the original centre's perpendicular
+          // distance to the offset leg, so the sign follows from rNew vs r.
+          const legA = newShapes[newIdxOf.get(aIdx) - base];
+          const lx = legA.x2 - legA.x1,
+            ly = legA.y2 - legA.y1;
+          const len = Math.hypot(lx, ly) || 1e-9;
+          const rNew = Math.abs(
+            ((o.cx - legA.x1) * ly - (o.cy - legA.y1) * lx) / len,
+          );
+          const sideSign = rNew - o.r >= 0 === dScene >= 0 ? 1 : -1;
+          newShapes[copyIdx - base].r = Math.max(1e-4, rNew);
+          if (oc) oc.sideSign = sideSign;
+          newConstraints.push(
+            {
+              type: "coincident",
+              shapeAIdx: copyIdx,
+              pointA: "start",
+              shapeBIdx: newIdxOf.get(aIdx),
+              pointB: aKey,
+            },
+            {
+              type: "coincident",
+              shapeAIdx: copyIdx,
+              pointA: "end",
+              shapeBIdx: newIdxOf.get(bIdx),
+              pointB: bKey,
+            },
+          );
+        } else if (o.type === "line") {
+          // Chamfer line.  A tool-built chamfer's bridge is wound opposite the
+          // loop, so a plain +d offset throws it to the far side (the wedge).
+          // Record sideSign so the offset residual sides it correctly, and seed
+          // the copy at the true parallel offset — the chamfer line shifted to
+          // the legs' side, clipped to where it crosses the two offset legs — so
+          // the solver starts at the answer and converges (a bare translation can
+          // fail, leaving every edge merely shifted with nothing rejoined).  The
+          // bridge keeps its offset constraint so the distance editor moves it.
+          const nC = rightNormal(o);
+          const nA = rightNormal(shapes[aIdx]);
+          const sideSign = nC.x * nA.x + nC.y * nA.y >= 0 ? 1 : -1;
+          if (oc) oc.sideSign = sideSign;
+          const chamOff = offsetShapeGeometry(o, dScene * sideSign);
+          const legACopy = newShapes[newIdxOf.get(aIdx) - base];
+          const legBCopy = newShapes[newIdxOf.get(bIdx) - base];
+          const s = lineLineIntersect(chamOff, legACopy);
+          const e = lineLineIntersect(chamOff, legBCopy);
+          if (s && e)
+            newShapes[copyIdx - base] = {
+              type: "line",
+              x1: s.x,
+              y1: s.y,
+              x2: e.x,
+              y2: e.y,
+            };
+          else newShapes[copyIdx - base] = chamOff;
+        }
       });
 
       // Carry shared corners over to the copies: group the originals' endpoints
@@ -762,10 +1760,52 @@ export const createSketchSlice = (set) => ({
       pushSketchSnapshot(state, sketchId);
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
+        const oldShapes = item.shapes || [];
+        const oldConstraints = item.constraints || [];
+        const removed = oldConstraints[constraintIdx];
+
+        // Deleting a `text` constraint unlocks the text: explode its glyph
+        // contours into ordinary editable line segments in place of the (now
+        // unconstrained) text shape.
+        if (
+          removed &&
+          removed.type === "text" &&
+          typeof removed.shapeIdx === "number" &&
+          oldShapes[removed.shapeIdx]?.type === "text"
+        ) {
+          const textIdx = removed.shapeIdx;
+          // Absolute glyph contours — regenerated from the font when the shape
+          // predates contour caching, so the text is never silently lost.
+          const absContours = textShapeContours(oldShapes[textIdx]);
+          const keptShapes = oldShapes.filter((_, i) => i !== textIdx);
+          const { shapes: lineShapes, constraints: lineCons } = explodeContours(
+            absContours,
+            keptShapes.length,
+          );
+          // No usable outlines → keep the text shape, just drop the constraint.
+          // Never delete the geometry.
+          if (lineShapes.length === 0) {
+            return Object.assign({}, item, {
+              constraints: oldConstraints.filter((_, i) => i !== constraintIdx),
+            });
+          }
+          const indexMap = new Map();
+          let ni = 0;
+          oldShapes.forEach((_, i) =>
+            indexMap.set(i, i === textIdx ? -1 : ni++),
+          );
+          const keptConstraints = oldConstraints
+            .filter((_, i) => i !== constraintIdx)
+            .map((c) => remapConstraintShapeIndices(c, indexMap))
+            .filter(Boolean);
+          return Object.assign({}, item, {
+            shapes: [...keptShapes, ...lineShapes],
+            constraints: [...keptConstraints, ...lineCons],
+          });
+        }
+
         return Object.assign({}, item, {
-          constraints: (item.constraints || []).filter(
-            (_, i) => i !== constraintIdx,
-          ),
+          constraints: oldConstraints.filter((_, i) => i !== constraintIdx),
         });
       });
       const updatedItem = updatedItems.find((i) => i.id === sketchId);
@@ -777,6 +1817,7 @@ export const createSketchSlice = (set) => ({
           return Object.assign({}, entry, {
             instruction: Object.assign({}, entry.instruction, {
               item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
                 constraints: updatedItem?.constraints,
               }),
             }),
@@ -788,6 +1829,339 @@ export const createSketchSlice = (set) => ({
       return {
         items: markCsgDirty(updatedItems),
         history: withOrphanFlags(newHistory),
+      };
+    }),
+
+  // Create mirrored copies of the picked shapes across the picked mirror
+  // line, each linked to its original by a `mirror` constraint. The copies
+  // are exact reflections (see sketchMirror.js) and stay in sync via
+  // applyMirrorConstraints whenever the original or the mirror line moves —
+  // until the `mirror` constraint is deleted, which leaves the copy as
+  // ordinary independent geometry.
+  confirmMirror: (sketchId) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const mirrorState = state.sketchMirrorState;
+      if (!item || !mirrorState || mirrorState.lineIdx == null) return {};
+      const done = { activeSketchTool: null, sketchMirrorState: null };
+
+      // Edit mode: drop the old copies first, reindexing every surviving
+      // constraint, and bring the line + source selection into the reduced
+      // frame.
+      let workShapes = item.shapes || [];
+      let workConstraints = item.constraints || [];
+      let lineIdx = mirrorState.lineIdx;
+      let selRaw = mirrorState.shapeIndices || [];
+      const copyIndices = mirrorState.editCopyIndices || [];
+      const editing = copyIndices.length > 0;
+      if (editing) {
+        const r = removeCopiesForEdit(workShapes, workConstraints, copyIndices);
+        workShapes = r.workShapes;
+        workConstraints = r.workConstraints;
+        lineIdx = r.remapIdx(lineIdx);
+        selRaw = selRaw.map(r.remapIdx).filter((i) => i != null);
+      }
+
+      const lineShape = lineIdx == null ? null : workShapes[lineIdx];
+      const sel = selRaw.filter(
+        (idx) =>
+          idx !== lineIdx && MIRRORABLE_TYPES.includes(workShapes[idx]?.type),
+      );
+      if (!lineShape || lineShape.type !== "line" || sel.length === 0) {
+        // A valid edit that empties the mirror still commits the removal.
+        if (!editing) return done;
+      }
+
+      const base = workShapes.length;
+      const newShapes = [];
+      const newConstraints = [];
+      if (lineShape && lineShape.type === "line") {
+        sel.forEach((origIdx) => {
+          const copy = mirrorShapeGeometry(workShapes[origIdx], lineShape);
+          if (!copy) return;
+          const newIdx = base + newShapes.length;
+          newShapes.push(copy);
+          newConstraints.push({
+            type: "mirror",
+            shapeIdx: newIdx,
+            origIdx,
+            lineIdx,
+          });
+        });
+      }
+      if (newShapes.length === 0 && !editing) return done;
+
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: [...workShapes, ...newShapes],
+              constraints: [...workConstraints, ...newConstraints],
+            })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+        activeSketchTool: null,
+        sketchMirrorState: null,
+      };
+    }),
+
+  // Create `count - 1` rotated copies of the picked shapes around the picked
+  // centre point, each linked to its original by a `circularPattern`
+  // constraint (index 1..count-1, sharing centre + count). The copies are
+  // exact rotations (see sketchCircularPattern.js) and stay in sync via
+  // applyCircularPatternConstraints whenever the original or the centre point
+  // moves — until the `circularPattern` constraint is deleted, which leaves
+  // the copy as ordinary independent geometry. The chosen count becomes the
+  // new document default for future circular patterns.
+  confirmCircularPattern: (sketchId) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const patternState = state.sketchCircularPatternState;
+      if (!item || !patternState || patternState.centerShapeIdx == null)
+        return {};
+      const count = Math.max(2, Math.round(patternState.count) || 2);
+      const { centerPointKey } = patternState;
+      const done = {
+        activeSketchTool: null,
+        sketchCircularPatternState: null,
+        circularPatternDefaultCount: count,
+      };
+
+      // Edit mode: drop the old copies first, reindexing every surviving
+      // constraint, and bring the centre + source selection into the reduced
+      // frame.
+      let workShapes = item.shapes || [];
+      let workConstraints = item.constraints || [];
+      let centerShapeIdx = patternState.centerShapeIdx;
+      let selRaw = patternState.shapeIndices || [];
+      const copyIndices = patternState.editCopyIndices || [];
+      const editing = copyIndices.length > 0;
+      if (editing) {
+        const r = removeCopiesForEdit(workShapes, workConstraints, copyIndices);
+        workShapes = r.workShapes;
+        workConstraints = r.workConstraints;
+        centerShapeIdx = r.remapIdx(centerShapeIdx);
+        selRaw = selRaw.map(r.remapIdx).filter((i) => i != null);
+      }
+
+      const sel =
+        centerShapeIdx == null
+          ? []
+          : selRaw.filter((idx) =>
+              CIRCULAR_PATTERNABLE_TYPES.includes(workShapes[idx]?.type),
+            );
+      if (sel.length === 0 && !editing) return done;
+
+      const base = workShapes.length;
+      const newShapes = [];
+      const newConstraints = [];
+      if (centerShapeIdx != null) {
+        const center = getShapePoint(
+          workShapes[centerShapeIdx],
+          centerPointKey,
+        );
+        sel.forEach((origIdx) => {
+          for (let index = 1; index < count; index++) {
+            const angle = (index * 2 * Math.PI) / count;
+            const copy = rotateShapeGeometry(
+              workShapes[origIdx],
+              center,
+              angle,
+            );
+            if (!copy) continue;
+            const newIdx = base + newShapes.length;
+            newShapes.push(copy);
+            newConstraints.push({
+              type: "circularPattern",
+              shapeIdx: newIdx,
+              origIdx,
+              centerShapeIdx,
+              centerPointKey,
+              count,
+              index,
+            });
+          }
+        });
+      }
+      if (newShapes.length === 0 && !editing) return done;
+
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: [...workShapes, ...newShapes],
+              constraints: [...workConstraints, ...newConstraints],
+            })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+        activeSketchTool: null,
+        sketchCircularPatternState: null,
+        circularPatternDefaultCount: count,
+      };
+    }),
+
+  // Create a grid of translated copies of the picked shapes, offset by
+  // (offsetX, offsetY) per step in X/Y (skipping the (0,0) original cell),
+  // each linked to its original by a `rectangularPattern` constraint (grid
+  // position i,j sharing dx/dy/countX/countY). The copies are exact
+  // translations (see sketchRectangularPattern.js) and stay in sync via
+  // applyRectangularPatternConstraints whenever the original moves — until
+  // the `rectangularPattern` constraint is deleted, which leaves the copy as
+  // ordinary independent geometry. The chosen counts/offsets become the new
+  // document defaults for future rectangular patterns.
+  confirmRectangularPattern: (sketchId) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      const patternState = state.sketchRectangularPatternState;
+      if (!item || !patternState) return {};
+      const shapes = item.shapes || [];
+      const countX = Math.max(1, Math.round(patternState.countX) || 1);
+      const countY = Math.max(1, Math.round(patternState.countY) || 1);
+      const offsetX = patternState.offsetX;
+      const offsetY = patternState.offsetY;
+      const defaults = {
+        activeSketchTool: null,
+        sketchRectangularPatternState: null,
+        rectangularPatternDefaultCountX: countX,
+        rectangularPatternDefaultCountY: countY,
+        rectangularPatternDefaultOffsetX: offsetX,
+        rectangularPatternDefaultOffsetY: offsetY,
+      };
+      // Edit mode (double-clicked an existing pattern): drop the old copies
+      // first, reindexing every surviving constraint, and carry the source
+      // selection through the same remap so it still points at the originals.
+      let workShapes = shapes;
+      let workConstraints = item.constraints || [];
+      let selRaw = patternState.shapeIndices || [];
+      const copyIndices = patternState.editCopyIndices || [];
+      const editing = copyIndices.length > 0;
+      if (editing) {
+        const copySet = new Set(copyIndices);
+        const indexMap = new Map();
+        let ni = 0;
+        workShapes.forEach((_, i) =>
+          indexMap.set(i, copySet.has(i) ? -1 : ni++),
+        );
+        workShapes = workShapes.filter((_, i) => !copySet.has(i));
+        workConstraints = workConstraints
+          .map((c) => remapConstraintShapeIndices(c, indexMap))
+          .filter(Boolean);
+        selRaw = selRaw
+          .map((i) => indexMap.get(i))
+          .filter((i) => i != null && i !== -1);
+      }
+
+      const sel = selRaw.filter((idx) =>
+        RECTANGULAR_PATTERNABLE_TYPES.includes(workShapes[idx]?.type),
+      );
+      // Nothing to do only when we're not editing — an edit with no sources
+      // (or counts of 1×1) still has to commit the removal of the old copies.
+      if (sel.length === 0 && !editing) return defaults;
+
+      const base = workShapes.length;
+      const newShapes = [];
+      const newConstraints = [];
+      sel.forEach((origIdx) => {
+        for (let i = 0; i < countX; i++) {
+          for (let j = 0; j < countY; j++) {
+            if (i === 0 && j === 0) continue;
+            const copy = translateShapeGeometry(
+              workShapes[origIdx],
+              i * offsetX,
+              j * offsetY,
+            );
+            if (!copy) continue;
+            const newIdx = base + newShapes.length;
+            newShapes.push(copy);
+            newConstraints.push({
+              type: "rectangularPattern",
+              shapeIdx: newIdx,
+              origIdx,
+              i,
+              j,
+              dx: offsetX,
+              dy: offsetY,
+              countX,
+              countY,
+            });
+          }
+        }
+      });
+      if (newShapes.length === 0 && !editing) return defaults;
+
+      pushSketchSnapshot(state, sketchId);
+      const updatedItems = state.items.map((it) =>
+        it.id === sketchId
+          ? Object.assign({}, it, {
+              shapes: [...workShapes, ...newShapes],
+              constraints: [...workConstraints, ...newConstraints],
+            })
+          : it,
+      );
+      const updatedItem = updatedItems.find((i) => i.id === sketchId);
+      const newHistory = state.history.map((entry) => {
+        if (
+          entry.instruction?.type === "create" &&
+          entry.instruction.item?.id === sketchId
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, entry.instruction, {
+              item: Object.assign({}, entry.instruction.item, {
+                shapes: updatedItem?.shapes,
+                constraints: updatedItem?.constraints,
+              }),
+            }),
+          });
+        }
+        return entry;
+      });
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        items: markCsgDirty(updatedItems),
+        history: withOrphanFlags(newHistory),
+        ...defaults,
       };
     }),
 

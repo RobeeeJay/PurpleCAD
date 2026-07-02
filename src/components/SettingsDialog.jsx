@@ -1,9 +1,10 @@
 import React from "react";
 import { useStore } from "../store";
+import { NumberInput } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
 // App settings: perspective field of view + snap-to-grid interval / angle.
-// Values are live (no Save button) and persist to localStorage via the store.
+// Values are live (no Save button) and persist via the store.
 const SettingsDialog = () => {
   const open = useStore((s) => s.settingsDialogOpen);
   const setOpen = useStore((s) => s.setSettingsDialogOpen);
@@ -18,10 +19,22 @@ const SettingsDialog = () => {
   const setCurveDetectionAngleDeg = useStore(
     (s) => s.setCurveDetectionAngleDeg,
   );
+  const previewPrecisionMm = useStore((s) => s.previewPrecisionMm);
+  const setPreviewPrecisionMm = useStore((s) => s.setPreviewPrecisionMm);
+  const printPrecisionMm = useStore((s) => s.printPrecisionMm);
+  const setPrintPrecisionMm = useStore((s) => s.setPrintPrecisionMm);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
   const widgetVisible = useStore((s) => s.widgetVisible);
   const toggleWidgetVisibility = useStore((s) => s.toggleWidgetVisibility);
+  const alwaysExtrudeSingleObject = useStore(
+    (s) => s.alwaysExtrudeSingleObject,
+  );
+  const setAlwaysExtrudeSingleObject = useStore(
+    (s) => s.setAlwaysExtrudeSingleObject,
+  );
+  const resetSettings = useStore((s) => s.resetSettings);
+  const setAboutDialogOpen = useStore((s) => s.setAboutDialogOpen);
 
   if (!open) return null;
 
@@ -88,13 +101,12 @@ const SettingsDialog = () => {
                 onChange={(e) => setFov(e.target.value)}
                 onKeyDown={stop}
               />
-              <input
-                type="number"
+              <NumberInput
                 min="5"
                 max="90"
                 step="1"
                 value={fov}
-                onChange={(e) => setFov(e.target.value)}
+                onCommit={(n, raw) => setFov(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -105,12 +117,11 @@ const SettingsDialog = () => {
           <div style={rowStyle}>
             <span style={labelStyle}>Snap distance</span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
+              <NumberInput
                 min="0.1"
                 step="0.5"
                 value={snapDistanceMm}
-                onChange={(e) => setSnapDistanceMm(e.target.value)}
+                onCommit={(n, raw) => setSnapDistanceMm(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -121,12 +132,11 @@ const SettingsDialog = () => {
           <div style={rowStyle}>
             <span style={labelStyle}>Snap angle</span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
+              <NumberInput
                 min="0.1"
                 step="1"
                 value={snapAngleDeg}
-                onChange={(e) => setSnapAngleDeg(e.target.value)}
+                onCommit={(n, raw) => setSnapAngleDeg(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
@@ -142,16 +152,55 @@ const SettingsDialog = () => {
               </span>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="number"
+              <NumberInput
                 min="0"
                 step="1"
                 value={curveDetectionAngleDeg}
-                onChange={(e) => setCurveDetectionAngleDeg(e.target.value)}
+                onCommit={(n, raw) => setCurveDetectionAngleDeg(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />
               <span style={{ fontSize: 10, opacity: 0.7 }}>&deg;</span>
+            </span>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
+              <span>Preview resolution</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                surface deviation while editing (lower = denser)
+              </span>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <NumberInput
+                min="0.001"
+                step="0.05"
+                value={previewPrecisionMm}
+                onCommit={(n, raw) => setPreviewPrecisionMm(raw)}
+                onKeyDown={stop}
+                style={numStyle}
+              />
+              <span style={{ fontSize: 10, opacity: 0.7 }}>mm</span>
+            </span>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
+              <span>Normal resolution</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                final density (the high-res toggle / 3D print)
+              </span>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <NumberInput
+                min="0.001"
+                step="0.005"
+                value={printPrecisionMm}
+                onCommit={(n, raw) => setPrintPrecisionMm(raw)}
+                onKeyDown={stop}
+                style={numStyle}
+              />
+              <span style={{ fontSize: 10, opacity: 0.7 }}>mm</span>
             </span>
           </div>
 
@@ -174,6 +223,46 @@ const SettingsDialog = () => {
               style={{ minWidth: 56 }}
             >
               {widgetVisible ? "On" : "Off"}
+            </button>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
+              <span>Always extrude as single object</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                combine disjoint profiles (e.g. text glyphs) into one body
+              </span>
+            </span>
+            <button
+              className="variables-btn"
+              onClick={() =>
+                setAlwaysExtrudeSingleObject(!alwaysExtrudeSingleObject)
+              }
+              style={{ minWidth: 56 }}
+            >
+              {alwaysExtrudeSingleObject ? "On" : "Off"}
+            </button>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>Reset all settings</span>
+            <button
+              className="variables-btn"
+              onClick={resetSettings}
+              style={{ minWidth: 56 }}
+            >
+              Reset
+            </button>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>About PurpleCAD</span>
+            <button
+              className="variables-btn"
+              onClick={() => setAboutDialogOpen(true)}
+              style={{ minWidth: 56 }}
+            >
+              About
             </button>
           </div>
         </div>

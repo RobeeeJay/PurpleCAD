@@ -48,6 +48,28 @@ export function polyCentroid(poly) {
   };
 }
 
+// Area (shoelace) centroid — the centroid of the FILLED region, which is
+// invariant to vertex density (adding points along an edge doesn't move it).
+// polyCentroid is the vertex MEAN, which shifts when a curve (arc / bezier) is
+// re-tessellated at a different resolution; using that to position an extrude
+// makes the solid drift on a preview/print toggle.  Falls back to the vertex
+// mean for a degenerate (zero-area) loop.
+export function polyAreaCentroid(poly) {
+  let a2 = 0,
+    cx = 0,
+    cy = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i],
+      q = poly[(i + 1) % poly.length];
+    const cross = p.x * q.y - q.x * p.y;
+    a2 += cross;
+    cx += (p.x + q.x) * cross;
+    cy += (p.y + q.y) * cross;
+  }
+  if (Math.abs(a2) < 1e-12) return polyCentroid(poly);
+  return { x: cx / (3 * a2), y: cy / (3 * a2) };
+}
+
 export function polyArea(poly) {
   let a = 0;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++)

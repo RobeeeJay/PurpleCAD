@@ -8,8 +8,10 @@ import {
   withOrphanFlags,
   saveTimeline,
   saveVariables,
+  saveFolders,
   setNextHistoryId,
 } from "./internals.js";
+import { clearCamera } from "./db.js";
 
 export const createDocumentSlice = (set) => ({
   newDocument: () =>
@@ -21,12 +23,14 @@ export const createDocumentSlice = (set) => ({
           label: "Scene created",
           itemId: null,
           instruction: { type: "scene_created" },
+          hiddenIds: [],
           _orphaned: false,
         },
       ];
       saveTimeline(freshHistory, null);
       saveVariables([]);
-      localStorage.removeItem("cad-camera-state");
+      saveFolders([]);
+      clearCamera();
       return {
         items: [],
         history: freshHistory,
@@ -37,6 +41,7 @@ export const createDocumentSlice = (set) => ({
         undoStack: [],
         redoStack: [],
         variables: [],
+        folders: [],
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),
@@ -58,7 +63,7 @@ export const createDocumentSlice = (set) => ({
       const newActiveHistoryId =
         data.activeHistoryId !== undefined ? data.activeHistoryId : null;
       saveTimeline(data.history, newActiveHistoryId);
-      localStorage.removeItem("cad-camera-state");
+      clearCamera();
       const targetIdx =
         newActiveHistoryId !== null
           ? data.history.findIndex((h) => h.id === newActiveHistoryId)
@@ -69,6 +74,7 @@ export const createDocumentSlice = (set) => ({
       );
       const variables = Array.isArray(data.variables) ? data.variables : [];
       saveVariables(variables);
+      saveFolders([]);
       return {
         items,
         history: withOrphanFlags(data.history),
@@ -79,6 +85,7 @@ export const createDocumentSlice = (set) => ({
         undoStack: [],
         redoStack: [],
         variables,
+        folders: [],
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),

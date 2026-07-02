@@ -1,17 +1,30 @@
 import React from "react";
 import { useStore } from "../../store";
-import { maxItemId } from "../../store/internals.js";
 import ToolbarSection from "./ToolbarSection";
+import SweepSection from "./SweepSection";
+import Pattern3dSection from "./Pattern3dSection";
 
 const ObjectCreateSection = () => {
-  const addItem = useStore((s) => s.addItem);
-  const history = useStore((s) => s.history);
   const setSketchPlacementMode = useStore((s) => s.setSketchPlacementMode);
   const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
   const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
+  const selectedId = useStore((s) => s.selectedId);
+  const items = useStore((s) => s.items);
+  const startPlaneTool = useStore((s) => s.startPlaneTool);
 
   const hasFaceSelected = (selectedSubGeometry?.faces?.length ?? 0) > 0;
+
+  // Open the Plane dialog seeded from the selected sketch's plane, else world
+  // XY.  The dialog also offers axis-plane bases and "Pick 3 points".
+  const handlePlane = () => {
+    const sel = items.find((i) => i.id === selectedId);
+    startPlaneTool(
+      sel?.type === "sketch"
+        ? { position: { ...sel.position }, rotation: { ...sel.rotation } }
+        : { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } },
+    );
+  };
 
   const handleExtrudeClick = () => {
     if (extrudeSelectMode) {
@@ -33,22 +46,13 @@ const ObjectCreateSection = () => {
     setExtrudeSelectMode("profile");
   };
 
+  // Every Create button here makes a parametric primitive: open its dimensions
+  // dialog with a live ghost preview at the view centre; nothing is added to the
+  // timeline until the user confirms.
   const createItem = (type) => {
-    const id = maxItemId(history) + 1;
-    const label = type.charAt(0).toUpperCase() + type.slice(1);
-    // Spawn at the current view centre (camera target) so the object appears
-    // where the user is looking; fall back to a sensible default if the
-    // viewport handle isn't ready.
     const t = useStore.getState()._cameraControls?.getViewTarget?.();
     const position = t ? { x: t.x, y: t.y, z: t.z } : { x: 0, y: 2, z: 0 };
-    addItem({
-      id,
-      name: `${label} ${id}`,
-      type,
-      children: [],
-      position,
-      scale: { x: 1, y: 1, z: 1 },
-    });
+    useStore.getState().openBoxCreate(type, position);
   };
 
   return (
@@ -59,44 +63,117 @@ const ObjectCreateSection = () => {
         onClick={() => setSketchPlacementMode(true)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            x="3"
-            y="3"
-            width="18"
-            height="18"
+          <polygon
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="2,19 8,13 22,13 16,19"
           />
           <line
-            x1="3"
-            y1="12"
-            x2="21"
-            y2="12"
-            stroke="currentColor"
+            stroke="#D4A33F"
+            fill="none"
             strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="2"
+            y1="19"
+            x2="22"
+            y2="13"
           />
           <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="8"
+            y1="13"
+            x2="16"
+            y2="19"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
             x1="12"
-            y1="3"
+            y1="16"
             x2="12"
-            y2="21"
-            stroke="currentColor"
-            strokeWidth="1"
+            y2="8"
           />
+          <polygon
+            fill="#6C3FD4"
+            stroke="#6C3FD4"
+            strokeWidth="0.5"
+            points="12,5 10.5,8.5 13.5,8.5"
+          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="16" />
         </svg>
       </button>
       <button
         className="toolbar-btn"
-        title="Cube"
+        title="Box — enter dimensions in a dialog"
         onClick={() => createItem("cube")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M3 5v12h18V5M3 5l9-4 9 4m0 12l-9 4-9-4"
+          <rect
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            x="3"
+            y="7"
+            width="14"
+            height="14"
+          />
+          <polyline
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,7 7,3 21,3 21,17 17,21"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="17"
+            y1="7"
+            x2="17"
+            y2="21"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="3"
+            y1="7"
+            x2="17"
+            y2="7"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="7"
+            y1="3"
+            x2="7"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeDasharray="2 1.5"
+            x1="21"
+            y1="3"
+            x2="7"
+            y2="17"
           />
         </svg>
       </button>
@@ -107,22 +184,31 @@ const ObjectCreateSection = () => {
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <circle
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
             cx="12"
             cy="12"
             r="9"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
           />
           <ellipse
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="2"
             cx="12"
             cy="12"
-            rx="3"
-            ry="9"
+            rx="9"
+            ry="3.5"
+          />
+          <line
+            stroke="#D4A33F"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="1"
-            opacity="0.5"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="3"
+            y1="12"
+            x2="21"
+            y2="12"
           />
         </svg>
       </button>
@@ -133,38 +219,52 @@ const ObjectCreateSection = () => {
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <ellipse
-            cx="12"
-            cy="6"
-            rx="7"
-            ry="2.5"
+            stroke="#6C3FD4"
             fill="none"
-            stroke="currentColor"
             strokeWidth="2"
+            cx="12"
+            cy="7"
+            rx="8"
+            ry="3"
           />
           <ellipse
-            cx="12"
-            cy="18"
-            rx="7"
-            ry="2.5"
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            cx="12"
+            cy="17"
+            rx="8"
+            ry="3"
           />
           <line
-            x1="5"
-            y1="6"
-            x2="5"
-            y2="18"
-            stroke="currentColor"
-            strokeWidth="2"
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="4"
+            y1="7"
+            x2="4"
+            y2="17"
           />
           <line
-            x1="19"
-            y1="6"
-            x2="19"
-            y2="18"
-            stroke="currentColor"
-            strokeWidth="2"
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="20"
+            y1="7"
+            x2="20"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="12"
+            y1="7"
+            x2="12"
+            y2="17"
           />
         </svg>
       </button>
@@ -174,24 +274,96 @@ const ObjectCreateSection = () => {
         onClick={() => createItem("torus")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <ellipse
+          <circle
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
             cx="12"
             cy="12"
-            rx="9"
-            ry="4.5"
+            r="9"
+          />
+          <circle
+            stroke="#6C3FD4"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="2.5"
+            cx="12"
+            cy="12"
+            r="4"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="3"
+            y1="12"
+            x2="8"
+            y2="12"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="16"
+            y1="12"
+            x2="21"
+            y2="12"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="3"
+            x2="12"
+            y2="8"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="16"
+            x2="12"
+            y2="21"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title="Cone — enter dimensions in a dialog"
+        onClick={() => createItem("cone")}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <polygon
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="12,3 19,18 5,18"
           />
           <ellipse
-            cx="12"
-            cy="12"
-            rx="4"
-            ry="2"
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
             strokeWidth="1.5"
-            opacity="0.6"
+            cx="12"
+            cy="18"
+            rx="7"
+            ry="2.5"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeDasharray="2 1.5"
+            x1="12"
+            y1="3"
+            x2="12"
+            y2="20.5"
           />
         </svg>
       </button>
@@ -205,40 +377,74 @@ const ObjectCreateSection = () => {
         onClick={handleExtrudeClick}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            x="4"
-            y="14"
-            width="16"
-            height="6"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
           <polygon
-            points="4,14 8,8 20,8 20,14"
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
             strokeWidth="1.5"
-            opacity="0.7"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="12,3 21,8 21,16 12,21 3,16 3,8"
           />
           <line
-            x1="12"
-            y1="8"
-            x2="12"
-            y2="3"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <polyline
-            points="9,5 12,2 15,5"
+            stroke="#6C3FD4"
             fill="none"
-            stroke="currentColor"
             strokeWidth="2"
-            strokeLinejoin="round"
+            strokeLinecap="square"
+            x1="3"
+            y1="8"
+            x2="21"
+            y2="8"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="3"
+            y1="16"
+            x2="21"
+            y2="16"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="12"
+            y1="3"
+            x2="12"
+            y2="21"
           />
         </svg>
       </button>
+      <button
+        className="toolbar-btn"
+        title="Plane — a reference plane to sketch on (from the selected sketch, else pick 3 points)"
+        onClick={handlePlane}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <polygon
+            points="3,9 14,5 21,11 10,15"
+            fill="rgba(68,136,255,0.25)"
+            stroke="#4488ff"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+          <line
+            x1="12"
+            y1="10"
+            x2="12"
+            y2="20"
+            stroke="#D4A33F"
+            strokeWidth="1.5"
+            strokeDasharray="2 2"
+          />
+        </svg>
+      </button>
+      {/* Sketch→solid sweeps (Revolve / Pipe / Loft) live here in Create. */}
+      <SweepSection bare />
+      {/* 3D Mirror / Circular / Rectangular patterns also create new objects. */}
+      <Pattern3dSection bare />
     </ToolbarSection>
   );
 };

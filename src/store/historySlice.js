@@ -293,6 +293,49 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Set an object's custom rotation/scale pivot (a point in its local geometry
+  // frame).  Recorded as a modify so it survives replay; also clears the origin
+  // tool.  Passing null clears the custom origin (back to the bbox centre).
+  setItemOrigin: (id, origin) =>
+    set((state) => {
+      const newEntry = makeEntry("Set origin", id, {
+        type: "modify",
+        itemId: id,
+        patches: { origin },
+      });
+      let insertIdx, newActiveId;
+      if (state.activeHistoryId !== null) {
+        const activeIdx = state.history.findIndex(
+          (h) => h.id === state.activeHistoryId,
+        );
+        insertIdx = activeIdx + 1;
+        newActiveId = newEntry.id;
+      } else {
+        insertIdx = state.history.length;
+        newActiveId = null;
+      }
+      newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
+      const rawHistory = [
+        ...state.history.slice(0, insertIdx),
+        newEntry,
+        ...state.history.slice(insertIdx),
+      ];
+      const items = replayUpTo(rawHistory, insertIdx);
+      saveTimeline(rawHistory, newActiveId);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(rawHistory),
+          activeHistoryId: newActiveId,
+          originToolActive: false,
+          originDialogItemId: null,
+          originVertexPick: null,
+          selectionOverride: null,
+        },
+        withUndo(state),
+      );
+    }),
+
   deleteItem: (id) =>
     set((state) => {
       const deletedItem = state.items.find((item) => item.id === id);
@@ -512,6 +555,356 @@ export const createHistorySlice = (set) => ({
           items,
           history: withOrphanFlags(newHistory),
         },
+        withUndo(state),
+      );
+    }),
+
+  // Update the distance on an existing push/pull history entry, then replay so
+  // the regenerator rebuilds with the new value.  Mirrors updateChamferParams:
+  // `regeneratedAt` is reset and `geometryData` cleared so the skip-check in
+  // regenerateItemsForResolution misses and re-tessellates.
+  updatePushPullParams: (entryId, params) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        const r = inst.patches?.regenerator;
+        if (r?.kind !== "pushpull") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches: {
+              ...inst.patches,
+              regenerator: {
+                ...r,
+                ...params,
+                regeneratedAt: "dirty",
+              },
+              geometryData: null,
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Edit a committed shell's wall thickness from its timeline step.  Mirrors
+  // updatePushPullParams: mark the regenerator dirty + clear geometry so the
+  // regen orchestrator rebuilds it at the new thickness.
+  updateShellParams: (entryId, params) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        const r = inst.patches?.regenerator;
+        if (r?.kind !== "shell") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches: {
+              ...inst.patches,
+              regenerator: { ...r, ...params, regeneratedAt: "dirty" },
+              geometryData: null,
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Update a committed hole step in place with re-edited params (geometry
+  // already rebuilt by commitHole).  `patch` = { hole, position, centerOffset,
+  // geometryData, regeneratedAt }.
+  updateHoleEntry: (entryId, patch) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        const r = inst.patches?.regenerator;
+        if (r?.kind !== "hole") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches: {
+              ...inst.patches,
+              position: patch.position,
+              geometryData: patch.geometryData,
+              regenerator: {
+                ...r,
+                hole: patch.hole,
+                centerOffset: patch.centerOffset,
+                regeneratedAt: patch.regeneratedAt,
+              },
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Update a committed emboss step in place with re-edited params (geometry +
+  // stamp already rebuilt by commitEmboss).  `patch` = { regenerator, position,
+  // geometryData }.
+  updateEmbossEntry: (entryId, patch) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        if (inst.patches?.regenerator?.kind !== "emboss") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches: {
+              ...inst.patches,
+              position: patch.position,
+              geometryData: patch.geometryData,
+              regenerator: patch.regenerator,
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Edit a committed draft step in place (angle/flip/faces changed, geometry
+  // already rebuilt).  Mirrors updateEmbossEntry.
+  updateDraftEntry: (entryId, patch) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        if (inst.patches?.regenerator?.kind !== "draft") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches: {
+              ...inst.patches,
+              position: patch.position,
+              geometryData: patch.geometryData,
+              regenerator: patch.regenerator,
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Update an existing push/pull history entry's patches in place — used by
+  // PushPullOverlay's retarget confirm (geometry already rebuilt against the
+  // new face selection).  Mirrors retargetChamferEntry.
+  retargetPushPullEntry: (entryId, patches) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        if (inst.patches?.regenerator?.kind !== "pushpull") return entry;
+        return { ...entry, instruction: { ...inst, patches } };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Update a revolve (sweep) step's parameters.  A revolve is a CREATE entry
+  // (it adds a new solid), so its recipe lives on inst.item, not inst.patches.
+  updateRevolveParams: (entryId, params) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "create") return entry;
+        const r = inst.item?.regenerator;
+        if (r?.kind !== "revolve") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            item: {
+              ...inst.item,
+              regenerator: { ...r, ...params, regeneratedAt: "dirty" },
+              geometryData: null,
+            },
+          },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Replace a revolve step's item recipe in place (re-picked profile/axis) —
+  // used by the sweep retarget confirm.  `patches` carries the new regenerator,
+  // geometryData and position to merge onto the CREATE entry's item.
+  retargetRevolveEntry: (entryId, patches) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "create") return entry;
+        if (inst.item?.regenerator?.kind !== "revolve") return entry;
+        return {
+          ...entry,
+          instruction: { ...inst, item: { ...inst.item, ...patches } },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  // Pipe and loft are CREATE entries like revolve, but with no editable
+  // parameters — only re-picking their inputs.  Mirrors retargetRevolveEntry.
+  retargetPipeEntry: (entryId, patches) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "create") return entry;
+        if (inst.item?.regenerator?.kind !== "pipe") return entry;
+        return {
+          ...entry,
+          instruction: { ...inst, item: { ...inst.item, ...patches } },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
+        withUndo(state),
+      );
+    }),
+
+  retargetLoftEntry: (entryId, patches) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "create") return entry;
+        if (inst.item?.regenerator?.kind !== "loft") return entry;
+        return {
+          ...entry,
+          instruction: { ...inst, item: { ...inst.item, ...patches } },
+        };
+      });
+      const activeIdx =
+        state.activeHistoryId != null
+          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+          : newHistory.length - 1;
+      const items = replayUpTo(
+        newHistory,
+        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return Object.assign(
+        { items, history: withOrphanFlags(newHistory) },
         withUndo(state),
       );
     }),

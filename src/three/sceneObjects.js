@@ -16,6 +16,7 @@ export {
   getMeshDimensions,
   getMeshExtent,
   getMeshBBoxCenter,
+  gizmoCenterFor,
   makeDimSprite,
   redrawDimSprite,
   placeDimLabels,
@@ -30,6 +31,7 @@ export {
   getSnapPoints,
   getShapePoint,
   getShapeLength,
+  defaultBezierControls,
 } from "./sceneObjects/sketchShapes.js";
 
 export {
@@ -37,6 +39,7 @@ export {
   findClosedLoopsWithShapes,
   polyContainsPoint,
   polyCentroid,
+  polyAreaCentroid,
   polyArea,
   groupLoopsWithHoles,
 } from "./sceneObjects/closedLoops.js";

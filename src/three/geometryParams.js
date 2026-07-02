@@ -6,6 +6,7 @@
 // Tests that don't have a working store mock get an empty variable map
 // (the bare-number path of `evaluateFormula` still works).
 
+import Decimal from "decimal.js";
 import { useStore } from "../store";
 import { MM_PER_UNIT } from "./sceneObjects.js";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
@@ -39,7 +40,8 @@ export function resolveValue(value, fallback = 0, variables = null) {
   const map = variables ?? getCurrentVariablesMap();
   const mm = evaluateFormula(value, map);
   if (!Number.isFinite(mm)) return fallback;
-  return mm / MM_PER_UNIT;
+  // mm -> scene units, exact in decimal (e.g. 5 mm / 10 = 0.5, not 0.49999…).
+  return new Decimal(mm).div(MM_PER_UNIT).toNumber();
 }
 
 // Convenience: resolve an extrude item's depth in scene units.  The
@@ -62,7 +64,10 @@ export function resolveConstraintDistance(constraint, variables = null) {
 // value (drag/finalise) and we want subsequent edits to see a sensible
 // formula (just the number, in mm).
 export function formatAsFormula(sceneUnits) {
-  const mm = sceneUnits * MM_PER_UNIT;
-  // Trim trailing zeros so simple round numbers don't show as "10.000000".
-  return Number.isFinite(mm) ? String(Number(mm.toFixed(4))) : "0";
+  if (!Number.isFinite(sceneUnits)) return "0";
+  // scene units -> mm, exact in decimal, trimmed to 4 dp without float noise.
+  return new Decimal(sceneUnits)
+    .times(MM_PER_UNIT)
+    .toDecimalPlaces(4)
+    .toString();
 }

@@ -36,6 +36,29 @@ function readGitCommit() {
   }
 }
 
+// Versions for the About dialog. Pulled from package.json so they stay in
+// sync with what's actually installed; OpenCASCADE isn't an npm package
+// (native addon, see native/occ-addon) so its version is hardcoded to match
+// the CLAUDE.md-documented build target.
+function readDependencyVersions() {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(join(__dirname, "package.json"), "utf8"),
+    );
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    const pick = (name) => deps[name]?.replace(/^[\^~]/, "") || "unknown";
+    return {
+      react: pick("react"),
+      three: pick("three"),
+      "three-gpu-pathtracer": pick("three-gpu-pathtracer"),
+      electron: pick("electron"),
+      OpenCASCADE: "8.0.0",
+    };
+  } catch {
+    return {};
+  }
+}
+
 export default defineConfig({
   // Relative `base` so the built bundle loads under Electron's
   // `file://` scheme (and from any subpath when served).  Vite's
@@ -50,6 +73,11 @@ export default defineConfig({
     // identifiers).
     __APP_VERSION__: JSON.stringify(readVersion()),
     __GIT_COMMIT__: JSON.stringify(readGitCommit()),
+    __DEPENDENCY_VERSIONS__: JSON.stringify(readDependencyVersions()),
+    // E2E build flag (see store.js): baked from the VITE_E2E shell var at
+    // config-load time so the replacement is deterministic — set by the
+    // `e2e:build` npm script.  `false` in every normal build.
+    __E2E__: JSON.stringify(process.env.VITE_E2E === "1"),
   },
   server: {
     host: "0.0.0.0",
@@ -68,5 +96,8 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Only the in-repo unit tests under src/.  The Playwright E2E specs live in
+    // e2e/ and use their own runner — vitest must not try to collect them.
+    include: ["src/**/*.test.{js,jsx}"],
   },
 });

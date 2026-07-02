@@ -11,6 +11,7 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
+import { effectiveSketchSelTypes } from "../../store/selectionMode.js";
 import {
   getSketchShapePoints,
   getSnapPoints,
@@ -21,6 +22,7 @@ import {
   rebuildPointDotsForDrag,
   polyArea,
   snapUnitToIntervalMm,
+  MM_PER_UNIT,
 } from "../sceneObjects.js";
 import {
   applyHVEnforcement,
@@ -36,13 +38,22 @@ import {
   fieldsForPoint,
   varFields,
 } from "../sketchSolver.js";
-import { SKETCH_LINE_COLOR, SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
+import { sketchLineColorFor, SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
 import {
   selectedSketchLineIndices,
   offsetSelectedSketchGeometry,
 } from "../sketchModifyActions.js";
+import { svgCoincidentConstraints } from "../importGeometry.js";
+import { DEFAULT_FONT_ID as TEXT_DEFAULT_FONT_ID } from "../sketchText.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
+import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
+import { createSketchCircularPatternHelpers } from "./sketchCircularPatternTool.js";
+import { createSketchRectangularPatternHelpers } from "./sketchRectangularPatternTool.js";
+import { buildPatternPreviewObjects } from "./sketchPatternPreview.js";
+import { MIRRORABLE_TYPES } from "../sketchMirror.js";
+import { CIRCULAR_PATTERNABLE_TYPES } from "../sketchCircularPattern.js";
+import { RECTANGULAR_PATTERNABLE_TYPES } from "../sketchRectangularPattern.js";
 import { createSketchConstraintHandlers } from "./sketchConstraintHandlers.js";
 import { createSketchDrawHelpers } from "./sketchDraw.js";
 
@@ -51,6 +62,36 @@ import { createSketchDrawHelpers } from "./sketchDraw.js";
 const isOffsetShapeIdx = (selItem, idx) =>
   (selItem?.constraints || []).some(
     (c) => c.type === "offset" && c.shapeIdx === idx,
+  );
+
+// Same inertness for mirror copies while their mirror constraint exists.
+const isMirrorShapeIdx = (selItem, idx) =>
+  (selItem?.constraints || []).some(
+    (c) => c.type === "mirror" && c.shapeIdx === idx,
+  );
+
+// Same inertness for circular-pattern copies while their constraint exists.
+const isCircularPatternShapeIdx = (selItem, idx) =>
+  (selItem?.constraints || []).some(
+    (c) => c.type === "circularPattern" && c.shapeIdx === idx,
+  );
+
+// Indices of every shape sharing a group with shape `idx` (just [idx] when it
+// isn't grouped) — so a grouped shape selects / drags as a unit.
+const groupMembersOf = (shapes, idx) => {
+  const g = shapes?.[idx]?.group;
+  if (g == null) return [idx];
+  const members = [];
+  shapes.forEach((s, i) => {
+    if (s?.group === g) members.push(i);
+  });
+  return members.length ? members : [idx];
+};
+
+// Same inertness for rectangular-pattern copies while their constraint exists.
+const isRectangularPatternShapeIdx = (selItem, idx) =>
+  (selItem?.constraints || []).some(
+    (c) => c.type === "rectangularPattern" && c.shapeIdx === idx,
   );
 
 export function createSketchInteraction(
@@ -99,6 +140,97 @@ export function createSketchInteraction(
   },
 ) {
   const controls = cameraControlsRef.current;
+
+  // ── SVG import placement ──────────────────────────────────────────────────
+  // After an SVG is parsed it isn't committed straight away — its shapes show as
+  // a movable/scalable preview until the user confirms.  Drag to move, the
+  // overlay sets the scale; commit appends the transformed shapes to the sketch.
+  let svgPreviewObjs = [];
+  let svgDrag = null; // { startLocal, startOffsetX, startOffsetY }
+
+  const transformSvgShapes = (shapes, scale, ox, oy) => {
+    const t = (p) => ({ x: p.x * scale + ox, y: p.y * scale + oy });
+    return shapes.map((s) =>
+      s.type === "line"
+        ? {
+            type: "line",
+            x1: s.x1 * scale + ox,
+            y1: s.y1 * scale + oy,
+            x2: s.x2 * scale + ox,
+            y2: s.y2 * scale + oy,
+          }
+        : {
+            type: "bezier",
+            p0: t(s.p0),
+            p1: t(s.p1),
+            p2: t(s.p2),
+            p3: t(s.p3),
+          },
+    );
+  };
+
+  const clearSvgPreview = () => {
+    svgPreviewObjs.forEach((o) => {
+      scene.remove(o);
+      o.geometry?.dispose();
+      o.material?.dispose();
+    });
+    svgPreviewObjs = [];
+  };
+
+  const updateSvgPreview = () => {
+    clearSvgPreview();
+    const svg = useStore.getState().svgImport;
+    if (!svg) return;
+    const sketchMesh = objectsRef.current[svg.sketchId];
+    if (!sketchMesh) return;
+    const shapes = transformSvgShapes(
+      svg.shapes,
+      svg.scale,
+      svg.offsetX,
+      svg.offsetY,
+    );
+    buildPatternPreviewObjects({
+      sketchMesh,
+      sourceShapes: shapes,
+      copyShapes: [],
+      color: 0x44aaff,
+      renderer,
+    }).forEach((o) => {
+      scene.add(o);
+      svgPreviewObjs.push(o);
+    });
+  };
+
+  controls.updateSvgPreview = updateSvgPreview;
+  controls.commitSvgPlacement = () => {
+    const store = useStore.getState();
+    const svg = store.svgImport;
+    if (svg) {
+      const placed = transformSvgShapes(
+        svg.shapes,
+        svg.scale,
+        svg.offsetX,
+        svg.offsetY,
+      );
+      const baseIdx = (
+        store.items.find((i) => i.id === svg.sketchId)?.shapes || []
+      ).length;
+      store.addSketchShapes(
+        svg.sketchId,
+        placed,
+        svgCoincidentConstraints(placed, baseIdx),
+      );
+    }
+    clearSvgPreview();
+    svgDrag = null;
+    store.clearSvgImport();
+  };
+  controls.cancelSvgPlacement = () => {
+    clearSvgPreview();
+    svgDrag = null;
+    useStore.getState().clearSvgImport();
+  };
 
   // ── Sketch drawing preview cleanup ────────────────────────────────────────
   const clearSketchPreview = () => {
@@ -170,6 +302,8 @@ export function createSketchInteraction(
   };
   let multiSelectedIndices = [];
   let marqueeStartScreen = null;
+  // Selection a shift+marquee adds to (the pre-drag selection); [] replaces.
+  let marqueeBaseIndices = [];
   let marqueeActive = false;
   let marqueeRectObj = null;
   let lastClickTime = 0;
@@ -204,6 +338,19 @@ export function createSketchInteraction(
     itemsRef,
     selectedIdRef,
   });
+
+  // After an external shapes change (e.g. undoing a move) the selection overlays
+  // linger at the old positions until the user reselects — snap them back to the
+  // committed geometry.  Driven by useSceneSync on every items change.
+  controls.refreshSketchSelectionOverlays = () => {
+    if (!hasMultiSelectOverlays() && !hasSketchSelectionOverlay()) return;
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    updateSelectionForDrag(selItem.shapes || [], sketchMesh, true);
+  };
 
   // Exposed on cameraControlsRef so SketchOverlays can drive hover/select for
   // the long-press context menu without duplicating these highlight functions.
@@ -282,6 +429,45 @@ export function createSketchInteraction(
     }
   };
 
+  // The Project tool's marquee box — drawn in projection teal, no shape select.
+  const drawProjectMarquee = (screenX, screenY) => {
+    clearMarqueeRect();
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!sketchMesh || !marqueeStartScreen) return;
+    const p1 = screenToSketchLocal(
+      marqueeStartScreen.x,
+      marqueeStartScreen.y,
+      sketchMesh,
+    );
+    const p2 = screenToSketchLocal(screenX, screenY, sketchMesh);
+    if (!p1 || !p2) return;
+    const toW = (lx, ly) =>
+      new THREE.Vector3(lx, ly, 0.008)
+        .applyQuaternion(sketchMesh.quaternion)
+        .add(sketchMesh.position);
+    const corners = [
+      toW(p1.x, p1.y),
+      toW(p2.x, p1.y),
+      toW(p2.x, p2.y),
+      toW(p1.x, p2.y),
+      toW(p1.x, p1.y),
+    ];
+    marqueeRectObj = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(corners),
+      new THREE.LineBasicMaterial({
+        color: 0x37b8a0,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.8,
+      }),
+    );
+    marqueeRectObj.renderOrder = 1010;
+    scene.add(marqueeRectObj);
+  };
+
   const updateMarquee = (screenX, screenY) => {
     clearMarqueeRect();
     const selItem = itemsRef.current.find(
@@ -311,7 +497,7 @@ export function createSketchInteraction(
     ];
     const geo = new THREE.BufferGeometry().setFromPoints(corners);
     const mat = new THREE.LineBasicMaterial({
-      color: SKETCH_LINE_COLOR,
+      color: sketchLineColorFor(useStore.getState().theme),
       depthTest: false,
       transparent: true,
       opacity: 0.8,
@@ -332,11 +518,17 @@ export function createSketchInteraction(
         pt.x <= maxX &&
         pt.y >= minY &&
         pt.y <= maxY &&
-        !isOffsetShapeIdx(selItem, pt.shapeIdx)
+        !isOffsetShapeIdx(selItem, pt.shapeIdx) &&
+        !isMirrorShapeIdx(selItem, pt.shapeIdx) &&
+        !isCircularPatternShapeIdx(selItem, pt.shapeIdx) &&
+        !isRectangularPatternShapeIdx(selItem, pt.shapeIdx)
       )
         inRect.add(pt.shapeIdx);
     });
-    multiSelectedIndices = [...inRect];
+    // Shift-marquee adds to the pre-drag selection; otherwise it replaces.
+    const union = new Set(marqueeBaseIndices);
+    inRect.forEach((i) => union.add(i));
+    multiSelectedIndices = [...union];
     showMultiSelectOverlays(multiSelectedIndices);
   };
 
@@ -346,6 +538,49 @@ export function createSketchInteraction(
     clearMultiSelectOverlays();
     multiSelectedIndices = [];
   };
+
+  // ── Mirror tool ────────────────────────────────────────────────────────────
+  const sketchMirror = createSketchMirrorHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    sketchShapesGroupRef,
+    renderer,
+  });
+  const { clearMirrorPreview, updateMirrorPreview, handleMirrorClick } =
+    sketchMirror;
+
+  // ── Circular Pattern tool ──────────────────────────────────────────────────
+  const sketchCircularPattern = createSketchCircularPatternHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    sketchShapesGroupRef,
+    cameraRef,
+    renderer,
+  });
+  const {
+    clearCircularPatternPreview,
+    updateCircularPatternPreview,
+    handleCircularPatternClick,
+  } = sketchCircularPattern;
+
+  // ── Rectangular Pattern tool ──────────────────────────────────────────────
+  const sketchRectangularPattern = createSketchRectangularPatternHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    sketchShapesGroupRef,
+    renderer,
+  });
+  const {
+    clearRectangularPatternPreview,
+    updateRectangularPatternPreview,
+    handleRectangularPatternClick,
+  } = sketchRectangularPattern;
 
   // Whenever sketch shapes are mutated (any store items change while in sketch
   // mode), the selection overlay drawn at the old position becomes a ghost.
@@ -364,6 +599,51 @@ export function createSketchInteraction(
     },
   );
 
+  // Rebuild / clear the mirror preview whenever the mirror tool's picked line
+  // or shape selection changes, the tool is cancelled, or the underlying
+  // geometry moves (drag of the original or mirror line).
+  const unsubMirror = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchMirrorState === prev.sketchMirrorState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "mirror") updateMirrorPreview();
+    else clearMirrorPreview();
+  });
+
+  // Rebuild / clear the circular-pattern preview whenever the tool's picked
+  // centre, shape selection, or count changes, the tool is cancelled, or the
+  // underlying geometry moves (drag of the original or the centre point).
+  const unsubCircularPattern = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchCircularPatternState === prev.sketchCircularPatternState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "circularPattern")
+      updateCircularPatternPreview();
+    else clearCircularPatternPreview();
+  });
+
+  // Rebuild / clear the rectangular-pattern preview whenever the tool's shape
+  // selection or counts/offsets change, the tool is cancelled, or the
+  // underlying geometry moves (drag of the original).
+  const unsubRectangularPattern = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchRectangularPatternState ===
+        prev.sketchRectangularPatternState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "rectangularPattern")
+      updateRectangularPatternPreview();
+    else clearRectangularPatternPreview();
+  });
+
   const trySelectSketchElement = (screenX, screenY) => {
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
@@ -371,15 +651,46 @@ export function createSketchInteraction(
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     const shapes = selItem.shapes || [];
+    // The top-right selection-type widget gates which kinds a click resolves to.
+    const { eff } = effectiveSketchSelTypes(useStore.getState());
     // Point hit first (ignore offset-copy points — they're inert).
-    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-    if (snap && !isOffsetShapeIdx(selItem, snap.shapeIdx)) {
+    const snap = eff.point
+      ? findSnap(screenX, screenY, shapes, sketchMesh)
+      : null;
+    if (
+      snap &&
+      !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
+      !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
+      !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
+      !isRectangularPatternShapeIdx(selItem, snap.shapeIdx)
+    ) {
+      // Measure tool: accumulate the snapped point as a pick (highlighted by a
+      // marker, and measured between picks) rather than a normal point select.
+      if (useStore.getState().measureTool) {
+        const w = new THREE.Vector3(snap.x, snap.y, 0)
+          .applyQuaternion(sketchMesh.quaternion)
+          .add(sketchMesh.position);
+        const at = [w.x, w.y, w.z];
+        useStore
+          .getState()
+          .addMeasurePick({ kind: "point", pick: "point", p: at, at });
+        useStore.getState().setSelectedSketchElement(null);
+        clearSketchSelectionOverlay();
+        clearMultiSelectOverlays();
+        multiSelectedIndices = [];
+        if (dimHintRef.current) dimHintRef.current.style.display = "none";
+        return;
+      }
       sketchSelectPoint(snap, sketchMesh);
       if (dimHintRef.current) dimHintRef.current.style.display = "none";
       return;
     }
+    // Measure tool: a non-point click starts a fresh selection (a line for
+    // length, two lines for distance), so drop any accumulated point picks.
+    if (useStore.getState().measureTool)
+      useStore.getState().clearMeasurePicks();
     // Line hit
-    const sketchGroup = sketchShapesGroupRef?.current;
+    const sketchGroup = eff.line ? sketchShapesGroupRef?.current : null;
     if (sketchGroup) {
       const rect = renderer.domElement.getBoundingClientRect();
       const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
@@ -387,13 +698,27 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+        (c) =>
+          c.userData.shapeIdx != null &&
+          !c.userData.isOffset &&
+          !c.userData.isMirror &&
+          !c.userData.isCircularPattern &&
+          !c.userData.isRectangularPattern,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
         const shapeIdx = hits[0].object.userData.shapeIdx;
         const shape = shapes[shapeIdx];
         if (shape) {
+          // A grouped shape selects the whole group as a multi-selection.
+          const members = groupMembersOf(shapes, shapeIdx);
+          if (members.length > 1) {
+            multiSelectedIndices = members;
+            showMultiSelectOverlays(members);
+            useStore.getState().setSelectedSketchElement(null);
+            if (dimHintRef.current) dimHintRef.current.style.display = "none";
+            return;
+          }
           sketchSelectLine(shapeIdx, shape, sketchMesh);
           const len = getShapeLength(shape);
           if (len !== null && dimHintRef.current) {
@@ -407,9 +732,11 @@ export function createSketchInteraction(
         }
       }
     }
-    // Region-fill click: select all boundary shapes that form the hovered area
-    const localForFill = screenToSketchLocal(screenX, screenY, sketchMesh);
-    const sketchGroup2 = sketchShapesGroupRef?.current;
+    // Region-fill ("shape") click: select all boundary shapes of the area.
+    const localForFill = eff.shape
+      ? screenToSketchLocal(screenX, screenY, sketchMesh)
+      : null;
+    const sketchGroup2 = eff.shape ? sketchShapesGroupRef?.current : null;
     if (localForFill && sketchGroup2) {
       // Sort fills so higher renderOrder (inner fills) are checked first
       const fillMeshes = sketchGroup2.children
@@ -438,6 +765,10 @@ export function createSketchInteraction(
   };
   // ── Sketch element dragging ───────────────────────────────────────────────
   let sketchDrag = null; // { kind:"point"|"shape", shapeIdx, pointKey?, sketchMesh, selItemId, anchorLocal, origShape }
+  // Trim tool: while the button is held the tool keeps trimming any line under
+  // the cursor; the whole drag is one undo step (snapshot taken on first trim).
+  let trimming = false;
+  let trimSnapshotTaken = false;
 
   const updateSketchLineGeo = (lineObj, newShape, sketchMesh) => {
     const pts = getSketchShapePoints(newShape, sketchMesh);
@@ -501,10 +832,24 @@ export function createSketchInteraction(
         for (const f of varFields(s)) fixed.add(`${idx}:${f}`);
       }
     }
-    const { shapes } = solveConstraints(input, selItem.constraints || [], {
-      fixed,
-      maxIter: warmed ? 30 : 60,
-    });
+    const { shapes, maxResidual } = solveConstraints(
+      input,
+      selItem.constraints || [],
+      { fixed, maxIter: warmed ? 30 : 60 },
+    );
+    // If the dragged target can't satisfy the constraints — e.g. dragging a
+    // square's edge so far that a chamfered corner would collapse or invert —
+    // committing the solver's best (constraint-violating) guess visibly breaks
+    // the sketch. Instead hold the last valid configuration, so the geometry
+    // simply stops following until the cursor returns to a satisfiable range.
+    // The threshold sits well above a converged solve (~0) and below a genuine
+    // miss (which jumps to a large residual).
+    if (maxResidual > 1e-2) {
+      const prev = warmed ? warm : selItem.shapes || [];
+      const out = new Map();
+      prev.forEach((s, i) => out.set(i, s));
+      return out;
+    }
     const out = new Map();
     shapes.forEach((s, i) => out.set(i, s));
     return out;
@@ -518,7 +863,7 @@ export function createSketchInteraction(
   // ── Chamfer / Bevel helpers ───────────────────────────────────────────────
   const sketchModify = createSketchModifyHelpers(
     { scene, renderer, objectsRef, itemsRef, selectedIdRef },
-    { findSnap, propagateConstraints },
+    { findSnap },
   );
   const { clearModifyPreview, applyModify, showModifyPreview } = sketchModify;
 
@@ -683,9 +1028,18 @@ export function createSketchInteraction(
       }
     }
     // Snap-to-grid: when enabled and not already snapped to existing geometry,
-    // round the in-plane position to the configured world-space interval.
+    // round the in-plane position to the configured world-space interval.  A
+    // bezier's control points (p1/p2) shape the curve freely, so they bypass the
+    // grid — gridding them quantises the tangents and fights fine adjustment.
+    const isBezierControl =
+      origShape?.type === "bezier" && (pointKey === "p1" || pointKey === "p2");
     const snapCfg = useStore.getState();
-    if (!pointSnapped && snapCfg.snapEnabled && snapCfg.snapDistanceMm > 0) {
+    if (
+      !pointSnapped &&
+      !isBezierControl &&
+      snapCfg.snapEnabled &&
+      snapCfg.snapDistanceMm > 0
+    ) {
       localPt = {
         x: snapUnitToIntervalMm(localPt.x, snapCfg.snapDistanceMm),
         y: snapUnitToIntervalMm(localPt.y, snapCfg.snapDistanceMm),
@@ -884,7 +1238,12 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+        (c) =>
+          c.userData.shapeIdx != null &&
+          !c.userData.isOffset &&
+          !c.userData.isMirror &&
+          !c.userData.isCircularPattern &&
+          !c.userData.isRectangularPattern,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       for (const hit of hits) {
@@ -942,6 +1301,9 @@ export function createSketchInteraction(
     );
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return false;
+    // Shift is additive-selection only — never start a drag, so a shift click /
+    // marquee adds to the current selection rather than moving or replacing it.
+    if (shiftKey) return false;
     const shapes = selItem.shapes || [];
     clearAllSketchHover();
 
@@ -959,12 +1321,15 @@ export function createSketchInteraction(
       const sy = ((-gw.y + 1) / 2) * rect.height + rect.top;
       if (Math.hypot(screenX - sx, screenY - sy) < 16) {
         const sel = useStore.getState().selectedSketchElement;
-        const indices =
+        const indices = (
           multiSelectedIndices.length > 0
             ? [...multiSelectedIndices]
             : sel?.type === "line"
               ? [sel.shapeIdx]
-              : [];
+              : []
+        )
+          // Projected geometry is immovable until released — never rotate it.
+          .filter((i) => !shapes[i]?.projection);
         const start = screenToSketchLocal(screenX, screenY, sketchMesh);
         if (indices.length > 0 && start) {
           sketchDrag = {
@@ -985,24 +1350,70 @@ export function createSketchInteraction(
       }
     }
 
+    // Bezier tangent handles: when a bezier is selected, its p1/p2 control
+    // points are grabbable (they aren't snap points, so check them explicitly).
+    {
+      const selEl = useStore.getState().selectedSketchElement;
+      const bez = selEl?.type === "line" ? shapes[selEl.shapeIdx] : null;
+      if (bez?.type === "bezier" && !bez.projection) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        for (const key of ["p1", "p2"]) {
+          const p = bez[key];
+          const w = new THREE.Vector3(p.x, p.y, 0.003)
+            .applyQuaternion(sketchMesh.quaternion)
+            .add(sketchMesh.position)
+            .project(cameraRef.current);
+          const px = ((w.x + 1) / 2) * rect.width + rect.left;
+          const py = ((-w.y + 1) / 2) * rect.height + rect.top;
+          if (Math.hypot(screenX - px, screenY - py) < 16) {
+            clearMultiSelectOverlays();
+            multiSelectedIndices = [];
+            sketchDrag = {
+              kind: "point",
+              shapeIdx: selEl.shapeIdx,
+              pointKey: key,
+              sketchMesh,
+              selItemId: selItem.id,
+              anchorLocal: { x: p.x, y: p.y },
+              origShape: bez,
+            };
+            renderer.domElement.style.cursor = "grabbing";
+            return true;
+          }
+        }
+      }
+    }
+
     // Point drag — check snap points first (higher priority, smaller target).
     // An offset copy's points are inert, so skip dragging by them.
     if (!shiftKey) {
       const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-      if (snap && !isOffsetShapeIdx(selItem, snap.shapeIdx)) {
+      if (
+        snap &&
+        !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
+        !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
+        !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
+        !isRectangularPatternShapeIdx(selItem, snap.shapeIdx) &&
+        // Projected geometry is immovable until its constraint is released.
+        !shapes[snap.shapeIdx]?.projection
+      ) {
         // If the snapped shape is part of a multi-selection, drag them all together
         // (the snap point acts as the anchor instead of a single-point drag).
         if (
           multiSelectedIndices.length > 1 &&
           multiSelectedIndices.includes(snap.shapeIdx)
         ) {
+          // Projected geometry is immovable — exclude it from the dragged set.
+          const movable = multiSelectedIndices.filter(
+            (i) => !shapes[i]?.projection,
+          );
           sketchDrag = {
             kind: "multi",
             sketchMesh,
             selItemId: selItem.id,
             anchorLocal: { x: snap.x, y: snap.y },
-            multiIndices: [...multiSelectedIndices],
-            multiOrigShapes: multiSelectedIndices.map((i) => shapes[i]),
+            multiIndices: movable,
+            multiOrigShapes: movable.map((i) => shapes[i]),
           };
         } else {
           clearMultiSelectOverlays();
@@ -1031,28 +1442,48 @@ export function createSketchInteraction(
       const ray = new THREE.Raycaster();
       ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
       const lineObjs = sketchGroup.children.filter(
-        (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+        (c) =>
+          c.userData.shapeIdx != null &&
+          !c.userData.isOffset &&
+          !c.userData.isMirror &&
+          !c.userData.isCircularPattern &&
+          !c.userData.isRectangularPattern,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
-      if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+      if (
+        hits.length > 0 &&
+        hits[0].object.userData.shapeIdx != null &&
+        // Projected geometry is immovable until its constraint is released.
+        !shapes[hits[0].object.userData.shapeIdx]?.projection
+      ) {
         const shapeIdx = hits[0].object.userData.shapeIdx;
         const localAnchor = screenToSketchLocal(
           screenX,
           screenY,
           sketchMesh,
         ) || { x: 0, y: 0 };
-        // If the hit shape is part of a multi-selection, drag them all together
-        if (
-          multiSelectedIndices.length > 1 &&
-          multiSelectedIndices.includes(shapeIdx)
-        ) {
+        // Grabbing a grouped shape drags the whole group; otherwise honour an
+        // existing multi-selection that includes the hit shape.
+        const group = groupMembersOf(shapes, shapeIdx);
+        const dragSet =
+          group.length > 1
+            ? group
+            : multiSelectedIndices.length > 1 &&
+                multiSelectedIndices.includes(shapeIdx)
+              ? [...multiSelectedIndices]
+              : null;
+        if (dragSet) {
+          multiSelectedIndices = dragSet;
+          showMultiSelectOverlays(dragSet);
+          // Projected geometry stays selected but isn't moved.
+          const movable = dragSet.filter((i) => !shapes[i]?.projection);
           sketchDrag = {
             kind: "multi",
             sketchMesh,
             selItemId: selItem.id,
             anchorLocal: localAnchor,
-            multiIndices: [...multiSelectedIndices],
-            multiOrigShapes: multiSelectedIndices.map((i) => shapes[i]),
+            multiIndices: movable,
+            multiOrigShapes: movable.map((i) => shapes[i]),
           };
         } else {
           clearMultiSelectOverlays();
@@ -1103,6 +1534,54 @@ export function createSketchInteraction(
   // ── Sketch-mode pointer dispatch (return true when handled) ───────────────
   const onSketchMouseDown = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
+    // SVG placement: start dragging the pending import to move it.
+    const svg = useStore.getState().svgImport;
+    if (svg) {
+      const sketchMesh = objectsRef.current[svg.sketchId];
+      const local = sketchMesh
+        ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
+        : null;
+      svgDrag = local
+        ? {
+            startLocal: local,
+            startOffsetX: svg.offsetX,
+            startOffsetY: svg.offsetY,
+          }
+        : null;
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      return true;
+    }
+    // The mirror tool is a pick-mode, not a drawing tool: clicks are handled
+    // on mouse-up by handleMirrorClick, not the draw helpers.
+    if (
+      activeSketchToolRef.current === "mirror" ||
+      activeSketchToolRef.current === "circularPattern" ||
+      activeSketchToolRef.current === "rectangularPattern"
+    ) {
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
+    // Project: arm a marquee so a drag box-selects edges, a click projects all
+    // connected edges of the body under the cursor.
+    if (activeSketchToolRef.current === "project") {
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      marqueeStartScreen = { x: e.clientX, y: e.clientY };
+      return true;
+    }
+    // Trim: start trimming immediately and keep trimming on drag (no marquee).
+    if (activeSketchToolRef.current === "trim") {
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      trimming = true;
+      trimSnapshotTaken = false;
+      tryTrimAt(e.clientX, e.clientY);
+      return true;
+    }
     if (activeSketchToolRef.current) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
@@ -1122,6 +1601,12 @@ export function createSketchInteraction(
           sketchDrag = null;
           renderer.domElement.style.cursor = "";
           longPressMenuOpen = true;
+          // Cancel the pending marquee armed on mouse-down — a long press opens
+          // the element list, it must not also start a selection box if the
+          // cursor drifts while held.
+          marqueeStartScreen = null;
+          marqueeActive = false;
+          clearMarqueeRect();
           useStore
             .getState()
             .setSketchLongPressMenu({ x: downX, y: downY, items });
@@ -1129,16 +1614,149 @@ export function createSketchInteraction(
       }, 500);
       const didDrag = startSketchDrag(e.clientX, e.clientY, e.shiftKey);
       if (!didDrag) {
-        clearMultiSelectOverlays();
-        multiSelectedIndices = [];
+        // Shift keeps the current selection so a marquee/click adds to it.
+        if (!e.shiftKey) {
+          clearMultiSelectOverlays();
+          multiSelectedIndices = [];
+        }
+        marqueeBaseIndices = e.shiftKey ? [...multiSelectedIndices] : [];
         marqueeStartScreen = { x: e.clientX, y: e.clientY };
       }
     }
     return true;
   };
 
+  // Hover feedback while a mirror/circular/rectangular pattern tool is active:
+  // highlight the geometry under the cursor that this tool/phase could actually
+  // select (the mirror axis line, a pattern centre point, or a patternable
+  // shape), so it's clear what a click would pick.
+  const updateSketchToolHover = (screenX, screenY, tool) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    const group = sketchShapesGroupRef?.current;
+    if (!selItem || !sketchMesh || !group) {
+      clearHoverLineHighlight();
+      clearHoverPointIndicator();
+      renderer.domElement.style.cursor = "";
+      return;
+    }
+    const shapes = selItem.shapes || [];
+    const store = useStore.getState();
+    const mirrorLineIdx =
+      tool === "mirror" ? store.sketchMirrorState?.lineIdx : null;
+
+    // Circular pattern's first phase picks a centre snap point — show the ring.
+    if (
+      tool === "circularPattern" &&
+      store.sketchCircularPatternState?.centerShapeIdx == null
+    ) {
+      const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+      clearHoverLineHighlight();
+      if (snap) {
+        showHoverPointIndicator(snap, sketchMesh);
+        renderer.domElement.style.cursor = "grab";
+      } else {
+        clearHoverPointIndicator();
+        renderer.domElement.style.cursor = "";
+      }
+      return;
+    }
+    clearHoverPointIndicator();
+
+    // Line/shape pick: hit-test the original (non-copy) shape lines.
+    const lineObjs = group.children.filter(
+      (c) =>
+        c.userData.shapeIdx != null &&
+        !c.userData.isOffset &&
+        !c.userData.isMirror &&
+        !c.userData.isCircularPattern &&
+        !c.userData.isRectangularPattern,
+    );
+    const hits = hitTestSketchLines(makeRay(screenX, screenY), lineObjs);
+    const hitIdx = hits[0]?.object?.userData?.shapeIdx;
+    if (hitIdx != null) {
+      const type = shapes[hitIdx]?.type;
+      const selectable =
+        tool === "mirror"
+          ? mirrorLineIdx == null
+            ? type === "line" // phase 1: any line can be the mirror axis
+            : hitIdx !== mirrorLineIdx && MIRRORABLE_TYPES.includes(type)
+          : tool === "circularPattern"
+            ? CIRCULAR_PATTERNABLE_TYPES.includes(type)
+            : RECTANGULAR_PATTERNABLE_TYPES.includes(type);
+      if (selectable) {
+        applyHoverLineHighlight(hits[0].object);
+        renderer.domElement.style.cursor = "pointer";
+        return;
+      }
+    }
+    clearHoverLineHighlight();
+    renderer.domElement.style.cursor = "";
+  };
+
   const onSketchMouseMove = (e) => {
     if (!sketchModeRef.current) return false;
+    // SVG placement: drag moves the pending import's offset.
+    const svgMove = useStore.getState().svgImport;
+    if (svgMove) {
+      if (svgDrag) {
+        const sketchMesh = objectsRef.current[svgMove.sketchId];
+        const cur = sketchMesh
+          ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
+          : null;
+        if (cur) {
+          useStore.getState().updateSvgImport({
+            offsetX: svgDrag.startOffsetX + (cur.x - svgDrag.startLocal.x),
+            offsetY: svgDrag.startOffsetY + (cur.y - svgDrag.startLocal.y),
+          });
+          updateSvgPreview();
+        }
+      }
+      renderer.domElement.style.cursor = svgDrag ? "grabbing" : "grab";
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
+    // While the long-press element list is open, ignore canvas motion — no
+    // marquee, no hover repaint underneath it.
+    if (longPressMenuOpen) return true;
+    if (activeSketchToolRef.current === "project") {
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      if (marqueeStartScreen) {
+        const dx = e.clientX - marqueeStartScreen.x;
+        const dy = e.clientY - marqueeStartScreen.y;
+        if (Math.hypot(dx, dy) > 5) {
+          marqueeActive = true;
+          controls.clearProjectHover?.();
+          drawProjectMarquee(e.clientX, e.clientY);
+          return true;
+        }
+      }
+      // Not dragging a box → highlight the edges under the cursor.
+      controls.projectHoverAt?.(e.clientX, e.clientY);
+      return true;
+    }
+    if (
+      activeSketchToolRef.current === "mirror" ||
+      activeSketchToolRef.current === "circularPattern" ||
+      activeSketchToolRef.current === "rectangularPattern"
+    ) {
+      updateSketchToolHover(e.clientX, e.clientY, activeSketchToolRef.current);
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
+    if (activeSketchToolRef.current === "trim") {
+      clearAllSketchHover();
+      if (trimming) tryTrimAt(e.clientX, e.clientY);
+      else trimHoverAt(e.clientX, e.clientY);
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
     if (activeSketchToolRef.current) {
       clearAllSketchHover();
       updateSketchPreview(e.clientX, e.clientY, e.shiftKey);
@@ -1181,8 +1799,228 @@ export function createSketchInteraction(
     return true;
   };
 
+  // Closest point on segment AB to P (all in sketch-local coords).
+  const closestOnSegment = (px, py, ax, ay, bx, by) => {
+    const dx = bx - ax,
+      dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1e-12;
+    let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return { x: ax + t * dx, y: ay + t * dy };
+  };
+
+  // "Point" tool: a single click drops a standalone point.  Clicking on a line
+  // snaps the point onto it and adds an onLine constraint so the point rides
+  // the line through later edits.
+  const handlePointClick = (clientX, clientY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    let local = screenToSketchLocal(clientX, clientY, sketchMesh);
+    if (!local) return;
+    const shapes = selItem.shapes || [];
+
+    const sketchGroup = sketchShapesGroupRef?.current;
+    const lineObjs = sketchGroup
+      ? sketchGroup.children.filter(
+          (c) =>
+            c.userData.shapeIdx != null &&
+            !c.userData.isOffset &&
+            !c.userData.isMirror &&
+            !c.userData.isCircularPattern &&
+            !c.userData.isRectangularPattern,
+        )
+      : [];
+    const hits = hitTestSketchLines(makeRay(clientX, clientY), lineObjs);
+    const constraints = [];
+    if (hits.length > 0) {
+      const lineIdx = hits[0].object.userData.shapeIdx;
+      const ln = shapes[lineIdx];
+      if (ln?.type === "line") {
+        // Snap exactly onto the segment so the onLine residual starts at zero.
+        local = closestOnSegment(local.x, local.y, ln.x1, ln.y1, ln.x2, ln.y2);
+        constraints.push({
+          type: "onLine",
+          pointShapeIdx: shapes.length, // index of the point we're appending
+          pointKey: "p",
+          lineShapeIdx: lineIdx,
+        });
+      }
+    }
+    useStore
+      .getState()
+      .addSketchShape(
+        selItem.id,
+        { type: "point", x: local.x, y: local.y },
+        constraints,
+      );
+  };
+
+  // The trim tool's pickable lines: original (non-copy, non-offset) shapes only.
+  const trimLineObjs = () => {
+    const group = sketchShapesGroupRef?.current;
+    if (!group) return [];
+    return group.children.filter(
+      (c) =>
+        c.userData.shapeIdx != null &&
+        !c.userData.isOffset &&
+        !c.userData.isMirror &&
+        !c.userData.isCircularPattern &&
+        !c.userData.isRectangularPattern,
+    );
+  };
+
+  const trimHitIdx = (clientX, clientY, selItem) => {
+    const hits = hitTestSketchLines(makeRay(clientX, clientY), trimLineObjs());
+    const idx = hits[0]?.object?.userData?.shapeIdx;
+    if (idx == null) return null;
+    return (selItem.shapes || [])[idx]?.type === "line" ? idx : null;
+  };
+
+  // Trim whatever plain line is under the cursor.  Called on click and on every
+  // move while dragging, so a drag "eats" lines continuously.
+  const tryTrimAt = (clientX, clientY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const lineIdx = trimHitIdx(clientX, clientY, selItem);
+    if (lineIdx == null) return;
+    const local = screenToSketchLocal(clientX, clientY, sketchMesh);
+    if (!local) return;
+    useStore
+      .getState()
+      .trimSketchLine(
+        selItem.id,
+        lineIdx,
+        local.x,
+        local.y,
+        !trimSnapshotTaken,
+      );
+    trimSnapshotTaken = true;
+  };
+
+  // Hover feedback for the trim tool: light the line a click would trim.
+  const trimHoverAt = (clientX, clientY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    if (!selItem || !sketchShapesGroupRef?.current) {
+      clearHoverLineHighlight();
+      renderer.domElement.style.cursor = "";
+      return;
+    }
+    const hits = hitTestSketchLines(makeRay(clientX, clientY), trimLineObjs());
+    const obj = hits[0]?.object;
+    const idx = obj?.userData?.shapeIdx;
+    if (idx != null && (selItem.shapes || [])[idx]?.type === "line") {
+      applyHoverLineHighlight(obj);
+      renderer.domElement.style.cursor = "crosshair";
+    } else {
+      clearHoverLineHighlight();
+      renderer.domElement.style.cursor = "";
+    }
+  };
+
   const onSketchMouseUp = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
+    if (useStore.getState().svgImport) {
+      svgDrag = null;
+      renderer.domElement.style.cursor = "grab";
+      return true;
+    }
+    if (activeSketchToolRef.current === "point") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) handlePointClick(e.clientX, e.clientY);
+      return true;
+    }
+    if (activeSketchToolRef.current === "project") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) >= 5 && marqueeStartScreen) {
+        controls.projectEdgesInBox({
+          x1: marqueeStartScreen.x,
+          y1: marqueeStartScreen.y,
+          x2: e.clientX,
+          y2: e.clientY,
+        });
+      } else {
+        controls.projectEdgeAt(e.clientX, e.clientY);
+      }
+      clearMarqueeRect();
+      controls.clearProjectHover?.();
+      marqueeActive = false;
+      marqueeStartScreen = null;
+      return true;
+    }
+    if (activeSketchToolRef.current === "mirror") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleMirrorClick(e.clientX, e.clientY, hitTestSketchLines, makeRay);
+      return true;
+    }
+    if (activeSketchToolRef.current === "circularPattern") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleCircularPatternClick(
+          e.clientX,
+          e.clientY,
+          hitTestSketchLines,
+          makeRay,
+        );
+      return true;
+    }
+    if (activeSketchToolRef.current === "rectangularPattern") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleRectangularPatternClick(
+          e.clientX,
+          e.clientY,
+          hitTestSketchLines,
+          makeRay,
+        );
+      return true;
+    }
+    // Text tool: a click sets the anchor and opens the Text dialog (with a live
+    // preview) rather than drawing directly.
+    if (activeSketchToolRef.current === "text") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) {
+        const selItem = itemsRef.current.find(
+          (i) => i.id === selectedIdRef.current,
+        );
+        const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+        const local = sketchMesh
+          ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
+          : null;
+        if (local) {
+          const store = useStore.getState();
+          store.setActiveSketchTool(null);
+          store.setTextDraft({
+            x: local.x,
+            y: local.y,
+            text: "Text",
+            heightMm: 10,
+            font: TEXT_DEFAULT_FONT_ID,
+            editIdx: null,
+          });
+        }
+      }
+      return true;
+    }
+    if (activeSketchToolRef.current === "trim") {
+      trimming = false;
+      trimSnapshotTaken = false;
+      return true;
+    }
     if (activeSketchToolRef.current) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
@@ -1246,7 +2084,11 @@ export function createSketchInteraction(
             if (
               !cObj.userData.isConstraint ||
               (cObj.userData.constraintType !== "distance" &&
-                cObj.userData.constraintType !== "offset")
+                cObj.userData.constraintType !== "offset" &&
+                cObj.userData.constraintType !== "rectangularPattern" &&
+                cObj.userData.constraintType !== "mirror" &&
+                cObj.userData.constraintType !== "circularPattern" &&
+                cObj.userData.constraintType !== "text")
             )
               continue;
             const lp = cObj.userData.constraintIconLocalPos;
@@ -1278,6 +2120,42 @@ export function createSketchInteraction(
                   defaultDistance: c.distance,
                 });
                 useStore.getState().setSketchConstraintMode("distance");
+              } else if (c && c.type === "rectangularPattern") {
+                // Re-open the Rectangular Pattern tool seeded from this pattern
+                // so its counts/offsets can be edited and re-confirmed.
+                useStore
+                  .getState()
+                  .beginRectangularPatternEdit(
+                    selectedIdRef.current,
+                    cObj.userData.constraintIdx,
+                  );
+              } else if (c && c.type === "mirror") {
+                useStore
+                  .getState()
+                  .beginMirrorEdit(
+                    selectedIdRef.current,
+                    cObj.userData.constraintIdx,
+                  );
+              } else if (c && c.type === "circularPattern") {
+                useStore
+                  .getState()
+                  .beginCircularPatternEdit(
+                    selectedIdRef.current,
+                    cObj.userData.constraintIdx,
+                  );
+              } else if (c && c.type === "text") {
+                // Re-open the Text dialog seeded from this text shape so its
+                // contents / height / font can be edited and re-committed.
+                const ts = (dblSel.shapes || [])[c.shapeIdx];
+                if (ts && ts.type === "text")
+                  useStore.getState().setTextDraft({
+                    x: ts.x,
+                    y: ts.y,
+                    text: ts.text,
+                    heightMm: ts.height * MM_PER_UNIT,
+                    font: ts.font,
+                    editIdx: c.shapeIdx,
+                  });
               }
               return;
             }
@@ -1294,12 +2172,32 @@ export function createSketchInteraction(
         const sketchGroup = sketchShapesGroupRef?.current;
         if (selItem && sketchMesh && sketchGroup) {
           const lineObjs = sketchGroup.children.filter(
-            (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+            (c) =>
+              c.userData.shapeIdx != null &&
+              !c.userData.isOffset &&
+              !c.userData.isMirror &&
+              !c.userData.isCircularPattern &&
+              !c.userData.isRectangularPattern,
           );
           const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
           if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
+            const hitIdx = hits[0].object.userData.shapeIdx;
+            const hs = (selItem.shapes || [])[hitIdx];
+            // Double-clicking a chamfer/bevel bridge edits its setback / radius.
+            if (hs && (hs.kind === "chamfer" || hs.kind === "bevel")) {
+              useStore.getState().setSketchDistanceInput({
+                cornerResize: {
+                  sketchId: selItem.id,
+                  shapeIdx: hitIdx,
+                  mode: hs.kind,
+                },
+                defaultDistance:
+                  hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0),
+              });
+              return;
+            }
             const connected = collectConnectedShapes(
-              hits[0].object.userData.shapeIdx,
+              hitIdx,
               selItem.shapes || [],
               selItem.constraints || [],
             );
@@ -1311,25 +2209,44 @@ export function createSketchInteraction(
       }
 
       if (shift) {
-        // Shift+click: toggle the hit line in/out of the multi-selection
+        // Shift+click: toggle the hit line in/out of the multi-selection.
+        // Selecting lines for a distance/length drops any measure point picks.
+        if (useStore.getState().measureTool)
+          useStore.getState().clearMeasurePicks();
         const sketchGroup = sketchShapesGroupRef?.current;
         if (!sketchGroup) return;
         const lineObjs = sketchGroup.children.filter(
-          (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
+          (c) =>
+            c.userData.shapeIdx != null &&
+            !c.userData.isOffset &&
+            !c.userData.isMirror &&
+            !c.userData.isCircularPattern &&
+            !c.userData.isRectangularPattern,
         );
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
         if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
           const hitIdx = hits[0].object.userData.shapeIdx;
+          // Seed from a current single-line selection so the natural flow —
+          // click one line, shift-click a second — yields a 2-shape multiselect
+          // (what the parallel / colinear / tangent constraints need).
+          if (multiSelectedIndices.length === 0) {
+            const sel = useStore.getState().selectedSketchElement;
+            if (sel?.type === "line" && sel.shapeIdx !== hitIdx)
+              multiSelectedIndices = [sel.shapeIdx];
+          }
           multiSelectedIndices = multiSelectedIndices.includes(hitIdx)
             ? multiSelectedIndices.filter((i) => i !== hitIdx)
             : [...multiSelectedIndices, hitIdx];
           showMultiSelectOverlays(multiSelectedIndices);
+          if (multiSelectedIndices.length > 0)
+            useStore.getState().setSelectedSketchElement(null);
         }
         return;
       }
 
       // Check for constraint icon click before doing normal element select
-      {
+      // (only when the Constraint selection type is enabled).
+      if (effectiveSketchSelTypes(useStore.getState()).eff.constraint) {
         const cg = sketchShapesGroupRef?.current;
         const cSelItem = itemsRef.current.find(
           (i) => i.id === selectedIdRef.current,
@@ -1428,6 +2345,85 @@ export function createSketchInteraction(
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable)
       return;
 
+    // Arrow keys nudge the selected sketch geometry by 1mm (one grid step in
+    // scene units).  Translates the whole selection rigidly, then solves the
+    // rest of the system around it — same path a body drag uses.
+    const nudge = {
+      ArrowUp: [0, 1],
+      ArrowDown: [0, -1],
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+    }[e.key];
+    if (
+      nudge &&
+      sketchModeRef.current &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
+      const sel = useStore.getState().selectedSketchElement;
+      const indices =
+        multiSelectedIndices.length > 0
+          ? [...multiSelectedIndices]
+          : sel?.shapeIdx != null
+            ? [sel.shapeIdx]
+            : null;
+      const selItem = itemsRef.current.find(
+        (i) => i.id === selectedIdRef.current,
+      );
+      if (indices && selItem) {
+        e.preventDefault();
+        const step = 1 / MM_PER_UNIT;
+        const dx = nudge[0] * step;
+        const dy = nudge[1] * step;
+        const placed = new Map();
+        const keys = new Map();
+        for (const idx of indices) {
+          const moved = translateShape(selItem.shapes[idx], dx, dy);
+          if (moved) {
+            placed.set(idx, moved);
+            keys.set(idx, null);
+          }
+        }
+        if (placed.size > 0) {
+          const solved = solveDrag(selItem.id, placed, keys, null);
+          useStore.getState().updateSketchShapes(selItem.id, solved);
+          refreshSketchSelectionOverlay();
+        }
+      }
+      return;
+    }
+
+    // Z X C V B toggle the selection-type filters, in a shared widget order, for
+    // whichever selection widget is showing (object → region → edge/line → point,
+    // then constraint): 3D = object/face/edge/point (no fifth type, so B is a
+    // no-op there); sketch = object/shape/line/point/constraint.  Bare keys only —
+    // Ctrl/Cmd/Alt combos stay free for copy/undo/etc.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      const idx = { z: 0, x: 1, c: 2, v: 3, b: 4 }[e.key.toLowerCase()];
+      if (idx !== undefined) {
+        const store = useStore.getState();
+        if (sketchModeRef.current) {
+          e.preventDefault();
+          store.toggleSketchSelType(
+            ["object", "shape", "line", "point", "constraint"][idx],
+          );
+        } else {
+          const toggle = [
+            store.toggleSelObject,
+            store.toggleSelFace,
+            store.toggleSelEdge,
+            store.toggleSelPoint,
+          ][idx];
+          if (toggle) {
+            e.preventDefault();
+            toggle();
+          }
+        }
+        return;
+      }
+    }
+
     // Debug export: copy the whole active sketch (shapes + constraints) to the
     // clipboard as JSON, for sharing a reproducer.  Cmd/Ctrl+Shift+C.
     if (
@@ -1510,7 +2506,13 @@ export function createSketchInteraction(
       const PASTE_OFFSET = 0.5;
       const newShapes = sketchClipboard.shapes
         .map((s) => translateShape(s, PASTE_OFFSET, PASTE_OFFSET))
-        .filter(Boolean);
+        .filter(Boolean)
+        // Pasted copies start ungrouped (don't inherit the source's group).
+        .map((s) => {
+          if (s.group == null) return s;
+          const { group, ...rest } = s;
+          return rest;
+        });
       const newConstraints = sketchClipboard.constraints.map((c) => ({
         ...c,
         shapeAIdx: c.shapeAIdx + baseIdx,
@@ -1519,6 +2521,41 @@ export function createSketchInteraction(
       useStore
         .getState()
         .addSketchShapes(selectedIdRef.current, newShapes, newConstraints);
+      return;
+    }
+
+    // Cmd/Ctrl+G — group the selected sketch shapes (2+) so they act as a unit.
+    if (
+      sketchModeRef.current &&
+      (isMac ? e.metaKey : e.ctrlKey) &&
+      !e.shiftKey &&
+      e.key.toLowerCase() === "g"
+    ) {
+      if (multiSelectedIndices.length < 2) return;
+      e.preventDefault();
+      const indices = [...multiSelectedIndices];
+      useStore.getState().groupSketchShapes(selectedIdRef.current, indices);
+      showMultiSelectOverlays(indices);
+      return;
+    }
+
+    // Cmd/Ctrl+U — ungroup the selected sketch shapes.
+    if (
+      sketchModeRef.current &&
+      (isMac ? e.metaKey : e.ctrlKey) &&
+      !e.shiftKey &&
+      e.key.toLowerCase() === "u"
+    ) {
+      const sel = useStore.getState().selectedSketchElement;
+      const indices =
+        multiSelectedIndices.length > 0
+          ? [...multiSelectedIndices]
+          : sel?.type === "line"
+            ? [sel.shapeIdx]
+            : [];
+      if (indices.length === 0) return;
+      e.preventDefault();
+      useStore.getState().ungroupSketchShapes(selectedIdRef.current, indices);
       return;
     }
 
@@ -1536,12 +2573,19 @@ export function createSketchInteraction(
         return;
       }
       const sel = useStore.getState().selectedSketchElement;
+      const selShapes =
+        itemsRef.current.find((i) => i.id === selectedIdRef.current)?.shapes ||
+        [];
       const toDelete =
         multiSelectedIndices.length > 0
           ? [...multiSelectedIndices]
           : sel?.type === "line"
             ? [sel.shapeIdx]
-            : null;
+            : // A selected standalone point deletes that point (a line's
+              // endpoint node, also type "point", is left alone).
+              sel?.type === "point" && selShapes[sel.shapeIdx]?.type === "point"
+              ? [sel.shapeIdx]
+              : null;
       if (toDelete?.length > 0) {
         e.preventDefault();
         useStore.getState().deleteSketchShapes(selectedIdRef.current, toDelete);
@@ -1591,6 +2635,21 @@ export function createSketchInteraction(
           clearModifyPreview();
           return;
         }
+        if (store.activeSketchTool === "mirror") {
+          store.cancelMirrorTool();
+          clearMirrorPreview();
+          return;
+        }
+        if (store.activeSketchTool === "circularPattern") {
+          store.cancelCircularPatternTool();
+          clearCircularPatternPreview();
+          return;
+        }
+        if (store.activeSketchTool === "rectangularPattern") {
+          store.cancelRectangularPatternTool();
+          clearRectangularPatternPreview();
+          return;
+        }
         if (store.sketchConstraintMode || store.sketchDistanceInput) {
           store.setSketchConstraintMode(null);
           store.setSketchConstraintFirstPoint(null);
@@ -1627,11 +2686,16 @@ export function createSketchInteraction(
         1: "wireframe",
         2: "shaded",
         3: "transparent",
-        4: "smooth",
       };
       if (renderModeKeys[e.key]) {
         e.preventDefault();
         store.setRenderMode(renderModeKeys[e.key]);
+        return;
+      }
+      // 4 selects the path-traced render mode (1-3 select the raster modes).
+      if (e.key === "4") {
+        e.preventDefault();
+        store.setPathTraceView(true);
         return;
       }
       if (e.key === "5") {
@@ -1642,11 +2706,6 @@ export function createSketchInteraction(
       if (e.key === "6") {
         e.preventDefault();
         store.toggleCrossSectionView();
-        return;
-      }
-      if (e.key === "7") {
-        e.preventDefault();
-        store.togglePathTraceView();
         return;
       }
       if (e.key === "8") {
@@ -1690,13 +2749,13 @@ export function createSketchInteraction(
         return;
       }
 
+      // C and B are reserved for selection-type toggles (handled above), so the
+      // circle / bezier tools have no key bind — use the toolbar.
       const toolMap = {
         l: "line",
         r: "rect",
-        c: "circle",
         e: "ellipse",
         a: "arc",
-        b: "bezier",
       };
       const tool = toolMap[key];
       if (tool) {
@@ -1723,5 +2782,8 @@ export function createSketchInteraction(
     clearSketchVisualsFor3D,
     refreshSketchSelectionOverlay,
     unsubItems,
+    unsubMirror,
+    unsubCircularPattern,
+    unsubRectangularPattern,
   };
 }

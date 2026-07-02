@@ -25,6 +25,11 @@ let activeCamera = null;
 let rafId = null;
 const lastCamMatrix = new THREE.Matrix4();
 
+// Sample count the progress bar treats as "full" — the image still keeps
+// refining past this, but it's a reasonable point to call the accumulation
+// converged for the bar's purposes.
+const TARGET_SAMPLES = 100;
+
 // three-gpu-pathtracer 0.0.23 reads scene.environmentRotation / backgroundRotation
 // (Euler properties added in three r163) — undefined in our three 0.157, which
 // crashes makeRotationFromEuler even in the tracer's internal empty scene.
@@ -104,11 +109,20 @@ const buildRenderScene = (objectsRef, itemsRef) => {
   const scene = new THREE.Scene();
   const items = itemsRef.current;
   const defaultMaterial = useStore.getState().defaultMaterial;
+  const soloId = useStore.getState().soloItemId;
 
   let minY = Infinity;
   Object.values(objectsRef.current).forEach((mesh) => {
     const item = items.find((i) => i.id === mesh.userData.itemId);
-    if (!item || item.type === "sketch" || item.visible === false) return;
+    // Sketches and reference Planes are construction aids — always excluded.
+    if (!item || item.type === "sketch" || item.type === "plane") return;
+    // Solo: trace ONLY the soloed object (even if it's marked hidden);
+    // otherwise exclude hidden items as usual.
+    if (soloId != null) {
+      if (item.id !== soloId) return;
+    } else if (item.visible === false) {
+      return;
+    }
     const geometry = normalizeGeometry(renderGeometryFor(item, mesh));
     const m = new THREE.Mesh(
       geometry,
@@ -216,6 +230,12 @@ export function enablePathTracer(renderer, camera, { objectsRef, itemsRef }) {
           pathTracer.updateCamera();
         }
         pathTracer.renderSample();
+        useStore.setState({
+          pathTraceProgress: {
+            samples: pathTracer.samples,
+            target: TARGET_SAMPLES,
+          },
+        });
       } catch (err) {
         console.error("Path tracer render error:", err);
         useStore
@@ -255,5 +275,5 @@ export function disablePathTracer() {
   }
   pathTracer = null;
   activeCamera = null;
-  useStore.setState({ pathTracerActive: false });
+  useStore.setState({ pathTracerActive: false, pathTraceProgress: null });
 }

@@ -57,6 +57,7 @@ export function useViewportInit({
   sketchPlacementPlanesRef,
   extrudeSelectModeRef,
   extrudeSelectGroupRef,
+  sweepSelectModeRef,
   sketchDrawRef,
   sketchShapesGroupRef,
   dimHintRef,
@@ -118,7 +119,7 @@ export function useViewportInit({
     const { dir1: shadowLight } = createLights(scene, camera);
     shadowLightRef.current = shadowLight;
     shadowGroundRef.current = createShadowGround(scene);
-    const { gridPlane, gridMaterial, rulerGroup } = createGrid(scene);
+    const { gridPlane, gridMaterial, rulerGroup } = createGrid(scene, theme);
     planeRef.current = gridPlane;
     axisGroupRef.current = createAxisGroup(scene);
     axisGroupRef.current.visible = useStore.getState().axisVisible;
@@ -169,6 +170,7 @@ export function useViewportInit({
       sketchShapesGroupRef,
       extrudeSelectGroupRef,
       extrudeSelectModeRef,
+      sweepSelectModeRef,
       orbitIndicator,
       gridMaterial,
       rulerGroup,

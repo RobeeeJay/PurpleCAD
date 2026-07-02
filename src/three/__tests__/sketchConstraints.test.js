@@ -6,7 +6,9 @@ import {
   allConstraintsSatisfied,
   computeChamfer,
   chamferConstraints,
+  buildBevelArc,
 } from "../sketchConstraints.js";
+import { buildChamferEdit, resizeCorner } from "../sketchGeometry.js";
 
 // ── Mock sceneObjects.js ─────────────────────────────────────────────────────
 // Only getShapePoint and moveShapePoint are used by enforceConstraints; the
@@ -2606,6 +2608,177 @@ describe("enforceConstraints", () => {
       expect(geom.trimA.y).toBeCloseTo(1);
       expect(geom.trimB.x).toBeCloseTo(1 + Math.cos(Math.PI / 3) * 0.5);
       expect(geom.trimB.y).toBeCloseTo(1 + Math.sin(Math.PI / 3) * 0.5);
+    });
+
+    it("bevel radius: trimming r/tan(theta/2) along each leg yields an arc of radius r", () => {
+      // The bevel tool treats its input as a fillet radius. At a non-right
+      // corner the tangent points must sit legDist = r / tan(theta/2) back, or
+      // the fitted arc comes out the wrong size. Verify both a 90° and a 60°
+      // corner land on the requested radius.
+      const check = (legA, legB, thetaRad, r) => {
+        const legDist = r / Math.tan(thetaRad / 2);
+        const g = computeChamfer(legA, legB, "start", "start", legDist);
+        const arc = buildBevelArc(g.P, g.uA, g.uB, g.trimA, g.trimB);
+        expect(arc.r).toBeCloseTo(r, 6);
+      };
+      // 90° corner at the origin
+      check(L(0, 0, 2, 0), L(0, 0, 0, 2), Math.PI / 2, 0.4);
+      // 60° corner: legB at 60° from legA
+      check(
+        L(0, 0, 2, 0),
+        L(0, 0, 2 * Math.cos(Math.PI / 3), 2 * Math.sin(Math.PI / 3)),
+        Math.PI / 3,
+        0.4,
+      );
+    });
+
+    describe("buildChamferEdit (local, non-propagating)", () => {
+      // A square: L0 bottom, L1 right, L2 top, L3 left, joined corner-to-corner.
+      // Chamfer the L0/L1 corner (their shared vertex at (2,0)).
+      const square = () => ({
+        shapes: [
+          L(0, 0, 2, 0), // L0 bottom
+          L(2, 0, 2, 2), // L1 right
+          L(2, 2, 0, 2), // L2 top
+          L(0, 2, 0, 0), // L3 left
+        ],
+        junc: { aIdx: 0, aKey: "end", bIdx: 1, bKey: "start" },
+      });
+
+      it("touches only the two clicked legs, never unrelated geometry", () => {
+        const { shapes, junc } = square();
+        const edit = buildChamferEdit(shapes, junc, "chamfer", 0.5);
+        // Exactly the two legs are updated; L2 and L3 (which the user never
+        // constrained for this op) are absent.
+        const movedIdx = edit.updates.map(([i]) => i).sort();
+        expect(movedIdx).toEqual([0, 1]);
+        // Each leg keeps its far endpoint; only the shared corner trims back.
+        const [, newL0] = edit.updates.find(([i]) => i === 0);
+        const [, newL1] = edit.updates.find(([i]) => i === 1);
+        expect({ x: newL0.x1, y: newL0.y1 }).toEqual({ x: 0, y: 0 }); // L0 far end
+        expect({ x: newL1.x2, y: newL1.y2 }).toEqual({ x: 2, y: 2 }); // L1 far end
+        expect(newL0.x2).toBeCloseTo(1.5); // trimmed back along L0
+        expect(newL1.y1).toBeCloseTo(0.5); // trimmed back along L1
+      });
+
+      it("adds a coincident at each new corner (chamfer)", () => {
+        const { shapes, junc } = square();
+        const edit = buildChamferEdit(shapes, junc, "chamfer", 0.5);
+        const newIdx = shapes.length; // the bridge line's index
+        const coincs = edit.newConstraints.filter(
+          (c) => c.type === "coincident",
+        );
+        expect(coincs).toHaveLength(2);
+        expect(coincs).toContainEqual({
+          type: "coincident",
+          shapeAIdx: newIdx,
+          pointA: "start",
+          shapeBIdx: 0,
+          pointB: "end",
+        });
+        expect(coincs).toContainEqual({
+          type: "coincident",
+          shapeAIdx: newIdx,
+          pointA: "end",
+          shapeBIdx: 1,
+          pointB: "start",
+        });
+        // The cut carries its junction so the solver re-derives it on edits, and
+        // it is held by coincidents ALONE — no angle locks (which broke under a
+        // connected-line drag).
+        expect(edit.newShape.kind).toBe("chamfer");
+        expect(edit.newShape.chamferData).toMatchObject({
+          aIdx: 0,
+          aKey: "end",
+          bIdx: 1,
+          bKey: "start",
+        });
+        expect(edit.newConstraints.some((c) => c.type === "angle")).toBe(false);
+        // The split corner's rigidity is restored by a direction-angle lock
+        // between the two legs (a square corner → 90°).
+        const la = edit.newConstraints.find((c) => c.type === "lineAngle");
+        expect(la).toMatchObject({ shapeAIdx: 0, shapeBIdx: 1 });
+        expect(la.angle).toBeCloseTo(90, 4);
+      });
+
+      it("adds a coincident at each new corner (fillet) and an arc bridge", () => {
+        const { shapes, junc } = square();
+        const edit = buildChamferEdit(shapes, junc, "bevel", 0.5);
+        const newIdx = shapes.length;
+        expect(edit.newShape.type).toBe("arc");
+        expect(edit.newShape.kind).toBe("bevel");
+        const coincs = edit.newConstraints.filter(
+          (c) => c.type === "coincident",
+        );
+        expect(coincs).toContainEqual({
+          type: "coincident",
+          shapeAIdx: newIdx,
+          pointA: "start",
+          shapeBIdx: 0,
+          pointB: "end",
+        });
+        expect(coincs).toContainEqual({
+          type: "coincident",
+          shapeAIdx: newIdx,
+          pointA: "end",
+          shapeBIdx: 1,
+          pointB: "start",
+        });
+        // The arc endpoints actually sit on the trimmed leg corners it joins.
+        const [, newL0] = edit.updates.find(([i]) => i === 0);
+        const [, newL1] = edit.updates.find(([i]) => i === 1);
+        const a = edit.newShape;
+        const start = {
+          x: a.cx + a.r * Math.cos(a.startAngle),
+          y: a.cy + a.r * Math.sin(a.startAngle),
+        };
+        const end = {
+          x: a.cx + a.r * Math.cos(a.endAngle),
+          y: a.cy + a.r * Math.sin(a.endAngle),
+        };
+        const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-6;
+        const corner0 = { x: newL0.x2, y: newL0.y2 };
+        const corner1 = { x: newL1.x1, y: newL1.y1 };
+        expect(near(start, corner0) || near(start, corner1)).toBe(true);
+        expect(near(end, corner0) || near(end, corner1)).toBe(true);
+      });
+
+      // Helper: chamfer/bevel the square's L0/L1 corner and return the committed
+      // shapes (the bridge lands at index 4).
+      const applied = (mode, dist) => {
+        const { shapes, junc } = square();
+        const edit = buildChamferEdit(shapes, junc, mode, dist);
+        const cShapes = shapes.map((s, i) => {
+          const u = edit.updates.find(([x]) => x === i);
+          return u ? u[1] : s;
+        });
+        cShapes.push(edit.newShape);
+        return cShapes;
+      };
+
+      it("resizeCorner: a chamfer re-trims its legs to the new setback", () => {
+        const res = resizeCorner(applied("chamfer", 0.5), 4, 0.8);
+        expect(res.dist).toBeCloseTo(0.8);
+        const byIdx = new Map(res.updates);
+        // legs trim 0.8 back from the (2,0) corner; the bridge spans them.
+        expect(byIdx.get(0).x2).toBeCloseTo(1.2);
+        expect(byIdx.get(1).y1).toBeCloseTo(0.8);
+        const b = byIdx.get(4);
+        expect(b.kind).toBe("chamfer");
+        expect(b.x1).toBeCloseTo(1.2);
+        expect(b.y2).toBeCloseTo(0.8);
+        expect(b.chamferData.dist).toBeCloseTo(0.8);
+      });
+
+      it("resizeCorner: a bevel re-derives the arc at the new radius", () => {
+        const cShapes = applied("bevel", 0.5);
+        expect(cShapes[4].r).toBeCloseTo(0.5);
+        const res = resizeCorner(cShapes, 4, 1.0);
+        const arc = new Map(res.updates).get(4);
+        expect(arc.type).toBe("arc");
+        expect(arc.kind).toBe("bevel");
+        expect(arc.r).toBeCloseTo(1.0);
+      });
     });
 
     it("chamferConstraints: 2 coincidents joining the chamfer line + 2 angle locks", () => {

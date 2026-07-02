@@ -8,6 +8,15 @@
 // Identifiers reference other variables; cycles are detected and produce NaN.
 // All values in the system are stored as strings (e.g. "10", "width * 2") so
 // the same evaluator handles both bare numbers and formulas.
+//
+// Arithmetic runs through decimal.js so user-entered maths is exact in decimal
+// (e.g. 0.1 + 0.2 = 0.3, not 0.30000000000000004).  Values flow as `Decimal`
+// internally and are converted back to a JS number only at the public return
+// (the geometry / three.js / OCC layers all consume doubles).
+
+import Decimal from "decimal.js";
+
+const D_NAN = new Decimal(NaN);
 
 function tokenize(src) {
   const tokens = [];
@@ -30,7 +39,8 @@ function tokenize(src) {
         ((src[j] >= "0" && src[j] <= "9") || src[j] === ".")
       )
         j++;
-      tokens.push({ type: "num", value: parseFloat(src.slice(i, j)) });
+      // Keep the raw literal string so decimal.js parses it exactly.
+      tokens.push({ type: "num", value: src.slice(i, j) });
       i = j;
       continue;
     }
@@ -54,12 +64,13 @@ function tokenize(src) {
 }
 
 function parseExpr(tokens, pos, evalIdent) {
+  // All `value`s below are decimal.js Decimals.
   const parseFactor = (p) => {
     const t = tokens[p];
     if (!t) throw new Error("Unexpected end of expression");
     if (t.type === "-") {
       const inner = parseFactor(p + 1);
-      return { value: -inner.value, next: inner.next };
+      return { value: inner.value.neg(), next: inner.next };
     }
     if (t.type === "+") return parseFactor(p + 1);
     if (t.type === "(") {
@@ -68,7 +79,7 @@ function parseExpr(tokens, pos, evalIdent) {
         throw new Error("Missing closing parenthesis");
       return { value: inner.value, next: inner.next + 1 };
     }
-    if (t.type === "num") return { value: t.value, next: p + 1 };
+    if (t.type === "num") return { value: new Decimal(t.value), next: p + 1 };
     if (t.type === "ident") return { value: evalIdent(t.value), next: p + 1 };
     throw new Error(`Unexpected token "${t.type}"`);
   };
@@ -78,7 +89,7 @@ function parseExpr(tokens, pos, evalIdent) {
     while (tokens[next]?.type === "*" || tokens[next]?.type === "/") {
       const op = tokens[next].type;
       const rhs = parseFactor(next + 1);
-      value = op === "*" ? value * rhs.value : value / rhs.value;
+      value = op === "*" ? value.times(rhs.value) : value.div(rhs.value);
       next = rhs.next;
     }
     return { value, next };
@@ -89,7 +100,7 @@ function parseExpr(tokens, pos, evalIdent) {
     while (tokens[next]?.type === "+" || tokens[next]?.type === "-") {
       const op = tokens[next].type;
       const rhs = parseTerm(next + 1);
-      value = op === "+" ? value + rhs.value : value - rhs.value;
+      value = op === "+" ? value.plus(rhs.value) : value.minus(rhs.value);
       next = rhs.next;
     }
     return { value, next };
@@ -114,27 +125,26 @@ export function evaluateFormula(formula, variables = {}) {
     variables instanceof Map ? (n) => variables.get(n) : (n) => variables[n];
 
   const stack = new Set();
-  const cache = new Map();
+  const cache = new Map(); // name -> Decimal
   const evalIdent = (name) => {
     if (cache.has(name)) return cache.get(name);
     if (stack.has(name)) {
-      cache.set(name, NaN);
-      return NaN;
+      cache.set(name, D_NAN);
+      return D_NAN;
     }
     const raw = lookup(name);
     if (raw == null || String(raw).trim() === "") {
-      cache.set(name, NaN);
-      return NaN;
+      cache.set(name, D_NAN);
+      return D_NAN;
     }
     stack.add(name);
     let result;
     try {
       const innerTokens = tokenize(String(raw));
       const parsed = parseExpr(innerTokens, 0, evalIdent);
-      if (parsed.next !== innerTokens.length) result = NaN;
-      else result = parsed.value;
+      result = parsed.next !== innerTokens.length ? D_NAN : parsed.value;
     } catch {
-      result = NaN;
+      result = D_NAN;
     }
     stack.delete(name);
     cache.set(name, result);
@@ -145,7 +155,7 @@ export function evaluateFormula(formula, variables = {}) {
     const tokens = tokenize(src);
     const parsed = parseExpr(tokens, 0, evalIdent);
     if (parsed.next !== tokens.length) return NaN;
-    return parsed.value;
+    return parsed.value.toNumber();
   } catch {
     return NaN;
   }

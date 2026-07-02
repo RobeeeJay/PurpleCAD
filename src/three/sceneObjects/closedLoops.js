@@ -21,6 +21,7 @@ export {
   withWinding,
   polyContainsPoint,
   polyCentroid,
+  polyAreaCentroid,
   polyArea,
 } from "./polygonUtil.js";
 
@@ -32,10 +33,42 @@ export function findClosedLoopsWithShapes(
   const EPS = 1e-4;
 
   // ── Filter solid shapes ───────────────────────────────────────────────
+  // Projected geometry participates in region detection (so an enclosed area
+  // bounded by projected edges is extrudable).  It is deduped of coincident /
+  // zero-length segments at projection time so it isn't a degenerate input.
   const solidEntries = [];
   shapes.forEach((s, i) => {
-    if (!s.dashed && s.kind !== "bevel")
+    // Bevel (fillet) arcs are real profile geometry — they bridge the two
+    // trimmed legs, so a filleted corner only closes if the arc participates.
+    // Construction (dashed) geometry is excluded; text is handled separately
+    // below (its stored glyph contours are already closed loops).
+    if (!s.dashed && s.type !== "text")
       solidEntries.push({ shape: s, origIdx: i });
+  });
+
+  // Text: each stored glyph contour is already a closed loop positioned at the
+  // shape's anchor.  Feed them in directly — NOT through the pairwise-intersect
+  // + cycle DFS, which dense glyph geometry would choke — so filled/extruded
+  // text works.  groupLoopsWithHoles nests the counters (e.g. the hole in "o").
+  const textLoops = [];
+  shapes.forEach((s, i) => {
+    if (s.type !== "text" || !Array.isArray(s.contours)) return;
+    for (const c of s.contours) {
+      // Drop a duplicated closing point (font glyph contours repeat the start
+      // point) so the loop is a clean polygon — a zero-length closing segment
+      // makes OCC's extrude wire-builder reject the profile.
+      let pts = c;
+      if (pts.length >= 2) {
+        const a = pts[0],
+          b = pts[pts.length - 1];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) pts = pts.slice(0, -1);
+      }
+      if (pts.length < 3) continue;
+      textLoops.push({
+        polygon: pts.map((p) => ({ x: p.x + s.x, y: p.y + s.y })),
+        shapeIndices: [i],
+      });
+    }
   });
 
   // ── Expand rects to 4 line segments so they participate in intersection
@@ -189,6 +222,11 @@ export function findClosedLoopsWithShapes(
     }
   }
 
+  // Too many split segments → the O(n²) node merge and the cycle DFS below get
+  // pathologically slow (a dense projected wireframe of crossing edges).  Bail
+  // out of region detection rather than freeze; the geometry still draws.
+  if (subEntries.length > 2500) return textLoops;
+
   // ── Build adjacency graph from sub-shapes ────────────────────────────
   const nodes = [];
   const getNode = (x, y) => {
@@ -302,9 +340,15 @@ export function findClosedLoopsWithShapes(
   });
 
   // ── DFS cycle detection ─────────────────────────────────────────────
+  // Enumerating every cycle is exponential in the graph's branching, so a dense
+  // intersection graph (e.g. a projected body's wireframe with many crossing
+  // edges) would otherwise freeze the app.  Bound the total exploration: when
+  // the budget runs out we keep the regions found so far rather than hang.
   const cycles = [];
+  let dfsBudget = 150000;
   const dfs = (start, cur, path, visited) => {
-    if (path.length > 24) return;
+    if (path.length > 24 || dfsBudget <= 0) return;
+    dfsBudget--;
     for (const { si, otherNode } of adj[cur] || []) {
       if (path.some((e) => e.si === si)) continue;
       if (otherNode === start && path.length >= 2) {
@@ -391,7 +435,7 @@ export function findClosedLoopsWithShapes(
     // cycle.
   });
 
-  return results;
+  return results.concat(textLoops);
 }
 
 export function findClosedLoops(shapes, curveSegments = 32, precision = null) {

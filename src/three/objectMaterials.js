@@ -1,15 +1,37 @@
 import * as THREE from "three";
 import {
   DEFAULT_MESH_COLOR,
-  DEFAULT_OBJECT_COLOR,
   EMISSIVE_HOVERED,
   EMISSIVE_MULTI_SELECTED,
   EMISSIVE_SELECTED,
   NO_EMISSIVE,
+  sketchPlaneFillColorFor,
 } from "./theme.js";
 import { DEFAULT_MATERIAL } from "./materialPresets.js";
+import { primitiveDimensions } from "./sceneObjects/dimensions.js";
+import { useStore } from "../store";
+
+// Shader uniforms carrying a primitive's parametric dimensions (object-space; the
+// analytic shaders multiply by the model scale).  Updated live by the dimensions
+// dialog's preview.  cone uses a generic vec for radii + half-height.
+export function primitiveUniforms(item) {
+  const d = primitiveDimensions(item);
+  if (item.type === "sphere") return { uRadius: { value: d.radius } };
+  if (item.type === "cylinder")
+    return { uRadius: { value: d.radius }, uHalfH: { value: d.height / 2 } };
+  if (item.type === "torus")
+    return { uMajor: { value: d.major }, uMinor: { value: d.minor } };
+  if (item.type === "cone")
+    return {
+      uRb: { value: d.radiusBottom },
+      uRt: { value: d.radiusTop },
+      uHalfH: { value: d.height / 2 },
+    };
+  return {};
+}
 
 export const SPHERE_VERTEX_SHADER = `
+  uniform float uRadius;
   varying vec3 vViewPos;
   varying vec3 vSphereCenter;
   varying float vSphereRadius;
@@ -17,7 +39,7 @@ export const SPHERE_VERTEX_SHADER = `
     vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
     vViewPos = mvPos.xyz;
     vSphereCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    vSphereRadius = 1.5 * length(modelViewMatrix[0].xyz);
+    vSphereRadius = uRadius * length(modelViewMatrix[0].xyz);
     gl_Position = projectionMatrix * mvPos;
   }
 `;
@@ -71,6 +93,8 @@ export const SPHERE_FRAGMENT_SHADER = `
 `;
 
 export const CYLINDER_VERTEX_SHADER = `
+  uniform float uRadius;
+  uniform float uHalfH;
   varying vec3 vViewPos;
   varying vec3 vCylCenter;
   varying vec3 vCylAxis;
@@ -81,8 +105,8 @@ export const CYLINDER_VERTEX_SHADER = `
     vViewPos = mvPos.xyz;
     vCylCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     vCylAxis   = normalize(modelViewMatrix[1].xyz);
-    vCylRadius = length(modelViewMatrix[0].xyz);
-    vCylHalfH  = length(modelViewMatrix[1].xyz);
+    vCylRadius = uRadius * length(modelViewMatrix[0].xyz);
+    vCylHalfH  = uHalfH * length(modelViewMatrix[1].xyz);
     gl_Position = projectionMatrix * mvPos;
   }
 `;
@@ -166,6 +190,8 @@ export const CYLINDER_FRAGMENT_SHADER = `
 `;
 
 export const TORUS_VERTEX_SHADER = `
+  uniform float uMajor;
+  uniform float uMinor;
   varying vec3 vViewPos;
   varying vec3 vTorusCenter;
   varying vec3 vTorusNormal;
@@ -177,8 +203,8 @@ export const TORUS_VERTEX_SHADER = `
     vTorusCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     vTorusNormal = normalize(modelViewMatrix[1].xyz);
     float scale  = length(modelViewMatrix[0].xyz);
-    vTorusR = 1.0 * scale;
-    vTorusr = 0.4 * scale;
+    vTorusR = uMajor * scale;
+    vTorusr = uMinor * scale;
     gl_Position = projectionMatrix * mvPos;
   }
 `;
@@ -243,6 +269,111 @@ export const TORUS_FRAGMENT_SHADER = `
   }
 `;
 
+export const CONE_VERTEX_SHADER = `
+  uniform float uRb;
+  uniform float uRt;
+  uniform float uHalfH;
+  varying vec3 vViewPos;
+  varying vec3 vConeCenter;
+  varying vec3 vConeAxis;
+  varying float vRb;
+  varying float vRt;
+  varying float vHalfH;
+  void main() {
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    vViewPos     = mvPos.xyz;
+    vConeCenter  = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    vConeAxis    = normalize(modelViewMatrix[1].xyz);
+    float scale  = length(modelViewMatrix[0].xyz);
+    vRb = uRb * scale;
+    vRt = uRt * scale;
+    vHalfH = uHalfH * scale;
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+
+export const CONE_FRAGMENT_SHADER = `
+  uniform mat4 projectionMatrix;
+  uniform vec3 uColor;
+  uniform vec3 uEmissive;
+  uniform float uOpacity;
+  uniform vec3 uClipNormal;
+  uniform float uClipConstant;
+  uniform float uClipEnabled;
+  varying vec3 vViewPos;
+  varying vec3 vConeCenter;
+  varying vec3 vConeAxis;
+  varying float vRb;
+  varying float vRt;
+  varying float vHalfH;
+  bool clipped(vec3 p) {
+    return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
+  }
+  // IQ capped-cone SDF in (radial, axial) coords: bottom radius vRb at axial
+  // -vHalfH, top radius vRt at +vHalfH.
+  float sdCone(vec3 p) {
+    vec3 q3 = p - vConeCenter;
+    float axial  = dot(q3, vConeAxis);
+    float radial = length(q3 - axial * vConeAxis);
+    vec2 q = vec2(radial, axial);
+    float ra = vRb, rb = vRt, h = vHalfH;
+    vec2 k1 = vec2(rb, h);
+    vec2 k2 = vec2(rb - ra, 2.0 * h);
+    vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? ra : rb), abs(q.y) - h);
+    vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+    float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+    return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+  }
+  void main() {
+    vec3 rd = normalize(vViewPos);
+    float t  = max(0.01, length(vConeCenter) - max(vRb, vRt) - vHalfH - 0.2);
+    bool hit = false;
+    for (int i = 0; i < 160; i++) {
+      vec3 p = rd * t;
+      float d = sdCone(p);
+      if (d < 0.0002 * t) {
+        if (!clipped(p)) { hit = true; break; }
+        t += 0.02;
+        continue;
+      }
+      if (t > 60.0) break;
+      t += max(d, 0.001);
+    }
+    if (!hit) discard;
+    vec3 hitPos = rd * t;
+    const float eps = 0.002;
+    vec3 n = normalize(vec3(
+      sdCone(hitPos + vec3(eps,0.0,0.0)) - sdCone(hitPos - vec3(eps,0.0,0.0)),
+      sdCone(hitPos + vec3(0.0,eps,0.0)) - sdCone(hitPos - vec3(0.0,eps,0.0)),
+      sdCone(hitPos + vec3(0.0,0.0,eps)) - sdCone(hitPos - vec3(0.0,0.0,eps))
+    ));
+    vec3 L1 = normalize(vec3(10.0, 15.0, 10.0));
+    vec3 L2 = normalize(vec3(-10.0, 10.0, -10.0));
+    vec3 V  = normalize(-hitPos);
+    float d1 = max(dot(n, L1), 0.0);
+    float d2 = max(dot(n, L2), 0.0) * 0.4;
+    float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
+    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
+    vec4 cp = projectionMatrix * vec4(hitPos, 1.0);
+    gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
+  }
+`;
+
+// The material props an item should render with.  Mirror / circular /
+// rectangular pattern clones (kind:"pattern3d") track their originating object,
+// so they inherit ITS material live — a later change to the source's material
+// flows to every clone on the next scene build.  Everything else uses its own
+// item.material (or the default).
+export function resolveItemMaterial(item, items, defaultMaterial) {
+  const r = item?.regenerator;
+  if (r?.kind === "pattern3d" && r.sourceId != null) {
+    const src = (items || []).find((i) => i.id === r.sourceId);
+    if (src) return src.material ?? defaultMaterial;
+  }
+  return item?.material ?? defaultMaterial;
+}
+
 // `materialProps` is an item.material-shaped object (see
 // materialPresets.js#DEFAULT_MATERIAL): { color, metalness, roughness,
 // opacity, clearcoat, clearcoatRoughness }. `color` here is the resolved
@@ -264,7 +395,7 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
   });
   if (item.type === "sketch") {
     return new THREE.MeshStandardMaterial({
-      color: DEFAULT_OBJECT_COLOR,
+      color: sketchPlaneFillColorFor(useStore.getState().theme),
       transparent: true,
       opacity: 0.18,
       side: THREE.DoubleSide,
@@ -273,7 +404,7 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
   }
   if (item.type === "sphere") {
     return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
+      uniforms: { ...uniforms(), ...primitiveUniforms(item) },
       vertexShader: SPHERE_VERTEX_SHADER,
       fragmentShader: SPHERE_FRAGMENT_SHADER,
       transparent,
@@ -281,7 +412,7 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
   }
   if (item.type === "cylinder") {
     return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
+      uniforms: { ...uniforms(), ...primitiveUniforms(item) },
       vertexShader: CYLINDER_VERTEX_SHADER,
       fragmentShader: CYLINDER_FRAGMENT_SHADER,
       transparent,
@@ -289,9 +420,17 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
   }
   if (item.type === "torus") {
     return new THREE.ShaderMaterial({
-      uniforms: uniforms(),
+      uniforms: { ...uniforms(), ...primitiveUniforms(item) },
       vertexShader: TORUS_VERTEX_SHADER,
       fragmentShader: TORUS_FRAGMENT_SHADER,
+      transparent,
+    });
+  }
+  if (item.type === "cone") {
+    return new THREE.ShaderMaterial({
+      uniforms: { ...uniforms(), ...primitiveUniforms(item) },
+      vertexShader: CONE_VERTEX_SHADER,
+      fragmentShader: CONE_FRAGMENT_SHADER,
       transparent,
     });
   }
@@ -353,4 +492,77 @@ export function updateEmissive(objectsRef, selectedId, selectedIds, hoveredId) {
       mesh.material.needsUpdate = true;
     }
   });
+}
+
+// The sketch plane is a reference surface, not part of the model: keep it hidden
+// in the 3D view (the sketch's lines render separately and stay visible) and
+// reveal it only while the sketch is hovered in the objects list, or while it is
+// the active drawing surface in sketch mode.  Runs on hover changes so the plane
+// appears/disappears without a full render-mode pass.
+export function updateSketchPlaneVisibility(
+  objectsRef,
+  itemsRef,
+  hoveredId,
+  sketchMode,
+  activeSketchId,
+) {
+  Object.values(objectsRef.current).forEach((mesh) => {
+    const item = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
+    if (!item || item.type !== "sketch") return;
+    if (item.visible === false) {
+      mesh.visible = false;
+      return;
+    }
+    const isActive = sketchMode && item.id === activeSketchId;
+    mesh.visible = isActive || item.id === hoveredId;
+  });
+}
+
+// While a hidden object is selected, reveal it at 25% opacity (75% transparent)
+// so the user can see what they've picked in the objects list; hidden objects
+// that aren't selected stay hidden.  applyRenderMode forces hidden meshes
+// invisible, so this runs after it (and on selection change) to override.
+export function applyHiddenSelectionVisibility(
+  objectsRef,
+  itemsRef,
+  selectedIds,
+) {
+  const sel = new Set(selectedIds || []);
+  Object.values(objectsRef.current).forEach((mesh) => {
+    const item = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
+    if (!item || item.visible !== false || item.type === "sketch") return;
+    const selected = sel.has(item.id);
+    mesh.visible = selected;
+    if (!selected) return;
+    const m = mesh.material;
+    if (!m) return;
+    if (m.uniforms?.uOpacity) {
+      m.uniforms.uOpacity.value = 0.25;
+      m.transparent = true;
+      m.depthWrite = false;
+    } else if ("opacity" in m) {
+      m.transparent = true;
+      m.opacity = 0.25;
+      m.depthWrite = false;
+      m.needsUpdate = true;
+    }
+  });
+}
+
+// Final visibility pass.  When an item is soloed, show ONLY its mesh (even if
+// the item is marked hidden) and hide everything else; otherwise fall back to
+// the normal hidden/selected reveal.  Guards against a stale solo id (the soloed
+// item was deleted / the timeline moved) leaving the scene entirely blank.
+export function finalizeVisibility(objectsRef, itemsRef, selectedIds, soloId) {
+  if (soloId != null) {
+    const meshes = Object.values(objectsRef.current);
+    const hasSolo = meshes.some((m) => m.userData.itemId === soloId);
+    if (hasSolo) {
+      meshes.forEach((mesh) => {
+        mesh.visible = mesh.userData.itemId === soloId;
+      });
+      return;
+    }
+  }
+  applyHiddenSelectionVisibility(objectsRef, itemsRef, selectedIds);
 }

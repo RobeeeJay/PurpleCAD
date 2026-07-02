@@ -1,0 +1,77 @@
+.shortcuts-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--black-rgb), 0.45);
+  z-index: 10000;
+  pointer-events: none; /* purely informational; released on keyup */
+}
+
+.shortcuts-overlay {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(var(--black-rgb), 0.5);
+  padding: 20px 24px;
+}
+
+.shortcuts-overlay h2 {
+  margin: 0 0 14px;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-semibold);
+}
+
+.shortcuts-columns {
+  display: flex;
+  gap: 36px;
+}
+
+.shortcuts-section {
+  min-width: 250px;
+}
+
+.shortcuts-section h3 {
+  margin: 0 0 8px;
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 3px 0;
+  font-size: var(--font-size-md);
+}
+
+.shortcuts-keys {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.shortcuts-key {
+  display: inline-block;
+  min-width: 16px;
+  text-align: center;
+  padding: 1px 6px;
+  font-family: monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.shortcuts-hint {
+  margin-top: 14px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  text-align: center;
+}

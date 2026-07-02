@@ -9,6 +9,7 @@
 // the current one (and fixed points stay put).
 
 import { resolveConstraintDistance } from "./geometryParams.js";
+import { rederiveAllCorners } from "./sketchGeometry.js";
 
 // Which scalar fields of a shape the solver may move, in a stable order.
 export function varFields(s) {
@@ -22,6 +23,8 @@ export function varFields(s) {
       return ["cx", "cy", "rx", "ry", "rotation"];
     case "arc":
       return ["cx", "cy", "r", "startAngle", "endAngle"];
+    case "point":
+      return ["x", "y"];
     default:
       return []; // bezier & unknowns: treated as fixed
   }
@@ -45,6 +48,7 @@ export function fieldsForPoint(shape, key) {
     shape.type === "arc"
   )
     return key === "center" ? ["cx", "cy"] : [];
+  if (shape.type === "point") return ["x", "y"];
   return [];
 }
 
@@ -77,6 +81,8 @@ function pointOf(s, key) {
   } else if (s.type === "bezier") {
     if (key === "p0") return { x: s.p0.x, y: s.p0.y };
     if (key === "p3") return { x: s.p3.x, y: s.p3.y };
+  } else if (s.type === "point") {
+    return { x: s.x, y: s.y };
   }
   return null;
 }
@@ -135,7 +141,11 @@ function residuals(shapes, constraints, variables) {
         out.push((nl.r ?? 0) - ((ol.r ?? 0) + d));
       } else if (nl?.type === "arc" && ol?.type === "arc") {
         // Concentric arc offset: shared centre + angles, radius offset by d.
-        const d = resolveConstraintDistance(c, variables);
+        // sideSign (set when the offset was created for a fillet corner) flips the
+        // radius change so it matches which way the legs offset — without it a
+        // reversed-wound loop grows the fillet when it should shrink, tearing the
+        // arc off its legs.  Plain concentric arcs leave it 1 (grow with +d).
+        const d = resolveConstraintDistance(c, variables) * (c.sideSign ?? 1);
         out.push(nl.cx - ol.cx);
         out.push(nl.cy - ol.cy);
         out.push((nl.r ?? 0) - ((ol.r ?? 0) + d));
@@ -159,7 +169,10 @@ function residuals(shapes, constraints, variables) {
         const olen = Math.hypot(odx, ody) || 1e-9;
         // sin of the angle between the two directions → 0 when parallel.
         out.push((ndx * ody - ndy * odx) / (nlen * olen));
-        const d = resolveConstraintDistance(c, variables);
+        // sideSign flips the offset side for a chamfer-line bridge whose own
+        // right-normal points opposite the loop's (else it offsets the wrong way
+        // and stretches off the corner).  Plain offset lines leave it 1.
+        const d = resolveConstraintDistance(c, variables) * (c.sideSign ?? 1);
         out.push(((nl.x1 - ol.x1) * ody - (nl.y1 - ol.y1) * odx) / olen - d);
       } else out.push(0, 0);
     } else if (c.type === "angle") {
@@ -180,9 +193,127 @@ function residuals(shapes, constraints, variables) {
         while (d < -Math.PI) d += 2 * Math.PI;
         out.push(Math.abs(d) - target); // magnitude; sign kept by regularization
       } else out.push(0);
+    } else if (c.type === "lineAngle") {
+      // Angle between two line DIRECTIONS (no shared vertex) — used to hold a
+      // chamfer/fillet corner rigid: its two legs no longer meet at a point, so
+      // the corner's old vertex-angle lock can't span them, but this can.  Sign-
+      // free (a line has no direction), so it reads the same [0,π] either way.
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      if (a?.type === "line" && b?.type === "line") {
+        const ax = a.x2 - a.x1,
+          ay = a.y2 - a.y1,
+          bx = b.x2 - b.x1,
+          by = b.y2 - b.y1;
+        const target =
+          ((typeof c.angle === "number" ? c.angle : parseFloat(c.angle)) *
+            Math.PI) /
+          180;
+        const actual = Math.atan2(
+          Math.abs(ax * by - ay * bx),
+          ax * bx + ay * by,
+        );
+        out.push(Number.isFinite(target) ? actual - target : 0);
+      } else out.push(0);
+    } else if (c.type === "parallel" || c.type === "colinear") {
+      // Two lines parallel: the direction cross-product → 0.  Colinear adds a
+      // second residual — line B's start point lies on line A (perp dist 0).
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      if (a?.type === "line" && b?.type === "line") {
+        const adx = a.x2 - a.x1,
+          ady = a.y2 - a.y1,
+          al = Math.hypot(adx, ady) || 1e-9;
+        const bdx = b.x2 - b.x1,
+          bdy = b.y2 - b.y1,
+          bl = Math.hypot(bdx, bdy) || 1e-9;
+        out.push((adx * bdy - ady * bdx) / (al * bl));
+        if (c.type === "colinear")
+          out.push(((b.x1 - a.x1) * ady - (b.y1 - a.y1) * adx) / al);
+      } else out.push(0, ...(c.type === "colinear" ? [0] : []));
+    } else if (c.type === "tangent") {
+      // Line↔circle/arc: distance(centre, line) = radius.  Circle/arc↔circle/arc:
+      // centre distance = r1+r2 (external) or |r1−r2| (internal), whichever fits.
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      const isArc = (s) => s?.type === "circle" || s?.type === "arc";
+      const lineCircle = (ln, ci) => {
+        const dx = ln.x2 - ln.x1,
+          dy = ln.y2 - ln.y1,
+          len = Math.hypot(dx, dy) || 1e-9;
+        const d = ((ci.cx - ln.x1) * dy - (ci.cy - ln.y1) * dx) / len;
+        return Math.abs(d) - (ci.r ?? 0);
+      };
+      if (a?.type === "line" && isArc(b)) out.push(lineCircle(a, b));
+      else if (isArc(a) && b?.type === "line") out.push(lineCircle(b, a));
+      else if (isArc(a) && isArc(b)) {
+        const dist = Math.hypot(a.cx - b.cx, a.cy - b.cy);
+        const ra = a.r ?? 0,
+          rb = b.r ?? 0;
+        const ext = dist - (ra + rb),
+          int = dist - Math.abs(ra - rb);
+        out.push(Math.abs(ext) <= Math.abs(int) ? ext : int);
+      } else out.push(0);
+    } else if (c.type === "equal") {
+      // Two lines → equal length; two circles/arcs (incl. bevels) → equal radius.
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      if (a?.type === "line" && b?.type === "line")
+        out.push(
+          Math.hypot(a.x2 - a.x1, a.y2 - a.y1) -
+            Math.hypot(b.x2 - b.x1, b.y2 - b.y1),
+        );
+      else out.push((a?.r ?? a?.rx ?? 0) - (b?.r ?? b?.rx ?? 0));
     }
   }
   return out;
+}
+
+// Hop distance (number of coupling constraints) from each shape to the nearest
+// fixed shape.  Two shapes are coupled when a constraint references both; H/V
+// constraints touch a single shape and add no edge.  Used during a drag to make
+// far-away geometry stiffer than near geometry, so a drag is absorbed by the
+// points closest to it and distant points stay put.  Shapes unreachable from
+// the drag are Infinity (treated as maximally stiff).
+export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
+  const adj = Array.from({ length: numShapes }, () => []);
+  const link = (a, b) => {
+    if (a == null || b == null || a === b) return;
+    if (a < 0 || b < 0 || a >= numShapes || b >= numShapes) return;
+    adj[a].push(b);
+    adj[b].push(a);
+  };
+  for (const c of constraints) {
+    if (
+      c.type === "coincident" ||
+      c.type === "distance" ||
+      c.type === "angle" ||
+      c.type === "parallel" ||
+      c.type === "colinear" ||
+      c.type === "tangent" ||
+      c.type === "equal" ||
+      c.type === "lineAngle"
+    )
+      link(c.shapeAIdx, c.shapeBIdx);
+    else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);
+    else if (c.type === "offset") link(c.shapeIdx, c.origIdx);
+  }
+  const dist = new Array(numShapes).fill(Infinity);
+  const queue = [];
+  for (const i of fixedShapeIdxs)
+    if (i >= 0 && i < numShapes && dist[i] !== 0) {
+      dist[i] = 0;
+      queue.push(i);
+    }
+  for (let head = 0; head < queue.length; head++) {
+    const i = queue[head];
+    for (const j of adj[i])
+      if (dist[j] > dist[i] + 1) {
+        dist[j] = dist[i] + 1;
+        queue.push(j);
+      }
+  }
+  return dist;
 }
 
 // Solve A·x = b in place (Gaussian elimination with partial pivoting).  A is
@@ -241,6 +372,35 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   const fixedW = 1e4;
   const isFixed = specs.map(({ i, f }) => fixed.has(`${i}:${f}`));
 
+  // During a drag (a non-empty fixed set), pull distant geometry toward its
+  // start position more firmly than nearby geometry: the regularization weight
+  // grows with hop distance from the dragged shape, so the change is absorbed
+  // by the nearest connected points and far points barely move.  All weights
+  // stay far below the unit constraint weight, so this only chooses among
+  // otherwise-equivalent solutions — it never fights a constraint.  With no
+  // fixed set (e.g. a dimension edit) the weight is uniform, as before.
+  const fixedShapeIdxs = new Set();
+  for (const key of fixed) {
+    const i = parseInt(key, 10);
+    if (Number.isInteger(i)) fixedShapeIdxs.add(i);
+  }
+  const HOP_GROWTH = 4; // weight multiplier per hop away from the drag
+  const HOP_MAX_MULT = 100; // cap so even far points stay well under weight 1
+  const hop =
+    fixedShapeIdxs.size > 0
+      ? shapeHopDistance(base.length, cs, fixedShapeIdxs)
+      : null;
+  const regWeight = specs.map(({ i }, j) => {
+    if (isFixed[j]) return fixedW;
+    if (!hop) return regW;
+    const d = hop[i];
+    // The drag shape and its immediate neighbours are the freest (mult 1);
+    // stiffness ramps up beyond them.  Unreachable geometry is maximally stiff.
+    const steps = Number.isFinite(d) ? Math.max(0, d - 1) : Infinity;
+    const mult = Math.min(HOP_MAX_MULT, HOP_GROWTH ** steps);
+    return regW * mult;
+  });
+
   const shapesAt = (xv) => {
     const out = base.map((s) => ({ ...s }));
     specs.forEach(({ i, f }, j) => {
@@ -251,8 +411,7 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   // Full residual: constraints first, then one regularization row per variable.
   const fullRes = (xv) => {
     const r = residuals(shapesAt(xv), cs, variables);
-    for (let j = 0; j < N; j++)
-      r.push((xv[j] - x0[j]) * (isFixed[j] ? fixedW : regW));
+    for (let j = 0; j < N; j++) r.push((xv[j] - x0[j]) * regWeight[j]);
     return r;
   };
   const cost = (r) => r.reduce((a, v) => a + v * v, 0);
@@ -311,7 +470,11 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
       if (lambda > 1e9) break;
     }
   }
-  const finalShapes = shapesAt(x);
+  // Repair any chamfer/bevel corners: the solver only pins a bridge's endpoints
+  // to its legs, so a bevel arc's radius/centre drift free and the fillet breaks
+  // as a connected line is dragged.  Re-deriving from the legs restores the proper
+  // tangent arc (and the chamfer's exact setback) before residuals are scored.
+  const finalShapes = rederiveAllCorners(shapesAt(x), cs);
   const finalRes = residuals(finalShapes, cs, variables);
   let maxResidual = 0;
   for (const v of finalRes) maxResidual = Math.max(maxResidual, Math.abs(v));

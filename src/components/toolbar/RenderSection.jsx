@@ -12,72 +12,326 @@ const RenderSection = () => {
   const crossSectionView = useStore((s) => s.crossSectionView);
   const toggleCrossSectionView = useStore((s) => s.toggleCrossSectionView);
   const pathTraceView = useStore((s) => s.pathTraceView);
-  const togglePathTraceView = useStore((s) => s.togglePathTraceView);
+  const setPathTraceView = useStore((s) => s.setPathTraceView);
+  const projectionMode = useStore((s) => s.projectionMode);
+  const toggleProjectionMode = useStore((s) => s.toggleProjectionMode);
+  // The raster modes read as selected only when the path-traced view is off, so
+  // all four behave as one mutually-exclusive radio group.
+  const rasterMode = (m) => renderMode === m && !pathTraceView;
 
   return (
     <ToolbarSection label="Render">
       <button
-        className={`toolbar-btn ${renderMode === "wireframe" ? "active" : ""}`}
+        className={`toolbar-btn ${rasterMode("wireframe") ? "active" : ""}`}
         title="Wireframe (1)"
         onClick={() => setRenderMode("wireframe")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M3 5v14h18V5m0 7h-18m9-7v14"
+          <rect
+            stroke="#6C3FD4"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            x="3"
+            y="7"
+            width="14"
+            height="14"
+          />
+          <polyline
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,7 7,3 21,3 21,17 17,21"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="17"
+            y1="7"
+            x2="17"
+            y2="21"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="3"
+            y1="7"
+            x2="17"
+            y2="7"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="7"
+            y1="3"
+            x2="7"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="21"
+            y1="3"
+            x2="7"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="3"
+            y1="21"
+            x2="7"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="7"
+            y1="17"
+            x2="17"
+            y2="17"
           />
         </svg>
       </button>
       <button
-        className={`toolbar-btn ${renderMode === "shaded" ? "active" : ""}`}
+        className={`toolbar-btn ${rasterMode("shaded") ? "active" : ""}`}
         title="Shaded (2)"
         onClick={() => setRenderMode("shaded")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M3 5v14h18V5z"
-            fill="currentColor"
-            opacity="0.3"
-            stroke="currentColor"
-            strokeWidth="2"
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.55)"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,8 17,8 17,21 3,21"
+          />
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.25)"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,8 7,4 21,4 17,8"
+          />
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.38)"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="17,8 21,4 21,17 17,21"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="7"
+            y1="4"
+            x2="7"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="21"
+            y1="4"
+            x2="7"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="7"
+            y1="17"
+            x2="17"
+            y2="17"
           />
         </svg>
       </button>
       <button
-        className={`toolbar-btn ${renderMode === "transparent" ? "active" : ""}`}
+        className={`toolbar-btn ${rasterMode("transparent") ? "active" : ""}`}
         title="Transparent (50%) (3)"
         onClick={() => setRenderMode("transparent")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M3 5v14h18V5z"
-            fill="currentColor"
-            opacity="0.3"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeDasharray="3 2"
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 1.5"
+            x1="3"
+            y1="21"
+            x2="3"
+            y2="8"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 1.5"
+            x1="3"
+            y1="8"
+            x2="17"
+            y2="8"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 1.5"
+            x1="7"
+            y1="4"
+            x2="3"
+            y2="8"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 1.5"
+            x1="7"
+            y1="17"
+            x2="3"
+            y2="21"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 1.5"
+            x1="7"
+            y1="17"
+            x2="17"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 1.5"
+            x1="7"
+            y1="17"
+            x2="7"
+            y2="4"
+          />
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.07)"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,8 17,8 17,21 3,21"
+          />
+          <polyline
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,8 7,4 21,4 21,17 17,21"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="17"
+            y1="8"
+            x2="17"
+            y2="21"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="3"
+            y1="8"
+            x2="17"
+            y2="8"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="7"
+            y1="4"
+            x2="21"
+            y2="4"
           />
         </svg>
       </button>
       <button
-        className={`toolbar-btn ${renderMode === "smooth" ? "active" : ""}`}
-        title="Smooth (4)"
-        onClick={() => setRenderMode("smooth")}
+        className={`toolbar-btn ${pathTraceView ? "active" : ""}`}
+        title="Path-traced render (prototype) — progressive GPU ray tracing (4)"
+        onClick={() => setPathTraceView(true)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          <defs>
-            <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="currentColor" />
-              <stop offset="100%" stopColor="currentColor" stopOpacity="0.3" />
-            </linearGradient>
-          </defs>
-          <path
-            d="M3 5v14h18V5z"
-            fill="url(#grad)"
-            stroke="currentColor"
-            strokeWidth="2"
+          <circle
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.55)"
+            strokeWidth="1.5"
+            cx="12"
+            cy="12"
+            r="9"
+          />
+          <circle
+            stroke="#6C3FD4"
+            fill="rgba(30,10,80,0.25)"
+            strokeWidth="0"
+            cx="12"
+            cy="12"
+            r="9"
+          />
+          <circle
+            stroke="none"
+            fill="rgba(108,63,212,0.3)"
+            strokeWidth="0"
+            cx="12"
+            cy="13"
+            r="7"
+          />
+          <ellipse
+            stroke="none"
+            fill="rgba(212,163,63,0.9)"
+            cx="8.5"
+            cy="8"
+            rx="2.5"
+            ry="1.8"
+            transform="rotate(-25 8.5 8)"
+          />
+          <ellipse
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="0.75"
+            strokeDasharray="2 2"
+            cx="12"
+            cy="12"
+            rx="9"
+            ry="3"
           />
         </svg>
       </button>
@@ -91,32 +345,57 @@ const RenderSection = () => {
         onClick={() => setShadowsEnabled(!shadowsEnabled)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          {/* Object */}
+          <ellipse
+            stroke="#D4A33F"
+            fill="rgba(212,163,63,0.2)"
+            strokeWidth="1.5"
+            cx="12"
+            cy="20"
+            rx="8"
+            ry="2.5"
+          />
           <rect
-            x="6"
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.15)"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            x="7"
             y="5"
-            width="8"
+            width="10"
             height="10"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
           />
-          {/* Ground plane line */}
           <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="7"
+            y1="15"
+            x2="5"
+            y2="20"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="2 2"
+            x1="17"
+            y1="15"
+            x2="19"
+            y2="20"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
             x1="3"
-            y1="18"
-            x2="21"
-            y2="18"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
+            y1="3"
+            x2="6"
+            y2="6"
           />
-          {/* Skewed shadow projection */}
-          <path
-            d="M 6 15 L 18 15 L 20 18 L 8 18 Z"
-            fill="currentColor"
-            opacity="0.45"
-          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="3" />
         </svg>
       </button>
       <button
@@ -129,96 +408,98 @@ const RenderSection = () => {
         onClick={toggleCrossSectionView}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
-          {/* The cut plane (vertical) */}
-          <line
-            x1="12"
-            y1="3"
-            x2="12"
-            y2="21"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeDasharray="3 2"
-          />
-          {/* The remaining (far) half-solid behind the plane */}
-          <path
-            d="M12 6 L20 6 L20 18 L12 18 Z"
-            fill="currentColor"
-            opacity="0.35"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinejoin="round"
-          />
-          {/* Hatching on the cut face */}
-          <line
-            x1="12"
-            y1="9"
-            x2="15"
-            y2="6"
-            stroke="currentColor"
-            strokeWidth="1"
-          />
-          <line
-            x1="12"
-            y1="13"
-            x2="19"
-            y2="6"
-            stroke="currentColor"
-            strokeWidth="1"
-          />
-          <line
-            x1="12"
-            y1="17"
-            x2="20"
-            y2="9"
-            stroke="currentColor"
-            strokeWidth="1"
-          />
-        </svg>
-      </button>
-      <button
-        className={`toolbar-btn ${pathTraceView ? "active" : ""}`}
-        title={
-          pathTraceView
-            ? "Path-traced render on — click to return to the raster view (7)"
-            : "Path-traced render (prototype) — progressive GPU ray tracing (7)"
-        }
-        onClick={togglePathTraceView}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          {/* Camera / eye */}
-          <circle cx="6" cy="12" r="2" fill="currentColor" />
-          {/* Rays bouncing to a sphere */}
-          <circle
-            cx="17"
-            cy="11"
-            r="4"
+          <polygon
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          />
-          <line
-            x1="8"
-            y1="12"
-            x2="13.5"
-            y2="11"
-            stroke="currentColor"
             strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,7 17,7 17,21 3,21"
+          />
+          <polyline
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,7 7,3 21,3 21,17 17,21"
           />
           <line
-            x1="13.5"
-            y1="11"
-            x2="20"
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="17"
+            y1="7"
+            x2="17"
+            y2="21"
+          />
+          <line
+            stroke="#c4c2b8"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="3"
+            y1="7"
+            x2="17"
+            y2="7"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="7"
+            y1="3"
+            x2="7"
             y2="17"
-            stroke="currentColor"
+          />
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.25)"
             strokeWidth="1.5"
+            strokeLinejoin="miter"
+            points="3,7 10,7 10,21 3,21"
           />
           <line
-            x1="13.5"
-            y1="11"
-            x2="19"
-            y2="6"
-            stroke="currentColor"
+            stroke="#6C3FD4"
+            fill="none"
             strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="10"
+            y1="7"
+            x2="10"
+            y2="21"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="3"
+            y1="10"
+            x2="10"
+            y2="10"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="3"
+            y1="13"
+            x2="10"
+            y2="13"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="3"
+            y1="16"
+            x2="10"
+            y2="16"
           />
         </svg>
       </button>
@@ -233,35 +514,151 @@ const RenderSection = () => {
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <circle
-            cx="12"
-            cy="12"
-            r="7"
+            stroke="#c4c2b8"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
+            cx="10"
+            cy="10"
+            r="7"
           />
-          {curveResolution === "print" ? (
-            <>
-              <circle cx="12" cy="5" r="1.2" fill="currentColor" />
-              <circle cx="16.95" cy="6.4" r="1.2" fill="currentColor" />
-              <circle cx="19.6" cy="11" r="1.2" fill="currentColor" />
-              <circle cx="18.7" cy="16.3" r="1.2" fill="currentColor" />
-              <circle cx="14.7" cy="19.6" r="1.2" fill="currentColor" />
-              <circle cx="9.3" cy="19.6" r="1.2" fill="currentColor" />
-              <circle cx="5.3" cy="16.3" r="1.2" fill="currentColor" />
-              <circle cx="4.4" cy="11" r="1.2" fill="currentColor" />
-              <circle cx="7.05" cy="6.4" r="1.2" fill="currentColor" />
-            </>
-          ) : (
-            <>
-              <circle cx="12" cy="5" r="1.5" fill="currentColor" />
-              <circle cx="18.7" cy="8.5" r="1.5" fill="currentColor" />
-              <circle cx="18.7" cy="15.5" r="1.5" fill="currentColor" />
-              <circle cx="12" cy="19" r="1.5" fill="currentColor" />
-              <circle cx="5.3" cy="15.5" r="1.5" fill="currentColor" />
-              <circle cx="5.3" cy="8.5" r="1.5" fill="currentColor" />
-            </>
-          )}
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="3"
+            y1="10"
+            x2="17"
+            y2="10"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="10"
+            y1="3"
+            x2="10"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="5"
+            y1="7"
+            x2="15"
+            y2="7"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="5"
+            y1="13"
+            x2="15"
+            y2="13"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="7"
+            y1="5"
+            x2="7"
+            y2="15"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1"
+            strokeDasharray="1.5 1.5"
+            x1="13"
+            y1="5"
+            x2="13"
+            y2="15"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="2"
+            strokeLinecap="square"
+            x1="15"
+            y1="15"
+            x2="21"
+            y2="21"
+          />
+          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.5" cx="21" cy="21" />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${projectionMode === "orthographic" ? "active" : ""}`}
+        title={`Switch to ${projectionMode === "perspective" ? "orthographic" : "perspective"} projection`}
+        onClick={toggleProjectionMode}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="12"
+            x2="12"
+            y2="3"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="12"
+            x2="4"
+            y2="17"
+          />
+          <line
+            stroke="#6C3FD4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="12"
+            y1="12"
+            x2="20"
+            y2="17"
+          />
+          <polygon
+            fill="#6C3FD4"
+            stroke="#6C3FD4"
+            strokeWidth="0.5"
+            points="12,3 10.5,6 13.5,6"
+          />
+          <polygon
+            fill="#6C3FD4"
+            stroke="#6C3FD4"
+            strokeWidth="0.5"
+            points="4,17 7,16.5 5.5,19"
+          />
+          <polygon
+            fill="#6C3FD4"
+            stroke="#6C3FD4"
+            strokeWidth="0.5"
+            points="20,17 18.5,19 21,16.5"
+          />
+          <circle fill="#D4A33F" stroke="#D4A33F" r="2" cx="12" cy="12" />
+          <text
+            x="11"
+            y="22"
+            fontSize="6"
+            fontFamily="monospace"
+            fill="#D4A33F"
+            fontWeight="600"
+          >
+            ISO
+          </text>
         </svg>
       </button>
     </ToolbarSection>

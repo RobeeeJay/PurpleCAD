@@ -129,6 +129,258 @@ export function buildBevelArc(P, uA, uB, trimA, trimB) {
   return { type: "arc", cx, cy, r, startAngle, endAngle };
 }
 
+const setLineEnd = (line, key, p) =>
+  key === "start"
+    ? { ...line, x1: p.x, y1: p.y }
+    : { ...line, x2: p.x, y2: p.y };
+
+// A coincident joining the new element's endpoint to a trimmed leg's corner.
+const coincident = (newIdx, newKey, legIdx, legKey) => ({
+  type: "coincident",
+  shapeAIdx: newIdx,
+  pointA: newKey,
+  shapeBIdx: legIdx,
+  pointB: legKey,
+});
+
+// The full local edit a chamfer ("chamfer") or fillet ("bevel") makes at a
+// two-line junction: the two legs trimmed back along their own directions, the
+// bridging element (a line for a chamfer, a tangent arc for a fillet), and the
+// constraints that join them.  This is deliberately *local* — it touches only
+// the two legs, so chamfering never drags geometry the user didn't constrain.
+// Both new corners always get a coincident constraint to the bridge; a chamfer
+// additionally angle-locks each corner so it holds its shape under later edits.
+// `junc` = {aIdx, aKey, bIdx, bKey}; `dist` is the chamfer setback or, for a
+// fillet, the desired arc radius (converted to the leg setback so the arc comes
+// out that radius at any corner angle).  `constraints` is the sketch's current
+// constraint list — every constraint that joined the two corner endpoints
+// (coincident *and* angle, e.g. a rectangle's 90 degree lock) is returned in
+// `removeConstraints`, since once the corner is split those endpoints are no
+// longer one point and such a constraint would span two vertices and corrupt
+// later drags.  Returns null on degenerate geometry.
+export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
+  const { aIdx, aKey, bIdx, bKey } = junc;
+  const sA = shapes[aIdx],
+    sB = shapes[bIdx];
+  if (sA?.type !== "line" || sB?.type !== "line") return null;
+
+  let legDist = dist;
+  if (mode === "bevel") {
+    const dirs = computeChamfer(sA, sB, aKey, bKey, 1);
+    const dot = Math.max(
+      -1,
+      Math.min(1, dirs.uA.x * dirs.uB.x + dirs.uA.y * dirs.uB.y),
+    );
+    const halfTan = Math.tan(Math.acos(dot) / 2);
+    legDist = halfTan > 1e-6 ? dist / halfTan : dist;
+  }
+
+  const m = computeChamfer(sA, sB, aKey, bKey, legDist);
+  const newSA = setLineEnd(sA, aKey, m.trimA);
+  const newSB = setLineEnd(sB, bKey, m.trimB);
+  const newIdx = shapes.length;
+  const straight = {
+    type: "line",
+    x1: m.trimA.x,
+    y1: m.trimA.y,
+    x2: m.trimB.x,
+    y2: m.trimB.y,
+  };
+
+  let newShape;
+  let newConstraints;
+  if (mode === "chamfer") {
+    // Carry the junction so the solver can re-derive the cut from its legs on
+    // every edit (see sketchConstraints' corner recomputation) — the same robust
+    // approach as the bevel arc.  Angle-lock constraints (chamferConstraints) used
+    // to hold the shape but break when a *connected* line is dragged, because the
+    // chamfer line ends up coincident- AND angle-bound to legs that have rotated.
+    straight.kind = "chamfer";
+    straight.chamferData = { aIdx, aKey, bIdx, bKey, dist: legDist };
+    newShape = straight;
+    newConstraints = [
+      coincident(newIdx, "start", aIdx, aKey),
+      coincident(newIdx, "end", bIdx, bKey),
+    ];
+  } else {
+    const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
+    if (arc) {
+      arc.kind = "bevel";
+      arc.bevelData = { aIdx, aKey, bIdx, bKey, dist: legDist };
+      newShape = arc;
+    } else {
+      newShape = straight; // collinear legs: fall back to a straight bridge
+    }
+    newConstraints = [
+      coincident(newIdx, "start", aIdx, aKey),
+      coincident(newIdx, "end", bIdx, bKey),
+    ];
+  }
+
+  // Chamfering splits the corner, so its old vertex-angle lock (e.g. a box's 90°)
+  // is dropped below.  Replace it with a direction-angle lock BETWEEN the two legs
+  // so the corner stays rigid — without it the chamfered corner can flex freely
+  // when a connected line is dragged.  Held on the leg directions (not the bridge),
+  // it never over-constrains the bridge the way the old chamfer-to-leg locks did.
+  const legAngleDeg =
+    (Math.atan2(
+      Math.abs(
+        (newSA.x2 - newSA.x1) * (newSB.y2 - newSB.y1) -
+          (newSA.y2 - newSA.y1) * (newSB.x2 - newSB.x1),
+      ),
+      (newSA.x2 - newSA.x1) * (newSB.x2 - newSB.x1) +
+        (newSA.y2 - newSA.y1) * (newSB.y2 - newSB.y1),
+    ) *
+      180) /
+    Math.PI;
+  newConstraints.push({
+    type: "lineAngle",
+    shapeAIdx: aIdx,
+    shapeBIdx: bIdx,
+    angle: legAngleDeg,
+  });
+
+  const joinsCorner = (c) => {
+    const m2 = (i1, k1, i2, k2) =>
+      c.shapeAIdx === i1 &&
+      c.pointA === k1 &&
+      c.shapeBIdx === i2 &&
+      c.pointB === k2;
+    return (
+      (c.type === "coincident" || c.type === "angle") &&
+      (m2(aIdx, aKey, bIdx, bKey) || m2(bIdx, bKey, aIdx, aKey))
+    );
+  };
+
+  return {
+    updates: [
+      [aIdx, newSA],
+      [bIdx, newSB],
+    ],
+    newShape,
+    newConstraints,
+    removeConstraints: constraints.filter(joinsCorner),
+    legDist,
+  };
+}
+
+// Resize an existing chamfer / bevel corner to a new user size, in scene units
+// (the chamfer's leg setback, or the bevel's arc radius).  Re-derives from the
+// two legs' current directions exactly like the solver's corner recomputation:
+// finds the virtual corner P where the legs meet, trims each leg back, and
+// rebuilds the bridge.  Returns `{ updates: [[idx, shape]…], dist }` (bridge +
+// both legs) or null when the data is missing or the legs are degenerate.
+// `sizeIsLegDist` distinguishes the two callers: a user resize passes the desired
+// setback (chamfer) / radius (bevel) and the radius is converted to the leg
+// setback at the corner's angle; the post-solve re-derive passes the already-known
+// leg setback (`bevelData.dist`) verbatim.
+export function resizeCorner(
+  shapes,
+  bridgeIdx,
+  sizeScene,
+  sizeIsLegDist = false,
+) {
+  const bridge = shapes[bridgeIdx];
+  const data = bridge?.chamferData || bridge?.bevelData;
+  if (!data) return null;
+  const { aIdx, aKey, bIdx, bKey } = data;
+  const sA = shapes[aIdx],
+    sB = shapes[bIdx];
+  if (sA?.type !== "line" || sB?.type !== "line") return null;
+  const end = (s, k) =>
+    k === "start" ? { x: s.x1, y: s.y1 } : { x: s.x2, y: s.y2 };
+  const aEnd = end(sA, aKey),
+    aOther = end(sA, aKey === "start" ? "end" : "start");
+  const bEnd = end(sB, bKey),
+    bOther = end(sB, bKey === "start" ? "end" : "start");
+  const dx1 = aEnd.x - aOther.x,
+    dy1 = aEnd.y - aOther.y;
+  const dx2 = bEnd.x - bOther.x,
+    dy2 = bEnd.y - bOther.y;
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < 1e-10) return null;
+  const tInter =
+    ((bOther.x - aOther.x) * dy2 - (bOther.y - aOther.y) * dx2) / denom;
+  const P = { x: aOther.x + tInter * dx1, y: aOther.y + tInter * dy1 };
+  const uA = norm2({ x: aOther.x - P.x, y: aOther.y - P.y });
+  const uB = norm2({ x: bOther.x - P.x, y: bOther.y - P.y });
+  let legDist = sizeScene;
+  if (!sizeIsLegDist && bridge.kind === "bevel") {
+    const dot = Math.max(-1, Math.min(1, uA.x * uB.x + uA.y * uB.y));
+    const halfTan = Math.tan(Math.acos(dot) / 2);
+    legDist = halfTan > 1e-6 ? sizeScene / halfTan : sizeScene;
+  }
+  const trimA = { x: P.x + uA.x * legDist, y: P.y + uA.y * legDist };
+  const trimB = { x: P.x + uB.x * legDist, y: P.y + uB.y * legDist };
+  const newData = { ...data, dist: legDist };
+  let newBridge;
+  if (bridge.kind === "bevel") {
+    const arc = buildBevelArc(P, uA, uB, trimA, trimB);
+    if (!arc) return null;
+    arc.kind = "bevel";
+    arc.bevelData = newData;
+    newBridge = arc;
+  } else {
+    newBridge = {
+      type: "line",
+      x1: trimA.x,
+      y1: trimA.y,
+      x2: trimB.x,
+      y2: trimB.y,
+      kind: "chamfer",
+      chamferData: newData,
+    };
+  }
+  return {
+    updates: [
+      [bridgeIdx, newBridge],
+      [aIdx, setLineEnd(sA, aKey, trimA)],
+      [bIdx, setLineEnd(sB, bKey, trimB)],
+    ],
+    dist: legDist,
+  };
+}
+
+// Re-derive a chamfer/bevel bridge from its legs at its STORED leg setback.  The
+// numeric solver only pins the bridge's endpoints to the legs; for a bevel arc
+// that leaves the radius/centre free to drift, so the fillet degenerates as a
+// connected line is dragged.  Re-running this after the solve restores the proper
+// tangent arc (and the chamfer's exact setback).
+export function rederiveCornerFromLegs(shapes, bridgeIdx) {
+  const bridge = shapes[bridgeIdx];
+  const data = bridge?.chamferData || bridge?.bevelData;
+  if (!data) return null;
+  return resizeCorner(shapes, bridgeIdx, data.dist, true);
+}
+
+// Re-derive every chamfer/bevel corner in a shape list (post-solve repair).
+// Returns the same array reference when there are no corners to touch.  A corner
+// is skipped only when one of its legs has its OWN length dimensioned (a self
+// distance constraint): re-deriving retrims the leg and would fight that
+// dimension, rejecting the edit.  A plain drag — even body-dragging a leg, which
+// pins it just like a dimension does — carries no such constraint, so the corner
+// re-derives and holds its setback/angle instead of growing.
+export function rederiveAllCorners(shapes, constraints = null) {
+  const lengthPinned = (idx) =>
+    !!constraints &&
+    constraints.some(
+      (c) =>
+        c.type === "distance" && c.shapeAIdx === idx && c.shapeBIdx === idx,
+    );
+  let out = null;
+  for (let i = 0; i < shapes.length; i++) {
+    const s = shapes[i];
+    if (s?.kind !== "bevel" && s?.kind !== "chamfer") continue;
+    const data = s.chamferData || s.bevelData;
+    if (data && (lengthPinned(data.aIdx) || lengthPinned(data.bIdx))) continue;
+    const res = rederiveCornerFromLegs(out || shapes, i);
+    if (!res) continue;
+    if (!out) out = shapes.slice();
+    for (const [idx, sh] of res.updates) out[idx] = sh;
+  }
+  return out || shapes;
+}
+
 // Translate any sketch shape by (dx, dy).  Returns a new shape, or null for
 // unknown types.  Used by sketch-element body-drag and clipboard paste.
 export function translateShape(shape, dx, dy) {
@@ -163,9 +415,45 @@ export function translateShape(shape, dx, dy) {
         p2: { x: shape.p2.x + dx, y: shape.p2.y + dy },
         p3: { x: shape.p3.x + dx, y: shape.p3.y + dy },
       };
+    case "text":
+      return { ...shape, x: shape.x + dx, y: shape.y + dy };
     default:
       return null;
   }
+}
+
+// Explode glyph contours (absolute polylines) into ordinary editable geometry:
+// each contour becomes a closed chain of `line` segments joined by coincident
+// constraints.  Indices are offset by `baseIdx` (where the lines are appended).
+// Pure — the caller supplies the absolute contours.
+export function explodeContours(contours, baseIdx) {
+  const shapes = [];
+  const constraints = [];
+  for (const raw of contours || []) {
+    const pts = raw.map((p) => ({ x: p.x, y: p.y }));
+    // Drop a duplicated closing point so the loop isn't degenerate.
+    if (pts.length >= 2) {
+      const a = pts[0],
+        b = pts[pts.length - 1];
+      if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) pts.pop();
+    }
+    if (pts.length < 3) continue;
+    const start = baseIdx + shapes.length;
+    pts.forEach((p, i) => {
+      const q = pts[(i + 1) % pts.length];
+      shapes.push({ type: "line", x1: p.x, y1: p.y, x2: q.x, y2: q.y });
+    });
+    pts.forEach((_, i) => {
+      constraints.push({
+        type: "coincident",
+        shapeAIdx: start + i,
+        pointA: "end",
+        shapeBIdx: start + ((i + 1) % pts.length),
+        pointB: "start",
+      });
+    });
+  }
+  return { shapes, constraints };
 }
 
 // Rotate every defining point of a shape about (cx, cy) by `angle` radians.

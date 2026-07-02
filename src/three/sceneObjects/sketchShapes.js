@@ -106,6 +106,19 @@ export function getSketchShapePoints(shape, sketchMesh) {
       );
       return curve.getPoints(48).map(({ x, y }) => toWorld(x, y));
     }
+    case "text": {
+      // The actual glyph outlines are drawn separately (they need the font);
+      // here return the cached ink bounding box (anchor = top-left), used for
+      // selection highlight, hit-testing, and extent.
+      const { x, y, w = 0, h = 0 } = shape;
+      return [
+        toWorld(x, y),
+        toWorld(x + w, y),
+        toWorld(x + w, y - h),
+        toWorld(x, y - h),
+        toWorld(x, y),
+      ];
+    }
     default:
       return [];
   }
@@ -188,6 +201,8 @@ export function moveShapePoint(shape, pointKey, newPos) {
       if (pointKey === "p2") return { ...shape, p2: { x, y } };
       break;
     }
+    case "point":
+      return { ...shape, x, y };
     default:
       break;
   }
@@ -235,6 +250,9 @@ export function getSnapPoints(shapes) {
         pts.push({ x: shape.p0.x, y: shape.p0.y, shapeIdx, pointKey: "p0" });
         pts.push({ x: shape.p3.x, y: shape.p3.y, shapeIdx, pointKey: "p3" });
         break;
+      case "point":
+        pts.push({ x: shape.x, y: shape.y, shapeIdx, pointKey: "p" });
+        break;
       default:
         break;
     }
@@ -274,9 +292,30 @@ export function getShapePoint(shape, pointKey) {
       return null;
     case "bezier":
       return shape[pointKey] ?? null;
+    case "point":
+      return { x: shape.x, y: shape.y };
     default:
       return null;
   }
+}
+
+// Default cubic-bezier control points for an endpoint-only (start→end) curve:
+// the handles sit 1/3 along the chord and bow ~22% of its length to one side, so
+// the curve reads as a curve and the tangent handles are clearly off the chord.
+export function defaultBezierControls(p0, p3) {
+  const dx = p3.x - p0.x,
+    dy = p3.y - p0.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len,
+    uy = dy / len; // chord direction
+  const px = -uy,
+    py = ux; // left perpendicular
+  const along = len / 3;
+  const bow = len * 0.22;
+  return {
+    p1: { x: p0.x + ux * along + px * bow, y: p0.y + uy * along + py * bow },
+    p2: { x: p3.x - ux * along + px * bow, y: p3.y - uy * along + py * bow },
+  };
 }
 
 export function getShapeLength(shape) {

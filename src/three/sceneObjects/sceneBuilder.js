@@ -7,7 +7,7 @@
 // pre-tessellated `geometryData` for csg results).
 
 import * as THREE from "three";
-import { createMaterial } from "../objectMaterials.js";
+import { createMaterial, resolveItemMaterial } from "../objectMaterials.js";
 import { resolveItemDepth } from "../geometryParams.js";
 import { DEFAULT_MATERIAL } from "../materialPresets.js";
 import {
@@ -15,6 +15,7 @@ import {
   groupLoopsWithHoles,
   polyContainsPoint,
   polyCentroid,
+  polyAreaCentroid,
   polyArea,
   withWinding,
 } from "./closedLoops.js";
@@ -23,6 +24,47 @@ import {
   WIREFRAME_EDGE_COLOR,
   NO_EMISSIVE,
 } from "../theme.js";
+import { primitiveDimensions } from "./dimensions.js";
+
+// Green so the revealed plane stands out clearly against the model.
+const GRID_MINOR_COLOR = 0x2ecc71;
+const GRID_MAJOR_COLOR = 0x55ff88;
+
+// A two-tier grid laid in the sketch plane's local XY, spanning the 1000-unit
+// reference plane.  Added as a child of the (hover-revealed) plane mesh so it
+// inherits the plane's transform and visibility — when the plane appears on
+// hover the grid makes its position and orientation in space obvious.
+function buildSketchPlaneGrid() {
+  const half = 500; // matches the PlaneGeometry(1000, 1000)
+  const majorStep = 10; // 10 scene units = 100 mm
+  const minorPts = [];
+  const majorPts = [];
+  for (let i = -half; i <= half; i++) {
+    const target = i % majorStep === 0 ? majorPts : minorPts;
+    target.push(i, -half, 0, i, half, 0); // line parallel to local Y
+    target.push(-half, i, 0, half, i, 0); // line parallel to local X
+  }
+  const group = new THREE.Group();
+  const tier = (pts, color, opacity) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(pts), 3),
+    );
+    return new THREE.LineSegments(
+      g,
+      new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+      }),
+    );
+  };
+  group.add(tier(minorPts, GRID_MINOR_COLOR, 0.45));
+  group.add(tier(majorPts, GRID_MAJOR_COLOR, 0.85));
+  return group;
+}
 
 export function buildSceneObjects(
   items,
@@ -50,20 +92,45 @@ export function buildSceneObjects(
     let geometry;
     let extrudeLocalOffset = null; // set by the extrude case; used for mesh positioning
     switch (item.type) {
-      case "cube":
-        geometry = new THREE.BoxGeometry(2, 2, 2);
+      case "cube": {
+        const d = item.dimensions || {};
+        geometry = new THREE.BoxGeometry(
+          d.width || 2,
+          d.height || 2,
+          d.depth || 2,
+        );
         break;
-      case "sphere":
-        geometry = new THREE.BoxGeometry(3, 3, 3);
+      }
+      case "sphere": {
+        const r = primitiveDimensions(item).radius;
+        geometry = new THREE.BoxGeometry(2 * r, 2 * r, 2 * r);
         break;
-      case "cylinder":
-        geometry = new THREE.BoxGeometry(2, 2, 2);
+      }
+      case "cylinder": {
+        const c = primitiveDimensions(item);
+        geometry = new THREE.BoxGeometry(2 * c.radius, c.height, 2 * c.radius);
         break;
-      case "torus":
-        geometry = new THREE.BoxGeometry(3, 1.2, 3);
+      }
+      case "torus": {
+        const tr = primitiveDimensions(item);
+        const o = 2 * (tr.major + tr.minor);
+        geometry = new THREE.BoxGeometry(o, 2 * tr.minor, o);
         break;
+      }
+      case "cone": {
+        const cn = primitiveDimensions(item);
+        const o = 2 * Math.max(cn.radiusBottom, cn.radiusTop);
+        geometry = new THREE.BoxGeometry(o, cn.height, o);
+        break;
+      }
       case "sketch":
-        geometry = new THREE.PlaneGeometry(3, 3);
+        // Large so that, when revealed on hover, the plane reads as an infinite
+        // reference surface spanning the view rather than a small card.  It is
+        // hidden by default (renderMode) — only the sketch geometry shows.
+        geometry = new THREE.PlaneGeometry(1000, 1000);
+        break;
+      case "plane":
+        geometry = new THREE.PlaneGeometry(6, 6);
         break;
       case "csg": {
         if (!item.geometryData) return;
@@ -166,8 +233,12 @@ export function buildSceneObjects(
         // Shift the 2D polygon so its centroid sits at the local
         // origin.  Without this the mesh pivot stays at the sketch
         // origin (often the world origin), making rotation and scaling
-        // feel completely wrong.
-        const profileCentroid2D = polyCentroid(poly);
+        // feel completely wrong.  Use the AREA centroid (density-invariant) so
+        // this rendered-mesh pivot matches the OCC pivot in occOps.js
+        // makeExtrude — otherwise an emboss face/cylinder picked off this mesh
+        // lands in a different local frame than the OCC body it unions with (the
+        // frames diverge for an asymmetric profile such as a bezier).
+        const profileCentroid2D = polyAreaCentroid(poly);
         const centeredPoly = poly.map((p) => ({
           x: p.x - profileCentroid2D.x,
           y: p.y - profileCentroid2D.y,
@@ -226,14 +297,24 @@ export function buildSceneObjects(
         return;
     }
 
-    const materialProps = item.material ?? defaultMaterial;
+    const materialProps = resolveItemMaterial(item, items, defaultMaterial);
     const color = materialProps.color ?? DEFAULT_MESH_COLOR;
-    const material = createMaterial(item, color, materialProps);
+    // A Plane object is a translucent double-sided reference surface, not solid.
+    const material =
+      item.type === "plane"
+        ? new THREE.MeshBasicMaterial({
+            color: 0x4488ff,
+            transparent: true,
+            opacity: 0.16,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          })
+        : createMaterial(item, color, materialProps);
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = item.type !== "sketch";
-    mesh.receiveShadow = item.type !== "sketch";
+    mesh.castShadow = item.type !== "sketch" && item.type !== "plane";
+    mesh.receiveShadow = item.type !== "sketch" && item.type !== "plane";
     mesh.userData.itemId = item.id;
-    if (["sphere", "cylinder", "torus"].includes(item.type)) {
+    if (["sphere", "cylinder", "torus", "cone"].includes(item.type)) {
       mesh.userData.hullGeometry = geometry;
       mesh.userData.shaderMat = material;
     }
@@ -241,7 +322,10 @@ export function buildSceneObjects(
     const p = item.position;
     const rot = item.rotation;
     if (rot) mesh.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
-    mesh.scale.setScalar(item.scale ? item.scale.x : 1);
+    // Per-axis scale so the transform panel can stretch a single length; the
+    // gizmo resize handle still writes all three equal (uniform) when dragged.
+    const sc = item.scale;
+    mesh.scale.set(sc?.x ?? 1, sc?.y ?? 1, sc?.z ?? 1);
 
     if (extrudeLocalOffset) {
       // Tag the mesh with the pre-rotation local offset so the drag
@@ -273,7 +357,7 @@ export function buildSceneObjects(
         mesh.getWorldPosition(worldCenter);
         const worldScale = new THREE.Vector3();
         mesh.getWorldScale(worldScale);
-        const radius = 1.5 * worldScale.x;
+        const radius = primitiveDimensions(item).radius * worldScale.x;
         const sphere = new THREE.Sphere(worldCenter, radius);
         const target = new THREE.Vector3();
         if (!raycaster.ray.intersectSphere(sphere, target)) return;
@@ -293,8 +377,9 @@ export function buildSceneObjects(
         mesh.getWorldPosition(wc);
         const ws = new THREE.Vector3();
         mesh.getWorldScale(ws);
-        const radius = 1.0 * ws.x;
-        const halfH = 1.0 * ws.y;
+        const cdim = primitiveDimensions(item);
+        const radius = cdim.radius * ws.x;
+        const halfH = (cdim.height / 2) * ws.y;
         const axis = new THREE.Vector3(0, 1, 0)
           .applyQuaternion(mesh.quaternion)
           .normalize();
@@ -361,7 +446,8 @@ export function buildSceneObjects(
         mesh.getWorldPosition(wc);
         const ws = new THREE.Vector3();
         mesh.getWorldScale(ws);
-        const outerR = (1.0 + 0.4) * ws.x;
+        const tdim = primitiveDimensions(item);
+        const outerR = (tdim.major + tdim.minor) * ws.x;
         const sphere = new THREE.Sphere(wc, outerR);
         const target = new THREE.Vector3();
         if (!raycaster.ray.intersectSphere(sphere, target)) return;
@@ -375,7 +461,78 @@ export function buildSceneObjects(
           object: mesh,
         });
       };
-    } else if (item.type !== "sketch") {
+    } else if (item.type === "cone") {
+      // Selection ray against the cone's bounding cylinder (radius = the larger
+      // end) — close enough to pick it; the exact tapered surface is shader-drawn.
+      mesh.raycast = (raycaster, intersects) => {
+        const wc = new THREE.Vector3();
+        mesh.getWorldPosition(wc);
+        const ws = new THREE.Vector3();
+        mesh.getWorldScale(ws);
+        const cn = primitiveDimensions(item);
+        const radius = Math.max(cn.radiusBottom, cn.radiusTop) * ws.x;
+        const halfH = (cn.height / 2) * ws.y;
+        const axis = new THREE.Vector3(0, 1, 0)
+          .applyQuaternion(mesh.quaternion)
+          .normalize();
+        const ray = raycaster.ray;
+        const oc = new THREE.Vector3().subVectors(ray.origin, wc);
+        const da = ray.direction.dot(axis);
+        const oca = oc.dot(axis);
+        const A = 1.0 - da * da;
+        const B = 2.0 * (ray.direction.dot(oc) - da * oca);
+        const C = oc.dot(oc) - oca * oca - radius * radius;
+        let tHit = Infinity,
+          nHit = null;
+        if (Math.abs(A) > 1e-6) {
+          const disc = B * B - 4 * A * C;
+          if (disc >= 0) {
+            const sq = Math.sqrt(disc);
+            for (const t of [(-B - sq) / (2 * A), (-B + sq) / (2 * A)]) {
+              if (t > raycaster.near && t < tHit) {
+                const p = ray.origin.clone().addScaledVector(ray.direction, t);
+                const y = p.clone().sub(wc).dot(axis);
+                if (Math.abs(y) <= halfH) {
+                  tHit = t;
+                  nHit = p
+                    .clone()
+                    .sub(wc)
+                    .addScaledVector(axis, -y)
+                    .normalize();
+                }
+              }
+            }
+          }
+        }
+        for (const sign of Math.abs(da) > 1e-6 ? [1, -1] : []) {
+          const t = (sign * halfH - oca) / da;
+          if (t > raycaster.near && t < tHit) {
+            const p = ray.origin.clone().addScaledVector(ray.direction, t);
+            if (
+              p
+                .clone()
+                .sub(wc)
+                .addScaledVector(axis, -sign * halfH)
+                .lengthSq() <=
+              radius * radius
+            ) {
+              tHit = t;
+              nHit = axis.clone().multiplyScalar(sign);
+            }
+          }
+        }
+        if (tHit === Infinity || tHit > raycaster.far) return;
+        intersects.push({
+          distance: tHit,
+          point: ray.origin.clone().addScaledVector(ray.direction, tHit),
+          face: { normal: nHit || axis },
+          faceIndex: 0,
+          object: mesh,
+        });
+      };
+    } else if (item.type === "sketch") {
+      mesh.add(buildSketchPlaneGrid());
+    } else {
       mesh.add(
         new THREE.LineSegments(
           new THREE.EdgesGeometry(geometry),

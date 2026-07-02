@@ -4,6 +4,7 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "./sceneObjects.js";
 import { FACE_SELECT_COLOR, EDGE_SELECT_COLOR } from "./theme.js";
+import { useStore } from "../store";
 
 // Returns a geometry to source overlay triangles from.  For primitive types
 // (sphere/cylinder/torus) the on-mesh geometry is just a BoxGeometry stand-in
@@ -32,7 +33,7 @@ function overlayGeometryFor(hitMesh, itemType) {
   return hitMesh.geometry;
 }
 
-const PRIMITIVE_TYPES = new Set(["sphere", "cylinder", "torus"]);
+const PRIMITIVE_TYPES = new Set(["sphere", "cylinder", "torus", "cone"]);
 
 // Build persistent highlight objects for the user's current sub-geometry
 // selection (faces and/or edges). Returns a THREE.Group placed at the same
@@ -52,7 +53,8 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
   if (!hitMesh || !subGeo) return null;
   const faces = subGeo.faces || [];
   const edges = subGeo.edges || [];
-  if (!faces.length && !edges.length) return null;
+  const points = subGeo.points || [];
+  if (!faces.length && !edges.length && !points.length) return null;
 
   // Face-select hover uses FACE_HOVER_COLOR (light blue); the selected colour
   // is a visibly darker version of the same blue so the user recognises this
@@ -172,6 +174,14 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
         }
       }
 
+      // Faces respect the curve-detection angle (like edges): the region grows
+      // across a tessellated curve via the local dihedral and stops at a sharp
+      // edge — matching the hover highlight (applyFaceHighlight).
+      const cosThr = Math.cos(
+        (Math.max(0, useStore.getState?.()?.curveDetectionAngleDeg ?? 5) *
+          Math.PI) /
+          180,
+      );
       const visitedAll = new Set();
       for (const f of faces) {
         // Seed: triangle whose centre is closest to the stored centroid
@@ -224,7 +234,7 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
             if (!adj) continue;
             for (const nt of adj) {
               if (seenLocal.has(nt)) continue;
-              if (triNormals[nt].dot(triNormals[seed]) > 0.999) {
+              if (triNormals[nt].dot(triNormals[t]) > cosThr) {
                 seenLocal.add(nt);
                 queue.push(nt);
               }
@@ -299,6 +309,23 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
     hlLine.renderOrder = 997;
     hlLine.userData.kind = "edge";
     group.add(hlLine);
+  }
+
+  // ── Point markers ───────────────────────────────────────────────────────
+  // Local-frame vertices selected via the widget's Point mode.  The group is
+  // placed at the mesh transform below, so these sit on the geometry.
+  for (const p of points) {
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: options.edgeColor ?? EDGE_SELECT_COLOR,
+        depthTest: false,
+      }),
+    );
+    dot.position.set(p.x, p.y, p.z);
+    dot.renderOrder = 999;
+    dot.userData.kind = "point";
+    group.add(dot);
   }
 
   if (group.children.length === 0) return null;

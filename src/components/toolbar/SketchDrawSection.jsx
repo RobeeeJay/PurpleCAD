@@ -9,14 +9,20 @@ const SKETCH_TOOLS = [
     icon: (
       <svg viewBox="0 0 24 24" width="20" height="20">
         <rect
-          x="3"
-          y="6"
-          width="18"
-          height="12"
+          stroke="#6C3FD4"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          strokeLinejoin="miter"
+          x="3"
+          y="5"
+          width="18"
+          height="14"
         />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="5" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="5" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="19" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="19" />
       </svg>
     ),
   },
@@ -26,13 +32,54 @@ const SKETCH_TOOLS = [
     icon: (
       <svg viewBox="0 0 24 24" width="20" height="20">
         <circle
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
           cx="12"
           cy="12"
           r="9"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
         />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="12"
+          y1="3"
+          x2="12"
+          y2="5"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="12"
+          y1="19"
+          x2="12"
+          y2="21"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="3"
+          y1="12"
+          x2="5"
+          y2="12"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="19"
+          y1="12"
+          x2="21"
+          y2="12"
+        />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="12" />
       </svg>
     ),
   },
@@ -42,14 +89,35 @@ const SKETCH_TOOLS = [
     icon: (
       <svg viewBox="0 0 24 24" width="20" height="20">
         <ellipse
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
           cx="12"
           cy="12"
-          rx="10"
-          ry="6"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
+          rx="9"
+          ry="5.5"
         />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          strokeDasharray="2 2"
+          x1="12"
+          y1="6.5"
+          x2="12"
+          y2="17.5"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          strokeDasharray="2 2"
+          x1="3"
+          y1="12"
+          x2="21"
+          y2="12"
+        />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="12" />
       </svg>
     ),
   },
@@ -59,14 +127,17 @@ const SKETCH_TOOLS = [
     icon: (
       <svg viewBox="0 0 24 24" width="20" height="20">
         <line
-          x1="4"
-          y1="20"
-          x2="20"
-          y2="4"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="3"
+          y1="21"
+          x2="21"
+          y2="3"
         />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="21" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="3" />
       </svg>
     ),
   },
@@ -76,31 +147,152 @@ const SKETCH_TOOLS = [
     icon: (
       <svg viewBox="0 0 24 24" width="20" height="20">
         <path
-          d="M4 20 Q12 2 20 20"
+          stroke="#6C3FD4"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          d="M4 18 A10 10 0 0 1 20 18"
+        />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="18" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="20" cy="18" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="8" />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          strokeDasharray="2 2"
+          x1="4"
+          y1="18"
+          x2="12"
+          y2="8"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          strokeDasharray="2 2"
+          x1="20"
+          y1="18"
+          x2="12"
+          y2="8"
         />
       </svg>
     ),
   },
   {
+    id: "point",
+    label: "Point — click to place a point; on a line it's constrained to it",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="12"
+          y1="3"
+          x2="12"
+          y2="9"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="12"
+          y1="15"
+          x2="12"
+          y2="21"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="3"
+          y1="12"
+          x2="9"
+          y2="12"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="15"
+          y1="12"
+          x2="21"
+          y2="12"
+        />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="2.5" cx="12" cy="12" />
+      </svg>
+    ),
+  },
+  {
     id: "bezier",
-    label: "Bezier",
+    label: "Bezier — click start then end; select it to drag the handles",
     icon: (
       <svg viewBox="0 0 24 24" width="20" height="20">
         <path
-          d="M3 20 C6 4 18 4 21 20"
+          stroke="#6C3FD4"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          d="M3 18 C6 6, 18 6, 21 18"
         />
-        <circle cx="3" cy="20" r="2" fill="currentColor" />
-        <circle cx="6" cy="4" r="1.5" fill="currentColor" opacity="0.6" />
-        <circle cx="18" cy="4" r="1.5" fill="currentColor" opacity="0.6" />
-        <circle cx="21" cy="20" r="2" fill="currentColor" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="18" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="18" />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          strokeDasharray="2 2"
+          x1="3"
+          y1="18"
+          x2="6"
+          y2="10"
+        />
+        <line
+          stroke="#D4A33F"
+          fill="none"
+          strokeWidth="1"
+          strokeDasharray="2 2"
+          x1="21"
+          y1="18"
+          x2="18"
+          y2="10"
+        />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.2" cx="6" cy="10" />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.2" cx="18" cy="10" />
+      </svg>
+    ),
+  },
+  {
+    id: "text",
+    label: "Text — click a start point, then type in the dialog",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="5"
+          y1="5"
+          x2="19"
+          y2="5"
+        />
+        <line
+          stroke="#6C3FD4"
+          fill="none"
+          strokeWidth="1.5"
+          strokeLinecap="square"
+          x1="12"
+          y1="5"
+          x2="12"
+          y2="19"
+        />
+        <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="5" cy="5" />
       </svg>
     ),
   },

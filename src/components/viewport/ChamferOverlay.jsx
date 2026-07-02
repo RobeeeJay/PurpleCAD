@@ -5,19 +5,27 @@
 // debounced call into chamferPreview.js additionally swaps in a translucent
 // preview of the actual chamfer/fillet result as the selection or
 // distance/angle changes.
+//
+// Inputs accept variable formulas, may be cleared to blank while typing, and
+// gate the live preview + Confirm on a valid value (see ../inputs.js).
 
 import React, { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 import { chamferOrFilletItem } from "../../three/occClient.js";
+import { activePrecision } from "../../three/resolution.js";
 import {
   buildChamferSourceAndSubGeo,
   commitChamferResult,
 } from "../../three/cameraControls/chamferCommit.js";
+import FormulaInput from "../FormulaInput";
+import { evalValue, useDebouncedPreview } from "../inputs.jsx";
 
-// Debounce live-preview recomputation: each call re-runs OCC's chamfer/
-// fillet, so don't fire on every keystroke / pick.
-const PREVIEW_DEBOUNCE_MS = 250;
+const fieldStyle = (ok) => ({
+  width: 64,
+  marginRight: 8,
+  border: `1px solid ${ok ? "var(--border-color)" : "#e87575"}`,
+});
 
 export default function ChamferOverlay() {
   const chamferSelectMode = useStore((s) => s.chamferSelectMode);
@@ -25,21 +33,29 @@ export default function ChamferOverlay() {
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const items = useStore((s) => s.items);
-  const curveResolution = useStore((s) => s.curveResolution);
+  const variables = useStore((s) => s.variables);
+  const printPrecision = useStore(activePrecision);
   const showNotification = useStore((s) => s.showNotification);
   const chamferRetargetTarget = useStore((s) => s.chamferRetargetTarget);
   const setChamferRetargetTarget = useStore((s) => s.setChamferRetargetTarget);
 
-  // Same defaults/units as the old toolbar inputs: distance in mm
-  // (converted to scene units by MM_PER_UNIT), angle in degrees (chamfer
-  // only — fillet's radius alone determines the curve).
-  const [distanceMm, setDistanceMm] = useState(0.5);
-  const [angleDeg, setAngleDeg] = useState(45);
+  // Raw strings so the field can be cleared while typing and so variable
+  // formulas (resolved against `variables`) are accepted.
+  const [distanceMm, setDistanceMm] = useState("0.5");
+  const [angleDeg, setAngleDeg] = useState("45");
 
+  const isChamfer = chamferSelectMode === "chamfer";
   const hasSelection =
     selectedSubGeometry &&
     ((selectedSubGeometry.edges?.length ?? 0) > 0 ||
       (selectedSubGeometry.faces?.length ?? 0) > 0);
+
+  const distVal = evalValue(distanceMm, variables); // mm
+  const angVal = evalValue(angleDeg, variables); // degrees
+  const distValid = Number.isFinite(distVal) && distVal > 0;
+  const angValid =
+    !isChamfer || (Number.isFinite(angVal) && angVal > 0 && angVal < 90);
+  const valid = distValid && angValid;
 
   // beginChamferRetarget pre-selects the prior subGeo and arms
   // chamferRetargetTarget — seed the inputs from that operation's recipe so
@@ -50,30 +66,26 @@ export default function ChamferOverlay() {
     const item = items.find((i) => i.id === chamferRetargetTarget.itemId);
     const prior = item?.regenerator;
     if (!prior || prior.kind !== "chamfer") return;
-    setDistanceMm(prior.amount * MM_PER_UNIT);
-    setAngleDeg(prior.angleRad != null ? (prior.angleRad * 180) / Math.PI : 45);
-  }, [chamferRetargetTarget]);
+    setDistanceMm(String(prior.amount * MM_PER_UNIT));
+    setAngleDeg(
+      prior.angleRad != null ? String((prior.angleRad * 180) / Math.PI) : "45",
+    );
+  }, [chamferRetargetTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Live preview: debounced re-run of the chamfer/fillet recipe against the
-  // current selection + distance/angle, swapping a translucent result mesh
-  // in for the source item.
-  useEffect(() => {
-    const cameraControls = useStore.getState()._cameraControls;
-    if (!chamferSelectMode || !hasSelection) {
-      cameraControls?.clearChamferPreview?.();
-      return;
-    }
-    const timer = setTimeout(() => {
-      cameraControls?.updateChamferPreview?.(distanceMm, angleDeg);
-    }, PREVIEW_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [
-    chamferSelectMode,
-    selectedSubGeometry,
-    distanceMm,
-    angleDeg,
-    hasSelection,
-  ]);
+  // Live preview: debounced re-run while a valid distance/angle and a selection
+  // exist; cleared the moment the value goes blank/invalid.
+  useDebouncedPreview(
+    !!chamferSelectMode && !!hasSelection && valid,
+    () =>
+      useStore
+        .getState()
+        ._cameraControls?.updateChamferPreview?.(
+          distVal,
+          isChamfer ? angVal : 45,
+        ),
+    () => useStore.getState()._cameraControls?.clearChamferPreview?.(),
+    [distVal, angVal, isChamfer, selectedSubGeometry],
+  );
 
   // Clear any preview mesh on unmount (mode toggled off, item deselected).
   useEffect(() => {
@@ -90,11 +102,10 @@ export default function ChamferOverlay() {
   };
 
   // `segments` here is preserved from the old (custom-mesh) chamfer API:
-  // segments=1 → chamfer (flat); segments>1 → bevel (rounded).  OCC
-  // expresses these as BRepFilletAPI_MakeChamfer (constant distance) and
-  // BRepFilletAPI_MakeFillet (radius); we map directly.
+  // segments=1 → chamfer (flat); segments>1 → bevel (rounded).
   const applyChamfer = async () => {
-    const segments = chamferSelectMode === "chamfer" ? 1 : 3;
+    if (!valid) return;
+    const segments = isChamfer ? 1 : 3;
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
     const retargetEntryId =
@@ -103,15 +114,13 @@ export default function ChamferOverlay() {
         : null;
 
     try {
-      const printPrecision = curveResolution === "print" ? 0.01 : null;
-      const amount = distanceMm / MM_PER_UNIT;
+      const amount = distVal / MM_PER_UNIT;
       // Only chamfer (segments=1) uses the angle; fillet is purely
-      // radius-driven.  Treat angle ≈ 45° as "symmetric" and skip the
-      // AddDA path (cheaper, and BRepFilletAPI_MakeChamfer's Add_2 also
-      // handles convex/concave cases more robustly).
+      // radius-driven.  Treat angle ≈ 45° as "symmetric" and skip the AddDA
+      // path.
       const angleRad =
-        segments === 1 && Math.abs(angleDeg - 45) > 0.1
-          ? (angleDeg * Math.PI) / 180
+        segments === 1 && Math.abs(angVal - 45) > 0.1
+          ? (angVal * Math.PI) / 180
           : null;
 
       const { source, subGeo } = buildChamferSourceAndSubGeo({
@@ -125,11 +134,6 @@ export default function ChamferOverlay() {
       });
       if (subGeo.edges.length === 0 && subGeo.faces.length === 0) return;
 
-      // Delegated to occClient — handles building the source shape,
-      // applying chamfer (segments=1) or fillet (segments>1), tessellating,
-      // and centring the result around its bbox.  The "By" variants used
-      // inside handle both explicit edge endpoints and face-normal
-      // selections.  Returns null when nothing matched.
       const result = await chamferOrFilletItem({
         source,
         subGeo,
@@ -171,8 +175,9 @@ export default function ChamferOverlay() {
 
   const handleKeyDown = (e) => {
     e.stopPropagation();
-    if (e.key === "Enter") applyChamfer();
-    else if (e.key === "Escape") cancel();
+    if (e.key === "Enter") {
+      if (valid) applyChamfer();
+    } else if (e.key === "Escape") cancel();
   };
 
   return (
@@ -187,36 +192,25 @@ export default function ChamferOverlay() {
           <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
             Distance (mm):
           </span>
-          <input
-            type="number"
+          <FormulaInput
+            variables={variables}
             autoFocus
-            step="0.1"
-            min="0.05"
             value={distanceMm}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value);
-              if (!isNaN(v) && v > 0) setDistanceMm(v);
-            }}
+            onChange={(e) => setDistanceMm(e.target.value)}
             onKeyDown={handleKeyDown}
-            style={{ width: 56, marginRight: 8 }}
+            style={fieldStyle(distValid)}
           />
-          {chamferSelectMode === "chamfer" && (
+          {isChamfer && (
             <>
               <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
                 Angle (°):
               </span>
-              <input
-                type="number"
-                step="1"
-                min="1"
-                max="89"
+              <FormulaInput
+                variables={variables}
                 value={angleDeg}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  if (!isNaN(v) && v > 0 && v < 90) setAngleDeg(v);
-                }}
+                onChange={(e) => setAngleDeg(e.target.value)}
                 onKeyDown={handleKeyDown}
-                style={{ width: 48, marginRight: 8 }}
+                style={fieldStyle(angValid)}
               />
             </>
           )}
@@ -240,9 +234,12 @@ export default function ChamferOverlay() {
           <button
             type="button"
             onClick={applyChamfer}
-            title={`Confirm — apply the ${
-              chamferSelectMode === "chamfer" ? "chamfer" : "fillet"
-            }`}
+            disabled={!valid}
+            title={
+              valid
+                ? `Confirm — apply the ${isChamfer ? "chamfer" : "fillet"}`
+                : "Enter a valid value to confirm"
+            }
             style={{
               fontSize: 11,
               padding: "3px 10px",
@@ -251,7 +248,8 @@ export default function ChamferOverlay() {
               border: "1px solid var(--accent, #4488ff)",
               background: "var(--accent, #4488ff)",
               color: "#fff",
-              cursor: "pointer",
+              cursor: valid ? "pointer" : "not-allowed",
+              opacity: valid ? 1 : 0.5,
             }}
           >
             Confirm

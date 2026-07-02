@@ -2,13 +2,35 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import RotationWidget from "./RotationWidget";
 import BusyIndicator from "./BusyIndicator";
+import MeasureOverlay from "./MeasureOverlay";
+import PathTraceProgress from "./PathTraceProgress";
 import SketchOverlays from "./viewport/SketchOverlays";
 import ChamferOverlay from "./viewport/ChamferOverlay";
+import PushPullOverlay from "./viewport/PushPullOverlay";
+import SweepOverlay from "./viewport/SweepOverlay";
+import SvgPlacementOverlay from "./viewport/SvgPlacementOverlay";
+import PlaneDialog from "./PlaneDialog";
+import MirrorDialog from "./MirrorDialog";
+import Pattern3dDialog from "./Pattern3dDialog";
+import SplitDialog from "./SplitDialog";
+import ShellDialog from "./ShellDialog";
+import OriginDialog from "./OriginDialog";
+import HoleDialog from "./HoleDialog";
+import EmbossDialog from "./EmbossDialog";
+import DraftDialog from "./DraftDialog";
+import BoxDialog from "./BoxDialog";
+import ProjectsDialog from "./ProjectsDialog";
+import TransformDialog from "./TransformDialog";
+import PointToPointDialog from "./PointToPointDialog";
+import SelectionWidget from "./SelectionWidget";
+import SketchSelectionWidget from "./SketchSelectionWidget";
+import PlanePickHint from "./viewport/PlanePickHint";
 import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
 import { useSceneSync } from "./viewport/useSceneSync";
 import "../styles/Viewport.css";
 import { useStore } from "../store";
+import { activePrecision } from "../three/resolution.js";
 
 const Viewport = () => {
   const containerRef = useRef(null);
@@ -50,12 +72,13 @@ const Viewport = () => {
   const sketchPlacementPlanesRef = useRef([]);
   const extrudeSelectModeRef = useRef(null);
   const extrudeSelectGroupRef = useRef(null);
+  const sweepSelectModeRef = useRef(null);
   const sketchDrawRef = useRef(null);
   const sketchShapesGroupRef = useRef(null);
   const allSketchGroupRef = useRef(null);
   const sketchGhostGroupRef = useRef(null);
   // Remembers the user's projection setting from before entering sketch
-  // mode so it can be restored on exit.  Sketch mode forces isometric
+  // mode so it can be restored on exit.  Sketch mode forces orthographic
   // (orthographic) projection so the sketch plane has no perspective
   // distortion.
   const preSketchProjectionRef = useRef(null);
@@ -95,6 +118,7 @@ const Viewport = () => {
   const cameraResetTrigger = useStore((state) => state.cameraResetTrigger);
   const sketchPlacementMode = useStore((state) => state.sketchPlacementMode);
   const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
+  const sweepSelectMode = useStore((state) => state.sweepSelectMode);
   const cutExtrudeInProgress = useStore((state) => state.cutExtrudeInProgress);
   const extrudeDepthInput = useStore((state) => state.extrudeDepthInput);
   const activeSketchTool = useStore((state) => state.activeSketchTool);
@@ -104,12 +128,18 @@ const Viewport = () => {
   );
   const sketchModifyMode = useStore((state) => state.sketchModifyMode);
   const sketchDistanceInput = useStore((state) => state.sketchDistanceInput);
+  const sketchMirrorState = useStore((state) => state.sketchMirrorState);
+  const sketchCircularPatternState = useStore(
+    (state) => state.sketchCircularPatternState,
+  );
+  const sketchRectangularPatternState = useStore(
+    (state) => state.sketchRectangularPatternState,
+  );
   const constraintsVisible = useStore((state) => state.constraintsVisible);
   const dimensionsVisible = useStore((state) => state.dimensionsVisible);
-  const curveResolution = useStore((state) => state.curveResolution);
   const selectedSubGeometry = useStore((state) => state.selectedSubGeometry);
   const curveSegments = 32;
-  const printPrecision = curveResolution === "print" ? 0.01 : null;
+  const printPrecision = useStore(activePrecision);
 
   const _selItem = items.find((i) => i.id === selectedId);
   const isInSketchMode = _selItem != null && _selItem.type === "sketch";
@@ -120,6 +150,7 @@ const Viewport = () => {
   sketchPlacementModeRef.current = sketchPlacementMode;
   activeSketchToolRef.current = activeSketchTool;
   extrudeSelectModeRef.current = extrudeSelectMode;
+  sweepSelectModeRef.current = sweepSelectMode ? sweepSelectMode.kind : null;
 
   const { handleOrientationChange, handleHome } = useViewportCamera({
     containerRef,
@@ -173,6 +204,7 @@ const Viewport = () => {
     sketchPlacementPlanesRef,
     extrudeSelectModeRef,
     extrudeSelectGroupRef,
+    sweepSelectModeRef,
     sketchDrawRef,
     sketchShapesGroupRef,
     dimHintRef,
@@ -231,10 +263,10 @@ const Viewport = () => {
     selectedSubGeometry,
     constraintsVisible,
     dimensionsVisible,
-    curveResolution,
     sketchMode,
     sketchPlacementMode,
     extrudeSelectMode,
+    sweepSelectMode,
     cutExtrudeInProgress,
     hoveredId,
     projectionMode,
@@ -244,6 +276,7 @@ const Viewport = () => {
     pathTraceView,
     curveSegments,
     printPrecision,
+    activeSketchTool,
     setSketchMode,
     setSketchDrawPhase,
     setRotationState,
@@ -255,12 +288,14 @@ const Viewport = () => {
         ref={containerRef}
         className="viewport"
         style={
-          sketchPlacementMode || activeSketchTool
+          sketchPlacementMode || activeSketchTool || sweepSelectMode
             ? { cursor: "crosshair" }
             : undefined
         }
       />
       <BusyIndicator />
+      <MeasureOverlay />
+      <PathTraceProgress />
       <SketchOverlays
         sketchPlacementMode={sketchPlacementMode}
         extrudeSelectMode={extrudeSelectMode}
@@ -272,6 +307,9 @@ const Viewport = () => {
         sketchConstraintFirstPoint={sketchConstraintFirstPoint}
         sketchModifyMode={sketchModifyMode}
         sketchDistanceInput={sketchDistanceInput}
+        sketchMirrorState={sketchMirrorState}
+        sketchCircularPatternState={sketchCircularPatternState}
+        sketchRectangularPatternState={sketchRectangularPatternState}
         isInSketchMode={isInSketchMode}
         selectedId={selectedId}
         variables={variables}
@@ -285,6 +323,25 @@ const Viewport = () => {
         selectItem={selectItem}
       />
       <ChamferOverlay />
+      <PushPullOverlay />
+      <SweepOverlay />
+      <PlaneDialog />
+      <MirrorDialog />
+      <Pattern3dDialog />
+      <SplitDialog />
+      <ShellDialog />
+      <OriginDialog />
+      <HoleDialog />
+      <EmbossDialog />
+      <DraftDialog />
+      <BoxDialog />
+      <ProjectsDialog />
+      <TransformDialog />
+      <PointToPointDialog />
+      <SelectionWidget />
+      <SketchSelectionWidget />
+      <SvgPlacementOverlay />
+      <PlanePickHint />
       {widgetVisible && (
         <RotationWidget
           rotationState={rotationState}

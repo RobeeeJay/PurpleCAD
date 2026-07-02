@@ -1,0 +1,29 @@
+.status-line {
+  position: fixed;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 5px;
+  background: var(--bg-secondary, rgba(20, 20, 28, 0.85));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  z-index: 9000;
+}
+
+.status-line-name {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.status-line-sep {
+  opacity: 0.4;
+}

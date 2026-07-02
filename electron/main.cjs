@@ -22,7 +22,7 @@ if (process.env.ELECTRON_START_URL) {
 }
 
 const electron = require("electron");
-const { app, BrowserWindow, ipcMain, protocol } = electron;
+const { app, BrowserWindow, ipcMain, protocol, session } = electron;
 const fsMod = require("fs");
 const urlMod = require("url");
 
@@ -56,19 +56,92 @@ try {
   ipcMain.handle("occ:chamferOrFilletItem", (_e, args) =>
     occBridge.chamferOrFilletItem(args),
   );
+  ipcMain.handle("occ:pushPullFaces", (_e, args) =>
+    occBridge.pushPullFaces(args),
+  );
+  ipcMain.handle("occ:shellItem", (_e, args) => occBridge.shellItem(args));
+  ipcMain.handle("occ:holeItem", (_e, args) => occBridge.holeItem(args));
+  ipcMain.handle("occ:embossItem", (_e, args) => occBridge.embossItem(args));
+  ipcMain.handle("occ:draftItem", (_e, args) => occBridge.draftItem(args));
+  ipcMain.handle("occ:revolveItem", (_e, args) => occBridge.revolveItem(args));
+  ipcMain.handle("occ:pipeItem", (_e, args) => occBridge.pipeItem(args));
+  ipcMain.handle("occ:loftItem", (_e, args) => occBridge.loftItem(args));
   ipcMain.handle("occ:exportSTL", (_e, args) => occBridge.exportSTL(args));
   ipcMain.handle("occ:exportSTEP", (_e, args) => occBridge.exportSTEP(args));
+  ipcMain.handle("occ:importStep", (_e, args) => occBridge.importStep(args));
+  ipcMain.handle("occ:splitItem", (_e, args) => occBridge.splitItem(args));
+  ipcMain.handle("occ:pattern3dItem", (_e, args) =>
+    occBridge.pattern3dItem(args),
+  );
 } catch (err) {
   // Addon not built or OCC dylib missing — fall back to WASM path in renderer.
   console.warn("[main] native OCC addon unavailable:", err.message);
 }
 
+// SQLite-backed persistence for renderer settings/data (replaces localStorage).
+// Synchronous IPC keeps the renderer's load-at-init code path unchanged.
+const kvStore = require("./kvStore.cjs");
+// Synchronous DB bridge (sendSync): settings, project CRUD, and per-project
+// data.  sendSync returns event.returnValue, which Electron structured-clones,
+// so structured objects/arrays come back to the renderer intact.
+const syncHandlers = {
+  "db:settingGet": (a) => kvStore.settingGet(a),
+  "db:settingSet": (a) => (kvStore.settingSet(a.key, a.value), true),
+  "db:settingRemove": (a) => (kvStore.settingRemove(a), true),
+  "db:listProjects": () => kvStore.listProjects(),
+  "db:createProject": (a) => kvStore.createProject(a),
+  "db:renameProject": (a) => (kvStore.renameProject(a.id, a.name), true),
+  "db:deleteProject": (a) => (kvStore.deleteProject(a), true),
+  "db:setThumbnail": (a) => (kvStore.setThumbnail(a.id, a.thumbnail), true),
+  "db:getActiveProjectId": () => kvStore.getActiveProjectId(),
+  "db:setActiveProjectId": (a) => (kvStore.setActiveProjectId(a), true),
+  "db:getTimeline": (a) => kvStore.getTimeline(a),
+  "db:saveTimeline": (a) => (kvStore.saveTimeline(a.pid, a.data), true),
+  "db:getVariables": (a) => kvStore.getVariables(a),
+  "db:saveVariables": (a) => (kvStore.saveVariables(a.pid, a.data), true),
+  "db:getFolders": (a) => kvStore.getFolders(a),
+  "db:saveFolders": (a) => (kvStore.saveFolders(a.pid, a.data), true),
+  "db:getMaterial": (a) => kvStore.getMaterial(a),
+  "db:saveMaterial": (a) => (kvStore.saveMaterial(a.pid, a.data), true),
+  "db:getCamera": (a) => kvStore.getCamera(a),
+  "db:saveCamera": (a) => (kvStore.saveCamera(a.pid, a.state), true),
+  "db:clearCamera": (a) => (kvStore.clearCamera(a), true),
+};
+for (const [channel, fn] of Object.entries(syncHandlers)) {
+  ipcMain.on(channel, (e, arg) => {
+    e.returnValue = fn(arg);
+  });
+}
+
+// 512px source covers window/taskbar icon use across platforms; packaged
+// builds get their app icon from `build.icon` in package.json instead.
+const APP_ICON = path.join(
+  __dirname,
+  "..",
+  "app-icons",
+  "padded",
+  "icon-512.png",
+);
+
+// Initial title shown before the page loads; the renderer then sets
+// `document.title` to the same string, which Electron mirrors into the
+// window/title bar via `page-title-updated`.
+const { version: APP_VERSION } = require("../package.json");
+
 function createWindow() {
+  // Allow the renderer's Local Font Access API (queryLocalFonts) to enumerate
+  // installed fonts for the sketch Text tool. The app only loads its own
+  // bundled content, so granting this is safe; other permissions are denied.
+  session.defaultSession.setPermissionRequestHandler(
+    (_wc, permission, callback) => callback(permission === "local-fonts"),
+  );
+
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     backgroundColor: "#101013",
-    title: "PurpleCAD",
+    title: `PurpleCAD v${APP_VERSION}`,
+    icon: APP_ICON,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -99,6 +172,21 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // BrowserWindow's `icon` option doesn't reach the Dock on macOS; packaged
+  // builds get their Dock icon from `build.icon`, but dev runs (launched as
+  // a bare Electron binary) still show Electron's default unless set here.
+  if (process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(APP_ICON);
+  }
+
+  // Open the database before the window loads so the renderer's first
+  // synchronous db read (during store init) finds it ready.
+  try {
+    kvStore.init(app.getPath("userData"));
+  } catch (err) {
+    console.warn("[main] SQLite KV store unavailable:", err.message);
+  }
+
   // Serve dist files over `app://./<path>`.  Handler decodes the URL
   // and pipes the matching dist file back via a stream response.
   const DIST = path.join(__dirname, "..", "dist");

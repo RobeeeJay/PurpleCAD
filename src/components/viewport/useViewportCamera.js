@@ -136,7 +136,7 @@ export function useViewportCamera({
     const aspect = container.clientWidth / container.clientHeight;
     const frustumSize = 20;
     let newCamera;
-    if (projectionMode === "isometric") {
+    if (projectionMode === "orthographic") {
       newCamera = new THREE.OrthographicCamera(
         (-frustumSize * aspect) / 2,
         (frustumSize * aspect) / 2,
@@ -191,8 +191,8 @@ export function useViewportCamera({
   // useSketchModeEffect forces this once on entry; this keeps it enforced if
   // the projection is toggled to perspective while a sketch is still active.
   useEffect(() => {
-    if (isInSketchMode && projectionMode !== "isometric") {
-      useStore.getState().setProjectionMode("isometric");
+    if (isInSketchMode && projectionMode !== "orthographic") {
+      useStore.getState().setProjectionMode("orthographic");
     }
   }, [isInSketchMode, projectionMode]);
 

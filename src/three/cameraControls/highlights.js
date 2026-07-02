@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "../sceneObjects.js";
+import { activePrecision } from "../resolution.js";
 import { computeSegmentChain } from "../segmentChain.js";
 import { CHAMFER_EDGE_HOVER, CHAMFER_PREVIEW_COLOR } from "../theme.js";
 
@@ -53,8 +54,7 @@ export function createHighlightHelpers({
     // depth-tested materials, but the highlight material uses
     // depthTest:false + high renderOrder, so an inflated overlay just
     // visibly extends past the actual primitive.
-    const printPrecisionMm =
-      useStore.getState().curveResolution === "print" ? 0.01 : null;
+    const printPrecisionMm = activePrecision();
     const displayPrecision =
       printPrecisionMm != null
         ? Math.min(printPrecisionMm, DISPLAY_PRECISION_MM)
@@ -86,7 +86,7 @@ export function createHighlightHelpers({
     const itemData = itemsRef.current.find(
       (i) => i.id === hitMesh.userData.itemId,
     );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
+    const primitiveType = ["sphere", "cylinder", "torus", "cone"].includes(
       itemData?.type,
     )
       ? itemData.type
@@ -246,8 +246,14 @@ export function createHighlightHelpers({
         }
       }
 
-      // BFS from seed, only following neighbours with a matching normal.
+      // BFS from seed across shared edges.  Curve detection applies to faces
+      // just like edges: follow a neighbour when the LOCAL dihedral (this
+      // triangle vs the neighbour) is within the curve-detection angle, so a
+      // tessellated cylinder / fillet / wave selects as one face while a sharp
+      // edge (a larger bend than the setting) stops it.
       const seedN = triNormals[seedTri];
+      const maxAngle = useStore.getState().curveDetectionAngleDeg ?? 5;
+      const cosThr = Math.cos((Math.max(0, maxAngle) * Math.PI) / 180);
       const visited = new Set([seedTri]);
       const queue = [seedTri];
       while (queue.length > 0) {
@@ -262,7 +268,7 @@ export function createHighlightHelpers({
           if (!adj) continue;
           for (const nt of adj) {
             if (visited.has(nt)) continue;
-            if (triNormals[nt].dot(seedN) > 0.999) {
+            if (triNormals[nt].dot(triNormals[t]) > cosThr) {
               visited.add(nt);
               queue.push(nt);
             }
@@ -343,7 +349,7 @@ export function createHighlightHelpers({
     const itemData = itemsRef.current.find(
       (i) => i.id === hitMesh.userData.itemId,
     );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
+    const primitiveType = ["sphere", "cylinder", "torus", "cone"].includes(
       itemData?.type,
     )
       ? itemData.type
@@ -382,7 +388,7 @@ export function createHighlightHelpers({
         bestIdx = i;
       }
     }
-    if (bestIdx < 0) return;
+    if (bestIdx < 0) return null;
 
     // Curve detection: highlight (and select) the whole smooth chain of
     // connected edges, so a tessellated curve reads/selects as one edge.
@@ -437,6 +443,16 @@ export function createHighlightHelpers({
         };
       }),
     };
+    // World-space distance from the cursor's hit point to the nearest edge —
+    // used by the selection-widget priority (point > edge > face).
+    va.set(best.ax, best.ay, best.az).applyMatrix4(hitMesh.matrixWorld);
+    vb.set(best.bx, best.by, best.bz).applyMatrix4(hitMesh.matrixWorld);
+    const ab = vb.clone().sub(va);
+    const t = Math.max(
+      0,
+      Math.min(1, hit.point.clone().sub(va).dot(ab) / (ab.lengthSq() || 1)),
+    );
+    return hit.point.distanceTo(va.add(ab.multiplyScalar(t)));
   };
 
   const applyPointHighlight = (hit) => {
@@ -446,7 +462,7 @@ export function createHighlightHelpers({
     const itemData = itemsRef.current.find(
       (i) => i.id === hitMesh.userData.itemId,
     );
-    const primitiveType = ["sphere", "cylinder", "torus"].includes(
+    const primitiveType = ["sphere", "cylinder", "torus", "cone"].includes(
       itemData?.type,
     )
       ? itemData.type
@@ -474,26 +490,119 @@ export function createHighlightHelpers({
       }
     }
     if (primitiveType) srcGeo.dispose();
-    if (bestV) {
-      bestV.applyMatrix4(hitMesh.matrixWorld);
-      const hlMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06, 10, 8),
-        new THREE.MeshBasicMaterial({
-          color: CHAMFER_PREVIEW_COLOR,
-          depthTest: false,
-        }),
-      );
-      hlMesh.position.copy(bestV);
-      hlMesh.renderOrder = 999;
-      scene.add(hlMesh);
-      pointHighlightRef.current = hlMesh;
+    if (!bestV) return null;
+    const worldV = bestV.clone().applyMatrix4(hitMesh.matrixWorld);
+    const hlMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: CHAMFER_PREVIEW_COLOR,
+        depthTest: false,
+      }),
+    );
+    hlMesh.position.copy(worldV);
+    hlMesh.renderOrder = 999;
+    scene.add(hlMesh);
+    pointHighlightRef.current = hlMesh;
+    // World-space distance from the cursor's hit point to the chosen vertex —
+    // the selection-widget priority uses it to gate point vs edge vs face.
+    return hit.point.distanceTo(worldV);
+  };
+
+  // Show the point-highlight marker at an arbitrary world position (eg a sketch
+  // point the hole tool snaps to, which isn't a mesh vertex).
+  const highlightWorldPoint = (world) => {
+    clearPointHighlight();
+    const hlMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: CHAMFER_PREVIEW_COLOR,
+        depthTest: false,
+      }),
+    );
+    hlMesh.position.copy(world);
+    hlMesh.renderOrder = 999;
+    scene.add(hlMesh);
+    pointHighlightRef.current = hlMesh;
+  };
+
+  // Highlight an arbitrary connected face set (the emboss tool grows it across
+  // a curved surface) from its triangle positions in the mesh's local frame.
+  // A PERSISTENT highlight of the accumulated emboss multi-face selection (the
+  // hover highlight on faceHighlightRef is transient and cleared every move; this
+  // one stays until the selection changes or the tool ends).
+  let selectedFacesMesh = null;
+  const clearSelectedFaces = () => {
+    if (selectedFacesMesh) {
+      scene.remove(selectedFacesMesh);
+      selectedFacesMesh.geometry.dispose();
+      selectedFacesMesh.material.dispose();
+      selectedFacesMesh = null;
     }
+  };
+  const highlightSelectedFaces = (mesh, positionsLocal, color) => {
+    clearSelectedFaces();
+    if (!mesh || !positionsLocal || positionsLocal.length < 9) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positionsLocal), 3),
+    );
+    const m = new THREE.Mesh(
+      g,
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.4,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }),
+    );
+    m.position.copy(mesh.position);
+    m.rotation.copy(mesh.rotation);
+    m.scale.copy(mesh.scale);
+    m.renderOrder = 995;
+    scene.add(m);
+    selectedFacesMesh = m;
+  };
+
+  const highlightFaceSet = (mesh, positionsLocal, color) => {
+    clearFaceHighlight();
+    if (!positionsLocal || positionsLocal.length < 9) return;
+    const hlGeo = new THREE.BufferGeometry();
+    hlGeo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positionsLocal), 3),
+    );
+    const hlMesh = new THREE.Mesh(
+      hlGeo,
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.5,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }),
+    );
+    hlMesh.position.copy(mesh.position);
+    hlMesh.rotation.copy(mesh.rotation);
+    hlMesh.scale.copy(mesh.scale);
+    hlMesh.renderOrder = 996;
+    scene.add(hlMesh);
+    faceHighlightRef.current = hlMesh;
   };
 
   return {
     clearFaceHighlight,
     clearEdgeHighlight,
     clearPointHighlight,
+    highlightWorldPoint,
+    highlightFaceSet,
+    highlightSelectedFaces,
+    clearSelectedFaces,
     // Visual-only clearer (does NOT reset pendingFaceSelection /
     // pendingEdgeSelection).  Used by the modifier-keyup handler in
     // cameraControls.js so a stray keyup between hover and click doesn't

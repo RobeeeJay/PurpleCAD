@@ -5,6 +5,8 @@ import {
   AXIS_Y_COLOR,
   AXIS_Z_COLOR,
   LIGHT_COLOR,
+  gridMajorColorFor,
+  rulerTickColorFor,
   sceneBackgroundFor,
   toCssHex,
 } from "./theme.js";
@@ -24,7 +26,7 @@ export function createCamera(
 ) {
   const frustumSize = 20;
   let camera;
-  if (projectionMode === "isometric") {
+  if (projectionMode === "orthographic") {
     camera = new THREE.OrthographicCamera(
       (-frustumSize * aspect) / 2,
       (frustumSize * aspect) / 2,
@@ -128,7 +130,15 @@ const RULER_TIERS = {
   ultra: { fontSize: 18, scaleX: 1.05, scaleY: 0.2625 },
 };
 
-function makeRulerSprite(text, tier = "coarse") {
+// The ground labels lie flat (foreshortened), so they read smaller than their
+// raw scale suggests — this lifts them all to a legible on-screen size.  (1/3
+// smaller than the previous 1.5.)
+const RULER_LABEL_SCALE = 1.0;
+
+// Shared unit quad — each label is the same geometry, sized via mesh.scale.
+const RULER_LABEL_GEO = new THREE.PlaneGeometry(1, 1);
+
+function makeRulerLabel(text, tier = "coarse", theme) {
   const t = RULER_TIERS[tier];
   const canvas = document.createElement("canvas");
   canvas.width = 160;
@@ -139,26 +149,41 @@ function makeRulerSprite(text, tier = "coarse") {
   ctx.font = `${t.fontSize}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = "#0055ff";
+  ctx.fillStyle = toCssHex(rulerTickColorFor(theme));
   ctx.fillText(text, 80, 20);
-  const mat = new THREE.SpriteMaterial({
+  const mat = new THREE.MeshBasicMaterial({
     map: new THREE.CanvasTexture(canvas),
     depthTest: false,
     transparent: true,
+    side: THREE.DoubleSide,
   });
-  const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(t.scaleX, t.scaleY, 1);
-  sprite.userData.baseScale = { x: t.scaleX, y: t.scaleY, z: 1 };
-  sprite.userData.isRulerLabel = true;
-  sprite.renderOrder = 1;
-  return sprite;
+  // A flat quad lying on the ground (XZ) instead of a camera-facing sprite, so
+  // the numbers read painted on the floor. -90° about X lays the quad down with
+  // its texture facing up; mesh.scale (x = width along X, y = height along Z) is
+  // driven each frame for constant on-screen size.
+  const mesh = new THREE.Mesh(RULER_LABEL_GEO, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  const sx = t.scaleX * RULER_LABEL_SCALE;
+  const sy = t.scaleY * RULER_LABEL_SCALE;
+  mesh.scale.set(sx, sy, 1);
+  mesh.userData.baseScale = { x: sx, y: sy, z: 1 };
+  mesh.userData.isRulerLabel = true;
+  mesh.renderOrder = 1;
+  return mesh;
 }
 
-export function createGrid(scene) {
+export function createGrid(scene, theme) {
+  const gridColor = gridMajorColorFor(theme);
   const gridMaterial = new THREE.ShaderMaterial({
     uniforms: {
       uCameraPos: { value: new THREE.Vector3() },
-      uGridColor: { value: new THREE.Vector3(0.45, 0.45, 0.45) },
+      uGridColor: {
+        value: new THREE.Vector3(
+          ((gridColor >> 16) & 0xff) / 255,
+          ((gridColor >> 8) & 0xff) / 255,
+          (gridColor & 0xff) / 255,
+        ),
+      },
       // 0 → no 1 mm grid, 1 → fully shown; driven by animateLoop to match the
       // 1 mm ruler tier's zoom threshold.
       uUltraFade: { value: 0 },
@@ -185,8 +210,8 @@ export function createGrid(scene) {
         vec2 g01 = abs(fract(coord / 0.1 - 0.5) - 0.5) / fwidth(coord / 0.1);
         float ultra = 1.0 - min(min(g01.x, g01.y), 1.0);
         float dist = length(vWorldPos.xz - uCameraPos.xz);
-        float fadeFine   = 1.0 - smoothstep(8.0,  45.0, dist);
-        float fadeCoarse = 1.0 - smoothstep(20.0, 80.0, dist);
+        float fadeFine   = 1.0 - smoothstep(8.0,  120.0, dist);
+        float fadeCoarse = 1.0 - smoothstep(20.0, 260.0, dist);
         // Lighter than the 10 mm lines (0.3 vs 0.6), and only when zoomed in.
         float ultraA = ultra * fadeFine * 0.3 * uUltraFade;
         float alpha = max(max(coarse * fadeCoarse, fine * fadeFine * 0.6), ultraA);
@@ -223,10 +248,10 @@ export function createGrid(scene) {
       pool: new Map(),
       step: 5,
       skipMod: 0,
-      // Hide the 50 mm markers too once zoomed very far out (view height > 400
-      // units ≈ 4 m), leaving the ruler clear.
-      showBelow: 40,
-      maxSpan: 120,
+      // Hide the 50 mm markers too once zoomed very far out, leaving the ruler
+      // clear.
+      showBelow: 80,
+      maxSpan: 320,
     },
     {
       name: "fine",
@@ -234,8 +259,8 @@ export function createGrid(scene) {
       pool: new Map(),
       step: 1,
       skipMod: 5,
-      showBelow: 25,
-      maxSpan: 50,
+      showBelow: 17,
+      maxSpan: 130,
     },
     {
       name: "ultra",
@@ -261,14 +286,20 @@ const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
 // follow the view.  Labels live at absolute world multiples of each tier's step
 // and read true mm; only labels entering the range get a fresh texture, the
 // rest are just repositioned, so this is cheap to call every frame.
-export function updateRuler3D(rulerGroup, cx, cz, viewHeight) {
-  const rowZ = Math.round(cz) + RULER_AXIS_OFFSET; // X-labels' row follows target Z
-  const rowX = Math.round(cx) + RULER_AXIS_OFFSET; // Z-labels' row follows target X
+export function updateRuler3D(rulerGroup, cx, cz, viewHeight, theme) {
+  // Track the target continuously (no rounding) so the rows glide with a pan and
+  // stay centred on the view instead of snapping a whole unit each time the
+  // target crosses a half-integer.  Scale the off-axis nudge with the zoom so a
+  // fixed world offset can't push the rows off-screen when zoomed right in
+  // (capped at the default so the zoomed-out look is unchanged).
+  const off = Math.min(viewHeight * 0.1, RULER_AXIS_OFFSET);
+  const rowZ = cz + off; // X-labels' row follows target Z
+  const rowX = cx + off; // Z-labels' row follows target X
   for (const tier of rulerGroup.userData.tiers) {
     const visible = viewHeight < tier.showBelow;
     tier.group.visible = visible;
     if (!visible) continue;
-    const span = Math.min(viewHeight * 1.3, tier.maxSpan);
+    const span = Math.min(viewHeight * 2, tier.maxSpan);
     const { step, skipMod, pool, group, name } = tier;
     // Skip label indices that belong to a coarser tier (work in integer step
     // counts so 1/0.1 float error can't leak a 10 mm label into the 1 mm tier).
@@ -280,7 +311,11 @@ export function updateRuler3D(rulerGroup, cx, cz, viewHeight) {
       needed.add(key);
       let sp = pool.get(key);
       if (!sp) {
-        sp = makeRulerSprite(`${Math.round(k * step * MM_PER_UNIT)}`, name);
+        sp = makeRulerLabel(
+          `${Math.round(k * step * MM_PER_UNIT)}`,
+          name,
+          theme,
+        );
         pool.set(key, sp);
         group.add(sp);
       }

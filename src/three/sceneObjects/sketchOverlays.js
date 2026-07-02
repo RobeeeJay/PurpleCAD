@@ -9,19 +9,22 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { addConstraintIconsToGroup } from "./constraintIcons.js";
 import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
+import { textShapeContours } from "../sketchText.js";
+import { useStore } from "../../store";
 import {
-  findClosedLoops,
   findClosedLoopsWithShapes,
   groupLoopsWithHoles,
   polyCentroid,
 } from "./closedLoops.js";
 import {
-  BEVEL_COLOR,
-  OFFSET_COLOR,
   SKETCH_FACE_HIGHLIGHT,
-  SKETCH_LINE_COLOR,
-  SKETCH_PLANE_HOVER_COLOR,
-  SKETCH_POINT_COLOR,
+  sketchConstructionColorFor,
+  sketchLineColorFor,
+  sketchNodeColorFor,
+  sketchOffsetColorFor,
+  sketchMirrorColorFor,
+  sketchCircularPatternColorFor,
+  sketchRectangularPatternColorFor,
 } from "../theme.js";
 
 // Offset copies (driven by an offset constraint) render in OFFSET_COLOR to
@@ -33,6 +36,54 @@ const offsetShapeIdxSet = (item) =>
       .filter((c) => c.type === "offset")
       .map((c) => c.shapeIdx),
   );
+
+// Mirror copies (driven by a mirror constraint) render in MIRROR_COLOR and
+// are made non-interactive while the constraint holds — same rationale as
+// offset copies.
+const mirrorShapeIdxSet = (item) =>
+  new Set(
+    (item.constraints || [])
+      .filter((c) => c.type === "mirror")
+      .map((c) => c.shapeIdx),
+  );
+
+// Circular-pattern copies (driven by a circularPattern constraint) render in
+// CIRCULAR_PATTERN_COLOR and are non-interactive while the constraint holds —
+// same rationale as offset/mirror copies.
+const circularPatternShapeIdxSet = (item) =>
+  new Set(
+    (item.constraints || [])
+      .filter((c) => c.type === "circularPattern")
+      .map((c) => c.shapeIdx),
+  );
+
+// Rectangular-pattern copies (driven by a rectangularPattern constraint)
+// render in RECTANGULAR_PATTERN_COLOR and are non-interactive while the
+// constraint holds — same rationale as offset/mirror/circular-pattern copies.
+const rectangularPatternShapeIdxSet = (item) =>
+  new Set(
+    (item.constraints || [])
+      .filter((c) => c.type === "rectangularPattern")
+      .map((c) => c.shapeIdx),
+  );
+
+// The copy shapes of the mirror / pattern currently being edited (double-click
+// → beginXEdit stamps editCopyIndices on the active tool's state).  These are
+// hidden while editing so the live preview shows source + preview only, like
+// the initial creation.  Empty when no edit is in progress on this sketch.
+const editHiddenShapeIdxSet = (sketchId) => {
+  const s = useStore.getState();
+  if (s.selectedId !== sketchId) return new Set();
+  const st =
+    s.activeSketchTool === "mirror"
+      ? s.sketchMirrorState
+      : s.activeSketchTool === "circularPattern"
+        ? s.sketchCircularPatternState
+        : s.activeSketchTool === "rectangularPattern"
+          ? s.sketchRectangularPatternState
+          : null;
+  return new Set(st?.editCopyIndices || []);
+};
 
 // ── Object-view sketch lines (all sketches, lines only) ──────────────────────
 
@@ -50,22 +101,56 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     ? renderer.getSize(new THREE.Vector2())
     : new THREE.Vector2(window.innerWidth, window.innerHeight);
 
+  const theme = useStore.getState().theme;
   sketchItems.forEach((item) => {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
     const offsetIdxs = offsetShapeIdxSet(item);
+    const mirrorIdxs = mirrorShapeIdxSet(item);
+    const circularPatternIdxs = circularPatternShapeIdxSet(item);
+    const rectangularPatternIdxs = rectangularPatternShapeIdxSet(item);
     item.shapes.forEach((shape, shapeIdx) => {
-      if (shape.kind === "bevel") return; // bevel arcs not shown in object view
+      if (shape.type === "text") {
+        const toW = (lx, ly) =>
+          new THREE.Vector3(lx, ly, 0.003)
+            .applyQuaternion(sketchMesh.quaternion)
+            .add(sketchMesh.position);
+        for (const contour of textShapeContours(shape)) {
+          if (contour.length < 2) continue;
+          const wpts = [...contour, contour[0]].map((p) => toW(p.x, p.y));
+          const tgeo = new LineGeometry();
+          tgeo.setPositions(wpts.flatMap((p) => [p.x, p.y, p.z]));
+          const tline = new Line2(
+            tgeo,
+            new LineMaterial({
+              color: sketchLineColorFor(theme),
+              linewidth: 1.5,
+              depthTest: false,
+              resolution: res,
+            }),
+          );
+          tline.computeLineDistances();
+          tline.renderOrder = 1001;
+          group.add(tline);
+        }
+        return;
+      }
       const pts = getSketchShapePoints(shape, sketchMesh);
       if (pts.length < 2) return;
       const geo = new LineGeometry();
       geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
       const mat = new LineMaterial({
         color: offsetIdxs.has(shapeIdx)
-          ? OFFSET_COLOR
-          : shape.dashed
-            ? SKETCH_PLANE_HOVER_COLOR
-            : SKETCH_LINE_COLOR,
+          ? sketchOffsetColorFor(theme)
+          : mirrorIdxs.has(shapeIdx)
+            ? sketchMirrorColorFor(theme)
+            : circularPatternIdxs.has(shapeIdx)
+              ? sketchCircularPatternColorFor(theme)
+              : rectangularPatternIdxs.has(shapeIdx)
+                ? sketchRectangularPatternColorFor(theme)
+                : shape.dashed
+                  ? sketchConstructionColorFor(theme)
+                  : sketchLineColorFor(theme),
         linewidth: 1.5,
         depthTest: false,
         resolution: res,
@@ -99,11 +184,28 @@ export function buildExtrudeSelectGroup(
   sketchItems.forEach((item) => {
     const sketchMesh = objectsRef.current[item.id];
     if (!sketchMesh) return;
-    const allLoops = findClosedLoops(
+    const loopsWithShapes = findClosedLoopsWithShapes(
       item.shapes || [],
       curveSegments,
       precision,
     );
+    // Track which loops belong to a text shape so its counters (e.g. the hole
+    // in "o") stay holes of the glyph rather than separately-selectable regions.
+    const textIdxs = new Set();
+    (item.shapes || []).forEach((s, i) => {
+      if (s.type === "text") textIdxs.add(i);
+    });
+    const isTextPoly = new Map();
+    const polyShapeIndices = new Map();
+    const allLoops = loopsWithShapes.map((l) => {
+      isTextPoly.set(
+        l.polygon,
+        l.shapeIndices.length > 0 &&
+          l.shapeIndices.every((si) => textIdxs.has(si)),
+      );
+      polyShapeIndices.set(l.polygon, l.shapeIndices);
+      return l.polygon;
+    });
     const grouped = groupLoopsWithHoles(allLoops);
     const euler = new THREE.Euler().setFromQuaternion(sketchMesh.quaternion);
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
@@ -134,9 +236,15 @@ export function buildExtrudeSelectGroup(
       fill.position.copy(pos).addScaledVector(normal, 0.005);
       fill.quaternion.copy(sketchMesh.quaternion);
       fill.renderOrder = 995;
+      // For a glyph loop, remember which text shape it came from so selecting
+      // one letter can select the whole word (all glyphs share this index).
+      const textShapeIdx = isTextPoly.get(polygon)
+        ? (polyShapeIndices.get(polygon) || [])[0]
+        : null;
       fill.userData.extrudeProfile = {
         type: "sketchLoop",
         sketchId: item.id,
+        textShapeIdx: textShapeIdx ?? null,
         profileCentroid: polyCentroid(polygon),
         polygon2D: polygon,
         holes: holes.filter((h) => h.length >= 3),
@@ -145,7 +253,10 @@ export function buildExtrudeSelectGroup(
         normalWorld: { x: normal.x, y: normal.y, z: normal.z },
       };
       group.add(fill);
-      entries.forEach(addProfile);
+      // A text glyph's nested regions are its counters — keep them as holes,
+      // not separately-selectable profiles.  Non-text regions still expose
+      // their children (e.g. text sitting inside a rectangle).
+      if (!isTextPoly.get(polygon)) entries.forEach(addProfile);
     };
     grouped.forEach(addProfile);
   });
@@ -185,7 +296,7 @@ export function rebuildPointDotsForDrag(group, shapes, sketchMesh) {
   if (pts.length === 0) return;
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const mat = new THREE.PointsMaterial({
-    color: SKETCH_POINT_COLOR,
+    color: sketchNodeColorFor(useStore.getState().theme),
     size: 5,
     sizeAttenuation: false,
     depthTest: false,
@@ -217,6 +328,7 @@ export function buildSketchShapesGroup(
   const res = renderer
     ? renderer.getSize(new THREE.Vector2())
     : new THREE.Vector2(window.innerWidth, window.innerHeight);
+  const theme = useStore.getState().theme;
 
   const toWorld = (lx, ly, z = 0.003) => {
     const v = new THREE.Vector3(lx, ly, z);
@@ -225,45 +337,113 @@ export function buildSketchShapesGroup(
     return v;
   };
 
+  // While editing a mirror / pattern, its existing copies are hidden so the
+  // live preview reads like the initial creation (source + preview only).
+  const editHidden = editHiddenShapeIdxSet(selItem.id);
+
   // ── Shape lines (Line2 for actual pixel-width thickness) ──────────────────
   const offsetIdxs = offsetShapeIdxSet(selItem);
+  const mirrorIdxs = mirrorShapeIdxSet(selItem);
+  const circularPatternIdxs = circularPatternShapeIdxSet(selItem);
+  const rectangularPatternIdxs = rectangularPatternShapeIdxSet(selItem);
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
+    if (editHidden.has(shapeIdx)) return;
+    if (shape.type === "text") {
+      // Locked text: draw each glyph contour as its own loop, all tagged with
+      // the same shapeIdx so a click selects (and whole-shape drags) the text.
+      for (const contour of textShapeContours(shape)) {
+        if (contour.length < 2) continue;
+        const wpts = [...contour, contour[0]].map((p) =>
+          toWorld(p.x, p.y, 0.003),
+        );
+        const tgeo = new LineGeometry();
+        tgeo.setPositions(wpts.flatMap((p) => [p.x, p.y, p.z]));
+        const tline = new Line2(
+          tgeo,
+          new LineMaterial({
+            color: sketchLineColorFor(theme),
+            linewidth: 1.5,
+            depthTest: false,
+            resolution: res,
+          }),
+        );
+        tline.computeLineDistances();
+        tline.renderOrder = 1001;
+        tline.userData.shapeIdx = shapeIdx;
+        tline.userData.isText = true;
+        group.add(tline);
+      }
+      return;
+    }
     const pts = getSketchShapePoints(shape, sketchMesh);
-    if (pts.length < 2) return;
+    if (pts.length < 2) {
+      // A standalone point has no polyline; still emit its node dot so it's
+      // visible and pickable.
+      if (shape.type === "point")
+        getSnapPoints([shape]).forEach((sp) =>
+          dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)),
+        );
+      return;
+    }
 
-    const isBevel = shape.kind === "bevel";
+    // A bevel (fillet) arc is real profile geometry, so it draws like any other
+    // solid sketch line — not as a dashed reference curve.
     const isDashed = !!shape.dashed;
     const isOffset = offsetIdxs.has(shapeIdx);
+    const isMirror = mirrorIdxs.has(shapeIdx);
+    const isCircularPattern = circularPatternIdxs.has(shapeIdx);
+    const isRectangularPattern = rectangularPatternIdxs.has(shapeIdx);
+    // Projected geometry is locked to its 3D source — drawn in a distinct teal
+    // and (like the other constrained copies) inert to dragging.
+    const isProjected = !!shape.projection;
+    const isInert =
+      isOffset ||
+      isMirror ||
+      isCircularPattern ||
+      isRectangularPattern ||
+      isProjected;
     const geo = new LineGeometry();
     geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
     const mat = new LineMaterial({
-      color: isBevel
-        ? BEVEL_COLOR
+      color: isProjected
+        ? 0x37b8a0
         : isOffset
-          ? OFFSET_COLOR
-          : SKETCH_LINE_COLOR,
-      linewidth: isBevel ? 1.0 : 1.5,
+          ? sketchOffsetColorFor(theme)
+          : isMirror
+            ? sketchMirrorColorFor(theme)
+            : isCircularPattern
+              ? sketchCircularPatternColorFor(theme)
+              : isRectangularPattern
+                ? sketchRectangularPatternColorFor(theme)
+                : sketchLineColorFor(theme),
+      linewidth: 1.5,
       depthTest: false,
       resolution: res,
-      transparent: isBevel || isDashed,
-      opacity: isBevel ? 0.55 : isDashed ? 0.75 : 1.0,
-      dashed: isDashed || isBevel,
-      dashSize: isDashed || isBevel ? 0.1 : 0,
-      gapSize: isDashed || isBevel ? 0.06 : 0,
+      transparent: isDashed,
+      opacity: isDashed ? 0.75 : 1.0,
+      dashed: isDashed,
+      dashSize: isDashed ? 0.1 : 0,
+      gapSize: isDashed ? 0.06 : 0,
     });
     const line = new Line2(geo, mat);
     line.computeLineDistances();
     line.renderOrder = 1001;
     line.userData.shapeIdx = shapeIdx;
-    // Offset copies are inert while constrained: tag so the drag / select
-    // hit-tests skip them (they're driven by their original).
+    // Offset / mirror / circular-pattern / rectangular-pattern copies are
+    // inert while constrained: tag so the drag / select hit-tests skip them
+    // (they're driven by their original).
     if (isOffset) line.userData.isOffset = true;
+    if (isMirror) line.userData.isMirror = true;
+    if (isCircularPattern) line.userData.isCircularPattern = true;
+    if (isRectangularPattern) line.userData.isRectangularPattern = true;
+    if (isProjected) line.userData.isProjected = true;
     group.add(line);
 
-    // Collect key points for dots — not for offset copies, whose points are
-    // inert (a dot would imply a draggable handle that does nothing).
-    if (!isOffset)
+    // Collect key points for dots — not for offset/mirror/circular-pattern
+    // copies, whose points are inert (a dot would imply a draggable handle
+    // that does nothing).
+    if (!isInert)
       getSnapPoints([shape]).forEach((sp) =>
         dotWorldPts.push(toWorld(sp.x, sp.y, 0.004)),
       );
@@ -273,7 +453,7 @@ export function buildSketchShapesGroup(
   if (dotWorldPts.length > 0) {
     const ptGeo = new THREE.BufferGeometry().setFromPoints(dotWorldPts);
     const ptMat = new THREE.PointsMaterial({
-      color: SKETCH_POINT_COLOR,
+      color: sketchNodeColorFor(theme),
       size: 5,
       sizeAttenuation: false,
       depthTest: false,
@@ -294,6 +474,7 @@ export function buildSketchShapesGroup(
       toWorld,
       res,
       showDimensions,
+      editHidden,
     );
 
   // ── Enclosed region fills (hole-aware, hidden until hover) ──────────────────

@@ -15,7 +15,11 @@ import {
   buildExtrudeSelectGroup,
   applyRenderMode,
 } from "../../three/sceneObjects.js";
-import { updateEmissive } from "../../three/objectMaterials.js";
+import {
+  updateEmissive,
+  finalizeVisibility,
+  updateSketchPlaneVisibility,
+} from "../../three/objectMaterials.js";
 import { resolveItemDepth } from "../../three/geometryParams.js";
 import { reconcileSelectionHighlight } from "../../three/selectionHighlights.js";
 import {
@@ -54,6 +58,7 @@ export function useSceneSync({
   sketchGhostGroupRef,
   sketchGridGroupRef,
   extrudeSelectGroupRef,
+  sweepSelectMode,
   preSketchProjectionRef,
   preExtrudeRenderModeRef,
   dimHintRef,
@@ -70,7 +75,6 @@ export function useSceneSync({
   selectedSubGeometry,
   constraintsVisible,
   dimensionsVisible,
-  curveResolution,
   sketchMode,
   sketchPlacementMode,
   extrudeSelectMode,
@@ -83,12 +87,18 @@ export function useSceneSync({
   pathTraceView,
   curveSegments,
   printPrecision,
+  activeSketchTool,
   setSketchMode,
   setSketchDrawPhase,
   setRotationState,
 }) {
   const defaultMaterial = useStore((s) => s.defaultMaterial);
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
+  const soloItemId = useStore((s) => s.soloItemId);
+  // The Emboss tool reuses the extrude-select fills to pick sketch geometry.
+  const embossGeomPicking = useStore(
+    (s) => s.embossTool?.picking === "geometry",
+  );
   // Tracks whether the path tracer was ever started, so unmount can tear down
   // its render loop without loading the (lazy) module when it was never used.
   const pathTraceUsedRef = useRef(false);
@@ -182,10 +192,10 @@ export function useSceneSync({
     // geometry that later timeline steps were built from, so every subsequent
     // step has to be rebuilt — not just the items in the current view.  Run the
     // full per-step recalc only for such edits.  Crucially, ADDING a new item
-    // (a fresh sketch plane, an extrusion) must NOT recalc — nothing existing
-    // changed — so compare per-item signatures and trigger only when an id
-    // present both before and after differs (plus variable changes).  Object
-    // add/move and resolution toggles keep the cheap current-view regen.
+    // (a fresh sketch plane, an extrusion, a primitive) must NOT recalc — nothing
+    // existing changed — so compare per-item signatures and trigger only when an
+    // id present both before and after differs (plus variable changes).  A plain
+    // add / delete / move with nothing stale does NO regen at all.
     // Capture a boolean's inputIds (and those nested in a chamfer/fillet's
     // source snapshot, recursively) so a RETARGET — which re-points a union, and
     // any chamfer fused onto it, at a different prism set — counts as an upstream
@@ -201,6 +211,11 @@ export function useSceneSync({
       // edit makes it rebuild, not just in the cheap items-only pass.
       else if (r.kind === "chamfer")
         base = `c${r.amount ?? ""}:${r.angleRad ?? ""}:${r.segments ?? ""}`;
+      // Likewise include the push/pull distance: it bbox-centres its result, so
+      // editing the distance must take the full recalc to recompute the
+      // position — the cheap items-only pass keeps the stale anchor and the
+      // body's origin slides along the push/pull direction.
+      else if (r.kind === "pushpull") base = `p${r.distance ?? ""}`;
       else base = r.kind;
       return r.source?.regenerator
         ? `${base}>${regenSig(r.source.regenerator)}`
@@ -231,29 +246,54 @@ export function useSceneSync({
           }
         }
     }
-    upstreamSigRef.current = { map: itemSig, varsSig };
+    const precisionChanged = !isFirst && printPrecision !== prev?.precision;
+    // Some item's cached geometry is stale for the current precision (a freshly
+    // loaded / dirtied csg).  A plain add / delete / move at the same precision
+    // (e.g. dropping in a primitive) leaves every cache current — nothing stale.
+    const hasStale = items.some((i) => {
+      const r = i.regenerator;
+      return r && !(r.regeneratedAt === printPrecision && i.geometryData);
+    });
+    upstreamSigRef.current = {
+      map: itemSig,
+      varsSig,
+      precision: printPrecision,
+    };
+
+    // An upstream edit, a precision change, or a stale cache on first load takes
+    // the full per-step recalc: it stamps the fresh tessellation back into HISTORY,
+    // so a subsequent add doesn't keep re-deriving the csg as "stale".
+    // (regenerateForResolution only updates the live items, not the history they're
+    // replayed from — which is exactly why a precision change / load used to make
+    // every later add re-run the csg.)
+    const fullRecalc =
+      upstreamChanged || precisionChanged || (isFirst && hasStale);
 
     // While a sketch is open, defer the full timeline recalc until it's closed
     // — recomputing every downstream step on each point drag is wasteful (and
     // the 3D solids are hidden behind the sketch anyway).  The deferred recalc
     // runs in the sketch-close effect below.
-    if (upstreamChanged && sketchMode) {
+    if (fullRecalc && sketchMode) {
       pendingRecalcRef.current = true;
       return;
     }
+    // Nothing to do: no upstream change, same precision, and no stale cache — e.g.
+    // adding a primitive — so skip the regen pass entirely (no busy flash).
+    if (!fullRecalc && !hasStale) return;
 
     // The orchestrator is a UI-only module that's never reachable from
     // the OCC worker's transitive imports, so it can route per-item regen
     // through occClient → worker without creating a bundling cycle.
     import("../../three/regenerateOrchestrator.js").then((m) => {
-      if (upstreamChanged) {
+      if (fullRecalc) {
         pendingRecalcRef.current = false;
         m.recalculateTimeline();
       } else {
+        // First load or a stale cache: the cheap current-view regen suffices.
         m.regenerateForResolution(printPrecision);
       }
     });
-  }, [items, curveResolution, variables]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, printPrecision, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run a sketch edit's deferred timeline recalc once the sketch is closed.
   useEffect(() => {
@@ -292,10 +332,38 @@ export function useSceneSync({
       sketchModeRef,
       printPrecision,
     });
+    finalizeVisibility(
+      objectsRef,
+      itemsRef,
+      selectedIdsRef.current,
+      useStore.getState().soloItemId,
+    );
     // Variables drive extrude depth and dimension distances via formula
     // resolution; re-run when they change so geometry/labels reflect the
-    // new values.
-  }, [items, curveResolution, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
+    // new values.  soloItemId is here (not in the render-mode effect) because
+    // toggling solo needs the FULL rebuild: fresh meshes restore visible=true,
+    // applyRenderMode reapplies materials, then finalizeVisibility applies or
+    // releases the solo override.
+  }, [items, printPrecision, variables, defaultMaterial, soloItemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // End solo if the soloed item is gone (deleted, or the timeline moved past
+  // it), restoring the saved view so the user isn't left staring at a blank
+  // scene with no button to toggle off.
+  useEffect(() => {
+    if (soloItemId == null) return;
+    if (items.some((i) => i.id === soloItemId)) return;
+    const st = useStore.getState();
+    if (st.soloView) st._cameraControls?.restoreView?.(st.soloView);
+    st.clearItemSolo();
+  }, [items, soloItemId]);
+
+  // Keep the sketch selection overlays glued to the committed geometry after an
+  // external shapes change (e.g. undoing a move), so they don't linger at the
+  // old positions until the user reselects.
+  useEffect(() => {
+    if (sketchModeRef.current)
+      cameraControlsRef.current?.refreshSketchSelectionOverlays?.();
+  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Persistent sub-geometry selection highlights ─────────────────────────
   // Rebuild a darker-coloured overlay whenever the selected faces or edges
@@ -468,7 +536,10 @@ export function useSceneSync({
     items,
     constraintsVisible,
     dimensionsVisible,
-    curveResolution,
+    printPrecision,
+    // Entering / leaving a mirror-or-pattern edit (double-click) toggles which
+    // copies are hidden, so the in-sketch group must rebuild on tool change.
+    activeSketchTool,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Object-view sketch construction lines ────────────────────────────────
@@ -506,7 +577,17 @@ export function useSceneSync({
     // selection: the "Start from…" offset picker raycasts them as candidate
     // sketch planes.  Keep the group alive through depth + start, building it
     // once on entry and disposing only when the extrude ends.
-    const active = ["profile", "start"].includes(extrudeSelectMode);
+    // The same loop fills are reused by the sweep tools (Revolve/Pipe/Loft) to
+    // pick a profile — build them while a sweep tool is awaiting a profile.
+    // Loft picks two regions, so keep them while its second profile is pending.
+    const sweepPicking =
+      !!sweepSelectMode &&
+      (!sweepSelectMode.profile ||
+        (sweepSelectMode.kind === "loft" && !sweepSelectMode.secondProfile));
+    const active =
+      ["profile", "start"].includes(extrudeSelectMode) ||
+      sweepPicking ||
+      embossGeomPicking;
     if (!active) {
       if (extrudeSelectGroupRef.current) {
         scene.remove(extrudeSelectGroupRef.current);
@@ -536,7 +617,13 @@ export function useSceneSync({
         }
       }
     }
-  }, [extrudeSelectMode, items, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    extrudeSelectMode,
+    sweepSelectMode,
+    embossGeomPicking,
+    items,
+    printPrecision,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Extrude depth input init ──────────────────────────────────────────────
   // The distance overlay + Confirm button appear as soon as the unified
@@ -597,10 +684,24 @@ export function useSceneSync({
     } else {
       updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
     }
+    // Reveal a sketch's reference plane while it's hovered in the objects list.
+    updateSketchPlaneVisibility(
+      objectsRef,
+      itemsRef,
+      materialDialogTarget != null ? null : hoveredId,
+      sketchModeRef.current,
+      selectedId,
+    );
+    finalizeVisibility(
+      objectsRef,
+      itemsRef,
+      selectedIds,
+      useStore.getState().soloItemId,
+    );
   }, [hoveredId, selectedId, selectedIds, materialDialogTarget]);
 
   // ── Render mode ───────────────────────────────────────────────────────────
-  // Also re-runs on curveResolution changes so the wireframe (and the
+  // Also re-runs on printPrecision changes so the wireframe (and the
   // primitive shader vs. wireframe swap) picks up the new chord-deviation
   // precision and matches the smooth shader / CSG / bevel resolution.
 
@@ -621,12 +722,18 @@ export function useSceneSync({
       sketchModeRef,
       printPrecision,
     });
+    finalizeVisibility(
+      objectsRef,
+      itemsRef,
+      selectedIdsRef.current,
+      useStore.getState().soloItemId,
+    );
     const isSmooth = renderMode === "smooth";
     if (allSketchGroupRef.current)
       allSketchGroupRef.current.visible = !isSmooth;
     if (sketchShapesGroupRef.current)
       sketchShapesGroupRef.current.visible = !isSmooth;
-  }, [renderMode, curveResolution]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [renderMode, printPrecision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Cross-section view ────────────────────────────────────────────────────
   // Clip the object meshes (only — helpers, grid, and the origin axis gizmo
@@ -693,7 +800,7 @@ export function useSceneSync({
   }, [
     crossSectionView,
     renderMode,
-    curveResolution,
+    printPrecision,
     items,
     variables,
     defaultMaterial,
@@ -726,7 +833,7 @@ export function useSceneSync({
     return () => {
       cancelled = true;
     };
-  }, [pathTraceView, items, variables, defaultMaterial]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pathTraceView, items, variables, defaultMaterial, soloItemId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stop the path tracer's render loop if the viewport unmounts mid-render.
   useEffect(

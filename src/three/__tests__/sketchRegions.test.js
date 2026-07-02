@@ -7,6 +7,7 @@ import {
   polyArea,
   groupLoopsWithHoles,
 } from "../sceneObjects.js";
+import { buildChamferEdit } from "../sketchGeometry.js";
 
 // ── Stub out THREE.js and other heavy dependencies ────────────────────────────
 // The pure geometry functions under test use no THREE symbols at all; we only
@@ -392,6 +393,51 @@ describe("sketch region detection", () => {
         { ...L(0, 0, 0, 4), dashed: true }, // this edge excluded
       ];
       expect(findClosedLoopsWithShapes(shapes)).toHaveLength(0);
+    });
+
+    it("a bevel (fillet) arc closes a filleted corner's region", () => {
+      // Square with the top-left corner filleted: the two legs are trimmed back
+      // and a bevel arc bridges them.  The arc must participate in region
+      // detection, or the profile reads as open and won't extrude.
+      const edit = buildChamferEdit(
+        squareLines(),
+        { aIdx: 3, aKey: "end", bIdx: 0, bKey: "start" },
+        "bevel",
+        1,
+      );
+      const shapes = squareLines().map((s, i) => {
+        const u = edit.updates.find(([x]) => x === i);
+        return u ? u[1] : s;
+      });
+      shapes.push(edit.newShape); // the bevel arc, index 4
+      expect(edit.newShape.kind).toBe("bevel");
+      const loops = findClosedLoopsWithShapes(shapes);
+      expect(loops).toHaveLength(1);
+      // The closed loop includes the bevel arc.
+      expect(loops[0].shapeIndices).toContain(4);
+    });
+
+    it("text glyph contours become extrudable loops", () => {
+      // A square (1 loop) plus a text shape whose stored contour is a unit
+      // square → the text contributes its own loop (so it can fill / extrude)
+      // without going through the intersection/DFS machinery.
+      const textShape = {
+        type: "text",
+        x: 1,
+        y: 1,
+        contours: [
+          [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 1, y: -1 },
+            { x: 0, y: -1 },
+          ],
+        ],
+      };
+      const shapes = [...squareLines(), textShape];
+      const loops = findClosedLoopsWithShapes(shapes);
+      expect(loops).toHaveLength(2);
+      expect(loops.some((l) => l.shapeIndices.includes(4))).toBe(true);
     });
 
     it("two separate rect shapes → 2 independent loops", () => {
@@ -1411,5 +1457,22 @@ describe("sketch region detection", () => {
         polyArea(f.find((fd) => polyArea(fd.polygon2D) > 10).polygon2D),
       );
     });
+  });
+});
+
+describe("region detection is bounded on dense input", () => {
+  it("completes quickly on a dense crossing-line grid instead of hanging", () => {
+    // A 40x40 grid of crossing lines (a projected wireframe is similarly dense):
+    // every horizontal crosses every vertical, exploding intersections + cycles.
+    const shapes = [];
+    for (let i = 0; i < 40; i++) {
+      shapes.push({ type: "line", x1: 0, y1: i, x2: 40, y2: i });
+      shapes.push({ type: "line", x1: i, y1: 0, x2: i, y2: 40 });
+    }
+    const start = Date.now();
+    const loops = findClosedLoops(shapes);
+    // It must return (bailing/budget) well under vitest's timeout — not hang.
+    expect(Date.now() - start).toBeLessThan(3000);
+    expect(Array.isArray(loops)).toBe(true);
   });
 });

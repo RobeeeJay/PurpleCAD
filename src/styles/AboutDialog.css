@@ -1,0 +1,58 @@
+.about-dialog {
+  min-width: 320px;
+  max-width: 400px;
+}
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 16px;
+  gap: 4px;
+}
+
+.about-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  margin-bottom: 8px;
+}
+
+.about-name {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.about-version {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  margin-bottom: 12px;
+}
+
+.about-commit {
+  margin-left: 6px;
+  opacity: 0.7;
+}
+
+.about-deps {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.about-deps td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.about-deps-name {
+  color: var(--text-secondary);
+}
+
+.about-deps-version {
+  font-family: var(--font-mono);
+  text-align: right;
+  color: var(--text-primary);
+}

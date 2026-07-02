@@ -1,19 +1,40 @@
 // Manages the lifecycle of "sketch mode" — what happens when the
 // selected item is a sketch.  Entering: save the user's camera state,
-// force isometric projection, animate a fly-in to the sketch plane,
+// force orthographic projection, animate a fly-in to the sketch plane,
 // build the grid + axis overlay, and re-run applyRenderMode so 3D
 // geometry behind the active sketch becomes see-through.  Leaving:
 // dispose the grid + preview overlays, restore the saved camera, and
 // rebuild scene objects so any downstream extrudes pick up the latest
 // sketch shapes.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import {
   buildSceneObjects,
   applyRenderMode,
 } from "../../three/sceneObjects.js";
 import { useStore } from "../../store";
+import { activePrecision } from "../../three/resolution.js";
+import { gridMinorColorFor } from "../../three/theme.js";
+import {
+  worldPolylineToLocal2D,
+  fitProjectedShapes,
+} from "../../three/sketchProjection.js";
+
+// Geometry-only signature of a shape list, so re-projection only writes to the
+// store when the projected geometry actually moved (avoids an update loop).
+const projSig = (shapes) =>
+  shapes
+    .map((s) => {
+      const r = (n) => Math.round((n ?? 0) * 1e4);
+      if (s.type === "line")
+        return `l${r(s.x1)},${r(s.y1)},${r(s.x2)},${r(s.y2)}`;
+      if (s.type === "circle") return `c${r(s.cx)},${r(s.cy)},${r(s.r)}`;
+      if (s.type === "arc")
+        return `a${r(s.cx)},${r(s.cy)},${r(s.r)},${r(s.startAngle)},${r(s.endAngle)}`;
+      return JSON.stringify(s);
+    })
+    .join("|");
 
 // Quantize a world coord into a stable key so triangles that share a vertex
 // (even with tiny float drift, e.g. from CSG) map to the same edge. 1e4 → 1e-4
@@ -202,11 +223,11 @@ export function useSketchModeEffect({
           axisGroupRef.current.visible = useStore.getState().axisVisible;
         if (planeRef.current) planeRef.current.visible = true;
         // Restore the projection mode the user had selected before
-        // entering sketch mode.  Sketch mode forces isometric so the
+        // entering sketch mode.  Sketch mode forces orthographic so the
         // sketch plane sits flat with no perspective distortion.
         if (
           preSketchProjectionRef.current &&
-          preSketchProjectionRef.current !== "isometric"
+          preSketchProjectionRef.current !== "orthographic"
         ) {
           useStore.getState().setProjectionMode(preSketchProjectionRef.current);
         }
@@ -235,8 +256,7 @@ export function useSketchModeEffect({
           composerRef,
           envTextureRef,
           sketchModeRef,
-          printPrecision:
-            useStore.getState().curveResolution === "print" ? 0.01 : null,
+          printPrecision: activePrecision(),
         });
         clearSketchGrid();
         const saved = savedCameraStateRef.current;
@@ -301,8 +321,8 @@ export function useSketchModeEffect({
       // sketch plane — now the real geometry stays visible behind the
       // sketch, no ghost projection needed.
       preSketchProjectionRef.current = projectionMode;
-      if (projectionMode !== "isometric") {
-        useStore.getState().setProjectionMode("isometric");
+      if (projectionMode !== "orthographic") {
+        useStore.getState().setProjectionMode("orthographic");
       }
       applyRenderMode(useStore.getState().renderMode, {
         scene,
@@ -375,7 +395,7 @@ export function useSketchModeEffect({
       const l = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([a, b]),
         new THREE.LineBasicMaterial({
-          color: 0x445566,
+          color: gridMinorColorFor(useStore.getState().theme),
           transparent: true,
           opacity: 0.45,
           depthTest: false,
@@ -505,5 +525,55 @@ export function useSketchModeEffect({
       scene.add(ghostGroup);
       sketchGhostGroupRef.current = ghostGroup;
     }
+  }, [selectedId, items]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Live re-projection ────────────────────────────────────────────────────
+  // Projected sketch geometry tracks its source: re-derive each projection
+  // group from its stored source-local polyline through the source's current
+  // world transform.  Gated on a per-group source-transform signature so it ONLY
+  // works when the source actually moved — this both avoids needless refits on
+  // every unrelated sketch edit AND stops the effect from re-triggering on its
+  // own writes (which would freeze the app).
+  const projXformRef = useRef(new Map());
+  useEffect(() => {
+    if (!sketchModeRef.current) return;
+    const sketch = itemsRef.current.find(
+      (i) => i.id === selectedId && i.type === "sketch",
+    );
+    const sketchMesh = sketch ? objectsRef.current[sketch.id] : null;
+    if (!sketch || !sketchMesh) return;
+    const groups = new Map();
+    (sketch.shapes || []).forEach((s) => {
+      const key = s.projection?.key;
+      if (!key) return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(s);
+    });
+    if (groups.size === 0) return;
+    const xformSig = (m) =>
+      `${sketchMesh.matrixWorld.elements.map((e) => Math.round(e * 1e3)).join(",")}|${m.elements.map((e) => Math.round(e * 1e3)).join(",")}`;
+    groups.forEach((grpShapes, key) => {
+      const proj = grpShapes[0].projection;
+      const source = objectsRef.current[proj.sourceId];
+      if (!source || !proj.localPolyline) return;
+      source.updateMatrixWorld(true);
+      sketchMesh.updateMatrixWorld(true);
+      const sig = xformSig(source.matrixWorld);
+      if (projXformRef.current.get(key) === sig) return; // source hasn't moved
+      projXformRef.current.set(key, sig);
+      const mw = source.matrixWorld;
+      const worldPoly = proj.localPolyline.map(([x, y, z]) => {
+        const v = new THREE.Vector3(x, y, z).applyMatrix4(mw);
+        return { x: v.x, y: v.y, z: v.z };
+      });
+      const pts2d = worldPolylineToLocal2D(
+        worldPoly,
+        sketchMesh.position,
+        sketchMesh.quaternion,
+      );
+      const newShapes = fitProjectedShapes(pts2d, { projection: proj });
+      if (newShapes.length && projSig(newShapes) !== projSig(grpShapes))
+        useStore.getState().updateProjectionShapes(sketch.id, key, newShapes);
+    });
   }, [selectedId, items]); // eslint-disable-line react-hooks/exhaustive-deps
 }

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="4" y1="20" x2="4" y2="5"/>
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="4" y1="20" x2="20" y2="20"/>
+  <polyline stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" points="4,14 10,14 10,20"/>
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="5"/>
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="20" cy="20"/>
+</svg>

@@ -4,8 +4,25 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+
+// ── Sweep / loft / shell ─────────────────────────────────────────────────
+#include <BRepOffsetAPI_ThruSections.hxx>
+#include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <BRepOffsetAPI_MakeOffsetShape.hxx>
+#include <BRepOffsetAPI_DraftAngle.hxx>
+#include <gp_Pln.hxx>
+#include <gp_Ax3.hxx>
+
+// ── Helical thread (hole tool) ───────────────────────────────────────────
+#include <Geom_CylindricalSurface.hxx>
+#include <GCE2d_MakeSegment.hxx>
+#include <gp_Pnt2d.hxx>
+#include <BRepLib.hxx>
 
 // ── Wire / face builders (extrude) ──────────────────────────────────────
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -13,6 +30,9 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
 
 // ── Boolean ops ──────────────────────────────────────────────────────────
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -61,6 +81,7 @@
 // ── STEP export ─────────────────────────────────────────────────────────
 #include <STEPControl_Writer.hxx>
 #include <STEPControl_StepModelType.hxx>
+#include <STEPControl_Reader.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 
 #include <algorithm>
@@ -475,6 +496,53 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
   return out;
 }
 
+// Resolve the actual faces a subGeo spec selects — the face-only analogue of
+// SelectSubGeoEdges (which explodes matched faces into their edges for
+// chamfer/fillet).  Matches by normal, using the stored centroid only as a
+// nearest tie-break among same-normal faces so a resized face still matches.
+// Used by push/pull, which needs the TopoDS_Face itself to sweep a prism.
+static std::vector<TopoDS_Face> SelectSubGeoFaces(const TopoDS_Shape& shape,
+                                                  const EdgeFaceSpec& spec) {
+  std::vector<TopoDS_Face> out;
+  const double eps = 0.05;
+  for (const auto& req : spec.faces) {
+    TopoDS_Face best;
+    double bestDist = 1e300;
+    bool found = false;
+    std::vector<TopoDS_Face> allNormalMatches;
+    TopExp_Explorer fexp(shape, TopAbs_FACE);
+    for (; fexp.More(); fexp.Next()) {
+      TopoDS_Face face = TopoDS::Face(fexp.Current());
+      auto n = ComputeFaceNormal(face);
+      if (!n.valid) continue;
+      if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
+          std::abs(req.nz - n.z) >= eps)
+        continue;
+      if (!req.hasCentroid) {
+        allNormalMatches.push_back(face);
+        continue;
+      }
+      gp_Pnt pnt(req.cx, req.cy, req.cz);
+      BRepBuilderAPI_MakeVertex vMk(pnt);
+      BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
+                                      Extrema_ExtAlgo_Grad);
+      dist.Perform();
+      double d = (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
+      if (!found || d < bestDist) {
+        best = face;
+        bestDist = d;
+        found = true;
+      }
+    }
+    if (req.hasCentroid) {
+      if (found) out.push_back(best);
+    } else {
+      for (const auto& f : allNormalMatches) out.push_back(f);
+    }
+  }
+  return out;
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Exported functions — primitives
 // ════════════════════════════════════════════════════════════════════════
@@ -530,6 +598,21 @@ Napi::Number MakeCylinder(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// makeCone(originY, radiusBottom, radiusTop, height) → shapeId
+// Axis = +Y, centred (originY = -height/2).  radiusTop may be 0 (an apex).
+Napi::Number MakeCone(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    double originY = GetDouble(info[0], -1.0);
+    double r1      = GetDouble(info[1], 1.0);
+    double r2      = GetDouble(info[2], 0.0);
+    double height  = GetDouble(info[3], 2.0);
+    gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
+    BRepPrimAPI_MakeCone mk(ax, r1, r2, height);
+    return Napi::Number::New(env, StoreShape(mk.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // makeTorus(majorR, minorR) → shapeId
 // Axis = +Y (matches primitives.js makeTorus which uses ax2YUp).
 Napi::Number MakeTorus(const Napi::CallbackInfo& info) {
@@ -541,6 +624,45 @@ Napi::Number MakeTorus(const Napi::CallbackInfo& info) {
     BRepPrimAPI_MakeTorus mk(ax, majorR, minorR);
     return Napi::Number::New(env, StoreShape(mk.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// Build a closed polygon wire in the sketch's centroid-local frame (z=0).
+// `pts` is [x0,y0, x1,y1, ...]; centroid (cx,cy) is subtracted so the sketch
+// origin sits at (0,0).  Returns a null wire if the builder fails.
+static TopoDS_Wire BuildPolyWire(const double* pts, size_t n,
+                                 double cx, double cy) {
+  if (n < 3) return TopoDS_Wire();
+  BRepBuilderAPI_MakeWire wireMk;
+  for (size_t i = 0; i < n; i++) {
+    size_t j = (i + 1) % n;
+    gp_Pnt p1(pts[i * 2] - cx, pts[i * 2 + 1] - cy, 0);
+    gp_Pnt p2(pts[j * 2] - cx, pts[j * 2 + 1] - cy, 0);
+    BRepBuilderAPI_MakeEdge edgeMk(p1, p2);
+    wireMk.Add(edgeMk.Edge());
+  }
+  return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
+}
+
+// Build a planar face from an outer polygon + CW hole polygons (centroid-local,
+// z=0).  Shared by extrude / revolve / loft.  Throws on a bad outer wire/face.
+static TopoDS_Face BuildProfileFace(const Napi::Float64Array& outer,
+                                    const Napi::Array& holes,
+                                    double cx, double cy) {
+  TopoDS_Wire ow = BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+  if (ow.IsNull()) throw std::runtime_error("outer wire builder failed");
+  BRepBuilderAPI_MakeFace faceMk(ow, true);
+  if (!faceMk.IsDone())
+    throw std::runtime_error("face builder failed (outer wire)");
+  TopoDS_Face face = faceMk.Face();
+  for (uint32_t h = 0; h < holes.Length(); h++) {
+    Napi::Float64Array hpts = holes.Get(h).As<Napi::Float64Array>();
+    TopoDS_Wire hw =
+        BuildPolyWire(hpts.Data(), hpts.ElementLength() / 2, cx, cy);
+    if (hw.IsNull()) continue;
+    BRepBuilderAPI_MakeFace faceWithHole(face, hw);
+    if (faceWithHole.IsDone()) face = faceWithHole.Face();
+  }
+  return face;
 }
 
 // makeExtrude(outerPts, holes, centroidX, centroidY, depth) → shapeId
@@ -558,41 +680,7 @@ Napi::Number MakeExtrude(const Napi::CallbackInfo& info) {
     double cy                = GetDouble(info[3]);
     double depth             = GetDouble(info[4]);
 
-    // Build outer wire
-    BRepBuilderAPI_MakeWire wireMk;
-    size_t nOuter = outer.ElementLength() / 2;
-    for (size_t i = 0; i < nOuter; i++) {
-      size_t j = (i + 1) % nOuter;
-      gp_Pnt p1(outer[i*2]   - cx, outer[i*2+1]   - cy, 0);
-      gp_Pnt p2(outer[j*2]   - cx, outer[j*2+1]   - cy, 0);
-      BRepBuilderAPI_MakeEdge edgeMk(p1, p2);
-      wireMk.Add(edgeMk.Edge());
-    }
-    if (!wireMk.IsDone())
-      throw std::runtime_error("outer wire builder failed");
-
-    BRepBuilderAPI_MakeFace faceMk(wireMk.Wire(), true);
-    if (!faceMk.IsDone())
-      throw std::runtime_error("face builder failed (outer wire)");
-    TopoDS_Face face = faceMk.Face();
-
-    // Add holes
-    for (uint32_t h = 0; h < holes.Length(); h++) {
-      Napi::Float64Array hpts = holes.Get(h).As<Napi::Float64Array>();
-      size_t nHole = hpts.ElementLength() / 2;
-      if (nHole < 3) continue;
-      BRepBuilderAPI_MakeWire holeMk;
-      for (size_t i = 0; i < nHole; i++) {
-        size_t j = (i + 1) % nHole;
-        gp_Pnt p1(hpts[i*2] - cx, hpts[i*2+1] - cy, 0);
-        gp_Pnt p2(hpts[j*2] - cx, hpts[j*2+1] - cy, 0);
-        BRepBuilderAPI_MakeEdge edgeMk(p1, p2);
-        holeMk.Add(edgeMk.Edge());
-      }
-      if (!holeMk.IsDone()) continue;
-      BRepBuilderAPI_MakeFace faceWithHole(face, holeMk.Wire());
-      if (faceWithHole.IsDone()) face = faceWithHole.Face();
-    }
+    TopoDS_Face face = BuildProfileFace(outer, holes, cx, cy);
 
     // Prism along +Z by depth (matches primitives.js: base at z=0, top at z=depth)
     gp_Vec dir(0, 0, depth);
@@ -600,6 +688,297 @@ Napi::Number MakeExtrude(const Napi::CallbackInfo& info) {
     if (!prismMk.IsDone())
       throw std::runtime_error("prism builder failed");
     return Napi::Number::New(env, StoreShape(prismMk.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// makeRevolve(outerPts, holes, cx, cy, ax1, ay1, ax2, ay2, angleRad, prismSides)
+//   → shapeId
+// Revolve the profile around the sketch-local axis through (ax1,ay1)-(ax2,ay2).
+// prismSides <= 0 → smooth surface of revolution (BRepPrimAPI_MakeRevol).
+// prismSides >= 3 → faceted "prism" sweep: the angle is split into N ruled
+//   segments (loft the profile wire between successive rotations) fused into one
+//   solid, giving N flat sides.
+Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    Napi::Float64Array outer = info[0].As<Napi::Float64Array>();
+    Napi::Array holes        = info[1].As<Napi::Array>();
+    double cx  = GetDouble(info[2]), cy  = GetDouble(info[3]);
+    // Axis endpoints in the profile sketch's frame (3D — the axis may come from
+    // a different, non-coplanar sketch, so a z component is allowed).
+    double ax1 = GetDouble(info[4]), ay1 = GetDouble(info[5]), az1 = GetDouble(info[6]);
+    double ax2 = GetDouble(info[7]), ay2 = GetDouble(info[8]), az2 = GetDouble(info[9]);
+    double angleRad = GetDouble(info[10], 2 * M_PI);
+    int prismSides =
+        info[11].IsNumber() ? info[11].As<Napi::Number>().Int32Value() : 0;
+    // Axial advance per full turn (helical/coil sweep).  0 → a flat revolve.
+    double pitch = GetDouble(info[12], 0.0);
+
+    double dx = ax2 - ax1, dy = ay2 - ay1, dz = az2 - az1;
+    double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 1e-9) throw std::runtime_error("revolve axis is degenerate");
+    gp_Dir axisDir(dx / len, dy / len, dz / len);
+    // Axis in the centroid-local frame the profile is built in (x/y centroid-
+    // subtracted to match the face; z carried through as-is).
+    gp_Ax1 axis(gp_Pnt(ax1 - cx, ay1 - cy, az1), axisDir);
+
+    // Helical sweep: thread the profile through one multi-section loft, each
+    // section rotated about the axis AND advanced along it by the pitch.  Used
+    // whenever a non-zero offset/turn is set (the only way to exceed a full
+    // turn meaningfully).  Outer boundary only (holes aren't lofted).
+    if (std::abs(pitch) > 1e-9) {
+      TopoDS_Wire base =
+          BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+      if (base.IsNull())
+        throw std::runtime_error("revolve profile wire builder failed");
+      const int perTurn = prismSides >= 3 ? prismSides : 24;
+      int steps = (int)std::ceil(perTurn * std::abs(angleRad) / (2 * M_PI));
+      if (steps < 2) steps = 2;
+      BRepOffsetAPI_ThruSections loft(Standard_True /*solid*/,
+                                      prismSides >= 3 /*ruled vs smooth*/);
+      for (int k = 0; k <= steps; k++) {
+        double a = angleRad * k / steps;
+        double off = pitch * a / (2 * M_PI);
+        gp_Trsf rot;
+        rot.SetRotation(axis, a);
+        gp_Trsf tr;
+        tr.SetTranslation(
+            gp_Vec(axisDir.X() * off, axisDir.Y() * off, axisDir.Z() * off));
+        TopoDS_Wire w = TopoDS::Wire(
+            BRepBuilderAPI_Transform(base, tr.Multiplied(rot), true).Shape());
+        loft.AddWire(w);
+      }
+      loft.Build();
+      if (!loft.IsDone()) throw std::runtime_error("helical revolve failed");
+      return Napi::Number::New(env, StoreShape(loft.Shape()));
+    }
+
+    // A flat revolve can't exceed a full turn — extra rotations would overlap.
+    if (angleRad > 2 * M_PI) angleRad = 2 * M_PI;
+
+    if (prismSides >= 3) {
+      TopoDS_Wire base =
+          BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+      if (base.IsNull())
+        throw std::runtime_error("revolve profile wire builder failed");
+      // Fuse N ruled wedges (each a loft between two successive rotations of the
+      // profile) into one faceted solid.  Fuzzy fuse + unify weld the seams, the
+      // same recipe BooleanOp's union path uses.
+      const Standard_Real kFuzzy = 1.0e-5;
+      TopoDS_Shape result;
+      bool haveResult = false;
+      for (int k = 0; k < prismSides; k++) {
+        double a0 = angleRad * k / prismSides;
+        double a1 = angleRad * (k + 1) / prismSides;
+        gp_Trsf t0, t1;
+        t0.SetRotation(axis, a0);
+        t1.SetRotation(axis, a1);
+        TopoDS_Wire w0 =
+            TopoDS::Wire(BRepBuilderAPI_Transform(base, t0, true).Shape());
+        TopoDS_Wire w1 =
+            TopoDS::Wire(BRepBuilderAPI_Transform(base, t1, true).Shape());
+        BRepOffsetAPI_ThruSections seg(Standard_True, Standard_True);
+        seg.AddWire(w0);
+        seg.AddWire(w1);
+        seg.Build();
+        if (!seg.IsDone()) continue;
+        TopoDS_Shape wedge = seg.Shape();
+        if (!haveResult) {
+          result = wedge;
+          haveResult = true;
+        } else {
+          BRepAlgoAPI_Fuse fuse(result, wedge);
+          fuse.SetFuzzyValue(kFuzzy);
+          fuse.Build();
+          if (fuse.IsDone()) result = fuse.Shape();
+        }
+      }
+      if (!haveResult)
+        throw std::runtime_error("prism revolve produced no geometry");
+      try {
+        ShapeUpgrade_UnifySameDomain unifier(result, Standard_True,
+                                             Standard_True, Standard_True);
+        unifier.Build();
+        result = unifier.Shape();
+      } catch (const std::exception&) {
+        // keep the un-unified fuse result
+      }
+      return Napi::Number::New(env, StoreShape(result));
+    }
+
+    TopoDS_Face face = BuildProfileFace(outer, holes, cx, cy);
+    BRepPrimAPI_MakeRevol rev(face, axis, angleRad);
+    if (!rev.IsDone())
+      throw std::runtime_error(
+          "revolve failed — the axis may cross the profile");
+    return Napi::Number::New(env, StoreShape(rev.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// makePipe(outer, holes, cx, cy, pathPts, twistTurns, autoRotate) → shapeId
+// Sweep the 2D profile cross-section along the world-space path polyline
+// `pathPts` ([x0,y0,z0, x1,y1,z1, ...], >= 2 points).  twistTurns spins the
+// profile about the path that many full turns over the sweep; autoRotate keeps
+// the section perpendicular to the local path tangent (so a curved path isn't
+// flattened).  With both off this is the plain start-oriented pipe.
+Napi::Number MakePipe(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    Napi::Float64Array outer = info[0].As<Napi::Float64Array>();
+    Napi::Array holes        = info[1].As<Napi::Array>();
+    double cx = GetDouble(info[2]), cy = GetDouble(info[3]);
+    Napi::Float64Array path = info[4].As<Napi::Float64Array>();
+    double twistTurns = GetDouble(info[5], 0.0);
+    bool autoRotate =
+        info[6].IsBoolean() ? info[6].As<Napi::Boolean>().Value() : false;
+    size_t nPath = path.ElementLength() / 3;
+    if (nPath < 2) throw std::runtime_error("pipe path needs at least 2 points");
+
+    const bool custom = std::abs(twistTurns) > 1e-9 || autoRotate;
+
+    if (!custom) {
+      // Plain pipe: spine + a single start-oriented profile.
+      BRepBuilderAPI_MakeWire wireMk;
+      gp_Pnt prev(path[0], path[1], path[2]);
+      for (size_t i = 1; i < nPath; i++) {
+        gp_Pnt p(path[i * 3], path[i * 3 + 1], path[i * 3 + 2]);
+        if (prev.Distance(p) > 1e-9)
+          wireMk.Add(BRepBuilderAPI_MakeEdge(prev, p).Edge());
+        prev = p;
+      }
+      if (!wireMk.IsDone()) throw std::runtime_error("pipe path wire failed");
+      TopoDS_Face face = BuildProfileFace(outer, holes, cx, cy);
+      gp_Pnt p0(path[0], path[1], path[2]);
+      gp_Dir tangent(path[3] - path[0], path[4] - path[1], path[5] - path[2]);
+      gp_Trsf place;
+      place.SetTransformation(gp_Ax3(p0, tangent));
+      place.Invert();
+      TopoDS_Face placed =
+          TopoDS::Face(BRepBuilderAPI_Transform(face, place, true).Shape());
+      BRepOffsetAPI_MakePipe pipe(wireMk.Wire(), placed);
+      pipe.Build();
+      if (!pipe.IsDone()) throw std::runtime_error("pipe sweep failed");
+      return Napi::Number::New(env, StoreShape(pipe.Shape()));
+    }
+
+    // Twist / auto-rotate: loft the profile through many sections, each placed
+    // and oriented along the path (with a rotation-minimizing frame when
+    // auto-rotating) and twisted progressively.
+
+    // De-dup the raw path points.
+    std::vector<gp_Pnt> raw;
+    raw.push_back(gp_Pnt(path[0], path[1], path[2]));
+    for (size_t i = 1; i < nPath; i++) {
+      gp_Pnt p(path[i * 3], path[i * 3 + 1], path[i * 3 + 2]);
+      if (p.Distance(raw.back()) > 1e-9) raw.push_back(p);
+    }
+    if (raw.size() < 2) throw std::runtime_error("pipe path is degenerate");
+
+    // Resample evenly by arc length — denser when there's more twist to show.
+    int minSec = (int)raw.size();
+    int twistSec = (int)std::ceil(24.0 * std::abs(twistTurns)) + 1;
+    int n = minSec > twistSec ? minSec : twistSec;
+    if (n < 2) n = 2;
+    std::vector<double> cum(raw.size(), 0.0);
+    for (size_t i = 1; i < raw.size(); i++)
+      cum[i] = cum[i - 1] + raw[i].Distance(raw[i - 1]);
+    double total = cum.back();
+    if (total < 1e-9) throw std::runtime_error("pipe path has zero length");
+    std::vector<gp_Pnt> pts(n);
+    for (int k = 0; k < n; k++) {
+      double s = total * k / (n - 1);
+      size_t i = 1;
+      while (i < raw.size() && cum[i] < s) i++;
+      if (i >= raw.size()) { pts[k] = raw.back(); continue; }
+      double segLen = cum[i] - cum[i - 1];
+      double t = segLen > 1e-12 ? (s - cum[i - 1]) / segLen : 0.0;
+      pts[k] = gp_Pnt(raw[i - 1].X() + (raw[i].X() - raw[i - 1].X()) * t,
+                      raw[i - 1].Y() + (raw[i].Y() - raw[i - 1].Y()) * t,
+                      raw[i - 1].Z() + (raw[i].Z() - raw[i - 1].Z()) * t);
+    }
+
+    auto tangentAt = [&](int i) -> gp_Dir {
+      gp_Pnt a = pts[i > 0 ? i - 1 : 0];
+      gp_Pnt b = pts[i < n - 1 ? i + 1 : n - 1];
+      gp_Vec v(a, b);
+      if (v.Magnitude() < 1e-9) return gp_Dir(1, 0, 0);
+      return gp_Dir(v);
+    };
+
+    TopoDS_Wire base =
+        BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+    if (base.IsNull())
+      throw std::runtime_error("pipe profile wire builder failed");
+
+    gp_Dir Z0 = tangentAt(0);
+    gp_Dir Xcur = gp_Ax2(pts[0], Z0).XDirection();
+    gp_Dir Zprev = Z0;
+
+    BRepOffsetAPI_ThruSections loft(Standard_True, Standard_False);
+    for (int k = 0; k < n; k++) {
+      gp_Dir Z = autoRotate ? tangentAt(k) : Z0;
+      if (autoRotate && k > 0) {
+        // Rotation-minimizing frame: carry X across the tangent's turn.
+        gp_Vec cr = gp_Vec(Zprev).Crossed(gp_Vec(Z));
+        double sn = cr.Magnitude();
+        if (sn > 1e-9) {
+          double ang = std::atan2(sn, gp_Vec(Zprev).Dot(gp_Vec(Z)));
+          Xcur = Xcur.Rotated(gp_Ax1(gp::Origin(), gp_Dir(cr)), ang);
+        }
+      }
+      Zprev = Z;
+      double theta = twistTurns * 2 * M_PI * (n > 1 ? (double)k / (n - 1) : 0.0);
+      gp_Dir Xk = std::abs(theta) > 1e-12
+                      ? Xcur.Rotated(gp_Ax1(gp::Origin(), Z), theta)
+                      : Xcur;
+      gp_Trsf place;
+      place.SetTransformation(gp_Ax3(pts[k], Z, Xk));
+      place.Invert();
+      loft.AddWire(
+          TopoDS::Wire(BRepBuilderAPI_Transform(base, place, true).Shape()));
+    }
+    loft.Build();
+    if (!loft.IsDone()) throw std::runtime_error("pipe sweep (twist) failed");
+    return Napi::Number::New(env, StoreShape(loft.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// Build a closed wire from a world-space 3D polyline [x0,y0,z0, x1,y1,z1, ...].
+static TopoDS_Wire BuildWorldWire(const Napi::Float64Array& pts) {
+  size_t n = pts.ElementLength() / 3;
+  if (n < 3) return TopoDS_Wire();
+  BRepBuilderAPI_MakeWire wireMk;
+  for (size_t i = 0; i < n; i++) {
+    size_t j = (i + 1) % n;
+    gp_Pnt p1(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+    gp_Pnt p2(pts[j * 3], pts[j * 3 + 1], pts[j * 3 + 2]);
+    if (p1.Distance(p2) < 1e-9) continue;
+    wireMk.Add(BRepBuilderAPI_MakeEdge(p1, p2).Edge());
+  }
+  return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
+}
+
+// makeLoft(wireAPts, wireBPts) → shapeId
+// Loft a smooth solid between two world-space closed profiles (each a flat 3D
+// polyline).  The caller positions both loops on their own sketch planes, so
+// this just threads them through BRepOffsetAPI_ThruSections.  Holes aren't
+// supported (outer boundaries only).
+Napi::Number MakeLoft(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    Napi::Float64Array a = info[0].As<Napi::Float64Array>();
+    Napi::Float64Array b = info[1].As<Napi::Float64Array>();
+    TopoDS_Wire wa = BuildWorldWire(a);
+    TopoDS_Wire wb = BuildWorldWire(b);
+    if (wa.IsNull() || wb.IsNull())
+      throw std::runtime_error("loft needs two closed profiles");
+    BRepOffsetAPI_ThruSections loft(Standard_True /*solid*/,
+                                    Standard_False /*ruled → smooth*/);
+    loft.AddWire(wa);
+    loft.AddWire(wb);
+    loft.Build();
+    if (!loft.IsDone()) throw std::runtime_error("loft failed");
+    return Napi::Number::New(env, StoreShape(loft.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -617,6 +996,43 @@ Napi::Number TransformShape(const Napi::CallbackInfo& info) {
     double rx = GetDouble(info[4]), ry = GetDouble(info[5]), rz = GetDouble(info[6]);
     TopoDS_Shape shape = FetchShape(id);
     gp_Trsf trsf = BuildTransform(tx, ty, tz, rx, ry, rz);
+    BRepBuilderAPI_Transform mk(shape, trsf, true);
+    return Napi::Number::New(env, StoreShape(mk.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// mirrorShape(id, ox,oy,oz, nx,ny,nz) → newShapeId
+// Reflect a shape across the plane through (o) with normal (n).
+Napi::Number MirrorShape(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id = info[0].As<Napi::Number>().Int32Value();
+    double ox = GetDouble(info[1]), oy = GetDouble(info[2]), oz = GetDouble(info[3]);
+    double nx = GetDouble(info[4]), ny = GetDouble(info[5]), nz = GetDouble(info[6]);
+    double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+    if (len < 1e-9) throw std::runtime_error("mirror plane normal is degenerate");
+    TopoDS_Shape shape = FetchShape(id);
+    gp_Trsf trsf;
+    trsf.SetMirror(gp_Ax2(gp_Pnt(ox, oy, oz), gp_Dir(nx / len, ny / len, nz / len)));
+    BRepBuilderAPI_Transform mk(shape, trsf, true);
+    return Napi::Number::New(env, StoreShape(mk.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// rotateShapeAxis(id, ox,oy,oz, dx,dy,dz, angleRad) → newShapeId
+// Rotate a shape about the axis through (o) along direction (d).
+Napi::Number RotateShapeAxis(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id = info[0].As<Napi::Number>().Int32Value();
+    double ox = GetDouble(info[1]), oy = GetDouble(info[2]), oz = GetDouble(info[3]);
+    double dx = GetDouble(info[4]), dy = GetDouble(info[5]), dz = GetDouble(info[6]);
+    double angle = GetDouble(info[7], 0.0);
+    double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 1e-9) throw std::runtime_error("rotation axis is degenerate");
+    TopoDS_Shape shape = FetchShape(id);
+    gp_Trsf trsf;
+    trsf.SetRotation(gp_Ax1(gp_Pnt(ox, oy, oz), gp_Dir(dx / len, dy / len, dz / len)), angle);
     BRepBuilderAPI_Transform mk(shape, trsf, true);
     return Napi::Number::New(env, StoreShape(mk.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -779,6 +1195,279 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// pushPullFaces(id, subGeo, distance) → newShapeId
+// Moves each selected planar face along its OUTWARD normal by `distance`
+// (signed: +pull grows the solid, -push shrinks it).  Each face is swept into
+// a feature prism that is fused (pull) or cut (push) from the solid; a final
+// ShapeUpgrade_UnifySameDomain welds the resulting coplanar side-wall seams so
+// the body stays a clean single solid — the same fuzzy-fuse + unify recipe the
+// union path uses to keep abutting geometry valid.
+//
+// subGeo: { faces?: [{nx,ny,nz,cx?,cy?,cz?}] }.  Edges are ignored — push/pull
+// operates on faces only.
+Napi::Number PushPullFaces(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id          = info[0].As<Napi::Number>().Int32Value();
+    Napi::Object sg = info[1].As<Napi::Object>();
+    double distance = GetDouble(info[2], 0.0);
+
+    TopoDS_Shape shape = FetchShape(id);
+    EdgeFaceSpec spec  = ParseSubGeo(sg);
+    // No faces, or a zero move — nothing to do; hand back the input unchanged.
+    if (spec.faces.empty() || std::abs(distance) < 1e-9)
+      return Napi::Number::New(env, StoreShape(shape));
+
+    auto faces = SelectSubGeoFaces(shape, spec);
+    // 0 = sentinel "no faces matched" — the JS bridge turns this into a
+    // descriptive error (same convention as chamfer/fillet).
+    if (faces.empty()) return Napi::Number::New(env, 0);
+
+    const bool pull = distance > 0;
+    const Standard_Real kFuzzy = 1.0e-5;
+    TopoDS_Shape result = shape;
+    try {
+      for (const auto& face : faces) {
+        FaceNormal n = ComputeFaceNormal(face);
+        if (!n.valid) continue;
+        // Signed sweep: outward (pull) or inward (push) by |distance|.  The
+        // prism is built from the ORIGINAL face geometry; since distinct faces
+        // don't overlap, fusing / cutting them onto the running result in any
+        // order yields the same solid.
+        gp_Vec vec(n.x * distance, n.y * distance, n.z * distance);
+        if (vec.Magnitude() < 1e-12) continue;
+        BRepPrimAPI_MakePrism prismMk(face, vec, Standard_False, Standard_True);
+        prismMk.Build();
+        if (!prismMk.IsDone()) continue;
+        TopoDS_Shape prism = prismMk.Shape();
+        if (pull) {
+          BRepAlgoAPI_Fuse fuse(result, prism);
+          fuse.SetFuzzyValue(kFuzzy);
+          fuse.Build();
+          if (!fuse.IsDone()) throw std::runtime_error("fuse rejected the prism");
+          result = fuse.Shape();
+        } else {
+          BRepAlgoAPI_Cut cut(result, prism);
+          cut.SetFuzzyValue(kFuzzy);
+          cut.Build();
+          if (!cut.IsDone()) throw std::runtime_error("cut rejected the prism");
+          result = cut.Shape();
+        }
+      }
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+        std::string("Push/pull failed — try a smaller distance or a different "
+                    "face (") + e.what() + ")");
+    }
+
+    // Weld coplanar seams the fuse/cut left behind.  Fall back to the raw
+    // boolean result if unification rejects it (matches the union path).
+    try {
+      ShapeUpgrade_UnifySameDomain unifier(
+        result, Standard_True, Standard_True, Standard_True);
+      unifier.Build();
+      result = unifier.Shape();
+    } catch (const std::exception&) {
+      // keep the un-unified result
+    }
+    return Napi::Number::New(env, StoreShape(result));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// draftFaces(id, neutral{nx,ny,nz,cx,cy,cz}, subGeo, angleRad) → newShapeId
+// Applies a draft (taper) to each selected face, pivoting it about its
+// intersection with the NEUTRAL plane (the picked main face's plane) by
+// `angleRad` along the pull direction (= the main face's normal).  Used for
+// mould/cast draft.  0 = sentinel "operation rejected".
+Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id               = info[0].As<Napi::Number>().Int32Value();
+    Napi::Object neutral = info[1].As<Napi::Object>();
+    Napi::Object sg      = info[2].As<Napi::Object>();
+    double angle         = GetDouble(info[3], 0.0);
+
+    TopoDS_Shape shape = FetchShape(id);
+    EdgeFaceSpec spec  = ParseSubGeo(sg);
+    if (spec.faces.empty() || std::abs(angle) < 1e-9)
+      return Napi::Number::New(env, StoreShape(shape));
+
+    double nx = GetDouble(neutral.Get("nx")), ny = GetDouble(neutral.Get("ny")),
+           nz = GetDouble(neutral.Get("nz"));
+    double cx = GetDouble(neutral.Get("cx")), cy = GetDouble(neutral.Get("cy")),
+           cz = GetDouble(neutral.Get("cz"));
+    gp_Vec nv(nx, ny, nz);
+    if (nv.Magnitude() < 1e-9) return Napi::Number::New(env, 0);
+    gp_Dir pullDir(nv);
+    gp_Pln neutralPlane(gp_Pnt(cx, cy, cz), pullDir);
+
+    auto faces = SelectSubGeoFaces(shape, spec);
+    if (faces.empty()) return Napi::Number::New(env, 0);
+
+    try {
+      BRepOffsetAPI_DraftAngle draft(shape);
+      bool any = false;
+      for (const auto& face : faces) {
+        draft.Add(face, pullDir, angle, neutralPlane);
+        if (draft.AddDone()) any = true;
+        else draft.Remove(face);  // skip a face the draft can't take
+      }
+      if (!any) return Napi::Number::New(env, 0);
+      draft.Build();
+      if (!draft.IsDone()) return Napi::Number::New(env, 0);
+      return Napi::Number::New(env, StoreShape(draft.Shape()));
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+        std::string("Draft failed — try a smaller angle or a different face (") +
+        e.what() + ")");
+    }
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// MakeShell(shapeId, thickness) → hollow the solid inward by |thickness|,
+// leaving a closed shell of that wall thickness (no faces removed).  Uses the
+// "simple" thick-solid path so it works on any solid without a face selection.
+// 0 = sentinel "operation rejected" — the JS bridge turns it into an error.
+Napi::Number MakeShell(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id           = info[0].As<Napi::Number>().Int32Value();
+    double thickness = GetDouble(info[1], 0.0);
+
+    TopoDS_Shape shape = FetchShape(id);
+    if (std::abs(thickness) < 1e-9)
+      return Napi::Number::New(env, StoreShape(shape));
+
+    // Closed hollow with a wall of |thickness|: offset every face inward to get
+    // the inner void solid, then cut it from the original.  (MakeThickSolid's
+    // join/simple paths need a face to remove or an open shell; this works on
+    // any closed solid with no face selection.)
+    TopoDS_Shape inner;
+    try {
+      BRepOffsetAPI_MakeOffsetShape off;
+      off.PerformByJoin(shape, -std::abs(thickness), 1e-3);
+      if (!off.IsDone()) return Napi::Number::New(env, 0);
+      inner = off.Shape();
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+        std::string("Shell failed — try a smaller thickness (") + e.what() + ")");
+    }
+    if (inner.IsNull()) return Napi::Number::New(env, 0);
+
+    BRepAlgoAPI_Cut cut(shape, inner);
+    cut.SetFuzzyValue(1.0e-5);
+    cut.Build();
+    if (!cut.IsDone()) return Napi::Number::New(env, 0);
+    return Napi::Number::New(env, StoreShape(cut.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// Build the helical thread groove solid for an internal (tapped) hole: an ISO
+// 60° V profile swept along a helix on the bore wall.  Returns a null shape on
+// failure so the caller can fall back to a plain bore.
+static TopoDS_Shape BuildThreadGroove(
+    const gp_Pnt& start, const gp_Dir& axisDir,
+    double minR, double majR, double pitch, double length) {
+  try {
+    if (pitch < 1e-6 || majR <= minR) return TopoDS_Shape();
+    gp_Ax3 cylAx(start, axisDir);
+    Handle(Geom_CylindricalSurface) surf = new Geom_CylindricalSurface(cylAx, minR);
+    const double TWO_PI = 2.0 * M_PI;
+    // Cover the bore length plus an extra turn each end so the groove runs out
+    // cleanly past the cut faces.  The caller offsets `start` into the part by
+    // one pitch so this lead-in lands on the entry face, not above it.
+    double vEnd = length + 2.0 * pitch;
+    double uEnd = (vEnd / pitch) * TWO_PI;
+    // Straight line in (u = angle, v = height) param space → a helix in 3D.
+    Handle(Geom2d_Curve) seg =
+      GCE2d_MakeSegment(gp_Pnt2d(0.0, -pitch), gp_Pnt2d(uEnd, vEnd - pitch))
+        .Value();
+    TopoDS_Edge helixE = BRepBuilderAPI_MakeEdge(seg, surf);
+    BRepLib::BuildCurves3d(helixE);
+    TopoDS_Wire helixW = BRepBuilderAPI_MakeWire(helixE);
+
+    // Triangular V profile in the axial plane at the helix start, base on the
+    // bore wall (minR) and apex outward at majR.
+    gp_Dir xdir = cylAx.XDirection();
+    gp_Vec vx(xdir), vz(axisDir);
+    double axialHalf = (majR - minR) * 0.5774; // tan(30°) for a 60° thread
+    gp_Pnt base(start.XYZ() + (minR * vx).XYZ());
+    gp_Pnt pTop(base.XYZ() + (axialHalf * vz).XYZ());
+    gp_Pnt pBot(base.XYZ() + (-axialHalf * vz).XYZ());
+    gp_Pnt pApex(start.XYZ() + (majR * vx).XYZ());
+    BRepBuilderAPI_MakePolygon poly(pTop, pApex, pBot, Standard_True);
+    if (!poly.IsDone()) return TopoDS_Shape();
+    TopoDS_Wire profile = poly.Wire();
+
+    BRepOffsetAPI_MakePipeShell pipe(helixW);
+    pipe.Add(profile);
+    pipe.SetMode(Standard_True); // Frenet frame — stable on a constant helix
+    pipe.Build();
+    if (!pipe.IsDone()) return TopoDS_Shape();
+    if (!pipe.MakeSolid()) return TopoDS_Shape();
+    return pipe.Shape();
+  } catch (const std::exception&) {
+    return TopoDS_Shape();
+  }
+}
+
+// MakeHole(px,py,pz, dx,dy,dz, length, diameter, tolerance) → a plain bore
+// cylinder (the hole's negative volume) drilled from (p) along (d).  For a
+// threaded hole the caller passes the MINOR diameter here and cuts MakeThread's
+// groove as a second step (separate cuts are far more robust than fusing a
+// helical solid).  `tolerance` adds radial clearance.
+Napi::Number MakeHole(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    double px = GetDouble(info[0], 0.0), py = GetDouble(info[1], 0.0),
+           pz = GetDouble(info[2], 0.0);
+    double dx = GetDouble(info[3], 0.0), dy = GetDouble(info[4], -1.0),
+           dz = GetDouble(info[5], 0.0);
+    double length    = GetDouble(info[6], 1.0);
+    double diameter  = GetDouble(info[7], 0.5);
+    double tolerance = GetDouble(info[8], 0.0);
+
+    if (length <= 1e-7 || diameter <= 1e-7) return Napi::Number::New(env, 0);
+    gp_Vec dv(dx, dy, dz);
+    if (dv.Magnitude() < 1e-9) return Napi::Number::New(env, 0);
+    gp_Ax2 ax(gp_Pnt(px, py, pz), gp_Dir(dv));
+    BRepPrimAPI_MakeCylinder cyl(ax, diameter / 2.0 + tolerance, length);
+    cyl.Build();
+    if (!cyl.IsDone()) return Napi::Number::New(env, 0);
+    return Napi::Number::New(env, StoreShape(cyl.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// MakeThread(px,py,pz, dx,dy,dz, length, majorDia, pitch, tolerance) → the ISO
+// internal thread groove solid (cut as a second tool after the bore).  Returns
+// 0 when the helical sweep can't be built, so the caller just leaves a plain
+// bore.  Crests at the minor radius, roots at majorDia/2.
+Napi::Number MakeThread(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    double px = GetDouble(info[0], 0.0), py = GetDouble(info[1], 0.0),
+           pz = GetDouble(info[2], 0.0);
+    double dx = GetDouble(info[3], 0.0), dy = GetDouble(info[4], -1.0),
+           dz = GetDouble(info[5], 0.0);
+    double length    = GetDouble(info[6], 1.0);
+    double majorDia  = GetDouble(info[7], 0.6);
+    double pitch     = GetDouble(info[8], 0.1);
+    double tolerance = GetDouble(info[9], 0.0);
+
+    gp_Vec dv(dx, dy, dz);
+    if (dv.Magnitude() < 1e-9 || pitch <= 1e-6) return Napi::Number::New(env, 0);
+    gp_Dir axisDir(dv);
+    gp_Pnt start(px, py, pz);
+    double majR = majorDia / 2.0 + tolerance;
+    double minR = majR - 0.5413 * pitch;
+    if (minR < 1e-4) return Napi::Number::New(env, 0);
+    TopoDS_Shape groove =
+      BuildThreadGroove(start, axisDir, minR, majR, pitch, length);
+    if (groove.IsNull()) return Napi::Number::New(env, 0);
+    return Napi::Number::New(env, StoreShape(groove));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // enrichSubGeo(shapeId, subGeo) → subGeo with each edge's two adjacent face
 // normals resolved (n1, n2).  Called once at chamfer/fillet creation — when
 // the stored endpoint coordinates still line up with the (pre-resize) shape —
@@ -934,6 +1623,120 @@ Napi::String ExportSTEP(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// importSTEP(stepText: string) → shapeId
+// Reads a STEP file's content into a single shape (all roots fused into one
+// compound).  The caller tessellates it and must release the shape.
+Napi::Number ImportSTEP(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    std::string content = info[0].As<Napi::String>().Utf8Value();
+    std::istringstream iss(content);
+    STEPControl_Reader reader;
+    IFSelect_ReturnStatus status = reader.ReadStream("import.step", iss);
+    if (status != IFSelect_RetDone)
+      throw std::runtime_error("STEP read failed");
+    reader.TransferRoots();
+    TopoDS_Shape shape = reader.OneShape();
+    if (shape.IsNull()) throw std::runtime_error("STEP file produced no shape");
+    return Napi::Number::New(env, StoreShape(shape));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// makeSolidFromMesh(positions: Float64Array, indices: Uint32Array|null) → shapeId
+// Sew a triangle soup into a shell and make a solid, so imported meshes (STL, or
+// a tessellated STEP) can take part in boolean operations.  Coplanar triangles
+// are merged so flat-faced models become cheap to boolean.  Booleans on a solid
+// with thousands of faces are pathologically slow and would freeze the (single-
+// threaded) main process, so a too-dense mesh is rejected with a clear error
+// rather than hanging — the caller surfaces it as a notification.
+Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    Napi::Float64Array pos = info[0].As<Napi::Float64Array>();
+    const double* p = pos.Data();
+    const bool hasIdx = info[1].IsTypedArray();
+
+    // Sewing then unifying a very dense mesh is itself slow, so bail before that.
+    const size_t kMaxTris = 50000;
+    size_t triCount =
+        hasIdx ? info[1].As<Napi::Uint32Array>().ElementLength() / 3
+               : (pos.ElementLength() / 3) / 3;
+    if (triCount > kMaxTris)
+      throw std::runtime_error(
+          "Imported mesh is too detailed (" + std::to_string(triCount) +
+          " triangles) to use in a boolean. Simplify or decimate it first.");
+
+    BRepBuilderAPI_Sewing sew(1.0e-6);
+    auto addTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) {
+      gp_Pnt a(p[ia * 3], p[ia * 3 + 1], p[ia * 3 + 2]);
+      gp_Pnt b(p[ib * 3], p[ib * 3 + 1], p[ib * 3 + 2]);
+      gp_Pnt c(p[ic * 3], p[ic * 3 + 1], p[ic * 3 + 2]);
+      if (a.Distance(b) < 1e-12 || b.Distance(c) < 1e-12 ||
+          c.Distance(a) < 1e-12)
+        return;
+      BRepBuilderAPI_MakePolygon poly(a, b, c, Standard_True);
+      if (!poly.IsDone()) return;
+      BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
+      if (face.IsDone()) sew.Add(face.Face());
+    };
+
+    if (hasIdx) {
+      Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
+      for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3)
+        addTri(idx[i], idx[i + 1], idx[i + 2]);
+    } else {
+      uint32_t nv = (uint32_t)(pos.ElementLength() / 3);
+      for (uint32_t i = 0; i + 2 < nv; i += 3) addTri(i, i + 1, i + 2);
+    }
+
+    sew.Perform();
+    TopoDS_Shape sewn = sew.SewedShape();
+    if (sewn.IsNull()) throw std::runtime_error("mesh sewing produced nothing");
+
+    TopoDS_Shape result = sewn;
+    BRepBuilderAPI_MakeSolid mk;
+    bool anyShell = false;
+    for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next()) {
+      mk.Add(TopoDS::Shell(ex.Current()));
+      anyShell = true;
+    }
+    if (anyShell && mk.IsDone()) {
+      // Orient so the solid's material is on the inside of the shell (positive
+      // volume).  A mesh whose winding came out inverted — e.g. the deboss wrap,
+      // whose radial map flips handedness, or a badly-wound imported mesh — would
+      // otherwise become an inside-out solid that breaks the difference boolean.
+      TopoDS_Solid solid = mk.Solid();
+      BRepLib::OrientClosedSolid(solid);
+      result = solid;
+    }
+
+    // Merge coplanar faces so a tessellated flat model collapses to a handful of
+    // faces (a box: 12 triangles → 6 faces) the boolean can handle quickly.
+    try {
+      ShapeUpgrade_UnifySameDomain unify(result, Standard_True, Standard_True,
+                                         Standard_False);
+      unify.Build();
+      if (!unify.Shape().IsNull()) result = unify.Shape();
+    } catch (const std::exception&) {
+      // keep the un-unified shape
+    }
+
+    // After merging, a still-huge face count means a curved/organic mesh whose
+    // boolean would hang the main thread — reject it instead.
+    const int kMaxFaces = 5000;
+    int faceCount = 0;
+    for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
+      if (++faceCount > kMaxFaces) break;
+    }
+    if (faceCount > kMaxFaces)
+      throw std::runtime_error(
+          "Imported mesh has too many curved faces to use in a boolean. "
+          "Simplify it, or boolean against a primitive instead.");
+
+    return Napi::Number::New(env, StoreShape(result));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Phase-0 full-pipeline smoke test (kept for existing test/ping.mjs)
 // ════════════════════════════════════════════════════════════════════════
@@ -981,11 +1784,17 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("makeBox",            Napi::Function::New(env, MakeBox));
   exports.Set("makeSphere",         Napi::Function::New(env, MakeSphere));
   exports.Set("makeCylinder",       Napi::Function::New(env, MakeCylinder));
+  exports.Set("makeCone",           Napi::Function::New(env, MakeCone));
   exports.Set("makeTorus",          Napi::Function::New(env, MakeTorus));
   exports.Set("makeExtrude",        Napi::Function::New(env, MakeExtrude));
+  exports.Set("makeRevolve",        Napi::Function::New(env, MakeRevolve));
+  exports.Set("makePipe",           Napi::Function::New(env, MakePipe));
+  exports.Set("makeLoft",           Napi::Function::New(env, MakeLoft));
 
   // Transforms
   exports.Set("transformShape",     Napi::Function::New(env, TransformShape));
+  exports.Set("mirrorShape",        Napi::Function::New(env, MirrorShape));
+  exports.Set("rotateShapeAxis",    Napi::Function::New(env, RotateShapeAxis));
   exports.Set("scaleShape",         Napi::Function::New(env, ScaleShape));
 
   // Boolean ops
@@ -994,6 +1803,11 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   // Chamfer / fillet
   exports.Set("chamferShape",       Napi::Function::New(env, ChamferShape));
   exports.Set("filletShape",        Napi::Function::New(env, FilletShape));
+  exports.Set("pushPullFaces",      Napi::Function::New(env, PushPullFaces));
+  exports.Set("draftFaces",         Napi::Function::New(env, DraftFaces));
+  exports.Set("makeShell",          Napi::Function::New(env, MakeShell));
+  exports.Set("makeHole",           Napi::Function::New(env, MakeHole));
+  exports.Set("makeThread",         Napi::Function::New(env, MakeThread));
   exports.Set("enrichSubGeo",       Napi::Function::New(env, EnrichSubGeo));
 
   // Tessellation
@@ -1001,6 +1815,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
 
   // Export
   exports.Set("exportSTEP",         Napi::Function::New(env, ExportSTEP));
+  exports.Set("importSTEP",         Napi::Function::New(env, ImportSTEP));
+  exports.Set("makeSolidFromMesh",  Napi::Function::New(env, MakeSolidFromMesh));
 
   // Shape store management
   exports.Set("releaseShape",       Napi::Function::New(env, ReleaseShape));

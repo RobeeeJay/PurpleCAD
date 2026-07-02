@@ -6,6 +6,107 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { START_FACE_HIGHLIGHT, FACE_HOVER_COLOR } from "../theme.js";
+import { nearestVertexOf } from "../objectOrigin.js";
+import { growConnectedFaceSet } from "../embossFaceSet.js";
+import { effectiveSelectionTypes } from "../../store/selectionMode.js";
+
+// Turn a 3D click into a measure entity (world coords): snap to the nearest
+// vertex when close, else the clicked planar face (its triangles + normal); for a
+// raymarched primitive (box-hull geometry, so no real faces) use the clicked
+// surface point.
+function buildMeasureEntity(mesh, hit, isPrimitive) {
+  if (!hit) return null;
+  const localToWorldArr = (x, y, z) => {
+    const w = mesh.localToWorld(new THREE.Vector3(x, y, z));
+    return [w.x, w.y, w.z];
+  };
+  const at = [hit.point.x, hit.point.y, hit.point.z];
+  const id = mesh.userData.itemId;
+  if (isPrimitive || !hit.face) {
+    return { kind: "point", p: at, at, itemId: id, pick: "point" };
+  }
+  const pos = mesh.geometry?.attributes?.position?.array;
+  const lp = mesh.worldToLocal(hit.point.clone());
+  if (pos) {
+    const v = nearestVertexOf(pos, lp.x, lp.y, lp.z);
+    const vw = mesh.localToWorld(new THREE.Vector3(v.x, v.y, v.z));
+    mesh.geometry.computeBoundingSphere?.();
+    const r = mesh.geometry.boundingSphere?.radius || 1;
+    const ws = mesh.getWorldScale(new THREE.Vector3()).x || 1;
+    if (vw.distanceTo(hit.point) < r * ws * 0.07) {
+      const p = [vw.x, vw.y, vw.z];
+      return { kind: "point", p, at: p, itemId: id, pick: "vertex" };
+    }
+  }
+  const grown = growConnectedFaceSet(
+    mesh.geometry,
+    hit.faceIndex,
+    hit.face.normal,
+    1.5,
+  );
+  if (grown && grown.positions.length >= 9) {
+    const pts = [];
+    for (let i = 0; i < grown.positions.length; i += 3)
+      pts.push(
+        localToWorldArr(
+          grown.positions[i],
+          grown.positions[i + 1],
+          grown.positions[i + 2],
+        ),
+      );
+    const n = hit.face.normal
+      .clone()
+      .applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld))
+      .normalize();
+    return {
+      kind: "face",
+      pts,
+      normal: [n.x, n.y, n.z],
+      at,
+      itemId: id,
+      pick: "face",
+    };
+  }
+  return { kind: "point", p: at, at, itemId: id, pick: "point" };
+}
+
+// The snappable 2D points of a sketch shape (endpoints, corners, centres) — the
+// candidates the hole tool highlights/snaps its centre to.
+function shapeSnapPoints2D(shape) {
+  switch (shape.type) {
+    case "line":
+      return [
+        { x: shape.x1, y: shape.y1 },
+        { x: shape.x2, y: shape.y2 },
+      ];
+    case "rect":
+      return [
+        { x: shape.x1, y: shape.y1 },
+        { x: shape.x2, y: shape.y1 },
+        { x: shape.x2, y: shape.y2 },
+        { x: shape.x1, y: shape.y2 },
+      ];
+    case "circle":
+    case "ellipse":
+      return [{ x: shape.cx, y: shape.cy }];
+    case "arc":
+      return [
+        { x: shape.cx, y: shape.cy },
+        {
+          x: shape.cx + Math.cos(shape.startAngle) * shape.r,
+          y: shape.cy + Math.sin(shape.startAngle) * shape.r,
+        },
+        {
+          x: shape.cx + Math.cos(shape.endAngle) * shape.r,
+          y: shape.cy + Math.sin(shape.endAngle) * shape.r,
+        },
+      ];
+    case "point":
+      return [{ x: shape.x, y: shape.y }];
+    default:
+      return [];
+  }
+}
 
 export function createViewInteraction(
   {
@@ -32,10 +133,50 @@ export function createViewInteraction(
     clearEdgeHighlight,
     applyPointHighlight,
     clearPointHighlight,
+    highlightWorldPoint,
     isMac,
   },
 ) {
   const controls = cameraControlsRef.current;
+  // World-space hole-centre snap captured on hover (a sketch point), consumed by
+  // the click handler so it commits exactly what was highlighted.
+  let holeSketchSnap = null;
+
+  // Nearest visible sketch point to the cursor, in world space, within `maxPx`
+  // screen distance — or null.  Sketch meshes carry the plane transform even
+  // while hidden, so the points project correctly.
+  const nearestSketchPoint = (clientX, clientY, cam, rect, maxPx = 14) => {
+    const cx = clientX - rect.left,
+      cy = clientY - rect.top;
+    let best = null,
+      bestD = maxPx;
+    for (const item of itemsRef.current) {
+      if (item.type !== "sketch" || item.visible === false || !item.shapes)
+        continue;
+      const mesh = objectsRef.current[item.id];
+      if (!mesh) continue;
+      for (const shape of item.shapes) {
+        for (const pt of shapeSnapPoints2D(shape)) {
+          const w = new THREE.Vector3(pt.x, pt.y, 0)
+            .applyQuaternion(mesh.quaternion)
+            .add(mesh.position);
+          const p = w.clone().project(cam);
+          if (p.z > 1) continue; // behind the camera
+          const sx = (p.x * 0.5 + 0.5) * rect.width;
+          const sy = (-p.y * 0.5 + 0.5) * rect.height;
+          const d = Math.hypot(sx - cx, sy - cy);
+          if (d < bestD) {
+            bestD = d;
+            best = w;
+          }
+        }
+      }
+    }
+    return best;
+  };
+  // What the last hover settled on ("object" | "face" | "edge" | "point" | null)
+  // so the click commits the same entity the priority highlighted.
+  let lastHoverType = null;
 
   const onViewHover = (e) => {
     const currentCamera = cameraRef.current;
@@ -49,6 +190,44 @@ export function createViewInteraction(
       return it?.type !== "sketch" && m.visible !== false;
     });
     const intersects = raycasterRef.current.intersectObjects(meshArray, false);
+
+    // Hole tool, point phase: snap-highlight the hole centre to the nearest
+    // object vertex (on the body under the cursor) or sketch point.
+    const holeToolHover = useStore.getState().holeTool;
+    if (holeToolHover && holeToolHover.phase === "point") {
+      clearFaceHighlight();
+      clearEdgeHighlight();
+      clearPointHighlight();
+      setHoveredId(null);
+      holeSketchSnap = null;
+      const hit = intersects[0];
+      let onVertex = false;
+      if (hit) {
+        const d = applyPointHighlight(hit);
+        const cam = currentCamera;
+        const worldPerPx = cam.isPerspectiveCamera
+          ? (2 * Math.tan((cam.fov * Math.PI) / 360) * hit.distance) /
+            rect.height
+          : (cam.top - cam.bottom) / rect.height;
+        if (d != null && d <= 11 * worldPerPx) onVertex = true;
+        else clearPointHighlight();
+      }
+      if (!onVertex) {
+        const sp = nearestSketchPoint(
+          e.clientX,
+          e.clientY,
+          currentCamera,
+          rect,
+        );
+        if (sp) {
+          highlightWorldPoint(sp);
+          holeSketchSnap = sp;
+        }
+      }
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return;
+    }
 
     if (sketchPlacementModeRef.current) {
       setHoveredId(null);
@@ -71,45 +250,47 @@ export function createViewInteraction(
         clearFaceHighlight();
       }
     } else {
-      // Modifier-key scheme:
-      //   • CTRL (Cmd on Mac)        → edge selection mode
-      //   • ALT                      → face selection mode
-      //   • CTRL + ALT               → point selection mode
-      //   • SHIFT (orthogonal)       → additive selection in any of the
-      //                                above modes (incl. plain object mode).
-      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
-      const edgeMode = cmdOrCtrl && !e.altKey;
-      const faceMode = !cmdOrCtrl && e.altKey;
-      const pointMode = cmdOrCtrl && e.altKey;
-
-      if (pointMode) {
-        setHoveredId(null);
-        clearFaceHighlight();
-        clearEdgeHighlight();
-        if (intersects.length > 0) applyPointHighlight(intersects[0]);
-        else clearPointHighlight();
-      } else if (edgeMode) {
-        setHoveredId(null);
-        clearFaceHighlight();
-        clearPointHighlight();
-        if (intersects.length > 0) applyEdgeHighlight(intersects[0]);
-        else clearEdgeHighlight();
-      } else if (faceMode) {
-        setHoveredId(null);
-        clearEdgeHighlight();
-        clearPointHighlight();
-        if (intersects.length > 0)
-          applyFaceHighlight(intersects[0], FACE_HOVER_COLOR);
-        else clearFaceHighlight();
-      } else {
-        clearFaceHighlight();
-        clearEdgeHighlight();
-        clearPointHighlight();
+      // Selection widget drives what hovering highlights (no modifier keys).
+      const eff = effectiveSelectionTypes(useStore.getState());
+      clearFaceHighlight();
+      clearEdgeHighlight();
+      clearPointHighlight();
+      if (eff.object) {
+        lastHoverType = "object";
         setHoveredId(
           intersects.length > 0
             ? intersects[0].object.userData.itemId || null
             : null,
         );
+      } else {
+        setHoveredId(null);
+        lastHoverType = null;
+        const hit = intersects[0];
+        if (hit) {
+          // Priority point > edge > face, gated by a pixel budget converted to
+          // world units at the hit depth so corners/edges win only when near.
+          const cam = currentCamera;
+          const worldPerPx = cam.isPerspectiveCamera
+            ? (2 * Math.tan((cam.fov * Math.PI) / 360) * hit.distance) /
+              rect.height
+            : (cam.top - cam.bottom) / rect.height;
+          const vThr = 11 * worldPerPx;
+          const eThr = 9 * worldPerPx;
+          if (eff.point) {
+            const d = applyPointHighlight(hit);
+            if (d != null && d <= vThr) lastHoverType = "point";
+            else clearPointHighlight();
+          }
+          if (!lastHoverType && eff.edge) {
+            const d = applyEdgeHighlight(hit);
+            if (d != null && d <= eThr) lastHoverType = "edge";
+            else clearEdgeHighlight();
+          }
+          if (!lastHoverType && eff.face) {
+            applyFaceHighlight(hit, FACE_HOVER_COLOR);
+            lastHoverType = "face";
+          }
+        }
       }
     }
 
@@ -121,6 +302,43 @@ export function createViewInteraction(
     controls.isRotating = false;
     controls.isPanning = false;
     orbitIndicator.visible = false;
+
+    // Split tool: a click picks the object to split, then the cut plane/face.
+    const splitPick = useStore.getState().splitPick;
+    if (splitPick && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX || e.clientX);
+      const dy = e.clientY - (controls.mouseDownY || e.clientY);
+      if (Math.hypot(dx, dy) < 5) {
+        if (splitPick === "object")
+          controls.pickSplitObject(e.clientX, e.clientY);
+        else controls.pickSplitCut(e.clientX, e.clientY);
+      }
+      return;
+    }
+
+    // Circular pattern axis: a click picks the sketch line / face edge to rotate
+    // around.
+    if (useStore.getState().circularAxisPick && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX || e.clientX);
+      const dy = e.clientY - (controls.mouseDownY || e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        controls.pickCircularAxis(e.clientX, e.clientY);
+      return;
+    }
+
+    // Plane picking: clicks either accumulate vertices (3-point mode) or pick a
+    // single face's plane, depending on the active mode.
+    const planePick = useStore.getState().planePickActive;
+    if (planePick && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX || e.clientX);
+      const dy = e.clientY - (controls.mouseDownY || e.clientY);
+      if (Math.hypot(dx, dy) < 5) {
+        if (planePick === "face")
+          controls.planeFacePickClick(e.clientX, e.clientY);
+        else controls.planePickClick(e.clientX, e.clientY);
+      }
+      return;
+    }
 
     if (sketchPlacementModeRef.current && e.button === 0) {
       const dx = e.clientX - (controls.mouseDownX || e.clientX);
@@ -243,19 +461,202 @@ export function createViewInteraction(
         selectableMeshes,
         false,
       );
-      // Modifier-key scheme (must match the hover branch above):
-      //   • CTRL/Cmd            → edge selection mode
-      //   • ALT                 → face selection mode
-      //   • CTRL/Cmd + ALT      → point selection mode (hover only)
-      //   • SHIFT (orthogonal)  → additive: append/toggle within the
-      //                           existing selection of the current mode.
-      const cmdOrCtrl3d = isMac ? e.metaKey : e.ctrlKey;
-      const edgeMode3d = cmdOrCtrl3d && !e.altKey;
-      const faceMode3d = !cmdOrCtrl3d && e.altKey;
+
+      // Measure tool: a (non-drag) left click adds an entity (vertex / face /
+      // surface point); the overlay shows its dimension or the distance to the
+      // previous pick.  Guard against orbit/pan releases adding stray picks.
+      const measure = useStore.getState().measureTool;
+      if (measure) {
+        const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+        const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+        if (e.button === 0 && Math.hypot(dx, dy) < 5 && intersects.length > 0) {
+          const hit = intersects[0];
+          const it = itemsRef.current.find(
+            (i) => i.id === hit.object.userData.itemId,
+          );
+          if (it && it.type !== "sketch") {
+            const isPrim = ["sphere", "cylinder", "torus", "cone"].includes(
+              it.type,
+            );
+            const entity = buildMeasureEntity(hit.object, hit, isPrim);
+            if (entity) useStore.getState().addMeasurePick(entity);
+          }
+        }
+        save();
+        return;
+      }
+
+      // Point-to-Point move: capture the nearest vertex (in world coords) of the
+      // clicked body for the armed point.  Point B must be a different object.
+      const ptp = useStore.getState().pointToPointTool;
+      if (ptp && ptp.picking) {
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          const mesh = hit.object;
+          const id = mesh.userData.itemId;
+          const it = itemsRef.current.find((i) => i.id === id);
+          if (it && it.type !== "sketch") {
+            if (ptp.picking === "B" && ptp.a && ptp.a.itemId === id) {
+              useStore
+                .getState()
+                .showNotification?.(
+                  "Pick a vertex on a different object for Point B.",
+                );
+            } else {
+              const lp = mesh.worldToLocal(hit.point.clone());
+              const pos = mesh.geometry?.attributes?.position?.array;
+              if (pos) {
+                const v = nearestVertexOf(pos, lp.x, lp.y, lp.z);
+                const w = mesh.localToWorld(new THREE.Vector3(v.x, v.y, v.z));
+                useStore.getState().setPointToPointPoint(ptp.picking, id, {
+                  x: w.x,
+                  y: w.y,
+                  z: w.z,
+                });
+              }
+            }
+          }
+        }
+        save();
+        return;
+      }
+
+      // Draft tool: pick the neutral (main) face, then the faces to taper.  Each
+      // pick is a {normal, point} in the body's local frame (the native draft
+      // matches OCC faces by normal + nearby centroid).
+      const draft = useStore.getState().draftTool;
+      if (draft && draft.picking) {
+        if (intersects.length > 0 && intersects[0].face) {
+          const hit = intersects[0];
+          const mesh = hit.object;
+          const id = mesh.userData.itemId;
+          const it = itemsRef.current.find((i) => i.id === id);
+          const okBody = it && it.type !== "sketch";
+          if (okBody && (draft.itemId == null || draft.itemId === id)) {
+            const wN = hit.face.normal
+              .clone()
+              .applyMatrix3(
+                new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld),
+              )
+              .normalize();
+            const lN = wN
+              .applyQuaternion(
+                mesh.getWorldQuaternion(new THREE.Quaternion()).invert(),
+              )
+              .normalize();
+            const lP = mesh.worldToLocal(hit.point.clone());
+            const desc = {
+              nx: lN.x,
+              ny: lN.y,
+              nz: lN.z,
+              cx: lP.x,
+              cy: lP.y,
+              cz: lP.z,
+            };
+            if (draft.picking === "main")
+              useStore.getState().setDraftNeutral(desc, id);
+            else useStore.getState().toggleDraftFace(desc);
+          }
+        }
+        save();
+        return;
+      }
+
+      // Change-origin tool intercepts the click before normal selection.
+      const { originVertexPick, originToolActive } = useStore.getState();
+      if (originVertexPick != null || originToolActive) {
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          const clickedId = hit.object.userData.itemId;
+          if (originVertexPick != null) {
+            // Snap the origin to the nearest vertex of the picked object.
+            if (clickedId === originVertexPick) {
+              const mesh = hit.object;
+              const lp = mesh.worldToLocal(hit.point.clone());
+              const pos = mesh.geometry?.attributes?.position?.array;
+              if (pos) {
+                const v = nearestVertexOf(pos, lp.x, lp.y, lp.z);
+                useStore.getState().setItemOrigin(clickedId, v);
+              }
+            }
+          } else if (clickedId != null) {
+            // Tool armed: open the origin chooser for the clicked object.
+            useStore.getState().openOriginDialog(clickedId);
+          }
+        }
+        save();
+        return;
+      }
+
+      // Hole tool: phase "face" captures the drilled face; phase "point"
+      // captures the hole centre (a vertex if near one, else the spot on the
+      // face).  Both stored in the target's local geometry frame.
+      const holeTool = useStore.getState().holeTool;
+      if (
+        holeTool &&
+        (holeTool.phase === "face" || holeTool.phase === "point")
+      ) {
+        // A sketch point was snap-highlighted on hover: commit it (in the body's
+        // local frame) regardless of what the ray hit.
+        if (holeTool.phase === "point" && holeSketchSnap) {
+          const mesh = objectsRef.current[holeTool.itemId];
+          if (mesh) {
+            const lp = mesh.worldToLocal(holeSketchSnap.clone());
+            useStore.getState().setHolePoint({ x: lp.x, y: lp.y, z: lp.z });
+          }
+          save();
+          return;
+        }
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          const mesh = hit.object;
+          const id = mesh.userData.itemId;
+          if (holeTool.phase === "face") {
+            const it = itemsRef.current.find((i) => i.id === id);
+            const isPrim = ["sphere", "cylinder", "torus", "cone"].includes(
+              it?.type,
+            );
+            const worldN = hit.face
+              ? hit.face.normal.clone()
+              : new THREE.Vector3(0, 1, 0);
+            if (!isPrim && hit.face)
+              worldN.applyMatrix3(
+                new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld),
+              );
+            worldN.normalize();
+            const invQ = mesh
+              .getWorldQuaternion(new THREE.Quaternion())
+              .invert();
+            const localN = worldN.clone().applyQuaternion(invQ).normalize();
+            const localP = mesh.worldToLocal(hit.point.clone());
+            useStore.getState().setHoleFace(id, {
+              normal: { x: localN.x, y: localN.y, z: localN.z },
+              point: { x: localP.x, y: localP.y, z: localP.z },
+            });
+          } else if (id === holeTool.itemId) {
+            // Snap to the nearest vertex when close, else use the hit point.
+            const lp = mesh.worldToLocal(hit.point.clone());
+            const pos = mesh.geometry?.attributes?.position?.array;
+            let p = { x: lp.x, y: lp.y, z: lp.z };
+            if (pos) {
+              const v = nearestVertexOf(pos, lp.x, lp.y, lp.z);
+              const d = Math.hypot(v.x - lp.x, v.y - lp.y, v.z - lp.z);
+              if (d < 0.12) p = v;
+            }
+            useStore.getState().setHolePoint(p);
+          }
+        }
+        save();
+        return;
+      }
+
+      // The selection widget decides what a click commits — matching the hover
+      // priority (point > edge > face) captured in lastHoverType.  Shift stays
+      // additive within a sub-type.
       if (intersects.length > 0) {
         const clickedId = intersects[0].object.userData.itemId || null;
         if (
-          faceMode3d &&
+          lastHoverType === "face" &&
           highlights.pendingFaceSelection &&
           highlights.pendingFaceSelection.itemId === clickedId
         ) {
@@ -306,7 +707,7 @@ export function createViewInteraction(
           // making the click appear to have no visual effect.
           clearFaceHighlight();
         } else if (
-          edgeMode3d &&
+          lastHoverType === "edge" &&
           highlights.pendingEdgeSelection &&
           highlights.pendingEdgeSelection.itemId === clickedId
         ) {
@@ -359,6 +760,24 @@ export function createViewInteraction(
           // becomes immediately visible at click time (same rationale as in
           // the face-commit branch above).
           clearEdgeHighlight();
+        } else if (lastHoverType === "point") {
+          // Point selection: snap to the nearest vertex and record it (the hover
+          // sphere stays as the marker until the next pointer move).
+          const mesh = intersects[0].object;
+          const lp = mesh.worldToLocal(intersects[0].point.clone());
+          const posArr = mesh.geometry?.attributes?.position?.array;
+          if (posArr) {
+            // Stored in the mesh's local frame (like edges) so the persistent
+            // selection-highlight group can place it with the mesh transform.
+            const v = nearestVertexOf(posArr, lp.x, lp.y, lp.z);
+            useStore.getState().setSelectedSubGeometry({
+              itemId: clickedId,
+              edges: [],
+              faces: [],
+              points: [{ x: v.x, y: v.y, z: v.z }],
+            });
+            selectItem(null);
+          }
         } else {
           // Normal (object-mode) click: shift adds to multi-object selection.
           useStore.getState().clearSelectedSubGeometry();

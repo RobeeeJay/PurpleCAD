@@ -16,6 +16,12 @@ import {
 import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+
+// Width of the left objects/timeline overlay (`.left-panel` in App.css). The
+// axis indicator is nudged right by half this so it reads centred in the 3D
+// area the user can actually see, not the canvas centre hidden behind the panel.
+const LEFT_PANEL_PX = 250;
 
 export function createAnimateLoop({
   scene,
@@ -95,6 +101,18 @@ export function createAnimateLoop({
         return (2 * d * Math.tan((cam.fov * Math.PI) / 360)) / REFERENCE_HEIGHT;
       };
       if (axisGroupRef?.current && axisGroupRef.current.visible) {
+        // Pin the XYZ indicator to the view centre (the camera target) so it
+        // stays on-screen as the view pans, rather than scrolling off with the
+        // world origin.  The arrows still point along the true world axes.
+        // Then shift it right by half the left overlay's width so it sits in the
+        // centre of the *visible* 3D area, clear of the objects/timeline panel.
+        const canvasH = renderer.domElement.clientHeight || 1;
+        const worldPerPx =
+          (gizmoScale(targetRef.current) * REFERENCE_HEIGHT) / canvasH;
+        _camRight.set(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
+        axisGroupRef.current.position
+          .copy(targetRef.current)
+          .addScaledVector(_camRight, (LEFT_PANEL_PX / 2) * worldPerPx);
         // 0.5: render the XYZ indicator at half the authored on-screen size.
         const s = gizmoScale(axisGroupRef.current.position) * 0.5;
         axisGroupRef.current.scale.setScalar(s);
@@ -133,29 +151,29 @@ export function createAnimateLoop({
           }
         });
       }
-      // Bounding-box dimension labels (the "20mm" W/H/D sprites): place them at
-      // FIXED screen positions around the rotation gizmo (the gizmo sits at the
-      // selection centre) so they don't swing around as the camera orbits.  We
-      // offset along the camera's right/up axes — a screen-space ring of three
-      // slots 120° apart (W top, then H, D) — instead of world directions, which
-      // would rotate with the view.  Restamped every frame; constant on-screen
-      // size; each sprite caches its authored scale so we multiply not compound.
+      // Bounding-box dimension labels (the W/H/D "mm" sprites): sit each on the
+      // midpoint of its axis edge of the (object-oriented) bounding box, held at
+      // a constant on-screen SIZE only.  Restamped every frame; each sprite
+      // caches its authored scale so we multiply not compound.
       if (boundingBoxRef?.current) {
         const bbox = boundingBoxRef.current;
         const center = bbox.boxMesh.position;
         const s = gizmoScale(center);
-        const RAD = s * 1.85; // beyond the on-screen ring radius (~0.93·s)
-        const right = new THREE.Vector3()
-          .setFromMatrixColumn(cam.matrixWorld, 0)
-          .normalize();
-        const up = new THREE.Vector3()
-          .setFromMatrixColumn(cam.matrixWorld, 1)
-          .normalize();
-        const TWO_PI = Math.PI * 2;
-        const angles = [
-          Math.PI / 2, // W: top
-          Math.PI / 2 + TWO_PI / 3, // H: lower-left
-          Math.PI / 2 + (2 * TWO_PI) / 3, // D: lower-right
+        // Sit each dimension label at the midpoint of its axis edge on the
+        // bounding box (X bottom-front, Y front-right, Z bottom-right), nudged
+        // just outward so it hugs the edge.  Only the SIZE is held constant on
+        // screen (scale by s); the position tracks the box, not the gizmo.
+        const hw = bbox.boxMesh.scale.x / 2,
+          hh = bbox.boxMesh.scale.y / 2,
+          hd = bbox.boxMesh.scale.z / 2;
+        const G = 0.3 * s;
+        // Local (box-frame) edge-midpoint offsets, then rotated into the box's
+        // orientation so labels track the edges of a rotated bounding box.
+        const q = bbox.boxMesh.quaternion;
+        const edgeOff = [
+          [0, -hh - G, hd + G], // X
+          [hw + G, 0, hd + G], // Y
+          [hw + G, -hh - G, 0], // Z
         ];
         [bbox.labelX, bbox.labelY, bbox.labelZ].forEach((label, i) => {
           if (!label?.sprite) return;
@@ -169,11 +187,8 @@ export function createAnimateLoop({
           }
           const b = sp.userData.baseScale;
           sp.scale.set(b.x * s, b.y * s, b.z * s);
-          const a = angles[i];
-          sp.position
-            .copy(center)
-            .addScaledVector(right, Math.cos(a) * RAD)
-            .addScaledVector(up, Math.sin(a) * RAD);
+          const o = edgeOff[i];
+          sp.position.set(o[0], o[1], o[2]).applyQuaternion(q).add(center);
         });
       }
       // Constraint annotations: keep a constant on-screen size so they don't
@@ -221,13 +236,19 @@ export function createAnimateLoop({
       } else if (rulerGroup) {
         rulerGroup.visible = true;
         const viewHeight = gizmoScale(targetRef.current) * REFERENCE_HEIGHT;
-        // Recycle the labels around the camera target so they follow the view
-        // (tier visibility + which absolute mm labels are shown live here).
+        // Recycle the labels around the camera target, but shifted right by half
+        // the left overlay's width (same as the axis indicator) so the ruler is
+        // centred on the visible 3D area rather than the canvas centre half-
+        // hidden behind the objects/timeline panel.
+        const canvasH = renderer.domElement.clientHeight || 1;
+        const worldPerPx = (viewHeight / canvasH) * (LEFT_PANEL_PX / 2);
+        _camRight.set(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
         updateRuler3D(
           rulerGroup,
-          targetRef.current.x,
-          targetRef.current.z,
+          targetRef.current.x + _camRight.x * worldPerPx,
+          targetRef.current.z + _camRight.z * worldPerPx,
           viewHeight,
+          useStore.getState().theme,
         );
         // Fade the matching 1 mm ground grid in over a small band centred on
         // the same threshold the 1 mm ruler tier toggles at (viewHeight 7).

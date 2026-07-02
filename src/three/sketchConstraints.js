@@ -610,11 +610,19 @@ export function enforceConstraints(
     propagateCoincidentFrom(rotIdx, shapes, updated, constraints);
   }
 
-  // ── Bevel arc recomputation ──────────────────────────────────────────────────
+  // ── Corner (bevel arc / chamfer line) recomputation ──────────────────────────
+  // Both hold their shape by re-deriving from their two legs whenever a leg moves
+  // (directly or via a dragged connected line), rather than by fragile angle locks.
   for (let i = 0; i < shapes.length; i++) {
     const shape = shapes[i];
-    if (!shape || shape.kind !== "bevel" || !shape.bevelData) continue;
-    const { aIdx, aKey, bIdx, bKey, dist: bDist } = shape.bevelData;
+    const corner =
+      shape?.kind === "bevel"
+        ? shape.bevelData
+        : shape?.kind === "chamfer"
+          ? shape.chamferData
+          : null;
+    if (!corner) continue;
+    const { aIdx, aKey, bIdx, bKey, dist: bDist } = corner;
     if (!updated.has(aIdx) && !updated.has(bIdx)) continue;
     const sA2 = shapes[aIdx],
       sB2 = shapes[bIdx];
@@ -640,12 +648,26 @@ export function enforceConstraints(
     const uB = norm2({ x: bOther.x - P.x, y: bOther.y - P.y });
     const newTrimA = { x: P.x + uA.x * bDist, y: P.y + uA.y * bDist };
     const newTrimB = { x: P.x + uB.x * bDist, y: P.y + uB.y * bDist };
-    const newArc = buildBevelArc(P, uA, uB, newTrimA, newTrimB);
-    if (!newArc) continue;
-    newArc.kind = "bevel";
-    newArc.bevelData = shape.bevelData;
-    shapes[i] = newArc;
-    updated.set(i, newArc);
+    let rebuilt;
+    if (shape.kind === "bevel") {
+      const newArc = buildBevelArc(P, uA, uB, newTrimA, newTrimB);
+      if (!newArc) continue;
+      newArc.kind = "bevel";
+      newArc.bevelData = corner;
+      rebuilt = newArc;
+    } else {
+      rebuilt = {
+        type: "line",
+        x1: newTrimA.x,
+        y1: newTrimA.y,
+        x2: newTrimB.x,
+        y2: newTrimB.y,
+        kind: "chamfer",
+        chamferData: corner,
+      };
+    }
+    shapes[i] = rebuilt;
+    updated.set(i, rebuilt);
     const newSA = moveShapePoint(sA2, aKey, newTrimA);
     const newSB = moveShapePoint(sB2, bKey, newTrimB);
     if (newSA) {

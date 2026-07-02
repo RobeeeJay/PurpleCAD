@@ -78,4 +78,14 @@ describe("evaluateFormula", () => {
     expect(Number.isNaN(evaluateFormula(null))).toBe(true);
     expect(Number.isNaN(evaluateFormula(undefined))).toBe(true);
   });
+
+  // Arithmetic runs through decimal.js, so common decimal cases are exact
+  // rather than carrying binary-float noise.
+  it("evaluates decimal arithmetic exactly", () => {
+    expect(evaluateFormula("0.1 + 0.2")).toBe(0.3);
+    expect(evaluateFormula("1/3*3")).toBe(1);
+    expect(evaluateFormula("1.005 * 100")).toBe(100.5);
+    const map = variablesToMap([{ name: "w", formula: "0.1" }]);
+    expect(evaluateFormula("w + 0.2", map)).toBe(0.3);
+  });
 });

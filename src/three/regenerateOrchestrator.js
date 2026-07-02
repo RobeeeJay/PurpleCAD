@@ -20,6 +20,7 @@ import {
   withOrphanFlags,
 } from "../store/internals.js";
 import { regenerateItemsForResolution } from "./regenerateItems.js";
+import { activePrecision } from "./resolution.js";
 
 export async function regenerateForResolution(printPrecision) {
   const state = useStore.getState();
@@ -64,7 +65,7 @@ function geomTargetId(inst) {
 export async function recalculateTimeline() {
   const state = useStore.getState();
   const history = state.history;
-  const printPrecision = state.curveResolution === "print" ? 0.01 : null;
+  const printPrecision = activePrecision(state);
 
   const total = history.reduce(
     (n, e) => (geomTargetId(e.instruction) != null ? n + 1 : n),
@@ -72,6 +73,20 @@ export async function recalculateTimeline() {
   );
   let done = 0;
   useStore.getState().setRegenProgress({ current: 0, total });
+
+  // Yield a real animation frame at most this often so the render / camera loop
+  // keeps painting through a long recalc — the viewport stays orbitable while it
+  // runs — without adding a frame to every (often sub-millisecond) step.
+  let lastFrame = Date.now();
+  const breathe = async () => {
+    if (Date.now() - lastFrame < 80) return;
+    await new Promise((r) =>
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame(() => r())
+        : setTimeout(r, 0),
+    );
+    lastFrame = Date.now();
+  };
 
   let accItems = [];
   const newHistory = [];
@@ -84,21 +99,34 @@ export async function recalculateTimeline() {
     }
     // Dirty only this step's item; everything upstream keeps the cache an
     // earlier iteration already stamped, so the regen rebuilds just this one.
-    // For a chamfer whose source tracks a sketch, also drop the stored position
-    // so regenerateChamfer recomputes it (source brushPos + the fresh bbox
+    // For a chamfer/push-pull whose source tracks a sketch, also drop the stored
+    // position so the regen recomputes it (source brushPos + the fresh bbox
     // centerOffset) — otherwise a resized source keeps its old position and the
-    // body shifts by the bbox-centre delta.  This applies to a direct extrude
-    // source AND a union/boolean source (a boss): the union is re-localised by
-    // its frozen originalCentre, so its bbox centre moves as the sketch grows.
-    // Chained chamfers (source is itself a chamfer CSG) keep their position —
+    // body shifts by the bbox-centre delta.  Both ops bbox-centre their result,
+    // so both need this.  It applies to a direct extrude source AND a
+    // union/boolean source (a boss): the union is re-localised by its frozen
+    // originalCentre, so its bbox centre moves as the sketch grows.  Chained ops
+    // (source is itself a chamfer/push-pull CSG) keep their position —
     // buildBrushTransform has no live centroid there and any gizmo move lives in
     // a separate later transform entry.
     accItems = accItems.map((it) => {
       if (it.id !== targetId || it.type !== "csg" || !it.regenerator) return it;
       const src = it.regenerator.source;
       const recenter =
-        it.regenerator.kind === "chamfer" &&
-        (src?.type === "extrude" || src?.regenerator?.kind === "boolean");
+        ((it.regenerator.kind === "chamfer" ||
+          it.regenerator.kind === "pushpull" ||
+          it.regenerator.kind === "shell" ||
+          it.regenerator.kind === "hole" ||
+          it.regenerator.kind === "emboss" ||
+          it.regenerator.kind === "draft" ||
+          it.regenerator.kind === "revolve") &&
+          (src?.type === "extrude" || src?.regenerator?.kind === "boolean")) ||
+        // Pipe and loft are built in world and their position IS the bbox
+        // centre; drop it so a sketch edit to an input re-centres the result.
+        ((it.regenerator.kind === "pipe" || it.regenerator.kind === "loft") &&
+          it.regenerator.profileSource?.type === "extrude") ||
+        // A 3D pattern is world-built and follows its source — always recentre.
+        it.regenerator.kind === "pattern3d";
       return {
         ...it,
         regenerator: { ...it.regenerator, regeneratedAt: "dirty" },
@@ -109,6 +137,7 @@ export async function recalculateTimeline() {
     accItems = await regenerateItemsForResolution(accItems, printPrecision);
     done += 1;
     useStore.getState().setRegenProgress({ current: done, total });
+    await breathe();
 
     const reg = accItems.find((it) => it.id === targetId);
     // A failed regen comes back without geometry — keep the entry's existing

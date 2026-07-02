@@ -17,7 +17,11 @@ import {
   makeExtrudePreviewMesh,
   extractFaceProfile,
 } from "./extrudeGeometry.js";
-import { runCutExtrusion, runUnionExtrudes } from "./extrudeBoolean.js";
+import {
+  runCutExtrusion,
+  runUnionExtrudes,
+  runExtrudeUnion,
+} from "./extrudeBoolean.js";
 import {
   EXTRUDE_FACE_HIGHLIGHT,
   EXTRUDE_FACE_HIGHLIGHT_ALT,
@@ -143,7 +147,7 @@ export function createExtrudeHelpers(
     );
   };
 
-  const handleExtrudeHover = (screenX, screenY) => {
+  const handleExtrudeHover = (screenX, screenY, shift = false) => {
     const fills =
       extrudeSelectGroupRef && extrudeSelectGroupRef.current
         ? extrudeSelectGroupRef.current.children
@@ -157,9 +161,12 @@ export function createExtrudeHelpers(
     if (fills.length > 0) {
       const hits = ray.intersectObjects(fills, false);
       if (hits.length > 0) {
-        hits[0].object.material.opacity = selectedFills.has(hits[0].object)
-          ? 0.55
-          : 0.3;
+        // Preview the whole word a click would take, unless Shift restricts the
+        // pick to the single hovered glyph.
+        const group = shift ? [hits[0].object] : textGroupFills(hits[0].object);
+        group.forEach((m) => {
+          m.material.opacity = selectedFills.has(m) ? 0.55 : 0.3;
+        });
         renderer.domElement.style.cursor = "pointer";
         clearFaceHighlight();
         return;
@@ -351,7 +358,30 @@ export function createExtrudeHelpers(
   // preview.  Distance is never set by the click — only via the input field.
   // The selection is homogeneous: once a sketch region is picked only regions
   // can be added; once a face is picked only coplanar faces can be added.
-  const handleExtrudeProfileClick = (screenX, screenY) => {
+  // A glyph fill's text group: every fill from the same text shape (one word).
+  // Selecting one letter selects them all, since text is extruded as a unit.
+  const textGroupKey = (profile) =>
+    profile && profile.type === "sketchLoop" && profile.textShapeIdx != null
+      ? `${profile.sketchId}:${profile.textShapeIdx}`
+      : null;
+  const textGroupFills = (fill) => {
+    const key = textGroupKey(fill.userData.extrudeProfile);
+    if (!key) return [fill];
+    const fills = extrudeSelectGroupRef?.current?.children ?? [];
+    return fills.filter((f) => textGroupKey(f.userData.extrudeProfile) === key);
+  };
+  // Add or remove a single region fill from the selection (no rebuild).
+  const setFillSelected = (fill, selected) => {
+    if (selected && !selectedFills.has(fill)) {
+      selectedFills.add(fill);
+      extrudeProfileList.push({ ...fill.userData.extrudeProfile, _fill: fill });
+    } else if (!selected && selectedFills.has(fill)) {
+      selectedFills.delete(fill);
+      extrudeProfileList = extrudeProfileList.filter((p) => p._fill !== fill);
+    }
+  };
+
+  const handleExtrudeProfileClick = (screenX, screenY, shift = false) => {
     const found = findProfileAt(screenX, screenY);
     if (!found) return;
     const kind = extrudeProfileList[0]?.type;
@@ -373,16 +403,12 @@ export function createExtrudeHelpers(
       return;
     }
     if (found.fill) {
-      // Region pick: identity is the fill mesh.
-      if (selectedFills.has(found.fill)) {
-        selectedFills.delete(found.fill);
-        extrudeProfileList = extrudeProfileList.filter(
-          (p) => p._fill !== found.fill,
-        );
-      } else {
-        selectedFills.add(found.fill);
-        extrudeProfileList.push({ ...found.profile, _fill: found.fill });
-      }
+      // Region pick: identity is the fill mesh.  A text glyph toggles the whole
+      // word (all its letters) as one unit; Shift restricts it to this glyph so
+      // a single letter can be extruded on its own.
+      const selecting = !selectedFills.has(found.fill);
+      const group = shift ? [found.fill] : textGroupFills(found.fill);
+      group.forEach((f) => setFillSelected(f, selecting));
     } else {
       // Face pick: de-dup by plane + anchor.
       const idx = extrudeProfileList.findIndex((p) =>
@@ -392,6 +418,67 @@ export function createExtrudeHelpers(
       else extrudeProfileList.push({ ...found.profile, _fill: null });
     }
     rebuildPreviews(currentDepthValue());
+  };
+
+  // ── Drag-select marquee (sketch-region profiles) ──────────────────────────
+  let marqueeEl = null;
+  const showExtrudeMarquee = (x1, y1, x2, y2) => {
+    if (!marqueeEl) {
+      marqueeEl = document.createElement("div");
+      marqueeEl.style.cssText =
+        "position:fixed;border:1px solid #5b8de8;background:rgba(91,141,232,0.15);" +
+        "pointer-events:none;z-index:50;";
+      document.body.appendChild(marqueeEl);
+    }
+    marqueeEl.style.left = `${Math.min(x1, x2)}px`;
+    marqueeEl.style.top = `${Math.min(y1, y2)}px`;
+    marqueeEl.style.width = `${Math.abs(x2 - x1)}px`;
+    marqueeEl.style.height = `${Math.abs(y2 - y1)}px`;
+    marqueeEl.style.display = "block";
+  };
+  const clearExtrudeMarquee = () => {
+    if (marqueeEl) marqueeEl.style.display = "none";
+  };
+
+  // Drag-select: add (or, when `remove`, take away) every sketch-region profile
+  // whose centre falls inside the screen box.  Faces aren't box-selectable.
+  const handleExtrudeProfileBox = (x1, y1, x2, y2, remove, shift = false) => {
+    clearExtrudeMarquee();
+    const fills = extrudeSelectGroupRef?.current?.children ?? [];
+    if (fills.length === 0) return;
+    if (extrudeProfileList[0] && extrudeProfileList[0].type !== "sketchLoop")
+      return; // can't mix a face selection with region box-select
+    const minX = Math.min(x1, x2),
+      maxX = Math.max(x1, x2),
+      minY = Math.min(y1, y2),
+      maxY = Math.max(y1, y2);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const cam = makeRay(0, 0).camera;
+    let changed = false;
+    for (const fill of fills) {
+      const profile = fill.userData.extrudeProfile;
+      if (!profile || profile.type !== "sketchLoop") continue;
+      const c = profile.profileCentroid;
+      const ndc = new THREE.Vector3(c.x, c.y, 0)
+        .applyQuaternion(fill.quaternion)
+        .add(fill.position)
+        .project(cam);
+      const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
+      const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+      if (sx < minX || sx > maxX || sy < minY || sy > maxY) continue;
+      const selected = selectedFills.has(fill);
+      // A glyph dragged over pulls in (or releases) its whole word, unless Shift
+      // restricts the box to the individual glyphs it covers.
+      const group = shift ? [fill] : textGroupFills(fill);
+      if (remove && selected) {
+        group.forEach((f) => setFillSelected(f, false));
+        changed = true;
+      } else if (!remove && !selected) {
+        group.forEach((f) => setFillSelected(f, true));
+        changed = true;
+      }
+    }
+    if (changed) rebuildPreviews(currentDepthValue());
   };
 
   // The extrude item definition for a profile.  Used both for items added to the
@@ -457,6 +544,10 @@ export function createExtrudeHelpers(
     const retargetId = store.extrudeRetargetId;
     const isCut = !!store.extrudeDepthInput?.cut;
     const startOffset = store.extrudeDepthInput?.startOffset ?? 0;
+    // "Always extrude as single object" (default on): multiple disjoint
+    // profiles fuse into one body.  When off, pure-sketch multi-profile
+    // extrudes stay separate; a boss still merges into its host.
+    const combineSingle = store.alwaysExtrudeSingleObject !== false;
     // Persist the depth signed — the sign controls direction (positive =
     // along face normal, negative = opposite) for both cut and non-cut
     // extrudes.
@@ -492,7 +583,7 @@ export function createExtrudeHelpers(
           )
             maxId = e.instruction.item.id;
         });
-        if (!isCut) {
+        if (!isCut && combineSingle) {
           // The extra regions become new prisms in ONE timeline step; a separate
           // Union step then fuses them with the retargeted original (by id) and
           // any hosts.  So the extras stay one entry, not N separate ones.
@@ -521,7 +612,8 @@ export function createExtrudeHelpers(
             maxId + defs.length + 1,
           ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
         } else {
-          // Cut: each extra region cuts its target independently.
+          // Cut differences each extra region against its target; with the
+          // single-object setting off, non-cut extras become separate solids.
           profiles.slice(1).forEach((profile, i) => {
             createOneExtrude(
               store,
@@ -554,11 +646,28 @@ export function createExtrudeHelpers(
         ? []
         : unionTargetIdsFor(profiles, store.items);
       const willUnion =
-        !isCut && (profiles.length > 1 || unionTargets.length > 0);
+        !isCut &&
+        (unionTargets.length > 0 || (profiles.length > 1 && combineSingle));
       if (willUnion) {
-        // Create the prisms in ONE timeline step (a multi-area extrude reads as
-        // a single "Extruded" entry), then fuse them — and any host solids — in
-        // a separate Union step.  A lone prism is just a normal extrude entry.
+        // Fuse into ONE self-contained object in ONE timeline entry: the prism
+        // recipes are embedded in the result's regenerator (no separate prism
+        // items + Union step), and any host solids are merged in.
+        const defs = profiles.map((profile, i) =>
+          buildExtrudeDef(
+            profile,
+            depthStored,
+            false,
+            startOffset,
+            maxId + 2 + i,
+          ),
+        );
+        store.setCutExtrudeInProgress(true);
+        void runExtrudeUnion(defs, unionTargets, maxId + 1).finally(() =>
+          useStore.getState().setCutExtrudeInProgress(false),
+        );
+      } else if (!isCut && profiles.length > 1) {
+        // "Single object" off: N separate prisms, but committed as ONE timeline
+        // entry (a createGroup), not N.
         const defs = profiles.map((profile, i) =>
           buildExtrudeDef(
             profile,
@@ -568,15 +677,8 @@ export function createExtrudeHelpers(
             maxId + 1 + i,
           ),
         );
-        if (defs.length > 1) store.addItems(defs, "Extruded");
-        else store.addItem(defs[0]);
+        store.addItems(defs, "Extruded");
         store.selectItem(null);
-        store.setCutExtrudeInProgress(true);
-        void runUnionExtrudes(
-          defs.map((d) => d.id),
-          unionTargets,
-          maxId + defs.length + 1,
-        ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
       } else {
         // Cut prisms each difference their target; a lone non-cut prism is a
         // standalone extrude.
@@ -724,6 +826,7 @@ export function createExtrudeHelpers(
       m.material.opacity = 0;
     });
     clearFaceHighlight();
+    clearExtrudeMarquee();
     renderer.domElement.style.cursor = "";
     const store = useStore.getState();
     store.setExtrudeSelectMode(null);
@@ -738,6 +841,9 @@ export function createExtrudeHelpers(
     rebuildPreviews,
     handleExtrudeHover,
     handleExtrudeProfileClick,
+    handleExtrudeProfileBox,
+    showExtrudeMarquee,
+    clearExtrudeMarquee,
     startFaceExtrudeFromSelection,
     preselectRetargetProfile,
     beginExtrudeStartPick,

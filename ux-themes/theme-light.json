@@ -1,0 +1,51 @@
+{
+  "name": "PurpleCAD Light",
+  "description": "Complementary light theme — same semantic roles, inverted lightness",
+  "foundation": {
+    "bg":             { "hex": "#F5F3FF", "usage": "Viewport / canvas background" },
+    "surface":        { "hex": "#EEEDFE", "usage": "Panels, toolbars, sidebars" },
+    "border":         { "hex": "#CECBF6", "usage": "Panel edges, dividers" },
+    "textPrimary":    { "hex": "#26215C", "usage": "Labels, values, headings" },
+    "textSecondary":  { "hex": "#534AB7", "usage": "Hints, muted labels" }
+  },
+  "sketchPlane": {
+    "fill":   { "hex": "#534AB7", "alpha": 0.10, "usage": "Translucent plane surface" },
+    "border": { "hex": "#534AB7", "alpha": 1.00, "usage": "Plane outline edge" },
+    "normal": { "hex": "#534AB7", "alpha": 1.00, "usage": "Normal axis arrow" }
+  },
+  "sketchLines": {
+    "active":           { "hex": "#534AB7", "usage": "Active / default sketch line" },
+    "node":             { "hex": "#854F0B", "usage": "Vertex / endpoint node" },
+    "selected":         { "hex": "#26215C", "usage": "Selected sketch entity" },
+    "offset":           { "hex": "#7F77DD", "usage": "Offset line (dashed)" },
+    "construction":     { "hex": "#AFA9EC", "usage": "Construction / centre line (dash-dot)" },
+    "underconstrained": { "hex": "#7F77DD", "usage": "Under-constrained geometry" },
+    "solved":           { "hex": "#534AB7", "usage": "Fully constrained geometry" }
+  },
+  "rulers": {
+    "bg":     { "hex": "#EEEDFE", "usage": "Ruler background" },
+    "tick":   { "hex": "#854F0B", "usage": "Major and minor tick marks" },
+    "label":  { "hex": "#633806", "usage": "Ruler numeric labels" },
+    "cursor": { "hex": "#534AB7", "usage": "Live cursor position marker" },
+    "border": { "hex": "#CECBF6", "usage": "Ruler/viewport boundary" }
+  },
+  "grid": {
+    "major":  { "hex": "#534AB7", "alpha": 0.20, "usage": "Major grid lines" },
+    "minor":  { "hex": "#534AB7", "alpha": 0.09, "usage": "Minor grid lines" },
+    "node":   { "hex": "#7F77DD", "usage": "Grid intersection dots" },
+    "origin": { "hex": "#854F0B", "alpha": 0.40, "usage": "World origin X/Y/Z axes" }
+  },
+  "dimensions": {
+    "line":      { "hex": "#534AB7", "usage": "Dimension measurement line + arrowheads" },
+    "extension": { "hex": "#AFA9EC", "usage": "Extension / projection lines" },
+    "value":     { "hex": "#633806", "usage": "Dimension value label" },
+    "driven":    { "hex": "#854F0B", "usage": "Driven / reference dimension" }
+  },
+  "constraints": {
+    "marker":           { "hex": "#854F0B", "usage": "Constraint tick / symbol" },
+    "label":            { "hex": "#633806", "usage": "Constraint type label (⊥ ‖ etc)" },
+    "overconstrained":  { "hex": "#A32D2D", "usage": "Conflicting / redundant constraint" },
+    "underconstrained": { "hex": "#7F77DD", "usage": "Geometry with remaining DOF" },
+    "solved":           { "hex": "#534AB7", "usage": "Fully defined sketch" }
+  }
+}

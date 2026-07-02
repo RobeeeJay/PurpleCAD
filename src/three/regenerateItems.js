@@ -9,7 +9,20 @@ import {
 // imported from the store (the orchestrator in regenerateOrchestrator.js
 // is what Viewport pulls in), so it's outside the worker's transitive
 // graph and the previous cycle no longer applies.
-import { chamferOrFilletItem, performCsg } from "./occClient.js";
+import {
+  chamferOrFilletItem,
+  pushPullFaces,
+  shellItem,
+  holeItem,
+  embossItem,
+  draftItem,
+  revolveItem,
+  pipeItem,
+  loftItem,
+  pattern3dItem,
+  performCsg,
+} from "./occClient.js";
+import { buildEmbossStamp } from "./embossGeometry.js";
 
 // Items that came from CSG or chamfer operations store a `regenerator`
 // field describing how to re-run the operation.  This lets us recompute
@@ -111,6 +124,489 @@ async function regenerateChamfer(
   };
 }
 
+async function regeneratePushPull(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+  currentDepth,
+) {
+  const rawSubGeo = regenerator.subGeo || { faces: [] };
+  if ((rawSubGeo.faces?.length || 0) === 0) return null;
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    withLiveDepth(regenerator.source, currentDepth),
+    liveItems,
+    printPrecision,
+  );
+  // A sketch edit moves the polygon edges a side-face selection was bound to —
+  // re-point the face selections at the live edges so OCC can still find them.
+  const subGeo = remapExtrudeFaceSelections(
+    rawSubGeo,
+    regenerator.source,
+    source,
+  );
+  let result;
+  try {
+    result = await pushPullFaces({
+      source,
+      subGeo,
+      distance: regenerator.distance ?? 0,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Push/pull regen couldn't re-match its selection (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  // Keep the item's existing position (same rationale as regenerateChamfer):
+  // the re-tessellated geometry is bbox-centred, so the rendered centre is
+  // already item.position regardless of precision.
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
+// Rebuild a shell from its live source.  Mirrors regeneratePushPull without a
+// face selection: re-derive the source, hollow it, and (if the source tracks a
+// sketch and the position was dropped) recompute the bbox-centred position.
+async function regenerateShell(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    regenerator.source,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await shellItem({
+      source,
+      thickness: regenerator.thickness ?? 0,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Shell regen failed (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
+// Rebuild a draft from its live source.  Mirrors regenerateShell.
+async function regenerateDraft(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    regenerator.source,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await draftItem({
+      source,
+      neutral: regenerator.neutral,
+      faces: regenerator.faces || [],
+      angleDeg: regenerator.angleDeg ?? 0,
+      flip: !!regenerator.flip,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Draft regen failed (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
+// Rebuild a drilled hole from its live source.  Mirrors regenerateShell.
+async function regenerateHole(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    regenerator.source,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await holeItem({
+      source,
+      hole: regenerator.hole,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(`Hole regen failed (${err.message}); keeping geometry.`);
+    return null;
+  }
+  if (!result) return null;
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
+// Rebuild an emboss/deboss relief from its live source + sketch geometry.  The
+// stamp is recomputed from the (possibly edited) sketch profiles each pass.
+async function regenerateEmboss(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    regenerator.source,
+    liveItems,
+    printPrecision,
+  );
+  const stamp =
+    buildEmbossStamp(
+      regenerator.profiles,
+      regenerator.face,
+      regenerator.params,
+      liveItems,
+      printPrecision,
+      regenerator.faceSet,
+      source?.scale?.x ?? 1,
+    ) || regenerator.stamp;
+  let result;
+  try {
+    result = await embossItem({
+      source,
+      stamp,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(`Emboss regen failed (${err.message}); keeping geometry.`);
+    return null;
+  }
+  if (!result) return null;
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+    stamp,
+  };
+}
+
+async function regenerateRevolve(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    regenerator.source,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await revolveItem({
+      source,
+      axis: regenerator.axis,
+      angleRad: regenerator.angleRad,
+      prismSides: regenerator.prismSides,
+      offsetPerRotation: regenerator.offsetPerRotation,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Revolve regen couldn't rebuild (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  // The revolve bbox-centres its result; recompute the world centre from the
+  // profile's sketch-plane brush transform + the fresh centre offset so the
+  // origin tracks a sketch edit (recalculateTimeline drops currentPosition).
+  let position = currentPosition;
+  if (!position) {
+    const { cx, cy, cz } = result.centerOffset;
+    const brushPos = buildBrushTransform(source).position;
+    const rot = source.rotation || { x: 0, y: 0, z: 0 };
+    const local = new THREE.Vector3(cx, cy, cz);
+    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
+    position = {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    };
+  }
+  return {
+    position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
+async function regeneratePipe(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const profileSource = withLivePolygons(
+    regenerator.profileSource,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await pipeItem({
+      profileSource,
+      pathRef: regenerator.pathRef,
+      twistTurns: regenerator.twistTurns,
+      autoRotate: regenerator.autoRotate,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Pipe regen couldn't rebuild (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  // Pipe is built in world, so the bbox centre IS the position; recalculate-
+  // Timeline drops currentPosition to let a sketch edit re-centre the origin.
+  return {
+    position: currentPosition || result.position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
+async function regenerateLoft(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const profileSource = withLivePolygons(
+    regenerator.profileSource,
+    liveItems,
+    printPrecision,
+  );
+  const secondProfileSource = withLivePolygons(
+    regenerator.secondProfileSource,
+    liveItems,
+    printPrecision,
+  );
+  let result;
+  try {
+    result = await loftItem({
+      profileSource,
+      secondProfileSource,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Loft regen couldn't rebuild (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  // Built in world, so the bbox centre is the position; recalculateTimeline
+  // drops currentPosition to let a sketch edit re-centre the origin.
+  return {
+    position: currentPosition || result.position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
+// Resolve a 3D pattern's live params: mirror/circular read the plane object's
+// frame (origin + normal); circular uses the normal as the rotation axis.
+function resolvePatternParams(r, items) {
+  if (r.patternType === "rectangular") {
+    return {
+      countX: r.countX,
+      countY: r.countY,
+      countZ: r.countZ,
+      dx: r.dx,
+      dy: r.dy,
+      dz: r.dz,
+    };
+  }
+  // A circular pattern carries a baked axis (a picked sketch line / face edge).
+  if (r.patternType === "circular" && r.axisOrigin && r.axisDir) {
+    return {
+      origin: r.axisOrigin,
+      axis: r.axisDir,
+      count: r.count,
+      angleRad: r.angleRad,
+      axialOffset: r.axialOffset,
+    };
+  }
+  const plane = items.find((i) => i.id === r.planeId);
+  if (!plane) return null;
+  const rot = plane.rotation || { x: 0, y: 0, z: 0 };
+  const nv = new THREE.Vector3(0, 0, 1).applyEuler(
+    new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
+  );
+  const origin = plane.position || { x: 0, y: 0, z: 0 };
+  const normal = { x: nv.x, y: nv.y, z: nv.z };
+  if (r.patternType === "mirror") return { origin, normal };
+  return { origin, axis: normal, count: r.count, angleRad: r.angleRad };
+}
+
+async function regenerate3dPattern(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const params = resolvePatternParams(regenerator, liveItems);
+  if (!params) return null;
+  let result;
+  try {
+    result = await pattern3dItem({
+      patternType: regenerator.patternType,
+      sourceId: regenerator.sourceId,
+      params,
+      allItems: liveItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Pattern regen couldn't rebuild (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  return {
+    position: currentPosition || result.position,
+    geometryData: result.geometryData,
+    centerOffset: result.centerOffset,
+  };
+}
+
 async function regenerateBoolean(
   regenerator,
   accumulatedItems,
@@ -133,6 +629,33 @@ async function regenerateBoolean(
   return performCsg({
     selectedItems: liveInputs,
     operation: regenerator.op,
+    printPrecision,
+    allItems: accumulatedItems,
+  });
+}
+
+// A multi-area extrude fused into one body, self-contained: the prism recipes
+// (extrude item defs) are embedded in `extrudeDefs` rather than referenced as
+// separate store items, so the whole multi-area extrude is ONE timeline entry.
+// Optional `inputIds` are host solids (a boss) fused in too.  Each prism is
+// rebuilt from its live sketch polygon so the union tracks sketch edits.
+async function regenerateExtrudeUnion(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+) {
+  const prisms = (regenerator.extrudeDefs || []).map((d) =>
+    withLivePolygons(d, accumulatedItems, printPrecision),
+  );
+  const hosts = (regenerator.inputIds || [])
+    .map((id) => accumulatedItems.find((i) => i.id === id))
+    .filter(Boolean)
+    .map((i) => withLivePolygons(i, accumulatedItems, printPrecision));
+  const inputs = [...prisms, ...hosts];
+  if (inputs.length < 1) return null;
+  return performCsg({
+    selectedItems: inputs,
+    operation: "union",
     printPrecision,
     allItems: accumulatedItems,
   });
@@ -180,8 +703,34 @@ export async function regenerateItemsForResolution(
         item.position,
         item.depth,
       );
+    } else if (r.kind === "pushpull") {
+      result = await regeneratePushPull(
+        r,
+        out,
+        printPrecision,
+        item.position,
+        item.depth,
+      );
+    } else if (r.kind === "shell") {
+      result = await regenerateShell(r, out, printPrecision, item.position);
+    } else if (r.kind === "hole") {
+      result = await regenerateHole(r, out, printPrecision, item.position);
+    } else if (r.kind === "emboss") {
+      result = await regenerateEmboss(r, out, printPrecision, item.position);
+    } else if (r.kind === "draft") {
+      result = await regenerateDraft(r, out, printPrecision, item.position);
+    } else if (r.kind === "revolve") {
+      result = await regenerateRevolve(r, out, printPrecision, item.position);
+    } else if (r.kind === "pipe") {
+      result = await regeneratePipe(r, out, printPrecision, item.position);
+    } else if (r.kind === "loft") {
+      result = await regenerateLoft(r, out, printPrecision, item.position);
+    } else if (r.kind === "pattern3d") {
+      result = await regenerate3dPattern(r, out, printPrecision, item.position);
     } else if (r.kind === "boolean") {
       result = await regenerateBoolean(r, out, printPrecision);
+    } else if (r.kind === "extrudeUnion") {
+      result = await regenerateExtrudeUnion(r, out, printPrecision);
     }
     progressed += 1;
     if (onProgress) onProgress({ current: progressed, total });
@@ -191,7 +740,18 @@ export async function regenerateItemsForResolution(
       // changed.  Keep its last-good mesh but flag it so the timeline marks the
       // step bad until the user retargets / re-applies it.  Stop re-attempting
       // (settle regeneratedAt) so a clean pass doesn't spam OCC every recalc.
-      if (r.kind === "chamfer") {
+      if (
+        r.kind === "chamfer" ||
+        r.kind === "pushpull" ||
+        r.kind === "shell" ||
+        r.kind === "hole" ||
+        r.kind === "emboss" ||
+        r.kind === "draft" ||
+        r.kind === "revolve" ||
+        r.kind === "pipe" ||
+        r.kind === "loft" ||
+        r.kind === "pattern3d"
+      ) {
         changed = true;
         out.push({
           ...item,
@@ -215,9 +775,24 @@ export async function regenerateItemsForResolution(
       regeneratedAt: printPrecision,
       regenFailed: false,
     };
-    if (r.kind === "chamfer" && result.centerOffset) {
+    if (
+      (r.kind === "chamfer" ||
+        r.kind === "pushpull" ||
+        r.kind === "shell" ||
+        r.kind === "hole" ||
+        r.kind === "emboss" ||
+        r.kind === "draft" ||
+        r.kind === "revolve" ||
+        r.kind === "pipe" ||
+        r.kind === "loft" ||
+        r.kind === "pattern3d") &&
+      result.centerOffset
+    ) {
       nextRegen.centerOffset = result.centerOffset;
     }
+    // Carry the freshly-recomputed stamp so buildItemShapeLocal stays in sync
+    // with the live sketch geometry.
+    if (r.kind === "emboss" && result.stamp) nextRegen.stamp = result.stamp;
     out.push({
       ...item,
       position: result.position,

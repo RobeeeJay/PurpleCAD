@@ -1,7 +1,7 @@
 .timeline {
   display: flex;
   flex-direction: column;
-  background-color: var(--bg-secondary);
+  background-color: rgba(var(--bg-secondary-rgb), 0.8);
   border-right: 1px solid var(--border-color);
   border-top: 1px solid var(--border-color);
   min-height: 140px;
@@ -78,6 +78,14 @@
 
 .timeline-entry:hover {
   background-color: var(--bg-tertiary);
+}
+
+/* The whole timeline is locked while a create/modify/sketch tool is mid-flow:
+   pointer-events:none disables every button (restore / edit / retarget / delete /
+   recalculate / reorder) and the dim signals it's inert. */
+.timeline.tool-locked {
+  pointer-events: none;
+  opacity: 0.45;
 }
 
 .timeline-entry.active {
@@ -314,6 +322,33 @@
   background-color: var(--selected-bg);
   height: 3px;
   margin: 4px 10px;
+}
+
+.timeline-end-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.timeline-end-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+}
+
+.timeline-end-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .timeline-undo-status {

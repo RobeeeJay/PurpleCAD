@@ -29,6 +29,8 @@ import {
 } from "./store/variablesSlice.js";
 import { createUiSlice, uiInitial } from "./store/uiSlice.js";
 import { createMaterialSlice, materialInitial } from "./store/materialSlice.js";
+import { createFolderSlice, folderInitial } from "./store/folderSlice.js";
+import { createProjectSlice, projectInitial } from "./store/projectSlice.js";
 
 export const useStore = create((set, get) => ({
   // ---- Initial state ----
@@ -40,6 +42,8 @@ export const useStore = create((set, get) => ({
   ...uiInitial,
   ...variablesInitial,
   ...materialInitial,
+  ...folderInitial,
+  ...projectInitial,
 
   // ---- Actions, composed from slices ----
   ...createUiSlice(set, get),
@@ -48,7 +52,25 @@ export const useStore = create((set, get) => ({
   ...createSketchSlice(set, get),
   ...createVariablesSlice(set, get),
   ...createMaterialSlice(set, get),
+  ...createFolderSlice(set, get),
+  ...createProjectSlice(set, get),
 }));
+
+// E2E test hook: expose the store on window so Playwright can read state and
+// drive actions via page.evaluate, instead of trying to assert on opaque WebGL
+// canvas pixels.  Gated behind the __E2E__ compile-time flag (vite.config.js,
+// driven by the VITE_E2E shell var via the `e2e:build` npm script) so it never
+// ships in a normal build.  Also exposed in the Vite dev server
+// (import.meta.env.DEV) so it's available for debugging via devtools; that flag
+// is false in a production `vite build`, so it still never ships.  `typeof`
+// guards keep it inert under vitest/node, where neither flag is defined.
+if (
+  typeof window !== "undefined" &&
+  ((typeof __E2E__ !== "undefined" && __E2E__) ||
+    (typeof import.meta !== "undefined" && import.meta.env?.DEV))
+) {
+  window.__store = useStore;
+}
 
 // Per-sketch undo-state probe (sketch toolbar reads it to enable / disable
 // the per-sketch undo + redo buttons).

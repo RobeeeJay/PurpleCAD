@@ -4,6 +4,7 @@
 // replace their inputs with a single CSG item.
 
 import { useStore } from "../../store";
+import { activePrecision } from "../resolution.js";
 
 // Run a cut-extrusion: subtract the new extrude shape from the target solid
 // (or every visible solid when no source was captured), then hide both the
@@ -61,7 +62,7 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
       const result = await performCsg({
         selectedItems: [target, extrude],
         operation: "difference",
-        printPrecision: freshStore.curveResolution === "print" ? 0.01 : null,
+        printPrecision: activePrecision(freshStore),
         allItems: items,
       });
       if (!result) continue;
@@ -80,12 +81,14 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
         scale: { x: 1, y: 1, z: 1 },
         rotation: { x: 0, y: 0, z: 0 },
         geometryData: result.geometryData,
+        // A cut replaces the target, so inherit the target's material.
+        ...(target.material && { material: target.material }),
         regenerator: {
           kind: "boolean",
           op: "difference",
           inputIds: [target.id, extrudeItemId],
           originalCenter: result.position,
-          regeneratedAt: freshStore.curveResolution === "print" ? 0.01 : null,
+          regeneratedAt: activePrecision(freshStore),
         },
       });
     }
@@ -107,6 +110,59 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
 // caller so it can't collide with the just-created prisms (whose createGroup
 // step the local max-id scans here don't see).  No-op if the boolean can't
 // produce a result (< 2 valid inputs).
+// Fuse a fresh multi-area extrude into ONE self-contained object in ONE timeline
+// step.  Unlike runUnionExtrudes, the prisms are NOT created as separate store
+// items — their recipes (`extrudeDefs`) are embedded in the result's
+// `extrudeUnion` regenerator, so the whole extrude is a single "Extruded" entry.
+// `hostIds` are existing solids (a boss) fused in and consumed.  Falls back to
+// adding the prisms as separate items if the union can't be produced.
+export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
+  try {
+    const { performCsg } = await import("../occClient.js");
+    const store = useStore.getState();
+    const items = store.items;
+    const hosts = hostIds
+      .map((id) => items.find((i) => i.id === id && i.type !== "sketch"))
+      .filter(Boolean);
+    const inputs = [...extrudeDefs, ...hosts];
+    if (inputs.length < 1) return;
+    const precision = activePrecision(store);
+    const result = await performCsg({
+      selectedItems: inputs,
+      operation: "union",
+      printPrecision: precision,
+      allItems: items,
+    });
+    if (!result) {
+      // Couldn't fuse — keep the geometry by adding the prisms separately.
+      useStore.getState().addItems(extrudeDefs, "Extruded");
+      return;
+    }
+    const material = (hosts[0] ?? extrudeDefs[0])?.material;
+    useStore.getState().addItem({
+      id: unionId,
+      name: `Extruded ${unionId}`,
+      type: "csg",
+      children: [],
+      position: result.position,
+      scale: { x: 1, y: 1, z: 1 },
+      rotation: { x: 0, y: 0, z: 0 },
+      geometryData: result.geometryData,
+      ...(material && { material }),
+      regenerator: {
+        kind: "extrudeUnion",
+        extrudeDefs,
+        inputIds: hosts.map((h) => h.id),
+        originalCenter: result.position,
+        regeneratedAt: precision,
+      },
+    });
+    if (hosts.length) useStore.getState().consumeItems(hosts.map((h) => h.id));
+  } catch (err) {
+    console.error("Extrude union failed:", err);
+  }
+}
+
 export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
   try {
     const { performCsg } = await import("../occClient.js");
@@ -120,7 +176,10 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       .filter(Boolean);
     const inputs = [...extrudes, ...solids];
     if (inputs.length < 2) return;
-    const precision = freshStore.curveResolution === "print" ? 0.01 : null;
+    // A boss adds to an existing solid, so prefer that solid's material; for a
+    // pure multi-extrude union fall back to the first extrude's.
+    const unionMaterial = (solids[0] ?? extrudes[0])?.material;
+    const precision = activePrecision(freshStore);
     const result = await performCsg({
       selectedItems: inputs,
       operation: "union",
@@ -137,6 +196,7 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       scale: { x: 1, y: 1, z: 1 },
       rotation: { x: 0, y: 0, z: 0 },
       geometryData: result.geometryData,
+      ...(unionMaterial && { material: unionMaterial }),
       regenerator: {
         kind: "boolean",
         op: "union",

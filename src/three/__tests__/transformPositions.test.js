@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   findClosedLoops,
   polyCentroid,
+  polyAreaCentroid,
   buildSceneObjects,
 } from "../sceneObjects.js";
 
@@ -112,6 +113,11 @@ vi.mock("three", () => {
       s.x = v;
       s.y = v;
       s.z = v;
+    };
+    s.set = (x, y, z) => {
+      s.x = x;
+      s.y = y;
+      s.z = z;
     };
     return s;
   };
@@ -377,6 +383,8 @@ vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
 }));
 vi.mock("../objectMaterials.js", () => ({
   createMaterial: () => ({ dispose() {} }),
+  resolveItemMaterial: (item, items, defaultMaterial) =>
+    item?.material ?? defaultMaterial,
 }));
 vi.mock("../../store", () => ({ useStore: () => null }));
 
@@ -518,6 +526,53 @@ describe("item transform logic", () => {
 // For zero rotation the offset is just (cx,cy,depth/2) — these tests verify
 // that formula using only the pure polyCentroid helper.
 
+// ── Area centroid stays put when a curve re-tessellates ───────────────────────
+// The OCC extrude pivot (occOps makeExtrude / buildBrushTransform) uses the AREA
+// centroid, not the vertex mean, so toggling preview/print resolution — which
+// re-tessellates an arc/bezier edge to a different point set — doesn't drift the
+// solid.  These guard that property directly.
+describe("polyAreaCentroid is invariant to vertex density", () => {
+  // Same triangle, but the second has extra points subdividing one edge.
+  const tri = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 0, y: 4 },
+  ];
+  const denseEdge = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 3, y: 1 },
+    { x: 2, y: 2 },
+    { x: 1, y: 3 },
+    { x: 0, y: 4 },
+  ];
+
+  it("matches the geometric centre for a rectangle", () => {
+    const c = polyAreaCentroid(rectPoly(2, 3, 6, 7));
+    expect(c.x).toBeCloseTo(4);
+    expect(c.y).toBeCloseTo(5);
+  });
+
+  it("stays fixed when an edge is subdivided (vertex mean drifts)", () => {
+    const a = polyAreaCentroid(tri);
+    const b = polyAreaCentroid(denseEdge);
+    expect(b.x).toBeCloseTo(a.x, 9);
+    expect(b.y).toBeCloseTo(a.y, 9);
+    // The vertex mean is NOT invariant — that's the bug this replaces.
+    const m = polyCentroid(denseEdge);
+    expect(Math.hypot(m.x - a.x, m.y - a.y)).toBeGreaterThan(0.1);
+  });
+
+  it("falls back to the vertex mean for a degenerate (zero-area) loop", () => {
+    const line = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 4, y: 0 },
+    ];
+    expect(polyAreaCentroid(line)).toEqual(polyCentroid(line));
+  });
+});
+
 describe("extrude world-position formula (no rotation)", () => {
   it("centroid of an axis-aligned rectangle is its geometric centre", () => {
     const poly = rectPoly(0, 0, 4, 4);
@@ -600,6 +655,34 @@ describe("extrude world-position formula (no rotation)", () => {
 });
 
 // ── 3. buildSceneObjects mesh positioning ─────────────────────────────────────
+
+describe("buildSceneObjects: extrude pivot matches the OCC pivot", () => {
+  // An emboss picks the face/cylinder off this rendered mesh but unions with the
+  // OCC body, so the mesh pivot (extrudeLocalOffset) must equal the OCC pivot —
+  // the AREA centroid — not the vertex mean.  They diverge when a curve edge is
+  // densely tessellated (a bezier wall); the triangle below stands in for one,
+  // with its hypotenuse subdivided so the vertex mean is pulled off the centroid.
+  const denseHyp = [
+    { x: 0, y: 0 },
+    { x: 6, y: 0 },
+    { x: 4.5, y: 1.5 },
+    { x: 3, y: 3 },
+    { x: 1.5, y: 4.5 },
+    { x: 0, y: 6 },
+  ];
+
+  it("uses the area centroid as the local pivot (not the vertex mean)", () => {
+    const mesh = buildAndGetMesh([mkExtrude(1, denseHyp, 2, pos(0, 0, 0))], 1);
+    const off = mesh.userData.extrudeLocalOffset;
+    const area = polyAreaCentroid(denseHyp); // triangle centroid (2,2)
+    const mean = polyCentroid(denseHyp); // pulled to (2.5,2.5) by the dense edge
+    expect(off.x).toBeCloseTo(area.x, 6);
+    expect(off.y).toBeCloseTo(area.y, 6);
+    // Guard that the two centroids genuinely differ for this profile, so the
+    // assertion above is actually distinguishing them.
+    expect(Math.hypot(area.x - mean.x, area.y - mean.y)).toBeGreaterThan(0.1);
+  });
+});
 
 describe("buildSceneObjects: regular item positioning", () => {
   it("cube placed at item.position exactly", () => {
@@ -1062,5 +1145,15 @@ describe("extrude drag-commit round-trip (no offset drift)", () => {
     expect(meshAfter.position.x).toBeCloseTo(startMeshPos.x + 5);
     expect(meshAfter.position.y).toBeCloseTo(startMeshPos.y);
     expect(meshAfter.position.z).toBeCloseTo(startMeshPos.z);
+  });
+
+  it("attaches a grid child to a sketch plane mesh", () => {
+    const mesh = buildAndGetMesh(
+      [{ id: 7, type: "sketch", position: pos(0, 0, 0), shapes: [] }],
+      7,
+    );
+    // The grid group carries two LineSegments tiers (minor + major).
+    const grid = mesh.children.find((c) => c.children?.length === 2);
+    expect(grid).toBeTruthy();
   });
 });

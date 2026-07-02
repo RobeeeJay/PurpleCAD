@@ -6,6 +6,7 @@
 
 import React from "react";
 import FormulaInput from "../FormulaInput";
+import { DebouncedNumberField } from "../inputs.jsx";
 import SketchRulers from "./SketchRulers";
 import SketchLongPressMenu from "./SketchLongPressMenu";
 import { useStore } from "../../store";
@@ -29,6 +30,9 @@ export default function SketchOverlays({
   sketchConstraintFirstPoint,
   sketchModifyMode,
   sketchDistanceInput,
+  sketchMirrorState,
+  sketchCircularPatternState,
+  sketchRectangularPatternState,
   isInSketchMode,
   selectedId,
   variables,
@@ -42,6 +46,27 @@ export default function SketchOverlays({
   propagateConstraintsRef,
   selectItem,
 }) {
+  // Tracks which pattern-overlay fields currently hold an invalid / blank
+  // value, so Confirm can be disabled until every field parses again.  Keyed
+  // by field name; a field reports true (valid) on unmount so a closed tool
+  // never leaves a stale block.
+  const [patternInvalid, setPatternInvalid] = React.useState({});
+  const reportPatternValid = React.useCallback(
+    (key) => (valid) =>
+      setPatternInvalid((prev) => {
+        const blocked = !!prev[key];
+        if (valid && blocked) {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        }
+        if (!valid && !blocked) return { ...prev, [key]: true };
+        return prev;
+      }),
+    [],
+  );
+  const anyPatternInvalid = Object.keys(patternInvalid).length > 0;
+
   // Commit the extrude at the typed distance (shared by Enter and the Confirm
   // button).  Distance is read from the input state — never from the mouse.
   const confirmExtrude = () => {
@@ -93,11 +118,25 @@ export default function SketchOverlays({
     useStore.getState().setSketchConstraintMode(null);
   };
 
-  // Cancel discards the whole offset (it was created on entry) via the
-  // per-sketch undo, matching the extrude/chamfer "Cancel removes it" flow.
+  // Cancel.  For a freshly created offset, discard the whole thing via the
+  // per-sketch undo (matching the extrude/chamfer "Cancel removes it" flow).
+  // For an edit of an existing offset, the typed value was only live-previewed
+  // (no history), so restore the prior distance instead of undoing.
   const cancelOffset = () => {
+    const di = useStore.getState().sketchDistanceInput;
     offsetDraftRef.current = null;
-    useStore.getState().undoSketch(selectedId);
+    if (di?.created) {
+      useStore.getState().undoSketch(selectedId);
+    } else if (di) {
+      useStore
+        .getState()
+        .previewSketchOffsetDistance(
+          selectedId,
+          di.offsetGroup,
+          di.offsetConstraintIdx,
+          di.defaultDistance,
+        );
+    }
     cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
     useStore.getState().setSketchDistanceInput(null);
     useStore.getState().setSketchConstraintMode(null);
@@ -285,11 +324,393 @@ export default function SketchOverlays({
           </button>
         </div>
       )}
-      {activeSketchTool && sketchDrawPhase !== "second" && (
+      {activeSketchTool &&
+        activeSketchTool !== "mirror" &&
+        activeSketchTool !== "circularPattern" &&
+        activeSketchTool !== "rectangularPattern" &&
+        activeSketchTool !== "project" &&
+        sketchDrawPhase !== "second" && (
+          <div className="sketch-placement-hint">
+            Click to set the start point
+          </div>
+        )}
+      {activeSketchTool === "project" && (
         <div className="sketch-placement-hint">
-          Click to set the start point
+          Click a 3D edge to project its connected edges, or drag a box to
+          project everything inside · Esc to cancel
         </div>
       )}
+      {sketchMode && activeSketchTool === "mirror" && sketchMirrorState && (
+        <>
+          {sketchMirrorState.lineIdx == null ? (
+            <div className="sketch-placement-hint">
+              Click a line to use as the mirror line · Esc to cancel
+            </div>
+          ) : (
+            <>
+              <div className="sketch-placement-hint">
+                Click geometry to mirror, click again to remove · Esc to cancel
+              </div>
+              <div className="sketch-distance-input-overlay">
+                <span>
+                  Mirroring {sketchMirrorState.shapeIndices.length} item
+                  {sketchMirrorState.shapeIndices.length === 1 ? "" : "s"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => useStore.getState().reselectMirrorLine()}
+                  title="Reselect — pick a different mirror line"
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 10px",
+                    marginLeft: 8,
+                    borderRadius: 3,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Reselect line
+                </button>
+                <button
+                  type="button"
+                  onClick={() => useStore.getState().cancelMirrorTool()}
+                  title="Cancel — discard the mirror"
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 10px",
+                    marginLeft: 8,
+                    borderRadius: 3,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={sketchMirrorState.shapeIndices.length === 0}
+                  onClick={() => useStore.getState().confirmMirror(selectedId)}
+                  title="Confirm — create the mirrored geometry"
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 10px",
+                    marginLeft: 8,
+                    borderRadius: 3,
+                    border: "1px solid var(--accent, #4488ff)",
+                    background: "var(--accent, #4488ff)",
+                    color: "#fff",
+                    cursor: "pointer",
+                    opacity:
+                      sketchMirrorState.shapeIndices.length === 0 ? 0.5 : 1,
+                  }}
+                >
+                  Confirm
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+      {sketchMode &&
+        activeSketchTool === "circularPattern" &&
+        sketchCircularPatternState && (
+          <>
+            {sketchCircularPatternState.centerShapeIdx == null ? (
+              <div className="sketch-placement-hint">
+                Click a point to use as the pattern centre · Esc to cancel
+              </div>
+            ) : (
+              <>
+                <div className="sketch-placement-hint">
+                  Click geometry to pattern, click again to remove · Esc to
+                  cancel
+                </div>
+                <div className="sketch-distance-input-overlay">
+                  <span>
+                    Patterning {sketchCircularPatternState.shapeIndices.length}{" "}
+                    item
+                    {sketchCircularPatternState.shapeIndices.length === 1
+                      ? ""
+                      : "s"}
+                  </span>
+                  <label
+                    style={{
+                      marginLeft: 8,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    Instances per 360°
+                    <DebouncedNumberField
+                      min={2}
+                      step={1}
+                      storeValue={sketchCircularPatternState.count}
+                      validate={(v) => Number.isFinite(v) && v >= 2}
+                      onValidChange={reportPatternValid("circCount")}
+                      commit={(v) =>
+                        useStore.getState().setCircularPatternCount(v)
+                      }
+                      style={{
+                        width: 48,
+                        fontSize: 11,
+                        padding: "2px 4px",
+                        borderRadius: 3,
+                        background: "var(--bg-tertiary)",
+                        color: "var(--text-primary)",
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      useStore.getState().reselectCircularPatternCenter()
+                    }
+                    title="Reselect — pick a different centre point"
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 10px",
+                      marginLeft: 8,
+                      borderRadius: 3,
+                      border: "1px solid var(--border-color)",
+                      background: "var(--bg-tertiary)",
+                      color: "var(--text-primary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Reselect point
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      useStore.getState().cancelCircularPatternTool()
+                    }
+                    title="Cancel — discard the circular pattern"
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 10px",
+                      marginLeft: 8,
+                      borderRadius: 3,
+                      border: "1px solid var(--border-color)",
+                      background: "var(--bg-tertiary)",
+                      color: "var(--text-primary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  {(() => {
+                    const blocked =
+                      sketchCircularPatternState.shapeIndices.length === 0 ||
+                      anyPatternInvalid;
+                    return (
+                      <button
+                        type="button"
+                        disabled={blocked}
+                        onClick={() =>
+                          useStore.getState().confirmCircularPattern(selectedId)
+                        }
+                        title="Confirm — create the patterned geometry"
+                        style={{
+                          fontSize: 11,
+                          padding: "3px 10px",
+                          marginLeft: 8,
+                          borderRadius: 3,
+                          border: "1px solid var(--accent, #4488ff)",
+                          background: "var(--accent, #4488ff)",
+                          color: "#fff",
+                          cursor: blocked ? "not-allowed" : "pointer",
+                          opacity: blocked ? 0.5 : 1,
+                        }}
+                      >
+                        Confirm
+                      </button>
+                    );
+                  })()}
+                </div>
+              </>
+            )}
+          </>
+        )}
+      {sketchMode &&
+        activeSketchTool === "rectangularPattern" &&
+        sketchRectangularPatternState && (
+          <>
+            <div className="sketch-placement-hint">
+              Click geometry to pattern, click again to remove · Esc to cancel
+            </div>
+            <div className="sketch-distance-input-overlay">
+              <span>
+                Patterning {sketchRectangularPatternState.shapeIndices.length}{" "}
+                item
+                {sketchRectangularPatternState.shapeIndices.length === 1
+                  ? ""
+                  : "s"}
+              </span>
+              <label
+                style={{
+                  marginLeft: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                Count X
+                <DebouncedNumberField
+                  min={1}
+                  step={1}
+                  storeValue={sketchRectangularPatternState.countX}
+                  validate={(v) => Number.isFinite(v) && v >= 1}
+                  onValidChange={reportPatternValid("rectCountX")}
+                  commit={(v) =>
+                    useStore.getState().setRectangularPatternCountX(v)
+                  }
+                  style={{
+                    width: 44,
+                    fontSize: 11,
+                    padding: "2px 4px",
+                    borderRadius: 3,
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </label>
+              <label
+                style={{
+                  marginLeft: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                Offset X (mm)
+                <DebouncedNumberField
+                  step="any"
+                  storeValue={sketchRectangularPatternState.offsetX}
+                  validate={(v) => Number.isFinite(v)}
+                  onValidChange={reportPatternValid("rectOffsetX")}
+                  commit={(v) =>
+                    useStore.getState().setRectangularPatternOffsetX(v)
+                  }
+                  style={{
+                    width: 56,
+                    fontSize: 11,
+                    padding: "2px 4px",
+                    borderRadius: 3,
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </label>
+              <label
+                style={{
+                  marginLeft: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                Count Y
+                <DebouncedNumberField
+                  min={1}
+                  step={1}
+                  storeValue={sketchRectangularPatternState.countY}
+                  validate={(v) => Number.isFinite(v) && v >= 1}
+                  onValidChange={reportPatternValid("rectCountY")}
+                  commit={(v) =>
+                    useStore.getState().setRectangularPatternCountY(v)
+                  }
+                  style={{
+                    width: 44,
+                    fontSize: 11,
+                    padding: "2px 4px",
+                    borderRadius: 3,
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </label>
+              <label
+                style={{
+                  marginLeft: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                Offset Y (mm)
+                <DebouncedNumberField
+                  step="any"
+                  storeValue={sketchRectangularPatternState.offsetY}
+                  validate={(v) => Number.isFinite(v)}
+                  onValidChange={reportPatternValid("rectOffsetY")}
+                  commit={(v) =>
+                    useStore.getState().setRectangularPatternOffsetY(v)
+                  }
+                  style={{
+                    width: 56,
+                    fontSize: 11,
+                    padding: "2px 4px",
+                    borderRadius: 3,
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  useStore.getState().cancelRectangularPatternTool()
+                }
+                title="Cancel — discard the rectangular pattern"
+                style={{
+                  fontSize: 11,
+                  padding: "3px 10px",
+                  marginLeft: 8,
+                  borderRadius: 3,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-tertiary)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              {(() => {
+                const blocked =
+                  sketchRectangularPatternState.shapeIndices.length === 0 ||
+                  anyPatternInvalid;
+                return (
+                  <button
+                    type="button"
+                    disabled={blocked}
+                    onClick={() =>
+                      useStore.getState().confirmRectangularPattern(selectedId)
+                    }
+                    title="Confirm — create the patterned geometry"
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 10px",
+                      marginLeft: 8,
+                      borderRadius: 3,
+                      border: "1px solid var(--accent, #4488ff)",
+                      background: "var(--accent, #4488ff)",
+                      color: "#fff",
+                      cursor: blocked ? "not-allowed" : "pointer",
+                      opacity: blocked ? 0.5 : 1,
+                    }}
+                  >
+                    Confirm
+                  </button>
+                );
+              })()}
+            </div>
+          </>
+        )}
       {sketchMode && sketchConstraintMode === "coincident" && (
         <div className="sketch-placement-hint">
           {sketchConstraintFirstPoint
@@ -309,11 +730,15 @@ export default function SketchOverlays({
       {sketchMode && sketchDistanceInput && (
         <div className="sketch-distance-input-overlay">
           <span>
-            {sketchDistanceInput.offsetConstraintIdx != null
-              ? "Offset (mm):"
-              : sketchDistanceInput.constraintIdx != null
-                ? "Edit distance (mm):"
-                : "Distance (mm):"}
+            {sketchDistanceInput.cornerResize
+              ? sketchDistanceInput.cornerResize.mode === "bevel"
+                ? "Radius (mm):"
+                : "Setback (mm):"
+              : sketchDistanceInput.offsetConstraintIdx != null
+                ? "Offset (mm):"
+                : sketchDistanceInput.constraintIdx != null
+                  ? "Edit distance (mm):"
+                  : "Distance (mm):"}
           </span>
           <FormulaInput
             type="text"
@@ -359,6 +784,20 @@ export default function SketchOverlays({
                 if (sketchDistanceInput.offsetConstraintIdx != null) {
                   offsetDraftRef.current = raw;
                   confirmOffset();
+                  return;
+                }
+                // Chamfer/bevel resize: apply the new setback / radius.
+                if (sketchDistanceInput.cornerResize) {
+                  if (Number.isFinite(mm) && mm > 0) {
+                    const { sketchId, shapeIdx } =
+                      sketchDistanceInput.cornerResize;
+                    useStore
+                      .getState()
+                      .resizeSketchCorner(sketchId, shapeIdx, mm);
+                    cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
+                  }
+                  useStore.getState().setSketchDistanceInput(null);
+                  useStore.getState().setSketchConstraintMode(null);
                   return;
                 }
                 if (Number.isFinite(mm) && mm > 0) {
@@ -516,6 +955,16 @@ export default function SketchOverlays({
         sketchDistanceInput.offsetConstraintIdx != null && (
           <div className="sketch-placement-hint">
             Set the offset distance, then Confirm · Esc to cancel
+          </div>
+        )}
+      {sketchMode &&
+        sketchDistanceInput &&
+        sketchDistanceInput.cornerResize && (
+          <div className="sketch-placement-hint">
+            {sketchDistanceInput.cornerResize.mode === "bevel"
+              ? "Type a new radius, then Enter"
+              : "Type a new setback, then Enter"}{" "}
+            · Esc to cancel
           </div>
         )}
       {sketchMode && sketchModifyMode && (
