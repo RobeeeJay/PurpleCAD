@@ -80,13 +80,26 @@ export function useViewportCamera({
       box.union(b);
       any = true;
     }
+    // Include the drawn sketch geometry (the object-view line overlays) when
+    // it's visible, so a reset frames sketches too — not their 1000-unit plane
+    // (that's the mesh in objectsRef), just the shapes.
+    sceneRef.current?.traverse((o) => {
+      if (!o.userData?.isSketchOverlay || !o.visible) return;
+      o.updateWorldMatrix(true, true);
+      const b = new THREE.Box3().setFromObject(o);
+      if (b.isEmpty()) return;
+      box.union(b);
+      any = true;
+    });
 
     let center, distance;
     let endZoom = null;
     if (any) {
       center = box.getCenter(new THREE.Vector3());
       const radius = box.getSize(new THREE.Vector3()).length() / 2 || 1;
-      const pad = 1.25;
+      // Fill the viewport as much as possible while keeping a small safety
+      // margin so the bbox corners don't clip at the edges on any orientation.
+      const pad = 1.1;
       if (camera.isOrthographicCamera) {
         const fw = camera.right - camera.left;
         const fh = camera.top - camera.bottom;

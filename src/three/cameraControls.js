@@ -1604,10 +1604,12 @@ export function attachCameraControls(ctx) {
     scene.traverse((o) => {
       if (o.isMesh && o.material === gridMaterial) gridMesh = o;
       if (o.userData?.isShadowGround) hide(o);
+      // Sketch line overlays: hide when there's a solid to show (they'd clutter
+      // an object thumbnail); kept when the project is sketch-only.
+      if (any && o.userData?.isSketchOverlay) hide(o);
     });
     hide(gridMesh);
     hide(rulerGroup);
-    hide(sketchShapesGroupRef?.current);
     hide(sketchGridGroupRef?.current);
     hide(axisGroupRef?.current);
     handlesRef?.current?.forEach((h) => hide(h.mesh));
@@ -1618,8 +1620,7 @@ export function attachCameraControls(ctx) {
       hide(bb.labelY?.sprite);
       hide(bb.labelZ?.sprite);
     }
-    // Sketches: hidden when there are solids; the sketch plane is the fallback
-    // subject when the project has no objects yet.
+    // The sketch plane is the fallback subject when the project has no objects.
     if (any) hide(planeRef?.current);
 
     // Force each solid to its shaded (analytic) material, opaque, for the shot.

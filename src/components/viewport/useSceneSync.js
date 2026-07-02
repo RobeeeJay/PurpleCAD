@@ -528,6 +528,7 @@ export function useSceneSync({
     );
     if (group) {
       if (renderMode === "smooth") group.visible = false;
+      group.userData.isSketchOverlay = true;
       scene.add(group);
       sketchShapesGroupRef.current = group;
     }
@@ -563,6 +564,7 @@ export function useSceneSync({
     );
     if (group) {
       if (renderMode === "smooth") group.visible = false;
+      group.userData.isSketchOverlay = true;
       scene.add(group);
       allSketchGroupRef.current = group;
     }
