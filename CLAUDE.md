@@ -153,6 +153,39 @@ files just to make these go away.
   only takes positive `depth`, so negative-depth code paths extrude by
   `abs(depth)` then `translate(0, 0, -abs(depth))`.
 
+## Tool dialogs: create + edit symmetry
+
+Every tool that produces a persistent output (a `csg` item, a sketch
+modification, an offset, etc.) gets BOTH a creation UI and an edit path that
+re-opens the SAME UI — never a create-only flow.
+
+- **Creation UI.** 3D Modify tools (Hole, Shell, Push/Pull, Emboss, Draft,
+  Revolve, …) use a bottom-bar overlay (`overlayBar.js` — `BAR_STYLE`, `LBL`,
+  `barBtn`, `pickBtn`) with pick phases and a live, debounced ghost preview
+  (`useDebouncedPreview`, `useEscapeKey` from `inputs.jsx`). Simpler
+  parametric creators (Box, Plane, Split, Mirror, Pattern) use a portal dialog
+  mounted in `Viewport.jsx`. A phase machine in `uiSlice.js` (e.g. `holeTool`,
+  `embossTool`) holds the in-progress picks/params; Cancel/Esc removes the
+  in-progress output via the per-item/per-sketch undo.
+- **Committed output carries its recipe.** Confirm writes a `csg` item whose
+  `regenerator: { kind, …sources, …params, regeneratedAt }` can rebuild the
+  geometry from its live sources; `regenerateItems.js` re-derives it when an
+  upstream sketch/body changes.
+- **Edit re-opens the same UI.** The Timeline step gets an **Edit** button
+  (`beginHoleEdit`/`beginEmbossEdit`/…) that re-enters the tool's params phase
+  seeded from the frozen recipe, plus **Retarget** where a source can be
+  re-picked. Editing updates the entry IN PLACE (`updateHoleEntry`,
+  `updatePushPullParams`, `retarget*Entry`) — no new timeline step.
+- **Sketch-value edits mirror this too.** A dimension / offset / chamfer size
+  opens the shared distance-input overlay (`SketchOverlays.jsx`); double-clicking
+  the committed constraint re-opens the same input seeded from its stored value,
+  and Cancel restores the prior value (offsets live-preview, so Cancel re-previews
+  the original rather than undoing).
+
+When adding a new output-producing tool, follow this: build the create overlay/
+dialog, store a regenerator recipe, and wire a Timeline Edit (and Retarget where
+sources are picked) that reuses the creation UI.
+
 ## Misc
 
 - The `_cameraControls` slot on the store is a deliberate non-reactive
