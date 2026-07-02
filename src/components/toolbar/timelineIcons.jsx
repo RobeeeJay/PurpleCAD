@@ -2,6 +2,27 @@
 // Modify toolbar icons, reused by the Timeline so each entry's dot matches
 // the toolbar button that produced it.
 
+// Standard edit (pencil) icon used by every Timeline entry's Edit button.
+export const EditIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <path
+      d="M4 20 L4 16 L15 5 L19 9 L8 20 Z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+    <line
+      x1="13"
+      y1="7"
+      x2="17"
+      y2="11"
+      stroke="currentColor"
+      strokeWidth="1.6"
+    />
+  </svg>
+);
+
 export const CubeIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14">
     <polyline

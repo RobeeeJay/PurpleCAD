@@ -24,6 +24,7 @@ import {
   ShellIcon,
   HoleIcon,
   EmbossIcon,
+  EditIcon,
   PlaneIcon,
   RevolveIcon,
   PipeIcon,
@@ -312,56 +313,7 @@ function ExtrudeActions({ itemId, groupIds }) {
           );
         }}
       >
-        <svg viewBox="0 0 24 24" width="14" height="14">
-          <line
-            x1="3"
-            y1="10"
-            x2="21"
-            y2="10"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-          <line
-            x1="3"
-            y1="10"
-            x2="3"
-            y2="16"
-            stroke="currentColor"
-            strokeWidth="1"
-            strokeLinecap="square"
-          />
-          <line
-            x1="21"
-            y1="10"
-            x2="21"
-            y2="16"
-            stroke="currentColor"
-            strokeWidth="1"
-            strokeLinecap="square"
-          />
-          <line
-            x1="3"
-            y1="15"
-            x2="21"
-            y2="15"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-          <polygon
-            points="3,15 6,13.5 6,16.5"
-            fill="currentColor"
-            stroke="currentColor"
-            strokeWidth="0.5"
-          />
-          <polygon
-            points="21,15 18,13.5 18,16.5"
-            fill="currentColor"
-            stroke="currentColor"
-            strokeWidth="0.5"
-          />
-        </svg>
+        <EditIcon />
       </button>
     </>
   );
@@ -690,33 +642,7 @@ const Timeline = () => {
                       openBoxDialog(entry.instruction.item.id);
                     }}
                   >
-                    <svg viewBox="0 0 24 24" width="14" height="14">
-                      <rect
-                        x="3"
-                        y="9"
-                        width="18"
-                        height="6"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                      />
-                      <line
-                        x1="8"
-                        y1="9"
-                        x2="8"
-                        y2="13"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                      <line
-                        x1="13"
-                        y1="9"
-                        x2="13"
-                        y2="13"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                    </svg>
+                    <EditIcon />
                   </button>
                 )}
               {entry.instruction?.type === "createGroup" &&
@@ -783,35 +709,7 @@ const Timeline = () => {
                       setChamferEditTarget({ entryId: entry.id });
                     }}
                   >
-                    <svg viewBox="0 0 24 24" width="14" height="14">
-                      {chamferInfo(entry).isFillet ? (
-                        <path
-                          d="M4 4 L13 4 Q20 4 20 11 L20 20 L4 20 Z"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinejoin="round"
-                        />
-                      ) : (
-                        <>
-                          <path
-                            d="M4 4 L14 4 L20 10 L20 20 L4 20 Z"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinejoin="round"
-                          />
-                          <line
-                            x1="14"
-                            y1="4"
-                            x2="20"
-                            y2="10"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          />
-                        </>
-                      )}
-                    </svg>
+                    <EditIcon />
                   </button>
                 </>
               )}
@@ -868,45 +766,7 @@ const Timeline = () => {
                       setPushPullEditTarget({ entryId: entry.id });
                     }}
                   >
-                    <svg viewBox="0 0 24 24" width="14" height="14">
-                      <rect
-                        x="6"
-                        y="9"
-                        width="12"
-                        height="6"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                      />
-                      <line
-                        x1="12"
-                        y1="2"
-                        x2="12"
-                        y2="9"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                      />
-                      <polygon
-                        points="12,2 9.5,5 14.5,5"
-                        fill="currentColor"
-                        stroke="currentColor"
-                        strokeWidth="0.5"
-                      />
-                      <line
-                        x1="12"
-                        y1="15"
-                        x2="12"
-                        y2="22"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                      />
-                      <polygon
-                        points="12,22 9.5,19 14.5,19"
-                        fill="currentColor"
-                        stroke="currentColor"
-                        strokeWidth="0.5"
-                      />
-                    </svg>
+                    <EditIcon />
                   </button>
                 </>
               )}
@@ -919,7 +779,7 @@ const Timeline = () => {
                     setShellTarget({ itemId: entry.itemId, entryId: entry.id });
                   }}
                 >
-                  <ShellIcon />
+                  <EditIcon />
                 </button>
               )}
               {holeInfo(entry) && (
@@ -932,7 +792,7 @@ const Timeline = () => {
                     beginHoleEdit(entry.id);
                   }}
                 >
-                  <HoleIcon />
+                  <EditIcon />
                 </button>
               )}
               {embossInfo(entry) && (
@@ -945,7 +805,7 @@ const Timeline = () => {
                     beginEmbossEdit(entry.id);
                   }}
                 >
-                  <EmbossIcon />
+                  <EditIcon />
                 </button>
               )}
               {draftInfo(entry) && (
@@ -958,7 +818,7 @@ const Timeline = () => {
                     beginDraftEdit(entry.id);
                   }}
                 >
-                  <EmbossIcon />
+                  <EditIcon />
                 </button>
               )}
               {revolveInfo(entry) && (
@@ -976,23 +836,7 @@ const Timeline = () => {
                     beginRevolveEdit(revolveInfo(entry).itemId, entry.id);
                   }}
                 >
-                  <svg viewBox="0 0 24 24" width="14" height="14">
-                    <path
-                      d="M14 4 L20 10 L9 21 L3 21 L3 15 Z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinejoin="round"
-                    />
-                    <line
-                      x1="13"
-                      y1="5"
-                      x2="19"
-                      y2="11"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    />
-                  </svg>
+                  <EditIcon />
                 </button>
               )}
               {pipeInfo(entry) && (
