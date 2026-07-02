@@ -96,21 +96,40 @@ export function useViewportCamera({
     let endZoom = null;
     if (any) {
       center = box.getCenter(new THREE.Vector3());
-      const radius = box.getSize(new THREE.Vector3()).length() / 2 || 1;
-      // Fill the viewport as much as possible while keeping a small safety
-      // margin so the bbox corners don't clip at the edges on any orientation.
-      const pad = 1.1;
+      // Fit to the ACTUAL projected bounding box (its 8 corners in the view
+      // frame), not an enclosing sphere — the sphere over-frames non-cube
+      // shapes and leaves everything small.  A little margin avoids edge clip.
+      const pad = 1.06;
+      // Camera basis looking from center + dir back at center (up = +Y).
+      const zAxis = dir.clone().normalize(); // camera -> target axis
+      const xAxis = new THREE.Vector3()
+        .crossVectors(new THREE.Vector3(0, 1, 0), zAxis)
+        .normalize();
+      const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
+      let maxX = 1e-4;
+      let maxY = 1e-4;
+      let maxZ = 0;
+      const p = new THREE.Vector3();
+      for (let i = 0; i < 8; i++) {
+        p.set(
+          i & 1 ? box.max.x : box.min.x,
+          i & 2 ? box.max.y : box.min.y,
+          i & 4 ? box.max.z : box.min.z,
+        ).sub(center);
+        maxX = Math.max(maxX, Math.abs(p.dot(xAxis)));
+        maxY = Math.max(maxY, Math.abs(p.dot(yAxis)));
+        maxZ = Math.max(maxZ, Math.abs(p.dot(zAxis)));
+      }
       if (camera.isOrthographicCamera) {
         const fw = camera.right - camera.left;
         const fh = camera.top - camera.bottom;
-        // zoom small enough that the tighter frustum dimension still spans the bbox
-        endZoom = Math.min(fw, fh) / (2 * radius * pad);
-        distance = radius * 4 + 5; // clear of the 0.1–1000 near/far planes
+        endZoom = Math.min(fw / (2 * maxX * pad), fh / (2 * maxY * pad));
+        distance = maxZ + 5; // clear of the near/far planes
       } else {
-        const vfov = (camera.fov * Math.PI) / 180;
-        const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
-        const fitFov = Math.min(vfov, hfov);
-        distance = (radius * pad) / Math.sin(fitFov / 2);
+        const tanV = Math.tan((camera.fov * Math.PI) / 360);
+        const tanH = tanV * camera.aspect;
+        // Distance so the widest corner (H and V) sits just inside the frustum.
+        distance = maxZ + Math.max((maxX * pad) / tanH, (maxY * pad) / tanV);
       }
     } else {
       center = targetRef.current.clone();
@@ -209,7 +228,10 @@ export function useViewportCamera({
     }
   }, [isInSketchMode, projectionMode]);
 
-  // ── Camera reset ──────────────────────────────────────────────────────────
+  // ── Camera reset (document / project load) ─────────────────────────────────
+  // Reset == the Home button's isometric fit-all, so a loaded project frames
+  // its geometry.  Deferred a frame so the new scene's meshes exist before we
+  // measure them.
   useEffect(() => {
     if (
       !cameraRef.current ||
@@ -217,14 +239,8 @@ export function useViewportCamera({
       cameraResetTrigger === 0
     )
       return;
-    const camera = cameraRef.current;
-    const controls = cameraControlsRef.current;
-    targetRef.current.set(0, 0, 0);
-    controls.targetRotationX = Math.asin(Math.sqrt(1 / 3));
-    controls.targetRotationY = Math.PI / 4;
-    camera.position.set(10, 10, 10);
-    camera.lookAt(targetRef.current);
-    setRotationState(camera.quaternion.clone());
+    const raf = requestAnimationFrame(() => handleHome());
+    return () => cancelAnimationFrame(raf);
   }, [cameraResetTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { handleOrientationChange, handleHome };
