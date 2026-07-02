@@ -20,6 +20,7 @@ import EmbossDialog from "./EmbossDialog";
 import DraftDialog from "./DraftDialog";
 import BoxDialog from "./BoxDialog";
 import ProjectsDialog from "./ProjectsDialog";
+import TransformDialog from "./TransformDialog";
 import PointToPointDialog from "./PointToPointDialog";
 import SelectionWidget from "./SelectionWidget";
 import SketchSelectionWidget from "./SketchSelectionWidget";
@@ -335,6 +336,7 @@ const Viewport = () => {
       <DraftDialog />
       <BoxDialog />
       <ProjectsDialog />
+      <TransformDialog />
       <PointToPointDialog />
       <SelectionWidget />
       <SketchSelectionWidget />

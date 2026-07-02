@@ -460,6 +460,20 @@ export function attachCameraControls(ctx) {
     }
     return null;
   };
+  // Unscaled geometry size (mm) of an item's mesh, so the transform dialog can
+  // derive per-axis lengths (localSize * item.scale) and convert an edited
+  // length back to a scale.  Independent of item.scale, so it's stable to read.
+  controls.getItemLocalSizeMm = (id) => {
+    const mesh = objectsRef.current[id];
+    if (!mesh?.geometry) return null;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const bb = mesh.geometry.boundingBox;
+    return {
+      x: (bb.max.x - bb.min.x) * MM_PER_UNIT,
+      y: (bb.max.y - bb.min.y) * MM_PER_UNIT,
+      z: (bb.max.z - bb.min.z) * MM_PER_UNIT,
+    };
+  };
   controls.previewBoxDimensions = (id, dims) => {
     const mesh = objectsRef.current[id];
     const item = itemsRef.current.find((i) => i.id === id);
