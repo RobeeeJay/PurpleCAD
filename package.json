@@ -103,6 +103,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
+    "decimal.js": "^10.6.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "three": "^0.180.0",
