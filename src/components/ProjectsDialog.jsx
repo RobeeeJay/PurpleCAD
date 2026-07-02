@@ -28,11 +28,13 @@ const ProjectsDialog = () => {
     close();
   };
 
-  const create = async () => {
-    const name = window.prompt("Name for the new project:", "Untitled");
-    if (name == null) return; // cancelled
-    await createProject(name.trim() || "Untitled");
-    close();
+  // Electron has no window.prompt, so create with a default name and drop the
+  // new (now-active) card straight into inline rename instead of prompting.
+  const create = () => {
+    createProject("Untitled");
+    const id = useStore.getState().activeProjectId;
+    setRenamingId(id);
+    setDraftName("Untitled");
   };
 
   const commitRename = (id) => {
@@ -80,6 +82,7 @@ const ProjectsDialog = () => {
                     className="project-rename"
                     autoFocus
                     value={draftName}
+                    onFocus={(e) => e.target.select()}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => setDraftName(e.target.value)}
                     onBlur={() => commitRename(p.id)}
