@@ -131,8 +131,9 @@ const RULER_TIERS = {
 };
 
 // The ground labels lie flat (foreshortened), so they read smaller than their
-// raw scale suggests — this lifts them all to a legible on-screen size.
-const RULER_LABEL_SCALE = 1.5;
+// raw scale suggests — this lifts them all to a legible on-screen size.  (1/3
+// smaller than the previous 1.5.)
+const RULER_LABEL_SCALE = 1.0;
 
 // Shared unit quad — each label is the same geometry, sized via mesh.scale.
 const RULER_LABEL_GEO = new THREE.PlaneGeometry(1, 1);
