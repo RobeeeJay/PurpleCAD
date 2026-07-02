@@ -143,6 +143,27 @@ files just to make these go away.
 - Variable changes invalidate every regenerator's `regeneratedAt` flag so
   the next regen pass rebuilds downstream CSG / chamfer items.
 
+## Precision: prefer decimal.js
+
+- **Strongly prefer `decimal.js` for any calculation where precision
+  matters** — user-entered arithmetic, unit conversions (mm ↔ scene units),
+  money-like/exact values, dimension rounding, accumulating sums, and
+  anything whose result is shown to the user or stored. Native JS `+ - * /`
+  carries binary-float noise (`0.1 + 0.2 = 0.30000000000000004`); decimal.js
+  is exact in decimal.
+- The formula evaluator (`utils/formulas.js`) and geometry-parameter
+  resolution (`geometryParams.js` — `resolveValue`, `formatAsFormula`)
+  already run on decimal.js. Keep new value-resolution / formatting code on
+  the same path rather than reintroducing raw float maths.
+- **Convert to a JS `number` only at the boundary** where the value is
+  handed to three.js, WebGL/`Float32Array`, the OCC native addon, or the
+  hot constraint-solver loops — those consume doubles and can't take
+  `Decimal`, and Decimal in a per-frame/per-iteration hot path is far too
+  slow. Do the exact maths in Decimal, then `.toNumber()` at the edge.
+- decimal.js has no `hypot`/`sin`/`cos`; geometry/trig stays on doubles.
+  The preference is about the numbers users type, see, and store — not the
+  linear-algebra/geometry core.
+
 ## Coordinate system
 
 - Viewport is Y-up. STL/STEP exports rotate `+π/2` around X to match the
