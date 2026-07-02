@@ -322,7 +322,10 @@ export function buildSceneObjects(
     const p = item.position;
     const rot = item.rotation;
     if (rot) mesh.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
-    mesh.scale.setScalar(item.scale ? item.scale.x : 1);
+    // Per-axis scale so the transform panel can stretch a single length; the
+    // gizmo resize handle still writes all three equal (uniform) when dragged.
+    const sc = item.scale;
+    mesh.scale.set(sc?.x ?? 1, sc?.y ?? 1, sc?.z ?? 1);
 
     if (extrudeLocalOffset) {
       // Tag the mesh with the pre-rotation local offset so the drag

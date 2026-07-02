@@ -114,6 +114,11 @@ vi.mock("three", () => {
       s.y = v;
       s.z = v;
     };
+    s.set = (x, y, z) => {
+      s.x = x;
+      s.y = y;
+      s.z = z;
+    };
     return s;
   };
 
