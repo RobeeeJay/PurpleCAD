@@ -106,9 +106,16 @@ export function useViewportCamera({
         .crossVectors(new THREE.Vector3(0, 1, 0), zAxis)
         .normalize();
       const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
+      const tanV = Math.tan((camera.fov * Math.PI) / 360);
+      const tanH = tanV * camera.aspect;
       let maxX = 1e-4;
       let maxY = 1e-4;
       let maxZ = 0;
+      // For perspective, each corner needs the camera far enough that its own
+      // lateral offset fits the frustum AT ITS OWN DEPTH — coupling depth and
+      // lateral per corner (taking the maxima separately over-frames deep
+      // objects, which is why 3D solids sat small while flat sketches filled).
+      let need = 0;
       const p = new THREE.Vector3();
       for (let i = 0; i < 8; i++) {
         p.set(
@@ -116,9 +123,16 @@ export function useViewportCamera({
           i & 2 ? box.max.y : box.min.y,
           i & 4 ? box.max.z : box.min.z,
         ).sub(center);
-        maxX = Math.max(maxX, Math.abs(p.dot(xAxis)));
-        maxY = Math.max(maxY, Math.abs(p.dot(yAxis)));
-        maxZ = Math.max(maxZ, Math.abs(p.dot(zAxis)));
+        const cx = Math.abs(p.dot(xAxis));
+        const cy = Math.abs(p.dot(yAxis));
+        const cz = p.dot(zAxis); // +cz is toward the camera
+        maxX = Math.max(maxX, cx);
+        maxY = Math.max(maxY, cy);
+        maxZ = Math.max(maxZ, Math.abs(cz));
+        need = Math.max(
+          need,
+          cz + Math.max((cx * pad) / tanH, (cy * pad) / tanV),
+        );
       }
       if (camera.isOrthographicCamera) {
         const fw = camera.right - camera.left;
@@ -126,10 +140,7 @@ export function useViewportCamera({
         endZoom = Math.min(fw / (2 * maxX * pad), fh / (2 * maxY * pad));
         distance = maxZ + 5; // clear of the near/far planes
       } else {
-        const tanV = Math.tan((camera.fov * Math.PI) / 360);
-        const tanH = tanV * camera.aspect;
-        // Distance so the widest corner (H and V) sits just inside the frustum.
-        distance = maxZ + Math.max((maxX * pad) / tanH, (maxY * pad) / tanV);
+        distance = need;
       }
     } else {
       center = targetRef.current.clone();
