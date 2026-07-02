@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useStore } from "../store";
 import { NumberInput } from "./inputs";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
+import { lengthToScale, scaleToLength } from "../utils/transformMath.js";
 import "../styles/TransformDialog.css";
 
 // Floating transform panel shown while a single non-sketch object is selected
@@ -46,7 +47,7 @@ const TransformDialog = () => {
   const scale = item.scale || { x: 1, y: 1, z: 1 };
   const rot = item.rotation || { x: 0, y: 0, z: 0 };
   const local = cameraControls?.getItemLocalSizeMm?.(selectedId) || null;
-  const lengthMm = (a) => (local ? local[a] * scale[a] : null);
+  const lengthMm = (a) => scaleToLength(scale, local, a);
 
   const applyPos = (a, mm) => {
     if (!Number.isFinite(mm)) return;
@@ -55,14 +56,10 @@ const TransformDialog = () => {
   };
 
   const applyLength = (a, mm) => {
-    if (!Number.isFinite(mm) || mm <= 0 || !local || !local[a]) return;
-    let next;
-    if (locked) {
-      const factor = mm / (local[a] * scale[a]);
-      next = { x: scale.x * factor, y: scale.y * factor, z: scale.z * factor };
-    } else {
-      next = { ...scale, [a]: mm / local[a] };
-    }
+    const next = Number.isFinite(mm)
+      ? lengthToScale(scale, local, a, mm, locked)
+      : null;
+    if (!next) return;
     setItemTransform(selectedId, null, next, null);
     recordTransformHistory(selectedId, "Scaled");
   };
