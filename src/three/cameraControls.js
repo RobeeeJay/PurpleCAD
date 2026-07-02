@@ -1680,17 +1680,50 @@ export function attachCameraControls(ctx) {
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld(true);
 
-    // Render one clean frame (no bloom composer), read it, downscale to a small
-    // JPEG data URL, then restore camera / overlays / materials.
+    // Render one clean frame (no bloom composer), read it, downscale to the
+    // project card's display size, then restore camera / overlays / materials.
     renderer.render(scene, cam);
     const src = renderer.domElement;
-    const W = 240;
-    const H = Math.round((src.height / src.width) * W) || 180;
+    // Match the card thumbnail (4:3, ~240 CSS px wide) at the device pixel ratio
+    // so it's crisp on hi-DPI; cap at 2× to keep the stored data URL small.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const tw = Math.round(240 * dpr);
+    const th = Math.round(180 * dpr);
+    // Stepped halving keeps large minifications from aliasing, then a final
+    // high-quality cover-crop into the 4:3 box.
+    let cur = src;
+    let cw = src.width;
+    let ch = src.height;
+    const cap = Math.max(tw, th) * 2;
+    while (Math.min(cw, ch) > cap) {
+      const nw = Math.max(tw, Math.round(cw / 2));
+      const nh = Math.max(th, Math.round(ch / 2));
+      const half = document.createElement("canvas");
+      half.width = nw;
+      half.height = nh;
+      const hx = half.getContext("2d");
+      hx.imageSmoothingEnabled = true;
+      hx.imageSmoothingQuality = "high";
+      hx.drawImage(cur, 0, 0, nw, nh);
+      cur = half;
+      cw = nw;
+      ch = nh;
+    }
     const thumb = document.createElement("canvas");
-    thumb.width = W;
-    thumb.height = H;
-    thumb.getContext("2d").drawImage(src, 0, 0, W, H);
-    const dataUrl = thumb.toDataURL("image/jpeg", 0.7);
+    thumb.width = tw;
+    thumb.height = th;
+    const ctx = thumb.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    const cover = Math.max(tw / cw, th / ch);
+    ctx.drawImage(
+      cur,
+      (tw - cw * cover) / 2,
+      (th - ch * cover) / 2,
+      cw * cover,
+      ch * cover,
+    );
+    const dataUrl = thumb.toDataURL("image/jpeg", 0.72);
 
     cam.position.copy(saved.pos);
     cam.quaternion.copy(saved.quat);
