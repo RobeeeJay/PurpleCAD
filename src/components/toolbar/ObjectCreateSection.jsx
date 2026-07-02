@@ -1,8 +1,17 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import SweepSection from "./SweepSection";
 import Pattern3dSection from "./Pattern3dSection";
+
+const PRIMITIVES = [
+  { type: "cube", label: "Box" },
+  { type: "sphere", label: "Sphere" },
+  { type: "cylinder", label: "Cylinder" },
+  { type: "cone", label: "Cone" },
+  { type: "torus", label: "Torus" },
+];
 
 const ObjectCreateSection = () => {
   const setSketchPlacementMode = useStore((s) => s.setSketchPlacementMode);
@@ -14,6 +23,31 @@ const ObjectCreateSection = () => {
   const startPlaneTool = useStore((s) => s.startPlaneTool);
 
   const hasFaceSelected = (selectedSubGeometry?.faces?.length ?? 0) > 0;
+
+  // Primitive-create dropdown (Box / Sphere / Cylinder / Cone / Torus).
+  const primBtnRef = useRef(null);
+  const primMenuRef = useRef(null);
+  const [primMenuOpen, setPrimMenuOpen] = useState(false);
+  const [primMenuPos, setPrimMenuPos] = useState(null);
+  useEffect(() => {
+    if (!primMenuOpen) return;
+    const rect = primBtnRef.current?.getBoundingClientRect();
+    if (rect) setPrimMenuPos({ top: rect.bottom + 4, left: rect.left });
+    const onPointerDown = (e) => {
+      if (
+        !primMenuRef.current?.contains(e.target) &&
+        !primBtnRef.current?.contains(e.target)
+      )
+        setPrimMenuOpen(false);
+    };
+    const onKeyDown = (e) => e.key === "Escape" && setPrimMenuOpen(false);
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [primMenuOpen]);
 
   // Open the Plane dialog seeded from the selected sketch's plane, else world
   // XY.  The dialog also offers axis-plane bases and "Pick 3 points".
@@ -110,77 +144,10 @@ const ObjectCreateSection = () => {
         </svg>
       </button>
       <button
-        className="toolbar-btn"
-        title="Box — enter dimensions in a dialog"
-        onClick={() => createItem("cube")}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            x="3"
-            y="7"
-            width="14"
-            height="14"
-          />
-          <polyline
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="3,7 7,3 21,3 21,17 17,21"
-          />
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="17"
-            y1="7"
-            x2="17"
-            y2="21"
-          />
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="3"
-            y1="7"
-            x2="17"
-            y2="7"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="7"
-            y1="3"
-            x2="7"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeDasharray="2 1.5"
-            x1="21"
-            y1="3"
-            x2="7"
-            y2="17"
-          />
-        </svg>
-      </button>
-      <button
-        className="toolbar-btn"
-        title="Sphere"
-        onClick={() => createItem("sphere")}
+        ref={primBtnRef}
+        className={`toolbar-btn ${primMenuOpen ? "active" : ""}`}
+        title="Create a primitive — Box / Sphere / Cylinder / Cone / Torus"
+        onClick={() => setPrimMenuOpen((o) => !o)}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <circle
@@ -212,161 +179,29 @@ const ObjectCreateSection = () => {
           />
         </svg>
       </button>
-      <button
-        className="toolbar-btn"
-        title="Cylinder"
-        onClick={() => createItem("cylinder")}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <ellipse
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="2"
-            cx="12"
-            cy="7"
-            rx="8"
-            ry="3"
-          />
-          <ellipse
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            cx="12"
-            cy="17"
-            rx="8"
-            ry="3"
-          />
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="4"
-            y1="7"
-            x2="4"
-            y2="17"
-          />
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="20"
-            y1="7"
-            x2="20"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="12"
-            y1="7"
-            x2="12"
-            y2="17"
-          />
-        </svg>
-      </button>
-      <button
-        className="toolbar-btn"
-        title="Torus"
-        onClick={() => createItem("torus")}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <circle
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            cx="12"
-            cy="12"
-            r="9"
-          />
-          <circle
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="2.5"
-            cx="12"
-            cy="12"
-            r="4"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="3"
-            y1="12"
-            x2="8"
-            y2="12"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="16"
-            y1="12"
-            x2="21"
-            y2="12"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="12"
-            y1="3"
-            x2="12"
-            y2="8"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="12"
-            y1="16"
-            x2="12"
-            y2="21"
-          />
-        </svg>
-      </button>
-      <button
-        className="toolbar-btn"
-        title="Cone — enter dimensions in a dialog"
-        onClick={() => createItem("cone")}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <polygon
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinejoin="miter"
-            points="12,3 19,18 5,18"
-          />
-          <ellipse
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            cx="12"
-            cy="18"
-            rx="7"
-            ry="2.5"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeDasharray="2 1.5"
-            x1="12"
-            y1="3"
-            x2="12"
-            y2="20.5"
-          />
-        </svg>
-      </button>
+      {primMenuOpen &&
+        primMenuPos &&
+        createPortal(
+          <div
+            className="toolbar-dropdown-menu"
+            ref={primMenuRef}
+            style={{ top: primMenuPos.top, left: primMenuPos.left }}
+          >
+            {PRIMITIVES.map((p) => (
+              <button
+                key={p.type}
+                className="toolbar-dropdown-item"
+                onClick={() => {
+                  setPrimMenuOpen(false);
+                  createItem(p.type);
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
       <button
         className={`toolbar-btn ${extrudeSelectMode ? "active" : ""}`}
         title={
