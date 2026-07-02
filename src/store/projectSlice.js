@@ -18,22 +18,6 @@ export const projectInitial = {
   activeProjectId: db.getActiveProjectId(),
 };
 
-// Downscale a screenshot Blob to a small JPEG data URL for the project card.
-async function blobToThumb(blob) {
-  try {
-    const bmp = await createImageBitmap(blob);
-    const W = 240;
-    const H = Math.round((bmp.height / bmp.width) * W) || 180;
-    const canvas = document.createElement("canvas");
-    canvas.width = W;
-    canvas.height = H;
-    canvas.getContext("2d").drawImage(bmp, 0, 0, W, H);
-    return canvas.toDataURL("image/jpeg", 0.6);
-  } catch {
-    return null;
-  }
-}
-
 // Reset the store from a project's persisted data (already the active project in
 // the db facade).  Mirrors documentSlice.loadDocument but also restores folders
 // + material.
@@ -87,20 +71,18 @@ export const createProjectSlice = (set, get) => ({
       activeProjectId: db.getActiveProjectId(),
     }),
 
-  // Capture the current viewport into the given project's thumbnail.
-  refreshThumbnail: async (id) => {
-    const cc = get()._cameraControls;
-    const blob = await cc?.captureScreenshot?.();
-    if (!blob) return;
-    const thumb = await blobToThumb(blob);
+  // Capture the current viewport into the given project's thumbnail (a reset-
+  // view, shaded, overlay-free shot).  Synchronous so it also runs on unload.
+  refreshThumbnail: (id) => {
+    const thumb = get()._cameraControls?.captureThumbnailDataUrl?.();
     if (thumb) {
       db.setThumbnail(id, thumb);
       set({ projects: db.listProjects() });
     }
   },
 
-  createProject: async (name) => {
-    await get().refreshThumbnail(get().activeProjectId);
+  createProject: (name) => {
+    get().refreshThumbnail(get().activeProjectId);
     const id = db.createProject(name || "Untitled");
     get().applyProjectSwitch(id);
     set({ projects: db.listProjects() });
@@ -119,9 +101,9 @@ export const createProjectSlice = (set, get) => ({
     set({ projects: db.listProjects() });
   },
 
-  switchProject: async (id) => {
+  switchProject: (id) => {
     if (id === get().activeProjectId) return;
-    await get().refreshThumbnail(get().activeProjectId);
+    get().refreshThumbnail(get().activeProjectId);
     get().applyProjectSwitch(id);
   },
 

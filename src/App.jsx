@@ -47,6 +47,15 @@ function App() {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+  // Capture the active project's thumbnail when leaving the app.
+  useEffect(() => {
+    const onLeave = () => {
+      const s = useStore.getState();
+      s.refreshThumbnail?.(s.activeProjectId);
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, []);
   useEffect(() => {
     const name = projects.find((p) => p.id === activeProjectId)?.name;
     document.title = name ? `${name} — PurpleCAD` : "PurpleCAD";

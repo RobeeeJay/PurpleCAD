@@ -1567,6 +1567,150 @@ export function attachCameraControls(ctx) {
   controls.captureScreenshot = () =>
     new Promise((resolve) => renderer.domElement.toBlob(resolve, "image/png"));
 
+  // Capture a clean thumbnail of the project (a small JPEG data URL): reset-view
+  // (isometric fit-all) framing, geometry shaded, with the ground plane / ruler
+  // labels / sketches hidden.  When there are no solid objects, keep the sketch
+  // plane and frame the origin instead.  Synchronous (render → toDataURL →
+  // restore, all in one tick) so it also works during an unload/quit.
+  controls.captureThumbnailDataUrl = () => {
+    const cam = cameraRef.current;
+    if (!cam) return null;
+
+    // Solid (non-sketch, visible) meshes + their combined world bbox.
+    const box = new THREE.Box3();
+    let any = false;
+    const solidMeshes = [];
+    for (const item of itemsRef.current) {
+      if (item.type === "sketch" || item.visible === false) continue;
+      const mesh = objectsRef.current[item.id];
+      if (!mesh) continue;
+      mesh.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(mesh);
+      if (b.isEmpty()) continue;
+      box.union(b);
+      any = true;
+      solidMeshes.push(mesh);
+    }
+
+    // Hide overlays (restored after the capture).
+    const hidden = [];
+    const hide = (o) => {
+      if (o && o.visible) {
+        o.visible = false;
+        hidden.push(o);
+      }
+    };
+    let gridMesh = null;
+    scene.traverse((o) => {
+      if (o.isMesh && o.material === gridMaterial) gridMesh = o;
+      if (o.userData?.isShadowGround) hide(o);
+    });
+    hide(gridMesh);
+    hide(rulerGroup);
+    hide(sketchShapesGroupRef?.current);
+    hide(sketchGridGroupRef?.current);
+    hide(axisGroupRef?.current);
+    handlesRef?.current?.forEach((h) => hide(h.mesh));
+    const bb = boundingBoxRef?.current;
+    if (bb) {
+      hide(bb.boxMesh);
+      hide(bb.labelX?.sprite);
+      hide(bb.labelY?.sprite);
+      hide(bb.labelZ?.sprite);
+    }
+    // Sketches: hidden when there are solids; the sketch plane is the fallback
+    // subject when the project has no objects yet.
+    if (any) hide(planeRef?.current);
+
+    // Force each solid to its shaded (analytic) material, opaque, for the shot.
+    const matRestore = [];
+    for (const mesh of solidMeshes) {
+      const rec = { mesh, mat: mesh.material, geo: mesh.geometry };
+      if (
+        mesh.userData.hullGeometry &&
+        mesh.geometry !== mesh.userData.hullGeometry
+      )
+        mesh.geometry = mesh.userData.hullGeometry;
+      if (mesh.userData.shaderMat && mesh.material !== mesh.userData.shaderMat)
+        mesh.material = mesh.userData.shaderMat;
+      const m = mesh.material;
+      if (m && "opacity" in m) {
+        rec.opMat = m;
+        rec.op = { t: m.transparent, o: m.opacity, d: m.depthWrite };
+        m.transparent = false;
+        m.opacity = 1;
+        m.depthWrite = true;
+        m.needsUpdate = true;
+      }
+      matRestore.push(rec);
+    }
+
+    // Isometric fit-all pose (same maths as the Reset-view / Home button).
+    const saved = {
+      pos: cam.position.clone(),
+      quat: cam.quaternion.clone(),
+      zoom: cam.zoom,
+    };
+    const rotX = Math.asin(Math.sqrt(1 / 3));
+    const rotY = Math.PI / 4;
+    const dir = new THREE.Vector3(
+      Math.sin(rotY) * Math.cos(rotX),
+      Math.sin(rotX),
+      Math.cos(rotY) * Math.cos(rotX),
+    ).normalize();
+    const center = any
+      ? box.getCenter(new THREE.Vector3())
+      : new THREE.Vector3();
+    const radius = any ? box.getSize(new THREE.Vector3()).length() / 2 || 1 : 3;
+    const pad = 1.35;
+    let distance;
+    if (cam.isOrthographicCamera) {
+      const fw = cam.right - cam.left;
+      const fh = cam.top - cam.bottom;
+      cam.zoom = Math.min(fw, fh) / (2 * radius * pad);
+      distance = radius * 4 + 5;
+    } else {
+      const vfov = (cam.fov * Math.PI) / 180;
+      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * cam.aspect);
+      distance = (radius * pad) / Math.sin(Math.min(vfov, hfov) / 2);
+    }
+    cam.position.copy(center).addScaledVector(dir, distance);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(center);
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+
+    // Render one clean frame (no bloom composer), read it, downscale to a small
+    // JPEG data URL, then restore camera / overlays / materials.
+    renderer.render(scene, cam);
+    const src = renderer.domElement;
+    const W = 240;
+    const H = Math.round((src.height / src.width) * W) || 180;
+    const thumb = document.createElement("canvas");
+    thumb.width = W;
+    thumb.height = H;
+    thumb.getContext("2d").drawImage(src, 0, 0, W, H);
+    const dataUrl = thumb.toDataURL("image/jpeg", 0.7);
+
+    cam.position.copy(saved.pos);
+    cam.quaternion.copy(saved.quat);
+    cam.zoom = saved.zoom;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+    for (const o of hidden) o.visible = true;
+    for (const r of matRestore) {
+      r.mesh.geometry = r.geo;
+      if (r.op) {
+        r.opMat.transparent = r.op.t;
+        r.opMat.opacity = r.op.o;
+        r.opMat.depthWrite = r.op.d;
+        r.opMat.needsUpdate = true;
+      }
+      r.mesh.material = r.mat;
+    }
+    return dataUrl;
+  };
+
   // Drop the selected non-sketch objects so their lowest world-Y point
   // sits on the ground plane (Y=0).  Computes the min Y across all
   // selected meshes' world-space bounding boxes, then dispatches a
