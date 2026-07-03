@@ -35,7 +35,9 @@ const TransformDialog = () => {
         s.sweepSelectMode ||
         s.chamferSelectMode ||
         s.pushPullSelectMode ||
-        s.booleanTool
+        s.booleanTool ||
+        s.pattern3dTool ||
+        s.mirror3dTool
       ),
   );
   const [locked, setLocked] = useState(true);

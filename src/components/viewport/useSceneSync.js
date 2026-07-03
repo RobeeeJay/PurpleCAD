@@ -97,6 +97,8 @@ export function useSceneSync({
   const soloItemId = useStore((s) => s.soloItemId);
   const booleanTool = useStore((s) => s.booleanTool);
   const booleanCutIds = useStore((s) => s.booleanCutIds);
+  const pattern3dTool = useStore((s) => s.pattern3dTool);
+  const mirror3dTool = useStore((s) => s.mirror3dTool);
   // The Emboss tool reuses the extrude-select fills to pick sketch geometry.
   const embossGeomPicking = useStore(
     (s) => s.embossTool?.picking === "geometry",
@@ -420,10 +422,11 @@ export function useSceneSync({
       boundingBoxRef.current = null;
     }
 
-    // Boolean tools gather several whole objects; the transform gizmo has no
-    // meaning there (and its bounding box jumps around as the pick set grows),
-    // so suppress it entirely while a boolean dialog is open.
-    if (!selectedId || booleanTool) return;
+    // Object-picking tools (boolean, 3D pattern, mirror) gather whole objects
+    // as their source; the transform gizmo has no meaning there (and its
+    // bounding box jumps around as the picked object changes), so suppress it
+    // entirely while one of those dialogs is open.
+    if (!selectedId || booleanTool || pattern3dTool || mirror3dTool) return;
 
     const result = buildTransformHandles(selectedId, items, objectsRef);
     if (!result) return;
@@ -472,7 +475,14 @@ export function useSceneSync({
         boundingBoxRef.current = null;
       }
     };
-  }, [selectedId, selectedIds, items, booleanTool]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    selectedId,
+    selectedIds,
+    items,
+    booleanTool,
+    pattern3dTool,
+    mirror3dTool,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sketch mode (top-down view + grid) ───────────────────────────────────
 

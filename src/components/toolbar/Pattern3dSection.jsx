@@ -88,22 +88,13 @@ const Pattern3dSection = ({ bare = false }) => {
     .filter(Boolean);
   const source = sel.find((i) => SOLID_TYPES.includes(i.type));
 
-  // Circular needs a source; the rotation axis is picked (a sketch line or face
-  // edge) in the dialog.  Rectangular only needs a source.
-  const handleCircular = () => {
-    if (!source) {
-      alert("Select an object to pattern.");
-      return;
-    }
-    startPattern3d({ patternType: "circular", sourceId: source.id });
-  };
-  const handleRectangular = () => {
-    if (!source) {
-      alert("Select an object to pattern.");
-      return;
-    }
-    startPattern3d({ patternType: "rectangular", sourceId: source.id });
-  };
+  // No selection required — the dialog's "Object" button picks the source (and
+  // auto-enters object-pick mode when opened with nothing selected).  Seed it
+  // from the current selection when there is one.
+  const handleCircular = () =>
+    startPattern3d({ patternType: "circular", sourceId: source?.id });
+  const handleRectangular = () =>
+    startPattern3d({ patternType: "rectangular", sourceId: source?.id });
 
   // Open the Mirror dialog (seeded from the current selection); it owns the
   // object/plane picking and the confirm.
@@ -124,14 +115,12 @@ const Pattern3dSection = ({ bare = false }) => {
           key: "circular",
           label: "Circular",
           icon: <CircularIcon />,
-          disabled: !source,
           onClick: handleCircular,
         },
         {
           key: "rectangular",
           label: "Rectangular",
           icon: <RectangularIcon />,
-          disabled: !source,
           onClick: handleRectangular,
         },
       ]}
