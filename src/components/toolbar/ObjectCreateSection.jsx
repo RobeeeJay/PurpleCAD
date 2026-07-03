@@ -4,13 +4,20 @@ import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import SweepSection from "./SweepSection";
 import Pattern3dSection from "./Pattern3dSection";
+import {
+  CubeIcon,
+  SphereIcon,
+  CylinderIcon,
+  ConeIcon,
+  TorusIcon,
+} from "./timelineIcons.jsx";
 
 const PRIMITIVES = [
-  { type: "cube", label: "Box" },
-  { type: "sphere", label: "Sphere" },
-  { type: "cylinder", label: "Cylinder" },
-  { type: "cone", label: "Cone" },
-  { type: "torus", label: "Torus" },
+  { type: "cube", label: "Box", Icon: CubeIcon },
+  { type: "sphere", label: "Sphere", Icon: SphereIcon },
+  { type: "cylinder", label: "Cylinder", Icon: CylinderIcon },
+  { type: "cone", label: "Cone", Icon: ConeIcon },
+  { type: "torus", label: "Torus", Icon: TorusIcon },
 ];
 
 const ObjectCreateSection = () => {
@@ -196,6 +203,9 @@ const ObjectCreateSection = () => {
                   createItem(p.type);
                 }}
               >
+                <span className="toolbar-dropdown-icon">
+                  <p.Icon />
+                </span>
                 {p.label}
               </button>
             ))}

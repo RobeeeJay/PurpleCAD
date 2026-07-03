@@ -30,6 +30,9 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
+#include <gp_GTrsf.hxx>
+#include <gp_Mat.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -1052,6 +1055,25 @@ Napi::Number ScaleShape(const Napi::CallbackInfo& info) {
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
+// scaleShapeXYZ(id, sx, sy, sz) → newShapeId
+// Non-uniform scale about the origin in the shape's local frame (a per-axis
+// stretch), via an affine gp_GTrsf.  Used so a boolean/split input rebuilds at
+// the size the user stretched it to; uniform scales can still use ScaleShape.
+Napi::Number ScaleShapeXYZ(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id      = info[0].As<Napi::Number>().Int32Value();
+    double sx   = GetDouble(info[1], 1.0);
+    double sy   = GetDouble(info[2], 1.0);
+    double sz   = GetDouble(info[3], 1.0);
+    TopoDS_Shape shape = FetchShape(id);
+    gp_GTrsf gt;
+    gt.SetVectorialPart(gp_Mat(sx, 0, 0, 0, sy, 0, 0, 0, sz));
+    BRepBuilderAPI_GTransform mk(shape, gt, true);
+    return Napi::Number::New(env, StoreShape(mk.Shape()));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Exported functions — boolean operations
 // ════════════════════════════════════════════════════════════════════════
@@ -1796,6 +1818,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("mirrorShape",        Napi::Function::New(env, MirrorShape));
   exports.Set("rotateShapeAxis",    Napi::Function::New(env, RotateShapeAxis));
   exports.Set("scaleShape",         Napi::Function::New(env, ScaleShape));
+  exports.Set("scaleShapeXYZ",      Napi::Function::New(env, ScaleShapeXYZ));
 
   // Boolean ops
   exports.Set("booleanOp",          Napi::Function::New(env, BooleanOp));

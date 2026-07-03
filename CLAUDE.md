@@ -111,6 +111,24 @@ files just to make these go away.
   `regenerateOrchestrator.js` exists separately from the store (same
   reason: avoid creating a bundling cycle through `occClient`).
 
+- **⚠️ TWO parallel OCC implementations — keep them in lockstep.** The op
+  bodies exist TWICE:
+  - `src/three/occOps.js` (+ `src/three/csgUtils.js`) — ESM, used by
+    **vitest/Node** (the only path the test suite exercises).
+  - `electron/occ-bridge.cjs` — a CommonJS re-implementation that **the
+    actual Electron app runs** (main process, via `main.cjs`'s `invokeOcc`
+    handler). Its comments say "mirrors occOps.js".
+
+  A change to CSG/transform/scale/extrude logic in `occOps.js`/`csgUtils.js`
+  that is NOT also made in `occ-bridge.cjs` **passes every test but does
+  nothing in the shipped app** — this cost five rounds of "still broken"
+  before it was found. When you touch `buildBrushTransform`, `scaleLocal`,
+  `booleanInputLocal`, `buildItemShapeLocal`, `performCsg`, `splitItem`,
+  the export builder, or any op body: **edit BOTH files in the same commit**,
+  and grep the bridge for the same landmine (`git grep -n "scaleShape\|t.scale\|buildBrushTransform" electron/occ-bridge.cjs`).
+  Vitest cannot catch a bridge drift (it never loads the `.cjs`); the only
+  guard is this rule + a manual Electron smoke check.
+
 ## Native OCC addon (native/occ-addon)
 
 - Built against OpenCASCADE 8.0.0 at `~/occ-8.0-arm64`. CMakeLists' `find_package`
@@ -173,6 +191,68 @@ files just to make these go away.
 - Negative depths are valid (backwards extrude). `THREE.ExtrudeGeometry`
   only takes positive `depth`, so negative-depth code paths extrude by
   `abs(depth)` then `translate(0, 0, -abs(depth))`.
+
+## Display ↔ OCC-rebuild parity (the "reverts to an earlier state" bug class)
+
+Every object exists as **two representations that must stay in lockstep**:
+
+1. **What the renderer draws** — the mesh: analytic/`ExtrudeGeometry`/baked
+   `geometryData`, placed by `mesh.position/rotation/scale` (three.js order
+   `T·R·S`, with `S` per-axis in the LOCAL geometry frame).
+2. **What OCC rebuilds** — `buildItemShapeLocal` (recipe/live-sketch) →
+   `scaleLocal` → `transformShape`, positioned by `buildBrushTransform`.
+
+Every operation on an existing body — boolean, split, chamfer/fillet,
+shell/hole/emboss/draft, sweep, pattern, STL/STEP export, and timeline
+regeneration — consumes representation #2. **The recurring bug is #2 silently
+diverging from #1**, so the op applies to an earlier / different size, position,
+scale, or resolution than what's on screen. The invariant to preserve:
+
+> `worldBBox(OCC rebuild) == worldBBox(mesh geometry × mesh T·R·S)` for the
+> same item, at the current live state.
+
+Established landmines (each was a real bug — extend this list, never shrink it):
+
+- **Per-axis scale.** `buildBrushTransform` returns the full `{x,y,z}`;
+  `scaleLocal` applies uniform via `scaleShape`, non-uniform via the affine
+  `scaleShapeXYZ`. Collapsing to `scale.x` silently drops a stretch.
+- **Extrude centroid offset is UNSCALED.** The renderer adds it via
+  `mesh.position` (which `mesh.scale` never touches); scaling it shifts a
+  scaled extrude. A square profile hides this (centroid `(0,0)`) — test an
+  off-centre profile.
+- **Non-uniform scale is origin-sensitive.** It must hit the SAME geometry
+  about the SAME origin the renderer uses. For a `csg` whose baked
+  `geometryData` IS the display truth, a non-uniform scale must sew that baked
+  mesh (`booleanInputLocal`), not a re-derived recipe that can build a
+  differently-sized/centred shape.
+- **Use the LIVE state, never a frozen snapshot.** Live sketch polygon
+  (`extrudeWithLivePolygon`), current per-axis scale/rotation/position, current
+  `printPrecision`. Timeline replay must apply every `transform` instruction
+  (`applyInstruction`); regeneration must rebuild upstream inputs first.
+- **The fix must land in BOTH OCC implementations.** `occOps.js`/`csgUtils.js`
+  (tests) AND `electron/occ-bridge.cjs` (the shipped app). A green suite with an
+  un-mirrored bridge is the trap that hid every bug above — see the ⚠️ note under
+  "OCC execution boundary".
+
+**Checklist when adding/altering any op or feature that touches existing bodies:**
+
+1. Route through the shared `buildItemShapeLocal` + `buildBrushTransform` +
+   `scaleLocal` + `transformShape` path — don't hand-roll a second transform.
+2. Honour per-axis scale AND rotation AND position together (full `T·R·S`).
+3. For a `csg` with baked `geometryData`, a non-uniform scale uses the baked
+   mesh, not a recipe re-derivation.
+4. Read the item's live state, not a value cached at create time.
+5. Add a regression test in `src/three/occ/__tests__/occ.smoke.test.js` that
+   would FAIL if the op ignored scale/rotation/position — assert the OCC world
+   bbox equals `display-local-size × scale` (the existing "boolean … respects …
+   scale" tests are the template). Prefer an off-centre / non-uniform / rotated
+   case, since symmetric ones mask offset and origin errors.
+
+**Keeping the list current:** whenever a new "applies to an earlier state" bug
+surfaces, the fix is not done until (a) a regression test lands in the smoke
+suite and (b) a one-line landmine is appended above. Treat that list as
+append-only institutional memory — the next feature reads it before touching
+the rebuild path.
 
 ## Tool dialogs: create + edit symmetry
 

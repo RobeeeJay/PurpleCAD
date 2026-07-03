@@ -324,6 +324,27 @@ function loftArgs(profileSource, secondSource, allItems, precision) {
   };
 }
 
+// Apply an item's local-frame scale to a freshly built shape, BEFORE it is
+// rotated/translated into world space (matching the mesh's T·R·S order).  A
+// uniform scale uses the analytic scaleShape; a per-axis stretch needs the
+// affine scaleShapeXYZ.  Returns the scaled shape id (a NEW shape when it
+// scales, with the input released) or `localId` unchanged when scale ≈ 1.
+function scaleLocal(localId, scale) {
+  const sx = scale?.x ?? 1;
+  const sy = scale?.y ?? 1;
+  const sz = scale?.z ?? 1;
+  const uniform = Math.abs(sx - sy) < 1e-9 && Math.abs(sy - sz) < 1e-9;
+  if (uniform) {
+    if (Math.abs(sx - 1) < 1e-9) return localId;
+    const id = occ.scaleShape(localId, sx);
+    occ.releaseShape(localId);
+    return id;
+  }
+  const id = occ.scaleShapeXYZ(localId, sx, sy, sz);
+  occ.releaseShape(localId);
+  return id;
+}
+
 // Build the native OCC shape for an item in its LOCAL frame (matching the
 // frame of the rendered geometryData so edge endpoints from the viewport
 // mesh align with the OCC shape's edges).
@@ -730,11 +751,7 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
           const localId = buildItemShapeLocal(inp, allItems, precision);
           if (localId == null) return null;
           const t = buildBrushTransform(inp);
-          let scaledId = localId;
-          if (Math.abs(t.scale - 1) > 1e-9) {
-            scaledId = occ.scaleShape(localId, t.scale);
-            occ.releaseShape(localId);
-          }
+          const scaledId = scaleLocal(localId, t.scale);
           const worldId = occ.transformShape(
             scaledId,
             t.position.x,
@@ -788,11 +805,7 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         const localId = buildItemShapeLocal(inp, allItems, precision);
         if (localId == null) return null;
         const t = buildBrushTransform(inp);
-        let scaledId = localId;
-        if (Math.abs(t.scale - 1) > 1e-9) {
-          scaledId = occ.scaleShape(localId, t.scale);
-          occ.releaseShape(localId);
-        }
+        const scaledId = scaleLocal(localId, t.scale);
         const worldId = occ.transformShape(
           scaledId,
           t.position.x,
@@ -857,12 +870,13 @@ function buildExportShapes(items) {
     const localId = buildItemShapeLocal(item, items, 0.01);
     if (localId == null) continue;
     const t = buildBrushTransform(item);
-    const finalScale = (t.scale != null ? t.scale : 1) * MM_PER_UNIT;
-    let scaledId = localId;
-    if (Math.abs(finalScale - 1) > 1e-9) {
-      scaledId = occ.scaleShape(localId, finalScale);
-      occ.releaseShape(localId);
-    }
+    // Per-axis scale, then the world unit conversion (mm) folded onto every
+    // axis, so a stretched body exports at its visible proportions.
+    const scaledId = scaleLocal(localId, {
+      x: t.scale.x * MM_PER_UNIT,
+      y: t.scale.y * MM_PER_UNIT,
+      z: t.scale.z * MM_PER_UNIT,
+    });
     const worldId = occ.transformShape(
       scaledId,
       t.position.x * MM_PER_UNIT,
@@ -1620,6 +1634,31 @@ async function loftItem({
   };
 }
 
+// Local OCC shape for one boolean input.  A transformed csg body must
+// contribute the EXACT geometry the user sees.  Re-deriving a recipe csg from
+// buildItemShapeLocal diverges from its baked geometryData under a NON-UNIFORM
+// gizmo scale (the per-axis scale then hits a differently-built shape, so the
+// cut result comes out the wrong size).  In that case sew the baked mesh — the
+// display truth — and let scaleLocal + transform reproduce it exactly.  Uniform
+// scales are origin-independent, so they keep the robust analytic rebuild.
+function booleanInputLocal(item, sources, precision) {
+  const s = item.scale || {};
+  const sx = s.x ?? 1;
+  const sy = s.y ?? 1;
+  const sz = s.z ?? 1;
+  const nonUniform = Math.abs(sx - sy) > 1e-9 || Math.abs(sy - sz) > 1e-9;
+  if (item.type === "csg" && item.geometryData && nonUniform) {
+    const g = item.geometryData;
+    if (g.positions && g.positions.length >= 9) {
+      const positions = new Float64Array(g.positions);
+      const indices =
+        g.indices && g.indices.length ? new Uint32Array(g.indices) : null;
+      return occ.makeSolidFromMesh(positions, indices);
+    }
+  }
+  return buildItemShapeLocal(item, sources, precision);
+}
+
 async function performCsg({
   selectedItems,
   allItems,
@@ -1631,14 +1670,10 @@ async function performCsg({
   const worldAnchors = [];
 
   for (const item of selectedItems) {
-    const localId = buildItemShapeLocal(item, sources, printPrecision);
+    const localId = booleanInputLocal(item, sources, printPrecision);
     if (localId == null) continue;
     const t = buildBrushTransform(item);
-    let scaledId = localId;
-    if (Math.abs(t.scale - 1) > 1e-9) {
-      scaledId = occ.scaleShape(localId, t.scale);
-      occ.releaseShape(localId);
-    }
+    const scaledId = scaleLocal(localId, t.scale);
     const worldId = occ.transformShape(
       scaledId,
       t.position.x,
@@ -1715,11 +1750,7 @@ async function splitItem({ target, plane, allItems, printPrecision }) {
   const localId = buildItemShapeLocal(target, allItems, printPrecision);
   if (localId == null) throw new Error("Couldn't build the object to split.");
   const t = buildBrushTransform(target);
-  let scaledId = localId;
-  if (Math.abs(t.scale - 1) > 1e-9) {
-    scaledId = occ.scaleShape(localId, t.scale);
-    occ.releaseShape(localId);
-  }
+  const scaledId = scaleLocal(localId, t.scale);
   const solidId = occ.transformShape(
     scaledId,
     t.position.x,
@@ -1797,11 +1828,7 @@ function buildWorldSolid(item, allItems, precision) {
   const localId = buildItemShapeLocal(item, allItems, precision);
   if (localId == null) return null;
   const t = buildBrushTransform(item);
-  let id = localId;
-  if (Math.abs(t.scale - 1) > 1e-9) {
-    id = occ.scaleShape(localId, t.scale);
-    occ.releaseShape(localId);
-  }
+  const id = scaleLocal(localId, t.scale);
   const w = occ.transformShape(
     id,
     t.position.x,

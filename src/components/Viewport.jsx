@@ -11,6 +11,7 @@ import SweepOverlay from "./viewport/SweepOverlay";
 import SvgPlacementOverlay from "./viewport/SvgPlacementOverlay";
 import PlaneDialog from "./PlaneDialog";
 import MirrorDialog from "./MirrorDialog";
+import BooleanDialog from "./BooleanDialog";
 import Pattern3dDialog from "./Pattern3dDialog";
 import SplitDialog from "./SplitDialog";
 import ShellDialog from "./ShellDialog";
@@ -327,6 +328,7 @@ const Viewport = () => {
       <SweepOverlay />
       <PlaneDialog />
       <MirrorDialog />
+      <BooleanDialog />
       <Pattern3dDialog />
       <SplitDialog />
       <ShellDialog />

@@ -16,12 +16,19 @@ import {
 // plane rather than at the sketch origin.
 export function buildBrushTransform(item) {
   const r = item.rotation || { x: 0, y: 0, z: 0 };
-  const s = item.scale ? item.scale.x : 1;
+  // Full per-axis scale (in the shape's local frame) so a non-uniformly
+  // stretched body rebuilds at its visible size for CSG/split/export, not just
+  // its scale.x.  Callers apply it before the rotation, matching the mesh's
+  // T·R·S order.
+  const sc = item.scale || {};
+  const s = { x: sc.x ?? 1, y: sc.y ?? 1, z: sc.z ?? 1 };
 
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
     const poly = item.profile.polygon2D;
     // Area centroid (not the vertex mean) so a re-tessellated curve doesn't shift
-    // the pivot — must match the centring in occOps.js makeExtrude.
+    // the pivot — must match the centring in occOps.js makeExtrude.  The offset
+    // is UNSCALED: the renderer adds it via mesh.position, which mesh.scale does
+    // not touch (only the geometry scales, about this centroid).
     const c = polyAreaCentroid(poly);
     const offset = new THREE.Vector3(c.x, c.y, 0);
     offset.applyEuler(new THREE.Euler(r.x || 0, r.y || 0, r.z || 0));

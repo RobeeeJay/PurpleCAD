@@ -47,6 +47,10 @@ export const uiInitial = {
   selEdge: false,
   selPoint: false,
   selectionOverride: null,
+  // When true, a plain object click adds to (toggles) the multi-selection
+  // instead of replacing it — no shift needed.  Set by pick tools that gather
+  // several objects at once (e.g. the Boolean dialog).
+  additiveObjectPick: false,
   // Saved selection-type set before a Cmd/Ctrl-click "solo" isolate, so a second
   // solo-click restores it.  Cleared by any normal toggle.
   selTypeSolo: null,
@@ -178,6 +182,14 @@ export const uiInitial = {
   // picked object/plane ids; this just gates its visibility.  Named *3d to avoid
   // colliding with the sketch slice's startMirrorTool (the 2D sketch mirror).
   mirror3dTool: null,
+
+  // Boolean (Union / Difference / Intersection) dialog: { operation }.  The
+  // dialog owns the picked primary/secondary object ids; this just carries which
+  // operation is running and gates visibility.
+  booleanTool: null,
+  // Ids of the Cut tool's cutting objects, so the 3D view can tint them red
+  // (distinct from the base).  Kept in sync by the dialog; empty otherwise.
+  booleanCutIds: [],
 
   // Sketch Project tool: while open, clicks/marquee-drags accumulate the
   // projected sketch shapes (with a live preview) into `shapes`; the dialog
@@ -686,6 +698,24 @@ export const createUiSlice = (set) => ({
   startMirror3d: (seed) =>
     set({ mirror3dTool: seed || {}, selectionOverride: ["object"] }),
   cancelMirror3d: () => set({ mirror3dTool: null, selectionOverride: null }),
+
+  // Boolean tools act on whole objects, so they lock the selection widget to
+  // Object mode while the dialog is open.
+  startBooleanTool: (operation) =>
+    set({
+      booleanTool: { operation },
+      selectionOverride: ["object"],
+      additiveObjectPick: true,
+    }),
+  cancelBooleanTool: () =>
+    set({
+      booleanTool: null,
+      selectionOverride: null,
+      additiveObjectPick: false,
+      booleanCutIds: [],
+    }),
+  setAdditiveObjectPick: (v) => set({ additiveObjectPick: !!v }),
+  setBooleanCutIds: (ids) => set({ booleanCutIds: [...ids] }),
 
   startProjectTool: () => set({ projectTool: { shapes: [] } }),
   addProjectShapes: (shapes) =>

@@ -805,6 +805,47 @@ export function attachCameraControls(ctx) {
   };
   controls.clearPattern3dPreview = () => controls.previewPattern3d(null);
 
+  // Boolean/Cut preview: fade the input bodies to 15% opacity so the translucent
+  // result ghost reads clearly through them, then show the ghost.  Restored by
+  // clearBooleanPreview.  Handles both the primitive shader materials (uOpacity
+  // uniform) and the standard mesh materials (material.opacity).
+  let booleanDimmed = [];
+  const BOOLEAN_DIM_OPACITY = 0.15;
+  controls.previewBoolean = (result, inputIds) => {
+    controls.clearBooleanPreview();
+    for (const id of inputIds || []) {
+      const mesh = objectsRef.current[id];
+      const m = mesh?.material;
+      if (!m) continue;
+      const u = m.uniforms?.uOpacity;
+      booleanDimmed.push({
+        m,
+        u,
+        prevTransparent: m.transparent,
+        prevOpacity: m.opacity,
+        prevDepthWrite: m.depthWrite,
+        prevU: u ? u.value : null,
+      });
+      m.transparent = true;
+      m.depthWrite = false;
+      if (u) u.value = BOOLEAN_DIM_OPACITY;
+      else m.opacity = BOOLEAN_DIM_OPACITY;
+      m.needsUpdate = true;
+    }
+    controls.previewPattern3d(result);
+  };
+  controls.clearBooleanPreview = () => {
+    for (const d of booleanDimmed) {
+      d.m.transparent = d.prevTransparent;
+      d.m.opacity = d.prevOpacity;
+      d.m.depthWrite = d.prevDepthWrite;
+      if (d.u && d.prevU != null) d.u.value = d.prevU;
+      d.m.needsUpdate = true;
+    }
+    booleanDimmed = [];
+    controls.previewPattern3d(null);
+  };
+
   // Pick 3 points (snapping to object vertices) to define a new Plane.  Markers
   // mark each pick; the 3rd derives a frame and opens the creation dialog.
   let planePickPoints = [];

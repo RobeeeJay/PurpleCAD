@@ -34,7 +34,8 @@ const TransformDialog = () => {
         s.planeTool ||
         s.sweepSelectMode ||
         s.chamferSelectMode ||
-        s.pushPullSelectMode
+        s.pushPullSelectMode ||
+        s.booleanTool
       ),
   );
   const [locked, setLocked] = useState(true);

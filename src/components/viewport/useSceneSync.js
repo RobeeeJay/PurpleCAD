@@ -95,6 +95,8 @@ export function useSceneSync({
   const defaultMaterial = useStore((s) => s.defaultMaterial);
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
   const soloItemId = useStore((s) => s.soloItemId);
+  const booleanTool = useStore((s) => s.booleanTool);
+  const booleanCutIds = useStore((s) => s.booleanCutIds);
   // The Emboss tool reuses the extrude-select fills to pick sketch geometry.
   const embossGeomPicking = useStore(
     (s) => s.embossTool?.picking === "geometry",
@@ -418,7 +420,10 @@ export function useSceneSync({
       boundingBoxRef.current = null;
     }
 
-    if (!selectedId) return;
+    // Boolean tools gather several whole objects; the transform gizmo has no
+    // meaning there (and its bounding box jumps around as the pick set grows),
+    // so suppress it entirely while a boolean dialog is open.
+    if (!selectedId || booleanTool) return;
 
     const result = buildTransformHandles(selectedId, items, objectsRef);
     if (!result) return;
@@ -467,7 +472,7 @@ export function useSceneSync({
         boundingBoxRef.current = null;
       }
     };
-  }, [selectedId, selectedIds, items]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedId, selectedIds, items, booleanTool]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sketch mode (top-down view + grid) ───────────────────────────────────
 
@@ -684,7 +689,17 @@ export function useSceneSync({
     if (materialDialogTarget != null) {
       updateEmissive(objectsRef, null, [], null);
     } else {
-      updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
+      // In a boolean pick every gathered object is an equal input, so tint them
+      // all with the single-selection colour rather than the primary/secondary
+      // (multi-select) split.
+      updateEmissive(
+        objectsRef,
+        selectedId,
+        selectedIds,
+        hoveredId,
+        !!booleanTool,
+        booleanCutIds,
+      );
     }
     // Reveal a sketch's reference plane while it's hovered in the objects list.
     updateSketchPlaneVisibility(
@@ -700,7 +715,14 @@ export function useSceneSync({
       selectedIds,
       useStore.getState().soloItemId,
     );
-  }, [hoveredId, selectedId, selectedIds, materialDialogTarget]);
+  }, [
+    hoveredId,
+    selectedId,
+    selectedIds,
+    materialDialogTarget,
+    booleanTool,
+    booleanCutIds,
+  ]);
 
   // ── Render mode ───────────────────────────────────────────────────────────
   // Also re-runs on printPrecision changes so the wireframe (and the

@@ -779,13 +779,17 @@ export function createViewInteraction(
             selectItem(null);
           }
         } else {
-          // Normal (object-mode) click: shift adds to multi-object selection.
+          // Normal (object-mode) click: shift — or a tool's additive-pick mode
+          // (e.g. the Boolean dialog) — adds to / toggles the multi-selection.
           useStore.getState().clearSelectedSubGeometry();
-          if (e.shiftKey && clickedId)
+          const additive = e.shiftKey || useStore.getState().additiveObjectPick;
+          if (additive && clickedId)
             useStore.getState().addToSelection(clickedId);
           else selectItem(clickedId);
         }
-      } else if (!e.shiftKey) {
+      } else if (!e.shiftKey && !useStore.getState().additiveObjectPick) {
+        // Empty-space click clears the selection — but not while an additive
+        // pick tool is gathering objects (a stray miss shouldn't wipe them).
         selectItem(null);
         useStore.getState().clearSelectedSubGeometry();
       }

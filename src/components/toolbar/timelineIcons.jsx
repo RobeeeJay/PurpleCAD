@@ -138,6 +138,27 @@ export const TorusIcon = () => (
   </svg>
 );
 
+export const ConeIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <polygon
+      points="12,3 19,18 5,18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="miter"
+    />
+    <ellipse
+      cx="12"
+      cy="18"
+      rx="7"
+      ry="2.2"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+  </svg>
+);
+
 export const SketchPlaneIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14">
     <polygon

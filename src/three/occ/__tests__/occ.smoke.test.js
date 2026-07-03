@@ -1361,6 +1361,190 @@ describe("OCC boolean operations", () => {
     expect(maxX).toBeCloseTo(3, 3);
   });
 
+  it("boolean cut respects a NON-uniform item.scale (per-axis stretch)", async () => {
+    // Regression for: a scaled+rotated extrude (or any body stretched on a
+    // single axis) reverted to an earlier dimension during a boolean, because
+    // the transform collapsed item.scale to a uniform scale.x.  Now each axis
+    // scales independently via scaleShapeXYZ.
+    const { ops } = await import("../../occOps.js");
+    // Cube A stretched ONLY on Z (×4): spans X/Y ∈ [-1, 1], Z ∈ [-4, 4].
+    const cubeA = {
+      id: 1,
+      type: "cube",
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 4 },
+    };
+    // Cube B unscaled at Z = +5: spans Z ∈ [4, 6].  It only overlaps A because
+    // A reaches Z = 4 thanks to the Z stretch — if scale.x (=1) were applied
+    // uniformly, A would be a 2×2×2 cube and B would miss it entirely.
+    const cubeB = {
+      id: 2,
+      type: "cube",
+      position: { x: 0, y: 0, z: 5 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+    const result = await ops.performCsg({
+      selectedItems: [cubeA, cubeB],
+      allItems: [cubeA, cubeB],
+      operation: "difference",
+      printPrecision: null,
+    });
+    expect(result).toBeTruthy();
+    let minZ = Infinity,
+      maxZ = -Infinity,
+      maxX = -Infinity;
+    for (let i = 0; i < result.geometryData.positions.length; i += 3) {
+      const wx = result.position.x + result.geometryData.positions[i];
+      const wz = result.position.z + result.geometryData.positions[i + 2];
+      if (wz < minZ) minZ = wz;
+      if (wz > maxZ) maxZ = wz;
+      if (wx > maxX) maxX = wx;
+    }
+    // A's Z stretch must be honoured: the body reaches Z = -4 (not -1).
+    expect(minZ).toBeCloseTo(-4, 3);
+    // B bit into A's +Z end (from Z = 4), so the result stops before +4.
+    expect(maxZ).toBeLessThan(4.001);
+    // The un-stretched X axis stays at ±1 — the stretch was Z-only.
+    expect(maxX).toBeCloseTo(1, 3);
+  });
+
+  it("boolean respects a scaled extrude with an off-centre profile (offset stays put)", async () => {
+    // Regression for: a scaled (and rotated) extrude reverted / shifted during a
+    // boolean.  The extrude's centroid offset must NOT be scaled — the renderer
+    // adds it via mesh.position (unaffected by mesh.scale), only the geometry
+    // scales, about that centroid.  A square-at-origin test misses this (its
+    // centroid is 0,0); use a profile whose centroid is (1,1).
+    const { ops } = await import("../../occOps.js");
+    const extrude = {
+      id: 1,
+      type: "extrude",
+      profile: {
+        polygon2D: [
+          { x: 0, y: 0 },
+          { x: 2, y: 0 },
+          { x: 2, y: 2 },
+          { x: 0, y: 2 },
+        ],
+        holes: [],
+      },
+      depth: 2,
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 2, y: 2, z: 1 }, // scale ×2 about the centroid (1,1)
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    // A cube far above so the union keeps the extrude intact (no overlap).
+    const cube = {
+      id: 2,
+      type: "cube",
+      position: { x: 0, y: 0, z: 20 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+    const r = await ops.performCsg({
+      selectedItems: [extrude, cube],
+      allItems: [extrude, cube],
+      operation: "union",
+      printPrecision: null,
+    });
+    let mnX = Infinity,
+      mxX = -Infinity,
+      mnY = Infinity,
+      mxY = -Infinity;
+    for (let i = 0; i < r.geometryData.positions.length; i += 3) {
+      const x = r.position.x + r.geometryData.positions[i];
+      const y = r.position.y + r.geometryData.positions[i + 1];
+      const z = r.position.z + r.geometryData.positions[i + 2];
+      if (z > 10) continue; // skip the far cube
+      if (x < mnX) mnX = x;
+      if (x > mxX) mxX = x;
+      if (y < mnY) mnY = y;
+      if (y > mxY) mxY = y;
+    }
+    // Centroid (1,1) stays put; the ±1 half-profile scales to ±2 about it →
+    // world span [-1, 3].  (If the offset were wrongly scaled, this'd be [0, 4].)
+    expect(mnX).toBeCloseTo(-1, 3);
+    expect(mxX).toBeCloseTo(3, 3);
+    expect(mnY).toBeCloseTo(-1, 3);
+    expect(mxY).toBeCloseTo(3, 3);
+  });
+
+  it("boolean uses a scaled csg body's BAKED mesh, not a divergent recipe rebuild", async () => {
+    // Regression for: cutting a non-uniformly gizmo-scaled csg body (e.g. a
+    // chamfered/boolean solid) produced a wrong-sized result — the recipe was
+    // re-derived and the per-axis scale hit a differently-built shape.  The
+    // input must come from the baked geometryData the user sees.
+    const { ops } = await import("../../occOps.js");
+    // A 2×2×2 cube as a baked mesh (centred at origin).
+    const V = [
+      [-1, -1, -1],
+      [1, -1, -1],
+      [1, 1, -1],
+      [-1, 1, -1],
+      [-1, -1, 1],
+      [1, -1, 1],
+      [1, 1, 1],
+      [-1, 1, 1],
+    ];
+    const F = [
+      [4, 5, 6],
+      [4, 6, 7], // +Z
+      [1, 0, 3],
+      [1, 3, 2], // -Z
+      [0, 4, 7],
+      [0, 7, 3], // -X
+      [5, 1, 2],
+      [5, 2, 6], // +X
+      [3, 7, 6],
+      [3, 6, 2], // +Y
+      [0, 1, 5],
+      [0, 5, 4], // -Y
+    ];
+    const geometryData = {
+      positions: V.flat(),
+      indices: F.flat(),
+    };
+    // A csg body with a recipe whose inputs are GONE — so the old recipe-rebuild
+    // path returns nothing; only the baked-mesh path yields geometry.
+    const body = {
+      id: 1,
+      type: "csg",
+      geometryData,
+      regenerator: { kind: "boolean", op: "union", inputIds: [98, 99] },
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 2, y: 1, z: 1 }, // stretch X ×2 → 4×2×2
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const far = {
+      id: 2,
+      type: "cube",
+      position: { x: 0, y: 0, z: 20 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+    const r = await ops.performCsg({
+      selectedItems: [body, far],
+      allItems: [body, far],
+      operation: "union",
+      printPrecision: null,
+    });
+    expect(r).toBeTruthy();
+    let mnX = Infinity,
+      mxX = -Infinity,
+      mnY = Infinity,
+      mxY = -Infinity;
+    for (let i = 0; i < r.geometryData.positions.length; i += 3) {
+      const x = r.position.x + r.geometryData.positions[i];
+      const y = r.position.y + r.geometryData.positions[i + 1];
+      const z = r.position.z + r.geometryData.positions[i + 2];
+      if (z > 10) continue; // skip the far cube
+      if (x < mnX) mnX = x;
+      if (x > mxX) mxX = x;
+      if (y < mnY) mnY = y;
+      if (y > mxY) mxY = y;
+    }
+    // Baked 2×2×2 cube, scaled ×2 on X → world span 4 on X, 2 on Y.
+    expect(mxX - mnX).toBeCloseTo(4, 3);
+    expect(mxY - mnY).toBeCloseTo(2, 3);
+  });
+
   it("performCsg anchors the result at the first input's world position", async () => {
     // Regression for: "Applying a cut extrusion results in objects that
     // extrusion touches moving before the cut is applied."  Previously

@@ -104,10 +104,23 @@
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-dropdown-icon {
+  display: inline-flex;
+  color: var(--text-secondary, #a7a4b0);
 }
 
 .toolbar-dropdown-item:hover:not(:disabled) {
   background-color: var(--button-hover);
+}
+
+.toolbar-dropdown-item.active {
+  background-color: var(--selected-bg);
+  color: var(--color-white);
 }
 
 .toolbar-dropdown-item:disabled {

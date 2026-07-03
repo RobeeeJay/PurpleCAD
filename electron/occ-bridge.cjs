@@ -292,10 +292,14 @@ function resolveDepth(depth, fallback = 1) {
   return Number.isFinite(n) ? n / 10 : fallback;
 }
 
-// Mirrors csgUtils.js#buildBrushTransform without THREE.js.
+// Mirrors csgUtils.js#buildBrushTransform without THREE.js.  Returns the full
+// per-axis scale (in the LOCAL geometry frame) so a non-uniformly stretched
+// body rebuilds at its visible size.  The extrude centroid offset is UNSCALED —
+// the renderer adds it via mesh.position, which mesh.scale never touches.
 function buildBrushTransform(item) {
   const r = item.rotation || { x: 0, y: 0, z: 0 };
-  const s = item.scale ? item.scale.x : 1;
+  const sc = item.scale || {};
+  const s = { x: sc.x ?? 1, y: sc.y ?? 1, z: sc.z ?? 1 };
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
     const c = polyAreaCentroid(item.profile.polygon2D);
     const rotated = applyEulerXYZ(c.x, c.y, 0, r.x||0, r.y||0, r.z||0);
@@ -311,6 +315,43 @@ function buildBrushTransform(item) {
     rotation: r,
     scale: s,
   };
+}
+
+// Mirrors occOps.js#scaleLocal — apply an item's local-frame scale to a shape
+// before it is rotated/translated.  Uniform → analytic scaleShape; per-axis →
+// affine scaleShapeXYZ.  Returns the scaled id (input released) or `localId`.
+function scaleLocal(localId, scale) {
+  const sx = scale && scale.x != null ? scale.x : 1;
+  const sy = scale && scale.y != null ? scale.y : 1;
+  const sz = scale && scale.z != null ? scale.z : 1;
+  const uniform = Math.abs(sx - sy) < 1e-9 && Math.abs(sy - sz) < 1e-9;
+  if (uniform) {
+    if (Math.abs(sx - 1) < 1e-9) return localId;
+    const id = occ.scaleShape(localId, sx);
+    occ.releaseShape(localId);
+    return id;
+  }
+  const id = occ.scaleShapeXYZ(localId, sx, sy, sz);
+  occ.releaseShape(localId);
+  return id;
+}
+
+// Mirrors occOps.js#booleanInputLocal — a transformed csg body must contribute
+// the EXACT geometry the user sees.  Under a non-uniform gizmo scale a recipe
+// re-derivation can diverge from the baked geometryData, so sew the baked mesh.
+function booleanInputLocal(item, allItems, precision) {
+  const s = item.scale || {};
+  const sx = s.x ?? 1, sy = s.y ?? 1, sz = s.z ?? 1;
+  const nonUniform = Math.abs(sx - sy) > 1e-9 || Math.abs(sy - sz) > 1e-9;
+  if (item.type === "csg" && item.geometryData && nonUniform) {
+    const g = item.geometryData;
+    if (g.positions && g.positions.length >= 9) {
+      const positions = new Float64Array(g.positions);
+      const indices = g.indices && g.indices.length ? new Uint32Array(g.indices) : null;
+      return occ.makeSolidFromMesh(positions, indices);
+    }
+  }
+  return buildItemShapeLocal(item, allItems, precision);
 }
 
 function bboxOf(positions) {
@@ -591,11 +632,7 @@ function buildItemShapeLocal(item, allItems, precision) {
           if (localId == null) return null;
           const t = buildBrushTransform(inp);
           // Scale BEFORE translate+rotate (mirrors occOps.js#performCsg)
-          let scaledId = localId;
-          if (Math.abs(t.scale - 1) > 1e-9) {
-            scaledId = occ.scaleShape(localId, t.scale);
-            occ.releaseShape(localId);
-          }
+          const scaledId = scaleLocal(localId, t.scale);
           const worldId = occ.transformShape(
             scaledId,
             t.position.x, t.position.y, t.position.z,
@@ -644,11 +681,7 @@ function buildItemShapeLocal(item, allItems, precision) {
         const localId = buildItemShapeLocal(inp, allItems, precision);
         if (localId == null) return null;
         const t = buildBrushTransform(inp);
-        let scaledId = localId;
-        if (Math.abs(t.scale - 1) > 1e-9) {
-          scaledId = occ.scaleShape(localId, t.scale);
-          occ.releaseShape(localId);
-        }
+        const scaledId = scaleLocal(localId, t.scale);
         const worldId = occ.transformShape(
           scaledId,
           t.position.x, t.position.y, t.position.z,
@@ -694,16 +727,12 @@ function performCsg({ selectedItems, allItems, operation, printPrecision }) {
   const worldAnchors = [];
 
   for (const item of selectedItems) {
-    const localId = buildItemShapeLocal(item, sources, printPrecision);
+    const localId = booleanInputLocal(item, sources, printPrecision);
     if (localId == null) continue;
     const t = buildBrushTransform(item);
 
     // Apply scale before rotate+translate (mirrors occOps.js)
-    let scaledId = localId;
-    if (Math.abs(t.scale - 1) > 1e-9) {
-      scaledId = occ.scaleShape(localId, t.scale);
-      occ.releaseShape(localId);
-    }
+    const scaledId = scaleLocal(localId, t.scale);
     const worldId = occ.transformShape(
       scaledId,
       t.position.x, t.position.y, t.position.z,
@@ -1178,14 +1207,14 @@ function buildExportShapes(items) {
     if (localId == null) continue;
 
     const t = buildBrushTransform(item);
-    const finalScale = (t.scale != null ? t.scale : 1) * MM_PER_UNIT;
 
-    // Apply item scale * MM_PER_UNIT, then world rotation + translation.
-    let scaledId = localId;
-    if (Math.abs(finalScale - 1) > 1e-9) {
-      scaledId = occ.scaleShape(localId, finalScale);
-      occ.releaseShape(localId);
-    }
+    // Per-axis scale, then the mm unit conversion folded onto every axis, then
+    // world rotation + translation.
+    const scaledId = scaleLocal(localId, {
+      x: t.scale.x * MM_PER_UNIT,
+      y: t.scale.y * MM_PER_UNIT,
+      z: t.scale.z * MM_PER_UNIT,
+    });
 
     const worldId = occ.transformShape(
       scaledId,
@@ -1393,11 +1422,7 @@ function splitItem({ target, plane, allItems, printPrecision }) {
   const localId = buildItemShapeLocal(target, allItems, printPrecision);
   if (localId == null) throw new Error("Couldn't build the object to split.");
   const t = buildBrushTransform(target);
-  let scaledId = localId;
-  if (Math.abs(t.scale - 1) > 1e-9) {
-    scaledId = occ.scaleShape(localId, t.scale);
-    occ.releaseShape(localId);
-  }
+  const scaledId = scaleLocal(localId, t.scale);
   const solidId = occ.transformShape(
     scaledId, t.position.x, t.position.y, t.position.z,
     t.rotation.x || 0, t.rotation.y || 0, t.rotation.z || 0,
@@ -1456,11 +1481,7 @@ function buildWorldSolid(item, allItems, precision) {
   const localId = buildItemShapeLocal(item, allItems, precision);
   if (localId == null) return null;
   const t = buildBrushTransform(item);
-  let id = localId;
-  if (Math.abs(t.scale - 1) > 1e-9) {
-    id = occ.scaleShape(localId, t.scale);
-    occ.releaseShape(localId);
-  }
+  const id = scaleLocal(localId, t.scale);
   const w = occ.transformShape(
     id, t.position.x, t.position.y, t.position.z,
     t.rotation.x || 0, t.rotation.y || 0, t.rotation.z || 0,

@@ -58,14 +58,15 @@ export const barBtn = (accent, disabled) => ({
 // A small inline pick/base button; active = currently the live pick target.
 // A faint translucent fill is invisible on the light theme, so the active state
 // uses a SOLID accent with contrasting text — clearly readable in both themes.
-export const pickBtn = (active) => ({
+export const pickBtn = (active, disabled) => ({
   fontSize: 11,
   padding: "3px 8px",
   borderRadius: 3,
   border: `1px solid ${active ? "var(--accent, #4488ff)" : "var(--border-color)"}`,
   background: active ? "var(--accent, #4488ff)" : "var(--bg-tertiary)",
   color: active ? "#fff" : "var(--text-primary)",
-  cursor: "pointer",
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.5 : 1,
 });
 
 // A toggle button (emboss/deboss, mirror, projection, draft flip, …).  Shared so

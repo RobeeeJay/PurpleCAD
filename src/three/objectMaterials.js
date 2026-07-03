@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   DEFAULT_MESH_COLOR,
+  EMISSIVE_CUT,
   EMISSIVE_HOVERED,
   EMISSIVE_MULTI_SELECTED,
   EMISSIVE_SELECTED,
@@ -474,14 +475,25 @@ export function applyMaterialToMesh(mesh, item, materialProps) {
   mat.needsUpdate = true;
 }
 
-export function updateEmissive(objectsRef, selectedId, selectedIds, hoveredId) {
+export function updateEmissive(
+  objectsRef,
+  selectedId,
+  selectedIds,
+  hoveredId,
+  uniformSelect = false,
+  cutIds = [],
+) {
   Object.entries(objectsRef.current).forEach(([itemId, mesh]) => {
     const id = parseInt(itemId);
-    const hex =
-      id === selectedId
+    // Boolean Cut tools tint red (checked first: a cutter can also be selectedId).
+    const hex = cutIds.includes(id)
+      ? EMISSIVE_CUT
+      : id === selectedId
         ? EMISSIVE_SELECTED
         : selectedIds.includes(id)
-          ? EMISSIVE_MULTI_SELECTED
+          ? uniformSelect
+            ? EMISSIVE_SELECTED
+            : EMISSIVE_MULTI_SELECTED
           : id === hoveredId
             ? EMISSIVE_HOVERED
             : NO_EMISSIVE;
