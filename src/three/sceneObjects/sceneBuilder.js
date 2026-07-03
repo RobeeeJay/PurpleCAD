@@ -312,7 +312,9 @@ export function buildSceneObjects(
         : createMaterial(item, color, materialProps);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = item.type !== "sketch" && item.type !== "plane";
-    mesh.receiveShadow = item.type !== "sketch" && item.type !== "plane";
+    // Shadows only land on the ground plane (its ShadowMaterial receiver) —
+    // objects cast but never receive, so they aren't self-/inter-shadowed.
+    mesh.receiveShadow = false;
     mesh.userData.itemId = item.id;
     if (["sphere", "cylinder", "torus", "cone"].includes(item.type)) {
       mesh.userData.hullGeometry = geometry;

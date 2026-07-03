@@ -1,11 +1,14 @@
 import React from "react";
 import { useStore } from "../store";
 import { effectiveSelectionTypes } from "../store/selectionMode.js";
+import VisibilityToggles, { useShiftHeld } from "./VisibilityToggles";
 
 // The selection widget: four toggle icons at the top-left of the 3D view (clear
 // of the Objects/Timeline panel) choosing what a click selects — whole Object,
 // or Face / Edge / Point.  Object mode greys the sub-types; a running tool locks
 // the set (e.g. extrude → face only).  Hover priority is point > edge > face.
+// Holding Shift swaps the widget for the Show-Constraints / Show-Dimensions
+// visibility toggles.
 
 const ObjectIcon = () => (
   <svg viewBox="0 0 24 24" width="18" height="18">
@@ -83,7 +86,6 @@ const PointIcon = () => (
     />
   </svg>
 );
-
 const SelectionWidget = () => {
   const sketchMode = useStore((s) => {
     const it = s.items.find((i) => i.id === s.selectedId);
@@ -115,9 +117,13 @@ const SelectionWidget = () => {
   const toggleSelEdge = useStore((s) => s.toggleSelEdge);
   const toggleSelPoint = useStore((s) => s.toggleSelPoint);
   const soloSelType = useStore((s) => s.soloSelType);
+  const shiftHeld = useShiftHeld();
 
-  // Hidden in sketch mode — it only governs 3D-view selection.
+  // Hidden in sketch mode — it only governs 3D-view selection (the sketch
+  // widget shows there instead).
   if (sketchMode) return null;
+  // While Shift is held, swap for the constraint/dimension visibility toggles.
+  if (shiftHeld) return <VisibilityToggles className="selection-widget" />;
 
   const eff = effectiveSelectionTypes(state);
   const locked = eff.overridden; // a tool controls the set

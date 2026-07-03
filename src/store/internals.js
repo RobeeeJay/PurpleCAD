@@ -299,6 +299,7 @@ export const SNAP_DEFAULTS = {
   previewPrecisionMm: 0.1,
   printPrecisionMm: 0.01,
   alwaysExtrudeSingleObject: true,
+  axisVisible: false,
 };
 
 export const loadSnapSettings = () => {
@@ -319,6 +320,8 @@ export const loadSnapSettings = () => {
         parsed.printPrecisionMm > 0 ? parsed.printPrecisionMm : 0.01,
       // Default on (combine) — only an explicit false turns it off.
       alwaysExtrudeSingleObject: parsed.alwaysExtrudeSingleObject !== false,
+      // Combined-axis indicator defaults off — only an explicit true shows it.
+      axisVisible: parsed.axisVisible === true,
     };
   } catch {
     return { ...SNAP_DEFAULTS };
@@ -338,6 +341,7 @@ export const saveSnapSettings = (snap) => {
         previewPrecisionMm: snap.previewPrecisionMm,
         printPrecisionMm: snap.printPrecisionMm,
         alwaysExtrudeSingleObject: snap.alwaysExtrudeSingleObject,
+        axisVisible: snap.axisVisible,
       }),
     );
   } catch (e) {

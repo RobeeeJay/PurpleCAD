@@ -19,7 +19,9 @@ export const uiInitial = {
   renderMode: "shaded",
   projectionMode: "perspective",
   widgetVisible: true,
-  axisVisible: true,
+  // Combined-axis indicator: off by default, persisted via snap settings
+  // (loadSnapSettings below overrides this with the saved value).
+  axisVisible: false,
   constraintsVisible: true,
   dimensionsVisible: true,
   cameraResetTrigger: 0,
@@ -903,7 +905,11 @@ export const createUiSlice = (set) => ({
     set((state) => ({ widgetVisible: !state.widgetVisible })),
 
   toggleAxisVisibility: () =>
-    set((state) => ({ axisVisible: !state.axisVisible })),
+    set((state) => {
+      const axisVisible = !state.axisVisible;
+      saveSnapSettings({ ...state, axisVisible });
+      return { axisVisible };
+    }),
 
   toggleHideHiddenItems: () =>
     set((state) => ({ hideHiddenItems: !state.hideHiddenItems })),

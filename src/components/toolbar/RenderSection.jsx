@@ -109,70 +109,8 @@ const RenderSection = () => {
         </svg>
       </button>
       <button
-        className={`toolbar-btn ${rasterMode("shaded") ? "active" : ""}`}
-        title="Shaded (2)"
-        onClick={() => setRenderMode("shaded")}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <polygon
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.55)"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="3,8 17,8 17,21 3,21"
-          />
-          <polygon
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.25)"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="3,8 7,4 21,4 17,8"
-          />
-          <polygon
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.38)"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="17,8 21,4 21,17 17,21"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="7"
-            y1="4"
-            x2="7"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="21"
-            y1="4"
-            x2="7"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="7"
-            y1="17"
-            x2="17"
-            y2="17"
-          />
-        </svg>
-      </button>
-      <button
         className={`toolbar-btn ${rasterMode("transparent") ? "active" : ""}`}
-        title="Transparent (50%) (3)"
+        title="Transparent (50%) (2)"
         onClick={() => setRenderMode("transparent")}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
@@ -281,6 +219,68 @@ const RenderSection = () => {
             y1="4"
             x2="21"
             y2="4"
+          />
+        </svg>
+      </button>
+      <button
+        className={`toolbar-btn ${rasterMode("shaded") ? "active" : ""}`}
+        title="Shaded (3)"
+        onClick={() => setRenderMode("shaded")}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.55)"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,8 17,8 17,21 3,21"
+          />
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.25)"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="3,8 7,4 21,4 17,8"
+          />
+          <polygon
+            stroke="#6C3FD4"
+            fill="rgba(108,63,212,0.38)"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+            points="17,8 21,4 21,17 17,21"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+            x1="7"
+            y1="4"
+            x2="7"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="21"
+            y1="4"
+            x2="7"
+            y2="17"
+          />
+          <line
+            stroke="#D4A33F"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="2 1.5"
+            x1="7"
+            y1="17"
+            x2="17"
+            y2="17"
           />
         </svg>
       </button>
