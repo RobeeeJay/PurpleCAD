@@ -1,6 +1,7 @@
 import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import { enumerateSystemFonts } from "../../three/sketchText.js";
 
 const SKETCH_TOOLS = [
   {
@@ -309,9 +310,14 @@ const SketchDrawSection = () => {
           key={tool.id}
           className={`toolbar-btn ${activeSketchTool === tool.id ? "active" : ""}`}
           title={tool.label}
-          onClick={() =>
-            setActiveSketchTool(activeSketchTool === tool.id ? null : tool.id)
-          }
+          onClick={() => {
+            // Kick off system-font enumeration on the text tool's click — a real
+            // user gesture, so the Local Font Access permission prompt can fire
+            // and the (slow) first query is likely done before the dialog opens.
+            if (tool.id === "text" && activeSketchTool !== "text")
+              enumerateSystemFonts();
+            setActiveSketchTool(activeSketchTool === tool.id ? null : tool.id);
+          }}
         >
           {tool.icon}
         </button>

@@ -32,25 +32,45 @@ const FONT_BY_ID = Object.fromEntries(TEXT_FONTS.map((f) => [f.id, f.font]));
 // We enumerate names up front and parse a font's outlines (TTF/OTF → typeface)
 // only when it's actually selected. System font ids are "sys:<Family>".
 const SYS_PREFIX = "sys:";
-let systemFontData = null; // Map<family, FontData> for lazy blob loading
+let systemFontData = null; // Map<family, FontData>, only cached once non-empty
+let systemFontPromise = null; // in-flight queryLocalFonts(), shared by callers
 const loadedSystemFonts = new Map(); // id → parsed Font
 
 // List installed font families (after the bundled ones). Returns [] when the
 // API or permission is unavailable, so the bundled fonts always work.
+//
+// queryLocalFonts() is permission-gated and, on its first call, slow — the
+// original code cached whatever the FIRST call produced, so a not-yet-granted
+// permission (or an empty/failed result) poisoned the cache and the dialog was
+// stuck on just the four bundled fonts.  Instead: share one in-flight query,
+// and only cache a NON-empty result — an empty/failed attempt clears the promise
+// so the next open (once permission is granted / the gesture lands) retries.
 export async function enumerateSystemFonts() {
   if (typeof window === "undefined" || !window.queryLocalFonts) return [];
   if (!systemFontData) {
+    if (!systemFontPromise) {
+      systemFontPromise = (async () => {
+        const fonts = await window.queryLocalFonts();
+        const map = new Map();
+        for (const f of fonts) {
+          // Keep one representative file per family, preferring its Regular cut.
+          const have = map.get(f.family);
+          if (!have || /regular|book/i.test(f.style || ""))
+            map.set(f.family, f);
+        }
+        return map;
+      })();
+    }
     try {
-      const fonts = await window.queryLocalFonts();
-      systemFontData = new Map();
-      for (const f of fonts) {
-        // Keep one representative file per family, preferring its Regular cut.
-        const have = systemFontData.get(f.family);
-        if (!have || /regular|book/i.test(f.style || ""))
-          systemFontData.set(f.family, f);
+      const map = await systemFontPromise;
+      if (map.size) systemFontData = map;
+      else {
+        systemFontPromise = null; // empty (permission pending) — stay retryable
+        return [];
       }
     } catch {
-      systemFontData = new Map();
+      systemFontPromise = null; // failed — let the next open try again
+      return [];
     }
   }
   return [...systemFontData.keys()]
