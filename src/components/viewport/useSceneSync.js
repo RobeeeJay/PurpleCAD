@@ -785,7 +785,7 @@ export function useSceneSync({
     // Seed the plane for the live camera so the cut is correct on this frame;
     // the animate loop keeps it tracking the camera thereafter.
     if (crossSectionView && cameraRef.current)
-      updateCrossSectionPlane(cameraRef.current, targetRef.current);
+      updateCrossSectionPlane(cameraRef.current.quaternion, targetRef.current);
     const planes = crossSectionView ? [CROSS_SECTION_PLANE] : null;
     Object.values(objectsRef.current).forEach((mesh) => {
       // The sketch plane square is a reference surface, not solid — never clip

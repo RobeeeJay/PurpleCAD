@@ -12,6 +12,7 @@ import {
   CROSS_SECTION_PLANE,
   updateCrossSectionPlane,
   crossSectionViewPlane,
+  orientationFromAngles,
 } from "../crossSection.js";
 import { updateCaps } from "../crossSectionCaps.js";
 
@@ -29,6 +30,7 @@ export function createAnimateLoop({
   cameraRef,
   targetRef,
   cameraAnimRef,
+  cameraControlsRef,
   sketchModeRef,
   sketchGridGroupRef,
   sketchShapesGroupRef,
@@ -44,6 +46,10 @@ export function createAnimateLoop({
   setRotationState,
 }) {
   let animId;
+  // Frozen camera pose while cross-section is active (orbit/pan then move the
+  // cut plane instead of the view).  Re-captured after any camera animation.
+  let frozenPose = null;
+  let prevAnimActive = false;
   const animate = () => {
     animId = requestAnimationFrame(animate);
 
@@ -274,10 +280,33 @@ export function createAnimateLoop({
     // Keep the cross-section cut locked to the camera as it orbits / pans,
     // re-pose the hatched caps, and feed the view-space plane to the analytic
     // primitive shaders (they clip their computed surface point themselves).
+    const animActive = !!cameraAnimRef.current;
     if (useStore.getState().crossSectionView) {
-      updateCrossSectionPlane(cameraRef.current, targetRef.current);
+      const cam = cameraRef.current;
+      const cc = cameraControlsRef?.current;
+      // Freeze the camera: snapshot the pose when cross-section starts (or just
+      // after a camera animation ends), then hold it there every frame so orbit
+      // /pan gestures move the CUT rather than the view.
+      if (!frozenPose || (prevAnimActive && !animActive)) {
+        frozenPose = {
+          pos: cam.position.clone(),
+          quat: cam.quaternion.clone(),
+          rotX: cc ? cc.targetRotationX : 0,
+          rotY: cc ? cc.targetRotationY : 0,
+        };
+      }
+      if (!animActive && frozenPose) {
+        cam.position.copy(frozenPose.pos);
+        cam.quaternion.copy(frozenPose.quat);
+        cam.updateMatrixWorld(true);
+      }
+      // The cut spins with the live orbit angles even though the camera is held.
+      const orient = cc
+        ? orientationFromAngles(cc.targetRotationX, cc.targetRotationY)
+        : cam.quaternion;
+      updateCrossSectionPlane(orient, targetRef.current);
       updateCaps(CROSS_SECTION_PLANE, targetRef.current);
-      const vp = crossSectionViewPlane(cameraRef.current);
+      const vp = crossSectionViewPlane(cam);
       Object.values(objectsRef.current).forEach((mesh) => {
         const u = mesh.userData.shaderMat?.uniforms;
         if (u?.uClipEnabled) {
@@ -285,7 +314,16 @@ export function createAnimateLoop({
           u.uClipConstant.value = vp.constant;
         }
       });
+    } else if (frozenPose) {
+      // Leaving cross-section: put the orbit angles back where the frozen camera
+      // is, so exiting doesn't snap the view to wherever the cut was dragged to.
+      if (cameraControlsRef?.current && frozenPose.rotX != null) {
+        cameraControlsRef.current.targetRotationX = frozenPose.rotX;
+        cameraControlsRef.current.targetRotationY = frozenPose.rotY;
+      }
+      frozenPose = null;
     }
+    prevAnimActive = animActive;
     // While the path-traced render is actually running it owns the canvas (its
     // own RAF loop accumulates samples) — skip the raster render so we don't
     // fight it.  Gated on pathTracerActive (not the toggle) so a failed start

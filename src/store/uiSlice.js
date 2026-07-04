@@ -269,7 +269,55 @@ export const uiInitial = {
   ...loadSnapSettings(),
 };
 
+// Every in-progress 3D tool / modal state, reset to its idle value.  Starting
+// any tool spreads this first (so its own state, set afterwards, wins), which
+// cancels whatever operation was in progress.  The tools' React overlays /
+// dialogs watch these fields and tear down their previews when they go idle.
+// (Sketch-mode drawing tools are excluded — they own their own switching.)
+export const TOOL_RESET_PATCH = {
+  sketchPlacementMode: false,
+  extrudeSelectMode: null,
+  extrudeRetargetId: null,
+  extrudeRetargetGroup: null,
+  extrudeEditTarget: null,
+  extrudeDepthInput: null,
+  cutExtrudeInProgress: false,
+  chamferSelectMode: null,
+  chamferRetargetTarget: null,
+  chamferEditTarget: null,
+  pushPullSelectMode: null,
+  pushPullRetargetTarget: null,
+  pushPullEditTarget: null,
+  shellTarget: null,
+  holeTool: null,
+  embossTool: null,
+  draftTool: null,
+  measureTool: null,
+  sweepSelectMode: null,
+  sweepRetargetTarget: null,
+  planeTool: null,
+  planePickActive: false,
+  pattern3dTool: null,
+  circularAxisPick: false,
+  mirror3dTool: null,
+  booleanTool: null,
+  booleanCutIds: [],
+  additiveObjectPick: false,
+  projectTool: null,
+  splitTool: null,
+  splitPick: null,
+  originToolActive: false,
+  originDialogItemId: null,
+  originVertexPick: null,
+  pointToPointTool: null,
+  selectionOverride: null,
+  toolError: null,
+};
+
 export const createUiSlice = (set) => ({
+  // Cancel every in-progress tool operation (used when a new tool is selected).
+  cancelActiveTools: () => set({ ...TOOL_RESET_PATCH }),
+
   selectItem: (id) =>
     set({ selectedId: id, selectedIds: id != null ? [id] : [] }),
 
@@ -301,17 +349,27 @@ export const createUiSlice = (set) => ({
   // Setting either face-select mode clears the other — only one pick/confirm
   // overlay can be active at a time.
   setChamferSelectMode: (mode) =>
-    set({
-      chamferSelectMode: mode,
-      pushPullSelectMode: null,
-      // Chamfer/fillet pick edges and faces; nothing else.
-      selectionOverride: mode ? ["edge", "face"] : null,
+    set((s) => {
+      const own = {
+        chamferSelectMode: mode,
+        pushPullSelectMode: null,
+        // Chamfer/fillet pick edges and faces; nothing else.
+        selectionOverride: mode ? ["edge", "face"] : null,
+      };
+      return mode && !s.chamferSelectMode
+        ? { ...TOOL_RESET_PATCH, ...own }
+        : own;
     }),
   setPushPullSelectMode: (mode) =>
-    set({
-      pushPullSelectMode: mode,
-      chamferSelectMode: null,
-      selectionOverride: mode ? ["face"] : null,
+    set((s) => {
+      const own = {
+        pushPullSelectMode: mode,
+        chamferSelectMode: null,
+        selectionOverride: mode ? ["face"] : null,
+      };
+      return mode && !s.pushPullSelectMode
+        ? { ...TOOL_RESET_PATCH, ...own }
+        : own;
     }),
 
   // Selection-widget toggles.  Turning a sub-type on leaves object mode; turning
@@ -372,13 +430,21 @@ export const createUiSlice = (set) => ({
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
-  setShellTarget: (target) => set({ shellTarget: target }),
+  setShellTarget: (target) =>
+    set((s) =>
+      target && !s.shellTarget
+        ? { ...TOOL_RESET_PATCH, shellTarget: target }
+        : { shellTarget: target },
+    ),
   setOriginToolActive: (v) =>
-    set({
-      originToolActive: !!v,
-      // Origin works on whole objects → lock the selection widget to Object.
-      selectionOverride: v ? ["object"] : null,
-      ...(v ? null : { originDialogItemId: null, originVertexPick: null }),
+    set((s) => {
+      const own = {
+        originToolActive: !!v,
+        // Origin works on whole objects → lock the selection widget to Object.
+        selectionOverride: v ? ["object"] : null,
+        ...(v ? null : { originDialogItemId: null, originVertexPick: null }),
+      };
+      return v && !s.originToolActive ? { ...TOOL_RESET_PATCH, ...own } : own;
     }),
   openOriginDialog: (itemId) =>
     set({ originDialogItemId: itemId, originVertexPick: null }),
@@ -387,6 +453,7 @@ export const createUiSlice = (set) => ({
 
   startHoleTool: () =>
     set({
+      ...TOOL_RESET_PATCH,
       holeTool: {
         phase: "face",
         itemId: null,
@@ -461,7 +528,7 @@ export const createUiSlice = (set) => ({
   // ── Emboss tool ─────────────────────────────────────────────────────────
   startEmbossTool: () =>
     set({
-      toolError: null,
+      ...TOOL_RESET_PATCH,
       embossTool: {
         // Open straight into geometry picking — the first thing the user does.
         picking: "geometry",
@@ -577,7 +644,8 @@ export const createUiSlice = (set) => ({
   closeBoxDialog: () => set({ boxDialog: null }),
 
   // ── Measure tool ──────────────────────────────────────────────────────────
-  startMeasureTool: () => set({ measureTool: { picks: [] } }),
+  startMeasureTool: () =>
+    set({ ...TOOL_RESET_PATCH, measureTool: { picks: [] } }),
   cancelMeasureTool: () => set({ measureTool: null }),
   // Add a clicked entity (3D); keep at most the last two so a third click starts
   // a fresh distance from the previous pick.
@@ -593,7 +661,7 @@ export const createUiSlice = (set) => ({
 
   startDraftTool: () =>
     set({
-      toolError: null,
+      ...TOOL_RESET_PATCH,
       draftTool: {
         picking: "main",
         itemId: null,
@@ -674,7 +742,10 @@ export const createUiSlice = (set) => ({
   // viewport click contributes to the plane being defined.
   setPlanePickActive: (v) => set({ planePickActive: v || false }),
   startPlaneTool: (base) =>
-    set({ planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 } }),
+    set({
+      ...TOOL_RESET_PATCH,
+      planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 },
+    }),
   updatePlaneTool: (partial) =>
     set((state) =>
       state.planeTool ? { planeTool: { ...state.planeTool, ...partial } } : {},
@@ -683,7 +754,11 @@ export const createUiSlice = (set) => ({
   // Mirror / circular / rectangular patterns all act on whole objects, so they
   // lock the selection widget to Object mode while active.
   startPattern3d: (v) =>
-    set({ pattern3dTool: v, selectionOverride: ["object"] }),
+    set({
+      ...TOOL_RESET_PATCH,
+      pattern3dTool: v,
+      selectionOverride: ["object"],
+    }),
   updatePattern3d: (partial) =>
     set((state) =>
       state.pattern3dTool
@@ -698,13 +773,18 @@ export const createUiSlice = (set) => ({
     }),
   setCircularAxisPick: (v) => set({ circularAxisPick: !!v }),
   startMirror3d: (seed) =>
-    set({ mirror3dTool: seed || {}, selectionOverride: ["object"] }),
+    set({
+      ...TOOL_RESET_PATCH,
+      mirror3dTool: seed || {},
+      selectionOverride: ["object"],
+    }),
   cancelMirror3d: () => set({ mirror3dTool: null, selectionOverride: null }),
 
   // Boolean tools act on whole objects, so they lock the selection widget to
   // Object mode while the dialog is open.
   startBooleanTool: (operation) =>
     set({
+      ...TOOL_RESET_PATCH,
       booleanTool: { operation },
       selectionOverride: ["object"],
       additiveObjectPick: true,
@@ -719,7 +799,8 @@ export const createUiSlice = (set) => ({
   setAdditiveObjectPick: (v) => set({ additiveObjectPick: !!v }),
   setBooleanCutIds: (ids) => set({ booleanCutIds: [...ids] }),
 
-  startProjectTool: () => set({ projectTool: { shapes: [] } }),
+  startProjectTool: () =>
+    set({ ...TOOL_RESET_PATCH, projectTool: { shapes: [] } }),
   addProjectShapes: (shapes) =>
     set((state) =>
       state.projectTool
@@ -733,6 +814,7 @@ export const createUiSlice = (set) => ({
   // clearItemSolo ends solo (the caller restores the view from soloView first).
   startSplit3d: (seed) =>
     set({
+      ...TOOL_RESET_PATCH,
       splitTool: {
         objectId: null,
         objectName: null,
@@ -751,7 +833,10 @@ export const createUiSlice = (set) => ({
 
   // ── Point-to-Point move ──────────────────────────────────────────────────
   startPointToPointTool: () =>
-    set({ pointToPointTool: { picking: "A", a: null, b: null } }),
+    set({
+      ...TOOL_RESET_PATCH,
+      pointToPointTool: { picking: "A", a: null, b: null },
+    }),
   cancelPointToPointTool: () => set({ pointToPointTool: null }),
   // Arm one of the two picks (toggles off if already armed).
   setPointToPointPicking: (which) =>
@@ -796,6 +881,7 @@ export const createUiSlice = (set) => ({
     }),
   startSweepTool: (kind) =>
     set({
+      ...TOOL_RESET_PATCH,
       sweepSelectMode: {
         kind,
         profile: null,
@@ -803,9 +889,6 @@ export const createUiSlice = (set) => ({
         secondProfile: null,
         params: { rotations: 1, offsetPerRotation: 0, prism: false, sides: 6 },
       },
-      chamferSelectMode: null,
-      pushPullSelectMode: null,
-      selectionOverride: null,
     }),
   cancelSweepTool: () =>
     set({ sweepSelectMode: null, sweepRetargetTarget: null }),
@@ -878,9 +961,23 @@ export const createUiSlice = (set) => ({
       curveResolution: state.curveResolution === "print" ? "preview" : "print",
     })),
 
-  setSketchPlacementMode: (active) => set({ sketchPlacementMode: active }),
+  setSketchPlacementMode: (active) =>
+    set((s) =>
+      active && !s.sketchPlacementMode
+        ? { ...TOOL_RESET_PATCH, sketchPlacementMode: true }
+        : { sketchPlacementMode: active },
+    ),
   setExtrudeSelectMode: (mode) =>
-    set({ extrudeSelectMode: mode, selectionOverride: mode ? ["face"] : null }),
+    set((s) => {
+      const own = {
+        extrudeSelectMode: mode,
+        selectionOverride: mode ? ["face"] : null,
+      };
+      // Only cancel other tools when ENTERING extrude, not on phase changes.
+      return mode && !s.extrudeSelectMode
+        ? { ...TOOL_RESET_PATCH, ...own }
+        : own;
+    }),
   setCutExtrudeInProgress: (v) => set({ cutExtrudeInProgress: !!v }),
   setExtrudeRetargetId: (id) => set({ extrudeRetargetId: id }),
   setExtrudeRetargetGroup: (ids) => set({ extrudeRetargetGroup: ids }),

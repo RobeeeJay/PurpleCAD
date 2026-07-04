@@ -31,15 +31,32 @@ const _localNormal = new THREE.Vector3(-1, 0, 0)
 
 const _n = new THREE.Vector3();
 
-// Re-pose the plane to the live camera: its normal rotates with the camera and
-// it passes through the orbit `target`.  Anchoring to the target (not the world
-// origin) makes the cut follow panning — pan moves camera + target together —
-// as well as rotation, so the section stays put on screen.  Call once per frame
-// while the cross-section view is active.
-export function updateCrossSectionPlane(camera, target) {
-  _n.copy(_localNormal).applyQuaternion(camera.quaternion).normalize();
+// Re-pose the plane from an ORIENTATION quaternion (the camera's, or — while the
+// camera is frozen in cross-section mode — one built from the live orbit angles
+// so the cut rotates while the view stays put).  It passes through the orbit
+// `target`, so panning translates the cut.  Call once per frame while active.
+export function updateCrossSectionPlane(orientQuat, target) {
+  _n.copy(_localNormal).applyQuaternion(orientQuat).normalize();
   CROSS_SECTION_PLANE.normal.copy(_n);
   CROSS_SECTION_PLANE.constant = target ? -_n.dot(target) : 0;
+}
+
+// Camera-orientation quaternion for a pair of orbit angles — the same pose the
+// navigation would give the camera.  Used to spin the cut plane from the orbit
+// gesture while the camera itself is held frozen.
+const _ZERO = new THREE.Vector3(0, 0, 0);
+const _UP = new THREE.Vector3(0, 1, 0);
+const _dir = new THREE.Vector3();
+const _m = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
+export function orientationFromAngles(rotX, rotY) {
+  _dir.set(
+    Math.sin(rotY) * Math.cos(rotX),
+    Math.sin(rotX),
+    Math.cos(rotY) * Math.cos(rotX),
+  );
+  _m.lookAt(_dir, _ZERO, _UP);
+  return _q.setFromRotationMatrix(_m);
 }
 
 // The plane in VIEW space (for the analytic primitive shaders, which test their

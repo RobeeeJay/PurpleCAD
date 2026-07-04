@@ -22,6 +22,7 @@ const CAP_LINE_COLOR = 0x2a2a2a;
 let capsGroup = null;
 let stencilGroup = null; // holds the per-object back/front stencil meshes
 let capMesh = null;
+let planeMesh = null; // translucent green hatched indicator of the cut plane
 let attachedScene = null;
 
 const _Z = new THREE.Vector3(0, 0, 1);
@@ -42,6 +43,19 @@ const HATCH_FRAGMENT = `
 const HATCH_VERTEX = `
   void main() {
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+// Translucent green hatched sheet drawn ON the cut plane so the section plane is
+// visible.  Screen-space diagonal hatch, like the caps, but green and see-through.
+const PLANE_FRAGMENT = `
+  void main() {
+    float spacing = 12.0;
+    float thickness = 1.5;
+    float d = mod(gl_FragCoord.x + gl_FragCoord.y, spacing);
+    float line = smoothstep(thickness, 0.0, min(d, spacing - d));
+    // Faint green fill, brighter green hatch lines.
+    gl_FragColor = vec4(0.15, 0.85, 0.35, mix(0.12, 0.5, line));
   }
 `;
 
@@ -90,6 +104,18 @@ export function ensureCaps(scene) {
   // if autoClearStencil is disabled by a render pass.
   capMesh.onAfterRender = (renderer) => renderer.clearStencil();
   capsGroup.add(capMesh);
+
+  // Translucent green indicator of the whole cut plane (drawn after the caps).
+  const planeMat = new THREE.ShaderMaterial({
+    vertexShader: HATCH_VERTEX,
+    fragmentShader: PLANE_FRAGMENT,
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,
+  });
+  planeMesh = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), planeMat);
+  planeMesh.renderOrder = 3;
+  capsGroup.add(planeMesh);
 
   scene.add(capsGroup);
   attachedScene = scene;
@@ -142,4 +168,9 @@ export function updateCaps(plane, target) {
   capMesh.position.copy(plane.coplanarPoint(_pt));
   capMesh.quaternion.setFromUnitVectors(_Z, plane.normal);
   capMesh.updateMatrix();
+  if (planeMesh) {
+    planeMesh.position.copy(capMesh.position);
+    planeMesh.quaternion.copy(capMesh.quaternion);
+    planeMesh.updateMatrix();
+  }
 }

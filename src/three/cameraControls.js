@@ -10,6 +10,7 @@ import { createEmbossPreviewHelpers } from "./cameraControls/emboss.js";
 import { createDraftPreviewHelpers } from "./cameraControls/draft.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
+import { fitPointsToView, meshFitPoints, boxCorners } from "./cameraFit.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
 import { textShapeContours, makeTextShape } from "./sketchText.js";
 import { bboxCenterOf, massCentroidOf } from "./objectOrigin.js";
@@ -1617,10 +1618,12 @@ export function attachCameraControls(ctx) {
     const cam = cameraRef.current;
     if (!cam) return null;
 
-    // Solid (non-sketch, visible) meshes + their combined world bbox.
-    const box = new THREE.Box3();
+    // Solid (non-sketch, visible) meshes + the fit-point cloud (analytic
+    // silhouette for round primitives, AABB corners otherwise) so the thumbnail
+    // frames exactly like the Reset-view button.
     let any = false;
     const solidMeshes = [];
+    const fitPts = [];
     for (const item of itemsRef.current) {
       if (item.type === "sketch" || item.visible === false) continue;
       const mesh = objectsRef.current[item.id];
@@ -1628,9 +1631,9 @@ export function attachCameraControls(ctx) {
       mesh.updateMatrixWorld(true);
       const b = new THREE.Box3().setFromObject(mesh);
       if (b.isEmpty()) continue;
-      box.union(b);
       any = true;
       solidMeshes.push(mesh);
+      meshFitPoints(item, mesh, fitPts);
     }
 
     // Hide overlays (restored after the capture).
@@ -1646,8 +1649,15 @@ export function attachCameraControls(ctx) {
       if (o.isMesh && o.material === gridMaterial) gridMesh = o;
       if (o.userData?.isShadowGround) hide(o);
       // Sketch line overlays: hide when there's a solid to show (they'd clutter
-      // an object thumbnail); kept when the project is sketch-only.
-      if (any && o.userData?.isSketchOverlay) hide(o);
+      // an object thumbnail); kept — and framed — when the project is sketch-only.
+      if (o.userData?.isSketchOverlay) {
+        if (any) hide(o);
+        else if (o.visible) {
+          o.updateWorldMatrix(true, true);
+          const b = new THREE.Box3().setFromObject(o);
+          if (!b.isEmpty()) boxCorners(b, fitPts);
+        }
+      }
     });
     hide(gridMesh);
     hide(rulerGroup);
@@ -1687,7 +1697,9 @@ export function attachCameraControls(ctx) {
       matRestore.push(rec);
     }
 
-    // Isometric fit-all pose (same maths as the Reset-view / Home button).
+    // Isometric fit-all pose — the exact same fit as the Reset-view / Home
+    // button, so a thumbnail frames identically to the default view.  The full
+    // frame (no left-panel offset) is used since the shot has no overlay.
     const saved = {
       pos: cam.position.clone(),
       quat: cam.quaternion.clone(),
@@ -1700,23 +1712,16 @@ export function attachCameraControls(ctx) {
       Math.sin(rotX),
       Math.cos(rotY) * Math.cos(rotX),
     ).normalize();
-    const center = any
-      ? box.getCenter(new THREE.Vector3())
-      : new THREE.Vector3();
-    const radius = any ? box.getSize(new THREE.Vector3()).length() / 2 || 1 : 3;
-    const pad = 1.35;
-    let distance;
-    if (cam.isOrthographicCamera) {
-      const fw = cam.right - cam.left;
-      const fh = cam.top - cam.bottom;
-      cam.zoom = Math.min(fw, fh) / (2 * radius * pad);
-      distance = radius * 4 + 5;
+    let center;
+    if (fitPts.length > 0) {
+      const fit = fitPointsToView(fitPts, dir, cam, 0.9);
+      center = fit.target;
+      cam.position.copy(fit.target).addScaledVector(dir, fit.distance);
+      if (fit.endZoom != null) cam.zoom = fit.endZoom;
     } else {
-      const vfov = (cam.fov * Math.PI) / 180;
-      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * cam.aspect);
-      distance = (radius * pad) / Math.sin(Math.min(vfov, hfov) / 2);
+      center = new THREE.Vector3();
+      cam.position.copy(center).addScaledVector(dir, 15);
     }
-    cam.position.copy(center).addScaledVector(dir, distance);
     cam.up.set(0, 1, 0);
     cam.lookAt(center);
     cam.updateProjectionMatrix();
@@ -2133,6 +2138,7 @@ export function attachCameraControls(ctx) {
     cameraRef,
     targetRef,
     cameraAnimRef,
+    cameraControlsRef,
     sketchModeRef,
     sketchGridGroupRef,
     sketchShapesGroupRef,

@@ -51,15 +51,20 @@ const ProjectsDialog = () => {
       >
         <div className="projects-header">
           <h2>Projects</h2>
-          <button className="projects-close" onClick={close} title="Close">
-            ×
-          </button>
+          <div className="projects-header-actions">
+            <button
+              className="projects-new-btn"
+              onClick={create}
+              title="Create a new project"
+            >
+              + New project
+            </button>
+            <button className="projects-close" onClick={close} title="Close">
+              ×
+            </button>
+          </div>
         </div>
         <div className="projects-grid">
-          <button className="project-card project-new" onClick={create}>
-            <div className="project-new-plus">+</div>
-            <div className="project-name">New project</div>
-          </button>
           {projects.map((p) => (
             <div
               key={p.id}
