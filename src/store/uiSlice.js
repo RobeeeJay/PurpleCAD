@@ -70,9 +70,7 @@ export const uiInitial = {
   // MM_PER_UNIT for display).
   extrudeDepthInput: null,
 
-  // Modal state for editing the depth/length of an extrude from the
-  // timeline, and chamfer/fillet parameters from the same.
-  extrudeEditTarget: null,
+  // Modal state for editing chamfer/fillet parameters from the timeline.
   chamferEditTarget: null,
 
   // Set by the Timeline's chamfer/fillet "Retarget" button:
@@ -296,7 +294,6 @@ export const TOOL_RESET_PATCH = {
   extrudeSelectMode: null,
   extrudeRetargetId: null,
   extrudeRetargetGroup: null,
-  extrudeEditTarget: null,
   extrudeDepthInput: null,
   cutExtrudeInProgress: false,
   chamferSelectMode: null,
@@ -360,7 +357,6 @@ export const createUiSlice = (set) => ({
   clearSelectedSubGeometry: () => set({ selectedSubGeometry: null }),
 
   setExtrudeDepthInput: (v) => set({ extrudeDepthInput: v }),
-  setExtrudeEditTarget: (target) => set({ extrudeEditTarget: target }),
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
   setChamferRetargetTarget: (target) => set({ chamferRetargetTarget: target }),
   // Setting either face-select mode clears the other — only one pick/confirm

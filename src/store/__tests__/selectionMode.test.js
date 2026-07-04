@@ -209,7 +209,7 @@ describe("anyToolActive", () => {
     expect(anyToolActive({ chamferSelectMode: "chamfer" })).toBe(true);
     expect(anyToolActive({ pushPullRetargetTarget: { itemId: 1 } })).toBe(true);
     expect(anyToolActive({ extrudeSelectMode: "profile" })).toBe(true);
-    expect(anyToolActive({ extrudeEditTarget: { itemId: 1 } })).toBe(true);
+    expect(anyToolActive({ extrudeRetargetId: 2 })).toBe(true);
     expect(anyToolActive({ sweepSelectMode: { kind: "revolve" } })).toBe(true);
   });
 

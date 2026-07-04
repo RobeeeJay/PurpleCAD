@@ -4,7 +4,6 @@ import Viewport from "./components/Viewport";
 import TreeView from "./components/TreeView";
 import Timeline from "./components/Timeline";
 import VariablesDialog from "./components/VariablesDialog";
-import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
 import ChamferEditDialog from "./components/ChamferEditDialog";
 import PushPullEditDialog from "./components/PushPullEditDialog";
 import RevolveEditDialog from "./components/RevolveEditDialog";
@@ -157,7 +156,6 @@ function App() {
         <Viewport />
       </div>
       <VariablesDialog />
-      <ExtrudeLengthDialog />
       <ChamferEditDialog />
       <PushPullEditDialog />
       <RevolveEditDialog />

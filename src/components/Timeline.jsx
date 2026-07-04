@@ -218,9 +218,11 @@ const getDisplayLabel = (entry, history) => {
   return label;
 };
 
-// Retarget + edit-length controls for an extrude entry.  With `groupIds` the
-// controls act on a whole multi-area group as one unit; otherwise on the single
-// `itemId`.
+// Edit control for an extrude entry.  Editing re-enters profile-select mode
+// seeded with the extrude's current profile, so the user can change the profile
+// AND the length and Confirm edits the entry in place (retargetExtrude).  With
+// `groupIds` it acts on a whole multi-area group as one unit; otherwise on the
+// single `itemId`.
 function ExtrudeActions({ itemId, groupIds }) {
   const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
   const extrudeRetargetId = useStore((s) => s.extrudeRetargetId);
@@ -228,98 +230,29 @@ function ExtrudeActions({ itemId, groupIds }) {
   const setExtrudeRetargetId = useStore((s) => s.setExtrudeRetargetId);
   const setExtrudeRetargetGroup = useStore((s) => s.setExtrudeRetargetGroup);
   const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
-  const setExtrudeEditTarget = useStore((s) => s.setExtrudeEditTarget);
   const isGroup = !!groupIds;
-  const retargetActive =
+  const editActive =
     extrudeSelectMode === "profile" &&
     (isGroup
       ? !!extrudeRetargetGroup && extrudeRetargetGroup[0] === groupIds[0]
       : !extrudeRetargetGroup && extrudeRetargetId === itemId);
   return (
-    <>
-      <button
-        className={`timeline-action-btn${retargetActive ? " active" : ""}`}
-        title="Retarget Profile — pick the face(s) or sketch region(s) to extrude from"
-        onClick={(e) => {
-          e.stopPropagation();
-          // Enter profile mode FIRST: setExtrudeSelectMode spreads
-          // TOOL_RESET_PATCH when freshly entering extrude, which nulls
-          // extrudeRetargetId/Group — so arming the retarget before it would be
-          // wiped, and confirm would build a NEW extrude instead of editing.
-          setExtrudeSelectMode("profile");
-          setExtrudeRetargetGroup(isGroup ? groupIds : null);
-          setExtrudeRetargetId(isGroup ? groupIds[0] : itemId);
-        }}
-      >
-        <svg viewBox="0 0 24 24" width="14" height="14">
-          <circle
-            cx="12"
-            cy="12"
-            r="9"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-          <circle
-            cx="12"
-            cy="12"
-            r="5.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-          <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
-          <line
-            x1="12"
-            y1="2"
-            x2="12"
-            y2="4"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-          <line
-            x1="12"
-            y1="20"
-            x2="12"
-            y2="22"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-          <line
-            x1="2"
-            y1="12"
-            x2="4"
-            y2="12"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-          <line
-            x1="20"
-            y1="12"
-            x2="22"
-            y2="12"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-        </svg>
-      </button>
-      <button
-        className="timeline-action-btn"
-        title="Edit extrusion length"
-        onClick={(e) => {
-          e.stopPropagation();
-          setExtrudeEditTarget(
-            isGroup ? { groupItemIds: groupIds } : { itemId },
-          );
-        }}
-      >
-        <EditIcon />
-      </button>
-    </>
+    <button
+      className={`timeline-action-btn${editActive ? " active" : ""}`}
+      title="Edit extrusion — change the profile and length, then Confirm"
+      onClick={(e) => {
+        e.stopPropagation();
+        // Enter profile mode FIRST: setExtrudeSelectMode spreads
+        // TOOL_RESET_PATCH when freshly entering extrude, which nulls
+        // extrudeRetargetId/Group — so arming the edit target before it would
+        // be wiped, and Confirm would build a NEW extrude instead of editing.
+        setExtrudeSelectMode("profile");
+        setExtrudeRetargetGroup(isGroup ? groupIds : null);
+        setExtrudeRetargetId(isGroup ? groupIds[0] : itemId);
+      }}
+    >
+      <EditIcon />
+    </button>
   );
 }
 

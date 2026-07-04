@@ -89,8 +89,10 @@
   height: 30px;
   padding: 0 4px;
   border-radius: 4px;
-  border: 1px solid rgba(var(--color-info-rgb), 0.3);
-  background: rgba(var(--panel-bg-rgb), 0.6);
+  border: 1px solid var(--border-color);
+  /* Pair bg-tertiary with text-primary — a theme-guaranteed contrast pairing
+     (the prior translucent panel bg left the value text unreadable). */
+  background-color: var(--bg-tertiary);
   color: var(--text-primary);
   font-size: 12px;
   text-align: right;
