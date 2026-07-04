@@ -1668,6 +1668,33 @@ describe("OCC chamfer", () => {
     expect(geo.index.count).toBeGreaterThan(baseline.index.count);
   });
 
+  it("chamfers a cylinder's curved side face via an on-surface centroid", () => {
+    // Regression: clicking a curved face (a cylinder's side) stores the
+    // clicked point's surface normal, which varies across the face and does
+    // NOT equal the single representative normal OCC reports for the whole
+    // face — so the old normal-only matcher rejected it and the chamfer was a
+    // no-op.  Now SelectSubGeoEdges matches by point-on-face when a centroid
+    // is present, so an on-surface centroid selects the curved face regardless
+    // of the stored normal.  The `nx/ny/nz` below deliberately match NO face
+    // normal; pre-fix this returned the shape unchanged.
+    const cyl = makeCylinder(); // r=1, h=2, axis +Y → side surface at radius 1
+    const baseline = tessellate(cyl, null);
+    const chamfered = chamferShapeBy(
+      cyl,
+      {
+        edges: [],
+        faces: [{ nx: 0.6, ny: 0.6, nz: 0.529, cx: 1, cy: 0, cz: 0 }],
+      },
+      0.05,
+    );
+    expect(chamfered).not.toBe(cyl); // the curved side face was matched
+    const geo = tessellate(chamfered, null);
+    expectSolidGeometry(geo);
+    // Chamfering the side face rounds/bevels both its circular rims, adding a
+    // slanted strip at each — more triangles than the plain cylinder.
+    expect(geo.index.count).toBeGreaterThan(baseline.index.count);
+  });
+
   it("fillets the top cap of a cylinder via face-normal selection", () => {
     const cyl = makeCylinder();
     const filleted = filletShapeBy(

@@ -463,25 +463,32 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
     TopExp_Explorer fexp(shape, TopAbs_FACE);
     for (; fexp.More(); fexp.Next()) {
       TopoDS_Face face = TopoDS::Face(fexp.Current());
-      auto n = ComputeFaceNormal(face);
-      if (!n.valid) continue;
-      if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
-          std::abs(req.nz - n.z) >= eps)
-        continue;
-      if (!req.hasCentroid) {
+      if (req.hasCentroid) {
+        // Point-on-face match: the clicked sample point lies on exactly one
+        // face, so nearest-distance identifies it.  This works for CURVED faces
+        // too (whose representative normal differs from the clicked-point
+        // normal), letting a single click select the whole cylindrical /
+        // arc-swept face — the normal filter below would wrongly reject them.
+        gp_Pnt pnt(req.cx, req.cy, req.cz);
+        BRepBuilderAPI_MakeVertex vMk(pnt);
+        BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
+                                        Extrema_ExtAlgo_Grad);
+        dist.Perform();
+        double d =
+            (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
+        if (!found || d < bestDist) {
+          best = face;
+          bestDist = d;
+          found = true;
+        }
+      } else {
+        // Legacy spec (no sample point): match every same-normal face.
+        auto n = ComputeFaceNormal(face);
+        if (!n.valid) continue;
+        if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
+            std::abs(req.nz - n.z) >= eps)
+          continue;
         allNormalMatches.push_back(face);
-        continue;
-      }
-      gp_Pnt pnt(req.cx, req.cy, req.cz);
-      BRepBuilderAPI_MakeVertex vMk(pnt);
-      BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
-                                      Extrema_ExtAlgo_Grad);
-      dist.Perform();
-      double d = (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
-      if (!found || d < bestDist) {
-        best = face;
-        bestDist = d;
-        found = true;
       }
     }
     std::vector<TopoDS_Face> chosen;
@@ -525,6 +532,11 @@ static std::vector<TopoDS_Face> SelectSubGeoFaces(const TopoDS_Shape& shape,
         allNormalMatches.push_back(face);
         continue;
       }
+      // Push/pull stores a face centroid that may sit OFF the face plane (the
+      // profile centroid, not an on-surface hit point), so match by normal and
+      // use the centroid only as a nearest tie-break among same-normal faces.
+      // (SelectSubGeoEdges, used by chamfer/fillet, gets an on-surface hit
+      // point and can match curved faces by point-on-face instead.)
       gp_Pnt pnt(req.cx, req.cy, req.cz);
       BRepBuilderAPI_MakeVertex vMk(pnt);
       BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
