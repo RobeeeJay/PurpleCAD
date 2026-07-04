@@ -92,7 +92,7 @@ const DocumentSection = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "scene.cad.json";
+    a.download = "scene.pcad";
     a.click();
     URL.revokeObjectURL(url);
     setSaveMenuOpen(false);
@@ -168,8 +168,8 @@ const DocumentSection = () => {
     importInputRef.current.click();
   };
 
-  // Load a .cad.json document as a NEW project (existing projects untouched),
-  // then load its data into that fresh project.
+  // Load a .pcad document (JSON; legacy .cad.json still accepted) as a NEW
+  // project (existing projects untouched), then load its data into it.
   const handleLoadClick = () => {
     setImportMenuOpen(false);
     fileInputRef.current.value = "";
@@ -178,7 +178,7 @@ const DocumentSection = () => {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const baseName = file.name.replace(/\.(cad\.)?json$/i, "");
+    const baseName = file.name.replace(/\.(pcad|cad\.json|json)$/i, "");
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
@@ -352,7 +352,7 @@ const DocumentSection = () => {
             style={{ top: saveMenuPos.top, left: saveMenuPos.left }}
           >
             <button className="toolbar-dropdown-item" onClick={handleSave}>
-              Save document (.cad.json)
+              Save document (.pcad)
             </button>
             <button className="toolbar-dropdown-item" onClick={handleExportSTL}>
               Export as STL
@@ -413,7 +413,7 @@ const DocumentSection = () => {
             style={{ top: importMenuPos.top, left: importMenuPos.left }}
           >
             <button className="toolbar-dropdown-item" onClick={handleLoadClick}>
-              Load document (.cad.json)
+              Load document (.pcad)
             </button>
             <button
               className="toolbar-dropdown-item"
@@ -482,7 +482,7 @@ const DocumentSection = () => {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".json,.cad.json"
+        accept=".pcad,.cad.json,.json"
         style={{ display: "none" }}
         onChange={handleFileChange}
       />

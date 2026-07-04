@@ -22,9 +22,13 @@ if (process.env.ELECTRON_START_URL) {
 }
 
 const electron = require("electron");
-const { app, BrowserWindow, ipcMain, protocol, session } = electron;
+const { app, BrowserWindow, ipcMain, protocol, session, Menu } = electron;
 const fsMod = require("fs");
 const urlMod = require("url");
+
+// Name the app so the macOS menu bar, About item, Hide/Quit labels, etc. all
+// read "PurpleCAD" rather than "Electron" (set before `ready`).
+app.setName("PurpleCAD");
 
 // Registering as a standard scheme up front (before app `ready`) makes
 // `app://`-served pages behave like HTTPS for fetch + worker semantics.
@@ -171,7 +175,76 @@ function createWindow() {
   }
 }
 
+// Application menu.  "About PurpleCAD" opens the SAME in-app About dialog the
+// Settings dialog's About button does — main just tells the renderer to show it
+// (menu:about), so there's one source of truth for the About contents.
+function buildAppMenu() {
+  const isMac = process.platform === "darwin";
+  const openAbout = () => {
+    const win =
+      BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    win?.webContents.send("menu:about");
+  };
+  const aboutItem = { label: `About ${app.name}`, click: openAbout };
+  const template = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              aboutItem,
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
+    },
+    {
+      role: "help",
+      submenu: isMac ? [] : [aboutItem],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 app.whenReady().then(() => {
+  buildAppMenu();
   // BrowserWindow's `icon` option doesn't reach the Dock on macOS; packaged
   // builds get their Dock icon from `build.icon`, but dev runs (launched as
   // a bare Electron binary) still show Electron's default unless set here.

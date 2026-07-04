@@ -46,16 +46,34 @@ const HATCH_VERTEX = `
   }
 `;
 
-// Translucent green hatched sheet drawn ON the cut plane so the section plane is
-// visible.  Screen-space diagonal hatch, like the caps, but green and see-through.
-const PLANE_FRAGMENT = `
+// Translucent sheet drawn ON the cut plane so the section plane is visible: a
+// wide blue grid MAPPED TO THE PLANE (in the plane's own coordinates, so it
+// rotates and slides with the cut), see-through.  `fwidth` keeps the lines a
+// constant screen width whatever the zoom.
+const PLANE_VERTEX = `
+  varying vec2 vLocal;
+  varying float vWorldY;
   void main() {
-    float spacing = 12.0;
-    float thickness = 1.5;
-    float d = mod(gl_FragCoord.x + gl_FragCoord.y, spacing);
-    float line = smoothstep(thickness, 0.0, min(d, spacing - d));
-    // Faint green fill, brighter green hatch lines.
-    gl_FragColor = vec4(0.15, 0.85, 0.35, mix(0.12, 0.5, line));
+    vLocal = position.xy;
+    vWorldY = (modelMatrix * vec4(position, 1.0)).y;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const PLANE_FRAGMENT = `
+  varying vec2 vLocal;
+  varying float vWorldY;
+  void main() {
+    float spacing = 6.0;   // world units per cell (wide)
+    vec2 coord = vLocal / spacing;
+    vec2 g = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+    float line = 1.0 - min(min(g.x, g.y), 1.0);
+    float a = mix(0.10, 0.6, line);
+    // Fade out with distance from the plane centre (≈ the camera's look-at point).
+    a *= 1.0 - smoothstep(45.0, 135.0, length(vLocal));
+    // Drop 30% opacity where the section dips below the ground plane (Y < 0).
+    if (vWorldY < 0.0) a *= 0.7;
+    // Faint blue fill, brighter blue grid lines.
+    gl_FragColor = vec4(0.26, 0.55, 1.0, a);
   }
 `;
 
@@ -107,7 +125,7 @@ export function ensureCaps(scene) {
 
   // Translucent green indicator of the whole cut plane (drawn after the caps).
   const planeMat = new THREE.ShaderMaterial({
-    vertexShader: HATCH_VERTEX,
+    vertexShader: PLANE_VERTEX,
     fragmentShader: PLANE_FRAGMENT,
     side: THREE.DoubleSide,
     transparent: true,

@@ -29,4 +29,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   dbGetCamera: (pid) => sync("db:getCamera", pid),
   dbSaveCamera: (pid, state) => sync("db:saveCamera", { pid, state }),
   dbClearCamera: (pid) => sync("db:clearCamera", pid),
+  // Menu → renderer: the native "About PurpleCAD" item opens the in-app dialog.
+  // Replaces any prior listener so a re-register can't stack duplicates.
+  onMenuAbout: (cb) => {
+    ipcRenderer.removeAllListeners("menu:about");
+    ipcRenderer.on("menu:about", () => cb());
+  },
 });

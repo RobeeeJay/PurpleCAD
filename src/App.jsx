@@ -47,6 +47,12 @@ function App() {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+  // The Electron menu's "About PurpleCAD" opens the same in-app About dialog.
+  useEffect(() => {
+    window.electronAPI?.onMenuAbout?.(() =>
+      useStore.getState().setAboutDialogOpen(true),
+    );
+  }, []);
   // Capture the active project's thumbnail when leaving the app.
   useEffect(() => {
     const onLeave = () => {
