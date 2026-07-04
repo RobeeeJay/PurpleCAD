@@ -20,6 +20,7 @@ import {
 } from "../../three/cameraControls/chamferCommit.js";
 import FormulaInput from "../FormulaInput";
 import { evalValue, useDebouncedPreview } from "../inputs.jsx";
+import { pickBtn } from "./overlayBar.js";
 
 const fieldStyle = (ok) => ({
   width: 64,
@@ -104,7 +105,7 @@ export default function ChamferOverlay() {
   // `segments` here is preserved from the old (custom-mesh) chamfer API:
   // segments=1 → chamfer (flat); segments>1 → bevel (rounded).
   const applyChamfer = async () => {
-    if (!valid) return;
+    if (!valid || !hasSelection) return;
     const segments = isChamfer ? 1 : 3;
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
@@ -176,86 +177,100 @@ export default function ChamferOverlay() {
   const handleKeyDown = (e) => {
     e.stopPropagation();
     if (e.key === "Enter") {
-      if (valid) applyChamfer();
+      if (valid && hasSelection) applyChamfer();
     } else if (e.key === "Escape") cancel();
   };
+
+  const selCount =
+    (selectedSubGeometry?.faces?.length ?? 0) +
+    (selectedSubGeometry?.edges?.length ?? 0);
+
+  const confirmOk = valid && hasSelection;
 
   return (
     <>
       <div className="sketch-placement-hint">
         {hasSelection
           ? "Set the distance below, then Confirm · Esc to cancel"
-          : "Alt+click faces or Ctrl+click edges to select geometry to chamfer/fillet · Esc to cancel"}
+          : "Alt+click faces (chained) or Ctrl+click edges to select geometry to chamfer/fillet · Esc to cancel"}
       </div>
-      {hasSelection && (
-        <div className="sketch-distance-input-overlay">
-          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
-            Distance (mm):
-          </span>
-          <FormulaInput
-            variables={variables}
-            autoFocus
-            value={distanceMm}
-            onChange={(e) => setDistanceMm(e.target.value)}
-            onKeyDown={handleKeyDown}
-            style={fieldStyle(distValid)}
-          />
-          {isChamfer && (
-            <>
-              <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
-                Angle (°):
-              </span>
-              <FormulaInput
-                variables={variables}
-                value={angleDeg}
-                onChange={(e) => setAngleDeg(e.target.value)}
-                onKeyDown={handleKeyDown}
-                style={fieldStyle(angValid)}
-              />
-            </>
-          )}
-          <button
-            type="button"
-            onClick={cancel}
-            title="Cancel"
-            style={{
-              fontSize: 11,
-              padding: "3px 10px",
-              marginLeft: 8,
-              borderRadius: 3,
-              border: "1px solid var(--border-color)",
-              background: "var(--bg-tertiary)",
-              color: "var(--text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={applyChamfer}
-            disabled={!valid}
-            title={
-              valid
-                ? `Confirm — apply the ${isChamfer ? "chamfer" : "fillet"}`
-                : "Enter a valid value to confirm"
-            }
-            style={{
-              fontSize: 11,
-              padding: "3px 10px",
-              marginLeft: 8,
-              borderRadius: 3,
-              border: "1px solid var(--accent, #4488ff)",
-              background: "var(--accent, #4488ff)",
-              color: "#fff",
-              cursor: valid ? "pointer" : "not-allowed",
-              opacity: valid ? 1 : 0.5,
-            }}
-          >
-            Confirm
-          </button>
-        </div>
-      )}
+      <div className="sketch-distance-input-overlay">
+        <button
+          type="button"
+          onClick={() => clearSelectedSubGeometry()}
+          title="Pick geometry — Alt+click faces, Ctrl+click edges (click to clear + re-pick)"
+          style={{ ...pickBtn(!hasSelection), marginRight: 8 }}
+        >
+          {hasSelection ? `Geometry: ${selCount}` : "Select geometry"}
+        </button>
+        <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+          Distance (mm):
+        </span>
+        <FormulaInput
+          variables={variables}
+          autoFocus
+          value={distanceMm}
+          onChange={(e) => setDistanceMm(e.target.value)}
+          onKeyDown={handleKeyDown}
+          style={fieldStyle(distValid)}
+        />
+        {isChamfer && (
+          <>
+            <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+              Angle (°):
+            </span>
+            <FormulaInput
+              variables={variables}
+              value={angleDeg}
+              onChange={(e) => setAngleDeg(e.target.value)}
+              onKeyDown={handleKeyDown}
+              style={fieldStyle(angValid)}
+            />
+          </>
+        )}
+        <button
+          type="button"
+          onClick={cancel}
+          title="Cancel"
+          style={{
+            fontSize: 11,
+            padding: "3px 10px",
+            marginLeft: 8,
+            borderRadius: 3,
+            border: "1px solid var(--border-color)",
+            background: "var(--bg-tertiary)",
+            color: "var(--text-primary)",
+            cursor: "pointer",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={applyChamfer}
+          disabled={!confirmOk}
+          title={
+            confirmOk
+              ? `Confirm — apply the ${isChamfer ? "chamfer" : "fillet"}`
+              : hasSelection
+                ? "Enter a valid value to confirm"
+                : "Select geometry first"
+          }
+          style={{
+            fontSize: 11,
+            padding: "3px 10px",
+            marginLeft: 8,
+            borderRadius: 3,
+            border: "1px solid var(--accent, #4488ff)",
+            background: "var(--accent, #4488ff)",
+            color: "#fff",
+            cursor: confirmOk ? "pointer" : "not-allowed",
+            opacity: confirmOk ? 1 : 0.5,
+          }}
+        >
+          Confirm
+        </button>
+      </div>
     </>
   );
 }

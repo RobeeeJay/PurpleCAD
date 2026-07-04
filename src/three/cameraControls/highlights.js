@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "../sceneObjects.js";
+import { primitiveDimensions } from "../sceneObjects/dimensions.js";
 import { activePrecision } from "../resolution.js";
 import { computeSegmentChain } from "../segmentChain.js";
 import { CHAMFER_EDGE_HOVER, CHAMFER_PREVIEW_COLOR } from "../theme.js";
@@ -43,37 +44,48 @@ export function createHighlightHelpers({
   };
   const clearPointHighlight = () => clearHL(pointHighlightRef);
 
-  const primitiveGeoForHighlight = (type) => {
-    // Hover & selection highlights are DISPLAY overlays on the smooth
-    // shader render — they must visually match the shader, not the
-    // (potentially coarse) CSG/bevel resolution.  Always tessellate at
-    // DISPLAY_PRECISION_MM, or finer if the user has print mode enabled.
-    // Radii MUST exactly match the shader's primitive dimensions (sphere
-    // r=1.5, cylinder r=1 h=2, torus r=1 tube=0.4); the previous tiny
-    // inflation (1.53, 1.015, 1.01/0.42) was a z-fighting workaround for
-    // depth-tested materials, but the highlight material uses
-    // depthTest:false + high renderOrder, so an inflated overlay just
-    // visibly extends past the actual primitive.
+  const primitiveGeoForHighlight = (item) => {
+    // Hover & selection highlights are DISPLAY overlays on the smooth shader
+    // render — they must visually match the shader, not the (potentially
+    // coarse) CSG/bevel resolution.  Always tessellate at DISPLAY_PRECISION_MM,
+    // or finer if the user has print mode enabled.  Dimensions MUST come from
+    // the item's actual primitiveDimensions (matching the shaders) — hardcoded
+    // defaults leave the highlight the wrong size once the primitive is resized.
+    const type = item?.type;
+    const d = primitiveDimensions(item);
     const printPrecisionMm = activePrecision();
     const displayPrecision =
       printPrecisionMm != null
         ? Math.min(printPrecisionMm, DISPLAY_PRECISION_MM)
         : DISPLAY_PRECISION_MM;
     if (type === "sphere") {
-      const w = fullCircleSegments(1.5, displayPrecision, 32);
+      const w = fullCircleSegments(d.radius, displayPrecision, 32);
       const h = Math.max(8, Math.round(w / 2));
-      return new THREE.SphereGeometry(1.5, w, h);
+      return new THREE.SphereGeometry(d.radius, w, h);
     }
     if (type === "cylinder") {
-      const s = fullCircleSegments(1, displayPrecision, 32);
-      return new THREE.CylinderGeometry(1, 1, 2, s);
+      const s = fullCircleSegments(d.radius, displayPrecision, 32);
+      return new THREE.CylinderGeometry(d.radius, d.radius, d.height, s);
+    }
+    if (type === "cone") {
+      const s = fullCircleSegments(
+        Math.max(d.radiusBottom, d.radiusTop),
+        displayPrecision,
+        32,
+      );
+      return new THREE.CylinderGeometry(
+        d.radiusTop,
+        d.radiusBottom,
+        d.height,
+        s,
+      );
     }
     if (type === "torus") {
       // THREE.TorusGeometry ring is in XY plane; our torus shader ring is in
       // XZ plane.  Rotate -90° around X to align.
-      const tubular = fullCircleSegments(1.0, displayPrecision, 32);
-      const radial = fullCircleSegments(0.4, displayPrecision, 16);
-      const geo = new THREE.TorusGeometry(1.0, 0.4, radial, tubular);
+      const tubular = fullCircleSegments(d.major, displayPrecision, 32);
+      const radial = fullCircleSegments(d.minor, displayPrecision, 16);
+      const geo = new THREE.TorusGeometry(d.major, d.minor, radial, tubular);
       geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
       return geo;
     }
@@ -93,7 +105,7 @@ export function createHighlightHelpers({
       : null;
 
     const workGeo = primitiveType
-      ? primitiveGeoForHighlight(primitiveType)
+      ? primitiveGeoForHighlight(itemData)
       : hitMesh.geometry;
     const posAttr = workGeo.getAttribute("position");
     const indexAttr = workGeo.index;
@@ -152,6 +164,34 @@ export function createHighlightHelpers({
         const isTop = triNormal.y > 0.9,
           isBot = triNormal.y < -0.9,
           isSide = Math.abs(triNormal.y) < 0.1;
+        if (
+          (topHit && isTop) ||
+          (botHit && isBot) ||
+          (!topHit && !botHit && isSide)
+        )
+          matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+      }
+    } else if (primitiveType === "cone") {
+      for (let i = 0; i < triCount; i++) {
+        const [a, b, c] = triIdx(i);
+        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
+        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
+        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
+        triNormal
+          .crossVectors(
+            new THREE.Vector3().subVectors(vB, vA),
+            new THREE.Vector3().subVectors(vC, vA),
+          )
+          .normalize();
+        // The base cap and (if truncated) the top cap point straight ±Y; the
+        // slanted side is everything else.  A cap hit's normal is pure ±Y, so
+        // the side normals (which carry both radial + axial components) don't
+        // register as a cap.
+        const topHit = localNormal.y > 0.9,
+          botHit = localNormal.y < -0.9;
+        const isTop = triNormal.y > 0.9,
+          isBot = triNormal.y < -0.9,
+          isSide = !isTop && !isBot;
         if (
           (topHit && isTop) ||
           (botHit && isBot) ||
@@ -355,7 +395,7 @@ export function createHighlightHelpers({
       ? itemData.type
       : null;
     const srcGeo = primitiveType
-      ? primitiveGeoForHighlight(primitiveType)
+      ? primitiveGeoForHighlight(itemData)
       : hitMesh.geometry;
     const edgesGeo = new THREE.EdgesGeometry(srcGeo);
     if (primitiveType) srcGeo.dispose();
@@ -468,7 +508,7 @@ export function createHighlightHelpers({
       ? itemData.type
       : null;
     const srcGeo = primitiveType
-      ? primitiveGeoForHighlight(primitiveType)
+      ? primitiveGeoForHighlight(itemData)
       : hitMesh.geometry;
     const posAttr = srcGeo.getAttribute("position");
     let minDist = Infinity,

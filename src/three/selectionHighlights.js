@@ -3,30 +3,41 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { fullCircleSegments, DISPLAY_PRECISION_MM } from "./sceneObjects.js";
+import { primitiveDimensions } from "./sceneObjects/dimensions.js";
 import { FACE_SELECT_COLOR, EDGE_SELECT_COLOR } from "./theme.js";
 import { useStore } from "../store";
 
 // Returns a geometry to source overlay triangles from.  For primitive types
-// (sphere/cylinder/torus) the on-mesh geometry is just a BoxGeometry stand-in
-// — the actual visible surface is drawn by a shader, so we must synthesize
-// the real shape here.  Radii MUST exactly match the shader's primitive
-// dimensions; the overlay material uses depthTest:false + high renderOrder
-// so no z-fighting inflation is needed.  Tessellation uses
-// DISPLAY_PRECISION_MM to look smooth.
-function overlayGeometryFor(hitMesh, itemType) {
-  if (itemType === "sphere") {
-    const w = fullCircleSegments(1.5, DISPLAY_PRECISION_MM, 32);
+// (sphere/cylinder/cone/torus) the on-mesh geometry is just a BoxGeometry
+// stand-in — the actual visible surface is drawn by a shader, so we synthesize
+// the real shape here at the item's ACTUAL primitiveDimensions (matching the
+// shaders — hardcoded defaults leave the overlay the wrong size once resized).
+// The overlay material uses depthTest:false + high renderOrder so no
+// z-fighting inflation is needed; DISPLAY_PRECISION_MM keeps it smooth.
+function overlayGeometryFor(hitMesh, item) {
+  const type = item?.type;
+  const d = primitiveDimensions(item);
+  if (type === "sphere") {
+    const w = fullCircleSegments(d.radius, DISPLAY_PRECISION_MM, 32);
     const h = Math.max(8, Math.round(w / 2));
-    return new THREE.SphereGeometry(1.5, w, h);
+    return new THREE.SphereGeometry(d.radius, w, h);
   }
-  if (itemType === "cylinder") {
-    const s = fullCircleSegments(1, DISPLAY_PRECISION_MM, 32);
-    return new THREE.CylinderGeometry(1, 1, 2, s);
+  if (type === "cylinder") {
+    const s = fullCircleSegments(d.radius, DISPLAY_PRECISION_MM, 32);
+    return new THREE.CylinderGeometry(d.radius, d.radius, d.height, s);
   }
-  if (itemType === "torus") {
-    const tubular = fullCircleSegments(1.0, DISPLAY_PRECISION_MM, 32);
-    const radial = fullCircleSegments(0.4, DISPLAY_PRECISION_MM, 16);
-    const g = new THREE.TorusGeometry(1.0, 0.4, radial, tubular);
+  if (type === "cone") {
+    const s = fullCircleSegments(
+      Math.max(d.radiusBottom, d.radiusTop),
+      DISPLAY_PRECISION_MM,
+      32,
+    );
+    return new THREE.CylinderGeometry(d.radiusTop, d.radiusBottom, d.height, s);
+  }
+  if (type === "torus") {
+    const tubular = fullCircleSegments(d.major, DISPLAY_PRECISION_MM, 32);
+    const radial = fullCircleSegments(d.minor, DISPLAY_PRECISION_MM, 16);
+    const g = new THREE.TorusGeometry(d.major, d.minor, radial, tubular);
     g.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
     return g;
   }
@@ -72,7 +83,12 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
   // ── Face overlay ────────────────────────────────────────────────────────
   if (faces.length) {
     const isPrimitive = PRIMITIVE_TYPES.has(options.itemType);
-    const geo = overlayGeometryFor(hitMesh, options.itemType);
+    // Fall back to a type-only item so primitiveDimensions applies the defaults
+    // (callers that pass just itemType, e.g. tests, still get the right shape).
+    const geo = overlayGeometryFor(
+      hitMesh,
+      options.item ?? { type: options.itemType },
+    );
     const posAttr = geo.getAttribute("position");
     const indexAttr = geo.index;
     const triCount = indexAttr ? indexAttr.count / 3 : posAttr.count / 3;
@@ -114,6 +130,17 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
           const isTop = triNormal.y > 0.9,
             isBot = triNormal.y < -0.9,
             isSide = Math.abs(triNormal.y) < 0.1;
+          matches =
+            (topHit && isTop) ||
+            (botHit && isBot) ||
+            (!topHit && !botHit && isSide);
+        } else if (options.itemType === "cone") {
+          // Caps point straight ±Y; the slanted side is everything else.
+          const topHit = storedN.ny > 0.9,
+            botHit = storedN.ny < -0.9;
+          const isTop = triNormal.y > 0.9,
+            isBot = triNormal.y < -0.9,
+            isSide = !isTop && !isBot;
           matches =
             (topHit && isTop) ||
             (botHit && isBot) ||
@@ -376,7 +403,7 @@ export function reconcileSelectionHighlight(
   // Look up the item type so the builder can pick the right overlay geometry
   // for primitives (sphere / cylinder / torus).
   const item = items && items.find((i) => i.id === itemId);
-  const merged = { ...(options || {}), itemType: item?.type };
+  const merged = { ...(options || {}), itemType: item?.type, item };
   const group = buildSelectionHighlight(hitMesh, selectedSubGeometry, merged);
   if (!group) return null;
   scene.add(group);
