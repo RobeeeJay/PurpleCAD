@@ -11,6 +11,7 @@ import { fullCircleSegments, DISPLAY_PRECISION_MM } from "../sceneObjects.js";
 import { primitiveDimensions } from "../sceneObjects/dimensions.js";
 import { activePrecision } from "../resolution.js";
 import { computeSegmentChain } from "../segmentChain.js";
+import { selectionChainAngle } from "../../store/selectionMode.js";
 import { CHAMFER_EDGE_HOVER, CHAMFER_PREVIEW_COLOR } from "../theme.js";
 
 export function createHighlightHelpers({
@@ -292,7 +293,7 @@ export function createHighlightHelpers({
       // tessellated cylinder / fillet / wave selects as one face while a sharp
       // edge (a larger bend than the setting) stops it.
       const seedN = triNormals[seedTri];
-      const maxAngle = useStore.getState().curveDetectionAngleDeg ?? 5;
+      const maxAngle = selectionChainAngle(useStore.getState?.());
       const cosThr = Math.cos((Math.max(0, maxAngle) * Math.PI) / 180);
       const visited = new Set([seedTri]);
       const queue = [seedTri];
@@ -431,8 +432,9 @@ export function createHighlightHelpers({
     if (bestIdx < 0) return null;
 
     // Curve detection: highlight (and select) the whole smooth chain of
-    // connected edges, so a tessellated curve reads/selects as one edge.
-    const maxAngle = useStore.getState().curveDetectionAngleDeg ?? 5;
+    // connected edges, so a tessellated curve reads/selects as one edge.  With
+    // the chain toggle off this collapses to just the clicked segment.
+    const maxAngle = selectionChainAngle(useStore.getState?.());
     const chainIdx = computeSegmentChain(segs, bestIdx, maxAngle);
     const positions = [];
     chainIdx.forEach((i) => {

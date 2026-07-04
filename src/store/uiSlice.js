@@ -48,6 +48,13 @@ export const uiInitial = {
   selFace: false,
   selEdge: false,
   selPoint: false,
+  // Chain selection: when on, a face/edge pick follows the curve across the
+  // curveDetectionAngleDeg limit (a whole fillet / smooth edge run selects as
+  // one).  Only meaningful for face/edge selection, so it's gated on those in
+  // the widget — but the flag is remembered while gated off so re-enabling a
+  // face/edge type restores the user's choice.  Default on preserves the
+  // previous always-chaining behaviour.
+  selChain: true,
   selectionOverride: null,
   // When true, a plain object click adds to (toggles) the multi-selection
   // instead of replacing it — no shift needed.  Set by pick tools that gather
@@ -404,6 +411,10 @@ export const createUiSlice = (set) => ({
       selPoint: !s.selPoint,
       selTypeSolo: null,
     })),
+  // Chain toggle: only actionable while a face or edge type is on (the widget
+  // greys it otherwise), but the value is kept either way so it's remembered.
+  toggleSelChain: () =>
+    set((s) => (s.selFace || s.selEdge ? { selChain: !s.selChain } : {})),
   // Cmd/Ctrl-click: isolate one type (others off), saving the prior set; a second
   // solo-click on the isolated type restores it.
   soloSelType: (key) =>

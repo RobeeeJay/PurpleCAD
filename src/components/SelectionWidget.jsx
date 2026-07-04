@@ -86,6 +86,31 @@ const PointIcon = () => (
     />
   </svg>
 );
+// Two interlocking links — chain the selection along a curve / smooth edge run.
+const ChainIcon = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18">
+    <rect
+      x="3.5"
+      y="8.5"
+      width="10"
+      height="7"
+      rx="3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+    />
+    <rect
+      x="10.5"
+      y="8.5"
+      width="10"
+      height="7"
+      rx="3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+    />
+  </svg>
+);
 const SelectionWidget = () => {
   const sketchMode = useStore((s) => {
     const it = s.items.find((i) => i.id === s.selectedId);
@@ -112,10 +137,12 @@ const SelectionWidget = () => {
     planePickActive,
     holeTool,
   };
+  const selChain = useStore((s) => s.selChain);
   const toggleSelObject = useStore((s) => s.toggleSelObject);
   const toggleSelFace = useStore((s) => s.toggleSelFace);
   const toggleSelEdge = useStore((s) => s.toggleSelEdge);
   const toggleSelPoint = useStore((s) => s.toggleSelPoint);
+  const toggleSelChain = useStore((s) => s.toggleSelChain);
   const soloSelType = useStore((s) => s.soloSelType);
   const shiftHeld = useShiftHeld();
 
@@ -158,6 +185,11 @@ const SelectionWidget = () => {
     },
   ];
 
+  // Chaining only applies to face/edge picks, so it's actionable only when one
+  // of those is on; the flag is remembered while greyed out (see toggleSelChain).
+  const chainEnabled = !locked && (eff.face || eff.edge);
+  const chainOn = selChain && chainEnabled;
+
   return (
     <div className="selection-widget">
       {btns.map(({ key, Icon, on, toggle, title }) => {
@@ -185,6 +217,19 @@ const SelectionWidget = () => {
           </button>
         );
       })}
+      <button
+        type="button"
+        className={`selection-widget-btn${chainOn ? " active" : ""}${chainEnabled ? "" : " greyed"}`}
+        title={
+          chainEnabled
+            ? "Chain selection — follow a face/edge across the curve angle limit"
+            : "Chain selection — enable Face or Edge selection to use"
+        }
+        disabled={!chainEnabled}
+        onClick={chainEnabled ? () => toggleSelChain() : undefined}
+      >
+        <ChainIcon />
+      </button>
     </div>
   );
 };

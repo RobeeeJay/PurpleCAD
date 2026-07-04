@@ -6,6 +6,7 @@ import { fullCircleSegments, DISPLAY_PRECISION_MM } from "./sceneObjects.js";
 import { primitiveDimensions } from "./sceneObjects/dimensions.js";
 import { FACE_SELECT_COLOR, EDGE_SELECT_COLOR } from "./theme.js";
 import { useStore } from "../store";
+import { selectionChainAngle } from "../store/selectionMode.js";
 
 // Returns a geometry to source overlay triangles from.  For primitive types
 // (sphere/cylinder/cone/torus) the on-mesh geometry is just a BoxGeometry
@@ -203,10 +204,10 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
 
       // Faces respect the curve-detection angle (like edges): the region grows
       // across a tessellated curve via the local dihedral and stops at a sharp
-      // edge — matching the hover highlight (applyFaceHighlight).
+      // edge — matching the hover highlight (applyFaceHighlight).  The chain
+      // toggle gates whether curvature is followed at all.
       const cosThr = Math.cos(
-        (Math.max(0, useStore.getState?.()?.curveDetectionAngleDeg ?? 5) *
-          Math.PI) /
+        (Math.max(0, selectionChainAngle(useStore.getState?.())) * Math.PI) /
           180,
       );
       const visitedAll = new Set();

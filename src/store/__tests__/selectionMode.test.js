@@ -3,6 +3,7 @@ import {
   effectiveSelectionTypes,
   anyToolActive,
   effectiveSketchSelTypes,
+  selectionChainAngle,
 } from "../selectionMode.js";
 
 describe("effectiveSketchSelTypes", () => {
@@ -142,6 +143,52 @@ describe("effectiveSelectionTypes", () => {
     expect(
       effectiveSelectionTypes({ ...base, planePickActive: "face" }),
     ).toMatchObject({ face: true, overridden: true });
+  });
+});
+
+describe("selectionChainAngle", () => {
+  const NO_CHAIN = 0.5;
+  it("follows the curve angle when chain is on and a face/edge type is on", () => {
+    const s = {
+      ...base,
+      selObject: false,
+      selFace: true,
+      selChain: true,
+      curveDetectionAngleDeg: 12,
+    };
+    expect(selectionChainAngle(s)).toBe(12);
+  });
+
+  it("collapses to a hair when the chain toggle is off", () => {
+    const s = {
+      ...base,
+      selObject: false,
+      selEdge: true,
+      selChain: false,
+      curveDetectionAngleDeg: 12,
+    };
+    expect(selectionChainAngle(s)).toBe(NO_CHAIN);
+  });
+
+  it("collapses when neither face nor edge is selectable, even if chain is remembered on", () => {
+    // selChain stays true (remembered) but object mode means no face/edge pick.
+    const s = { ...base, selChain: true, curveDetectionAngleDeg: 12 };
+    expect(selectionChainAngle(s)).toBe(NO_CHAIN);
+  });
+
+  it("uses a face lock from a tool (override) to allow chaining", () => {
+    const s = {
+      ...base,
+      selObject: false,
+      selChain: true,
+      curveDetectionAngleDeg: 8,
+      planeTool: {}, // derives a face lock via effectiveSelectionTypes
+    };
+    expect(selectionChainAngle(s)).toBe(8);
+  });
+
+  it("defaults to the standard angle when no store is provided (unit tests)", () => {
+    expect(selectionChainAngle(undefined)).toBe(5);
   });
 });
 
