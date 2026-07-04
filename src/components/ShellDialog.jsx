@@ -82,11 +82,13 @@ const ShellDialog = () => {
     });
     setBusy(false);
     if (!ok) {
-      useStore
-        .getState()
-        .showNotification?.(
-          "Shell failed — the wall thickness is too large for this body.",
-        );
+      // A cancelled op returns no result — that's not a failure to report.
+      if (!useStore.getState().operationCancelled)
+        useStore
+          .getState()
+          .showNotification?.(
+            "Shell failed — the wall thickness is too large for this body.",
+          );
       return;
     }
     close();

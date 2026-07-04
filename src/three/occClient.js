@@ -78,9 +78,15 @@ async function callOp(op, args) {
 
 async function runOp(op, args) {
   inc();
+  // The native call is synchronous and can't be interrupted, so "cancel"
+  // means: run it but discard the result if the user cancelled meanwhile.
+  const epoch = useStore.getState().cancelEpoch;
+  const cancelled = () => useStore.getState().cancelEpoch !== epoch;
   try {
     await new Promise((r) => setTimeout(r, 0));
-    return await callOp(op, args);
+    if (cancelled()) return null;
+    const result = await callOp(op, args);
+    return cancelled() ? null : result;
   } finally {
     dec();
   }

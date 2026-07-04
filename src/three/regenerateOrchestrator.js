@@ -88,9 +88,19 @@ export async function recalculateTimeline() {
     lastFrame = Date.now();
   };
 
+  // Snapshot the cancel token; if the user hits Cancel the epoch changes and
+  // we stop between steps, leaving the not-yet-reached entries on the cache
+  // they already had (still valid — regen only dirties one step at a time).
+  const cancelEpoch = useStore.getState().cancelEpoch;
+
   let accItems = [];
   const newHistory = [];
-  for (const entry of history) {
+  for (let idx = 0; idx < history.length; idx++) {
+    if (useStore.getState().cancelEpoch !== cancelEpoch) {
+      for (let j = idx; j < history.length; j++) newHistory.push(history[j]);
+      break;
+    }
+    const entry = history[idx];
     accItems = applyInstruction(accItems, entry.instruction);
     const targetId = geomTargetId(entry.instruction);
     if (targetId == null) {

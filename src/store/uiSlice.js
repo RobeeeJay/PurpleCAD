@@ -246,6 +246,16 @@ export const uiInitial = {
   // are.
   regenProgress: null,
 
+  // Bumped each time the user hits Cancel in the BusyIndicator.  A
+  // synchronous native OCC call can't be interrupted mid-computation, so
+  // "cancel" means: stop the step-wise timeline recalc between steps AND
+  // discard the result of any single in-flight op (runOp captures this
+  // token and drops a result whose token has since changed).
+  cancelEpoch: 0,
+  // Set alongside a cancel bump so an op that returns "no result" because it
+  // was cancelled doesn't surface a misleading "could not apply" notice.
+  operationCancelled: false,
+
   // True from the moment the user confirms a cut-extrude until the
   // async CSG difference + consumeItems lands.  Lets the Viewport
   // keep "transparent" render mode active across the brief window
@@ -944,10 +954,25 @@ export const createUiSlice = (set) => ({
   setCameraControls: (controls) => set({ _cameraControls: controls }),
 
   beginOperation: () =>
-    set((state) => ({ pendingOperations: state.pendingOperations + 1 })),
+    // A fresh operation clears any stale cancel flag from a prior one.
+    set((state) => ({
+      pendingOperations: state.pendingOperations + 1,
+      operationCancelled: false,
+    })),
   endOperation: () =>
     set((state) => ({
       pendingOperations: Math.max(0, state.pendingOperations - 1),
+    })),
+
+  // Cancel whatever is driving the BusyIndicator.  Bumps cancelEpoch (so the
+  // regen loop bails between steps and runOp discards its in-flight result)
+  // and immediately clears the counters so the dialog dismisses at once.
+  requestOperationCancel: () =>
+    set((state) => ({
+      cancelEpoch: state.cancelEpoch + 1,
+      operationCancelled: true,
+      pendingOperations: 0,
+      regenProgress: null,
     })),
 
   setRegenProgress: (progress) => set({ regenProgress: progress }),

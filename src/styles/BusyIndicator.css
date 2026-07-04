@@ -51,3 +51,23 @@
   background-color: var(--color-white);
   transition: width 120ms ease-out;
 }
+
+/* The indicator itself is click-through (pointer-events: none) so it never
+   swallows viewport interaction; the Cancel button opts back in. */
+.busy-cancel {
+  pointer-events: auto;
+  margin-top: 2px;
+  padding: 4px 14px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.03em;
+  color: var(--color-white);
+  background-color: rgba(var(--white-rgb), 0.14);
+  border: 1px solid rgba(var(--white-rgb), 0.35);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.busy-cancel:hover {
+  background-color: rgba(var(--white-rgb), 0.26);
+}

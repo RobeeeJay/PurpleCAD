@@ -145,9 +145,11 @@ export default function ChamferOverlay() {
         printPrecision,
       });
       if (!result) {
-        showNotification(
-          "Could not apply — the distance may be too large for the selected geometry.",
-        );
+        // A null result from a user-cancelled op isn't a failure — stay quiet.
+        if (!useStore.getState().operationCancelled)
+          showNotification(
+            "Could not apply — the distance may be too large for the selected geometry.",
+          );
         return;
       }
       useStore.getState()._cameraControls?.clearChamferPreview?.();
