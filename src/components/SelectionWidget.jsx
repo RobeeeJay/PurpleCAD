@@ -2,6 +2,7 @@ import React from "react";
 import { useStore } from "../store";
 import { effectiveSelectionTypes } from "../store/selectionMode.js";
 import VisibilityToggles, { useShiftHeld } from "./VisibilityToggles";
+import { NumberInput } from "./inputs.jsx";
 
 // The selection widget: four toggle icons at the top-left of the 3D view (clear
 // of the Objects/Timeline panel) choosing what a click selects — whole Object,
@@ -138,6 +139,10 @@ const SelectionWidget = () => {
     holeTool,
   };
   const selChain = useStore((s) => s.selChain);
+  const curveDetectionAngleDeg = useStore((s) => s.curveDetectionAngleDeg);
+  const setCurveDetectionAngleDeg = useStore(
+    (s) => s.setCurveDetectionAngleDeg,
+  );
   const toggleSelObject = useStore((s) => s.toggleSelObject);
   const toggleSelFace = useStore((s) => s.toggleSelFace);
   const toggleSelEdge = useStore((s) => s.toggleSelEdge);
@@ -230,6 +235,22 @@ const SelectionWidget = () => {
       >
         <ChainIcon />
       </button>
+      {chainOn && (
+        <label
+          className="selection-widget-angle"
+          title="Maximum bend angle (degrees) still treated as one smooth face/edge"
+        >
+          <NumberInput
+            value={curveDetectionAngleDeg}
+            onCommit={(n) => setCurveDetectionAngleDeg(n)}
+            min="0"
+            max="90"
+            step="1"
+            aria-label="Chain angle limit (degrees)"
+          />
+          <span>°</span>
+        </label>
+      )}
     </div>
   );
 };
