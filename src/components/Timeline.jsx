@@ -242,9 +242,13 @@ function ExtrudeActions({ itemId, groupIds }) {
         title="Retarget Profile — pick the face(s) or sketch region(s) to extrude from"
         onClick={(e) => {
           e.stopPropagation();
+          // Enter profile mode FIRST: setExtrudeSelectMode spreads
+          // TOOL_RESET_PATCH when freshly entering extrude, which nulls
+          // extrudeRetargetId/Group — so arming the retarget before it would be
+          // wiped, and confirm would build a NEW extrude instead of editing.
+          setExtrudeSelectMode("profile");
           setExtrudeRetargetGroup(isGroup ? groupIds : null);
           setExtrudeRetargetId(isGroup ? groupIds[0] : itemId);
-          setExtrudeSelectMode("profile");
         }}
       >
         <svg viewBox="0 0 24 24" width="14" height="14">
