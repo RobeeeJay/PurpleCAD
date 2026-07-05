@@ -17,6 +17,7 @@ const DocumentSection = () => {
   const loadDocument = useStore((s) => s.loadDocument);
   const createProject = useStore((s) => s.createProject);
   const items = useStore((s) => s.items);
+  const curveResolution = useStore((s) => s.curveResolution);
   const variables = useStore((s) => s.variables);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
   const cameraControls = useStore((s) => s._cameraControls);
@@ -108,12 +109,26 @@ const DocumentSection = () => {
     URL.revokeObjectURL(url);
   };
 
+  // Exports tessellate at the ACTIVE resolution; in preview mode that's the
+  // coarse mesh, which pits/facets a printed part.  Warn before exporting so
+  // the user can switch on high-res print mode first.  Returns false to abort.
+  const confirmExportResolution = (kind) => {
+    if (curveResolution === "print") return true;
+    return window.confirm(
+      `High-resolution print mode is OFF, so this ${kind} will export at the ` +
+        `coarser preview tessellation (curved surfaces will look faceted).\n\n` +
+        `Turn on print mode (the resolution toggle) for a smooth mesh, then ` +
+        `export again.\n\nExport at preview resolution anyway?`,
+    );
+  };
+
   const handleExportSTL = async () => {
     setSaveMenuOpen(false);
     if (items.length === 0) {
       alert("No objects to export.");
       return;
     }
+    if (!confirmExportResolution("STL")) return;
     try {
       const buffer = await exportSTL({ items });
       if (!buffer) {
@@ -136,6 +151,7 @@ const DocumentSection = () => {
       alert("No objects to export.");
       return;
     }
+    if (!confirmExportResolution("STEP")) return;
     try {
       const content = await exportSTEP({ items });
       if (!content) {
