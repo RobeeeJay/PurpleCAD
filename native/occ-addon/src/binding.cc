@@ -1189,9 +1189,16 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
         throw std::runtime_error("chamfer computation failed (geometry rejected the operation)");
       return Napi::Number::New(env, StoreShape(mk.Shape()));
     } catch (const std::exception& e) {
+      // The usual cause is a distance wider than the material the chamfer
+      // runs into — e.g. chamfering only the OUTER rim of a hollow body by
+      // more than the wall thickness, so the chamfer face would collide with
+      // the inner wall.  Selecting the whole rim/face (both edges) bevels
+      // across it and allows a larger distance.
       throw std::runtime_error(
-        std::string("Chamfer failed — try a smaller distance or a different "
-                    "edge / face (") + e.what() + ")");
+        std::string("Chamfer failed — the distance is likely larger than the "
+                    "material allows (e.g. wider than a hollow body's wall). "
+                    "Use a smaller distance, or select the whole rim/face to "
+                    "bevel across it. (") + e.what() + ")");
     }
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
@@ -1222,9 +1229,14 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
         throw std::runtime_error("fillet computation failed (geometry rejected the operation)");
       return Napi::Number::New(env, StoreShape(mk.Shape()));
     } catch (const std::exception& e) {
+      // Same limit as chamfer: a radius wider than the material it rolls into
+      // (e.g. a hollow body's wall) is rejected — round the whole rim/face for
+      // a larger radius, or use a smaller one.
       throw std::runtime_error(
-        std::string("Fillet failed — try a smaller radius or a different "
-                    "edge / face (") + e.what() + ")");
+        std::string("Fillet failed — the radius is likely larger than the "
+                    "material allows (e.g. wider than a hollow body's wall). "
+                    "Use a smaller radius, or select the whole rim/face to "
+                    "round across it. (") + e.what() + ")");
     }
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
