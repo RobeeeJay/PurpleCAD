@@ -456,7 +456,17 @@ export function setupResize(containerRef, cameraRef, renderer, composerRef) {
     const height = containerRef.current.clientHeight;
     const cam = cameraRef.current;
     if (!cam) return;
-    cam.aspect = width / height;
+    const aspect = width / height;
+    if (cam.isOrthographicCamera) {
+      // Ortho has no `aspect`; setting it is a no-op that leaves the frustum
+      // stretched after a resize (breaking zoom/pan feel + on-screen overlays).
+      // Keep the vertical extent and rebuild left/right for the new aspect.
+      const frustH = cam.top - cam.bottom;
+      cam.left = (-frustH * aspect) / 2;
+      cam.right = (frustH * aspect) / 2;
+    } else {
+      cam.aspect = aspect;
+    }
     cam.updateProjectionMatrix();
     renderer.setSize(width, height);
     if (composerRef.current) composerRef.current.setSize(width, height);
