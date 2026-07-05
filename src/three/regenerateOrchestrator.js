@@ -93,6 +93,15 @@ export async function recalculateTimeline() {
   // they already had (still valid — regen only dirties one step at a time).
   const cancelEpoch = useStore.getState().cancelEpoch;
 
+  // JIT bound: only recompute up to the step the user is parked on.  Steps
+  // AFTER the viewed one keep their existing cache and are recomputed lazily
+  // when navigated to — we don't rebuild off-screen future geometry.
+  const bound =
+    state.activeHistoryId !== null
+      ? history.findIndex((h) => h.id === state.activeHistoryId)
+      : history.length - 1;
+  const jitBound = bound !== -1 ? bound : history.length - 1;
+
   let accItems = [];
   const newHistory = [];
   for (let idx = 0; idx < history.length; idx++) {
@@ -101,6 +110,11 @@ export async function recalculateTimeline() {
       break;
     }
     const entry = history[idx];
+    // Past the viewed step: carry the entry through untouched (JIT).
+    if (idx > jitBound) {
+      newHistory.push(entry);
+      continue;
+    }
     accItems = applyInstruction(accItems, entry.instruction);
     const targetId = geomTargetId(entry.instruction);
     if (targetId == null) {
