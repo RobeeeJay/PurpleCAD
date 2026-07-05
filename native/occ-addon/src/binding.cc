@@ -441,15 +441,29 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
     addedKeys.insert(key);
   };
 
-  if (!spec.edges.empty()) {
-    TopExp_Explorer eexp(shape, TopAbs_EDGE);
-    for (; eexp.More(); eexp.Next()) {
-      TopoDS_Edge edge = TopoDS::Edge(eexp.Current());
-      for (const auto& ep : spec.edges) {
-        if (EdgeMatchesSpec(edge, ep, edgeFaceMap)) {
+  for (const auto& ep : spec.edges) {
+    // Pass 1: precise endpoint match.  When the stored endpoints still lie on
+    // the shape (a fresh chamfer, or a regen with no resize) this pins the
+    // exact edge — crucial on bodies whose walls were split into many faces by
+    // an emboss/deboss, where several edges share the same adjacent-normal pair
+    // and the normal-set match below would over-select a set OCC can't bevel.
+    bool matched = false;
+    for (TopExp_Explorer e1(shape, TopAbs_EDGE); e1.More(); e1.Next()) {
+      TopoDS_Edge edge = TopoDS::Edge(e1.Current());
+      if (EdgeMatchesEndpoints(edge, {ep.ax, ep.ay, ep.az},
+                               {ep.bx, ep.by, ep.bz})) {
+        addEdge(edge, faceTouchingEdge(edge));
+        matched = true;
+      }
+    }
+    // Pass 2: resize-invariant normal fallback — only when the endpoints have
+    // moved off the shape (a parametric resize), so the precise match wins
+    // whenever the endpoints are still valid.
+    if (!matched && ep.hasNormals) {
+      for (TopExp_Explorer e2(shape, TopAbs_EDGE); e2.More(); e2.Next()) {
+        TopoDS_Edge edge = TopoDS::Edge(e2.Current());
+        if (NormalSetMatches(EdgeAdjacentNormals(edge, edgeFaceMap), ep))
           addEdge(edge, faceTouchingEdge(edge));
-          break;
-        }
       }
     }
   }
