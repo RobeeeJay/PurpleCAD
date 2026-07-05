@@ -139,6 +139,25 @@ export const relinkSourceChain = (history, itemId, fromIndex = 0) => {
   return changed ? out : history;
 };
 
+// After editing/retargeting one timeline entry (`entryId`), re-derive the
+// sources of any LATER ops on that same item so a downstream op (an emboss on
+// top of a chamfer, say) rebuilds against the EDITED upstream result instead of
+// the stale snapshot it froze at creation.  A no-op when nothing downstream
+// references the item.  Returns the same array when unchanged.
+export const relinkAfterEntryEdit = (history, entryId) => {
+  const idx = history.findIndex((h) => h.id === entryId);
+  if (idx < 0) return history;
+  const inst = history[idx].instruction;
+  const itemId =
+    inst?.type === "modify"
+      ? inst.itemId
+      : inst?.type === "create"
+        ? inst.item?.id
+        : null;
+  if (itemId == null) return history;
+  return relinkSourceChain(history, itemId, idx + 1);
+};
+
 // The set of hidden item ids a freshly-inserted entry should start from —
 // inherited from the entry it's being inserted after.
 export const inheritedHiddenIds = (history, insertIdx) =>

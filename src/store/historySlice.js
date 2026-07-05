@@ -9,6 +9,7 @@ import {
   withUndo,
   markCsgDirty,
   rewriteCreatedItem,
+  relinkAfterEntryEdit,
   maxItemId,
   inheritedHiddenIds,
   hideIdsFrom,
@@ -541,19 +542,22 @@ export const createHistorySlice = (set) => ({
           },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
         {
           items,
-          history: withOrphanFlags(newHistory),
+          history: withOrphanFlags(relinked),
         },
         withUndo(state),
       );
@@ -587,17 +591,20 @@ export const createHistorySlice = (set) => ({
           },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -625,17 +632,20 @@ export const createHistorySlice = (set) => ({
           },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -669,17 +679,20 @@ export const createHistorySlice = (set) => ({
           },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -707,17 +720,20 @@ export const createHistorySlice = (set) => ({
           },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -744,17 +760,20 @@ export const createHistorySlice = (set) => ({
           },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -771,17 +790,20 @@ export const createHistorySlice = (set) => ({
         if (inst.patches?.regenerator?.kind !== "pushpull") return entry;
         return { ...entry, instruction: { ...inst, patches } };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -808,17 +830,20 @@ export const createHistorySlice = (set) => ({
           },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -838,17 +863,20 @@ export const createHistorySlice = (set) => ({
           instruction: { ...inst, item: { ...inst.item, ...patches } },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -867,17 +895,20 @@ export const createHistorySlice = (set) => ({
           instruction: { ...inst, item: { ...inst.item, ...patches } },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -894,17 +925,20 @@ export const createHistorySlice = (set) => ({
           instruction: { ...inst, item: { ...inst.item, ...patches } },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
-        { items, history: withOrphanFlags(newHistory) },
+        { items, history: withOrphanFlags(relinked) },
         withUndo(state),
       );
     }),
@@ -928,19 +962,22 @@ export const createHistorySlice = (set) => ({
           },
         };
       });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = relinkAfterEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
-          ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : newHistory.length - 1;
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
       const items = replayUpTo(
-        newHistory,
-        activeIdx !== -1 ? activeIdx : newHistory.length - 1,
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      saveTimeline(relinked, state.activeHistoryId);
       return Object.assign(
         {
           items,
-          history: withOrphanFlags(newHistory),
+          history: withOrphanFlags(relinked),
         },
         withUndo(state),
       );

@@ -99,3 +99,21 @@ describe("deleting a chamfer under an emboss re-points the emboss source", () =>
     expect(embossItem.regenerator.source.regenerator).toBeUndefined();
   });
 });
+
+describe("editing a chamfer under an emboss re-points the emboss source", () => {
+  it("propagates the edited chamfer amount into the emboss's source", () => {
+    const useStore = makeStore();
+    // Edit the chamfer step's amount (the timeline "Edit" flow).
+    useStore.getState().updateChamferParams("h2", { amount: 0.42 });
+
+    // The emboss step's frozen source now carries the EDITED chamfer, so the
+    // emboss rebuilds on top of the new chamfer rather than the old snapshot.
+    const embossEntry = useStore.getState().history.find((h) => h.id === "h3");
+    const src = embossEntry.instruction.patches.regenerator.source;
+    expect(src.regenerator.kind).toBe("chamfer");
+    expect(src.regenerator.amount).toBe(0.42);
+
+    const embossItem = useStore.getState().items.find((i) => i.id === 5);
+    expect(embossItem.regenerator.source.regenerator.amount).toBe(0.42);
+  });
+});
