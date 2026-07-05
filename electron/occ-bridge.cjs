@@ -1666,4 +1666,12 @@ function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision
   return result;
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };
+// Release a cached OCC solid (JIT-timeline cache); no-op if already gone.
+function releaseShape({ id }) {
+  if (id != null) {
+    try { occ.releaseShape(id); } catch { /* already gone */ }
+  }
+  return null;
+}
+
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape };

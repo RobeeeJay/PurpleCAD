@@ -92,6 +92,14 @@ async function runOp(op, args) {
   }
 }
 
+// Release a cached OCC solid (JIT-timeline solid cache).  Lightweight cleanup:
+// bypasses the busy-counter / cancel machinery of runOp — it must always run,
+// even mid-cancel, and shouldn't flash the spinner.
+export function releaseShape(id) {
+  if (id == null) return Promise.resolve(null);
+  return callOp("releaseShape", { id });
+}
+
 export function chamferOrFilletItem(args) {
   return runOp("chamferOrFilletItem", args);
 }

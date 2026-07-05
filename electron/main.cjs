@@ -77,6 +77,9 @@ try {
   ipcMain.handle("occ:pattern3dItem", (_e, args) =>
     occBridge.pattern3dItem(args),
   );
+  ipcMain.handle("occ:releaseShape", (_e, args) =>
+    occBridge.releaseShape(args),
+  );
 } catch (err) {
   // Addon not built or OCC dylib missing — fall back to WASM path in renderer.
   console.warn("[main] native OCC addon unavailable:", err.message);

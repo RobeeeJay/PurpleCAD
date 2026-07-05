@@ -2238,6 +2238,19 @@ async function importStep({ stepText, printPrecision }) {
   };
 }
 
+// Release a cached OCC solid held in the native shape store (JIT timeline
+// cache).  Fire-and-forget cleanup; a missing/already-released id is a no-op.
+function releaseShape({ id }) {
+  if (id != null) {
+    try {
+      occ.releaseShape(id);
+    } catch {
+      /* already gone */
+    }
+  }
+  return null;
+}
+
 export const ops = {
   chamferOrFilletItem,
   pushPullFaces,
@@ -2254,4 +2267,5 @@ export const ops = {
   exportSTL,
   exportSTEP,
   importStep,
+  releaseShape,
 };
