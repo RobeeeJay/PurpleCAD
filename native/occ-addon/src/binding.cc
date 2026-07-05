@@ -69,6 +69,7 @@
 
 // ── Face-normal + edge-distance helpers ─────────────────────────────────
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <Extrema_ExtFlag.hxx>
 #include <Extrema_ExtAlgo.hxx>
@@ -261,6 +262,38 @@ static bool EdgeMatchesEndpoints(const TopoDS_Edge& edge,
     return dist.IsDone() && dist.NbSolution() >= 1 && dist.Value() < curveEps;
   };
   return pointOnEdge(posA) && pointOnEdge(posB);
+}
+
+// Tessellation-robust match: is the edge's midpoint on the stored segment
+// posA→posB (within tol)?  A stored edge selection is a polyline approximation
+// of a curve at the CREATION tessellation; toggling print resolution rebuilds
+// the body at a different density, moving every vertex, so the exact-endpoint
+// match fails.  The stored ring still traces the same curve, so an OCC edge
+// that belongs to it has its midpoint sitting on one of the stored segments —
+// which picks the ring precisely without the adjacent-normal set's tendency to
+// over-select on bodies whose walls were split into many faces (emboss/deboss).
+static bool EdgeMidpointOnSegment(const TopoDS_Edge& edge, const Vec3d& a,
+                                  const Vec3d& b, double tol) {
+  double mx, my, mz;
+  try {
+    BRepAdaptor_Curve c(edge);
+    double um = (c.FirstParameter() + c.LastParameter()) / 2.0;
+    gp_Pnt m = c.Value(um);
+    mx = m.X();
+    my = m.Y();
+    mz = m.Z();
+  } catch (...) {
+    return false;
+  }
+  const double abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+  const double ab2 = abx * abx + aby * aby + abz * abz;
+  double t = ab2 > 1e-12
+                 ? ((mx - a.x) * abx + (my - a.y) * aby + (mz - a.z) * abz) / ab2
+                 : 0.0;
+  t = std::max(0.0, std::min(1.0, t));
+  const double dx = mx - (a.x + abx * t), dy = my - (a.y + aby * t),
+               dz = mz - (a.z + abz * t);
+  return std::sqrt(dx * dx + dy * dy + dz * dz) < tol;
 }
 
 // Compute the outward face normal at the UV midpoint.
@@ -456,9 +489,25 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
         matched = true;
       }
     }
-    // Pass 2: resize-invariant normal fallback — only when the endpoints have
-    // moved off the shape (a parametric resize), so the precise match wins
-    // whenever the endpoints are still valid.
+    // Pass 2: tessellation-robust proximity.  If the exact endpoints didn't
+    // match (the body was rebuilt at a different resolution — toggling print
+    // mode — so every vertex moved), select the OCC edges whose midpoint sits
+    // on this stored segment.  This tracks the SAME curve precisely, so it
+    // avoids the normal-set over-selection that makes MakeChamfer reject the
+    // result on emboss-split walls.
+    if (!matched) {
+      for (TopExp_Explorer em(shape, TopAbs_EDGE); em.More(); em.Next()) {
+        TopoDS_Edge edge = TopoDS::Edge(em.Current());
+        if (EdgeMidpointOnSegment(edge, {ep.ax, ep.ay, ep.az},
+                                  {ep.bx, ep.by, ep.bz}, 0.05)) {
+          addEdge(edge, faceTouchingEdge(edge));
+          matched = true;
+        }
+      }
+    }
+    // Pass 3: resize-invariant normal fallback — only when the endpoints have
+    // moved off the shape entirely (a parametric resize repositions the curve),
+    // so the precise passes win whenever the selection still traces the body.
     if (!matched && ep.hasNormals) {
       for (TopExp_Explorer e2(shape, TopAbs_EDGE); e2.More(); e2.Next()) {
         TopoDS_Edge edge = TopoDS::Edge(e2.Current());

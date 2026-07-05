@@ -21,11 +21,12 @@ vi.mock("../../../store", () => {
   return { useStore };
 });
 
-let buildItemShapeLocal, ops, replayUpTo;
+let buildItemShapeLocal, ops, replayUpTo, regenerateItemsForResolution;
 beforeAll(async () => {
   await ensureOcc();
   ({ buildItemShapeLocal, ops } = await import("../../occOps.js"));
   ({ replayUpTo } = await import("../../../store/internals.js"));
+  ({ regenerateItemsForResolution } = await import("../../regenerateItems.js"));
 }, 60000);
 
 const loadScene = () => {
@@ -116,5 +117,54 @@ describe("chamfer the top ring of an embossed hollow cylinder", () => {
     const embossItem = items.find((i) => i.id === 2);
     const sid = buildItemShapeLocal(embossItem, items, 0.1);
     expect(sid).not.toBeNull();
+  });
+
+  it("regenerates at a finer precision (toggling high-res print mode)", async () => {
+    // The chamfer was created at the bake precision; toggling print mode
+    // rebuilds the body at a FINER density, moving every stored endpoint.  The
+    // proximity match must still find the ring so the chamfer isn't dropped
+    // (it used to fail to re-match and keep the stale coarse geometry).
+    const data = loadScene();
+    const items = replayUpTo(data.history, data.history.length - 1);
+    const embossItem = items.find((i) => i.id === 2);
+    const pp = embossItem.regenerator.regeneratedAt ?? 0.1;
+
+    const created = await ops.chamferOrFilletItem({
+      source: embossItem,
+      subGeo: {
+        edges: outerTopRingFromMesh(embossItem.geometryData.positions),
+        faces: [],
+      },
+      amount: 0.05,
+      angleRad: null,
+      segments: 1,
+      allItems: items,
+      printPrecision: pp,
+    });
+    expect(created).toBeTruthy();
+
+    // Re-run the committed chamfer at a much finer precision.
+    const chamferItem = {
+      id: 2,
+      type: "csg",
+      position: created.position,
+      geometryData: created.geometryData,
+      regenerator: {
+        kind: "chamfer",
+        source: embossItem,
+        subGeo: created.resolvedSubGeo,
+        amount: 0.05,
+        segments: 1,
+        centerOffset: created.centerOffset,
+        regeneratedAt: "dirty",
+      },
+    };
+    const out = await regenerateItemsForResolution(
+      [items[0], items[1], chamferItem],
+      0.02,
+    );
+    const regen = out.find((i) => i.id === 2);
+    expect(regen.regenerator.regenFailed).toBeFalsy();
+    expect(regen.regenerator.regeneratedAt).toBe(0.02);
   });
 });
