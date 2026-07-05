@@ -1171,23 +1171,48 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       return Napi::Number::New(env, StoreShape(shape));
     }
 
-    try {
-      BRepFilletAPI_MakeChamfer mk(shape);
-      auto selected = SelectSubGeoEdges(shape, spec);
+    // Build the chamfer on a given shape.  A null return means no edges
+    // matched (sentinel); a throw means a genuine computation failure.
+    auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
+      BRepFilletAPI_MakeChamfer mk(s);
+      auto selected = SelectSubGeoEdges(s, spec);
+      if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) {
-        if (useAngle && !se.refFace.IsNull()) {
+        if (useAngle && !se.refFace.IsNull())
           mk.AddDA(amount, angleRad, se.edge, se.refFace);
-        } else {
+        else
           mk.Add(amount, se.edge);
-        }
       }
-
-      // 0 = sentinel "no edges matched" — bridge throws a descriptive error.
-      if (selected.empty()) return Napi::Number::New(env, 0);
       mk.Build();
       if (!mk.IsDone())
-        throw std::runtime_error("chamfer computation failed (geometry rejected the operation)");
-      return Napi::Number::New(env, StoreShape(mk.Shape()));
+        throw std::runtime_error(
+          "chamfer computation failed (geometry rejected the operation)");
+      return mk.Shape();
+    };
+
+    try {
+      TopoDS_Shape result;
+      try {
+        result = attempt(shape);
+      } catch (const std::exception&) {
+        // Retry on a same-domain-unified copy.  Booleans / shell / timeline
+        // regeneration can leave sliver coplanar faces and hairline seams that
+        // MakeChamfer rejects even when the distance is small — the very
+        // artefacts the union path unifies away up front.  Merging them into
+        // clean single faces lets the chamfer run; if it still fails it's a
+        // real limit and the outer catch reports it.
+        TopoDS_Shape unified = shape;
+        try {
+          ShapeUpgrade_UnifySameDomain u(shape, Standard_True, Standard_True,
+                                         Standard_True);
+          u.Build();
+          unified = u.Shape();
+        } catch (...) { /* keep the original if unify throws */ }
+        result = attempt(unified);
+      }
+      // 0 = sentinel "no edges matched" — the bridge throws a descriptive error.
+      if (result.IsNull()) return Napi::Number::New(env, 0);
+      return Napi::Number::New(env, StoreShape(result));
     } catch (const std::exception& e) {
       // The usual cause is a distance wider than the material the chamfer
       // runs into — e.g. chamfering only the OUTER rim of a hollow body by
@@ -1218,16 +1243,38 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
       return Napi::Number::New(env, StoreShape(shape));
     }
 
-    try {
-      BRepFilletAPI_MakeFillet mk(shape, ChFi3d_Rational);
-      auto selected = SelectSubGeoEdges(shape, spec);
+    // Null return = no edges matched (sentinel); throw = computation failure.
+    auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
+      BRepFilletAPI_MakeFillet mk(s, ChFi3d_Rational);
+      auto selected = SelectSubGeoEdges(s, spec);
+      if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) mk.Add(radius, se.edge);
-
-      if (selected.empty()) return Napi::Number::New(env, 0);
       mk.Build();
       if (!mk.IsDone())
-        throw std::runtime_error("fillet computation failed (geometry rejected the operation)");
-      return Napi::Number::New(env, StoreShape(mk.Shape()));
+        throw std::runtime_error(
+          "fillet computation failed (geometry rejected the operation)");
+      return mk.Shape();
+    };
+
+    try {
+      TopoDS_Shape result;
+      try {
+        result = attempt(shape);
+      } catch (const std::exception&) {
+        // Retry on a same-domain-unified copy — see ChamferShape.  Sliver
+        // coplanar faces / hairline seams left by booleans, shell or timeline
+        // regeneration make MakeFillet reject an otherwise-valid radius.
+        TopoDS_Shape unified = shape;
+        try {
+          ShapeUpgrade_UnifySameDomain u(shape, Standard_True, Standard_True,
+                                         Standard_True);
+          u.Build();
+          unified = u.Shape();
+        } catch (...) { /* keep the original if unify throws */ }
+        result = attempt(unified);
+      }
+      if (result.IsNull()) return Napi::Number::New(env, 0);
+      return Napi::Number::New(env, StoreShape(result));
     } catch (const std::exception& e) {
       // Same limit as chamfer: a radius wider than the material it rolls into
       // (e.g. a hollow body's wall) is rejected — round the whole rim/face for
