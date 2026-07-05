@@ -273,29 +273,30 @@ export function useSceneSync({
     const fullRecalc =
       upstreamChanged || precisionChanged || (isFirst && hasStale);
 
-    // While a sketch is open, defer the full timeline recalc until it's closed
-    // — recomputing every downstream step on each point drag is wasteful (and
-    // the 3D solids are hidden behind the sketch anyway).  The deferred recalc
-    // runs in the sketch-close effect below.
-    if (fullRecalc && sketchMode) {
+    // Anything to do?  Either an upstream/precision change, or the viewed step
+    // has a stale/uncomputed cache (e.g. navigating to a step we haven't built
+    // yet).  Nothing stale and no change — e.g. adding a primitive — skips the
+    // regen pass entirely (no busy flash).
+    const needsRecalc = fullRecalc || hasStale;
+    if (!needsRecalc) return;
+
+    // While a sketch is open, defer the recalc until it's closed — recomputing
+    // every downstream step on each point drag is wasteful (and the 3D solids
+    // are hidden behind the sketch anyway).  Runs in the sketch-close effect.
+    if (sketchMode) {
       pendingRecalcRef.current = true;
       return;
     }
-    // Nothing to do: no upstream change, same precision, and no stale cache — e.g.
-    // adding a primitive — so skip the regen pass entirely (no busy flash).
-    if (!fullRecalc && !hasStale) return;
 
-    // The orchestrator is a UI-only module that's never reachable from
-    // the OCC worker's transitive imports, so it can route per-item regen
-    // through occClient → worker without creating a bundling cycle.
+    // The orchestrator is a UI-only module that's never reachable from the OCC
+    // worker's transitive imports, so it can route per-item regen through
+    // occClient → worker without creating a bundling cycle.  recalculateTimeline
+    // is now incremental (JIT) — it rebuilds only stale/dirty steps up to the
+    // viewed one and stamps the result back into history, so navigating to an
+    // already-built step is free and a first visit caches the step.
     import("../../three/regenerateOrchestrator.js").then((m) => {
-      if (fullRecalc) {
-        pendingRecalcRef.current = false;
-        m.recalculateTimeline();
-      } else {
-        // First load or a stale cache: the cheap current-view regen suffices.
-        m.regenerateForResolution(printPrecision);
-      }
+      pendingRecalcRef.current = false;
+      m.recalculateTimeline();
     });
   }, [items, printPrecision, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 

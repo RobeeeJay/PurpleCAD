@@ -38,6 +38,20 @@ export async function regenerateForResolution(printPrecision) {
   }
 }
 
+// Incremental (JIT) recompute predicate: can this step reuse its existing
+// cache?  Yes when the entry isn't flagged dirty AND the item's geometry is
+// fresh for the current precision — a regenerated body whose regeneratedAt
+// matches, or static import/split geometry that carries no recipe.  Anything
+// else (dirty, no geometry, or tessellated at a different precision) rebuilds.
+export function entryCacheValid(entry, cachedItem, precision) {
+  return (
+    !entry?.dirty &&
+    !!cachedItem?.geometryData &&
+    (!cachedItem.regenerator ||
+      cachedItem.regenerator.regeneratedAt === precision)
+  );
+}
+
 // The history entry whose geometry cache this instruction owns: a CSG
 // create, or a modify that stamps a geometryData / regenerator patch (e.g.
 // a chamfer turning an extrude into a CSG).  Returns the affected item id,
@@ -67,8 +81,18 @@ export async function recalculateTimeline() {
   const history = state.history;
   const printPrecision = activePrecision(state);
 
+  // JIT bound: only recompute up to the step the user is parked on.  Steps
+  // AFTER the viewed one keep their existing cache and are recomputed lazily
+  // when navigated to — we don't rebuild off-screen future geometry.
+  const bound =
+    state.activeHistoryId !== null
+      ? history.findIndex((h) => h.id === state.activeHistoryId)
+      : history.length - 1;
+  const jitBound = bound !== -1 ? bound : history.length - 1;
+
   const total = history.reduce(
-    (n, e) => (geomTargetId(e.instruction) != null ? n + 1 : n),
+    (n, e, i) =>
+      i <= jitBound && geomTargetId(e.instruction) != null ? n + 1 : n,
     0,
   );
   let done = 0;
@@ -93,15 +117,6 @@ export async function recalculateTimeline() {
   // they already had (still valid — regen only dirties one step at a time).
   const cancelEpoch = useStore.getState().cancelEpoch;
 
-  // JIT bound: only recompute up to the step the user is parked on.  Steps
-  // AFTER the viewed one keep their existing cache and are recomputed lazily
-  // when navigated to — we don't rebuild off-screen future geometry.
-  const bound =
-    state.activeHistoryId !== null
-      ? history.findIndex((h) => h.id === state.activeHistoryId)
-      : history.length - 1;
-  const jitBound = bound !== -1 ? bound : history.length - 1;
-
   let accItems = [];
   const newHistory = [];
   for (let idx = 0; idx < history.length; idx++) {
@@ -118,6 +133,18 @@ export async function recalculateTimeline() {
     accItems = applyInstruction(accItems, entry.instruction);
     const targetId = geomTargetId(entry.instruction);
     if (targetId == null) {
+      newHistory.push(entry);
+      continue;
+    }
+    // Incremental: reuse this step's cache when it's still valid — the entry
+    // isn't flagged dirty and its geometry is fresh for the current precision
+    // (or it's static import/split geometry with no recipe).  Only stale or
+    // dirty steps are rebuilt, so an unchanged step (and navigating over it) is
+    // free instead of a forced recompute.
+    const cached = accItems.find((it) => it.id === targetId);
+    if (entryCacheValid(entry, cached, printPrecision)) {
+      done += 1;
+      useStore.getState().setRegenProgress({ current: done, total });
       newHistory.push(entry);
       continue;
     }
@@ -176,14 +203,17 @@ export async function recalculateTimeline() {
       regenerator: reg.regenerator,
       geometryData: reg.geometryData,
     };
+    // Freshly recomputed → this step's cache is clean again.
     newHistory.push(
       inst.type === "create"
         ? {
             ...entry,
+            dirty: false,
             instruction: { ...inst, item: { ...inst.item, ...geom } },
           }
         : {
             ...entry,
+            dirty: false,
             instruction: { ...inst, patches: { ...inst.patches, ...geom } },
           },
     );
