@@ -47,6 +47,7 @@ async function regenerateChamfer(
   printPrecision,
   currentPosition,
   currentDepth,
+  solidOpts = null,
 ) {
   const rawSubGeo = regenerator.subGeo || { edges: [], faces: [] };
   if (
@@ -89,6 +90,7 @@ async function regenerateChamfer(
       segments: regenerator.segments,
       allItems: liveItems,
       printPrecision,
+      ...(solidOpts || {}),
     });
   } catch (err) {
     console.warn(
@@ -121,6 +123,9 @@ async function regenerateChamfer(
     position,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
+    // Present only when the caller passed retainResult (timeline solid cache);
+    // undefined on the live-preview path, which releases its result as before.
+    shapeId: result.shapeId,
   };
 }
 
@@ -130,6 +135,7 @@ async function regeneratePushPull(
   printPrecision,
   currentPosition,
   currentDepth,
+  solidOpts = null,
 ) {
   const rawSubGeo = regenerator.subGeo || { faces: [] };
   if ((rawSubGeo.faces?.length || 0) === 0) return null;
@@ -156,6 +162,7 @@ async function regeneratePushPull(
       distance: regenerator.distance ?? 0,
       allItems: liveItems,
       printPrecision,
+      ...(solidOpts || {}),
     });
   } catch (err) {
     console.warn(
@@ -184,6 +191,9 @@ async function regeneratePushPull(
     position,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
+    // Present only when the caller passed retainResult (timeline solid cache);
+    // undefined on the live-preview path, which releases its result as before.
+    shapeId: result.shapeId,
   };
 }
 
@@ -195,6 +205,7 @@ async function regenerateShell(
   accumulatedItems,
   printPrecision,
   currentPosition,
+  solidOpts = null,
 ) {
   const liveItems = accumulatedItems.map((i) =>
     withLivePolygons(i, accumulatedItems, printPrecision),
@@ -211,6 +222,7 @@ async function regenerateShell(
       thickness: regenerator.thickness ?? 0,
       allItems: liveItems,
       printPrecision,
+      ...(solidOpts || {}),
     });
   } catch (err) {
     console.warn(
@@ -236,6 +248,9 @@ async function regenerateShell(
     position,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
+    // Present only when the caller passed retainResult (timeline solid cache);
+    // undefined on the live-preview path, which releases its result as before.
+    shapeId: result.shapeId,
   };
 }
 
@@ -245,6 +260,7 @@ async function regenerateDraft(
   accumulatedItems,
   printPrecision,
   currentPosition,
+  solidOpts = null,
 ) {
   const liveItems = accumulatedItems.map((i) =>
     withLivePolygons(i, accumulatedItems, printPrecision),
@@ -264,6 +280,7 @@ async function regenerateDraft(
       flip: !!regenerator.flip,
       allItems: liveItems,
       printPrecision,
+      ...(solidOpts || {}),
     });
   } catch (err) {
     console.warn(
@@ -289,6 +306,9 @@ async function regenerateDraft(
     position,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
+    // Present only when the caller passed retainResult (timeline solid cache);
+    // undefined on the live-preview path, which releases its result as before.
+    shapeId: result.shapeId,
   };
 }
 
@@ -298,6 +318,7 @@ async function regenerateHole(
   accumulatedItems,
   printPrecision,
   currentPosition,
+  solidOpts = null,
 ) {
   const liveItems = accumulatedItems.map((i) =>
     withLivePolygons(i, accumulatedItems, printPrecision),
@@ -314,6 +335,7 @@ async function regenerateHole(
       hole: regenerator.hole,
       allItems: liveItems,
       printPrecision,
+      ...(solidOpts || {}),
     });
   } catch (err) {
     console.warn(`Hole regen failed (${err.message}); keeping geometry.`);
@@ -337,6 +359,9 @@ async function regenerateHole(
     position,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
+    // Present only when the caller passed retainResult (timeline solid cache);
+    // undefined on the live-preview path, which releases its result as before.
+    shapeId: result.shapeId,
   };
 }
 
@@ -347,6 +372,7 @@ async function regenerateEmboss(
   accumulatedItems,
   printPrecision,
   currentPosition,
+  solidOpts = null,
 ) {
   const liveItems = accumulatedItems.map((i) =>
     withLivePolygons(i, accumulatedItems, printPrecision),
@@ -373,6 +399,7 @@ async function regenerateEmboss(
       stamp,
       allItems: liveItems,
       printPrecision,
+      ...(solidOpts || {}),
     });
   } catch (err) {
     console.warn(`Emboss regen failed (${err.message}); keeping geometry.`);
@@ -396,6 +423,7 @@ async function regenerateEmboss(
     position,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
+    shapeId: result.shapeId,
     stamp,
   };
 }
@@ -452,6 +480,9 @@ async function regenerateRevolve(
     position,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
+    // Present only when the caller passed retainResult (timeline solid cache);
+    // undefined on the live-preview path, which releases its result as before.
+    shapeId: result.shapeId,
   };
 }
 
@@ -666,10 +697,20 @@ async function regenerateExtrudeUnion(
 // busy-indicator's timeline-recalculation progress bar.  Items that
 // skip the regen path (no regenerator, or already at the requested
 // precision) are NOT counted: there's nothing to wait for there.
+// `solidCtx`, when present (the timeline JIT cache path only), lets each
+// single-input op consume a cached input solid instead of rebuilding its whole
+// recipe in OCC, and hand its own result solid back to the cache:
+//   { inputs: Map<itemId, shapeId|null>, results: Map<itemId, shapeId> }
+// The op still builds the source JS object + remaps its subGeo (cheap), so the
+// cached input — which always reflects the current sketch, because a changed
+// input is recomputed-and-recached before its consumer runs here — stays
+// consistent with the remap.  Absent solidCtx (live preview / resolution
+// sweep), ops release their result as before and nothing is cached.
 export async function regenerateItemsForResolution(
   items,
   printPrecision,
   onProgress = null,
+  solidCtx = null,
 ) {
   if (!items || items.length === 0) return items;
   const total = items.reduce((n, item) => {
@@ -694,6 +735,15 @@ export async function regenerateItemsForResolution(
       out.push(item);
       continue;
     }
+    // Timeline cache path: hand this op its cached input solid (or null → the
+    // op rebuilds from source) and ask it to retain its result so we can cache
+    // it.  Only the single-input ops below participate.
+    const solidOpts = solidCtx
+      ? {
+          sourceShapeId: solidCtx.inputs.get(item.id) ?? null,
+          retainResult: true,
+        }
+      : null;
     let result = null;
     if (r.kind === "chamfer") {
       result = await regenerateChamfer(
@@ -702,6 +752,7 @@ export async function regenerateItemsForResolution(
         printPrecision,
         item.position,
         item.depth,
+        solidOpts,
       );
     } else if (r.kind === "pushpull") {
       result = await regeneratePushPull(
@@ -710,15 +761,40 @@ export async function regenerateItemsForResolution(
         printPrecision,
         item.position,
         item.depth,
+        solidOpts,
       );
     } else if (r.kind === "shell") {
-      result = await regenerateShell(r, out, printPrecision, item.position);
+      result = await regenerateShell(
+        r,
+        out,
+        printPrecision,
+        item.position,
+        solidOpts,
+      );
     } else if (r.kind === "hole") {
-      result = await regenerateHole(r, out, printPrecision, item.position);
+      result = await regenerateHole(
+        r,
+        out,
+        printPrecision,
+        item.position,
+        solidOpts,
+      );
     } else if (r.kind === "emboss") {
-      result = await regenerateEmboss(r, out, printPrecision, item.position);
+      result = await regenerateEmboss(
+        r,
+        out,
+        printPrecision,
+        item.position,
+        solidOpts,
+      );
     } else if (r.kind === "draft") {
-      result = await regenerateDraft(r, out, printPrecision, item.position);
+      result = await regenerateDraft(
+        r,
+        out,
+        printPrecision,
+        item.position,
+        solidOpts,
+      );
     } else if (r.kind === "revolve") {
       result = await regenerateRevolve(r, out, printPrecision, item.position);
     } else if (r.kind === "pipe") {
@@ -767,6 +843,12 @@ export async function regenerateItemsForResolution(
       continue;
     }
     changed = true;
+    // Hand this op's retained result solid to the timeline cache so the next
+    // op in the chain can consume it instead of rebuilding.  Only set when the
+    // op actually retained one (single-input ops on the solidCtx path).
+    if (solidCtx && result.shapeId != null) {
+      solidCtx.results.set(item.id, result.shapeId);
+    }
     // Carry the freshly-computed centerOffset back onto the chamfer
     // regenerator so buildItemShapeLocal stays in sync with the bbox
     // a re-tessellation just produced.  Clear any prior failure flag.

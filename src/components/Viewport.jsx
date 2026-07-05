@@ -32,6 +32,7 @@ import { useSceneSync } from "./viewport/useSceneSync";
 import "../styles/Viewport.css";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
+import { clearSolids } from "../three/solidCache.js";
 
 const Viewport = () => {
   const containerRef = useRef(null);
@@ -282,6 +283,14 @@ const Viewport = () => {
     setSketchDrawPhase,
     setRotationState,
   });
+
+  // Drop the timeline's cached OCC solids on any document boundary (new / load /
+  // project switch — each bumps cameraResetTrigger).  Entry ids restart per
+  // document, so a stale solid could otherwise be handed to a colliding id in
+  // the next document.  Clearing is always safe: a miss just rebuilds.
+  useEffect(() => {
+    clearSolids();
+  }, [cameraResetTrigger]);
 
   return (
     <div className="viewport-container">

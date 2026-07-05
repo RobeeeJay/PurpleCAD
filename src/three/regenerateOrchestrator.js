@@ -21,6 +21,7 @@ import {
 } from "../store/internals.js";
 import { regenerateItemsForResolution } from "./regenerateItems.js";
 import { activePrecision } from "./resolution.js";
+import { getSolid, setSolid } from "./solidCache.js";
 
 export async function regenerateForResolution(printPrecision) {
   const state = useStore.getState();
@@ -119,6 +120,11 @@ export async function recalculateTimeline() {
 
   let accItems = [];
   const newHistory = [];
+  // itemId → the most recent entry id that produced that item's geometry.  A
+  // modify op's cached INPUT solid is the solid of its item's previous entry;
+  // keying the solid cache by entry id (not item id) is essential because
+  // in-place chains (extrude→chamfer→emboss) all share one item id.
+  const lastEntryForItem = new Map();
   for (let idx = 0; idx < history.length; idx++) {
     if (useStore.getState().cancelEpoch !== cancelEpoch) {
       for (let j = idx; j < history.length; j++) newHistory.push(history[j]);
@@ -146,6 +152,10 @@ export async function recalculateTimeline() {
       done += 1;
       useStore.getState().setRegenProgress({ current: done, total });
       newHistory.push(entry);
+      // A downstream op reads this (unchanged) step as its input solid; record
+      // it as the item's latest producer.  Its solid may or may not be cached
+      // this session — if not, the consumer simply rebuilds (correct fallback).
+      lastEntryForItem.set(targetId, entry.id);
       continue;
     }
     // Dirty only this step's item; everything upstream keeps the cache an
@@ -185,7 +195,25 @@ export async function recalculateTimeline() {
         ...(recenter ? { position: undefined } : {}),
       };
     });
-    accItems = await regenerateItemsForResolution(accItems, printPrecision);
+    // Feed this step its cached input solid (the previous entry that produced
+    // this item) and collect its retained result solid.  A miss (null input)
+    // just makes the op rebuild from its source — always correct, only slower.
+    const inputEntryId = lastEntryForItem.get(targetId);
+    const inputSolid =
+      inputEntryId != null ? getSolid(inputEntryId, printPrecision) : null;
+    const solidCtx = {
+      inputs: new Map([[targetId, inputSolid]]),
+      results: new Map(),
+    };
+    accItems = await regenerateItemsForResolution(
+      accItems,
+      printPrecision,
+      null,
+      solidCtx,
+    );
+    const resultSolid = solidCtx.results.get(targetId);
+    if (resultSolid != null) setSolid(entry.id, resultSolid, printPrecision);
+    lastEntryForItem.set(targetId, entry.id);
     done += 1;
     useStore.getState().setRegenProgress({ current: done, total });
     await breathe();
