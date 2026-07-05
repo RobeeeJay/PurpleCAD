@@ -7,6 +7,7 @@ import {
   withOrphanFlags,
   saveTimeline,
   markCsgDirty,
+  relinkSourceChain,
   UNDO_LIMIT,
 } from "./internals.js";
 
@@ -52,7 +53,17 @@ export const createHistoryNavSlice = (set) => ({
       const deletedIndex = state.history.findIndex((h) => h.id === historyId);
       if (deletedIndex <= 0) return {};
 
-      const rawHistory = state.history.filter((h) => h.id !== historyId);
+      // If the deleted step was an in-place op on an item (chamfer, emboss, …),
+      // re-point the sources of any LATER ops on that same item so the deleted
+      // layer is spliced out of their frozen source chains — otherwise a
+      // downstream emboss keeps rebuilding the removed chamfer.
+      const deletedInst = state.history[deletedIndex].instruction;
+      const affectedId =
+        deletedInst?.type === "modify" ? deletedInst.itemId : null;
+
+      let rawHistory = state.history.filter((h) => h.id !== historyId);
+      if (affectedId != null)
+        rawHistory = relinkSourceChain(rawHistory, affectedId, deletedIndex);
 
       let newActiveId = state.activeHistoryId;
       if (newActiveId === historyId) {

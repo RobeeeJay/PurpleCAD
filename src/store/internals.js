@@ -88,6 +88,57 @@ export const replayUpTo = (history, upToIndex) => {
   );
 };
 
+// Re-derive the `regenerator.source` of each in-place op (chamfer/emboss/…) on
+// `itemId` from the item's accumulated state just BEFORE that step, for every
+// step at or after `fromIndex`.  Each op modifies the item in place, so its
+// frozen source is a snapshot of the previous step's result — when a middle op
+// is deleted, downstream sources still embed it (the emboss keeps rebuilding a
+// removed chamfer).  Walking the surviving history and re-pointing each source
+// at the live upstream state splices the deleted layer out of the whole chain
+// (nested sources included, since each source is rebuilt from the corrected
+// earlier state).  Marks the re-pointed steps dirty so the recalc rebuilds them.
+export const relinkSourceChain = (history, itemId, fromIndex = 0) => {
+  let acc = null; // the item's accumulated state as we walk
+  let changed = false;
+  const out = history.map((entry, idx) => {
+    const inst = entry.instruction;
+    if (inst?.type === "create" && inst.item?.id === itemId) {
+      acc = inst.item;
+      return entry;
+    }
+    if (inst?.type === "createGroup") {
+      const found = (inst.items || []).find((it) => it.id === itemId);
+      if (found) acc = found;
+      return entry;
+    }
+    if (inst?.type === "delete" && inst.itemId === itemId) {
+      acc = null;
+      return entry;
+    }
+    if (inst?.type === "transform" && inst.itemId === itemId && acc) {
+      acc = applyInstruction([acc], inst)[0];
+      return entry;
+    }
+    if (inst?.type === "modify" && inst.itemId === itemId) {
+      const patches = inst.patches;
+      if (idx >= fromIndex && acc && patches?.regenerator?.source) {
+        const regen = patches.regenerator;
+        const newPatches = {
+          ...patches,
+          regenerator: { ...regen, source: acc, regeneratedAt: "dirty" },
+        };
+        acc = Object.assign({}, acc, newPatches);
+        changed = true;
+        return { ...entry, instruction: { ...inst, patches: newPatches } };
+      }
+      if (acc) acc = Object.assign({}, acc, patches);
+      return entry;
+    }
+    return entry;
+  });
+  return changed ? out : history;
+};
+
 // The set of hidden item ids a freshly-inserted entry should start from —
 // inherited from the entry it's being inserted after.
 export const inheritedHiddenIds = (history, insertIdx) =>
