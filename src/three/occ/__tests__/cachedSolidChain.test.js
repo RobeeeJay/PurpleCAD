@@ -106,4 +106,19 @@ describe("chamfer on a cached input solid", () => {
       triCount(first.geometryData),
     );
   });
+
+  it("the shell op honours a cached input solid (matches frozen-source)", async () => {
+    const args = { thickness: 0.2, allItems: [cubeItem], printPrecision: 0.05 };
+    const viaSource = await ops.shellItem({ source: cubeItem, ...args });
+    const cubeId = occ.makeBox(-1, -1, -1, 1, 1, 1);
+    const viaCache = await ops.shellItem({ sourceShapeId: cubeId, ...args });
+    occ.releaseShape(cubeId);
+    expect(viaCache).toBeTruthy();
+    expect(triCount(viaCache.geometryData)).toBe(
+      triCount(viaSource.geometryData),
+    );
+    const a = extent(viaCache.geometryData),
+      b = extent(viaSource.geometryData);
+    for (let k = 0; k < 3; k++) expect(a[k]).toBeCloseTo(b[k], 5);
+  });
 });

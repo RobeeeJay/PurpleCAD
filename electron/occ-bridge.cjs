@@ -368,6 +368,44 @@ function bboxOf(positions) {
   return { minX, minY, minZ, maxX, maxY, maxZ };
 }
 
+// ── Cached-solid op helpers (JIT timeline) — mirror occOps.js ──────────────
+// A source-based op can take the previous entry's CACHED solid (sourceShapeId)
+// instead of rebuilding the frozen `source`.  We only own/release an id we
+// built ourselves; a cached id is owned by its entry and left alive.
+function resolveSourceSolid(sourceShapeId, source, allItems, precision) {
+  const owns = sourceShapeId == null;
+  const id = owns ? buildItemShapeLocal(source, allItems, precision) : sourceShapeId;
+  return { id, owns };
+}
+
+// Tessellate + bbox-centre an op result, releasing it unless the caller wants
+// to cache it (retainResult).  `extra` merges op-specific return fields.
+function finishSolidResult(resultId, precision, retainResult, extra) {
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, precision ?? 0.5);
+  } finally {
+    if (!retainResult) occ.releaseShape(resultId);
+  }
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
+  }
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
+    ...(retainResult ? { shapeId: resultId } : null),
+    ...extra,
+  };
+}
+
 // ── Shape builder ────────────────────────────────────────────────────────
 
 // Mirrors csgUtils.js#buildItemShapeLocal.
@@ -860,8 +898,8 @@ function chamferOrFilletItem({ source, sourceShapeId, retainResult, subGeo, amou
 
 // Mirrors occOps.js#pushPullFaces — move the selected faces along their
 // normals by `distance` (signed: +pull / -push), then bbox-centre the result.
-function pushPullFaces({ source, subGeo, distance, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function pushPullFaces({ source, sourceShapeId, retainResult, subGeo, distance, allItems, printPrecision }) {
+  const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe (boolean / chamfer / push-pull) is missing or references deleted inputs."
@@ -872,7 +910,7 @@ function pushPullFaces({ source, subGeo, distance, allItems, printPrecision }) {
   try {
     resultId = occ.pushPullFaces(sourceId, subGeo, distance);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -882,33 +920,13 @@ function pushPullFaces({ source, subGeo, distance, allItems, printPrecision }) {
     );
   }
 
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
-
-  return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
-    resolvedSubGeo: subGeo,
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult, { resolvedSubGeo: subGeo });
 }
 
 // Mirrors occOps.js#shellItem — hollow the source solid into a shell of
 // `thickness` (scene units), then bbox-centre the result.
-function shellItem({ source, thickness, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function shellItem({ source, sourceShapeId, retainResult, thickness, allItems, printPrecision }) {
+  const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs."
@@ -919,7 +937,7 @@ function shellItem({ source, thickness, allItems, printPrecision }) {
   try {
     resultId = occ.makeShell(sourceId, thickness);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -928,32 +946,13 @@ function shellItem({ source, thickness, allItems, printPrecision }) {
     );
   }
 
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
-
-  return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Mirrors occOps.js#draftItem — taper selected faces about the neutral (main)
 // face's plane, then bbox-centre.
-function draftItem({ source, neutral, faces, angleDeg, flip, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function draftItem({ source, sourceShapeId, retainResult, neutral, faces, angleDeg, flip, allItems, printPrecision }) {
+  const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs."
@@ -964,31 +963,14 @@ function draftItem({ source, neutral, faces, angleDeg, flip, allItems, printPrec
     const angleRad = (((angleDeg || 0) * Math.PI) / 180) * (flip ? -1 : 1);
     resultId = occ.draftFaces(sourceId, neutral, { faces: faces || [] }, angleRad);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
   if (!resultId) {
     throw new Error(
       "Draft failed — try a smaller angle, or faces that share an edge with the main face."
     );
   }
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
-  return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Mirrors occOps.js#buildHoleShape — cut a bore (+ optional ISO thread groove)
@@ -1038,8 +1020,8 @@ function buildHoleShape(partId, h) {
 }
 
 // Mirrors occOps.js#holeItem — drill a hole into the source body, bbox-centred.
-function holeItem({ source, hole, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function holeItem({ source, sourceShapeId, retainResult, hole, allItems, printPrecision }) {
+  const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs."
@@ -1049,31 +1031,14 @@ function holeItem({ source, hole, allItems, printPrecision }) {
   try {
     resultId = buildHoleShape(sourceId, hole);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
   if (!resultId) {
     throw new Error(
       "Hole failed — the cut produced nothing. Check the diameter/length and that the point is on the body."
     );
   }
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
-  return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Build the emboss/deboss stamp tool from a baked recipe (see occOps.js).
@@ -1166,8 +1131,8 @@ function embossResultShape(targetId, stamp, printPrecision) {
   return result || 0;
 }
 
-function embossItem({ source, stamp, allItems, printPrecision }) {
-  const targetId = buildItemShapeLocal(source, allItems, printPrecision);
+function embossItem({ source, sourceShapeId, retainResult, stamp, allItems, printPrecision }) {
+  const { id: targetId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (targetId == null) {
     throw new Error("Could not rebuild the body to emboss onto.");
   }
@@ -1175,7 +1140,7 @@ function embossItem({ source, stamp, allItems, printPrecision }) {
   try {
     resultId = embossResultShape(targetId, stamp, printPrecision);
   } finally {
-    occ.releaseShape(targetId);
+    if (owns) occ.releaseShape(targetId);
   }
   if (!resultId) {
     throw new Error("Emboss failed — the geometry didn't reach the face. Check distance/scale/offset.");
@@ -1184,14 +1149,18 @@ function embossItem({ source, stamp, allItems, printPrecision }) {
   try {
     tess = occ.tessellate(resultId, printPrecision ?? 0.5);
   } finally {
-    occ.releaseShape(resultId);
+    if (!retainResult) occ.releaseShape(resultId);
   }
-  if (!tess) return null;
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
   // No bbox-centring — anchor to the body's frame so the offset doesn't drag the
   // object (see occOps.js embossItem).
   return {
     geometryData: { positions: Array.from(tess.positions), normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx: 0, cy: 0, cz: 0 },
+    ...(retainResult ? { shapeId: resultId } : null),
   };
 }
 

@@ -48,6 +48,56 @@ function bboxOf(positions) {
   return { minX, minY, minZ, maxX, maxY, maxZ };
 }
 
+// ── Cached-solid op helpers (JIT timeline) ─────────────────────────────────
+// A source-based op (chamfer/emboss/shell/hole/draft/push-pull/…) can take the
+// previous entry's CACHED solid instead of rebuilding the frozen `source`.
+// resolveSourceSolid returns the input id and whether WE own it (built it, so
+// we must release it); a cached id is owned by its entry and left alive.
+function resolveSourceSolid(sourceShapeId, source, allItems, precision) {
+  const owns = sourceShapeId == null;
+  const id = owns
+    ? buildItemShapeLocal(source, allItems, precision)
+    : sourceShapeId;
+  return { id, owns };
+}
+
+// Tessellate + bbox-centre an op's result solid, releasing it unless the caller
+// wants to cache it (retainResult).  `extra` merges op-specific return fields
+// (e.g. resolvedSubGeo, stamp).  Returns null when tessellation fails.
+function finishSolidResult(resultId, precision, retainResult, extra) {
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, precision ?? 0.5);
+  } finally {
+    if (!retainResult) occ.releaseShape(resultId);
+  }
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2,
+    cy = (minY + maxY) / 2,
+    cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx;
+    centered[i + 1] -= cy;
+    centered[i + 2] -= cz;
+  }
+  return {
+    geometryData: {
+      positions: centered,
+      normals: null,
+      indices: Array.from(tess.indices),
+    },
+    centerOffset: { cx, cy, cz },
+    ...(retainResult ? { shapeId: resultId } : null),
+    ...extra,
+  };
+}
+
 // Resolve a revolve axis ({ sketchId, shapeIdx }) to its live endpoints in the
 // PROFILE sketch's local 3D frame, so the axis line can live in a different
 // sketch (its world position is mapped into the profile's frame; a z component
@@ -996,12 +1046,19 @@ async function chamferOrFilletItem({
 // result on its bbox so the rendered mesh stays origin-centred.
 async function pushPullFaces({
   source,
+  sourceShapeId,
+  retainResult,
   subGeo,
   distance,
   allItems,
   printPrecision,
 }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  const { id: sourceId, owns } = resolveSourceSolid(
+    sourceShapeId,
+    source,
+    allItems,
+    printPrecision,
+  );
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe (boolean / chamfer / push-pull) is missing or references deleted inputs.",
@@ -1012,7 +1069,7 @@ async function pushPullFaces({
   try {
     resultId = occ.pushPullFaces(sourceId, subGeo, distance);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -1022,41 +1079,28 @@ async function pushPullFaces({
     );
   }
 
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2,
-    cy = (minY + maxY) / 2,
-    cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx;
-    centered[i + 1] -= cy;
-    centered[i + 2] -= cz;
-  }
-  return {
-    geometryData: {
-      positions: centered,
-      normals: null,
-      indices: Array.from(tess.indices),
-    },
-    centerOffset: { cx, cy, cz },
+  return finishSolidResult(resultId, printPrecision, retainResult, {
     resolvedSubGeo: subGeo,
-  };
+  });
 }
 
 // Hollow a solid into a shell of `thickness` (scene units).  Mirrors
 // pushPullFaces: rebuild the source, run the native shell, tessellate, and
 // bbox-centre the result so the rendered mesh stays origin-centred.
-async function shellItem({ source, thickness, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+async function shellItem({
+  source,
+  sourceShapeId,
+  retainResult,
+  thickness,
+  allItems,
+  printPrecision,
+}) {
+  const { id: sourceId, owns } = resolveSourceSolid(
+    sourceShapeId,
+    source,
+    allItems,
+    printPrecision,
+  );
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs.",
@@ -1067,7 +1111,7 @@ async function shellItem({ source, thickness, allItems, printPrecision }) {
   try {
     resultId = occ.makeShell(sourceId, thickness);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -1076,39 +1120,15 @@ async function shellItem({ source, thickness, allItems, printPrecision }) {
     );
   }
 
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2,
-    cy = (minY + maxY) / 2,
-    cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx;
-    centered[i + 1] -= cy;
-    centered[i + 2] -= cz;
-  }
-  return {
-    geometryData: {
-      positions: centered,
-      normals: null,
-      indices: Array.from(tess.indices),
-    },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Apply a draft (taper) to selected faces about the neutral (main) face's plane.
 // Mirrors shellItem: rebuild source, draft, tessellate, bbox-centre.
 async function draftItem({
   source,
+  sourceShapeId,
+  retainResult,
   neutral,
   faces,
   angleDeg,
@@ -1116,7 +1136,12 @@ async function draftItem({
   allItems,
   printPrecision,
 }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  const { id: sourceId, owns } = resolveSourceSolid(
+    sourceShapeId,
+    source,
+    allItems,
+    printPrecision,
+  );
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs.",
@@ -1132,39 +1157,14 @@ async function draftItem({
       angleRad,
     );
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
   if (!resultId) {
     throw new Error(
       "Draft failed — try a smaller angle, or faces that share an edge with the main face.",
     );
   }
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2,
-    cy = (minY + maxY) / 2,
-    cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx;
-    centered[i + 1] -= cy;
-    centered[i + 2] -= cz;
-  }
-  return {
-    geometryData: {
-      positions: centered,
-      normals: null,
-      indices: Array.from(tess.indices),
-    },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Cut a hole into `partId`: a bore cylinder plus, for a threaded hole, a real
@@ -1385,8 +1385,20 @@ function embossResultShape(targetId, stamp, printPrecision) {
   return result || 0;
 }
 
-async function embossItem({ source, stamp, allItems, printPrecision }) {
-  const targetId = buildItemShapeLocal(source, allItems, printPrecision);
+async function embossItem({
+  source,
+  sourceShapeId,
+  retainResult,
+  stamp,
+  allItems,
+  printPrecision,
+}) {
+  const { id: targetId, owns } = resolveSourceSolid(
+    sourceShapeId,
+    source,
+    allItems,
+    printPrecision,
+  );
   if (targetId == null) {
     throw new Error(
       "Could not rebuild the body to emboss onto — its recipe is missing or references deleted inputs.",
@@ -1397,7 +1409,7 @@ async function embossItem({ source, stamp, allItems, printPrecision }) {
   try {
     resultId = embossResultShape(targetId, stamp, printPrecision);
   } finally {
-    occ.releaseShape(targetId);
+    if (owns) occ.releaseShape(targetId);
   }
   if (!resultId) {
     throw new Error(
@@ -1409,9 +1421,12 @@ async function embossItem({ source, stamp, allItems, printPrecision }) {
   try {
     tess = occ.tessellate(resultId, printPrecision ?? 0.5);
   } finally {
-    occ.releaseShape(resultId);
+    if (!retainResult) occ.releaseShape(resultId);
   }
-  if (!tess) return null;
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
 
   // Keep the result in the SOURCE's local frame (no bbox-centring): the relief
   // can stand far off the body, and a bbox centre that shifts with offset/scale
@@ -1424,11 +1439,24 @@ async function embossItem({ source, stamp, allItems, printPrecision }) {
       indices: Array.from(tess.indices),
     },
     centerOffset: { cx: 0, cy: 0, cz: 0 },
+    ...(retainResult ? { shapeId: resultId } : null),
   };
 }
 
-async function holeItem({ source, hole, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+async function holeItem({
+  source,
+  sourceShapeId,
+  retainResult,
+  hole,
+  allItems,
+  printPrecision,
+}) {
+  const { id: sourceId, owns } = resolveSourceSolid(
+    sourceShapeId,
+    source,
+    allItems,
+    printPrecision,
+  );
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs.",
@@ -1439,7 +1467,7 @@ async function holeItem({ source, hole, allItems, printPrecision }) {
   try {
     resultId = buildHoleShape(sourceId, hole);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
   if (!resultId) {
     throw new Error(
@@ -1447,33 +1475,7 @@ async function holeItem({ source, hole, allItems, printPrecision }) {
     );
   }
 
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2,
-    cy = (minY + maxY) / 2,
-    cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx;
-    centered[i + 1] -= cy;
-    centered[i + 2] -= cz;
-  }
-  return {
-    geometryData: {
-      positions: centered,
-      normals: null,
-      indices: Array.from(tess.indices),
-    },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Revolve a sketch profile around an axis line.  Mirrors pushPullFaces: build
