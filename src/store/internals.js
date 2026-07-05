@@ -182,6 +182,16 @@ export const relinkAfterEntryEdit = (history, entryId) => {
   return relinkSourceChain(history, itemId, idx + 1);
 };
 
+// Commit an entry edit: relink downstream frozen sources (so a later op rebuilds
+// against the edited result) AND mark this entry + every later entry dirty
+// (forward invalidation, per the JIT-timeline spec).  Used by every edit/
+// retarget action so a confirmed edit invalidates from that step forward.
+export const commitEntryEdit = (history, entryId) => {
+  const relinked = relinkAfterEntryEdit(history, entryId);
+  const idx = relinked.findIndex((h) => h.id === entryId);
+  return idx < 0 ? relinked : dirtyEntriesFrom(relinked, idx);
+};
+
 // The set of hidden item ids a freshly-inserted entry should start from —
 // inherited from the entry it's being inserted after.
 export const inheritedHiddenIds = (history, insertIdx) =>
@@ -262,7 +272,13 @@ export const makeEntry = (label, itemId, instruction) => ({
 
 export const saveTimeline = (history, activeHistoryId) => {
   try {
-    db.saveTimeline({ history, activeHistoryId });
+    // `dirty` is transient runtime cache state (JIT timeline model) — never
+    // persist it; a reload trusts the stored per-entry geometry until something
+    // invalidates it.
+    const persisted = history.map((e) =>
+      e.dirty ? (({ dirty, ...rest }) => rest)(e) : e,
+    );
+    db.saveTimeline({ history: persisted, activeHistoryId });
   } catch (e) {
     console.warn("Failed to save timeline to storage:", e);
   }

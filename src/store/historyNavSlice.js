@@ -8,6 +8,7 @@ import {
   saveTimeline,
   markCsgDirty,
   relinkSourceChain,
+  dirtyEntriesFrom,
   UNDO_LIMIT,
 } from "./internals.js";
 
@@ -64,6 +65,9 @@ export const createHistoryNavSlice = (set) => ({
       let rawHistory = state.history.filter((h) => h.id !== historyId);
       if (affectedId != null)
         rawHistory = relinkSourceChain(rawHistory, affectedId, deletedIndex);
+      // Forward invalidation: entries that were after the deleted one (now at
+      // deletedIndex onward) rebuild from the shortened chain.
+      rawHistory = dirtyEntriesFrom(rawHistory, deletedIndex);
 
       let newActiveId = state.activeHistoryId;
       if (newActiveId === historyId) {

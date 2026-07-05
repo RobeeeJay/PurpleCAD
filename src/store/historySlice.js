@@ -9,7 +9,8 @@ import {
   withUndo,
   markCsgDirty,
   rewriteCreatedItem,
-  relinkAfterEntryEdit,
+  commitEntryEdit,
+  dirtyEntriesFrom,
   maxItemId,
   inheritedHiddenIds,
   hideIdsFrom,
@@ -116,11 +117,16 @@ export const createHistorySlice = (set) => ({
       }
       newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
-      const rawHistory = [
-        ...state.history.slice(0, insertIdx),
-        newEntry,
-        ...state.history.slice(insertIdx),
-      ];
+      // Forward invalidation: the new entry and everything after it are dirty
+      // (a mid-timeline insert shifts the chain; an append has nothing after).
+      const rawHistory = dirtyEntriesFrom(
+        [
+          ...state.history.slice(0, insertIdx),
+          newEntry,
+          ...state.history.slice(insertIdx),
+        ],
+        insertIdx,
+      );
       const items = replayUpTo(rawHistory, insertIdx);
 
       saveTimeline(rawHistory, newActiveId);
@@ -165,11 +171,14 @@ export const createHistorySlice = (set) => ({
       }
       newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
-      const rawHistory = [
-        ...state.history.slice(0, insertIdx),
-        newEntry,
-        ...state.history.slice(insertIdx),
-      ];
+      const rawHistory = dirtyEntriesFrom(
+        [
+          ...state.history.slice(0, insertIdx),
+          newEntry,
+          ...state.history.slice(insertIdx),
+        ],
+        insertIdx,
+      );
       const items = replayUpTo(rawHistory, insertIdx);
 
       saveTimeline(rawHistory, newActiveId);
@@ -544,7 +553,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -593,7 +602,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -634,7 +643,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -681,7 +690,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -722,7 +731,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -762,7 +771,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -792,7 +801,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -832,7 +841,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -865,7 +874,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -897,7 +906,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -927,7 +936,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)
@@ -964,7 +973,7 @@ export const createHistorySlice = (set) => ({
       });
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = relinkAfterEntryEdit(newHistory, entryId);
+      const relinked = commitEntryEdit(newHistory, entryId);
       const activeIdx =
         state.activeHistoryId != null
           ? relinked.findIndex((h) => h.id === state.activeHistoryId)

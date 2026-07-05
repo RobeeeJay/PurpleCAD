@@ -7,6 +7,7 @@ import {
   getSystemTheme,
   loadSnapSettings,
   saveSnapSettings,
+  dirtyAllEntries,
   SNAP_DEFAULTS,
 } from "./internals.js";
 
@@ -989,8 +990,11 @@ export const createUiSlice = (set) => ({
   toggleDimensionsVisible: () =>
     set((state) => ({ dimensionsVisible: !state.dimensionsVisible })),
   toggleCurveResolution: () =>
+    // Changing tessellation resolution invalidates every cached entry (JIT
+    // timeline): each step must re-tessellate at the new precision.
     set((state) => ({
       curveResolution: state.curveResolution === "print" ? "preview" : "print",
+      history: dirtyAllEntries(state.history),
     })),
 
   setSketchPlacementMode: (active) =>
