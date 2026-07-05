@@ -70,6 +70,30 @@ export const maxItemId = (history) => {
   return maxId;
 };
 
+// ── Per-entry cache invalidation (JIT timeline model) ──────────────────────
+// Each history entry owns its cache validity via a single `dirty` flag:
+// `dirty === true` means the geometry this entry produced is stale for the
+// current state/precision and must be recomputed before the entry's result is
+// shown or fed to a later entry.  These pure helpers set the flag following the
+// spec's forward-invalidation rules; the JIT evaluator clears it when it
+// recomputes the entry.
+
+// Mark every entry from index `from` (inclusive) onward dirty.  Returns the same
+// array when nothing changed so callers can skip a store update.
+export const dirtyEntriesFrom = (history, from) => {
+  const start = Math.max(0, from);
+  let changed = false;
+  const out = history.map((e, i) => {
+    if (i < start || e.dirty) return e;
+    changed = true;
+    return { ...e, dirty: true };
+  });
+  return changed ? out : history;
+};
+
+// Resolution toggle invalidates the whole timeline.
+export const dirtyAllEntries = (history) => dirtyEntriesFrom(history, 0);
+
 export const replayUpTo = (history, upToIndex) => {
   let items = [];
   const end = Math.min(upToIndex, history.length - 1);
