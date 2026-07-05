@@ -898,6 +898,8 @@ function buildExportShapes(items) {
 
 async function chamferOrFilletItem({
   source,
+  sourceShapeId,
+  retainResult,
   subGeo,
   amount,
   angleRad,
@@ -905,7 +907,14 @@ async function chamferOrFilletItem({
   allItems,
   printPrecision,
 }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+  // JIT-timeline model: the caller can hand us the previous entry's CACHED
+  // solid (sourceShapeId) so we chamfer that directly instead of rebuilding the
+  // frozen `source` recipe.  We only own (and release) the source id when we
+  // built it ourselves; a cached id stays alive for its owning entry.
+  const ownsSource = sourceShapeId == null;
+  const sourceId = ownsSource
+    ? buildItemShapeLocal(source, allItems, printPrecision)
+    : sourceShapeId;
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe (boolean / chamfer) is missing or references deleted inputs.",
@@ -931,7 +940,7 @@ async function chamferOrFilletItem({
         ? occ.chamferShape(sourceId, resolvedSubGeo, amount, angleRad ?? null)
         : occ.filletShape(sourceId, resolvedSubGeo, amount);
   } finally {
-    occ.releaseShape(sourceId);
+    if (ownsSource) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -949,9 +958,14 @@ async function chamferOrFilletItem({
   try {
     tess = occ.tessellate(resultId, printPrecision ?? 0.5);
   } finally {
-    occ.releaseShape(resultId);
+    // Keep the result solid alive when the caller wants to cache it (chain the
+    // next op off this entry's solid); otherwise release it after tessellation.
+    if (!retainResult) occ.releaseShape(resultId);
   }
-  if (!tess) return null;
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
 
   const arr = Array.from(tess.positions);
   const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
@@ -972,6 +986,7 @@ async function chamferOrFilletItem({
     },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo,
+    ...(retainResult ? { shapeId: resultId } : null),
   };
 }
 

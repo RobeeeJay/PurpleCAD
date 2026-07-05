@@ -792,8 +792,11 @@ function performCsg({ selectedItems, allItems, operation, printPrecision }) {
   };
 }
 
-function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function chamferOrFilletItem({ source, sourceShapeId, retainResult, subGeo, amount, angleRad, segments, allItems, printPrecision }) {
+  // JIT-timeline model (mirrors occOps.js): chamfer a CACHED input solid when
+  // one is handed in, and retain the result solid for the next op to chain off.
+  const ownsSource = sourceShapeId == null;
+  const sourceId = ownsSource ? buildItemShapeLocal(source, allItems, printPrecision) : sourceShapeId;
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe (boolean / chamfer) is missing or references deleted inputs."
@@ -815,7 +818,7 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
       ? occ.chamferShape(sourceId, resolvedSubGeo, amount, angleRad ?? null)
       : occ.filletShape(sourceId, resolvedSubGeo, amount);
   } finally {
-    occ.releaseShape(sourceId);
+    if (ownsSource) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -832,9 +835,12 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
   try {
     tess = occ.tessellate(resultId, printPrecision ?? 0.5);
   } finally {
-    occ.releaseShape(resultId);
+    if (!retainResult) occ.releaseShape(resultId);
   }
-  if (!tess) return null;
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
 
   const arr = Array.from(tess.positions);
   const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
@@ -848,6 +854,7 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
     geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo,
+    ...(retainResult ? { shapeId: resultId } : null),
   };
 }
 
