@@ -80,6 +80,9 @@ try {
   ipcMain.handle("occ:releaseShape", (_e, args) =>
     occBridge.releaseShape(args),
   );
+  ipcMain.handle("occ:solidFromMesh", (_e, args) =>
+    occBridge.solidFromMesh(args),
+  );
 } catch (err) {
   // Addon not built or OCC dylib missing — fall back to WASM path in renderer.
   console.warn("[main] native OCC addon unavailable:", err.message);

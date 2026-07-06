@@ -1907,20 +1907,36 @@ Napi::Value EnrichSubGeo(const Napi::CallbackInfo& info) {
 
       // Stamp the persistent edge name (its adjacent face-pair) so a later regen
       // resolves the rim by name — robust to a re-tessellation that moves the
-      // endpoints.  Find the picked edge by endpoints, then match it in rec.edges.
+      // endpoints.  The picked coords come from the DISPLAY mesh, whose
+      // tessellation may differ from this OCC solid, so match tolerantly:
+      // exact endpoints first, then midpoint-on-segment (same as the regen
+      // selector), before naming the edge from rec.edges.
       if (ep.name.empty() && !rec.edges.empty()) {
+        TopoDS_Shape hit;
         for (TopExp_Explorer ee(shape, TopAbs_EDGE); ee.More(); ee.Next()) {
           if (EdgeMatchesEndpoints(TopoDS::Edge(ee.Current()),
                                    {ep.ax, ep.ay, ep.az},
                                    {ep.bx, ep.by, ep.bz})) {
-            for (const auto& kv : rec.edges)
-              if (kv.second.IsSame(ee.Current())) {
-                eo.Set("name", Napi::String::New(env, kv.first));
-                break;
-              }
+            hit = ee.Current();
             break;
           }
         }
+        if (hit.IsNull()) {
+          for (TopExp_Explorer ee(shape, TopAbs_EDGE); ee.More(); ee.Next()) {
+            if (EdgeMidpointOnSegment(TopoDS::Edge(ee.Current()),
+                                      {ep.ax, ep.ay, ep.az},
+                                      {ep.bx, ep.by, ep.bz}, 0.05)) {
+              hit = ee.Current();
+              break;
+            }
+          }
+        }
+        if (!hit.IsNull())
+          for (const auto& kv : rec.edges)
+            if (kv.second.IsSame(hit)) {
+              eo.Set("name", Napi::String::New(env, kv.first));
+              break;
+            }
       } else if (!ep.name.empty()) {
         eo.Set("name", Napi::String::New(env, ep.name));
       }

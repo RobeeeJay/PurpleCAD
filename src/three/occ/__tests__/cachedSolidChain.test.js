@@ -121,4 +121,30 @@ describe("chamfer on a cached input solid", () => {
       b = extent(viaSource.geometryData);
     for (let k = 0; k < 3; k++) expect(a[k]).toBeCloseTo(b[k], 5);
   });
+
+  it("solidFromMesh sews a baked mesh into a solid an op can consume", async () => {
+    // The JIT input-solid fallback: a downstream op builds on an upstream step's
+    // baked mesh instead of re-running its recipe (which can fail to re-select).
+    const cubeId = occ.makeBox(-1, -1, -1, 1, 1, 1);
+    const mesh = occ.tessellate(cubeId, 0.1);
+    occ.releaseShape(cubeId);
+    const sewn = ops.solidFromMesh({
+      positions: Array.from(mesh.positions),
+      indices: Array.from(mesh.indices),
+    });
+    expect(sewn.shapeId).toBeGreaterThan(0);
+    // Chamfer consumes the sewn solid directly (no recipe).
+    const res = await ops.chamferOrFilletItem({
+      sourceShapeId: sewn.shapeId,
+      subGeo: topFace,
+      amount: 0.1,
+      angleRad: null,
+      segments: 1,
+      allItems: [cubeItem],
+      printPrecision: 0.05,
+    });
+    expect(res).toBeTruthy();
+    expect(triCount(res.geometryData)).toBeGreaterThan(0);
+    occ.releaseShape(sewn.shapeId);
+  });
 });

@@ -22,6 +22,7 @@ import {
 import { regenerateItemsForResolution } from "./regenerateItems.js";
 import { activePrecision } from "./resolution.js";
 import { getSolid, setSolid, pruneSolids } from "./solidCache.js";
+import { solidFromMesh } from "./occClient.js";
 
 export async function regenerateForResolution(printPrecision) {
   const state = useStore.getState();
@@ -206,11 +207,34 @@ export async function recalculateTimeline() {
       };
     });
     // Feed this step its cached input solid (the previous entry that produced
-    // this item) and collect its retained result solid.  A miss (null input)
-    // just makes the op rebuild from its source — always correct, only slower.
+    // this item).  If it isn't cached this session (a clean upstream step
+    // skipped on load), SEW the upstream's baked mesh — its already-built
+    // display truth — into a solid instead, so this op builds on that rather
+    // than re-running the upstream recipe (which can fail to re-select geometry,
+    // e.g. a rim chamfer on a re-tessellated ring — the cause of the emboss
+    // shift).  A miss on both still falls back to the recipe (correct).
     const inputEntryId = lastEntryForItem.get(targetId);
-    const inputSolid =
+    let inputSolid =
       inputEntryId != null ? getSolid(inputEntryId, printPrecision) : null;
+    if (inputSolid == null && inputEntryId != null) {
+      const prev = newHistory.find((h) => h.id === inputEntryId);
+      const pinst = prev?.instruction;
+      const gd = pinst?.patches?.geometryData ?? pinst?.item?.geometryData;
+      const pkind = (pinst?.patches?.regenerator ?? pinst?.item?.regenerator)
+        ?.kind;
+      // Only sew when the baked mesh is in the SAME frame buildItemShapeLocal
+      // rebuilds the input in (bbox-centred).  A boolean/union re-localises by
+      // its originalCentre, not the bbox, so its baked mesh would misplace the
+      // consumer — skip it and let the recipe rebuild.
+      const sewSafe = pkind !== "boolean" && pkind !== "extrudeUnion";
+      if (sewSafe && gd?.positions?.length >= 9) {
+        const sewn = await solidFromMesh(gd);
+        if (sewn?.shapeId != null) {
+          inputSolid = sewn.shapeId;
+          setSolid(inputEntryId, inputSolid, printPrecision);
+        }
+      }
+    }
     const solidCtx = {
       inputs: new Map([[targetId, inputSolid]]),
       results: new Map(),

@@ -1678,6 +1678,15 @@ function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision
   return result;
 }
 
+// Sew a baked mesh into a retained OCC solid (JIT cache input fallback).
+function solidFromMesh({ positions, indices }) {
+  if (!positions || positions.length < 9) return null;
+  const pos = new Float64Array(positions);
+  const idx = indices && indices.length ? new Uint32Array(indices) : null;
+  const id = occ.makeSolidFromMesh(pos, idx);
+  return id ? { shapeId: id } : null;
+}
+
 // Release a cached OCC solid (JIT-timeline cache); no-op if already gone.
 function releaseShape({ id }) {
   if (id != null) {
@@ -1686,4 +1695,4 @@ function releaseShape({ id }) {
   return null;
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh };

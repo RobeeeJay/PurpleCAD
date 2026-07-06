@@ -100,6 +100,12 @@ export function releaseShape(id) {
   return callOp("releaseShape", { id });
 }
 
+// Sew a baked mesh into a retained solid (JIT cache input fallback).  Direct
+// route (no busy/cancel wrapper) — it runs inside the recalc loop.
+export function solidFromMesh(geometryData) {
+  return callOp("solidFromMesh", geometryData);
+}
+
 export function chamferOrFilletItem(args) {
   return runOp("chamferOrFilletItem", args);
 }

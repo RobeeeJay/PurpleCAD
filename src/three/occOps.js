@@ -2255,6 +2255,19 @@ async function importStep({ stepText, printPrecision }) {
   };
 }
 
+// Sew a baked mesh into a retained OCC solid (JIT timeline cache).  Lets a
+// downstream op build on an upstream step's ALREADY-BUILT result (its display
+// mesh, the truth) instead of re-running the upstream recipe — which can fail to
+// re-select geometry (e.g. a rim chamfer on a re-tessellated ring).  Returns
+// { shapeId } of the retained solid, or null.
+function solidFromMesh({ positions, indices }) {
+  if (!positions || positions.length < 9) return null;
+  const pos = new Float64Array(positions);
+  const idx = indices && indices.length ? new Uint32Array(indices) : null;
+  const id = occ.makeSolidFromMesh(pos, idx);
+  return id ? { shapeId: id } : null;
+}
+
 // Release a cached OCC solid held in the native shape store (JIT timeline
 // cache).  Fire-and-forget cleanup; a missing/already-released id is a no-op.
 function releaseShape({ id }) {
@@ -2285,4 +2298,5 @@ export const ops = {
   exportSTEP,
   importStep,
   releaseShape,
+  solidFromMesh,
 };
