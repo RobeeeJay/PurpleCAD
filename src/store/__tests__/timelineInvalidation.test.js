@@ -98,6 +98,16 @@ describe("timeline forward invalidation", () => {
     expect(dirty(s)).toEqual([false, false, true, true]);
   });
 
+  it("an in-place depth/dimension edit dirties the whole timeline (JIT recalc reruns regen)", () => {
+    const s = makeStore();
+    // Edits that rewrite a create entry + markCsgDirty the LIVE items (extrude
+    // depth, group depth, retarget, and setVariables) must ALSO dirty the history
+    // entries — the JIT recalc reads entry.dirty, not the live items, so it would
+    // otherwise skip every step as clean and keep stale downstream geometry.
+    s.getState().setExtrudeDepth(5, 3);
+    expect(dirty(s)).toEqual([true, true, true]);
+  });
+
   it("toggling the resolution dirties the whole timeline", () => {
     const s = makeStore();
     s.getState().toggleCurveResolution();

@@ -11,6 +11,7 @@ import {
   rewriteCreatedItem,
   commitEntryEdit,
   dirtyEntriesFrom,
+  dirtyAllEntries,
   maxItemId,
   inheritedHiddenIds,
   hideIdsFrom,
@@ -1045,22 +1046,24 @@ export const createHistorySlice = (set) => ({
           item.id === extrudeId ? apply(item) : shiftAnchors(item),
         ),
       );
-      const newHistory = state.history.map((entry) => {
-        const rewritten = rewriteCreatedItem(entry, extrudeId, apply);
-        if (rewritten !== entry) return rewritten;
-        const inst = entry.instruction;
-        if (inst?.type === "create" && inst.item?.regenerator) {
-          const next = shiftAnchors(inst.item);
-          if (next !== inst.item)
-            return { ...entry, instruction: { ...inst, item: next } };
-        }
-        if (inst?.type === "modify" && inst.patches?.regenerator) {
-          const next = shiftAnchors(inst.patches);
-          if (next !== inst.patches)
-            return { ...entry, instruction: { ...inst, patches: next } };
-        }
-        return entry;
-      });
+      const newHistory = dirtyAllEntries(
+        state.history.map((entry) => {
+          const rewritten = rewriteCreatedItem(entry, extrudeId, apply);
+          if (rewritten !== entry) return rewritten;
+          const inst = entry.instruction;
+          if (inst?.type === "create" && inst.item?.regenerator) {
+            const next = shiftAnchors(inst.item);
+            if (next !== inst.item)
+              return { ...entry, instruction: { ...inst, item: next } };
+          }
+          if (inst?.type === "modify" && inst.patches?.regenerator) {
+            const next = shiftAnchors(inst.patches);
+            if (next !== inst.patches)
+              return { ...entry, instruction: { ...inst, patches: next } };
+          }
+          return entry;
+        }),
+      );
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         ...withUndo(state),
@@ -1080,9 +1083,11 @@ export const createHistorySlice = (set) => ({
           item.id === id ? Object.assign({}, item, { depth }) : item,
         ),
       );
-      const newHistory = state.history.map((entry) =>
-        rewriteCreatedItem(entry, id, (item) =>
-          Object.assign({}, item, { depth }),
+      const newHistory = dirtyAllEntries(
+        state.history.map((entry) =>
+          rewriteCreatedItem(entry, id, (item) =>
+            Object.assign({}, item, { depth }),
+          ),
         ),
       );
       saveTimeline(newHistory, state.activeHistoryId);
@@ -1103,22 +1108,24 @@ export const createHistorySlice = (set) => ({
           idSet.has(item.id) ? Object.assign({}, item, { depth }) : item,
         ),
       );
-      const newHistory = state.history.map((entry) => {
-        const inst = entry.instruction;
-        if (
-          inst?.type === "createGroup" &&
-          inst.items?.some((it) => idSet.has(it.id))
-        ) {
-          return Object.assign({}, entry, {
-            instruction: Object.assign({}, inst, {
-              items: inst.items.map((it) =>
-                idSet.has(it.id) ? Object.assign({}, it, { depth }) : it,
-              ),
-            }),
-          });
-        }
-        return entry;
-      });
+      const newHistory = dirtyAllEntries(
+        state.history.map((entry) => {
+          const inst = entry.instruction;
+          if (
+            inst?.type === "createGroup" &&
+            inst.items?.some((it) => idSet.has(it.id))
+          ) {
+            return Object.assign({}, entry, {
+              instruction: Object.assign({}, inst, {
+                items: inst.items.map((it) =>
+                  idSet.has(it.id) ? Object.assign({}, it, { depth }) : it,
+                ),
+              }),
+            });
+          }
+          return entry;
+        }),
+      );
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         ...withUndo(state),
@@ -1226,16 +1233,17 @@ export const createHistorySlice = (set) => ({
         const kept = hidden.filter((id) => !oldSet.has(id));
         return { ...entry, hiddenIds: [...new Set([...kept, ...newIds])] };
       });
+      const dirtied = dirtyAllEntries(finalHistory);
       const activeIdx =
         state.activeHistoryId !== null
-          ? finalHistory.findIndex((h) => h.id === state.activeHistoryId)
-          : finalHistory.length - 1;
-      const items = markCsgDirty(replayUpTo(finalHistory, activeIdx));
-      saveTimeline(finalHistory, state.activeHistoryId);
+          ? dirtied.findIndex((h) => h.id === state.activeHistoryId)
+          : dirtied.length - 1;
+      const items = markCsgDirty(replayUpTo(dirtied, activeIdx));
+      saveTimeline(dirtied, state.activeHistoryId);
       return {
         ...withUndo(state),
         items,
-        history: withOrphanFlags(finalHistory),
+        history: withOrphanFlags(dirtied),
       };
     }),
 });

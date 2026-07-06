@@ -25,6 +25,7 @@ import {
   saveVariables,
   saveTimeline,
   withOrphanFlags,
+  dirtyAllEntries,
 } from "./internals.js";
 
 export const variablesInitial = {
@@ -80,7 +81,7 @@ export const createVariablesSlice = (set) => ({
       const changedSketchIds = updatedItems
         .filter((it, i) => it !== state.items[i])
         .map((it) => it.id);
-      const newHistory =
+      const rewritten =
         changedSketchIds.length === 0
           ? state.history
           : state.history.map((entry) => {
@@ -100,16 +101,17 @@ export const createVariablesSlice = (set) => ({
               }
               return entry;
             });
-      if (changedSketchIds.length > 0) {
-        saveTimeline(newHistory, state.activeHistoryId);
-      }
+      // A variable can drive any extrude depth / dimension / sketch shape, so
+      // forward-invalidate the WHOLE timeline: the JIT recalc reads each entry's
+      // `dirty` flag (not the live items), and would otherwise skip every step as
+      // clean and keep the stale geometry.  (dirty is a transient flag; saveTimeline
+      // strips it — persistence only sees the rewritten sketch shapes.)
+      const newHistory = dirtyAllEntries(rewritten);
+      saveTimeline(newHistory, state.activeHistoryId);
       return {
         variables,
         items: updatedItems,
-        history:
-          changedSketchIds.length > 0
-            ? withOrphanFlags(newHistory)
-            : state.history,
+        history: withOrphanFlags(newHistory),
         ...(anyFailed
           ? {
               notification:
