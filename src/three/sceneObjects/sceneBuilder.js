@@ -189,9 +189,21 @@ export function buildSceneObjects(
               // the arc is split into.
               let match = allEntries[0];
               if (pc) {
-                const containing = allEntries.filter((g) =>
+                let containing = allEntries.filter((g) =>
                   polyContainsPoint(g.polygon, pc),
                 );
+                // A ring's inner loop is emitted BOTH as the outer entry's hole
+                // AND as a standalone disc with the same centroid; the area
+                // tiebreak (vs the stale stored area) then picks the disc after
+                // a resize, showing a solid inner cylinder.  If the stored
+                // profile was a ring (had holes), keep only entries that also
+                // have holes.  (Mirrors extrudeWithLivePolygon.)
+                if (holePolys.some((h) => h.length >= 3)) {
+                  const withHoles = containing.filter((g) =>
+                    (g.holes || []).some((h) => h.length >= 3),
+                  );
+                  if (withHoles.length > 0) containing = withHoles;
+                }
                 if (containing.length > 0) {
                   // Pick the polygon whose area is closest to the
                   // stored profile's area rather than the smallest one.
