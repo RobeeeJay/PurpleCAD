@@ -375,8 +375,15 @@ async function regenerateHole(
 // change (outer radius unchanged) is a no-op.  Exact for a circular/round wall;
 // a non-uniform edit is approximate but still far better than the frozen radius.
 const outerRadius = (item) => {
-  const poly = item?.profile?.polygon2D;
-  const pc = item?.profile?.profileCentroid || { x: 0, y: 0 };
+  // The wall's outer radius lives on the underlying EXTRUDE profile; a chamfer/
+  // other csg source has no polygon2D, so dig through regenerator.source to find
+  // the extrude (otherwise the wrap curve never scales for an emboss on a
+  // chamfered wall).
+  let it = item;
+  while (it && !it.profile?.polygon2D && it.regenerator?.source)
+    it = it.regenerator.source;
+  const poly = it?.profile?.polygon2D;
+  const pc = it?.profile?.profileCentroid || { x: 0, y: 0 };
   if (!Array.isArray(poly) || poly.length < 3) return null;
   let m = 0;
   for (const p of poly) {
