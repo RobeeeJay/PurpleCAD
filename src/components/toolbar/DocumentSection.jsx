@@ -22,6 +22,7 @@ const DocumentSection = () => {
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
   const cameraControls = useStore((s) => s._cameraControls);
   const selectedId = useStore((s) => s.selectedId);
+  const selectedIds = useStore((s) => s.selectedIds);
   const addItem = useStore((s) => s.addItem);
   const setSvgImport = useStore((s) => s.setSvgImport);
   const selectItem = useStore((s) => s.selectItem);
@@ -122,6 +123,19 @@ const DocumentSection = () => {
     );
   };
 
+  // Export the selected objects (single or multi) in their current cached
+  // timeline state, or the whole scene when nothing is selected.
+  const exportItems = () => {
+    const ids = new Set(
+      selectedIds?.length
+        ? selectedIds
+        : selectedId != null
+          ? [selectedId]
+          : [],
+    );
+    return ids.size ? items.filter((i) => ids.has(i.id)) : items;
+  };
+
   const handleExportSTL = async () => {
     setSaveMenuOpen(false);
     if (items.length === 0) {
@@ -130,7 +144,7 @@ const DocumentSection = () => {
     }
     if (!confirmExportResolution("STL")) return;
     try {
-      const buffer = await exportSTL({ items });
+      const buffer = await exportSTL({ items: exportItems(), allItems: items });
       if (!buffer) {
         alert("No exportable objects in the scene.");
         return;
@@ -153,7 +167,10 @@ const DocumentSection = () => {
     }
     if (!confirmExportResolution("STEP")) return;
     try {
-      const content = await exportSTEP({ items });
+      const content = await exportSTEP({
+        items: exportItems(),
+        allItems: items,
+      });
       if (!content) {
         alert("No exportable objects in the scene.");
         return;

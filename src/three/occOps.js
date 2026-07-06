@@ -921,12 +921,15 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
 // Build all visible exportable items in world space, scaled to mm and
 // rotated +π/2 around X (viewport Y-up → export Z-up).
 // Returns an array of shape IDs; caller must release each.
-function buildExportShapes(items) {
+// `items` = the objects to export; `allItems` = the whole scene, so a csg
+// recipe (boolean / chamfer source) still resolves its inputs when only a
+// selected subset is exported.
+function buildExportShapes(items, allItems = items) {
   const out = [];
   for (const item of items) {
     if (item.visible === false) continue;
     if (!EXPORTABLE_TYPES.has(item.type)) continue;
-    const localId = buildItemShapeLocal(item, items, 0.01);
+    const localId = buildItemShapeLocal(item, allItems, 0.01);
     if (localId == null) continue;
     const t = buildBrushTransform(item);
     // Per-axis scale, then the world unit conversion (mm) folded onto every
@@ -2157,8 +2160,8 @@ async function pattern3dItem({
   return result;
 }
 
-async function exportSTL({ items }) {
-  const shapeIds = buildExportShapes(items);
+async function exportSTL({ items, allItems }) {
+  const shapeIds = buildExportShapes(items, allItems || items);
   if (shapeIds.length === 0) return null;
 
   const tessellations = [];
@@ -2224,8 +2227,8 @@ async function exportSTL({ items }) {
   return buf;
 }
 
-async function exportSTEP({ items }) {
-  const shapeIds = buildExportShapes(items);
+async function exportSTEP({ items, allItems }) {
+  const shapeIds = buildExportShapes(items, allItems || items);
   if (shapeIds.length === 0) return null;
   try {
     return occ.exportSTEP(shapeIds);

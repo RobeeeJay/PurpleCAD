@@ -36,6 +36,36 @@ describe("occOps.exportSTL / exportSTEP", () => {
     expect(await ops.exportSTL({ items: [] })).toBeNull();
   });
 
+  it("exports a selected subset, resolving recipes against the whole scene", async () => {
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    // A chamfer whose recipe source (the cube) is NOT in the export subset —
+    // it must still resolve via allItems.
+    const chamfered = {
+      id: 2,
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      regenerator: {
+        kind: "chamfer",
+        source: cube,
+        subGeo: { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
+        amount: 0.1,
+        segments: 1,
+      },
+    };
+    const scene = [cube, chamfered];
+    const buf = await ops.exportSTL({ items: [chamfered], allItems: scene });
+    expect(buf).toBeInstanceOf(ArrayBuffer);
+    const only = new DataView(buf).getUint32(80, true);
+    const all = new DataView(await ops.exportSTL({ items: scene })).getUint32(
+      80,
+      true,
+    );
+    // Selected body exports (non-empty) and is a subset of the whole scene.
+    expect(only).toBeGreaterThan(0);
+    expect(only).toBeLessThan(all);
+  });
+
   it("exportSTEP emits an ISO-10303-21 file", async () => {
     const { ops } = await import("../../occOps.js");
     const items = [{ id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } }];

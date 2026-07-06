@@ -1182,14 +1182,16 @@ const MM_PER_UNIT = 10;
 // Build each visible exportable item as a world-space OCC shape, scaled to
 // millimetres and rotated +π/2 around X (viewport Y-up → export Z-up).
 // Returns an array of { id } objects; caller must releaseShape each id.
-function buildExportShapes(items) {
+// `allItems` = whole scene so a csg recipe resolves inputs when exporting a
+// selected subset (mirrors occOps.js).
+function buildExportShapes(items, allItems = items) {
   const out = [];
   const exportPrecision = 0.01;
   for (const item of items) {
     if (item.visible === false) continue;
     if (!EXPORTABLE_TYPES.has(item.type)) continue;
 
-    const localId = buildItemShapeLocal(item, items, exportPrecision);
+    const localId = buildItemShapeLocal(item, allItems, exportPrecision);
     if (localId == null) continue;
 
     const t = buildBrushTransform(item);
@@ -1226,8 +1228,8 @@ function buildExportShapes(items) {
 // Binary STL: tessellate all export shapes at fine precision (0.01 scene
 // units = 0.1 mm chord deviation) and write the binary STL format.
 // Returns a Buffer (Uint8Array) suitable for Electron IPC + new Blob([buf]).
-function exportSTL({ items }) {
-  const shapeIds = buildExportShapes(items);
+function exportSTL({ items, allItems }) {
+  const shapeIds = buildExportShapes(items, allItems || items);
   if (shapeIds.length === 0) return null;
 
   const tessellations = [];
@@ -1272,8 +1274,8 @@ function exportSTL({ items }) {
 
 // Export as STEP.  Builds all shapes, passes their IDs to the C++ writer,
 // and returns the ISO-10303-21 file content as a string.
-function exportSTEP({ items }) {
-  const shapeIds = buildExportShapes(items);
+function exportSTEP({ items, allItems }) {
+  const shapeIds = buildExportShapes(items, allItems || items);
   if (shapeIds.length === 0) return null;
   try {
     return occ.exportSTEP(shapeIds);
