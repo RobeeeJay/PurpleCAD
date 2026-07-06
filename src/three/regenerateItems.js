@@ -744,69 +744,59 @@ export async function regenerateItemsForResolution(
           retainResult: true,
         }
       : null;
-    let result = null;
-    if (r.kind === "chamfer") {
-      result = await regenerateChamfer(
-        r,
-        out,
-        printPrecision,
-        item.position,
-        item.depth,
-        solidOpts,
-      );
-    } else if (r.kind === "pushpull") {
-      result = await regeneratePushPull(
-        r,
-        out,
-        printPrecision,
-        item.position,
-        item.depth,
-        solidOpts,
-      );
-    } else if (r.kind === "shell") {
-      result = await regenerateShell(
-        r,
-        out,
-        printPrecision,
-        item.position,
-        solidOpts,
-      );
-    } else if (r.kind === "hole") {
-      result = await regenerateHole(
-        r,
-        out,
-        printPrecision,
-        item.position,
-        solidOpts,
-      );
-    } else if (r.kind === "emboss") {
-      result = await regenerateEmboss(
-        r,
-        out,
-        printPrecision,
-        item.position,
-        solidOpts,
-      );
-    } else if (r.kind === "draft") {
-      result = await regenerateDraft(
-        r,
-        out,
-        printPrecision,
-        item.position,
-        solidOpts,
-      );
-    } else if (r.kind === "revolve") {
-      result = await regenerateRevolve(r, out, printPrecision, item.position);
-    } else if (r.kind === "pipe") {
-      result = await regeneratePipe(r, out, printPrecision, item.position);
-    } else if (r.kind === "loft") {
-      result = await regenerateLoft(r, out, printPrecision, item.position);
-    } else if (r.kind === "pattern3d") {
-      result = await regenerate3dPattern(r, out, printPrecision, item.position);
-    } else if (r.kind === "boolean") {
-      result = await regenerateBoolean(r, out, printPrecision);
-    } else if (r.kind === "extrudeUnion") {
-      result = await regenerateExtrudeUnion(r, out, printPrecision);
+    // Single-input ops take a cached input solid (solidOpts); the rest ignore
+    // it.  `opts` is null on the retry path (rebuild from the recipe source).
+    const dispatch = (opts) => {
+      switch (r.kind) {
+        case "chamfer":
+          return regenerateChamfer(
+            r,
+            out,
+            printPrecision,
+            item.position,
+            item.depth,
+            opts,
+          );
+        case "pushpull":
+          return regeneratePushPull(
+            r,
+            out,
+            printPrecision,
+            item.position,
+            item.depth,
+            opts,
+          );
+        case "shell":
+          return regenerateShell(r, out, printPrecision, item.position, opts);
+        case "hole":
+          return regenerateHole(r, out, printPrecision, item.position, opts);
+        case "emboss":
+          return regenerateEmboss(r, out, printPrecision, item.position, opts);
+        case "draft":
+          return regenerateDraft(r, out, printPrecision, item.position, opts);
+        case "revolve":
+          return regenerateRevolve(r, out, printPrecision, item.position);
+        case "pipe":
+          return regeneratePipe(r, out, printPrecision, item.position);
+        case "loft":
+          return regenerateLoft(r, out, printPrecision, item.position);
+        case "pattern3d":
+          return regenerate3dPattern(r, out, printPrecision, item.position);
+        case "boolean":
+          return regenerateBoolean(r, out, printPrecision);
+        case "extrudeUnion":
+          return regenerateExtrudeUnion(r, out, printPrecision);
+        default:
+          return null;
+      }
+    };
+    let result = await dispatch(solidOpts);
+    // A cached input can be stale for this op (upstream topology/frame drift on
+    // a mid-timeline insert) even when a full recipe rebuild would succeed.  If
+    // the cached path failed, retry once rebuilding from the source before
+    // flagging the step bad.
+    if (!result && solidOpts?.sourceShapeId != null) {
+      result = await dispatch({ ...solidOpts, sourceShapeId: null });
     }
     progressed += 1;
     if (onProgress) onProgress({ current: progressed, total });

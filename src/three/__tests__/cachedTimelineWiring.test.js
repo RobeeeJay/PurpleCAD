@@ -132,4 +132,27 @@ describe("solidCtx timeline cache wiring", () => {
     releaseShape(chamferedSolid);
     releaseShape(doubleSolid);
   });
+
+  it("falls back to the recipe rebuild when the cached input is bad", async () => {
+    // A stale/garbage cached input id makes the op fail; the dispatcher must
+    // retry without it and still produce the correct geometry (not flag the step
+    // bad).  Matches the recipe-only path.
+    const plain = await regenerateItemsForResolution(chamferItems(), null);
+    const plainGeo = plain.find((i) => i.id === 2).geometryData;
+
+    const ctx = { inputs: new Map([[2, 999999]]), results: new Map() };
+    const out = await regenerateItemsForResolution(
+      chamferItems(),
+      null,
+      null,
+      ctx,
+    );
+    const item = out.find((i) => i.id === 2);
+    expect(item.geometryData).toBeTruthy();
+    expect(item.regenerator.regenFailed).toBeFalsy(); // recovered, not flagged
+    expect(sig(item.geometryData)).toBe(sig(plainGeo));
+
+    const shapeId = ctx.results.get(2);
+    if (shapeId) releaseShape(shapeId);
+  });
 });

@@ -223,10 +223,36 @@ export async function recalculateTimeline() {
     await breathe();
 
     const reg = accItems.find((it) => it.id === targetId);
-    // A failed regen comes back without geometry — keep the entry's existing
-    // cache rather than blanking it out.
+    // A failed regen comes back without geometry (selection unmatchable / OCC
+    // rejected the combination).  SETTLE the step instead of leaving it dirty:
+    // keep its last-good geometry, but stamp the failed regenerator
+    // (regenFailed + regeneratedAt === printPrecision) and clear dirty.  Leaving
+    // it dirty made the step recompute-fail every pass — a re-trigger loop that
+    // blocked all other work.
     if (!reg || !reg.geometryData) {
-      newHistory.push(entry);
+      const inst = entry.instruction;
+      const failRegen = reg?.regenerator;
+      newHistory.push(
+        !failRegen
+          ? { ...entry, dirty: false }
+          : inst.type === "create"
+            ? {
+                ...entry,
+                dirty: false,
+                instruction: {
+                  ...inst,
+                  item: { ...inst.item, regenerator: failRegen },
+                },
+              }
+            : {
+                ...entry,
+                dirty: false,
+                instruction: {
+                  ...inst,
+                  patches: { ...inst.patches, regenerator: failRegen },
+                },
+              },
+      );
       continue;
     }
     const inst = entry.instruction;
