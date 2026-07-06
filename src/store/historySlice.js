@@ -119,15 +119,16 @@ export const createHistorySlice = (set) => ({
       }
       newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
-      // Forward invalidation: the new entry and everything after it are dirty
-      // (a mid-timeline insert shifts the chain; an append has nothing after).
+      // The new item carries the geometry it was created with, so it stays clean;
+      // only steps AFTER a mid-timeline insert shift and need rebuilding (an
+      // append has nothing after — zero recompute).
       const rawHistory = dirtyEntriesFrom(
         [
           ...state.history.slice(0, insertIdx),
           newEntry,
           ...state.history.slice(insertIdx),
         ],
-        insertIdx,
+        insertIdx + 1,
       );
       const items = replayUpTo(rawHistory, insertIdx);
 
@@ -173,13 +174,14 @@ export const createHistorySlice = (set) => ({
       }
       newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
+      // New group carries its created geometry — clean; only later steps rebuild.
       const rawHistory = dirtyEntriesFrom(
         [
           ...state.history.slice(0, insertIdx),
           newEntry,
           ...state.history.slice(insertIdx),
         ],
-        insertIdx,
+        insertIdx + 1,
       );
       const items = replayUpTo(rawHistory, insertIdx);
 
@@ -291,20 +293,20 @@ export const createHistorySlice = (set) => ({
       }
       newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
-      // A mid-timeline modify (e.g. a bevel inserted before an existing emboss
-      // on the same body) must (1) re-link the source chain so every LATER
-      // op on this item rebuilds on the newly inserted result — not its stale
-      // pre-insert snapshot, which would show/preview without the new op — and
-      // (2) forward-invalidate the new step and everything after it.  An append
-      // has nothing after it, so both are no-ops there.
+      // The new step already carries the geometry its tool just computed (the
+      // same result the preview showed), so it stays CLEAN — don't recompute it.
+      // Only the steps AFTER it need work (insertIdx + 1): re-link their source
+      // chain so every later op on this item rebuilds on the newly inserted
+      // result, and forward-invalidate them.  An append has nothing after, so
+      // both are no-ops (confirm does zero recompute).
       const inserted = [
         ...state.history.slice(0, insertIdx),
         newEntry,
         ...state.history.slice(insertIdx),
       ];
       const rawHistory = dirtyEntriesFrom(
-        relinkSourceChain(inserted, id, insertIdx),
-        insertIdx,
+        relinkSourceChain(inserted, id, insertIdx + 1),
+        insertIdx + 1,
       );
       const items = replayUpTo(rawHistory, insertIdx);
 

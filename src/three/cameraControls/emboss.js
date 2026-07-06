@@ -13,6 +13,27 @@ import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 
 const GHOST_OPACITY = 0.12;
 
+// The live preview already ran embossItem for the exact recipe the user is about
+// to confirm; cache its result so Confirm reuses it instead of recomputing the
+// same OCC boolean.  Keyed by a cheap signature of the stamp + source transform
+// (what the result depends on); a mismatch (or no preview) falls back to a fresh
+// build.  Consumed on commit.
+let previewCache = null;
+const embossKey = (recipe) => {
+  const s = recipe.stamp || {};
+  const pos = s.mesh?.positions || s.positions || [];
+  const n = pos.length;
+  const h = n ? pos[0] + pos[n >> 1] + pos[n - 1] : 0;
+  return JSON.stringify({
+    n,
+    h,
+    d: !!recipe.params?.deboss,
+    p: recipe.source?.position,
+    r: recipe.source?.rotation,
+    sc: recipe.source?.scale,
+  });
+};
+
 // Source snapshot + baked stamp recipe for the active emboss tool, or null until
 // at least one sketch profile and a face are picked.
 export function buildEmbossRecipe(items, printPrecision) {
@@ -62,16 +83,29 @@ export async function commitEmboss({ items, printPrecision }) {
   if (!recipe) return false;
   const { item, source, stamp, profiles, face, faceSet, params } = recipe;
   let result;
-  try {
-    result = await embossItem({
-      source,
-      stamp,
-      allItems: items,
-      printPrecision,
-    });
-  } catch (e) {
-    useStore.getState().setToolError(e?.message || "Emboss failed.");
-    return false;
+  const cached =
+    previewCache && previewCache.key === embossKey(recipe)
+      ? previewCache
+      : null;
+  previewCache = null; // consume regardless
+  if (cached) {
+    // Reuse the preview's already-computed geometry — no OCC work on Confirm.
+    result = {
+      geometryData: cached.geometryData,
+      centerOffset: cached.centerOffset,
+    };
+  } else {
+    try {
+      result = await embossItem({
+        source,
+        stamp,
+        allItems: items,
+        printPrecision,
+      });
+    } catch (e) {
+      useStore.getState().setToolError(e?.message || "Emboss failed.");
+      return false;
+    }
   }
   if (!result) return false;
   const { geometryData, centerOffset } = result;
@@ -195,6 +229,13 @@ export function createEmbossPreviewHelpers({ scene, itemsRef, objectsRef }) {
     }
     if (myRequest !== requestId || !result) return;
     useStore.getState().setToolError(null);
+    // Stash for Confirm to reuse (see commitEmboss) — this is the exact result
+    // the user is looking at.
+    previewCache = {
+      key: embossKey(recipe),
+      geometryData: result.geometryData,
+      centerOffset: result.centerOffset,
+    };
 
     const { positions, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();

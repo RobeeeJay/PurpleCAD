@@ -84,18 +84,19 @@ describe("timeline forward invalidation", () => {
     expect(dirty(s)).toEqual([false, true]);
   });
 
-  it("inserting a modify (bevel) mid-timeline dirties the later entries", () => {
+  it("inserting a modify (bevel) mid-timeline dirties only the later entries", () => {
     const s = makeStore();
-    // Park on h2 and insert a shell — it lands between h2 and h3, and h3 (which
-    // existed already) must rebuild on top of it, so it must be marked dirty.
+    // Park on h2 and insert a shell — it lands between h2 and h3.  The new step
+    // carries the geometry its tool just computed (clean); only h3 (which existed
+    // already) must rebuild on top of it.
     s.setState({ activeHistoryId: "h2" });
     s.getState().modifyItem(
       5,
       csgPatches("shell", { thickness: 0.1 }),
       "Shelled",
     );
-    // Order: h1, h2, <new>, h3 → the new step + h3 dirty; h1/h2 stay clean.
-    expect(dirty(s)).toEqual([false, false, true, true]);
+    // Order: h1, h2, <new>, h3 → the new step stays clean; only h3 is dirty.
+    expect(dirty(s)).toEqual([false, false, false, true]);
   });
 
   it("inserting a modify before a later same-item op relinks its source", () => {
