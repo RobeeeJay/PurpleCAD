@@ -365,6 +365,45 @@ async function regenerateHole(
   };
 }
 
+// Scale an emboss's developable wrap curve to the LIVE wall radius so the relief
+// tracks a resized profile.  The stored faceSet.developable was baked at the
+// wall's original size; without this the text keeps wrapping the old radius
+// (sitting inside a grown wall — reads as an inner cylinder).  The ratio is the
+// live vs stored outer-profile radius (max distance from the profile centroid).
+// Scaling preserves the curve's point order (no angular rotation of the text)
+// and its unit normals; arc lengths scale with the radius.  A pure thickness
+// change (outer radius unchanged) is a no-op.  Exact for a circular/round wall;
+// a non-uniform edit is approximate but still far better than the frozen radius.
+const outerRadius = (item) => {
+  const poly = item?.profile?.polygon2D;
+  const pc = item?.profile?.profileCentroid || { x: 0, y: 0 };
+  if (!Array.isArray(poly) || poly.length < 3) return null;
+  let m = 0;
+  for (const p of poly) {
+    const d = Math.hypot(p.x - pc.x, p.y - pc.y);
+    if (d > m) m = d;
+  }
+  return m;
+};
+
+export function reviveDevelopable(faceSet, liveSource, frozenSource) {
+  const dev = faceSet?.developable;
+  if (!dev || !Array.isArray(dev.curve)) return faceSet;
+  const oldR = outerRadius(frozenSource);
+  const newR = outerRadius(liveSource);
+  if (!oldR || !newR) return faceSet;
+  const ratio = newR / oldR;
+  if (!Number.isFinite(ratio) || Math.abs(ratio - 1) < 1e-4) return faceSet;
+  return {
+    ...faceSet,
+    developable: {
+      ...dev,
+      curve: dev.curve.map((c) => ({ u: c.u * ratio, v: c.v * ratio })),
+      arc: Array.isArray(dev.arc) ? dev.arc.map((a) => a * ratio) : dev.arc,
+    },
+  };
+}
+
 // Rebuild an emboss/deboss relief from its live source + sketch geometry.  The
 // stamp is recomputed from the (possibly edited) sketch profiles each pass.
 async function regenerateEmboss(
@@ -382,6 +421,13 @@ async function regenerateEmboss(
     liveItems,
     printPrecision,
   );
+  // Re-derive the wrap curve from the live wall so the relief follows a resized
+  // profile instead of wrapping the baked (old-radius) developable.
+  const liveFaceSet = reviveDevelopable(
+    regenerator.faceSet,
+    source,
+    regenerator.source,
+  );
   const stamp =
     buildEmbossStamp(
       regenerator.profiles,
@@ -389,7 +435,7 @@ async function regenerateEmboss(
       regenerator.params,
       liveItems,
       printPrecision,
-      regenerator.faceSet,
+      liveFaceSet,
       source?.scale?.x ?? 1,
     ) || regenerator.stamp;
   let result;
