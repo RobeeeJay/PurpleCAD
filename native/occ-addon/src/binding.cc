@@ -555,6 +555,33 @@ static std::map<std::string, TopoDS_Shape> RemapFaceNames(
   return out;
 }
 
+// Name a primitive's faces by geometry: each planar face by its dominant normal
+// axis (+x/-x/+y/-y/+z/-z), the lone curved lateral surface (cylinder/cone/
+// sphere/torus) as "side".  Deterministic and resize-invariant (a bigger box
+// still has a +x face), so a chamfer on a primitive face survives a dimension
+// edit.  First face wins on a name clash.
+static std::map<std::string, TopoDS_Shape> NamePrimitiveFaces(
+    const TopoDS_Shape& shape) {
+  std::map<std::string, TopoDS_Shape> faces;
+  for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next()) {
+    TopoDS_Face face = TopoDS::Face(f.Current());
+    std::string name;
+    BRepAdaptor_Surface s(face, false);
+    if (s.GetType() == GeomAbs_Plane) {
+      FaceNormal n = ComputeFaceNormal(face);
+      if (!n.valid) continue;
+      double ax = std::abs(n.x), ay = std::abs(n.y), az = std::abs(n.z);
+      if (ax >= ay && ax >= az) name = n.x > 0 ? "+x" : "-x";
+      else if (ay >= az)        name = n.y > 0 ? "+y" : "-y";
+      else                      name = n.z > 0 ? "+z" : "-z";
+    } else {
+      name = "side";
+    }
+    if (!name.empty() && !faces.count(name)) faces[name] = face;
+  }
+  return faces;
+}
+
 static std::vector<SelectedEdge> SelectSubGeoEdges(
     const TopoDS_Shape& shape, const EdgeFaceSpec& spec,
     const std::map<std::string, TopoDS_Shape>* namedFaces = nullptr) {
@@ -766,7 +793,7 @@ Napi::Number MakeBox(const Napi::CallbackInfo& info) {
     double x1 = GetDouble(info[0]), y1 = GetDouble(info[1]), z1 = GetDouble(info[2]);
     double x2 = GetDouble(info[3]), y2 = GetDouble(info[4]), z2 = GetDouble(info[5]);
     BRepPrimAPI_MakeBox mk(gp_Pnt(x1, y1, z1), gp_Pnt(x2, y2, z2));
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -776,7 +803,7 @@ Napi::Number MakeSphere(const Napi::CallbackInfo& info) {
   try {
     double r = GetDouble(info[0], 1.5);
     BRepPrimAPI_MakeSphere mk(r);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -791,7 +818,7 @@ Napi::Number MakeCylinder(const Napi::CallbackInfo& info) {
     double height  = GetDouble(info[2], 2.0);
     gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeCylinder mk(ax, radius, height);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -806,7 +833,7 @@ Napi::Number MakeCone(const Napi::CallbackInfo& info) {
     double height  = GetDouble(info[3], 2.0);
     gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeCone mk(ax, r1, r2, height);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -819,7 +846,7 @@ Napi::Number MakeTorus(const Napi::CallbackInfo& info) {
     double minorR = GetDouble(info[1], 0.4);
     gp_Ax2 ax(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeTorus mk(ax, majorR, minorR);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 

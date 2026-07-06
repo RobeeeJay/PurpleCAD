@@ -132,4 +132,25 @@ describe("extrude persistent face names", () => {
     occ.releaseShape(moved);
     occ.releaseShape(scaled);
   });
+
+  it("names primitive faces by axis (box) and lateral surface (cylinder)", () => {
+    const box = occ.makeBox(-1, -1, -1, 1, 1, 1);
+    expect(occ.faceNames(box)).toEqual(
+      expect.arrayContaining(["+x", "-x", "+y", "-y", "+z", "-z"]),
+    );
+    // Chamfer the +z face by name alone.
+    const tri = (id) => occ.tessellate(id, 0.1).indices.length / 3;
+    const baseTris = tri(box);
+    const ch = occ.chamferShape(box, { edges: [], faces: [{ name: "+z" }] }, 0.1, null);
+    expect(tri(ch)).toBeGreaterThan(baseTris);
+
+    const cyl = occ.makeCylinder(-1, 1, 2);
+    const cn = occ.faceNames(cyl);
+    expect(cn).toContain("side"); // lateral surface
+    expect(cn).toEqual(expect.arrayContaining(["+y", "-y"])); // caps
+
+    occ.releaseShape(box);
+    occ.releaseShape(ch);
+    occ.releaseShape(cyl);
+  });
 });
