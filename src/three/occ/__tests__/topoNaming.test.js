@@ -91,4 +91,45 @@ describe("extrude persistent face names", () => {
 
     occ.releaseShape(id);
   });
+
+  it("propagates names through a chamfer (chamfer-on-chamfer by name)", () => {
+    const base = occ.makeExtrude(square(1), [], 0, 0, 2);
+    // Chamfer the top by name; the bottom face is untouched → keeps its name.
+    const c1 = occ.chamferShape(
+      base,
+      { edges: [], faces: [{ name: "top" }] },
+      0.1,
+      null,
+    );
+    expect(occ.faceNames(c1)).toEqual(expect.arrayContaining(["bottom"]));
+    // A second chamfer resolves "bottom" by name on the chamfered body.
+    const c2 = occ.chamferShape(
+      c1,
+      { edges: [], faces: [{ name: "bottom" }] },
+      0.1,
+      null,
+    );
+    const tri = (id) => occ.tessellate(id, 0.1).indices.length / 3;
+    expect(tri(c2)).toBeGreaterThan(tri(c1)); // bottom edges bevelled too
+
+    occ.releaseShape(base);
+    occ.releaseShape(c1);
+    occ.releaseShape(c2);
+  });
+
+  it("carries names through a transform (position + scale)", () => {
+    const id = occ.makeExtrude(square(1), [], 0, 0, 2);
+    const moved = occ.transformShape(id, 0, 0, 5, 0, 0, 0); // +5 in z
+    expect(occ.faceNames(moved)).toEqual(expect.arrayContaining(["top", "side0"]));
+    // top cap was at z=2 → now z=7.
+    expect(occ.namedFacePoint(moved, "top")[2]).toBeCloseTo(7, 6);
+
+    const scaled = occ.scaleShape(id, 2);
+    expect(occ.faceNames(scaled)).toEqual(expect.arrayContaining(["top"]));
+    expect(occ.namedFacePoint(scaled, "top")[2]).toBeCloseTo(4, 6); // 2*2
+
+    occ.releaseShape(id);
+    occ.releaseShape(moved);
+    occ.releaseShape(scaled);
+  });
 });

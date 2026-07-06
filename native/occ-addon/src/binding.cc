@@ -31,6 +31,8 @@
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepBuilderAPI_MakeShape.hxx>
+#include <BRepBuilderAPI_ModifyShape.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Mat.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -502,6 +504,55 @@ static TopoDS_Face ResolveNamedFace(
   for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next())
     if (f.Current().IsSame(nf)) return nf;
   return TopoDS_Face();
+}
+
+// Is face `f` present in `shape` (by identity)?
+static bool FaceInShape(const TopoDS_Shape& shape, const TopoDS_Shape& f) {
+  for (TopExp_Explorer e(shape, TopAbs_FACE); e.More(); e.Next())
+    if (e.Current().IsSame(f)) return true;
+  return false;
+}
+
+// Carry face names from an op's INPUT to its RESULT using the builder's history:
+// a named input face maps to its Modified() face(s) if the op reshaped it, or
+// keeps its name if it survived unchanged (not IsDeleted, still present).  Faces
+// the op created (chamfer surfaces, etc.) are left unnamed here.  This is the
+// core of persistent topological naming across operations.
+static std::map<std::string, TopoDS_Shape> PropagateFaceNames(
+    BRepBuilderAPI_MakeShape& mk, const TopoDS_Shape& result,
+    const std::map<std::string, TopoDS_Shape>& inFaces) {
+  std::map<std::string, TopoDS_Shape> out;
+  for (const auto& kv : inFaces) {
+    const TopoDS_Shape& s = kv.second;
+    bool placed = false;
+    try {
+      const TopTools_ListOfShape& mod = mk.Modified(s);
+      for (const TopoDS_Shape& m : mod)
+        if (FaceInShape(result, m)) { out[kv.first] = m; placed = true; break; }
+    } catch (...) { /* op has no history for this subshape */ }
+    if (!placed) {
+      bool deleted = false;
+      try { deleted = mk.IsDeleted(s); } catch (...) {}
+      if (!deleted && FaceInShape(result, s)) out[kv.first] = s;
+    }
+  }
+  return out;
+}
+
+// Remap names through a rigid/affine transform (transform/mirror/scale): the
+// builder gives each subshape's single image via ModifiedShape.  Keeps names
+// attached as a body is positioned/scaled through the op pipeline.
+static std::map<std::string, TopoDS_Shape> RemapFaceNames(
+    BRepBuilderAPI_ModifyShape& mk,
+    const std::map<std::string, TopoDS_Shape>& inFaces) {
+  std::map<std::string, TopoDS_Shape> out;
+  for (const auto& kv : inFaces) {
+    try {
+      TopoDS_Shape m = mk.ModifiedShape(kv.second);
+      if (!m.IsNull()) out[kv.first] = m;
+    } catch (...) {}
+  }
+  return out;
 }
 
 static std::vector<SelectedEdge> SelectSubGeoEdges(
@@ -1161,10 +1212,11 @@ Napi::Number TransformShape(const Napi::CallbackInfo& info) {
     int id    = info[0].As<Napi::Number>().Int32Value();
     double tx = GetDouble(info[1]), ty = GetDouble(info[2]), tz = GetDouble(info[3]);
     double rx = GetDouble(info[4]), ry = GetDouble(info[5]), rz = GetDouble(info[6]);
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_Trsf trsf = BuildTransform(tx, ty, tz, rx, ry, rz);
-    BRepBuilderAPI_Transform mk(shape, trsf, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
+    return Napi::Number::New(env,
+        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1178,11 +1230,12 @@ Napi::Number MirrorShape(const Napi::CallbackInfo& info) {
     double nx = GetDouble(info[4]), ny = GetDouble(info[5]), nz = GetDouble(info[6]);
     double len = std::sqrt(nx * nx + ny * ny + nz * nz);
     if (len < 1e-9) throw std::runtime_error("mirror plane normal is degenerate");
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_Trsf trsf;
     trsf.SetMirror(gp_Ax2(gp_Pnt(ox, oy, oz), gp_Dir(nx / len, ny / len, nz / len)));
-    BRepBuilderAPI_Transform mk(shape, trsf, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
+    return Napi::Number::New(env,
+        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1197,11 +1250,12 @@ Napi::Number RotateShapeAxis(const Napi::CallbackInfo& info) {
     double angle = GetDouble(info[7], 0.0);
     double len = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (len < 1e-9) throw std::runtime_error("rotation axis is degenerate");
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_Trsf trsf;
     trsf.SetRotation(gp_Ax1(gp_Pnt(ox, oy, oz), gp_Dir(dx / len, dy / len, dz / len)), angle);
-    BRepBuilderAPI_Transform mk(shape, trsf, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
+    return Napi::Number::New(env,
+        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1211,11 +1265,12 @@ Napi::Number ScaleShape(const Napi::CallbackInfo& info) {
   try {
     int id       = info[0].As<Napi::Number>().Int32Value();
     double scale = GetDouble(info[1], 1.0);
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_Trsf trsf;
     trsf.SetScaleFactor(scale);
-    BRepBuilderAPI_Transform mk(shape, trsf, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
+    return Napi::Number::New(env,
+        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1230,11 +1285,12 @@ Napi::Number ScaleShapeXYZ(const Napi::CallbackInfo& info) {
     double sx   = GetDouble(info[1], 1.0);
     double sy   = GetDouble(info[2], 1.0);
     double sz   = GetDouble(info[3], 1.0);
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_GTrsf gt;
     gt.SetVectorialPart(gp_Mat(sx, 0, 0, 0, sy, 0, 0, 0, sz));
-    BRepBuilderAPI_GTransform mk(shape, gt, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_GTransform mk(rec.shape, gt, true);
+    return Napi::Number::New(env,
+        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1326,6 +1382,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
 
     // Build the chamfer on a given shape.  A null return means no edges
     // matched (sentinel); a throw means a genuine computation failure.
+    std::map<std::string, TopoDS_Shape> resultFaces;
     auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
       BRepFilletAPI_MakeChamfer mk(s);
       auto selected = SelectSubGeoEdges(s, spec, &rec.faces);
@@ -1340,6 +1397,13 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       if (!mk.IsDone())
         throw std::runtime_error(
           "chamfer computation failed (geometry rejected the operation)");
+      // Carry names forward from the original faces — only valid on the primary
+      // attempt (chamfering `shape` itself).  A unified-copy retry loses subshape
+      // identity, so names don't propagate there and the result falls back to
+      // coordinate selection.
+      resultFaces = s.IsSame(shape)
+                        ? PropagateFaceNames(mk, mk.Shape(), rec.faces)
+                        : std::map<std::string, TopoDS_Shape>{};
       return mk.Shape();
     };
 
@@ -1365,7 +1429,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       }
       // 0 = sentinel "no edges matched" — the bridge throws a descriptive error.
       if (result.IsNull()) return Napi::Number::New(env, 0);
-      return Napi::Number::New(env, StoreShape(result));
+      return Napi::Number::New(env, StoreRecord(result, resultFaces, {}));
     } catch (const std::exception& e) {
       // Two common causes, and the distance being small rules out neither:
       //  - the distance exceeds the material the chamfer runs into (e.g. wider
