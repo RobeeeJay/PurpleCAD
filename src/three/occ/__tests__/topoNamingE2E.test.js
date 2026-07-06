@@ -46,14 +46,23 @@ const sig = (g) => {
   for (let i = 0; i < g.positions.length; i++) s += g.positions[i];
   return `${g.positions.length}:${s.toFixed(3)}`;
 };
-const args = { amount: 0.1, angleRad: null, segments: 1, allItems: [], printPrecision: 0.05 };
+const args = {
+  amount: 0.1,
+  angleRad: null,
+  segments: 1,
+  allItems: [],
+  printPrecision: 0.05,
+};
 
 describe("chamfer name capture + resolve survives a depth edit (occOps)", () => {
   it("captures the top face name and re-selects it after the top moves", async () => {
     // Commit on depth 2: hit point on the top cap (z=2).
     const commit = await ops.chamferOrFilletItem({
       source: src(2),
-      subGeo: { edges: [], faces: [{ nx: 0, ny: 0, nz: 1, cx: 0, cy: 0, cz: 2 }] },
+      subGeo: {
+        edges: [],
+        faces: [{ nx: 0, ny: 0, nz: 1, cx: 0, cy: 0, cz: 2 }],
+      },
       ...args,
     });
     const named = commit.resolvedSubGeo.faces[0].name;
@@ -62,7 +71,10 @@ describe("chamfer name capture + resolve survives a depth edit (occOps)", () => 
     // Reference: chamfer the depth-4 top the normal way.
     const ref = await ops.chamferOrFilletItem({
       source: src(4),
-      subGeo: { edges: [], faces: [{ nx: 0, ny: 0, nz: 1, cx: 0, cy: 0, cz: 4 }] },
+      subGeo: {
+        edges: [],
+        faces: [{ nx: 0, ny: 0, nz: 1, cx: 0, cy: 0, cz: 4 }],
+      },
       ...args,
     });
 

@@ -23,7 +23,14 @@ describe("extrude persistent face names", () => {
     const id = occ.makeExtrude(square(1), [], 0, 0, 2);
     const names = occ.faceNames(id);
     expect(names).toEqual(
-      expect.arrayContaining(["top", "bottom", "side0", "side1", "side2", "side3"]),
+      expect.arrayContaining([
+        "top",
+        "bottom",
+        "side0",
+        "side1",
+        "side2",
+        "side3",
+      ]),
     );
     occ.releaseShape(id);
   });
@@ -66,7 +73,12 @@ describe("extrude persistent face names", () => {
     expect(triCount(named)).toBeGreaterThan(baseTris); // top edges bevelled
 
     // Same spec without the name resolves nothing → 0 sentinel (no match).
-    const unnamed = occ.chamferShape(base, { edges: [], faces: [{}] }, 0.1, null);
+    const unnamed = occ.chamferShape(
+      base,
+      { edges: [], faces: [{}] },
+      0.1,
+      null,
+    );
     expect(unnamed).toBe(0);
 
     occ.releaseShape(base);
@@ -120,7 +132,9 @@ describe("extrude persistent face names", () => {
   it("carries names through a transform (position + scale)", () => {
     const id = occ.makeExtrude(square(1), [], 0, 0, 2);
     const moved = occ.transformShape(id, 0, 0, 5, 0, 0, 0); // +5 in z
-    expect(occ.faceNames(moved)).toEqual(expect.arrayContaining(["top", "side0"]));
+    expect(occ.faceNames(moved)).toEqual(
+      expect.arrayContaining(["top", "side0"]),
+    );
     // top cap was at z=2 → now z=7.
     expect(occ.namedFacePoint(moved, "top")[2]).toBeCloseTo(7, 6);
 
@@ -141,7 +155,12 @@ describe("extrude persistent face names", () => {
     // Chamfer the +z face by name alone.
     const tri = (id) => occ.tessellate(id, 0.1).indices.length / 3;
     const baseTris = tri(box);
-    const ch = occ.chamferShape(box, { edges: [], faces: [{ name: "+z" }] }, 0.1, null);
+    const ch = occ.chamferShape(
+      box,
+      { edges: [], faces: [{ name: "+z" }] },
+      0.1,
+      null,
+    );
     expect(tri(ch)).toBeGreaterThan(baseTris);
 
     const cyl = occ.makeCylinder(-1, 1, 2);

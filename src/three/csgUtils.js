@@ -105,7 +105,20 @@ export function extrudeWithLivePolygon(item, allItems, precision) {
     const containing = allEntries.filter((g) =>
       polyContainsPoint(g.polygon, pc),
     );
-    const pool = containing.length > 0 ? containing : allEntries;
+    let pool = containing.length > 0 ? containing : allEntries;
+    // A ring's inner loop shows up BOTH as the outer entry's hole AND as a
+    // spurious standalone disc entry with the SAME centroid — so the distance
+    // test below can't tell them apart and the area tiebreak (against the stale
+    // stored area) can pick the disc after a resize, collapsing the ring to a
+    // solid inner cylinder.  When the stored profile was a ring (had holes),
+    // keep only entries that also have holes, dropping the disc.
+    const storedHasHoles = (profile.holes || []).some((h) => h.length >= 3);
+    if (storedHasHoles) {
+      const withHoles = pool.filter((g) =>
+        (g.holes || []).some((h) => h.length >= 3),
+      );
+      if (withHoles.length > 0) pool = withHoles;
+    }
     // Rank by spatial distance from the stored centroid first, area only as a
     // tiebreaker.  Area-alone fallback once mismatched a glyph whose centroid
     // (in its counter) stopped landing inside its own re-simplified loop to a
