@@ -46,4 +46,30 @@ describe("extrude persistent face names", () => {
     occ.releaseShape(small);
     occ.releaseShape(big);
   });
+
+  it("selects a face by name alone (no coordinates) for a chamfer", () => {
+    const triCount = (id) => {
+      const t = occ.tessellate(id, 0.1);
+      return t.indices.length / 3;
+    };
+    const base = occ.makeExtrude(square(1), [], 0, 0, 2);
+    const baseTris = triCount(base);
+
+    // Name only — no nx/ny/nz, no cx/cy/cz.  Coordinate/normal matching can't
+    // resolve this (zero normal matches nothing); the persistent name does.
+    const named = occ.chamferShape(
+      base,
+      { edges: [], faces: [{ name: "top" }] },
+      0.1,
+      null,
+    );
+    expect(triCount(named)).toBeGreaterThan(baseTris); // top edges bevelled
+
+    // Same spec without the name resolves nothing → 0 sentinel (no match).
+    const unnamed = occ.chamferShape(base, { edges: [], faces: [{}] }, 0.1, null);
+    expect(unnamed).toBe(0);
+
+    occ.releaseShape(base);
+    occ.releaseShape(named);
+  });
 });

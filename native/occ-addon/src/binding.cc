@@ -359,11 +359,14 @@ struct EdgeFaceSpec {
     bool hasNormals;
     double n1x, n1y, n1z, n2x, n2y, n2z;
   };
-  // Face normal + optional centroid (for face selection)
+  // Face normal + optional centroid (for face selection), plus an optional
+  // persistent name (topological naming) that resolves the exact face directly
+  // when present, before any coordinate/normal matching.
   struct FaceNorm {
     double nx, ny, nz;
     bool hasCentroid;
     double cx, cy, cz;
+    std::string name;
   };
   std::vector<EdgeEp> edges;
   std::vector<FaceNorm> faces;
@@ -408,12 +411,16 @@ static EdgeFaceSpec ParseSubGeo(const Napi::Object& subGeo) {
     for (uint32_t i = 0; i < arr.Length(); i++) {
       Napi::Object f = arr.Get(i).As<Napi::Object>();
       bool hasCx = f.Has("cx") && !f.Get("cx").IsNull() && !f.Get("cx").IsUndefined();
+      std::string name;
+      if (f.Has("name") && f.Get("name").IsString())
+        name = f.Get("name").As<Napi::String>().Utf8Value();
       spec.faces.push_back({
         GetDouble(f.Get("nx")), GetDouble(f.Get("ny")), GetDouble(f.Get("nz")),
         hasCx,
         hasCx ? GetDouble(f.Get("cx")) : 0.0,
         hasCx ? GetDouble(f.Get("cy")) : 0.0,
-        hasCx ? GetDouble(f.Get("cz")) : 0.0
+        hasCx ? GetDouble(f.Get("cz")) : 0.0,
+        name
       });
     }
   }
@@ -480,8 +487,26 @@ struct SelectedEdge {
 // centroid used only to pick the nearest among same-normal faces (a
 // tie-break, not a hard cutoff, so a resized face still matches).  Shared by
 // ChamferShape and FilletShape so the two never drift apart.
-static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
-                                                   const EdgeFaceSpec& spec) {
+// Resolve a face spec's persistent name to the actual face on `shape`.  The
+// named subshape is confirmed still present (IsSame) so a stale name falls
+// through to coordinate matching rather than selecting a dangling handle.
+static TopoDS_Face ResolveNamedFace(
+    const TopoDS_Shape& shape,
+    const std::map<std::string, TopoDS_Shape>* named,
+    const std::string& name) {
+  if (!named || name.empty()) return TopoDS_Face();
+  auto it = named->find(name);
+  if (it == named->end() || it->second.ShapeType() != TopAbs_FACE)
+    return TopoDS_Face();
+  TopoDS_Face nf = TopoDS::Face(it->second);
+  for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next())
+    if (f.Current().IsSame(nf)) return nf;
+  return TopoDS_Face();
+}
+
+static std::vector<SelectedEdge> SelectSubGeoEdges(
+    const TopoDS_Shape& shape, const EdgeFaceSpec& spec,
+    const std::map<std::string, TopoDS_Shape>* namedFaces = nullptr) {
   std::vector<SelectedEdge> out;
   std::set<std::string> addedKeys;
 
@@ -548,6 +573,14 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
 
   const double eps = 0.05;
   for (const auto& req : spec.faces) {
+    // Persistent name wins: resolve the exact face directly, skipping the
+    // coordinate/normal search entirely (survives a dimension edit).
+    TopoDS_Face named = ResolveNamedFace(shape, namedFaces, req.name);
+    if (!named.IsNull()) {
+      for (TopExp_Explorer eexp(named, TopAbs_EDGE); eexp.More(); eexp.Next())
+        addEdge(TopoDS::Edge(eexp.Current()), named);
+      continue;
+    }
     TopoDS_Face best;
     double bestDist = 1e300;
     bool found = false;
@@ -603,11 +636,17 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
 // chamfer/fillet).  Matches by normal, using the stored centroid only as a
 // nearest tie-break among same-normal faces so a resized face still matches.
 // Used by push/pull, which needs the TopoDS_Face itself to sweep a prism.
-static std::vector<TopoDS_Face> SelectSubGeoFaces(const TopoDS_Shape& shape,
-                                                  const EdgeFaceSpec& spec) {
+static std::vector<TopoDS_Face> SelectSubGeoFaces(
+    const TopoDS_Shape& shape, const EdgeFaceSpec& spec,
+    const std::map<std::string, TopoDS_Shape>* namedFaces = nullptr) {
   std::vector<TopoDS_Face> out;
   const double eps = 0.05;
   for (const auto& req : spec.faces) {
+    TopoDS_Face named = ResolveNamedFace(shape, namedFaces, req.name);
+    if (!named.IsNull()) {
+      out.push_back(named);
+      continue;
+    }
     TopoDS_Face best;
     double bestDist = 1e300;
     bool found = false;
@@ -1277,7 +1316,8 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
                       info[3].IsNumber() && std::isfinite(GetDouble(info[3]));
     double angleRad = useAngle ? GetDouble(info[3]) : 0.0;
 
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec  = ParseSubGeo(sg);
     if (spec.edges.empty() && spec.faces.empty()) {
       // Nothing to do — return the same shape
@@ -1288,7 +1328,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
     // matched (sentinel); a throw means a genuine computation failure.
     auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
       BRepFilletAPI_MakeChamfer mk(s);
-      auto selected = SelectSubGeoEdges(s, spec);
+      auto selected = SelectSubGeoEdges(s, spec, &rec.faces);
       if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) {
         if (useAngle && !se.refFace.IsNull())
@@ -1349,7 +1389,8 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
     Napi::Object sg = info[1].As<Napi::Object>();
     double radius = GetDouble(info[2], 0.05);
 
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec  = ParseSubGeo(sg);
     if (spec.edges.empty() && spec.faces.empty()) {
       return Napi::Number::New(env, StoreShape(shape));
@@ -1358,7 +1399,7 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
     // Null return = no edges matched (sentinel); throw = computation failure.
     auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
       BRepFilletAPI_MakeFillet mk(s, ChFi3d_Rational);
-      auto selected = SelectSubGeoEdges(s, spec);
+      auto selected = SelectSubGeoEdges(s, spec, &rec.faces);
       if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) mk.Add(radius, se.edge);
       mk.Build();
@@ -1416,13 +1457,14 @@ Napi::Number PushPullFaces(const Napi::CallbackInfo& info) {
     Napi::Object sg = info[1].As<Napi::Object>();
     double distance = GetDouble(info[2], 0.0);
 
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec  = ParseSubGeo(sg);
     // No faces, or a zero move — nothing to do; hand back the input unchanged.
     if (spec.faces.empty() || std::abs(distance) < 1e-9)
       return Napi::Number::New(env, StoreShape(shape));
 
-    auto faces = SelectSubGeoFaces(shape, spec);
+    auto faces = SelectSubGeoFaces(shape, spec, &rec.faces);
     // 0 = sentinel "no faces matched" — the JS bridge turns this into a
     // descriptive error (same convention as chamfer/fillet).
     if (faces.empty()) return Napi::Number::New(env, 0);
@@ -1491,7 +1533,8 @@ Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
     Napi::Object sg      = info[2].As<Napi::Object>();
     double angle         = GetDouble(info[3], 0.0);
 
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec  = ParseSubGeo(sg);
     if (spec.faces.empty() || std::abs(angle) < 1e-9)
       return Napi::Number::New(env, StoreShape(shape));
@@ -1505,7 +1548,7 @@ Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
     gp_Dir pullDir(nv);
     gp_Pln neutralPlane(gp_Pnt(cx, cy, cz), pullDir);
 
-    auto faces = SelectSubGeoFaces(shape, spec);
+    auto faces = SelectSubGeoFaces(shape, spec, &rec.faces);
     if (faces.empty()) return Napi::Number::New(env, 0);
 
     try {
