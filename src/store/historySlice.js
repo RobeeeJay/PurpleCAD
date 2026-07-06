@@ -246,8 +246,12 @@ export const createHistorySlice = (set) => ({
         ...state.history.slice(insertIdx),
       ];
       // Hide the original from the split step onward so a timeline replay
-      // shows the source before, the pieces after.
-      const rawHistory = hideIdsFrom(inserted, insertIdx, [id]);
+      // shows the source before, the pieces after.  Forward-invalidate later
+      // steps too (a mid-timeline split shifts the chain — see modifyItem).
+      const rawHistory = dirtyEntriesFrom(
+        hideIdsFrom(inserted, insertIdx, [id]),
+        insertIdx,
+      );
       const items = replayUpTo(rawHistory, insertIdx);
 
       saveTimeline(rawHistory, newActiveId);
@@ -285,11 +289,19 @@ export const createHistorySlice = (set) => ({
       }
       newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
-      const rawHistory = [
-        ...state.history.slice(0, insertIdx),
-        newEntry,
-        ...state.history.slice(insertIdx),
-      ];
+      // Forward invalidation: a mid-timeline modify (e.g. a bevel inserted
+      // before existing steps) shifts the chain, so the new step and everything
+      // after it are dirty and must rebuild on the modified body.  An append has
+      // nothing after it.  (addItem does the same; modifyItem used to skip it,
+      // which left later steps showing the pre-modify geometry.)
+      const rawHistory = dirtyEntriesFrom(
+        [
+          ...state.history.slice(0, insertIdx),
+          newEntry,
+          ...state.history.slice(insertIdx),
+        ],
+        insertIdx,
+      );
       const items = replayUpTo(rawHistory, insertIdx);
 
       saveTimeline(rawHistory, newActiveId);
@@ -325,11 +337,15 @@ export const createHistorySlice = (set) => ({
         newActiveId = null;
       }
       newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
-      const rawHistory = [
-        ...state.history.slice(0, insertIdx),
-        newEntry,
-        ...state.history.slice(insertIdx),
-      ];
+      // Forward invalidation for a mid-timeline insert (see modifyItem).
+      const rawHistory = dirtyEntriesFrom(
+        [
+          ...state.history.slice(0, insertIdx),
+          newEntry,
+          ...state.history.slice(insertIdx),
+        ],
+        insertIdx,
+      );
       const items = replayUpTo(rawHistory, insertIdx);
       saveTimeline(rawHistory, newActiveId);
       return Object.assign(
