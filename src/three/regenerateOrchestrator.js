@@ -21,7 +21,7 @@ import {
 } from "../store/internals.js";
 import { regenerateItemsForResolution } from "./regenerateItems.js";
 import { activePrecision } from "./resolution.js";
-import { getSolid, setSolid } from "./solidCache.js";
+import { getSolid, setSolid, pruneSolids } from "./solidCache.js";
 
 export async function regenerateForResolution(printPrecision) {
   const state = useStore.getState();
@@ -117,6 +117,10 @@ export async function recalculateTimeline() {
   // we stop between steps, leaving the not-yet-reached entries on the cache
   // they already had (still valid — regen only dirties one step at a time).
   const cancelEpoch = useStore.getState().cancelEpoch;
+
+  // Free cached solids whose entries were deleted since the last pass (their
+  // ids won't be revisited, so setSolid can't reclaim them).
+  pruneSolids(new Set(history.map((h) => h.id)));
 
   let accItems = [];
   const newHistory = [];

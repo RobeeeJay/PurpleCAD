@@ -43,6 +43,19 @@ export function clearSolids() {
   cache.clear();
 }
 
+// Release the cached solids of entries that no longer exist (deleted from the
+// timeline).  `validIds` is the set of current entry ids.  Safe within a
+// document — entry ids are unique and monotonic there; cross-document reuse is
+// handled separately by clearSolids on the document boundary.
+export function pruneSolids(validIds) {
+  for (const key of [...cache.keys()]) {
+    if (!validIds.has(key)) {
+      releaseShape(cache.get(key).shapeId);
+      cache.delete(key);
+    }
+  }
+}
+
 // Test/inspection helper — number of cached solids.
 export function cachedSolidCount() {
   return cache.size;

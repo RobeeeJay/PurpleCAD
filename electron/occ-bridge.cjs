@@ -398,10 +398,15 @@ function finishSolidResult(resultId, precision, retainResult, extra) {
   for (let i = 0; i < centered.length; i += 3) {
     centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
   }
+  // Re-centre the cached solid to buildItemShapeLocal's frame (mirrors occOps.js).
+  const shapeId = retainResult
+    ? occ.transformShape(resultId, -cx, -cy, -cz, 0, 0, 0)
+    : null;
+  if (retainResult) occ.releaseShape(resultId);
   return {
     geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx, cy, cz },
-    ...(retainResult ? { shapeId: resultId } : null),
+    ...(retainResult ? { shapeId } : null),
     ...extra,
   };
 }
@@ -887,12 +892,17 @@ function chamferOrFilletItem({ source, sourceShapeId, retainResult, subGeo, amou
   for (let i = 0; i < centered.length; i += 3) {
     centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
   }
+  // Re-centre the cached solid to buildItemShapeLocal's frame (mirrors occOps.js).
+  const shapeId = retainResult
+    ? occ.transformShape(resultId, -cx, -cy, -cz, 0, 0, 0)
+    : null;
+  if (retainResult) occ.releaseShape(resultId);
 
   return {
     geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo,
-    ...(retainResult ? { shapeId: resultId } : null),
+    ...(retainResult ? { shapeId } : null),
   };
 }
 

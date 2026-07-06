@@ -86,6 +86,15 @@ function finishSolidResult(resultId, precision, retainResult, extra) {
     centered[i + 1] -= cy;
     centered[i + 2] -= cz;
   }
+  // Cache the SOLID in the same bbox-centred frame buildItemShapeLocal rebuilds
+  // it in (it re-centres by regenerator.centerOffset === this offset).  Without
+  // this the retained shape is the op's uncentred result, so a downstream op
+  // consuming it would be SHIFTED by (cx,cy,cz) versus the recipe path — a
+  // centred profile hides it (offset ~0), an off-centre one does not.
+  const shapeId = retainResult
+    ? occ.transformShape(resultId, -cx, -cy, -cz, 0, 0, 0)
+    : null;
+  if (retainResult) occ.releaseShape(resultId);
   return {
     geometryData: {
       positions: centered,
@@ -93,7 +102,7 @@ function finishSolidResult(resultId, precision, retainResult, extra) {
       indices: Array.from(tess.indices),
     },
     centerOffset: { cx, cy, cz },
-    ...(retainResult ? { shapeId: resultId } : null),
+    ...(retainResult ? { shapeId } : null),
     ...extra,
   };
 }
@@ -1028,6 +1037,11 @@ async function chamferOrFilletItem({
     centered[i + 1] -= cy;
     centered[i + 2] -= cz;
   }
+  // Re-centre the cached solid to match buildItemShapeLocal (see finishSolidResult).
+  const shapeId = retainResult
+    ? occ.transformShape(resultId, -cx, -cy, -cz, 0, 0, 0)
+    : null;
+  if (retainResult) occ.releaseShape(resultId);
   return {
     geometryData: {
       positions: centered,
@@ -1036,7 +1050,7 @@ async function chamferOrFilletItem({
     },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo,
-    ...(retainResult ? { shapeId: resultId } : null),
+    ...(retainResult ? { shapeId } : null),
   };
 }
 
