@@ -72,4 +72,23 @@ describe("extrude persistent face names", () => {
     occ.releaseShape(base);
     occ.releaseShape(named);
   });
+
+  it("enrichSubGeo stamps the persistent name onto a picked face", () => {
+    const id = occ.makeExtrude(square(1), [], 0, 0, 2);
+    // A pick on the top cap (hit point at z=2, +Z normal).
+    const enriched = occ.enrichSubGeo(id, {
+      edges: [],
+      faces: [{ nx: 0, ny: 0, nz: 1, cx: 0, cy: 0, cz: 2 }],
+    });
+    expect(enriched.faces[0].name).toBe("top");
+
+    // A pick on the -Y side wall → side edge 0.
+    const side = occ.enrichSubGeo(id, {
+      edges: [],
+      faces: [{ nx: 0, ny: -1, nz: 0, cx: 0, cy: -1, cz: 1 }],
+    });
+    expect(side.faces[0].name).toBe("side0");
+
+    occ.releaseShape(id);
+  });
 });

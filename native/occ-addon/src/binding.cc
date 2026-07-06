@@ -1726,7 +1726,8 @@ Napi::Value EnrichSubGeo(const Napi::CallbackInfo& info) {
   try {
     int id = info[0].As<Napi::Number>().Int32Value();
     Napi::Object sg = info[1].As<Napi::Object>();
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec = ParseSubGeo(sg);
 
     TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
@@ -1774,10 +1775,38 @@ Napi::Value EnrichSubGeo(const Napi::CallbackInfo& info) {
       outEdges.Set(uint32_t(i), eo);
     }
 
+    // Faces: pass through unchanged, but stamp each with the persistent NAME of
+    // the face it currently selects, so later regens resolve it by name instead
+    // of coordinates.  Resolve the pick to a face (coord/normal), then match it
+    // to a named face by identity (IsSame).
+    Napi::Array outFaces;
+    if (sg.Has("faces") && sg.Get("faces").IsArray()) {
+      Napi::Array inFaces = sg.Get("faces").As<Napi::Array>();
+      outFaces = Napi::Array::New(env, inFaces.Length());
+      for (uint32_t i = 0; i < inFaces.Length() && i < spec.faces.size(); i++) {
+        Napi::Object fo = inFaces.Get(i).As<Napi::Object>();
+        if (spec.faces[i].name.empty()) {
+          EdgeFaceSpec one;
+          one.faces.push_back(spec.faces[i]);
+          auto sel = SelectSubGeoFaces(shape, one);
+          if (!sel.empty()) {
+            for (const auto& kv : rec.faces) {
+              if (kv.second.IsSame(sel[0])) {
+                fo.Set("name", Napi::String::New(env, kv.first));
+                break;
+              }
+            }
+          }
+        }
+        outFaces.Set(i, fo);
+      }
+    } else {
+      outFaces = Napi::Array::New(env, 0);
+    }
+
     Napi::Object out = Napi::Object::New(env);
     out.Set("edges", outEdges);
-    if (sg.Has("faces")) out.Set("faces", sg.Get("faces"));
-    else out.Set("faces", Napi::Array::New(env, 0));
+    out.Set("faces", outFaces);
     return out;
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
