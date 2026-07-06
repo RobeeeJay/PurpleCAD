@@ -10,6 +10,7 @@ import {
   markCsgDirty,
   rewriteCreatedItem,
   commitEntryEdit,
+  relinkSourceChain,
   dirtyEntriesFrom,
   dirtyAllEntries,
   maxItemId,
@@ -290,17 +291,19 @@ export const createHistorySlice = (set) => ({
       }
       newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
 
-      // Forward invalidation: a mid-timeline modify (e.g. a bevel inserted
-      // before existing steps) shifts the chain, so the new step and everything
-      // after it are dirty and must rebuild on the modified body.  An append has
-      // nothing after it.  (addItem does the same; modifyItem used to skip it,
-      // which left later steps showing the pre-modify geometry.)
+      // A mid-timeline modify (e.g. a bevel inserted before an existing emboss
+      // on the same body) must (1) re-link the source chain so every LATER
+      // op on this item rebuilds on the newly inserted result — not its stale
+      // pre-insert snapshot, which would show/preview without the new op — and
+      // (2) forward-invalidate the new step and everything after it.  An append
+      // has nothing after it, so both are no-ops there.
+      const inserted = [
+        ...state.history.slice(0, insertIdx),
+        newEntry,
+        ...state.history.slice(insertIdx),
+      ];
       const rawHistory = dirtyEntriesFrom(
-        [
-          ...state.history.slice(0, insertIdx),
-          newEntry,
-          ...state.history.slice(insertIdx),
-        ],
+        relinkSourceChain(inserted, id, insertIdx),
         insertIdx,
       );
       const items = replayUpTo(rawHistory, insertIdx);

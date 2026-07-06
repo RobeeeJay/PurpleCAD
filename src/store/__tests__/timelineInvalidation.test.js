@@ -98,6 +98,23 @@ describe("timeline forward invalidation", () => {
     expect(dirty(s)).toEqual([false, false, true, true]);
   });
 
+  it("inserting a modify before a later same-item op relinks its source", () => {
+    const s = makeStore();
+    // Park on the chamfer (h2) and insert a shell before the emboss (h3).  The
+    // emboss must now build on the shell (the newly inserted result), not its
+    // stale pre-insert snapshot — otherwise its preview/geometry omits the shell.
+    s.setState({ activeHistoryId: "h2" });
+    s.getState().modifyItem(
+      5,
+      csgPatches("shell", { thickness: 0.1 }),
+      "Shelled",
+    );
+    const emb = s.getState().history.find((e) => e.id === "h3");
+    expect(emb.instruction.patches.regenerator.source.regenerator.kind).toBe(
+      "shell",
+    );
+  });
+
   it("an in-place depth/dimension edit dirties the whole timeline (JIT recalc reruns regen)", () => {
     const s = makeStore();
     // Edits that rewrite a create entry + markCsgDirty the LIVE items (extrude
