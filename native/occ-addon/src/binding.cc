@@ -645,6 +645,32 @@ static TopoDS_Edge ResolveNamedEdge(
   return TopoDS_Edge();
 }
 
+// The face adjacent to the most of the given edges — the face a rim selection
+// bounds (e.g. the top cap for a ring's top rim).  Used as a chamfer fallback:
+// individual rim edges OCC won't bevel together (a thin ring at coarse
+// tessellation) often succeed as that whole face's boundary, and the result is
+// a clean solid (far faster for a downstream op than a mesh-sewn one).
+static TopoDS_Face MostCommonAdjacentFace(
+    const TopoDS_Shape& shape, const std::vector<SelectedEdge>& edges) {
+  TopTools_IndexedDataMapOfShapeListOfShape efMap;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, efMap);
+  std::vector<std::pair<TopoDS_Face, int>> counts;
+  for (const auto& se : edges) {
+    if (!efMap.Contains(se.edge)) continue;
+    for (const TopoDS_Shape& f : efMap.FindFromKey(se.edge)) {
+      bool found = false;
+      for (auto& pc : counts)
+        if (pc.first.IsSame(f)) { pc.second++; found = true; break; }
+      if (!found) counts.push_back({TopoDS::Face(f), 1});
+    }
+  }
+  TopoDS_Face best;
+  int bestC = 0;
+  for (auto& pc : counts)
+    if (pc.second > bestC) { bestC = pc.second; best = pc.first; }
+  return best;
+}
+
 static std::vector<SelectedEdge> SelectSubGeoEdges(
     const TopoDS_Shape& shape, const EdgeFaceSpec& spec,
     const std::map<std::string, TopoDS_Shape>* namedFaces = nullptr,
@@ -1506,6 +1532,28 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       return mk.Shape();
     };
 
+    // Fallback: chamfer the whole boundary of the FACE the selected edges bound.
+    // A rim whose individual edges OCC rejects (a thin ring at coarse preview
+    // tessellation) usually succeeds as the face's rim — and yields a clean
+    // solid, so a downstream emboss builds fast instead of on a slow mesh-sew.
+    auto attemptFaceRim = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
+      auto selected = SelectSubGeoEdges(s, spec, &rec.faces, &rec.edges);
+      if (selected.empty()) return TopoDS_Shape();
+      TopoDS_Face face = MostCommonAdjacentFace(s, selected);
+      if (face.IsNull()) return TopoDS_Shape();
+      BRepFilletAPI_MakeChamfer mk(s);
+      int n = 0;
+      for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next(), ++n)
+        mk.Add(amount, TopoDS::Edge(e.Current()));
+      if (n == 0) return TopoDS_Shape();
+      mk.Build();
+      if (!mk.IsDone()) return TopoDS_Shape();
+      resultFaces = s.IsSame(shape)
+                        ? PropagateFaceNames(mk, mk.Shape(), rec.faces)
+                        : std::map<std::string, TopoDS_Shape>{};
+      return mk.Shape();
+    };
+
     try {
       TopoDS_Shape result;
       try {
@@ -1524,7 +1572,17 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
           u.Build();
           unified = u.Shape();
         } catch (...) { /* keep the original if unify throws */ }
-        result = attempt(unified);
+        try {
+          result = attempt(unified);
+        } catch (const std::exception&) {
+          // Last resort: the face-rim fallback (see above).  Null → the outer
+          // catch reports the original rejection.
+          result = attemptFaceRim(shape);
+          if (result.IsNull()) result = attemptFaceRim(unified);
+          if (result.IsNull())
+            throw std::runtime_error(
+                "chamfer computation failed (geometry rejected the operation)");
+        }
       }
       // 0 = sentinel "no edges matched" — the bridge throws a descriptive error.
       if (result.IsNull()) return Napi::Number::New(env, 0);
