@@ -7,6 +7,7 @@ import { useStore } from "../../store";
 import { activePrecision } from "../resolution.js";
 import { withLivePolygons } from "../csgUtils.js";
 import { buildEmbossStamp } from "../embossGeometry.js";
+import { reviveDevelopable } from "../regenerateItems.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 
@@ -19,17 +20,26 @@ export function buildEmbossRecipe(items, printPrecision) {
   if (!et || !et.face || !et.profiles || et.profiles.length === 0) return null;
   const item = items.find((i) => i.id === et.itemId);
   if (!item) return null;
-  // Editing replays the FROZEN pre-emboss source; a fresh emboss snapshots live.
-  const source = et.source
-    ? et.source
-    : withLivePolygons({ ...item }, items, printPrecision);
+  // Re-derive the source's profiles from the LIVE sketch — for a fresh emboss
+  // (snapshot the current body) AND when editing (the stored pre-emboss source
+  // is frozen at emboss-create time; using it raw rebuilds the edit on the OLD
+  // size, reverting a since-resized body).  withLivePolygons keeps the source's
+  // structure but refreshes its extrude polygons to the current sketch.
+  const source = withLivePolygons(
+    et.source || { ...item },
+    items,
+    printPrecision,
+  );
+  // Scale the wrap curve to the live wall radius so an edit after a resize wraps
+  // the current wall, not the baked (old) radius.  No-op for a fresh emboss.
+  const liveFaceSet = reviveDevelopable(et.faceSet, source, et.source || item);
   const stamp = buildEmbossStamp(
     et.profiles,
     et.face,
     et.params,
     items,
     printPrecision,
-    et.faceSet,
+    liveFaceSet,
     source?.scale?.x ?? 1,
   );
   if (!stamp) return null;
@@ -39,7 +49,9 @@ export function buildEmbossRecipe(items, printPrecision) {
     stamp,
     profiles: et.profiles,
     face: et.face,
-    faceSet: et.faceSet || null,
+    // Store the wrap curve re-baselined to the CURRENT wall (with the live
+    // source), so a later resize scales from this size rather than a stale one.
+    faceSet: liveFaceSet || null,
     params: { ...et.params },
   };
 }
