@@ -129,6 +129,11 @@ export async function recalculateTimeline() {
   // keying the solid cache by entry id (not item id) is essential because
   // in-place chains (extrude→chamfer→emboss) all share one item id.
   const lastEntryForItem = new Map();
+  // itemId → the live world position its most recent geometry step resolved to.
+  // A body-anchored op (emboss: centerOffset 0, no bbox re-centre) must inherit
+  // this — otherwise when an upstream bevel is inserted and re-centres the body,
+  // the emboss keeps its old position and the relief drifts off the object.
+  const lastPositionForItem = new Map();
   for (let idx = 0; idx < history.length; idx++) {
     if (useStore.getState().cancelEpoch !== cancelEpoch) {
       for (let j = idx; j < history.length; j++) newHistory.push(history[j]);
@@ -160,6 +165,7 @@ export async function recalculateTimeline() {
       // it as the item's latest producer.  Its solid may or may not be cached
       // this session — if not, the consumer simply rebuilds (correct fallback).
       lastEntryForItem.set(targetId, entry.id);
+      if (cached?.position) lastPositionForItem.set(targetId, cached.position);
       continue;
     }
     // Dirty only this step's item; everything upstream keeps the cache an
@@ -256,11 +262,17 @@ export async function recalculateTimeline() {
       continue;
     }
     const inst = entry.instruction;
+    // A body-anchored op (emboss) sits at its source body's world position, not
+    // a re-derived one.  When an upstream op re-centred the body, inherit the
+    // live position of the previous same-item step so the relief stays put.
+    const bodyAnchored =
+      reg.regenerator?.kind === "emboss" && lastPositionForItem.has(targetId);
     const geom = {
-      position: reg.position,
+      position: bodyAnchored ? lastPositionForItem.get(targetId) : reg.position,
       regenerator: reg.regenerator,
       geometryData: reg.geometryData,
     };
+    lastPositionForItem.set(targetId, geom.position);
     // Freshly recomputed → this step's cache is clean again.
     newHistory.push(
       inst.type === "create"
