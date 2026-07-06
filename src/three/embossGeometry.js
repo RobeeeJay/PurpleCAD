@@ -175,10 +175,17 @@ function buildDevelopableConformMesh(loops, dev, face, params, invScale = 1) {
   const { curve, arc, norms } = dev;
   const total = arc[arc.length - 1] || 1;
 
-  // Anchor the wrap at the curve point nearest the picked face point.
+  // Anchor the wrap at the curve point nearest the picked face point (around the
+  // wall), but CENTRE it on the wall's axial extent (mid-face) rather than the
+  // click height — so the relief sits centred on the selected face, and stays
+  // centred through a resize.  Falls back to the click height for older face
+  // sets that didn't store the extent.
   const fu = face.cx * e1.x + face.cy * e1.y + face.cz * e1.z;
   const fv = face.cx * e2.x + face.cy * e2.y + face.cz * e2.z;
-  const fAlong = face.cx * A.x + face.cy * A.y + face.cz * A.z;
+  const fAlong =
+    Number.isFinite(dev.aMin) && Number.isFinite(dev.aMax)
+      ? (dev.aMin + dev.aMax) / 2
+      : face.cx * A.x + face.cy * A.y + face.cz * A.z;
   let sAnchor = 0,
     bestD = Infinity;
   for (let i = 0; i < curve.length; i++) {
