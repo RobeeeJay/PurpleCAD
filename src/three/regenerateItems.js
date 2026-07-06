@@ -365,50 +365,52 @@ async function regenerateHole(
   };
 }
 
-// Scale an emboss's developable wrap curve to the LIVE wall radius so the relief
-// tracks a resized profile.  The stored faceSet.developable was baked at the
-// wall's original size; without this the text keeps wrapping the old radius
-// (sitting inside a grown wall — reads as an inner cylinder).  The ratio is the
-// live vs stored outer-profile radius (max distance from the profile centroid).
-// Scaling preserves the curve's point order (no angular rotation of the text)
-// and its unit normals; arc lengths scale with the radius.  A pure thickness
-// change (outer radius unchanged) is a no-op.  Exact for a circular/round wall;
-// a non-uniform edit is approximate but still far better than the frozen radius.
-const outerRadius = (item) => {
-  // The wall's outer radius lives on the underlying EXTRUDE profile; a chamfer/
-  // other csg source has no polygon2D, so dig through regenerator.source to find
-  // the extrude (otherwise the wrap curve never scales for an emboss on a
-  // chamfered wall).
+// Find the underlying extrude (through csg sources) whose profile is the wall's
+// cross-section.
+const wallExtrude = (item) => {
   let it = item;
   while (it && !it.profile?.polygon2D && it.regenerator?.source)
     it = it.regenerator.source;
-  const poly = it?.profile?.polygon2D;
-  const pc = it?.profile?.profileCentroid || { x: 0, y: 0 };
-  if (!Array.isArray(poly) || poly.length < 3) return null;
-  let m = 0;
-  for (const p of poly) {
-    const d = Math.hypot(p.x - pc.x, p.y - pc.y);
-    if (d > m) m = d;
-  }
-  return m;
+  return it?.profile?.polygon2D ? it : null;
 };
 
-export function reviveDevelopable(faceSet, liveSource, frozenSource) {
+export function reviveDevelopable(faceSet, liveSource /*, frozenSource */) {
   const dev = faceSet?.developable;
-  if (!dev || !Array.isArray(dev.curve)) return faceSet;
-  const oldR = outerRadius(frozenSource);
-  const newR = outerRadius(liveSource);
-  if (!oldR || !newR) return faceSet;
-  const ratio = newR / oldR;
-  if (!Number.isFinite(ratio) || Math.abs(ratio - 1) < 1e-4) return faceSet;
-  return {
-    ...faceSet,
-    developable: {
-      ...dev,
-      curve: dev.curve.map((c) => ({ u: c.u * ratio, v: c.v * ratio })),
-      arc: Array.isArray(dev.arc) ? dev.arc.map((a) => a * ratio) : dev.arc,
-    },
-  };
+  if (
+    !dev ||
+    !Array.isArray(dev.curve) ||
+    !Array.isArray(dev.e1) ||
+    !Array.isArray(dev.e2)
+  )
+    return faceSet;
+  // REBUILD the wrap curve from the LIVE wall cross-section (its outer profile
+  // in the developable's e1/e2 frame), so the relief follows the current size.
+  // buildDevelopableConformMesh anchors the text at the curve point NEAREST the
+  // face — not by index — so a freshly-sampled curve needs no alignment; the
+  // text just re-centres on the resized wall.  norms are the radial-normalised
+  // curve; arc is cumulative length (matching extractDevelopableProfile).
+  const ext = wallExtrude(liveSource);
+  const poly = ext?.profile?.polygon2D;
+  if (!Array.isArray(poly) || poly.length < 3) return faceSet;
+  const pc = ext.profile.profileCentroid || { x: 0, y: 0 };
+  const [e1x, e1y] = dev.e1; // z-component is 0 for a profile-plane wall
+  const [e2x, e2y] = dev.e2;
+  const curve = poly.map((p) => {
+    const x = p.x - pc.x,
+      y = p.y - pc.y;
+    return { u: x * e1x + y * e1y, v: x * e2x + y * e2y };
+  });
+  const norms = curve.map(({ u, v }) => {
+    const r = Math.hypot(u, v) || 1;
+    return { u: u / r, v: v / r };
+  });
+  const arc = [0];
+  for (let i = 1; i < curve.length; i++)
+    arc.push(
+      arc[i - 1] +
+        Math.hypot(curve[i].u - curve[i - 1].u, curve[i].v - curve[i - 1].v),
+    );
+  return { ...faceSet, developable: { ...dev, curve, arc, norms } };
 }
 
 // Rebuild an emboss/deboss relief from its live source + sketch geometry.  The
