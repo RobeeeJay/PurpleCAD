@@ -51,41 +51,71 @@ const path = require("path");
 // invoke OCC operations without accessing Node.js or native modules directly.
 // We defer the require to here so the ELECTRON_RUN_AS_NODE guard above fires
 // before we attempt to load the addon.
-let occBridge = null;
+// Host the OCC addon in a worker_thread so its synchronous native calls never
+// block the main process event loop — a long boolean/chamfer used to freeze the
+// whole window (no input, no spinner, no Cancel).  ONE worker only: the addon is
+// single-threaded and keeps a shared shape store, so ops must serialise (they
+// queue on the worker's event loop in FIFO order).
+const { Worker } = require("worker_threads");
+let occWorker = null;
+const occPending = new Map();
+let occNextId = 1;
+
+function startOccWorker() {
+  occWorker = new Worker(path.join(__dirname, "occ-worker.cjs"));
+  occWorker.on("message", (msg) => {
+    if (msg.id == null) {
+      if (msg.ready === false)
+        console.warn("[main] OCC worker addon unavailable:", msg.error);
+      return;
+    }
+    const p = occPending.get(msg.id);
+    if (!p) return;
+    occPending.delete(msg.id);
+    if (msg.error) p.reject(new Error(msg.error));
+    else p.resolve(msg.result);
+  });
+  const failAll = (err) => {
+    for (const p of occPending.values()) p.reject(err);
+    occPending.clear();
+  };
+  occWorker.on("error", (e) => {
+    console.error("[main] OCC worker error:", e.message);
+    failAll(e);
+  });
+  occWorker.on("exit", (code) => {
+    failAll(new Error("OCC worker exited"));
+    // A crash loses the native shape store; restart so the app keeps working
+    // (the renderer's solid cache degrades gracefully — a missing id just
+    // rebuilds).
+    if (code !== 0) {
+      console.warn("[main] OCC worker exited (" + code + "), restarting");
+      startOccWorker();
+    }
+  });
+}
+
+function callOcc(op, args) {
+  return new Promise((resolve, reject) => {
+    if (!occWorker) return reject(new Error("OCC worker not started"));
+    const id = occNextId++;
+    occPending.set(id, { resolve, reject });
+    occWorker.postMessage({ id, op, args });
+  });
+}
+
 try {
-  occBridge = require("./occ-bridge.cjs");
-  // performCsg / chamferOrFilletItem are synchronous in C++ but can throw.
-  // ipcMain.handle wraps the return value in a promise automatically.
-  ipcMain.handle("occ:performCsg", (_e, args) => occBridge.performCsg(args));
-  ipcMain.handle("occ:chamferOrFilletItem", (_e, args) =>
-    occBridge.chamferOrFilletItem(args),
-  );
-  ipcMain.handle("occ:pushPullFaces", (_e, args) =>
-    occBridge.pushPullFaces(args),
-  );
-  ipcMain.handle("occ:shellItem", (_e, args) => occBridge.shellItem(args));
-  ipcMain.handle("occ:holeItem", (_e, args) => occBridge.holeItem(args));
-  ipcMain.handle("occ:embossItem", (_e, args) => occBridge.embossItem(args));
-  ipcMain.handle("occ:draftItem", (_e, args) => occBridge.draftItem(args));
-  ipcMain.handle("occ:revolveItem", (_e, args) => occBridge.revolveItem(args));
-  ipcMain.handle("occ:pipeItem", (_e, args) => occBridge.pipeItem(args));
-  ipcMain.handle("occ:loftItem", (_e, args) => occBridge.loftItem(args));
-  ipcMain.handle("occ:exportSTL", (_e, args) => occBridge.exportSTL(args));
-  ipcMain.handle("occ:exportSTEP", (_e, args) => occBridge.exportSTEP(args));
-  ipcMain.handle("occ:importStep", (_e, args) => occBridge.importStep(args));
-  ipcMain.handle("occ:splitItem", (_e, args) => occBridge.splitItem(args));
-  ipcMain.handle("occ:pattern3dItem", (_e, args) =>
-    occBridge.pattern3dItem(args),
-  );
-  ipcMain.handle("occ:releaseShape", (_e, args) =>
-    occBridge.releaseShape(args),
-  );
-  ipcMain.handle("occ:solidFromMesh", (_e, args) =>
-    occBridge.solidFromMesh(args),
-  );
+  startOccWorker();
+  const OCC_OPS = [
+    "performCsg", "chamferOrFilletItem", "pushPullFaces", "shellItem",
+    "holeItem", "embossItem", "draftItem", "revolveItem", "pipeItem",
+    "loftItem", "exportSTL", "exportSTEP", "importStep", "splitItem",
+    "pattern3dItem", "releaseShape", "solidFromMesh",
+  ];
+  for (const op of OCC_OPS)
+    ipcMain.handle(`occ:${op}`, (_e, args) => callOcc(op, args));
 } catch (err) {
-  // Addon not built or OCC dylib missing — fall back to WASM path in renderer.
-  console.warn("[main] native OCC addon unavailable:", err.message);
+  console.warn("[main] OCC worker failed to start:", err.message);
 }
 
 // SQLite-backed persistence for renderer settings/data (replaces localStorage).
