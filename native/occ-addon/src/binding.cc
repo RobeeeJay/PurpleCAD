@@ -1653,7 +1653,9 @@ Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
       if (!any) return Napi::Number::New(env, 0);
       draft.Build();
       if (!draft.IsDone()) return Napi::Number::New(env, 0);
-      return Napi::Number::New(env, StoreShape(draft.Shape()));
+      return Napi::Number::New(env,
+          StoreRecord(draft.Shape(),
+                      PropagateFaceNames(draft, draft.Shape(), rec.faces), {}));
     } catch (const std::exception& e) {
       throw std::runtime_error(
         std::string("Draft failed — try a smaller angle or a different face (") +
