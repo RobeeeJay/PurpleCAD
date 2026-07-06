@@ -172,4 +172,33 @@ describe("extrude persistent face names", () => {
     occ.releaseShape(ch);
     occ.releaseShape(cyl);
   });
+
+  it("names edges by face pair; a rim chamfer survives a resize by name", () => {
+    const small = occ.makeExtrude(square(1), [], 0, 0, 2);
+    // A top-rim edge on the -Y wall (side0), at z=2.  Capture its name.
+    const enriched = occ.enrichSubGeo(small, {
+      edges: [{ ax: -1, ay: -1, az: 2, bx: 1, by: -1, bz: 2 }],
+      faces: [],
+    });
+    const edgeName = enriched.edges[0].name;
+    expect(edgeName).toContain("side0");
+    expect(edgeName).toContain("top"); // top-rim = side0 ∩ top
+
+    // On a resized extrude, the endpoints moved (±3), but the NAME resolves.
+    const big = occ.makeExtrude(square(3), [], 0, 0, 2);
+    const tri = (id) => occ.tessellate(id, 0.1).indices.length / 3;
+    const base = tri(big);
+    const ch = occ.chamferShape(
+      big,
+      { edges: [{ name: edgeName }], faces: [] }, // name only, stale coords absent
+      0.1,
+      null,
+    );
+    expect(ch).toBeGreaterThan(0);
+    expect(tri(ch)).toBeGreaterThan(base); // the rim edge was bevelled
+
+    occ.releaseShape(small);
+    occ.releaseShape(big);
+    occ.releaseShape(ch);
+  });
 });

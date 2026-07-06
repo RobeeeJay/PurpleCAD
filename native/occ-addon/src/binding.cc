@@ -360,6 +360,10 @@ struct EdgeFaceSpec {
     double ax, ay, az, bx, by, bz;
     bool hasNormals;
     double n1x, n1y, n1z, n2x, n2y, n2z;
+    // Persistent name (topological naming): the sorted pair of adjacent face
+    // names.  Resolved directly before any coordinate/normal matching, so a rim
+    // chamfer survives a re-tessellation that moves every vertex.
+    std::string name;
   };
   // Face normal + optional centroid (for face selection), plus an optional
   // persistent name (topological naming) that resolves the exact face directly
@@ -398,13 +402,15 @@ static EdgeFaceSpec ParseSubGeo(const Napi::Object& subGeo) {
       EdgeFaceSpec::EdgeEp ep{
         GetDouble(e.Get("ax")), GetDouble(e.Get("ay")), GetDouble(e.Get("az")),
         GetDouble(e.Get("bx")), GetDouble(e.Get("by")), GetDouble(e.Get("bz")),
-        false, 0, 0, 0, 0, 0, 0
+        false, 0, 0, 0, 0, 0, 0, ""
       };
       if (e.Has("n1") && e.Has("n2")) {
         ep.hasNormals =
           ReadVec3(e.Get("n1"), ep.n1x, ep.n1y, ep.n1z) &&
           ReadVec3(e.Get("n2"), ep.n2x, ep.n2y, ep.n2z);
       }
+      if (e.Has("name") && e.Get("name").IsString())
+        ep.name = e.Get("name").As<Napi::String>().Utf8Value();
       spec.edges.push_back(ep);
     }
   }
@@ -582,9 +588,67 @@ static std::map<std::string, TopoDS_Shape> NamePrimitiveFaces(
   return faces;
 }
 
+// Name each edge by the sorted pair of adjacent FACE names it borders
+// (e.g. "side3|top" for a top-rim edge).  Reuses the stable face names, so an
+// edge name survives a re-tessellation that moves every vertex — the fix for a
+// rim chamfer that used to fail re-matching by coordinates.  First edge wins a
+// duplicate name.
+static std::map<std::string, TopoDS_Shape> NameEdgesByFacePairs(
+    const TopoDS_Shape& shape,
+    const std::map<std::string, TopoDS_Shape>& faceNames) {
+  std::map<std::string, TopoDS_Shape> edges;
+  if (faceNames.empty()) return edges;
+  TopTools_IndexedDataMapOfShapeListOfShape efMap;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, efMap);
+  auto nameOfFace = [&](const TopoDS_Shape& f) -> std::string {
+    for (const auto& kv : faceNames)
+      if (kv.second.IsSame(f)) return kv.first;
+    return "";
+  };
+  for (int i = 1; i <= efMap.Extent(); ++i) {
+    const TopoDS_Shape& edge = efMap.FindKey(i);
+    std::vector<std::string> ns;
+    for (const TopoDS_Shape& f : efMap.FindFromIndex(i)) {
+      std::string n = nameOfFace(f);
+      if (!n.empty()) ns.push_back(n);
+    }
+    if (ns.size() < 2) continue;
+    std::sort(ns.begin(), ns.end());
+    std::string key = ns[0] + "|" + ns[1];
+    if (!edges.count(key)) edges[key] = edge;
+  }
+  return edges;
+}
+
+// Store a solid with a face-name map, deriving its edge names from the adjacent
+// face pairs.  The one place solids acquire both name tables.
+static int StoreNamedSolid(const TopoDS_Shape& s,
+                           std::map<std::string, TopoDS_Shape> faces) {
+  auto edges = NameEdgesByFacePairs(s, faces);
+  return StoreRecord(s, std::move(faces), std::move(edges));
+}
+
+// Resolve an edge spec's persistent name to the actual edge on `shape`,
+// confirming it is still present (IsSame) so a stale name falls through to
+// coordinate matching.
+static TopoDS_Edge ResolveNamedEdge(
+    const TopoDS_Shape& shape,
+    const std::map<std::string, TopoDS_Shape>* named,
+    const std::string& name) {
+  if (!named || name.empty()) return TopoDS_Edge();
+  auto it = named->find(name);
+  if (it == named->end() || it->second.ShapeType() != TopAbs_EDGE)
+    return TopoDS_Edge();
+  TopoDS_Edge ne = TopoDS::Edge(it->second);
+  for (TopExp_Explorer e(shape, TopAbs_EDGE); e.More(); e.Next())
+    if (e.Current().IsSame(ne)) return ne;
+  return TopoDS_Edge();
+}
+
 static std::vector<SelectedEdge> SelectSubGeoEdges(
     const TopoDS_Shape& shape, const EdgeFaceSpec& spec,
-    const std::map<std::string, TopoDS_Shape>* namedFaces = nullptr) {
+    const std::map<std::string, TopoDS_Shape>* namedFaces = nullptr,
+    const std::map<std::string, TopoDS_Shape>* namedEdges = nullptr) {
   std::vector<SelectedEdge> out;
   std::set<std::string> addedKeys;
 
@@ -607,6 +671,13 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(
   };
 
   for (const auto& ep : spec.edges) {
+    // Persistent name wins: resolve the exact edge by its face-pair name,
+    // skipping all coordinate/normal matching (survives a re-tessellation).
+    TopoDS_Edge namedEdge = ResolveNamedEdge(shape, namedEdges, ep.name);
+    if (!namedEdge.IsNull()) {
+      addEdge(namedEdge, faceTouchingEdge(namedEdge));
+      continue;
+    }
     // Pass 1: precise endpoint match.  When the stored endpoints still lie on
     // the shape (a fresh chamfer, or a regen with no resize) this pins the
     // exact edge — crucial on bodies whose walls were split into many faces by
@@ -793,7 +864,7 @@ Napi::Number MakeBox(const Napi::CallbackInfo& info) {
     double x1 = GetDouble(info[0]), y1 = GetDouble(info[1]), z1 = GetDouble(info[2]);
     double x2 = GetDouble(info[3]), y2 = GetDouble(info[4]), z2 = GetDouble(info[5]);
     BRepPrimAPI_MakeBox mk(gp_Pnt(x1, y1, z1), gp_Pnt(x2, y2, z2));
-    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -803,7 +874,7 @@ Napi::Number MakeSphere(const Napi::CallbackInfo& info) {
   try {
     double r = GetDouble(info[0], 1.5);
     BRepPrimAPI_MakeSphere mk(r);
-    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -818,7 +889,7 @@ Napi::Number MakeCylinder(const Napi::CallbackInfo& info) {
     double height  = GetDouble(info[2], 2.0);
     gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeCylinder mk(ax, radius, height);
-    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -833,7 +904,7 @@ Napi::Number MakeCone(const Napi::CallbackInfo& info) {
     double height  = GetDouble(info[3], 2.0);
     gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeCone mk(ax, r1, r2, height);
-    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -846,7 +917,7 @@ Napi::Number MakeTorus(const Napi::CallbackInfo& info) {
     double minorR = GetDouble(info[1], 0.4);
     gp_Ax2 ax(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeTorus mk(ax, majorR, minorR);
-    return Napi::Number::New(env, StoreRecord(mk.Shape(), NamePrimitiveFaces(mk.Shape()), {}));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -931,6 +1002,7 @@ Napi::Number MakeExtrude(const Napi::CallbackInfo& info) {
         }
       }
     }
+    edges = NameEdgesByFacePairs(prismMk.Shape(), faces);
     return Napi::Number::New(env, StoreRecord(prismMk.Shape(), std::move(faces),
                                               std::move(edges)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -1243,7 +1315,7 @@ Napi::Number TransformShape(const Napi::CallbackInfo& info) {
     gp_Trsf trsf = BuildTransform(tx, ty, tz, rx, ry, rz);
     BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
     return Napi::Number::New(env,
-        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1262,7 +1334,7 @@ Napi::Number MirrorShape(const Napi::CallbackInfo& info) {
     trsf.SetMirror(gp_Ax2(gp_Pnt(ox, oy, oz), gp_Dir(nx / len, ny / len, nz / len)));
     BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
     return Napi::Number::New(env,
-        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1282,7 +1354,7 @@ Napi::Number RotateShapeAxis(const Napi::CallbackInfo& info) {
     trsf.SetRotation(gp_Ax1(gp_Pnt(ox, oy, oz), gp_Dir(dx / len, dy / len, dz / len)), angle);
     BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
     return Napi::Number::New(env,
-        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1297,7 +1369,7 @@ Napi::Number ScaleShape(const Napi::CallbackInfo& info) {
     trsf.SetScaleFactor(scale);
     BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
     return Napi::Number::New(env,
-        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1317,7 +1389,7 @@ Napi::Number ScaleShapeXYZ(const Napi::CallbackInfo& info) {
     gt.SetVectorialPart(gp_Mat(sx, 0, 0, 0, sy, 0, 0, 0, sz));
     BRepBuilderAPI_GTransform mk(rec.shape, gt, true);
     return Napi::Number::New(env,
-        StoreRecord(mk.Shape(), RemapFaceNames(mk, rec.faces), {}));
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1412,7 +1484,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
     std::map<std::string, TopoDS_Shape> resultFaces;
     auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
       BRepFilletAPI_MakeChamfer mk(s);
-      auto selected = SelectSubGeoEdges(s, spec, &rec.faces);
+      auto selected = SelectSubGeoEdges(s, spec, &rec.faces, &rec.edges);
       if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) {
         if (useAngle && !se.refFace.IsNull())
@@ -1456,7 +1528,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       }
       // 0 = sentinel "no edges matched" — the bridge throws a descriptive error.
       if (result.IsNull()) return Napi::Number::New(env, 0);
-      return Napi::Number::New(env, StoreRecord(result, resultFaces, {}));
+      return Napi::Number::New(env, StoreNamedSolid(result, resultFaces));
     } catch (const std::exception& e) {
       // Two common causes, and the distance being small rules out neither:
       //  - the distance exceeds the material the chamfer runs into (e.g. wider
@@ -1490,7 +1562,7 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
     // Null return = no edges matched (sentinel); throw = computation failure.
     auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
       BRepFilletAPI_MakeFillet mk(s, ChFi3d_Rational);
-      auto selected = SelectSubGeoEdges(s, spec, &rec.faces);
+      auto selected = SelectSubGeoEdges(s, spec, &rec.faces, &rec.edges);
       if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) mk.Add(radius, se.edge);
       mk.Build();
@@ -1654,8 +1726,8 @@ Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
       draft.Build();
       if (!draft.IsDone()) return Napi::Number::New(env, 0);
       return Napi::Number::New(env,
-          StoreRecord(draft.Shape(),
-                      PropagateFaceNames(draft, draft.Shape(), rec.faces), {}));
+          StoreNamedSolid(draft.Shape(),
+                          PropagateFaceNames(draft, draft.Shape(), rec.faces)));
     } catch (const std::exception& e) {
       throw std::runtime_error(
         std::string("Draft failed — try a smaller angle or a different face (") +
@@ -1832,6 +1904,26 @@ Napi::Value EnrichSubGeo(const Napi::CallbackInfo& info) {
       Napi::Object eo = Napi::Object::New(env);
       eo.Set("ax", ep.ax); eo.Set("ay", ep.ay); eo.Set("az", ep.az);
       eo.Set("bx", ep.bx); eo.Set("by", ep.by); eo.Set("bz", ep.bz);
+
+      // Stamp the persistent edge name (its adjacent face-pair) so a later regen
+      // resolves the rim by name — robust to a re-tessellation that moves the
+      // endpoints.  Find the picked edge by endpoints, then match it in rec.edges.
+      if (ep.name.empty() && !rec.edges.empty()) {
+        for (TopExp_Explorer ee(shape, TopAbs_EDGE); ee.More(); ee.Next()) {
+          if (EdgeMatchesEndpoints(TopoDS::Edge(ee.Current()),
+                                   {ep.ax, ep.ay, ep.az},
+                                   {ep.bx, ep.by, ep.bz})) {
+            for (const auto& kv : rec.edges)
+              if (kv.second.IsSame(ee.Current())) {
+                eo.Set("name", Napi::String::New(env, kv.first));
+                break;
+              }
+            break;
+          }
+        }
+      } else if (!ep.name.empty()) {
+        eo.Set("name", Napi::String::New(env, ep.name));
+      }
 
       double n1[3], n2[3];
       bool have = false;
