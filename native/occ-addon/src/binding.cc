@@ -95,25 +95,54 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <map>
 #include <unordered_map>
+#include <BRepTools.hxx>
 #include <vector>
 
 // ════════════════════════════════════════════════════════════════════════
 // Shape store
 // ════════════════════════════════════════════════════════════════════════
 
-static std::unordered_map<int, TopoDS_Shape> g_shapes;
+// Persistent topological naming: a stored shape carries a table of stable
+// NAMES for its faces/edges, derived from creation provenance (which sketch
+// entity / op produced them) rather than coordinates.  A selection stores a
+// name; on rebuild the name resolves to the current subshape even after the
+// geometry moved (a dimension edit), so chamfers/etc. stay bound to the
+// intended face.  The maps hold the actual TopoDS_Shape subshapes of `shape`;
+// they are valid only for THIS shape instance and are re-derived by each op.
+struct ShapeRecord {
+  TopoDS_Shape shape;
+  std::map<std::string, TopoDS_Shape> faces;
+  std::map<std::string, TopoDS_Shape> edges;
+};
+
+static std::unordered_map<int, ShapeRecord> g_shapes;
 static std::atomic<int> g_nextId{1};
 static std::mutex g_mu;
 
-static int StoreShape(const TopoDS_Shape& s) {
+static int StoreRecord(const TopoDS_Shape& s,
+                       std::map<std::string, TopoDS_Shape> faces,
+                       std::map<std::string, TopoDS_Shape> edges) {
   int id = g_nextId.fetch_add(1, std::memory_order_relaxed);
   std::lock_guard<std::mutex> lk(g_mu);
-  g_shapes[id] = s;
+  g_shapes[id] = ShapeRecord{s, std::move(faces), std::move(edges)};
   return id;
 }
 
+// Store a shape with no names (ops that don't yet propagate naming).
+static int StoreShape(const TopoDS_Shape& s) { return StoreRecord(s, {}, {}); }
+
 static TopoDS_Shape FetchShape(int id) {
+  std::lock_guard<std::mutex> lk(g_mu);
+  auto it = g_shapes.find(id);
+  if (it == g_shapes.end())
+    throw std::runtime_error("unknown shape id: " + std::to_string(id));
+  return it->second.shape;
+}
+
+// Copy of the full record (shape + name tables).  Empty maps when unnamed.
+static ShapeRecord FetchRecord(int id) {
   std::lock_guard<std::mutex> lk(g_mu);
   auto it = g_shapes.find(id);
   if (it == g_shapes.end())
@@ -765,7 +794,28 @@ Napi::Number MakeExtrude(const Napi::CallbackInfo& info) {
     BRepPrimAPI_MakePrism prismMk(face, dir, false, true);
     if (!prismMk.IsDone())
       throw std::runtime_error("prism builder failed");
-    return Napi::Number::New(env, StoreShape(prismMk.Shape()));
+
+    // Persistent names, from creation provenance: base/top caps and one side
+    // face per OUTER profile edge, indexed by the edge's position in the wire
+    // (== the sketch line order the caller passed).  The names survive a
+    // dimension edit — a resized profile re-extrudes to the same names, so a
+    // face chamfer stays bound to `side{i}` / `top` rather than a coordinate.
+    std::map<std::string, TopoDS_Shape> faces, edges;
+    if (!prismMk.FirstShape().IsNull()) faces["bottom"] = prismMk.FirstShape();
+    if (!prismMk.LastShape().IsNull()) faces["top"] = prismMk.LastShape();
+    TopoDS_Wire outerW = BRepTools::OuterWire(face);
+    int ei = 0;
+    for (TopExp_Explorer ex(outerW, TopAbs_EDGE); ex.More(); ex.Next(), ++ei) {
+      const TopTools_ListOfShape& gen = prismMk.Generated(ex.Current());
+      for (const TopoDS_Shape& g : gen) {
+        if (g.ShapeType() == TopAbs_FACE) {
+          faces["side" + std::to_string(ei)] = g;
+          break;
+        }
+      }
+    }
+    return Napi::Number::New(env, StoreRecord(prismMk.Shape(), std::move(faces),
+                                              std::move(edges)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1722,6 +1772,45 @@ Napi::Object TessellateShape(const Napi::CallbackInfo& info) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// Persistent topological naming — queries
+// ════════════════════════════════════════════════════════════════════════
+
+// faceNames(shapeId) → [name, ...] : the stable names this shape carries.
+Napi::Value FaceNames(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    ShapeRecord rec = FetchRecord(info[0].As<Napi::Number>().Int32Value());
+    Napi::Array out = Napi::Array::New(env, rec.faces.size());
+    uint32_t i = 0;
+    for (const auto& kv : rec.faces) out.Set(i++, Napi::String::New(env, kv.first));
+    return out;
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// namedFacePoint(shapeId, name) → [x,y,z] at the face's UV midpoint, or null.
+// Lets a caller (and the tests) confirm a name resolves to the intended face
+// after a rebuild — the point moves with the geometry, the name does not.
+Napi::Value NamedFacePoint(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    ShapeRecord rec = FetchRecord(info[0].As<Napi::Number>().Int32Value());
+    std::string name = info[1].As<Napi::String>().Utf8Value();
+    auto it = rec.faces.find(name);
+    if (it == rec.faces.end() || it->second.ShapeType() != TopAbs_FACE)
+      return env.Null();
+    BRepAdaptor_Surface s(TopoDS::Face(it->second), false);
+    double u = (s.FirstUParameter() + s.LastUParameter()) / 2.0;
+    double v = (s.FirstVParameter() + s.LastVParameter()) / 2.0;
+    gp_Pnt p = s.Value(u, v);
+    Napi::Array out = Napi::Array::New(env, 3);
+    out.Set(0u, Napi::Number::New(env, p.X()));
+    out.Set(1u, Napi::Number::New(env, p.Y()));
+    out.Set(2u, Napi::Number::New(env, p.Z()));
+    return out;
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // Exported functions — shape-store management
 // ════════════════════════════════════════════════════════════════════════
 
@@ -1964,6 +2053,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("makeHole",           Napi::Function::New(env, MakeHole));
   exports.Set("makeThread",         Napi::Function::New(env, MakeThread));
   exports.Set("enrichSubGeo",       Napi::Function::New(env, EnrichSubGeo));
+  exports.Set("faceNames",          Napi::Function::New(env, FaceNames));
+  exports.Set("namedFacePoint",     Napi::Function::New(env, NamedFacePoint));
 
   // Tessellation
   exports.Set("tessellate",         Napi::Function::New(env, TessellateShape));
