@@ -100,14 +100,27 @@ async function callOp(op, args) {
 async function runOp(op, args) {
   inc();
   // The native call is synchronous and can't be interrupted, so "cancel"
-  // means: run it but discard the result if the user cancelled meanwhile.
+  // means: run it but discard the result if the user cancelled meanwhile.  The
+  // op still runs to completion in the worker either way — cancel only drops the
+  // result (and unblocks the UI); it does NOT abort the OCC computation.
   const epoch = useStore.getState().cancelEpoch;
   const cancelled = () => useStore.getState().cancelEpoch !== epoch;
   try {
     await new Promise((r) => setTimeout(r, 0));
-    if (cancelled()) return null;
+    if (cancelled()) {
+      // eslint-disable-next-line no-console
+      console.log(`[OCC] ${op} CANCELLED before start (skipped)`);
+      return null;
+    }
     const result = await callOp(op, args);
-    return cancelled() ? null : result;
+    if (cancelled()) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[OCC] ${op} CANCELLED after completion (result discarded; op still ran)`,
+      );
+      return null;
+    }
+    return result;
   } finally {
     dec();
   }

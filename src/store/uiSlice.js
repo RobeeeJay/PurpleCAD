@@ -977,12 +977,18 @@ export const createUiSlice = (set) => ({
   // regen loop bails between steps and runOp discards its in-flight result)
   // and immediately clears the counters so the dialog dismisses at once.
   requestOperationCancel: () =>
-    set((state) => ({
-      cancelEpoch: state.cancelEpoch + 1,
-      operationCancelled: true,
-      pendingOperations: 0,
-      regenProgress: null,
-    })),
+    set((state) => {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[OCC] CANCEL requested (epoch ${state.cancelEpoch} -> ${state.cancelEpoch + 1}); in-flight op still runs to completion, its result is discarded`,
+      );
+      return {
+        cancelEpoch: state.cancelEpoch + 1,
+        operationCancelled: true,
+        pendingOperations: 0,
+        regenProgress: null,
+      };
+    }),
 
   setRegenProgress: (progress) => set({ regenProgress: progress }),
 

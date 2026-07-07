@@ -137,6 +137,10 @@ export async function recalculateTimeline() {
   const lastPositionForItem = new Map();
   for (let idx = 0; idx < history.length; idx++) {
     if (useStore.getState().cancelEpoch !== cancelEpoch) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[OCC] recalc CANCELLED at step ${idx}/${history.length}; remaining steps left on their existing cache`,
+      );
       for (let j = idx; j < history.length; j++) newHistory.push(history[j]);
       break;
     }
