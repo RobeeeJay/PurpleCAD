@@ -156,6 +156,14 @@ static Message_ProgressRange CancelRange() {
   return ind->Start();
 }
 
+// Direct flag read for OUR OWN hot loops (per-triangle face building etc.),
+// which aren't OCC algorithms and so never get a Message_ProgressRange.  Poll
+// this every N iterations and throw to abort — the only way to make those
+// stages cancellable.
+static inline bool CancelRequested() {
+  return g_cancelPtr != nullptr && *g_cancelPtr != 0;
+}
+
 static int StoreRecord(const TopoDS_Shape& s,
                        std::map<std::string, TopoDS_Shape> faces,
                        std::map<std::string, TopoDS_Shape> edges) {
@@ -2291,6 +2299,7 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
           "Imported mesh is too detailed (" + std::to_string(triCount) +
           " triangles) to use in a boolean. Simplify or decimate it first.");
 
+    const uint32_t nv = (uint32_t)(pos.ElementLength() / 3);
     BRepBuilderAPI_Sewing sew(1.0e-6);
     auto addTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) {
       gp_Pnt a(p[ia * 3], p[ia * 3 + 1], p[ia * 3 + 2]);
@@ -2304,14 +2313,19 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
       BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
       if (face.IsDone()) sew.Add(face.Face());
     };
-
     if (hasIdx) {
       Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
-      for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3)
+      for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3) {
+        if ((i & 0x3FF) == 0 && CancelRequested())
+          throw std::runtime_error("cancelled");
         addTri(idx[i], idx[i + 1], idx[i + 2]);
+      }
     } else {
-      uint32_t nv = (uint32_t)(pos.ElementLength() / 3);
-      for (uint32_t i = 0; i + 2 < nv; i += 3) addTri(i, i + 1, i + 2);
+      for (uint32_t i = 0; i + 2 < nv; i += 3) {
+        if ((i & 0x3FF) == 0 && CancelRequested())
+          throw std::runtime_error("cancelled");
+        addTri(i, i + 1, i + 2);
+      }
     }
 
     sew.Perform(CancelRange());
