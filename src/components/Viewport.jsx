@@ -33,6 +33,7 @@ import "../styles/Viewport.css";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { clearSolids } from "../three/solidCache.js";
+import { cancelOcc } from "../three/occClient.js";
 
 const Viewport = () => {
   const containerRef = useRef(null);
@@ -118,6 +119,7 @@ const Viewport = () => {
   const widgetVisible = useStore((state) => state.widgetVisible);
   const axisVisible = useStore((state) => state.axisVisible);
   const cameraResetTrigger = useStore((state) => state.cameraResetTrigger);
+  const cancelEpoch = useStore((state) => state.cancelEpoch);
   const sketchPlacementMode = useStore((state) => state.sketchPlacementMode);
   const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
   const sweepSelectMode = useStore((state) => state.sweepSelectMode);
@@ -291,6 +293,16 @@ const Viewport = () => {
   useEffect(() => {
     clearSolids();
   }, [cameraResetTrigger]);
+
+  // On Cancel (cancelEpoch bump), genuinely abort the in-flight OCC op by killing
+  // the OCC utilityProcess — a synchronous native call can't be interrupted any
+  // other way, and killing a separate process frees the CPU cleanly.  Its shape
+  // store dies with it, so drop the solid cache; the next recalc rebuilds.
+  useEffect(() => {
+    if (!cancelEpoch) return; // no cancel yet (mount)
+    cancelOcc();
+    clearSolids();
+  }, [cancelEpoch]);
 
   return (
     <div className="viewport-container">
