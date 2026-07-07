@@ -66,14 +66,35 @@ function dec() {
   if (typeof s.endOperation === "function") s.endOperation();
 }
 
+const now = () =>
+  typeof performance !== "undefined" ? performance.now() : Date.now();
+
 async function callOp(op, args) {
-  if (isElectron) {
-    return window.electronAPI.invokeOcc(op, resolveArgDepths(args));
+  // Debug timing: log every OCC op's start + end + duration (round-trip,
+  // including IPC to the worker).  Grep the console for "[OCC]".
+  const t0 = now();
+  /* eslint-disable no-console */
+  console.log(`[OCC] ${op} start @${t0.toFixed(0)}`);
+  try {
+    const result = isElectron
+      ? await window.electronAPI.invokeOcc(op, resolveArgDepths(args))
+      : await (async () => {
+          const ops = await getInProcessOps();
+          const fn = ops[op];
+          if (typeof fn !== "function") throw new Error(`Unknown op "${op}"`);
+          return fn(args);
+        })();
+    console.log(
+      `[OCC] ${op} end @${now().toFixed(0)} (${(now() - t0).toFixed(1)}ms)`,
+    );
+    return result;
+  } catch (e) {
+    console.log(
+      `[OCC] ${op} FAILED (${(now() - t0).toFixed(1)}ms): ${e.message}`,
+    );
+    throw e;
   }
-  const ops = await getInProcessOps();
-  const fn = ops[op];
-  if (typeof fn !== "function") throw new Error(`Unknown op "${op}"`);
-  return fn(args);
+  /* eslint-enable no-console */
 }
 
 async function runOp(op, args) {

@@ -28,11 +28,18 @@ parentPort.on("message", (msg) => {
     parentPort.postMessage({ id, error: `unknown OCC op: ${op}` });
     return;
   }
+  // Debug timing: native-only duration (no IPC/clone), logged to the worker's
+  // stdout (the terminal running the app).  Compare with the renderer's "[OCC]"
+  // round-trip logs to see the marshalling overhead.
+  const t0 = Date.now();
   try {
     // Bridge ops are synchronous C++ calls; run and return the result (mesh
     // object, STEP string, STL Buffer, { shapeId }, or null).
-    parentPort.postMessage({ id, result: fn(args) });
+    const result = fn(args);
+    console.log(`[OCC-native] ${op} ${Date.now() - t0}ms`);
+    parentPort.postMessage({ id, result });
   } catch (e) {
+    console.log(`[OCC-native] ${op} FAILED ${Date.now() - t0}ms: ${e.message}`);
     parentPort.postMessage({ id, error: e.message || String(e) });
   }
 });
