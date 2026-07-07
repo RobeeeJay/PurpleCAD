@@ -68,7 +68,6 @@ function failAllOcc(err) {
 
 function startOccWorker() {
   const w = new Worker(path.join(__dirname, "occ-worker.cjs"));
-  w._intentional = false; // set true when we terminate it on purpose (cancel)
   occWorker = w;
   w.on("message", (msg) => {
     if (msg.id == null) {
@@ -77,7 +76,7 @@ function startOccWorker() {
       return;
     }
     const p = occPending.get(msg.id);
-    if (!p) return; // late message from a terminated worker — ignore
+    if (!p) return;
     occPending.delete(msg.id);
     if (msg.error) p.reject(new Error(msg.error));
     else p.resolve(msg.result);
@@ -88,29 +87,13 @@ function startOccWorker() {
   });
   w.on("exit", (code) => {
     if (occWorker === w) failAllOcc(new Error("OCC worker exited"));
-    // A crash (or an intentional cancel-terminate) loses the native shape store;
-    // restart so the app keeps working — the renderer clears its solid cache on
-    // cancel, and a missing id otherwise just rebuilds from recipe.  A deliberate
-    // cancel already respawned, so don't double-start.
-    if (code !== 0 && !w._intentional && occWorker === w) {
+    // A crash loses the native shape store; restart so the app keeps working (a
+    // missing id just rebuilds from recipe on the next recalc).
+    if (code !== 0 && occWorker === w) {
       console.warn("[main] OCC worker exited (" + code + "), restarting");
       startOccWorker();
     }
   });
-}
-
-// Genuine cancel: hard-terminate the worker running the (synchronous, otherwise
-// un-interruptible) native op, reject everything in flight, and respawn a fresh
-// worker.  The native shape store is lost — the renderer clears its solid cache
-// so nothing hands out a dangling id.
-function cancelOccWorker() {
-  const w = occWorker;
-  if (!w) return;
-  console.log("[OCC] worker TERMINATE — genuine cancel");
-  w._intentional = true;
-  failAllOcc(new Error("OCC operation cancelled"));
-  startOccWorker(); // fresh worker takes over new ops (sets occWorker)
-  w.terminate(); // kill the old thread; its exit won't restart (intentional)
 }
 
 function callOcc(op, args) {
@@ -132,10 +115,6 @@ try {
   ];
   for (const op of OCC_OPS)
     ipcMain.handle(`occ:${op}`, (_e, args) => callOcc(op, args));
-  ipcMain.handle("occ:cancel", () => {
-    cancelOccWorker();
-    return true;
-  });
 } catch (err) {
   console.warn("[main] OCC worker failed to start:", err.message);
 }
