@@ -7,7 +7,36 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { FACE_HOVER_COLOR } from "../theme.js";
 import { polyArea } from "../sceneObjects/polygonUtil.js";
-import { splitGeometryComponents } from "../geometryComponents.js";
+
+// Count DISTINCT planar faces in a triangle soup: group triangles by their
+// supporting plane (rounded normal + signed offset) and count the groups.  A
+// flat face's triangles share a plane (→ 1); adjacent faces have different
+// normals (→ separate); a curved wall's tessellation segments each count.
+const distinctFaceCount = (p) => {
+  const set = new Set();
+  const r = (x) => Math.round(x * 100) / 100;
+  for (let i = 0; i + 8 < p.length; i += 9) {
+    const ax = p[i],
+      ay = p[i + 1],
+      az = p[i + 2];
+    const bx = p[i + 3],
+      by = p[i + 4],
+      bz = p[i + 5];
+    const cx = p[i + 6],
+      cy = p[i + 7],
+      cz = p[i + 8];
+    let nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+    let ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    let nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l;
+    ny /= l;
+    nz /= l;
+    const d = nx * ax + ny * ay + nz * az;
+    set.add(`${r(nx)},${r(ny)},${r(nz)},${r(d)}`);
+  }
+  return set.size;
+};
 import {
   growConnectedFaceSet,
   fitCylinderToFaceSet,
@@ -376,8 +405,8 @@ export function createEmbossInteraction({
       const sph = dev || cyl ? null : fitSphereToFaceSet(normals, combined);
       const center = centerFaceOfSet(normals, centroids) || a.face;
       const valid = validateFaceSetConnectivity(combined, 45);
-      // Count distinct selected regions (connected face groups) for the button.
-      const faceCount = splitGeometryComponents({ positions: combined }).length;
+      // Count distinct planar faces selected (for the Faces button).
+      const faceCount = distinctFaceCount(combined);
       store.setEmbossFaceSelection({
         itemId: a.id,
         face: center,
