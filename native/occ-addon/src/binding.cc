@@ -56,6 +56,7 @@
 
 // ── Meshing + tessellation access ────────────────────────────────────────
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <IMeshTools_Parameters.hxx>
 #include <BRep_Tool.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Poly_Triangle.hxx>
@@ -237,7 +238,15 @@ static gp_Trsf BuildTransform(double tx, double ty, double tz,
 static void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
                             std::vector<float>& positions,
                             std::vector<uint32_t>& indices) {
-  BRepMesh_IncrementalMesh mesher(shape, linearDeflection, false, 0.3, false);
+  // Mesh via the parameters+range overload so a long tessellation polls the
+  // cancel flag (UserBreak) and can be aborted — a high-precision emboss/boolean
+  // result is one of the slowest stages.
+  IMeshTools_Parameters meshParams;
+  meshParams.Deflection = linearDeflection;
+  meshParams.Angle = 0.3;
+  meshParams.Relative = Standard_False;
+  meshParams.InParallel = Standard_False;
+  BRepMesh_IncrementalMesh mesher(shape, meshParams, CancelRange());
 
   TopExp_Explorer explorer(shape, TopAbs_FACE);
   for (; explorer.More(); explorer.Next()) {
@@ -2305,7 +2314,7 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
       for (uint32_t i = 0; i + 2 < nv; i += 3) addTri(i, i + 1, i + 2);
     }
 
-    sew.Perform();
+    sew.Perform(CancelRange());
     TopoDS_Shape sewn = sew.SewedShape();
     if (sewn.IsNull()) throw std::runtime_error("mesh sewing produced nothing");
 
