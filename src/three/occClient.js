@@ -69,12 +69,19 @@ function dec() {
 const now = () =>
   typeof performance !== "undefined" ? performance.now() : Date.now();
 
+// Wall-clock HH:MM:SS.mmm for the debug logs.
+const clock = () => {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+};
+
 async function callOp(op, args) {
-  // Debug timing: log every OCC op's start + end + duration (round-trip,
-  // including IPC to the worker).  Grep the console for "[OCC]".
+  // Debug timing: log every OCC op's start + end wall-clock time + duration
+  // (round-trip, including IPC to the worker).  Grep the console for "[OCC]".
   const t0 = now();
   /* eslint-disable no-console */
-  console.log(`[OCC] ${op} start @${t0.toFixed(0)}`);
+  console.log(`[OCC] ${op} start ${clock()}`);
   try {
     const result = isElectron
       ? await window.electronAPI.invokeOcc(op, resolveArgDepths(args))
@@ -84,13 +91,11 @@ async function callOp(op, args) {
           if (typeof fn !== "function") throw new Error(`Unknown op "${op}"`);
           return fn(args);
         })();
-    console.log(
-      `[OCC] ${op} end @${now().toFixed(0)} (${(now() - t0).toFixed(1)}ms)`,
-    );
+    console.log(`[OCC] ${op} end ${clock()} (${(now() - t0).toFixed(1)}ms)`);
     return result;
   } catch (e) {
     console.log(
-      `[OCC] ${op} FAILED (${(now() - t0).toFixed(1)}ms): ${e.message}`,
+      `[OCC] ${op} FAILED ${clock()} (${(now() - t0).toFixed(1)}ms): ${e.message}`,
     );
     throw e;
   }
