@@ -5,12 +5,22 @@
 // shared shape store (g_shapes), so exactly ONE worker hosts it and requests
 // serialise through this thread's event loop in FIFO order.
 
-const { parentPort } = require("worker_threads");
+const { parentPort, workerData } = require("worker_threads");
 const path = require("path");
+
+// Shared cancel flag: an Int32Array over the SharedArrayBuffer the main process
+// created and flips (element 0 → 1) to abort a long op.  This thread is BLOCKED
+// inside the synchronous native call and can't receive a "cancel" message, so
+// the native builders poll this shared memory directly (UserBreak).
+const cancelView =
+  workerData && workerData.cancelBuffer
+    ? new Int32Array(workerData.cancelBuffer)
+    : null;
 
 let bridge = null;
 try {
   bridge = require(path.join(__dirname, "occ-bridge.cjs"));
+  if (cancelView) bridge.setCancelBuffer(cancelView);
   parentPort.postMessage({ ready: true });
 } catch (e) {
   // Addon not built / OCC dylib missing — report once; every op then errors.
@@ -28,6 +38,10 @@ parentPort.on("message", (msg) => {
     parentPort.postMessage({ id, error: `unknown OCC op: ${op}` });
     return;
   }
+  // Clear any stale cancel from a prior op before we start this one (we only
+  // reach here between ops — the thread is free, so this can't race the native
+  // poll of a running op).
+  if (cancelView) Atomics.store(cancelView, 0, 0);
   // Debug timing: native-only duration (no IPC/clone), logged to the worker's
   // stdout (the terminal running the app).  Compare with the renderer's "[OCC]"
   // round-trip logs to see the marshalling overhead.

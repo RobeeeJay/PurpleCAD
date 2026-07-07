@@ -61,13 +61,23 @@ let occWorker = null;
 const occPending = new Map();
 let occNextId = 1;
 
+// Shared cancel flag (one int32) the worker's native OCC builders poll to abort
+// a long op mid-flight — genuine cancel that frees the CPU, without killing the
+// worker (which shares OCC's non-thread-safe globals and crashes on terminate).
+// We flip element 0 to 1 from THIS (main) thread while the worker is blocked in
+// the synchronous native call; UserBreak in binding.cc sees it and throws.
+const occCancelBuffer = new SharedArrayBuffer(4);
+const occCancelView = new Int32Array(occCancelBuffer);
+
 function failAllOcc(err) {
   for (const p of occPending.values()) p.reject(err);
   occPending.clear();
 }
 
 function startOccWorker() {
-  const w = new Worker(path.join(__dirname, "occ-worker.cjs"));
+  const w = new Worker(path.join(__dirname, "occ-worker.cjs"), {
+    workerData: { cancelBuffer: occCancelBuffer },
+  });
   occWorker = w;
   w.on("message", (msg) => {
     if (msg.id == null) {
@@ -115,6 +125,14 @@ try {
   ];
   for (const op of OCC_OPS)
     ipcMain.handle(`occ:${op}`, (_e, args) => callOcc(op, args));
+  // Genuine cancel: flip the shared flag so the worker's in-flight native op
+  // aborts (UserBreak) and frees the CPU.  The worker clears it before the next
+  // op.  Cheap and non-destructive — the worker (and its shape store) survives.
+  ipcMain.handle("occ:cancel", () => {
+    Atomics.store(occCancelView, 0, 1);
+    console.log("[OCC] cancel flag set (worker will abort current op)");
+    return true;
+  });
 } catch (err) {
   console.warn("[main] OCC worker failed to start:", err.message);
 }

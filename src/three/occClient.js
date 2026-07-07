@@ -104,10 +104,10 @@ async function callOp(op, args) {
 
 async function runOp(op, args) {
   inc();
-  // The native call is synchronous and can't be interrupted, so "cancel"
-  // means: run it but discard the result if the user cancelled meanwhile.  The
-  // op still runs to completion in the worker either way — cancel only drops the
-  // result (and unblocks the UI); it does NOT abort the OCC computation.
+  // Cancel has two layers: the worker's native op aborts via the shared cancel
+  // flag (cancelOcc, frees the CPU), and this soft layer discards any result
+  // that still lands (an op that finished before the flag was seen, or a
+  // non-abortable op) so a stale result never reaches the UI.
   const epoch = useStore.getState().cancelEpoch;
   const cancelled = () => useStore.getState().cancelEpoch !== epoch;
   try {
@@ -143,6 +143,18 @@ export function releaseShape(id) {
 // route (no busy/cancel wrapper) — it runs inside the recalc loop.
 export function solidFromMesh(geometryData) {
   return callOp("solidFromMesh", geometryData);
+}
+
+// Genuine cancel: ask the main process to flip the shared cancel flag, so the
+// worker's in-flight native OCC op aborts (UserBreak) and frees the CPU — no
+// process/worker kill, so nothing shared is corrupted.  Electron-only; a no-op
+// elsewhere.  The op still rejects/returns null via the soft-cancel epoch, and
+// the caller clears the solid cache (a half-built shape was never stored).
+export function cancelOcc() {
+  if (!isElectron) return Promise.resolve(null);
+  // eslint-disable-next-line no-console
+  console.log("[OCC] requesting cancel (worker abort)");
+  return window.electronAPI.invokeOcc("cancel");
 }
 
 export function chamferOrFilletItem(args) {

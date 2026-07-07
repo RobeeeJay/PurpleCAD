@@ -1695,4 +1695,11 @@ function releaseShape({ id }) {
   return null;
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh };
+// Register the shared cancel flag (an Int32Array over a SharedArrayBuffer).  The
+// native builders poll it via UserBreak and abort mid-op when another thread
+// flips it — see binding.cc's CancelIndicator.
+function setCancelBuffer(view) {
+  occ.setCancelBuffer(view);
+}
+
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, setCancelBuffer };

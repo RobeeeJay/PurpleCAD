@@ -973,14 +973,16 @@ export const createUiSlice = (set) => ({
       pendingOperations: Math.max(0, state.pendingOperations - 1),
     })),
 
-  // Cancel whatever is driving the BusyIndicator.  Bumps cancelEpoch (so the
-  // regen loop bails between steps and runOp discards its in-flight result)
-  // and immediately clears the counters so the dialog dismisses at once.
+  // Cancel whatever is driving the BusyIndicator.  Bumps cancelEpoch, which the
+  // Viewport observes to ask the worker to ABORT its in-flight native op (via
+  // the shared cancel flag — frees the CPU), the regen loop to bail between
+  // steps, and runOp to discard any result that still lands; the counters clear
+  // immediately so the dialog dismisses at once.
   requestOperationCancel: () =>
     set((state) => {
       // eslint-disable-next-line no-console
       console.log(
-        `[OCC] CANCEL requested (epoch ${state.cancelEpoch} -> ${state.cancelEpoch + 1}); in-flight op still runs to completion, its result is discarded`,
+        `[OCC] CANCEL requested (epoch ${state.cancelEpoch} -> ${state.cancelEpoch + 1}); worker aborts the in-flight op, its result is discarded`,
       );
       return {
         cancelEpoch: state.cancelEpoch + 1,

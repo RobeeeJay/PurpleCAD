@@ -50,6 +50,10 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <ChFi3d_FilletShape.hxx>
 
+// ── Cooperative cancel (long-op abort) ───────────────────────────────────
+#include <Message_ProgressIndicator.hxx>
+#include <Message_ProgressRange.hxx>
+
 // ── Meshing + tessellation access ────────────────────────────────────────
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
@@ -122,6 +126,34 @@ struct ShapeRecord {
 static std::unordered_map<int, ShapeRecord> g_shapes;
 static std::atomic<int> g_nextId{1};
 static std::mutex g_mu;
+
+// ── Cooperative cancel ───────────────────────────────────────────────────
+// A long OCC build (boolean/chamfer/loft/…) is a single synchronous native
+// call; the JS thread hosting it is blocked and can't receive a "cancel"
+// message.  So the cancel flag lives in a SharedArrayBuffer written by ANOTHER
+// thread (the Electron main process) and read here — OCC's builders poll
+// UserBreak() through a Message_ProgressRange and throw when it flips, aborting
+// the op mid-flight and freeing the CPU.  g_cancelPtr aliases the SAB's first
+// int32 (0 = run, non-0 = cancel); it never moves (a SAB never detaches).
+static volatile int32_t* g_cancelPtr = nullptr;
+
+class CancelIndicator : public Message_ProgressIndicator {
+ public:
+  Standard_Boolean UserBreak() override {
+    return g_cancelPtr != nullptr && *g_cancelPtr != 0;
+  }
+  // Pure virtual in Message_ProgressIndicator; we don't render progress, only
+  // poll UserBreak, so this is a no-op.
+  void Show(const Message_ProgressScope&, const bool) override {}
+};
+
+// Fresh range for one build; a static indicator is fine (only UserBreak
+// matters, the progress fraction is unused).  The returned range references the
+// indicator's root scope for the duration of the Build() call it's passed to.
+static Message_ProgressRange CancelRange() {
+  static Handle(CancelIndicator) ind = new CancelIndicator();
+  return ind->Start();
+}
 
 static int StoreRecord(const TopoDS_Shape& s,
                        std::map<std::string, TopoDS_Shape> faces,
@@ -1091,7 +1123,7 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
             BRepBuilderAPI_Transform(base, tr.Multiplied(rot), true).Shape());
         loft.AddWire(w);
       }
-      loft.Build();
+      loft.Build(CancelRange());
       if (!loft.IsDone()) throw std::runtime_error("helical revolve failed");
       return Napi::Number::New(env, StoreShape(loft.Shape()));
     }
@@ -1132,7 +1164,7 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
         } else {
           BRepAlgoAPI_Fuse fuse(result, wedge);
           fuse.SetFuzzyValue(kFuzzy);
-          fuse.Build();
+          fuse.Build(CancelRange());
           if (fuse.IsDone()) result = fuse.Shape();
         }
       }
@@ -1199,7 +1231,7 @@ Napi::Number MakePipe(const Napi::CallbackInfo& info) {
       TopoDS_Face placed =
           TopoDS::Face(BRepBuilderAPI_Transform(face, place, true).Shape());
       BRepOffsetAPI_MakePipe pipe(wireMk.Wire(), placed);
-      pipe.Build();
+      pipe.Build(CancelRange());
       if (!pipe.IsDone()) throw std::runtime_error("pipe sweep failed");
       return Napi::Number::New(env, StoreShape(pipe.Shape()));
     }
@@ -1280,7 +1312,7 @@ Napi::Number MakePipe(const Napi::CallbackInfo& info) {
       loft.AddWire(
           TopoDS::Wire(BRepBuilderAPI_Transform(base, place, true).Shape()));
     }
-    loft.Build();
+    loft.Build(CancelRange());
     if (!loft.IsDone()) throw std::runtime_error("pipe sweep (twist) failed");
     return Napi::Number::New(env, StoreShape(loft.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -1319,7 +1351,7 @@ Napi::Number MakeLoft(const Napi::CallbackInfo& info) {
                                     Standard_False /*ruled → smooth*/);
     loft.AddWire(wa);
     loft.AddWire(wb);
-    loft.Build();
+    loft.Build(CancelRange());
     if (!loft.IsDone()) throw std::runtime_error("loft failed");
     return Napi::Number::New(env, StoreShape(loft.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -1446,15 +1478,15 @@ Napi::Number BooleanOp(const Napi::CallbackInfo& info) {
       if (op == "union") {
         BRepAlgoAPI_Fuse fuse(result, tool);
         fuse.SetFuzzyValue(kFuzzy);
-        fuse.Build();
+        fuse.Build(CancelRange());
         result = fuse.Shape();
       } else if (op == "difference") {
         BRepAlgoAPI_Cut cut(result, tool);
-        cut.Build();
+        cut.Build(CancelRange());
         result = cut.Shape();
       } else if (op == "intersection") {
         BRepAlgoAPI_Common common(result, tool);
-        common.Build();
+        common.Build(CancelRange());
         result = common.Shape();
       } else {
         throw std::runtime_error("unknown boolean operation: " + op);
@@ -1518,7 +1550,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
         else
           mk.Add(amount, se.edge);
       }
-      mk.Build();
+      mk.Build(CancelRange());
       if (!mk.IsDone())
         throw std::runtime_error(
           "chamfer computation failed (geometry rejected the operation)");
@@ -1546,7 +1578,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next(), ++n)
         mk.Add(amount, TopoDS::Edge(e.Current()));
       if (n == 0) return TopoDS_Shape();
-      mk.Build();
+      mk.Build(CancelRange());
       if (!mk.IsDone()) return TopoDS_Shape();
       resultFaces = s.IsSame(shape)
                         ? PropagateFaceNames(mk, mk.Shape(), rec.faces)
@@ -1623,7 +1655,7 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
       auto selected = SelectSubGeoEdges(s, spec, &rec.faces, &rec.edges);
       if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) mk.Add(radius, se.edge);
-      mk.Build();
+      mk.Build(CancelRange());
       if (!mk.IsDone())
         throw std::runtime_error(
           "fillet computation failed (geometry rejected the operation)");
@@ -1704,19 +1736,19 @@ Napi::Number PushPullFaces(const Napi::CallbackInfo& info) {
         gp_Vec vec(n.x * distance, n.y * distance, n.z * distance);
         if (vec.Magnitude() < 1e-12) continue;
         BRepPrimAPI_MakePrism prismMk(face, vec, Standard_False, Standard_True);
-        prismMk.Build();
+        prismMk.Build(CancelRange());
         if (!prismMk.IsDone()) continue;
         TopoDS_Shape prism = prismMk.Shape();
         if (pull) {
           BRepAlgoAPI_Fuse fuse(result, prism);
           fuse.SetFuzzyValue(kFuzzy);
-          fuse.Build();
+          fuse.Build(CancelRange());
           if (!fuse.IsDone()) throw std::runtime_error("fuse rejected the prism");
           result = fuse.Shape();
         } else {
           BRepAlgoAPI_Cut cut(result, prism);
           cut.SetFuzzyValue(kFuzzy);
-          cut.Build();
+          cut.Build(CancelRange());
           if (!cut.IsDone()) throw std::runtime_error("cut rejected the prism");
           result = cut.Shape();
         }
@@ -1781,7 +1813,7 @@ Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
         else draft.Remove(face);  // skip a face the draft can't take
       }
       if (!any) return Napi::Number::New(env, 0);
-      draft.Build();
+      draft.Build(CancelRange());
       if (!draft.IsDone()) return Napi::Number::New(env, 0);
       return Napi::Number::New(env,
           StoreNamedSolid(draft.Shape(),
@@ -1826,7 +1858,7 @@ Napi::Number MakeShell(const Napi::CallbackInfo& info) {
 
     BRepAlgoAPI_Cut cut(shape, inner);
     cut.SetFuzzyValue(1.0e-5);
-    cut.Build();
+    cut.Build(CancelRange());
     if (!cut.IsDone()) return Napi::Number::New(env, 0);
     return Napi::Number::New(env, StoreShape(cut.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -1872,7 +1904,7 @@ static TopoDS_Shape BuildThreadGroove(
     BRepOffsetAPI_MakePipeShell pipe(helixW);
     pipe.Add(profile);
     pipe.SetMode(Standard_True); // Frenet frame — stable on a constant helix
-    pipe.Build();
+    pipe.Build(CancelRange());
     if (!pipe.IsDone()) return TopoDS_Shape();
     if (!pipe.MakeSolid()) return TopoDS_Shape();
     return pipe.Shape();
@@ -1902,7 +1934,7 @@ Napi::Number MakeHole(const Napi::CallbackInfo& info) {
     if (dv.Magnitude() < 1e-9) return Napi::Number::New(env, 0);
     gp_Ax2 ax(gp_Pnt(px, py, pz), gp_Dir(dv));
     BRepPrimAPI_MakeCylinder cyl(ax, diameter / 2.0 + tolerance, length);
-    cyl.Build();
+    cyl.Build(CancelRange());
     if (!cyl.IsDone()) return Napi::Number::New(env, 0);
     return Napi::Number::New(env, StoreShape(cyl.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -2163,6 +2195,16 @@ Napi::Number ShapeCount(const Napi::CallbackInfo& info) {
   return Napi::Number::New(info.Env(), static_cast<int>(g_shapes.size()));
 }
 
+// Register the shared cancel flag: an Int32Array over a SharedArrayBuffer whose
+// element 0 the caller flips to non-zero (from another thread) to abort the
+// current long build.  We stash the backing pointer; a SAB never detaches, so
+// it stays valid for the process lifetime.  Called once at worker startup.
+Napi::Value SetCancelBuffer(const Napi::CallbackInfo& info) {
+  Napi::Int32Array arr = info[0].As<Napi::Int32Array>();
+  g_cancelPtr = reinterpret_cast<volatile int32_t*>(arr.Data());
+  return info.Env().Undefined();
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Exported functions — STEP export
 // ════════════════════════════════════════════════════════════════════════
@@ -2399,6 +2441,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("releaseShape",       Napi::Function::New(env, ReleaseShape));
   exports.Set("clearAll",           Napi::Function::New(env, ClearAll));
   exports.Set("shapeCount",         Napi::Function::New(env, ShapeCount));
+  exports.Set("setCancelBuffer",    Napi::Function::New(env, SetCancelBuffer));
 
   return exports;
 }
