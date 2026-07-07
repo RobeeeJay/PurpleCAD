@@ -35,6 +35,7 @@ parentPort.on("message", (msg) => {
   try {
     // Bridge ops are synchronous C++ calls; run and return the result (mesh
     // object, STEP string, STL Buffer, { shapeId }, or null).
+    console.log(`[OCC-native] ${op} start`);
     const result = fn(args);
     console.log(`[OCC-native] ${op} ${Date.now() - t0}ms`);
     parentPort.postMessage({ id, result });

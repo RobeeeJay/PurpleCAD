@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { FACE_HOVER_COLOR } from "../theme.js";
 import { polyArea } from "../sceneObjects/polygonUtil.js";
+import { splitGeometryComponents } from "../geometryComponents.js";
 import {
   growConnectedFaceSet,
   fitCylinderToFaceSet,
@@ -375,6 +376,8 @@ export function createEmbossInteraction({
       const sph = dev || cyl ? null : fitSphereToFaceSet(normals, combined);
       const center = centerFaceOfSet(normals, centroids) || a.face;
       const valid = validateFaceSetConnectivity(combined, 45);
+      // Count distinct selected regions (connected face groups) for the button.
+      const faceCount = splitGeometryComponents({ positions: combined }).length;
       store.setEmbossFaceSelection({
         itemId: a.id,
         face: center,
@@ -386,6 +389,7 @@ export function createEmbossInteraction({
               ? { sphere: sph }
               : null,
         faceTris: combined,
+        faceCount,
         valid,
         keepPicking: true,
       });

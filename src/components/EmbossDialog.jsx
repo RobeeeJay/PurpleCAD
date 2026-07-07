@@ -28,6 +28,7 @@ const EmbossDialog = () => {
   const params = embossTool?.params;
   const nProfiles = embossTool?.profiles?.length || 0;
   const hasFace = !!embossTool?.face;
+  const faceCount = embossTool?.faceCount || 0;
   const facesValid = !!embossTool?.facesValid;
   const ready = nProfiles > 0 && hasFace && facesValid;
 
@@ -114,7 +115,9 @@ const EmbossDialog = () => {
           onClick={() => setEmbossPicking("faces")}
           title="Pick one or more connected faces to emboss onto (click again to deselect)"
         >
-          {!hasFace ? "Faces" : facesValid ? "Faces ✓" : "Faces ⚠"}
+          {!hasFace
+            ? "Faces"
+            : `Faces${faceCount > 0 ? ` (${faceCount})` : ""} ${facesValid ? "✓" : "⚠"}`}
         </button>
 
         <button

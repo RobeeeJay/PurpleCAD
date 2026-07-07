@@ -609,6 +609,7 @@ export const createUiSlice = (set) => ({
           face: sel.face,
           faceSet: sel.faceSet,
           faceTris: sel.faceTris ?? null,
+          faceCount: sel.faceCount ?? 0,
           facesValid: !!sel.valid,
           picking: sel.keepPicking ? s.embossTool.picking : null,
           params,
