@@ -9,9 +9,6 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
-import { useStore } from "../store";
-import { cancelOcc } from "../three/occClient.js";
-import { clearSolids } from "../three/solidCache.js";
 
 export const PREVIEW_DEBOUNCE_MS = 350;
 
@@ -38,14 +35,6 @@ export function useDebouncedPreview(valid, run, clear, deps) {
       return;
     }
     const t = setTimeout(() => {
-      // A previous preview's OCC op may still be running; it would block this new
-      // one (serial process) and keep eating CPU.  Kill it — the OCC
-      // utilityProcess — so the latest preview runs now.  Only when something is
-      // actually in flight (a slow op that outlived the debounce).
-      if (useStore.getState().pendingOperations > 0) {
-        cancelOcc();
-        clearSolids();
-      }
       if (runRef.current) runRef.current();
     }, PREVIEW_DEBOUNCE_MS);
     return () => clearTimeout(t);

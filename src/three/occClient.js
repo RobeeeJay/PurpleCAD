@@ -145,18 +145,6 @@ export function solidFromMesh(geometryData) {
   return callOp("solidFromMesh", geometryData);
 }
 
-// GENUINE cancel: kill the OCC utilityProcess running the current (synchronous,
-// un-interruptible) native op and respawn a fresh one — clean, since it's a
-// separate OS process, and it frees the CPU immediately.  Only meaningful in
-// Electron; a no-op elsewhere.  The caller must also clear the solid cache — the
-// killed process's shape store is gone.
-export function cancelOcc() {
-  if (!isElectron) return Promise.resolve(null);
-  // eslint-disable-next-line no-console
-  console.log("[OCC] requesting process kill (genuine cancel)");
-  return window.electronAPI.invokeOcc("cancel");
-}
-
 export function chamferOrFilletItem(args) {
   return runOp("chamferOrFilletItem", args);
 }

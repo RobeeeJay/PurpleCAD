@@ -22,8 +22,7 @@ if (process.env.ELECTRON_START_URL) {
 }
 
 const electron = require("electron");
-const { app, BrowserWindow, ipcMain, protocol, session, Menu, utilityProcess } =
-  electron;
+const { app, BrowserWindow, ipcMain, protocol, session, Menu } = electron;
 const fsMod = require("fs");
 const urlMod = require("url");
 
@@ -52,12 +51,13 @@ const path = require("path");
 // invoke OCC operations without accessing Node.js or native modules directly.
 // We defer the require to here so the ELECTRON_RUN_AS_NODE guard above fires
 // before we attempt to load the addon.
-// Host the OCC addon in a utilityProcess (a SEPARATE OS process) so its
-// synchronous native calls never block the main window, AND so a genuine Cancel
-// can KILL it mid-op cleanly — a worker_thread shares OCC's non-thread-safe
-// global state and terminating one mid-call corrupts it.  ONE process: the addon
-// is single-threaded with a shared shape store, so ops serialise (FIFO).
-let occProc = null;
+// Host the OCC addon in a worker_thread so its synchronous native calls never
+// block the main process event loop — a long boolean/chamfer used to freeze the
+// whole window (no input, no spinner, no Cancel).  ONE worker only: the addon is
+// single-threaded and keeps a shared shape store, so ops must serialise (they
+// queue on the worker's event loop in FIFO order).
+const { Worker } = require("worker_threads");
+let occWorker = null;
 const occPending = new Map();
 let occNextId = 1;
 
@@ -66,56 +66,47 @@ function failAllOcc(err) {
   occPending.clear();
 }
 
-function startOccProc() {
-  const proc = utilityProcess.fork(path.join(__dirname, "occ-process.cjs"), [], {
-    stdio: "inherit", // [OCC-native] logs go to the terminal
-  });
-  occProc = proc;
-  proc.on("message", (msg) => {
+function startOccWorker() {
+  const w = new Worker(path.join(__dirname, "occ-worker.cjs"));
+  occWorker = w;
+  w.on("message", (msg) => {
     if (msg.id == null) {
       if (msg.ready === false)
-        console.warn("[main] OCC process addon unavailable:", msg.error);
+        console.warn("[main] OCC worker addon unavailable:", msg.error);
       return;
     }
     const p = occPending.get(msg.id);
-    if (!p) return; // late reply from a killed process — ignore
+    if (!p) return;
     occPending.delete(msg.id);
     if (msg.error) p.reject(new Error(msg.error));
     else p.resolve(msg.result);
   });
-  proc.on("exit", (code) => {
-    if (occProc !== proc) return; // an intentional kill already respawned
-    failAllOcc(new Error("OCC process exited"));
-    console.warn("[main] OCC process exited (" + code + "), restarting");
-    startOccProc();
+  w.on("error", (e) => {
+    console.error("[main] OCC worker error:", e.message);
+    if (occWorker === w) failAllOcc(e);
+  });
+  w.on("exit", (code) => {
+    if (occWorker === w) failAllOcc(new Error("OCC worker exited"));
+    // A crash loses the native shape store; restart so the app keeps working (a
+    // missing id just rebuilds from recipe on the next recalc).
+    if (code !== 0 && occWorker === w) {
+      console.warn("[main] OCC worker exited (" + code + "), restarting");
+      startOccWorker();
+    }
   });
 }
 
 function callOcc(op, args) {
   return new Promise((resolve, reject) => {
-    if (!occProc) return reject(new Error("OCC process not started"));
+    if (!occWorker) return reject(new Error("OCC worker not started"));
     const id = occNextId++;
     occPending.set(id, { resolve, reject });
-    occProc.postMessage({ id, op, args });
+    occWorker.postMessage({ id, op, args });
   });
 }
 
-// Genuine cancel: KILL the OCC process running the (synchronous, otherwise
-// un-interruptible) native op — a separate process, so this is clean and frees
-// the CPU immediately — reject everything in flight, and respawn a fresh one.
-// The native shape store dies with it; the renderer clears its solid cache.
-function cancelOccProc() {
-  const proc = occProc;
-  if (!proc) return;
-  console.log("[OCC] process KILL — genuine cancel");
-  occProc = null; // detach: the old proc's exit handler won't restart it
-  failAllOcc(new Error("OCC operation cancelled"));
-  startOccProc(); // fresh process takes over new ops (sets occProc)
-  proc.kill(); // terminate the old process — clean (own address space)
-}
-
 try {
-  startOccProc();
+  startOccWorker();
   const OCC_OPS = [
     "performCsg", "chamferOrFilletItem", "pushPullFaces", "shellItem",
     "holeItem", "embossItem", "draftItem", "revolveItem", "pipeItem",
@@ -124,12 +115,8 @@ try {
   ];
   for (const op of OCC_OPS)
     ipcMain.handle(`occ:${op}`, (_e, args) => callOcc(op, args));
-  ipcMain.handle("occ:cancel", () => {
-    cancelOccProc();
-    return true;
-  });
 } catch (err) {
-  console.warn("[main] OCC process failed to start:", err.message);
+  console.warn("[main] OCC worker failed to start:", err.message);
 }
 
 // SQLite-backed persistence for renderer settings/data (replaces localStorage).
