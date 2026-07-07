@@ -140,6 +140,17 @@ export function solidFromMesh(geometryData) {
   return callOp("solidFromMesh", geometryData);
 }
 
+// GENUINE cancel: hard-terminate the worker running the current (synchronous,
+// un-interruptible) native op and respawn a fresh one.  Only meaningful in
+// Electron (the worker path); a no-op elsewhere.  The caller must also clear the
+// solid cache — the terminated worker's shape store is gone.
+export function cancelOcc() {
+  if (!isElectron) return Promise.resolve(null);
+  // eslint-disable-next-line no-console
+  console.log("[OCC] requesting worker terminate (genuine cancel)");
+  return window.electronAPI.invokeOcc("cancel");
+}
+
 export function chamferOrFilletItem(args) {
   return runOp("chamferOrFilletItem", args);
 }
