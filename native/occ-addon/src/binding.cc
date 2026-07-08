@@ -2338,23 +2338,35 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
       }
     };
 
-    // Fast pass: sewing options (tol, sewingMode, analysis, CUTTING, nonManif).
-    // The default cutting pass splits faces to resolve intersections and is
-    // pathologically slow (a ~5k-triangle emboss stamp hung for seconds) AND
-    // ignores the cancel flag — so it can't be aborted.  A conformal mesh whose
-    // faces already meet edge-to-edge needs no cutting, so disable it: near-
-    // instant.  If the mesh is nasty enough that this yields nothing, fall back
-    // to the full (slow) sewing below.
-    BRepBuilderAPI_Sewing sew(1.0e-6, Standard_True, Standard_True,
-                              Standard_False, Standard_False);
-    fillSew(sew);
-    sew.Perform(CancelRange());
-    TopoDS_Shape sewn = sew.SewedShape();
-    if (sewn.IsNull()) {
-      BRepBuilderAPI_Sewing sewFull(1.0e-6);
-      fillSew(sewFull);
-      sewFull.Perform(CancelRange());
-      sewn = sewFull.SewedShape();
+    // Sewing options (tol, sewingMode, analysis, CUTTING, nonManifold).  The
+    // cutting pass splits faces to resolve intersections; it's slow but produces
+    // properly-shared edges so a later ShapeUpgrade_UnifySameDomain can merge
+    // coplanar faces and the following BOOLEAN stays cheap.
+    //   • Export (skipCaps): the solid is only tessellated / written, never
+    //     booleaned, so cutting is pointless — disable it for a near-instant sew.
+    //   • Boolean path (emboss stamp/body, STL import): cutting ON is REQUIRED —
+    //     without it the un-cut per-triangle shell doesn't unify, the face count
+    //     stays ~= the triangle count (blowing the kMaxFaces cap, or hanging the
+    //     boolean), which broke emboss when this was globally disabled.
+    TopoDS_Shape sewn;
+    if (skipCaps) {
+      BRepBuilderAPI_Sewing sew(1.0e-6, Standard_True, Standard_True,
+                                Standard_False, Standard_False);
+      fillSew(sew);
+      sew.Perform(CancelRange());
+      sewn = sew.SewedShape();
+      if (sewn.IsNull()) {
+        // Fast pass produced nothing (a mesh that needs cutting) — retry full.
+        BRepBuilderAPI_Sewing sewFull(1.0e-6);
+        fillSew(sewFull);
+        sewFull.Perform(CancelRange());
+        sewn = sewFull.SewedShape();
+      }
+    } else {
+      BRepBuilderAPI_Sewing sew(1.0e-6);
+      fillSew(sew);
+      sew.Perform(CancelRange());
+      sewn = sew.SewedShape();
     }
     if (sewn.IsNull()) throw std::runtime_error("mesh sewing produced nothing");
 
