@@ -1059,10 +1059,11 @@ function buildEmbossStampShape(stamp) {
     if (!m || !m.positions || m.positions.length < 9) return 0;
     const positions = new Float64Array(m.positions);
     const indices = m.indices && m.indices.length ? new Uint32Array(m.indices) : null;
-    // skipCaps: the wrapped-text stamp is a dense CURVED mesh that must be
-    // booleaned — the import face cap would reject it at print resolution.
-    // fastSew=false: keep cutting + unify (mirrors occOps.js).
-    return occ.makeSolidFromMesh(positions, indices, true, false) || 0;
+    // The wrapped-text stamp is a flat-prism mesh bent over the wall — cutting-ON
+    // sewing hangs resolving the near-touching bent triangles.  fastSew=true sews
+    // cutting-OFF (fast) + skips unify (unify mangled the un-cut shell into a
+    // "single line").  skipCaps: dense + must be booleaned.  Mirrors occOps.js.
+    return occ.makeSolidFromMesh(positions, indices, true, true) || 0;
   }
   if (!stamp.loops || stamp.loops.length === 0) return 0;
   const { placement: pl, depth } = stamp;

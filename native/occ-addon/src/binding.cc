@@ -72,6 +72,10 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Vertex.hxx>
+#include <TopoDS_Compound.hxx>
+#include <TopoDS_Shell.hxx>
+#include <BRep_Builder.hxx>
+#include <ShapeFix_Shell.hxx>
 #include <TopLoc_Location.hxx>
 
 // ── Face-normal + edge-distance helpers ─────────────────────────────────
@@ -2378,21 +2382,44 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
     }
     if (sewn.IsNull()) throw std::runtime_error("mesh sewing produced nothing");
 
+    // Build a solid from EACH closed shell and orient each for positive volume
+    // (material inside).  Orienting a multi-shell solid as a whole flips it by
+    // TOTAL volume, so several disjoint shells (e.g. one per emboss letter) can
+    // come out inside-out — wrong normals after the boolean, especially on the
+    // fast (cutting-off) sew that doesn't re-orient faces itself.  Per-shell
+    // orientation fixes each letter independently.
     TopoDS_Shape result = sewn;
-    BRepBuilderAPI_MakeSolid mk;
-    bool anyShell = false;
+    std::vector<TopoDS_Solid> solids;
     for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next()) {
-      mk.Add(TopoDS::Shell(ex.Current()));
-      anyShell = true;
+      TopoDS_Shell shell = TopoDS::Shell(ex.Current());
+      if (fastSew) {
+        // Cutting-off sewing keeps the mesh's own winding, which the developable
+        // emboss wrap can leave INCONSISTENT (a curved / S-curve wall flips
+        // handedness region to region — some triangles reversed).  Cutting-on
+        // would re-orient them but hangs on this mesh; ShapeFix_Shell propagates a
+        // consistent orientation across the shell (the same result, cheaply), so
+        // the boolean and the rendered normals come out right.
+        Handle(ShapeFix_Shell) sfs = new ShapeFix_Shell(shell);
+        sfs->FixFaceOrientation(shell);
+        if (!sfs->Shell().IsNull()) shell = sfs->Shell();
+      }
+      BRepBuilderAPI_MakeSolid ms(shell);
+      if (!ms.IsDone()) {
+        solids.clear();
+        break;
+      }
+      TopoDS_Solid sol = ms.Solid();
+      BRepLib::OrientClosedSolid(sol);
+      solids.push_back(sol);
     }
-    if (anyShell && mk.IsDone()) {
-      // Orient so the solid's material is on the inside of the shell (positive
-      // volume).  A mesh whose winding came out inverted — e.g. the deboss wrap,
-      // whose radial map flips handedness, or a badly-wound imported mesh — would
-      // otherwise become an inside-out solid that breaks the difference boolean.
-      TopoDS_Solid solid = mk.Solid();
-      BRepLib::OrientClosedSolid(solid);
-      result = solid;
+    if (solids.size() == 1) {
+      result = solids[0];
+    } else if (solids.size() > 1) {
+      BRep_Builder bld;
+      TopoDS_Compound comp;
+      bld.MakeCompound(comp);
+      for (const TopoDS_Solid& s : solids) bld.Add(comp, s);
+      result = comp;
     }
 
     // Merge coplanar faces so a tessellated flat model collapses to a handful of

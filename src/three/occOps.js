@@ -1311,10 +1311,13 @@ export function buildEmbossStampShape(stamp) {
     const positions = new Float64Array(m.positions);
     const indices =
       m.indices && m.indices.length ? new Uint32Array(m.indices) : null;
-    // skipCaps: the wrapped-text stamp is a legitimately dense CURVED mesh that
-    // must be booleaned — the face-count cap (an import guard) would reject it at
-    // print resolution.  fastSew=false: keep cutting + unify so it sews cleanly.
-    return occ.makeSolidFromMesh(positions, indices, true, false) || 0;
+    // The wrapped-text stamp is a flat-prism mesh bent over the wall: its shared
+    // vertices already encode the per-letter shells, but the bend makes triangles
+    // near-touch, so cutting-ON sewing chokes (hangs) trying to resolve the
+    // intersections.  fastSew=true sews cutting-OFF (fast) and SKIPS unify — the
+    // un-cut shell is exactly what we want here (unify was what mangled it into a
+    // "single line").  skipCaps: it's dense + must be booleaned.
+    return occ.makeSolidFromMesh(positions, indices, true, true) || 0;
   }
   if (!stamp.loops || stamp.loops.length === 0) return 0;
   const { placement: pl, depth } = stamp;
