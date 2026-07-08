@@ -2300,36 +2300,56 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
           " triangles) to use in a boolean. Simplify or decimate it first.");
 
     const uint32_t nv = (uint32_t)(pos.ElementLength() / 3);
-    BRepBuilderAPI_Sewing sew(1.0e-6);
-    auto addTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) {
-      gp_Pnt a(p[ia * 3], p[ia * 3 + 1], p[ia * 3 + 2]);
-      gp_Pnt b(p[ib * 3], p[ib * 3 + 1], p[ib * 3 + 2]);
-      gp_Pnt c(p[ic * 3], p[ic * 3 + 1], p[ic * 3 + 2]);
-      if (a.Distance(b) < 1e-12 || b.Distance(c) < 1e-12 ||
-          c.Distance(a) < 1e-12)
-        return;
-      BRepBuilderAPI_MakePolygon poly(a, b, c, Standard_True);
-      if (!poly.IsDone()) return;
-      BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
-      if (face.IsDone()) sew.Add(face.Face());
+    // Add every (non-degenerate) triangle as a face to a sewing pass, polling
+    // the cancel flag periodically.  Reusable so we can try a fast pass then a
+    // thorough fallback.
+    auto fillSew = [&](BRepBuilderAPI_Sewing& sew) {
+      auto addTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) {
+        gp_Pnt a(p[ia * 3], p[ia * 3 + 1], p[ia * 3 + 2]);
+        gp_Pnt b(p[ib * 3], p[ib * 3 + 1], p[ib * 3 + 2]);
+        gp_Pnt c(p[ic * 3], p[ic * 3 + 1], p[ic * 3 + 2]);
+        if (a.Distance(b) < 1e-12 || b.Distance(c) < 1e-12 ||
+            c.Distance(a) < 1e-12)
+          return;
+        BRepBuilderAPI_MakePolygon poly(a, b, c, Standard_True);
+        if (!poly.IsDone()) return;
+        BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
+        if (face.IsDone()) sew.Add(face.Face());
+      };
+      if (hasIdx) {
+        Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
+        for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3) {
+          if ((i & 0x3FF) == 0 && CancelRequested())
+            throw std::runtime_error("cancelled");
+          addTri(idx[i], idx[i + 1], idx[i + 2]);
+        }
+      } else {
+        for (uint32_t i = 0; i + 2 < nv; i += 3) {
+          if ((i & 0x3FF) == 0 && CancelRequested())
+            throw std::runtime_error("cancelled");
+          addTri(i, i + 1, i + 2);
+        }
+      }
     };
-    if (hasIdx) {
-      Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
-      for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3) {
-        if ((i & 0x3FF) == 0 && CancelRequested())
-          throw std::runtime_error("cancelled");
-        addTri(idx[i], idx[i + 1], idx[i + 2]);
-      }
-    } else {
-      for (uint32_t i = 0; i + 2 < nv; i += 3) {
-        if ((i & 0x3FF) == 0 && CancelRequested())
-          throw std::runtime_error("cancelled");
-        addTri(i, i + 1, i + 2);
-      }
-    }
 
+    // Fast pass: sewing options (tol, sewingMode, analysis, CUTTING, nonManif).
+    // The default cutting pass splits faces to resolve intersections and is
+    // pathologically slow (a ~5k-triangle emboss stamp hung for seconds) AND
+    // ignores the cancel flag — so it can't be aborted.  A conformal mesh whose
+    // faces already meet edge-to-edge needs no cutting, so disable it: near-
+    // instant.  If the mesh is nasty enough that this yields nothing, fall back
+    // to the full (slow) sewing below.
+    BRepBuilderAPI_Sewing sew(1.0e-6, Standard_True, Standard_True,
+                              Standard_False, Standard_False);
+    fillSew(sew);
     sew.Perform(CancelRange());
     TopoDS_Shape sewn = sew.SewedShape();
+    if (sewn.IsNull()) {
+      BRepBuilderAPI_Sewing sewFull(1.0e-6);
+      fillSew(sewFull);
+      sewFull.Perform(CancelRange());
+      sewn = sewFull.SewedShape();
+    }
     if (sewn.IsNull()) throw std::runtime_error("mesh sewing produced nothing");
 
     TopoDS_Shape result = sewn;
