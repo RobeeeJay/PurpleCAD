@@ -939,7 +939,8 @@ function exportLocalSolid(item, allItems, precision) {
       const id = occ.makeSolidFromMesh(
         new Float64Array(gd.positions),
         gd.indices?.length ? new Uint32Array(gd.indices) : null,
-        true, // skipCaps — this mesh is exported, not fed to a boolean
+        true, // skipCaps — exported mesh, not booleaned
+        true, // fastSew — cutting off + no unify (near-instant)
       );
       if (id != null) return id;
     } catch {
@@ -1310,7 +1311,10 @@ export function buildEmbossStampShape(stamp) {
     const positions = new Float64Array(m.positions);
     const indices =
       m.indices && m.indices.length ? new Uint32Array(m.indices) : null;
-    return occ.makeSolidFromMesh(positions, indices) || 0;
+    // skipCaps: the wrapped-text stamp is a legitimately dense CURVED mesh that
+    // must be booleaned — the face-count cap (an import guard) would reject it at
+    // print resolution.  fastSew=false: keep cutting + unify so it sews cleanly.
+    return occ.makeSolidFromMesh(positions, indices, true, false) || 0;
   }
   if (!stamp.loops || stamp.loops.length === 0) return 0;
   const { placement: pl, depth } = stamp;
@@ -1369,9 +1373,13 @@ function embossResultShape(targetId, stamp, printPrecision) {
     const t = occ.tessellate(targetId, printPrecision ?? 0.1);
     if (t && t.positions && t.indices) {
       try {
+        // skipCaps: a fine-tessellated curved body exceeds the import face cap at
+        // print resolution; it's booleaned here, so keep cutting + unify.
         faceted = occ.makeSolidFromMesh(
           new Float64Array(t.positions),
           new Uint32Array(t.indices),
+          true,
+          false,
         );
       } catch {
         faceted = 0;

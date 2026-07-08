@@ -2288,12 +2288,20 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
     Napi::Float64Array pos = info[0].As<Napi::Float64Array>();
     const double* p = pos.Data();
     const bool hasIdx = info[1].IsTypedArray();
-    // Export mode: the resulting solid is only tessellated / written to STEP,
-    // never fed to a boolean, so the boolean-safety caps and the coplanar
-    // UnifySameDomain pass (slow + lossy on a curved mesh) don't apply — keep the
-    // baked mesh's triangles verbatim so the export matches the on-screen view.
+    // Two independent knobs for the callers:
+    //   skipCaps  — skip the tri/face REJECTION caps (which exist so an import's
+    //               dense mesh can't hang a later boolean).  Export needs this
+    //               (no boolean at all); the emboss stamp/body needs it too (a
+    //               legitimately dense curved wrap that MUST be booleaned).
+    //   fastSew   — sew with cutting OFF and skip the coplanar UnifySameDomain
+    //               pass: near-instant, for EXPORT only (only tessellated/written,
+    //               never booleaned).  A booleaned solid must keep cutting ON +
+    //               unify so its faces share edges and the boolean stays cheap.
+    // So: import = (false,false); export = (true,true); emboss = (true,false).
     const bool skipCaps =
         info.Length() > 2 && info[2].IsBoolean() && info[2].As<Napi::Boolean>();
+    const bool fastSew =
+        info.Length() > 3 && info[3].IsBoolean() && info[3].As<Napi::Boolean>();
 
     // Sewing then unifying a very dense mesh is itself slow, so bail before that.
     const size_t kMaxTris = 50000;
@@ -2349,7 +2357,7 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
     //     stays ~= the triangle count (blowing the kMaxFaces cap, or hanging the
     //     boolean), which broke emboss when this was globally disabled.
     TopoDS_Shape sewn;
-    if (skipCaps) {
+    if (fastSew) {
       BRepBuilderAPI_Sewing sew(1.0e-6, Standard_True, Standard_True,
                                 Standard_False, Standard_False);
       fillSew(sew);
@@ -2389,9 +2397,9 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
 
     // Merge coplanar faces so a tessellated flat model collapses to a handful of
     // faces (a box: 12 triangles → 6 faces) the boolean can handle quickly.
-    // Skipped for export: unify is slow on a curved mesh and would alter the
-    // triangles, and there's no downstream boolean to keep cheap.
-    if (!skipCaps) {
+    // Skipped only for the fast export sew (no boolean; unify is slow on a curved
+    // mesh and would alter the triangles).
+    if (!fastSew) {
       try {
         ShapeUpgrade_UnifySameDomain unify(result, Standard_True, Standard_True,
                                            Standard_False);
@@ -2400,9 +2408,13 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
       } catch (const std::exception&) {
         // keep the un-unified shape
       }
+    }
 
-      // After merging, a still-huge face count means a curved/organic mesh whose
-      // boolean would hang the main thread — reject it instead.
+    // After merging, a still-huge face count means a curved/organic mesh whose
+    // boolean would hang the main thread — reject it, UNLESS the caller opted out
+    // (skipCaps): export never booleans, and the emboss stamp is a legitimately
+    // dense curved wrap that must be booleaned (and is now cancellable).
+    if (!skipCaps) {
       const int kMaxFaces = 5000;
       int faceCount = 0;
       for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
