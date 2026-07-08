@@ -150,6 +150,69 @@ files just to make these go away.
   Preserve both the fuzzy value and the unify step in any rewrite of this
   function.
 
+## OCC cancellation (long-op abort) — how it works, what breaks it
+
+A long OCC build is ONE synchronous native call. The worker thread hosting it
+(`electron/occ-worker.cjs` → `occ-bridge.cjs` → the addon) is blocked and cannot
+receive a "cancel" message. So cancel is **cooperative via shared memory**, and
+this is the only shape that works — the two alternatives both failed hard:
+
+- **Do NOT `worker.terminate()` mid-op.** worker_threads share the process
+  address space; OCC keeps non-thread-safe globals (`g_shapes`, the shape store,
+  BOP internals). Terminating a worker mid-build corrupts them and crashes with
+  `libc++abi: terminating due to uncaught exception of type Napi::Error`.
+- **Do NOT move the addon to an Electron `utilityProcess`.** It segfaults
+  (`EXC_BAD_ACCESS`) loading the native addon in that context — the app quits
+  instantly at startup. (Not fully root-caused; if you retry it, it needs live
+  debugging of the addon load, not a blind reland.)
+
+The working mechanism (keep all three pieces in lockstep):
+
+1. **Shared flag.** `main.cjs` owns a one-int32 `SharedArrayBuffer`
+   (`occCancelBuffer`), passes it to the worker via `workerData`, and flips
+   element 0 to 1 in the `occ:cancel` IPC handler. The worker clears it to 0
+   before each op (safe — the thread is free between ops). `occClient.cancelOcc`
+   (renderer) triggers the IPC; the Viewport `cancelEpoch` effect and the
+   `inputs.jsx` preview-supersede call it, each also `clearSolids()`.
+2. **Native polls it.** `binding.cc` aliases the SAB as `g_cancelPtr`
+   (`SetCancelBuffer`). `CancelIndicator : Message_ProgressIndicator` returns it
+   from `UserBreak()`; `CancelRange()` hands a range rooted at that indicator
+   into every heavy `.Build(...)` (boolean, chamfer, fillet, pushpull prism,
+   loft, pipe, draft, cylinder) and the meshing (`BRepMesh_IncrementalMesh` via
+   the `IMeshTools_Parameters` + range overload). OCC throws at the next
+   checkpoint. For OUR OWN hot loops that aren't OCC algorithms (the
+   per-triangle face-building loop in `MakeSolidFromMesh`), poll
+   `CancelRequested()` directly every ~1024 iterations and throw.
+3. **Soft backstop.** `occClient.runOp` still discards a result that lands after
+   the cancel epoch changed — for an op that finished before the flag was seen.
+
+**Landmines (each was a real, painful bug):**
+
+- **`BRepBuilderAPI_Sewing` ignores `UserBreak`.** Threading a `Message_Progress-
+  Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
+  emboss bottleneck. Do not assume passing a range makes a stage cancellable —
+  only some algorithms honor it (booleans/meshing do; sewing does not).
+- **Sewing's default *cutting* pass is the killer.** `BRepBuilderAPI_Sewing`'s
+  4th ctor arg (cutting) splits faces to resolve intersections — O(n^2)-ish; a
+  ~5k-triangle conformal mesh hung for seconds. `MakeSolidFromMesh` sews with
+  cutting DISABLED (`Sewing(tol, true, true, false, false)`) for the fast path,
+  then falls back to full default sewing only if that yields nothing. Keep BOTH
+  passes — cutting-off alone returns nothing for some hard meshes (self-touching,
+  degenerate poles). Do not "simplify" this back to a single default `Sewing`.
+- **Do NOT hand-build a shared-topology shell to skip sewing.** Building faces
+  from shared `TopoDS_Edge`s (index-buffer topology) is fast and yields a valid
+  6-face solid, but downstream `chamfer`/`fillet` reject it ("no suitable edges")
+  — the manual faces lack the pcurves/edge-sharing that sewing produces, and
+  `ShapeFix_Shape` didn't fully repair it. Sewing is load-bearing for downstream
+  op compatibility; the fast path is *cutting-off sewing*, not *no sewing*.
+- **This is native-only — no `occOps.js` / `occ-bridge.cjs` op-body change.**
+  The cancel range + fast-sew live entirely in `binding.cc` (shared by both JS
+  impls), so the lockstep rule is satisfied by rebuilding the addon
+  (`cd native/occ-addon && npm run build`). The only JS surface is the SAB
+  plumbing (`main.cjs` / `occ-worker.cjs` / `occClient.cancelOcc`) and the
+  `setCancelBuffer` re-export in `occ-bridge.cjs`. vitest can't exercise cancel
+  (no worker) — validate abort behavior in the Electron app.
+
 ## Variables / formulas
 
 - Dimension distances, extrude depths, and chamfer/fillet parameters can
