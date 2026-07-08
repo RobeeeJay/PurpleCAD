@@ -206,9 +206,20 @@ The working mechanism (keep all three pieces in lockstep):
     ~= triangle count ⇒ slow/rejected). Cutting-off also returns nothing for some
     hard meshes, so the `fastSew` branch has a full-sew fallback.
   - So: **import** = `(false,false)` cutting+unify+caps; **export** = `(true,true)`
-    fast, no caps; **emboss stamp/body** = `(true,false)` cutting+unify, no caps.
-    Setting `fastSew` (or the old global cutting-off) on a booleaned solid broke
-    emboss — keep cutting ON for anything that feeds a boolean.
+    fast, no caps; **emboss faceted body** = `(true,false)` cutting+unify, no caps
+    (a clean OCC tessellation — cutting is safe). The **conform emboss STAMP** is
+    the exception: `(true,true)` — cutting-ON *hangs* resolving the wrapped
+    prism's near-touching bent triangles, so it sews cutting-OFF and relies on
+    per-shell `OrientClosedSolid` + `ShapeFix_Shell` (in `MakeSolidFromMesh`) to
+    fix face orientation instead. Keep cutting ON for any OTHER booleaned solid.
+- **Conform emboss is architecturally slow — don't chase it with sewing tweaks.**
+  It booleans a dense CURVED wrapped-text mesh (~5k faces that can't unify) against
+  the body: the union is ~O(faces²) (measured ~88s on a small-radius ring) and can
+  still mis-normal faces. The old `kMaxFaces` cap fail-fasted exactly this. The fix
+  is NOT another sew/orientation knob (that space is exhausted) — it's cutting the
+  stamp face count hard or replacing the dense-mesh boolean (surface displacement /
+  per-face clip). See the `conform-emboss-rework` memory. Flat-projection emboss
+  (analytic prism, `stamp.loops`) is fine — this only bites `projection:"conform"`.
 - **Do NOT hand-build a shared-topology shell to skip sewing.** Building faces
   from shared `TopoDS_Edge`s (index-buffer topology) is fast and yields a valid
   6-face solid, but downstream `chamfer`/`fillet` reject it ("no suitable edges")
