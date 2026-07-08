@@ -2185,23 +2185,67 @@ async function pattern3dItem({
   return result;
 }
 
-async function exportSTL({ items, allItems, precision }) {
-  const shapeIds = buildExportShapes(
-    items,
-    allItems || items,
-    precision ?? 0.01,
-  );
-  if (shapeIds.length === 0) return null;
+// World-space tessellation of an item's BAKED mesh for STL: the baked mesh is
+// already a watertight OCC tessellation, so transform its triangles to world
+// (per-axis scale × mm, item rotation, position × mm, then +π/2 about X for the
+// Z-up export convention) and write them VERBATIM.  Sewing the mesh into a solid
+// and re-tessellating (as the STEP path must, to get a B-rep) round-trips through
+// OCC and can OPEN the seams — the STL would then show open edges.  Matches the
+// transform buildExportShapes applies.
+function bakedWorldTessellation(item) {
+  const gd = item.geometryData;
+  const bt = buildBrushTransform(item);
+  const sx = (bt.scale.x ?? 1) * MM_PER_UNIT;
+  const sy = (bt.scale.y ?? 1) * MM_PER_UNIT;
+  const sz = (bt.scale.z ?? 1) * MM_PER_UNIT;
+  const rot = bt.rotation || { x: 0, y: 0, z: 0 };
+  const px = (bt.position.x || 0) * MM_PER_UNIT;
+  const py = (bt.position.y || 0) * MM_PER_UNIT;
+  const pz = (bt.position.z || 0) * MM_PER_UNIT;
+  const src = gd.positions;
+  const pos = new Array(src.length);
+  for (let i = 0; i < src.length; i += 3) {
+    const r = applyEulerXYZ(
+      src[i] * sx,
+      src[i + 1] * sy,
+      src[i + 2] * sz,
+      rot.x || 0,
+      rot.y || 0,
+      rot.z || 0,
+    );
+    const o = applyEulerXYZ(r.x + px, r.y + py, r.z + pz, Math.PI / 2, 0, 0);
+    pos[i] = o.x;
+    pos[i + 1] = o.y;
+    pos[i + 2] = o.z;
+  }
+  const idx = gd.indices?.length
+    ? gd.indices
+    : Array.from({ length: src.length / 3 }, (_, k) => k);
+  return { pos, idx, n: idx.length / 3 };
+}
 
+async function exportSTL({ items, allItems, precision }) {
+  const all = allItems || items;
   const tessellations = [];
   let triCount = 0;
-  for (const id of shapeIds) {
-    const tess = occ.tessellate(id, 0.01);
-    occ.releaseShape(id);
-    if (!tess) continue;
-    const n = tess.indices.length / 3;
-    tessellations.push({ pos: tess.positions, idx: tess.indices, n });
-    triCount += n;
+  for (const item of items) {
+    if (item.visible === false) continue;
+    if (!EXPORTABLE_TYPES.has(item.type)) continue;
+    let entry;
+    if (item.geometryData?.positions?.length >= 9) {
+      // Write the exact on-screen watertight mesh (no sew / re-tessellate).
+      entry = bakedWorldTessellation(item);
+    } else {
+      // Primitive / extrude: no baked mesh — build the analytic solid + tessellate.
+      const ids = buildExportShapes([item], all, precision ?? 0.01);
+      if (ids.length === 0) continue;
+      const t = occ.tessellate(ids[0], 0.01);
+      occ.releaseShape(ids[0]);
+      if (!t) continue;
+      entry = { pos: t.positions, idx: t.indices, n: t.indices.length / 3 };
+    }
+    tessellations.push(entry);
+    triCount += entry.n;
   }
   if (triCount === 0) return null;
 

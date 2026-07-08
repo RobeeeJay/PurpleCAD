@@ -91,7 +91,39 @@ describe("occOps.exportSTL / exportSTEP", () => {
     };
     const buf = await ops.exportSTL({ items: [baked], allItems: [baked] });
     expect(buf).toBeInstanceOf(ArrayBuffer);
-    expect(new DataView(buf).getUint32(80, true)).toBeGreaterThan(0);
+    const dv = new DataView(buf);
+    const tris = dv.getUint32(80, true);
+    expect(tris).toBeGreaterThan(0);
+
+    // WATERTIGHT: writing the baked mesh verbatim must keep it closed — every
+    // undirected edge shared by exactly two triangles.  The old sew + re-
+    // tessellate round-trip opened seams (open edges), which this catches.
+    const key = (x, y, z) =>
+      `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`;
+    const edgeUse = new Map();
+    let off = 84;
+    for (let t = 0; t < tris; t++) {
+      const v = [];
+      for (let k = 0; k < 3; k++) {
+        const o = off + 12 + k * 12;
+        v.push(
+          key(
+            dv.getFloat32(o, true),
+            dv.getFloat32(o + 4, true),
+            dv.getFloat32(o + 8, true),
+          ),
+        );
+      }
+      for (let k = 0; k < 3; k++) {
+        const a = v[k],
+          b = v[(k + 1) % 3];
+        const e = a < b ? `${a}|${b}` : `${b}|${a}`;
+        edgeUse.set(e, (edgeUse.get(e) || 0) + 1);
+      }
+      off += 50;
+    }
+    const openEdges = [...edgeUse.values()].filter((c) => c !== 2).length;
+    expect(openEdges).toBe(0);
   });
 
   it("exportSTEP emits an ISO-10303-21 file", async () => {
