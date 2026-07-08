@@ -237,5 +237,88 @@ export function prismFromLoops(loops, depth, maxEdge) {
     indices.push(a, b, nP + b); // wall quad → two triangles
     indices.push(a, nP + b, nP + a);
   }
-  return { positions, indices };
+  // The glyph cap triangulation + walls can emit MIXED-handedness triangles
+  // (holed letters especially), so the raw mesh has faces wound both ways.  Sewn,
+  // that's a watertight but inconsistently-oriented solid → reversed render
+  // normals that OCC's per-shell OrientClosedSolid (a global flip) can't fix.
+  // Flood-fill a consistent winding here; OCC then flips each shell outward.
+  return { positions, indices: orientWindingConsistent(indices) };
+}
+
+// Make triangle winding CONSISTENT across each connected component: BFS over
+// edge-adjacency, flipping any neighbour whose shared edge runs the SAME
+// direction as ours (a consistent pair shares an edge in OPPOSITE directions).
+// Leaves the global sense alone — the caller's per-shell OrientClosedSolid points
+// each component outward.  O(tris).
+export function orientWindingConsistent(indices) {
+  const nt = indices.length / 3;
+  const key = (u, v) => (u < v ? u * 2147483647 + v : v * 2147483647 + u);
+  const edgeTris = new Map(); // undirected edge → [triIdx, …]
+  for (let t = 0; t < nt; t++) {
+    const a = indices[t * 3],
+      b = indices[t * 3 + 1],
+      c = indices[t * 3 + 2];
+    for (const [u, v] of [
+      [a, b],
+      [b, c],
+      [c, a],
+    ]) {
+      const k = key(u, v);
+      let l = edgeTris.get(k);
+      if (!l) edgeTris.set(k, (l = []));
+      l.push(t);
+    }
+  }
+  const flip = new Array(nt).fill(false);
+  const seen = new Array(nt).fill(false);
+  // Directed edges of a triangle given its current flip state.
+  const dirs = (t) => {
+    const a = indices[t * 3],
+      b = indices[t * 3 + 1],
+      c = indices[t * 3 + 2];
+    return flip[t]
+      ? [
+          [a, c],
+          [c, b],
+          [b, a],
+        ]
+      : [
+          [a, b],
+          [b, c],
+          [c, a],
+        ];
+  };
+  for (let s = 0; s < nt; s++) {
+    if (seen[s]) continue;
+    seen[s] = true;
+    const stack = [s];
+    while (stack.length) {
+      const t = stack.pop();
+      for (const [u, v] of dirs(t)) {
+        for (const nb of edgeTris.get(key(u, v))) {
+          if (nb === t || seen[nb]) continue;
+          // Consistent when nb traverses this edge v→u; if it also goes u→v, flip.
+          if (dirs(nb).some(([x, y]) => x === u && y === v)) flip[nb] = true;
+          seen[nb] = true;
+          stack.push(nb);
+        }
+      }
+    }
+  }
+  const out = new Array(indices.length);
+  for (let t = 0; t < nt; t++) {
+    const a = indices[t * 3],
+      b = indices[t * 3 + 1],
+      c = indices[t * 3 + 2];
+    if (flip[t]) {
+      out[t * 3] = a;
+      out[t * 3 + 1] = c;
+      out[t * 3 + 2] = b;
+    } else {
+      out[t * 3] = a;
+      out[t * 3 + 1] = b;
+      out[t * 3 + 2] = c;
+    }
+  }
+  return out;
 }

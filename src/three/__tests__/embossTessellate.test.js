@@ -98,4 +98,41 @@ describe("embossTessellate", () => {
     }
     expect([...ec.values()].filter((c) => c !== 2).length).toBe(0);
   });
+
+  it("prismFromLoops has CONSISTENT winding on a holed glyph (correct normals)", () => {
+    // Square with a square hole (like O/A/e).  Regression: the raw cap+wall mesh
+    // wound some faces backward → the sewn solid was watertight but had reversed
+    // faces (wrong render normals) that OCC's global orient couldn't fix.  A
+    // consistently-wound closed mesh uses every DIRECTED edge exactly once.
+    const holed = [
+      {
+        outer: [
+          { x: -2, y: -2 },
+          { x: 2, y: -2 },
+          { x: 2, y: 2 },
+          { x: -2, y: 2 },
+        ],
+        holes: [
+          [
+            { x: -1, y: -1 },
+            { x: -1, y: 1 },
+            { x: 1, y: 1 },
+            { x: 1, y: -1 },
+          ],
+        ],
+      },
+    ];
+    const { indices } = prismFromLoops(holed, 1, 0.5);
+    const dir = new Map();
+    for (let i = 0; i < indices.length; i += 3) {
+      const t = [indices[i], indices[i + 1], indices[i + 2]];
+      for (const [a, b] of [
+        [t[0], t[1]],
+        [t[1], t[2]],
+        [t[2], t[0]],
+      ])
+        dir.set(`${a}_${b}`, (dir.get(`${a}_${b}`) || 0) + 1);
+    }
+    expect([...dir.values()].filter((c) => c !== 1).length).toBe(0);
+  });
 });
