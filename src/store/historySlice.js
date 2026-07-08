@@ -704,6 +704,7 @@ export const createHistorySlice = (set) => ({
                 ...r,
                 hole: patch.hole,
                 centerOffset: patch.centerOffset,
+                basePosition: patch.basePosition,
                 regeneratedAt: patch.regeneratedAt,
               },
             },

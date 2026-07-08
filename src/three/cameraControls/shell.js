@@ -38,7 +38,7 @@ export async function commitShell({
   if (!result) return false;
 
   const { geometryData, centerOffset } = result;
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
   const patches = {
     type: "csg",
     position,
@@ -47,6 +47,7 @@ export async function commitShell({
       thickness,
       source,
       centerOffset,
+      basePosition: basePos,
       regeneratedAt: printPrecision,
     },
     geometryData,

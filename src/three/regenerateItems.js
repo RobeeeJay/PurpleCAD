@@ -41,6 +41,60 @@ import { buildEmbossStamp } from "./embossGeometry.js";
 // Regeneration is async because both branches go through occClient, which
 // posts to the OCC Web Worker in the browser and runs in-process in node.
 
+// Re-anchor a chained op's item position to its LIVE source every recalc.
+//
+// A chamfer/emboss/hole/… is placed at its source's brush position plus its
+// bbox-centre offset; the user may then gizmo-MOVE it, adding a world delta.
+// Storing the absolute position and KEEPING it (the old behaviour) breaks the
+// instant an insert/edit repoints the source (relinkSourceChain): the geometry
+// rebuilds on the NEW source while the position stays pinned to the OLD one, so
+// the object shifts — the recurring "inserting a chamfer after a chamfer moves
+// the body" bug.  Instead we remember the SOURCE BRUSH position we last anchored
+// to (regenerator.basePosition) and shift the on-screen position by however much
+// that brush point moved.  Deliberately keyed on the brush point alone, NOT the
+// centre-offset: a resolution toggle re-tessellates and nudges the bbox centre
+// slightly, and we must NOT let that jitter the object (the old code kept the
+// position fixed on a toggle for exactly this reason).
+export function resolveChainedPosition(
+  source,
+  centerOffset,
+  currentPosition,
+  storedBrush,
+) {
+  const brushPos = buildBrushTransform(source).position;
+  // Common path: shift the current position by the source-brush delta, so an
+  // insert/edit that moved the source carries the body with it, while a
+  // resolution toggle (same source, zero delta) leaves it untouched.
+  if (storedBrush && currentPosition) {
+    return {
+      position: {
+        x: currentPosition.x + (brushPos.x - storedBrush.x),
+        y: currentPosition.y + (brushPos.y - storedBrush.y),
+        z: currentPosition.z + (brushPos.z - storedBrush.z),
+      },
+      base: brushPos,
+    };
+  }
+  // Legacy item (no recorded brush) but a position exists: keep it, and record
+  // the brush so the NEXT recalc can re-anchor precisely.
+  if (currentPosition) return { position: currentPosition, base: brushPos };
+  // No current position (a fresh sketch-driven rebuild): place it at the full
+  // source-anchored base (brush + centre-offset rotated into the source frame).
+  const { cx, cy, cz } = centerOffset;
+  const rot = source.rotation || { x: 0, y: 0, z: 0 };
+  const local = new THREE.Vector3(cx, cy, cz).applyEuler(
+    new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
+  );
+  return {
+    position: {
+      x: brushPos.x + local.x,
+      y: brushPos.y + local.y,
+      z: brushPos.z + local.z,
+    },
+    base: brushPos,
+  };
+}
+
 async function regenerateChamfer(
   regenerator,
   accumulatedItems,
@@ -106,21 +160,15 @@ async function regenerateChamfer(
   // source's brush transform moves it: the source rotation no longer matches
   // the item's once the bevelled object has been rotated independently.  Only
   // the mesh density should change on a resolution toggle.
-  let position = currentPosition;
-  if (!position) {
-    const { cx, cy, cz } = result.centerOffset;
-    const brushPos = buildBrushTransform(source).position;
-    const rot = source.rotation || { x: 0, y: 0, z: 0 };
-    const local = new THREE.Vector3(cx, cy, cz);
-    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-    position = {
-      x: brushPos.x + local.x,
-      y: brushPos.y + local.y,
-      z: brushPos.z + local.z,
-    };
-  }
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    result.centerOffset,
+    currentPosition,
+    regenerator.basePosition,
+  );
   return {
     position,
+    basePosition,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
     // Present only when the caller passed retainResult (timeline solid cache);
@@ -174,21 +222,15 @@ async function regeneratePushPull(
   // Keep the item's existing position (same rationale as regenerateChamfer):
   // the re-tessellated geometry is bbox-centred, so the rendered centre is
   // already item.position regardless of precision.
-  let position = currentPosition;
-  if (!position) {
-    const { cx, cy, cz } = result.centerOffset;
-    const brushPos = buildBrushTransform(source).position;
-    const rot = source.rotation || { x: 0, y: 0, z: 0 };
-    const local = new THREE.Vector3(cx, cy, cz);
-    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-    position = {
-      x: brushPos.x + local.x,
-      y: brushPos.y + local.y,
-      z: brushPos.z + local.z,
-    };
-  }
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    result.centerOffset,
+    currentPosition,
+    regenerator.basePosition,
+  );
   return {
     position,
+    basePosition,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
     // Present only when the caller passed retainResult (timeline solid cache);
@@ -231,21 +273,15 @@ async function regenerateShell(
     return null;
   }
   if (!result) return null;
-  let position = currentPosition;
-  if (!position) {
-    const { cx, cy, cz } = result.centerOffset;
-    const brushPos = buildBrushTransform(source).position;
-    const rot = source.rotation || { x: 0, y: 0, z: 0 };
-    const local = new THREE.Vector3(cx, cy, cz);
-    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-    position = {
-      x: brushPos.x + local.x,
-      y: brushPos.y + local.y,
-      z: brushPos.z + local.z,
-    };
-  }
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    result.centerOffset,
+    currentPosition,
+    regenerator.basePosition,
+  );
   return {
     position,
+    basePosition,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
     // Present only when the caller passed retainResult (timeline solid cache);
@@ -289,21 +325,15 @@ async function regenerateDraft(
     return null;
   }
   if (!result) return null;
-  let position = currentPosition;
-  if (!position) {
-    const { cx, cy, cz } = result.centerOffset;
-    const brushPos = buildBrushTransform(source).position;
-    const rot = source.rotation || { x: 0, y: 0, z: 0 };
-    const local = new THREE.Vector3(cx, cy, cz);
-    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-    position = {
-      x: brushPos.x + local.x,
-      y: brushPos.y + local.y,
-      z: brushPos.z + local.z,
-    };
-  }
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    result.centerOffset,
+    currentPosition,
+    regenerator.basePosition,
+  );
   return {
     position,
+    basePosition,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
     // Present only when the caller passed retainResult (timeline solid cache);
@@ -342,21 +372,15 @@ async function regenerateHole(
     return null;
   }
   if (!result) return null;
-  let position = currentPosition;
-  if (!position) {
-    const { cx, cy, cz } = result.centerOffset;
-    const brushPos = buildBrushTransform(source).position;
-    const rot = source.rotation || { x: 0, y: 0, z: 0 };
-    const local = new THREE.Vector3(cx, cy, cz);
-    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-    position = {
-      x: brushPos.x + local.x,
-      y: brushPos.y + local.y,
-      z: brushPos.z + local.z,
-    };
-  }
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    result.centerOffset,
+    currentPosition,
+    regenerator.basePosition,
+  );
   return {
     position,
+    basePosition,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
     // Present only when the caller passed retainResult (timeline solid cache);
@@ -461,21 +485,15 @@ async function regenerateEmboss(
     return null;
   }
   if (!result) return null;
-  let position = currentPosition;
-  if (!position) {
-    const { cx, cy, cz } = result.centerOffset;
-    const brushPos = buildBrushTransform(source).position;
-    const rot = source.rotation || { x: 0, y: 0, z: 0 };
-    const local = new THREE.Vector3(cx, cy, cz);
-    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-    position = {
-      x: brushPos.x + local.x,
-      y: brushPos.y + local.y,
-      z: brushPos.z + local.z,
-    };
-  }
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    result.centerOffset,
+    currentPosition,
+    regenerator.basePosition,
+  );
   return {
     position,
+    basePosition,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
     shapeId: result.shapeId,
@@ -518,21 +536,15 @@ async function regenerateRevolve(
   // The revolve bbox-centres its result; recompute the world centre from the
   // profile's sketch-plane brush transform + the fresh centre offset so the
   // origin tracks a sketch edit (recalculateTimeline drops currentPosition).
-  let position = currentPosition;
-  if (!position) {
-    const { cx, cy, cz } = result.centerOffset;
-    const brushPos = buildBrushTransform(source).position;
-    const rot = source.rotation || { x: 0, y: 0, z: 0 };
-    const local = new THREE.Vector3(cx, cy, cz);
-    local.applyEuler(new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0));
-    position = {
-      x: brushPos.x + local.x,
-      y: brushPos.y + local.y,
-      z: brushPos.z + local.z,
-    };
-  }
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    result.centerOffset,
+    currentPosition,
+    regenerator.basePosition,
+  );
   return {
     position,
+    basePosition,
     geometryData: result.geometryData,
     centerOffset: result.centerOffset,
     // Present only when the caller passed retainResult (timeline solid cache);
@@ -917,6 +929,10 @@ export async function regenerateItemsForResolution(
     ) {
       nextRegen.centerOffset = result.centerOffset;
     }
+    // Remember the source-anchored base we placed this op at, so the next recalc
+    // can re-anchor the user's move-delta onto a fresh base (resolveChainedPosition)
+    // instead of leaving the position pinned to a stale source after an insert/edit.
+    if (result.basePosition) nextRegen.basePosition = result.basePosition;
     // Carry the freshly-recomputed stamp so buildItemShapeLocal stays in sync
     // with the live sketch geometry.
     if (r.kind === "emboss" && result.stamp) nextRegen.stamp = result.stamp;

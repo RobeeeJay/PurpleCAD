@@ -62,7 +62,7 @@ export async function commitHole({ items, printPrecision }) {
   }
   if (!result) return false;
   const { geometryData, centerOffset } = result;
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
   const store = useStore.getState();
   const editEntryId = store.holeTool?.editEntryId;
   store._cameraControls?.clearHolePreview?.();
@@ -72,6 +72,7 @@ export async function commitHole({ items, printPrecision }) {
       hole,
       position,
       centerOffset,
+      basePosition: basePos,
       geometryData,
       regeneratedAt: printPrecision,
     });
@@ -86,6 +87,7 @@ export async function commitHole({ items, printPrecision }) {
           hole,
           source,
           centerOffset,
+          basePosition: basePos,
           regeneratedAt: printPrecision,
         },
         geometryData,

@@ -113,7 +113,7 @@ export async function commitPushPull({
   if (!result) return false;
 
   const { geometryData, centerOffset } = result;
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
   store._cameraControls?.clearPushPullPreview?.();
   const patches = {
     type: "csg",
@@ -124,6 +124,7 @@ export async function commitPushPull({
       source,
       subGeo: result.resolvedSubGeo || subGeo,
       centerOffset,
+      basePosition: basePos,
       regeneratedAt: printPrecision,
     },
     geometryData,

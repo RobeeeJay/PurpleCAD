@@ -109,7 +109,7 @@ export async function commitEmboss({ items, printPrecision }) {
   }
   if (!result) return false;
   const { geometryData, centerOffset } = result;
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
   const store = useStore.getState();
   const editEntryId = store.embossTool?.editEntryId;
   store._cameraControls?.clearEmbossPreview?.();
@@ -126,6 +126,7 @@ export async function commitEmboss({ items, printPrecision }) {
     params,
     stamp,
     centerOffset,
+    basePosition: basePos,
     regeneratedAt: printPrecision,
   };
   if (editEntryId != null) {

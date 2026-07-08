@@ -296,6 +296,20 @@ Established landmines (each was a real bug — extend this list, never shrink it
   (tests) AND `electron/occ-bridge.cjs` (the shipped app). A green suite with an
   un-mirrored bridge is the trap that hid every bug above — see the ⚠️ note under
   "OCC execution boundary".
+- **A chained op's position must RE-ANCHOR to its live source, not be kept.**
+  chamfer/emboss/hole/shell/draft/pushpull store `regenerator.basePosition` = the
+  SOURCE brush position they were placed against. Each recalc,
+  `resolveChainedPosition` shifts the item by how far that brush point moved
+  (`regenerateItems.js`). Keeping the absolute position (the old code) meant an
+  insert/edit that repointed the source via `relinkSourceChain` rebuilt the
+  geometry on the NEW source while the position stayed pinned to the OLD one — the
+  recurring "insert a chamfer after a chamfer shifts the body" bug. Key it on the
+  brush point ALONE, never `centerOffset`: a resolution toggle re-tessellates and
+  nudges the bbox centre, and re-anchoring on that would jitter the body every
+  toggle. Every commit/edit path that sets `position` must also store
+  `basePosition` (else the next recalc computes a spurious delta) — gizmo MOVES
+  are separate `transform` instructions, so `basePosition` re-anchoring preserves
+  them for free.
 - **STL/STEP export must use the CACHED solid + ACTIVE precision.**
   `buildExportShapes` takes `(items, allItems, precision, cachedShapeIds)`: for a
   cached item it COPIES the cache-owned solid (`transformShape` identity — never

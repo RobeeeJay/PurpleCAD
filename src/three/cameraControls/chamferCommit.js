@@ -155,6 +155,11 @@ export const chamferResultTransform = (source, centerOffset) => {
       z: brushPos.z + local.z,
     },
     rotation: rot,
+    // The SOURCE brush position alone (no centre-offset).  Stored as the
+    // regenerator's basePosition so recalc re-anchors the op to source MOVES only
+    // (insert/edit), not to the tiny centre-offset drift a re-tessellation
+    // produces on a resolution toggle. See resolveChainedPosition.
+    basePos: brushPos,
   };
 };
 
@@ -175,7 +180,7 @@ export const commitChamferResult = (
   // variable resize moves their coordinates.
   const storedSubGeo = result.resolvedSubGeo || subGeo;
 
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
 
   const patches = {
     type: "csg",
@@ -186,6 +191,11 @@ export const commitChamferResult = (
       subGeo: storedSubGeo,
       // bbox-centre offset in the source's LOCAL frame.
       centerOffset,
+      // The SOURCE brush position we anchored this op to.  Recalc shifts the
+      // item by however much this point moves, so an upstream insert/edit carries
+      // the body along instead of leaving it pinned to a stale source (and a
+      // resolution toggle, which doesn't move it, is a no-op). resolveChainedPosition.
+      basePosition: basePos,
     },
     geometryData,
   };

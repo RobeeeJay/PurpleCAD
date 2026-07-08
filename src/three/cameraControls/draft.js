@@ -53,7 +53,7 @@ export async function commitDraft({ items, printPrecision }) {
   }
   if (!result) return false;
   const { geometryData, centerOffset } = result;
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
   const store = useStore.getState();
   const editEntryId = store.draftTool?.editEntryId;
   store._cameraControls?.clearDraftPreview?.();
@@ -65,6 +65,7 @@ export async function commitDraft({ items, printPrecision }) {
     angleDeg,
     flip,
     centerOffset,
+    basePosition: basePos,
     regeneratedAt: printPrecision,
   };
   if (editEntryId != null) {
