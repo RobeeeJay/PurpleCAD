@@ -2288,13 +2288,19 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
     Napi::Float64Array pos = info[0].As<Napi::Float64Array>();
     const double* p = pos.Data();
     const bool hasIdx = info[1].IsTypedArray();
+    // Export mode: the resulting solid is only tessellated / written to STEP,
+    // never fed to a boolean, so the boolean-safety caps and the coplanar
+    // UnifySameDomain pass (slow + lossy on a curved mesh) don't apply — keep the
+    // baked mesh's triangles verbatim so the export matches the on-screen view.
+    const bool skipCaps =
+        info.Length() > 2 && info[2].IsBoolean() && info[2].As<Napi::Boolean>();
 
     // Sewing then unifying a very dense mesh is itself slow, so bail before that.
     const size_t kMaxTris = 50000;
     size_t triCount =
         hasIdx ? info[1].As<Napi::Uint32Array>().ElementLength() / 3
                : (pos.ElementLength() / 3) / 3;
-    if (triCount > kMaxTris)
+    if (!skipCaps && triCount > kMaxTris)
       throw std::runtime_error(
           "Imported mesh is too detailed (" + std::to_string(triCount) +
           " triangles) to use in a boolean. Simplify or decimate it first.");
@@ -2371,26 +2377,30 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
 
     // Merge coplanar faces so a tessellated flat model collapses to a handful of
     // faces (a box: 12 triangles → 6 faces) the boolean can handle quickly.
-    try {
-      ShapeUpgrade_UnifySameDomain unify(result, Standard_True, Standard_True,
-                                         Standard_False);
-      unify.Build();
-      if (!unify.Shape().IsNull()) result = unify.Shape();
-    } catch (const std::exception&) {
-      // keep the un-unified shape
-    }
+    // Skipped for export: unify is slow on a curved mesh and would alter the
+    // triangles, and there's no downstream boolean to keep cheap.
+    if (!skipCaps) {
+      try {
+        ShapeUpgrade_UnifySameDomain unify(result, Standard_True, Standard_True,
+                                           Standard_False);
+        unify.Build();
+        if (!unify.Shape().IsNull()) result = unify.Shape();
+      } catch (const std::exception&) {
+        // keep the un-unified shape
+      }
 
-    // After merging, a still-huge face count means a curved/organic mesh whose
-    // boolean would hang the main thread — reject it instead.
-    const int kMaxFaces = 5000;
-    int faceCount = 0;
-    for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
-      if (++faceCount > kMaxFaces) break;
+      // After merging, a still-huge face count means a curved/organic mesh whose
+      // boolean would hang the main thread — reject it instead.
+      const int kMaxFaces = 5000;
+      int faceCount = 0;
+      for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
+        if (++faceCount > kMaxFaces) break;
+      }
+      if (faceCount > kMaxFaces)
+        throw std::runtime_error(
+            "Imported mesh has too many curved faces to use in a boolean. "
+            "Simplify it, or boolean against a primitive instead.");
     }
-    if (faceCount > kMaxFaces)
-      throw std::runtime_error(
-          "Imported mesh has too many curved faces to use in a boolean. "
-          "Simplify it, or boolean against a primitive instead.");
 
     return Napi::Number::New(env, StoreShape(result));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }

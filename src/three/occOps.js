@@ -924,26 +924,37 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
 // `items` = the objects to export; `allItems` = the whole scene, so a csg
 // recipe (boolean / chamfer source) still resolves its inputs when only a
 // selected subset is exported.
-function buildExportShapes(
-  items,
-  allItems = items,
-  precision = 0.01,
-  cachedShapeIds = null,
-) {
+// The LOCAL-frame solid to export for one item.  Prefer the item's BAKED mesh —
+// the exact high-res geometry already on screen at the active precision — by
+// sewing it into a solid (cap-free: export only tessellates / writes it, never
+// booleans it, so the boolean-safety caps + coplanar unify don't apply and the
+// triangles stay verbatim).  Rebuilding the recipe instead re-runs the whole OCC
+// chain (slow) and for an emboss/csg can diverge from the baked result.  Fall
+// back to the recipe only when there's no baked mesh (primitives / extrudes,
+// which are analytic + cheap) or the sew fails.
+function exportLocalSolid(item, allItems, precision) {
+  const gd = item.geometryData;
+  if (gd?.positions?.length >= 9) {
+    try {
+      const id = occ.makeSolidFromMesh(
+        new Float64Array(gd.positions),
+        gd.indices?.length ? new Uint32Array(gd.indices) : null,
+        true, // skipCaps — this mesh is exported, not fed to a boolean
+      );
+      if (id != null) return id;
+    } catch {
+      // fall through to the recipe rebuild
+    }
+  }
+  return buildItemShapeLocal(item, allItems, precision);
+}
+
+function buildExportShapes(items, allItems = items, precision = 0.01) {
   const out = [];
   for (const item of items) {
     if (item.visible === false) continue;
     if (!EXPORTABLE_TYPES.has(item.type)) continue;
-    // Prefer the item's CURRENT cached solid (the exact on-screen geometry, at
-    // the active precision) — copy it (identity transform) so the export
-    // transforms below don't consume the cache-owned id.  Only when it isn't
-    // cached do we rebuild the recipe, and then at the ACTIVE precision, not a
-    // fixed coarse value — so a high-res toggle actually reaches the export.
-    const cachedId = cachedShapeIds ? cachedShapeIds[item.id] : null;
-    const localId =
-      cachedId != null
-        ? occ.transformShape(cachedId, 0, 0, 0, 0, 0, 0)
-        : buildItemShapeLocal(item, allItems, precision);
+    const localId = exportLocalSolid(item, allItems, precision);
     if (localId == null) continue;
     const t = buildBrushTransform(item);
     // Per-axis scale, then the world unit conversion (mm) folded onto every
@@ -2174,12 +2185,11 @@ async function pattern3dItem({
   return result;
 }
 
-async function exportSTL({ items, allItems, precision, cachedShapeIds }) {
+async function exportSTL({ items, allItems, precision }) {
   const shapeIds = buildExportShapes(
     items,
     allItems || items,
     precision ?? 0.01,
-    cachedShapeIds || null,
   );
   if (shapeIds.length === 0) return null;
 
@@ -2246,12 +2256,11 @@ async function exportSTL({ items, allItems, precision, cachedShapeIds }) {
   return buf;
 }
 
-async function exportSTEP({ items, allItems, precision, cachedShapeIds }) {
+async function exportSTEP({ items, allItems, precision }) {
   const shapeIds = buildExportShapes(
     items,
     allItems || items,
     precision ?? 0.01,
-    cachedShapeIds || null,
   );
   if (shapeIds.length === 0) return null;
   try {

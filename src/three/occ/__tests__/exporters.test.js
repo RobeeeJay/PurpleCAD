@@ -66,25 +66,32 @@ describe("occOps.exportSTL / exportSTEP", () => {
     expect(only).toBeLessThan(all);
   });
 
-  it("exportSTL uses a supplied cached solid without consuming it", async () => {
-    // Regression: export must render the CURRENT cached solid (the on-screen
-    // geometry at the active precision), and must copy it — never free the
-    // cache-owned id, which would corrupt the timeline cache.
+  it("exportSTL builds from an item's BAKED mesh, not a recipe rebuild", async () => {
+    // Export must use the exact on-screen high-res geometry (item.geometryData),
+    // not re-run the recipe (slow + can diverge for csg/emboss).  Prove it by
+    // exporting a csg item that carries ONLY a baked mesh and NO regenerator — a
+    // recipe rebuild would have nothing to build, so a non-empty STL can only come
+    // from the baked mesh.
     const { ops, buildItemShapeLocal } = await import("../../occOps.js");
     const { tessellate: tess } = await import("../tessellate.js");
-    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
-    const cachedId = buildItemShapeLocal(cube, [cube]);
-    expect(cachedId).toBeTruthy();
-    const buf = await ops.exportSTL({
-      items: [cube],
-      allItems: [cube],
-      cachedShapeIds: { 1: cachedId },
-    });
+    const cube = { id: 9, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    const cubeSolid = buildItemShapeLocal(cube, [cube]);
+    const geo = tess(cubeSolid, 0.1);
+    const pos = geo.getAttribute("position").array;
+    const idx = geo.index.array;
+    const baked = {
+      id: 1,
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      geometryData: {
+        positions: Array.from(pos),
+        indices: Array.from(idx),
+      },
+      // deliberately no regenerator — only the baked mesh can produce output
+    };
+    const buf = await ops.exportSTL({ items: [baked], allItems: [baked] });
     expect(buf).toBeInstanceOf(ArrayBuffer);
     expect(new DataView(buf).getUint32(80, true)).toBeGreaterThan(0);
-    // The cache-owned id survives export (copied, not consumed) — still usable.
-    const geo = tess(cachedId, 0.01);
-    expect(geo.getAttribute("position").count).toBeGreaterThan(0);
   });
 
   it("exportSTEP emits an ISO-10303-21 file", async () => {

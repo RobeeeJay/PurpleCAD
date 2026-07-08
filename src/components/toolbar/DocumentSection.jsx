@@ -4,7 +4,6 @@ import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { exportSTL, exportSTEP, importStep } from "../../three/occClient.js";
 import { maxItemId } from "../../store/internals.js";
-import { getSolid } from "../../three/solidCache.js";
 import { activePrecision } from "../../three/resolution.js";
 import {
   parseStl,
@@ -138,19 +137,15 @@ const DocumentSection = () => {
     return ids.size ? items.filter((i) => ids.has(i.id)) : items;
   };
 
-  // Export payload: the chosen items, plus the ACTIVE tessellation precision and
-  // each item's CURRENT cached solid id (so the export is the exact on-screen
-  // geometry at the selected resolution, not a fixed-coarse rebuild).  Uncached
-  // items fall back to a recipe rebuild at the same precision inside the op.
-  const exportPayload = (expItems) => {
-    const precision = activePrecision(useStore.getState());
-    const cachedShapeIds = {};
-    for (const it of expItems) {
-      const s = getSolid(it.id, precision);
-      if (s != null) cachedShapeIds[it.id] = s;
-    }
-    return { items: expItems, allItems: items, precision, cachedShapeIds };
-  };
+  // Export payload: the chosen items, the whole scene (so a selected body's
+  // recipe still resolves its inputs), and the ACTIVE tessellation precision.
+  // The op prefers each item's baked high-res mesh (exact on-screen geometry) and
+  // only rebuilds the recipe at this precision for items with no baked mesh.
+  const exportPayload = (expItems) => ({
+    items: expItems,
+    allItems: items,
+    precision: activePrecision(useStore.getState()),
+  });
 
   const handleExportSTL = async () => {
     setSaveMenuOpen(false);
