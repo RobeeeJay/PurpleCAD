@@ -310,15 +310,19 @@ Established landmines (each was a real bug — extend this list, never shrink it
   `basePosition` (else the next recalc computes a spurious delta) — gizmo MOVES
   are separate `transform` instructions, so `basePosition` re-anchoring preserves
   them for free.
-- **STL/STEP export must use the CACHED solid + ACTIVE precision.**
-  `buildExportShapes` takes `(items, allItems, precision, cachedShapeIds)`: for a
-  cached item it COPIES the cache-owned solid (`transformShape` identity — never
-  frees it; freeing corrupts the cache) so the export is the exact on-screen
-  geometry; uncached items rebuild the recipe at the ACTIVE precision, never a
-  fixed coarse value. `DocumentSection.exportPayload` gathers
-  `getSolid(id, activePrecision)` per item. A hardcoded export precision (the old
-  `0.01`) silently ignores the high-res toggle and re-derives (diverging) emboss/
-  csg geometry instead of exporting what's on screen.
+- **STL/STEP export builds from the BAKED mesh, not a recipe rebuild.**
+  `exportLocalSolid` (both OCC impls) sews each item's `geometryData` — the exact
+  high-res mesh already on screen at the active precision — into a solid via
+  `makeSolidFromMesh(pos, idx, /*skipCaps*/ true)`, and only rebuilds the recipe
+  (`buildItemShapeLocal`) for items with no baked mesh (primitives / extrudes).
+  Rebuilding the recipe re-runs the whole OCC chain (slow) and for an emboss/csg
+  re-derives geometry that DIVERGES from the baked view. `skipCaps` bypasses the
+  boolean-safety tri/face caps AND the coplanar `UnifySameDomain` pass — export
+  only tessellates/writes the solid, never booleans it, and unify is slow + alters
+  the triangles. Do NOT reintroduce the timeline solid cache here: it's keyed by
+  ENTRY id (not item id) and is sparse (clean steps retain nothing), so an
+  item-id lookup silently misses and every export falls back to the slow rebuild —
+  the exact bug this replaced.
 
 **Checklist when adding/altering any op or feature that touches existing bodies:**
 
