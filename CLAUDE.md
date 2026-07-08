@@ -192,18 +192,23 @@ The working mechanism (keep all three pieces in lockstep):
   Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   emboss bottleneck. Do not assume passing a range makes a stage cancellable —
   only some algorithms honor it (booleans/meshing do; sewing does not).
-- **Sewing's *cutting* pass — off for export, ON for anything booleaned.**
-  `BRepBuilderAPI_Sewing`'s 4th ctor arg (cutting) splits faces to resolve
-  intersections — slow (a ~5k-triangle mesh hung for seconds) BUT it produces the
-  properly-shared edges that let `UnifySameDomain` merge coplanar faces. So
-  `MakeSolidFromMesh` gates it on `skipCaps`: **export** (`skipCaps`, only
-  tessellated/written) uses cutting OFF for a near-instant sew, with a full-sew
-  fallback if that yields nothing (cutting-off returns nothing for some hard
-  meshes — self-touching, degenerate poles); **any solid fed to a BOOLEAN**
-  (emboss stamp/body, STL import — `skipCaps=false`) uses cutting ON, because
-  without it the un-cut per-triangle shell won't unify, the face count stays ~=
-  the triangle count, and it blows the `kMaxFaces` cap ("too many curved faces")
-  or hangs the boolean. Disabling cutting globally (the trap) broke emboss.
+- **`MakeSolidFromMesh` has TWO independent knobs — don't conflate them.**
+  `(positions, indices, skipCaps, fastSew)`:
+  - `skipCaps` — skip the tri/face REJECTION caps (`kMaxTris`/`kMaxFaces`, e.g.
+    "too many curved faces"). Those caps guard an IMPORTED mesh from hanging a
+    later boolean; they're wrong for export (no boolean) AND for the emboss
+    stamp/body (a legitimately dense CURVED wrap that MUST be booleaned — unify
+    can't merge curved faces, so at print resolution the count exceeds the cap).
+  - `fastSew` — sew with `BRepBuilderAPI_Sewing` cutting OFF and skip the coplanar
+    `UnifySameDomain` pass. Near-instant, but the un-cut per-triangle shell won't
+    unify and its faces don't share edges — fine when the solid is only
+    tessellated/written (EXPORT), fatal when it's booleaned (no unify ⇒ face count
+    ~= triangle count ⇒ slow/rejected). Cutting-off also returns nothing for some
+    hard meshes, so the `fastSew` branch has a full-sew fallback.
+  - So: **import** = `(false,false)` cutting+unify+caps; **export** = `(true,true)`
+    fast, no caps; **emboss stamp/body** = `(true,false)` cutting+unify, no caps.
+    Setting `fastSew` (or the old global cutting-off) on a booleaned solid broke
+    emboss — keep cutting ON for anything that feeds a boolean.
 - **Do NOT hand-build a shared-topology shell to skip sewing.** Building faces
   from shared `TopoDS_Edge`s (index-buffer topology) is fast and yields a valid
   6-face solid, but downstream `chamfer`/`fillet` reject it ("no suitable edges")
