@@ -78,19 +78,27 @@ function geomTargetId(inst) {
 // items keep the cache an earlier step just wrote (regeneratedAt ===
 // printPrecision), so each regen only rebuilds the one new item.  Navigating
 // the timeline or reloading then shows the correct geometry at every step.
-export async function recalculateTimeline() {
+export async function recalculateTimeline(force = false) {
   const state = useStore.getState();
   const history = state.history;
   const printPrecision = activePrecision(state);
 
   // JIT bound: only recompute up to the step the user is parked on.  Steps
   // AFTER the viewed one keep their existing cache and are recomputed lazily
-  // when navigated to — we don't rebuild off-screen future geometry.
+  // when navigated to — we don't rebuild off-screen future geometry.  The manual
+  // "Recalculate" button passes force=true: it rebuilds EVERY step from the
+  // beginning (ignoring both this bound and the per-step valid-cache skip below),
+  // which is the whole point of the button — an escape hatch when a step looks
+  // stale.  A plain recalc leaves the skip-check to do the incremental work.
   const bound =
     state.activeHistoryId !== null
       ? history.findIndex((h) => h.id === state.activeHistoryId)
       : history.length - 1;
-  const jitBound = bound !== -1 ? bound : history.length - 1;
+  const jitBound = force
+    ? history.length - 1
+    : bound !== -1
+      ? bound
+      : history.length - 1;
 
   const total = history.reduce(
     (n, e, i) =>
@@ -162,7 +170,7 @@ export async function recalculateTimeline() {
     // dirty steps are rebuilt, so an unchanged step (and navigating over it) is
     // free instead of a forced recompute.
     const cached = accItems.find((it) => it.id === targetId);
-    if (entryCacheValid(entry, cached, printPrecision)) {
+    if (!force && entryCacheValid(entry, cached, printPrecision)) {
       done += 1;
       useStore.getState().setRegenProgress({ current: done, total });
       newHistory.push(entry);

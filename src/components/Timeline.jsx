@@ -457,7 +457,9 @@ const Timeline = () => {
             // the worker's transitive graph (see regenerateOrchestrator.js
             // for the cycle constraint).
             import("../three/regenerateOrchestrator.js").then((m) => {
-              m.recalculateTimeline();
+              // force=true: rebuild EVERY step from the beginning, ignoring the
+              // incremental valid-cache skip — the button's whole purpose.
+              m.recalculateTimeline(true);
             });
           }}
         >
