@@ -1184,14 +1184,26 @@ const MM_PER_UNIT = 10;
 // Returns an array of { id } objects; caller must releaseShape each id.
 // `allItems` = whole scene so a csg recipe resolves inputs when exporting a
 // selected subset (mirrors occOps.js).
-function buildExportShapes(items, allItems = items) {
+function buildExportShapes(
+  items,
+  allItems = items,
+  precision = 0.01,
+  cachedShapeIds = null,
+) {
   const out = [];
-  const exportPrecision = 0.01;
   for (const item of items) {
     if (item.visible === false) continue;
     if (!EXPORTABLE_TYPES.has(item.type)) continue;
 
-    const localId = buildItemShapeLocal(item, allItems, exportPrecision);
+    // Prefer the item's CURRENT cached solid (exact on-screen geometry at the
+    // active precision) — copy it so the export transforms don't consume the
+    // cache-owned id; else rebuild the recipe at the ACTIVE precision so a
+    // high-res toggle reaches the export (mirrors occOps.js).
+    const cachedId = cachedShapeIds ? cachedShapeIds[item.id] : null;
+    const localId =
+      cachedId != null
+        ? occ.transformShape(cachedId, 0, 0, 0, 0, 0, 0)
+        : buildItemShapeLocal(item, allItems, precision);
     if (localId == null) continue;
 
     const t = buildBrushTransform(item);
@@ -1228,8 +1240,13 @@ function buildExportShapes(items, allItems = items) {
 // Binary STL: tessellate all export shapes at fine precision (0.01 scene
 // units = 0.1 mm chord deviation) and write the binary STL format.
 // Returns a Buffer (Uint8Array) suitable for Electron IPC + new Blob([buf]).
-function exportSTL({ items, allItems }) {
-  const shapeIds = buildExportShapes(items, allItems || items);
+function exportSTL({ items, allItems, precision, cachedShapeIds }) {
+  const shapeIds = buildExportShapes(
+    items,
+    allItems || items,
+    precision ?? 0.01,
+    cachedShapeIds || null,
+  );
   if (shapeIds.length === 0) return null;
 
   const tessellations = [];
@@ -1274,8 +1291,13 @@ function exportSTL({ items, allItems }) {
 
 // Export as STEP.  Builds all shapes, passes their IDs to the C++ writer,
 // and returns the ISO-10303-21 file content as a string.
-function exportSTEP({ items, allItems }) {
-  const shapeIds = buildExportShapes(items, allItems || items);
+function exportSTEP({ items, allItems, precision, cachedShapeIds }) {
+  const shapeIds = buildExportShapes(
+    items,
+    allItems || items,
+    precision ?? 0.01,
+    cachedShapeIds || null,
+  );
   if (shapeIds.length === 0) return null;
   try {
     return occ.exportSTEP(shapeIds);

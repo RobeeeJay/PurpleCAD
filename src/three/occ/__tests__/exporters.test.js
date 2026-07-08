@@ -66,6 +66,27 @@ describe("occOps.exportSTL / exportSTEP", () => {
     expect(only).toBeLessThan(all);
   });
 
+  it("exportSTL uses a supplied cached solid without consuming it", async () => {
+    // Regression: export must render the CURRENT cached solid (the on-screen
+    // geometry at the active precision), and must copy it — never free the
+    // cache-owned id, which would corrupt the timeline cache.
+    const { ops, buildItemShapeLocal } = await import("../../occOps.js");
+    const { tessellate: tess } = await import("../tessellate.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    const cachedId = buildItemShapeLocal(cube, [cube]);
+    expect(cachedId).toBeTruthy();
+    const buf = await ops.exportSTL({
+      items: [cube],
+      allItems: [cube],
+      cachedShapeIds: { 1: cachedId },
+    });
+    expect(buf).toBeInstanceOf(ArrayBuffer);
+    expect(new DataView(buf).getUint32(80, true)).toBeGreaterThan(0);
+    // The cache-owned id survives export (copied, not consumed) — still usable.
+    const geo = tess(cachedId, 0.01);
+    expect(geo.getAttribute("position").count).toBeGreaterThan(0);
+  });
+
   it("exportSTEP emits an ISO-10303-21 file", async () => {
     const { ops } = await import("../../occOps.js");
     const items = [{ id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } }];

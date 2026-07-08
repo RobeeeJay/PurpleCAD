@@ -924,12 +924,26 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
 // `items` = the objects to export; `allItems` = the whole scene, so a csg
 // recipe (boolean / chamfer source) still resolves its inputs when only a
 // selected subset is exported.
-function buildExportShapes(items, allItems = items) {
+function buildExportShapes(
+  items,
+  allItems = items,
+  precision = 0.01,
+  cachedShapeIds = null,
+) {
   const out = [];
   for (const item of items) {
     if (item.visible === false) continue;
     if (!EXPORTABLE_TYPES.has(item.type)) continue;
-    const localId = buildItemShapeLocal(item, allItems, 0.01);
+    // Prefer the item's CURRENT cached solid (the exact on-screen geometry, at
+    // the active precision) — copy it (identity transform) so the export
+    // transforms below don't consume the cache-owned id.  Only when it isn't
+    // cached do we rebuild the recipe, and then at the ACTIVE precision, not a
+    // fixed coarse value — so a high-res toggle actually reaches the export.
+    const cachedId = cachedShapeIds ? cachedShapeIds[item.id] : null;
+    const localId =
+      cachedId != null
+        ? occ.transformShape(cachedId, 0, 0, 0, 0, 0, 0)
+        : buildItemShapeLocal(item, allItems, precision);
     if (localId == null) continue;
     const t = buildBrushTransform(item);
     // Per-axis scale, then the world unit conversion (mm) folded onto every
@@ -2160,8 +2174,13 @@ async function pattern3dItem({
   return result;
 }
 
-async function exportSTL({ items, allItems }) {
-  const shapeIds = buildExportShapes(items, allItems || items);
+async function exportSTL({ items, allItems, precision, cachedShapeIds }) {
+  const shapeIds = buildExportShapes(
+    items,
+    allItems || items,
+    precision ?? 0.01,
+    cachedShapeIds || null,
+  );
   if (shapeIds.length === 0) return null;
 
   const tessellations = [];
@@ -2227,8 +2246,13 @@ async function exportSTL({ items, allItems }) {
   return buf;
 }
 
-async function exportSTEP({ items, allItems }) {
-  const shapeIds = buildExportShapes(items, allItems || items);
+async function exportSTEP({ items, allItems, precision, cachedShapeIds }) {
+  const shapeIds = buildExportShapes(
+    items,
+    allItems || items,
+    precision ?? 0.01,
+    cachedShapeIds || null,
+  );
   if (shapeIds.length === 0) return null;
   try {
     return occ.exportSTEP(shapeIds);

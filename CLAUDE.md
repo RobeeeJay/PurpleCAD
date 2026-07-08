@@ -296,6 +296,15 @@ Established landmines (each was a real bug — extend this list, never shrink it
   (tests) AND `electron/occ-bridge.cjs` (the shipped app). A green suite with an
   un-mirrored bridge is the trap that hid every bug above — see the ⚠️ note under
   "OCC execution boundary".
+- **STL/STEP export must use the CACHED solid + ACTIVE precision.**
+  `buildExportShapes` takes `(items, allItems, precision, cachedShapeIds)`: for a
+  cached item it COPIES the cache-owned solid (`transformShape` identity — never
+  frees it; freeing corrupts the cache) so the export is the exact on-screen
+  geometry; uncached items rebuild the recipe at the ACTIVE precision, never a
+  fixed coarse value. `DocumentSection.exportPayload` gathers
+  `getSolid(id, activePrecision)` per item. A hardcoded export precision (the old
+  `0.01`) silently ignores the high-res toggle and re-derives (diverging) emboss/
+  csg geometry instead of exporting what's on screen.
 
 **Checklist when adding/altering any op or feature that touches existing bodies:**
 

@@ -4,6 +4,8 @@ import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { exportSTL, exportSTEP, importStep } from "../../three/occClient.js";
 import { maxItemId } from "../../store/internals.js";
+import { getSolid } from "../../three/solidCache.js";
+import { activePrecision } from "../../three/resolution.js";
 import {
   parseStl,
   parseSvgToSketchShapes,
@@ -136,6 +138,20 @@ const DocumentSection = () => {
     return ids.size ? items.filter((i) => ids.has(i.id)) : items;
   };
 
+  // Export payload: the chosen items, plus the ACTIVE tessellation precision and
+  // each item's CURRENT cached solid id (so the export is the exact on-screen
+  // geometry at the selected resolution, not a fixed-coarse rebuild).  Uncached
+  // items fall back to a recipe rebuild at the same precision inside the op.
+  const exportPayload = (expItems) => {
+    const precision = activePrecision(useStore.getState());
+    const cachedShapeIds = {};
+    for (const it of expItems) {
+      const s = getSolid(it.id, precision);
+      if (s != null) cachedShapeIds[it.id] = s;
+    }
+    return { items: expItems, allItems: items, precision, cachedShapeIds };
+  };
+
   const handleExportSTL = async () => {
     setSaveMenuOpen(false);
     if (items.length === 0) {
@@ -144,7 +160,7 @@ const DocumentSection = () => {
     }
     if (!confirmExportResolution("STL")) return;
     try {
-      const buffer = await exportSTL({ items: exportItems(), allItems: items });
+      const buffer = await exportSTL(exportPayload(exportItems()));
       if (!buffer) {
         alert("No exportable objects in the scene.");
         return;
@@ -167,10 +183,7 @@ const DocumentSection = () => {
     }
     if (!confirmExportResolution("STEP")) return;
     try {
-      const content = await exportSTEP({
-        items: exportItems(),
-        allItems: items,
-      });
+      const content = await exportSTEP(exportPayload(exportItems()));
       if (!content) {
         alert("No exportable objects in the scene.");
         return;
