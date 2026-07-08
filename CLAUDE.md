@@ -212,14 +212,18 @@ The working mechanism (keep all three pieces in lockstep):
     prism's near-touching bent triangles, so it sews cutting-OFF and relies on
     per-shell `OrientClosedSolid` + `ShapeFix_Shell` (in `MakeSolidFromMesh`) to
     fix face orientation instead. Keep cutting ON for any OTHER booleaned solid.
-- **Conform emboss is architecturally slow — don't chase it with sewing tweaks.**
-  It booleans a dense CURVED wrapped-text mesh (~5k faces that can't unify) against
-  the body: the union is ~O(faces²) (measured ~88s on a small-radius ring) and can
-  still mis-normal faces. The old `kMaxFaces` cap fail-fasted exactly this. The fix
-  is NOT another sew/orientation knob (that space is exhausted) — it's cutting the
-  stamp face count hard or replacing the dense-mesh boolean (surface displacement /
-  per-face clip). See the `conform-emboss-rework` memory. Flat-projection emboss
-  (analytic prism, `stamp.loops`) is fine — this only bites `projection:"conform"`.
+- **Conform emboss: the stamp mesh MUST be consistently wound.**
+  `prismFromLoops` (`embossTessellate.js`) can emit mixed-handedness triangles for
+  holed glyphs (O/A/e); sewn, that's a watertight but inconsistently-oriented
+  solid → reversed render normals that OCC's global `OrientClosedSolid` can't fix
+  per-face. `orientWindingConsistent` flood-fills a consistent winding at the
+  source (regression test in `embossTessellate.test.js`); keep it. A CLEAN stamp
+  boolean is ~3s (measured; a clean 12k-face fuse is <1s) — conform emboss is NOT
+  inherently O(faces²). If it goes slow, the mesh is DIRTY (self-intersecting /
+  non-watertight), not "too many faces": check the boolean's inputs are watertight
+  rather than reaching for the `kMaxFaces` cap. (History: a coarsening experiment
+  once made this look like an 88s O(faces²) wall — it wasn't; see the
+  `conform-emboss-rework` memory.)
 - **Do NOT hand-build a shared-topology shell to skip sewing.** Building faces
   from shared `TopoDS_Edge`s (index-buffer topology) is fast and yields a valid
   6-face solid, but downstream `chamfer`/`fillet` reject it ("no suitable edges")
