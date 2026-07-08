@@ -19,6 +19,20 @@ import { updateCaps } from "../crossSectionCaps.js";
 const _rulerPos = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
 
+// On-demand rendering.  The loop keeps ticking (cheap) but only does the
+// expensive per-frame work + render() when something actually changed, instead
+// of pinning ~60 fps of bloom-composer raster on a static scene.  A frame is
+// rendered when: an explicit invalidation is pending (requestRender — wired to
+// every store change), the camera pose moved, a continuous state is running
+// (camera tween / cross-section), or we're inside the short activity window a
+// pointer/wheel/key press opens (so interaction never stutters even if an update
+// lands a frame late).  Conservative on purpose — over-rendering a little beats a
+// stale view.
+let _needsRender = true;
+export function requestRender() {
+  _needsRender = true;
+}
+
 // Width of the left objects/timeline overlay (`.left-panel` in App.css). The
 // axis indicator is nudged right by half this so it reads centred in the 3D
 // area the user can actually see, not the canvas centre hidden behind the panel.
@@ -50,8 +64,79 @@ export function createAnimateLoop({
   // cut plane instead of the view).  Re-captured after any camera animation.
   let frozenPose = null;
   let prevAnimActive = false;
+
+  // On-demand gate state.  lastCam remembers the pose we last rendered so we can
+  // detect a camera move; activeUntil holds a short "keep rendering" window that
+  // any pointer/wheel/key interaction opens.
+  const lastCam = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 0, zoom: 0 };
+  let activeUntil = 0;
+  const ACTIVITY_MS = 400;
+  const bumpActivity = () => {
+    activeUntil = performance.now() + ACTIVITY_MS;
+  };
+  // Any store change may alter what's drawn (selection, hover, items, material,
+  // theme, render mode …) — open the activity window rather than enumerate every
+  // key.  A window (not a one-shot) because the scene mutation happens in a React
+  // effect that runs AFTER the state change: a one-shot flag could be consumed by
+  // a frame that renders the pre-effect scene, leaving the update stale.  The
+  // window keeps rendering long enough to catch the effect (and short async mesh
+  // builds that resolve just after).
+  const unsubscribe = useStore.subscribe(bumpActivity);
+  // Pointer/wheel/key activity opens the window so interaction stays smooth even
+  // for updates that don't move the camera or hit the store this exact frame.
+  const canvas = renderer.domElement;
+  const onActivity = () => bumpActivity();
+  const activityEvents = ["pointerdown", "pointermove", "wheel", "keydown"];
+  for (const ev of activityEvents)
+    canvas.addEventListener(ev, onActivity, { passive: true });
+  // A resize changes the canvas/camera but isn't a canvas pointer event, so it
+  // must invalidate explicitly or an idle view would render at the old size.
+  window.addEventListener("resize", onActivity, { passive: true });
+
+  const cameraMoved = () => {
+    const cam = cameraRef.current;
+    if (!cam) return false;
+    const p = cam.position,
+      q = cam.quaternion;
+    const moved =
+      p.x !== lastCam.x ||
+      p.y !== lastCam.y ||
+      p.z !== lastCam.z ||
+      q.x !== lastCam.qx ||
+      q.y !== lastCam.qy ||
+      q.z !== lastCam.qz ||
+      q.w !== lastCam.qw ||
+      cam.zoom !== lastCam.zoom;
+    if (moved) {
+      lastCam.x = p.x;
+      lastCam.y = p.y;
+      lastCam.z = p.z;
+      lastCam.qx = q.x;
+      lastCam.qy = q.y;
+      lastCam.qz = q.z;
+      lastCam.qw = q.w;
+      lastCam.zoom = cam.zoom;
+    }
+    return moved;
+  };
+
   const animate = () => {
     animId = requestAnimationFrame(animate);
+
+    // Continuous states that must render every frame while they run: a camera
+    // tween, and cross-section (orbiting moves the CUT while the camera is held,
+    // so cameraMoved() can't see it).  The path tracer owns the canvas itself.
+    const continuous =
+      !!cameraAnimRef.current || useStore.getState().crossSectionView;
+    // Skip the whole per-frame body + render when nothing changed.  cameraMoved()
+    // is called for its side effect (updating lastCam) only when we might skip,
+    // so an active frame doesn't wastefully re-latch it.
+    if (!_needsRender && !continuous && performance.now() >= activeUntil) {
+      if (!cameraMoved()) return; // truly idle — don't touch the GPU
+    } else {
+      cameraMoved(); // keep lastCam current so the next idle check is correct
+    }
+    _needsRender = false;
 
     if (cameraAnimRef.current) {
       const anim = cameraAnimRef.current;
@@ -334,6 +419,12 @@ export function createAnimateLoop({
   };
   animate();
   return {
-    stop: () => cancelAnimationFrame(animId),
+    stop: () => {
+      cancelAnimationFrame(animId);
+      unsubscribe();
+      for (const ev of activityEvents)
+        canvas.removeEventListener(ev, onActivity);
+      window.removeEventListener("resize", onActivity);
+    },
   };
 }
