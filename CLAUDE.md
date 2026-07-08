@@ -192,13 +192,18 @@ The working mechanism (keep all three pieces in lockstep):
   Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   emboss bottleneck. Do not assume passing a range makes a stage cancellable —
   only some algorithms honor it (booleans/meshing do; sewing does not).
-- **Sewing's default *cutting* pass is the killer.** `BRepBuilderAPI_Sewing`'s
-  4th ctor arg (cutting) splits faces to resolve intersections — O(n^2)-ish; a
-  ~5k-triangle conformal mesh hung for seconds. `MakeSolidFromMesh` sews with
-  cutting DISABLED (`Sewing(tol, true, true, false, false)`) for the fast path,
-  then falls back to full default sewing only if that yields nothing. Keep BOTH
-  passes — cutting-off alone returns nothing for some hard meshes (self-touching,
-  degenerate poles). Do not "simplify" this back to a single default `Sewing`.
+- **Sewing's *cutting* pass — off for export, ON for anything booleaned.**
+  `BRepBuilderAPI_Sewing`'s 4th ctor arg (cutting) splits faces to resolve
+  intersections — slow (a ~5k-triangle mesh hung for seconds) BUT it produces the
+  properly-shared edges that let `UnifySameDomain` merge coplanar faces. So
+  `MakeSolidFromMesh` gates it on `skipCaps`: **export** (`skipCaps`, only
+  tessellated/written) uses cutting OFF for a near-instant sew, with a full-sew
+  fallback if that yields nothing (cutting-off returns nothing for some hard
+  meshes — self-touching, degenerate poles); **any solid fed to a BOOLEAN**
+  (emboss stamp/body, STL import — `skipCaps=false`) uses cutting ON, because
+  without it the un-cut per-triangle shell won't unify, the face count stays ~=
+  the triangle count, and it blows the `kMaxFaces` cap ("too many curved faces")
+  or hangs the boolean. Disabling cutting globally (the trap) broke emboss.
 - **Do NOT hand-build a shared-topology shell to skip sewing.** Building faces
   from shared `TopoDS_Edge`s (index-buffer topology) is fast and yields a valid
   6-face solid, but downstream `chamfer`/`fillet` reject it ("no suitable edges")
