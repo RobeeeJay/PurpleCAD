@@ -346,6 +346,16 @@ Established landmines (each was a real bug — extend this list, never shrink it
   (tests) AND `electron/occ-bridge.cjs` (the shipped app). A green suite with an
   un-mirrored bridge is the trap that hid every bug above — see the ⚠️ note under
   "OCC execution boundary".
+- **EVERY structural timeline mutation must relink + forward-invalidate.**
+  Ops carry FROZEN source snapshots, so any change to entry ORDER — insert,
+  delete, and REORDER — must run `relinkSourceChain` (re-bind each later op's
+  source to the new accumulation) AND `dirtyEntriesFrom` (rebuild from the first
+  affected index). `reorderHistory` once did neither: a chamfer moved before an
+  emboss kept the embossed body as its source (chamfer step still showed the
+  emboss) and the emboss re-stamped on its stale input (doubled relief) — steps
+  chained to the old order's GEOMETRY, not the new order's OPERATIONS. When
+  adding any new timeline mutation, mirror `deleteHistoryEntry`'s tail
+  (`reorderRelink.test.js` is the template).
 - **A chained op's position must RE-ANCHOR to its live source, not be kept.**
   chamfer/emboss/hole/shell/draft/pushpull store `regenerator.basePosition` = the
   SOURCE brush position they were placed against. Each recalc,
