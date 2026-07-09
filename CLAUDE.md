@@ -356,6 +356,33 @@ Established landmines (each was a real bug — extend this list, never shrink it
   chained to the old order's GEOMETRY, not the new order's OPERATIONS. When
   adding any new timeline mutation, mirror `deleteHistoryEntry`'s tail
   (`reorderRelink.test.js` is the template).
+- **A relink that SWAPS the source kind changes the op's FRAME — two traps.**
+  A relinked source is a different object delivering a different local frame (an
+  extrude = raw local, z 0..depth; a csg = bbox-centred by its `centerOffset`),
+  and relink binds the snapshot from the PRE-recalc accumulation, so its
+  transform can be stale. Consequences (each was a real bug, both directions of
+  the same reorder):
+  1. *Emboss anchors are authored-frame absolutes.* The face point and
+     developable `aMin/aMax` don't survive a frame swap — the relief jumped by
+     half the body height. `commitEmboss` records `sourceCenterOffset` (the
+     authoring frame) and `regenerateItems.js#shiftEmbossFrame` translates the
+     anchors by (authored − current) each regen; `backfillEmbossFrames` derives
+     the record for pre-existing documents at EVERY load path (it must run at
+     load, while the frozen source is still the authored one).
+  2. *`resolveChainedPosition`'s brush delta is only valid for the SAME source
+     moving.* After a swap, (new brush − stored base) is a frame difference,
+     not a movement — it double-counted and the whole object jumped. The
+     orchestrator tracks items RECOMPUTED this pass; a later same-item op then
+     refreshes `regenerator.source` from the accumulated pre-entry state (the
+     live previous result — the JIT model) and drops the stored position to
+     re-anchor from scratch. Gizmo moves are separate `transform` entries, so
+     dropping is safe. GATED for boolean/extrudeUnion sources: their
+     `originalCentre` re-localisation frame isn't reproducible from the
+     accumulated item (refreshing broke the union-source chamfer recentring —
+     `chamferRetargetPosition.test.js` is the guard).
+  `reorderPosition.test.js` drives BOTH reorder directions of the real scene
+  through the full store + recalc pipeline and asserts the world bbox never
+  moves — extend it when touching relink/anchor code.
 - **A chained op's position must RE-ANCHOR to its live source, not be kept.**
   chamfer/emboss/hole/shell/draft/pushpull store `regenerator.basePosition` = the
   SOURCE brush position they were placed against. Each recalc,
