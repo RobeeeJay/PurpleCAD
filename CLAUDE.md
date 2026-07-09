@@ -231,6 +231,14 @@ The working mechanism (keep all three pieces in lockstep):
   rather than reaching for the `kMaxFaces` cap. (History: a coarsening experiment
   once made this look like an 88s O(faces²) wall — it wasn't; see the
   `conform-emboss-rework` memory.)
+- **OCC kernel faults are converted to exceptions — keep `OSD::SetSignal`.**
+  `binding.cc`'s `Init` calls `OSD::SetSignal(Standard_False)`: hardware faults
+  inside OCC algorithms (ChFi3d's chamfer builder NULL-derefs on degenerate
+  stripes — observed via `PerformSetOfSurf` after a resolution switch) become
+  catchable `Standard_Failure` instead of a SIGSEGV that kills the whole app
+  (the addon shares the process via worker_thread). Removing it re-opens
+  app-death on any kernel fragility. The faulted op fails like rejected
+  geometry; the step settles as `regenFailed`.
 - **`BRepAlgoAPI_Fuse`'s two-shape constructor silently DROPS a COMPOUND tool.**
   A multi-letter emboss stamp is a compound (one sewn solid per letter); fusing it
   the two-argument way returns just the body — "missing letters", no error.
