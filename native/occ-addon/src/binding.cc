@@ -58,6 +58,9 @@
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 
+// ── Signal → exception conversion (survive kernel faults) ───────────────
+#include <OSD.hxx>
+
 // ── Meshing + tessellation access ────────────────────────────────────────
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <IMeshTools_Parameters.hxx>
@@ -2533,6 +2536,18 @@ Napi::Object MakeCubeTessellated(const Napi::CallbackInfo& info) {
 // ════════════════════════════════════════════════════════════════════════
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  // Convert hardware faults inside OCC algorithms (SIGSEGV/SIGFPE/…) into
+  // catchable Standard_Failure exceptions on this thread.  OCC's fillet/chamfer
+  // kernel (ChFi3d) occasionally NULL-derefs on degenerate stripe configurations
+  // instead of throwing — observed in ChFi3d_Builder::PerformSetOfSurf when
+  // chamfering faceted emboss geometry after a resolution switch — and since the
+  // addon shares the app's process (worker_thread), that killed the whole app.
+  // With SetSignal, the attempt fails like any other rejected geometry (our ops
+  // already catch std::exception, which Standard_Failure derives from).  The
+  // addon loads on the OCC worker thread, so this lands on the thread that runs
+  // every op.
+  OSD::SetSignal(Standard_False);
+
   // Smoke tests
   exports.Set("ping",               Napi::Function::New(env, PingStr));
   exports.Set("makeCubeTessellated",Napi::Function::New(env, MakeCubeTessellated));
