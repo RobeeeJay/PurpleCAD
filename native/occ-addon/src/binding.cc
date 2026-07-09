@@ -54,6 +54,10 @@
 #include <Message_ProgressIndicator.hxx>
 #include <Message_ProgressRange.hxx>
 
+// ── Solid volume check (mesh-sew orientation guard) ─────────────────────
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+
 // ── Meshing + tessellation access ────────────────────────────────────────
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <IMeshTools_Parameters.hxx>
@@ -1493,20 +1497,45 @@ Napi::Number BooleanOp(const Napi::CallbackInfo& info) {
     // i.e. ~1e-4 mm: far above float round-off, far below any real feature.
     const Standard_Real kFuzzy = 1.0e-5;
 
+    // A tool can be a COMPOUND of several solids (a sewn multi-letter emboss
+    // stamp).  BRepAlgoAPI_Fuse's two-shape constructor silently DROPS a
+    // compound tool (the union comes back as just the body — "missing
+    // letters"), so explode compounds into the BOP tools list instead.
+    auto appendSolids = [](const TopoDS_Shape& s, TopTools_ListOfShape& into) {
+      if (s.ShapeType() == TopAbs_COMPOUND) {
+        bool any = false;
+        for (TopExp_Explorer ex(s, TopAbs_SOLID); ex.More(); ex.Next()) {
+          into.Append(ex.Current());
+          any = true;
+        }
+        if (any) return;
+      }
+      into.Append(s);
+    };
+
     TopoDS_Shape result = FetchShape(ids.Get(0u).As<Napi::Number>().Int32Value());
     for (uint32_t i = 1; i < ids.Length(); i++) {
       TopoDS_Shape tool = FetchShape(ids.Get(i).As<Napi::Number>().Int32Value());
+      TopTools_ListOfShape args, tools;
+      appendSolids(result, args);
+      appendSolids(tool, tools);
       if (op == "union") {
-        BRepAlgoAPI_Fuse fuse(result, tool);
+        BRepAlgoAPI_Fuse fuse;
+        fuse.SetArguments(args);
+        fuse.SetTools(tools);
         fuse.SetFuzzyValue(kFuzzy);
         fuse.Build(CancelRange());
         result = fuse.Shape();
       } else if (op == "difference") {
-        BRepAlgoAPI_Cut cut(result, tool);
+        BRepAlgoAPI_Cut cut;
+        cut.SetArguments(args);
+        cut.SetTools(tools);
         cut.Build(CancelRange());
         result = cut.Shape();
       } else if (op == "intersection") {
-        BRepAlgoAPI_Common common(result, tool);
+        BRepAlgoAPI_Common common;
+        common.SetArguments(args);
+        common.SetTools(tools);
         common.Build(CancelRange());
         result = common.Shape();
       } else {
@@ -2410,6 +2439,14 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
       }
       TopoDS_Solid sol = ms.Solid();
       BRepLib::OrientClosedSolid(sol);
+      // OrientClosedSolid can silently FAIL on a sewn triangle shell (its point
+      // classification is unreliable there), leaving the solid inside-out —
+      // negative volume.  An inside-out tool VANISHES from a union and inverts a
+      // difference (the "missing letters" emboss bug).  Measure and flip: the
+      // signed volume is ground truth.
+      GProp_GProps props;
+      BRepGProp::VolumeProperties(sol, props);
+      if (props.Mass() < 0) sol = TopoDS::Solid(sol.Reversed());
       solids.push_back(sol);
     }
     if (solids.size() == 1) {
