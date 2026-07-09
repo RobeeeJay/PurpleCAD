@@ -10,6 +10,7 @@ import { buildEmbossStamp } from "../embossGeometry.js";
 import { reviveDevelopable } from "../regenerateItems.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
+import { releaseSolid } from "../solidCache.js";
 
 const GHOST_OPACITY = 0.12;
 
@@ -135,6 +136,10 @@ export async function commitEmboss({ items, printPrecision }) {
       position,
       geometryData,
     });
+    // The entry keeps this freshly-committed geometry (no recompute), so its
+    // OLD cached solid is stale — release it so a downstream consumer rebuilds
+    // from the new baked mesh / recipe instead of the outdated B-rep.
+    releaseSolid(editEntryId);
   } else {
     store.modifyItem(
       item.id,

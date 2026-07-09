@@ -181,6 +181,17 @@ export async function recalculateTimeline(force = false) {
       if (cached?.position) lastPositionForItem.set(targetId, cached.position);
       continue;
     }
+    // Why this step recomputes — greppable next to the "[OCC] <op> start" logs
+    // so a doubled op run is attributable at a glance.
+    // eslint-disable-next-line no-console
+    console.log(
+      `[OCC] recalc: rebuilding entry ${entry.id} ("${entry.label}") — ` +
+        (entry.dirty
+          ? "entry flagged dirty"
+          : !cached?.geometryData
+            ? "no cached geometry"
+            : `regeneratedAt ${cached.regenerator?.regeneratedAt} != precision ${printPrecision}`),
+    );
     // Dirty only this step's item; everything upstream keeps the cache an
     // earlier iteration already stamped, so the regen rebuilds just this one.
     // For a chamfer/push-pull whose source tracks a sketch, also drop the stored

@@ -6,6 +6,7 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
+import { releaseSolid } from "../solidCache.js";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { activePrecision } from "../resolution.js";
 import { withLivePolygons, withLiveDepth } from "../csgUtils.js";
@@ -129,8 +130,12 @@ export async function commitPushPull({
     },
     geometryData,
   };
-  if (retargetEntryId) store.retargetPushPullEntry(retargetEntryId, patches);
-  else store.modifyItem(item.id, patches, distance >= 0 ? "Pulled" : "Pushed");
+  if (retargetEntryId) {
+    store.retargetPushPullEntry(retargetEntryId, patches);
+    // Fresh committed geometry stays (no recompute) — drop the stale cached solid.
+    releaseSolid(retargetEntryId);
+  } else
+    store.modifyItem(item.id, patches, distance >= 0 ? "Pulled" : "Pushed");
   store.clearSelectedSubGeometry();
   if (retargetEntryId) store.setPushPullRetargetTarget(null);
   return true;

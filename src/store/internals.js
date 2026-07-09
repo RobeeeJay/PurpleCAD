@@ -183,13 +183,18 @@ export const relinkAfterEntryEdit = (history, entryId) => {
 };
 
 // Commit an entry edit: relink downstream frozen sources (so a later op rebuilds
-// against the edited result) AND mark this entry + every later entry dirty
-// (forward invalidation, per the JIT-timeline spec).  Used by every edit/
-// retarget action so a confirmed edit invalidates from that step forward.
+// against the edited result) and mark every LATER entry dirty (forward
+// invalidation).  The edited entry itself is NOT flagged — its own payload
+// decides: a full-payload update (updateEmbossEntry, retargetChamferEntry, …)
+// carries freshly-computed geometry + regeneratedAt, so recomputing it would
+// re-run the exact op Confirm just ran; a param-only edit (updateChamferParams,
+// …) stamps regeneratedAt:"dirty" + clears geometryData, which already fails
+// entryCacheValid and recomputes.  Flagging the entry regardless (the old
+// behaviour) doubled every edit/retarget's OCC work.
 export const commitEntryEdit = (history, entryId) => {
   const relinked = relinkAfterEntryEdit(history, entryId);
   const idx = relinked.findIndex((h) => h.id === entryId);
-  return idx < 0 ? relinked : dirtyEntriesFrom(relinked, idx);
+  return idx < 0 ? relinked : dirtyEntriesFrom(relinked, idx + 1);
 };
 
 // The set of hidden item ids a freshly-inserted entry should start from —

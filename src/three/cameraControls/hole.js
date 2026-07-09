@@ -9,6 +9,7 @@ import { activePrecision } from "../resolution.js";
 import { withLivePolygons } from "../csgUtils.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
+import { releaseSolid } from "../solidCache.js";
 
 const GHOST_OPACITY = 0.12;
 
@@ -76,6 +77,8 @@ export async function commitHole({ items, printPrecision }) {
       geometryData,
       regeneratedAt: printPrecision,
     });
+    // Fresh committed geometry stays (no recompute) — drop the stale cached solid.
+    releaseSolid(editEntryId);
   } else {
     store.modifyItem(
       item.id,

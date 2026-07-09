@@ -71,10 +71,18 @@ const makeStore = () =>
 const dirty = (s) => s.getState().history.map((e) => !!e.dirty);
 
 describe("timeline forward invalidation", () => {
-  it("editing an entry dirties it and every later entry", () => {
+  it("editing an entry invalidates it via its payload and dirties later entries", () => {
     const s = makeStore();
     s.getState().updateChamferParams("h2", { amount: 0.42 });
-    expect(dirty(s)).toEqual([false, true, true]); // h1 clean, h2 + h3 dirty
+    // The edited entry is NOT flag-dirtied (flagging it made the recalc re-run
+    // the op Confirm had just computed — every edit ran its OCC op twice).  Its
+    // own payload invalidates it instead: a param edit stamps
+    // regeneratedAt:"dirty" + clears geometryData, which fails entryCacheValid.
+    // Only entries AFTER it get the flag.
+    expect(dirty(s)).toEqual([false, false, true]);
+    const h2 = s.getState().history.find((e) => e.id === "h2");
+    expect(h2.instruction.patches.regenerator.regeneratedAt).toBe("dirty");
+    expect(h2.instruction.patches.geometryData).toBeNull();
   });
 
   it("deleting an entry dirties every entry after it", () => {

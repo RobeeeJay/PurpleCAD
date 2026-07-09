@@ -10,6 +10,7 @@ import {
   withLivePolygons,
   withLiveDepth,
 } from "../csgUtils.js";
+import { releaseSolid } from "../solidCache.js";
 
 // Preview-result cache: Confirm reuses the geometry the live preview already
 // computed for the SAME inputs instead of re-running the OCC op — the preview
@@ -239,7 +240,12 @@ export const commitChamferResult = (
   // in place; a first-time apply() inserts a new "Chamfered"/"Filleted"
   // history entry.
   const store = useStore.getState();
-  if (entryId) store.retargetChamferEntry(entryId, patches);
-  else store.modifyItem(item.id, patches, label);
+  if (entryId) {
+    store.retargetChamferEntry(entryId, patches);
+    // The entry keeps its fresh committed geometry (no recompute), so its OLD
+    // cached solid is stale — release it; a downstream consumer then rebuilds
+    // from the new baked mesh / recipe instead of the outdated B-rep.
+    releaseSolid(entryId);
+  } else store.modifyItem(item.id, patches, label);
   store.clearSelectedSubGeometry();
 };
