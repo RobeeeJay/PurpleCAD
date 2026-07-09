@@ -24,22 +24,6 @@ import { activePrecision } from "./resolution.js";
 import { getSolid, setSolid, pruneSolids } from "./solidCache.js";
 import { solidFromMesh } from "./occClient.js";
 
-export async function regenerateForResolution(printPrecision) {
-  const state = useStore.getState();
-  const newItems = await regenerateItemsForResolution(
-    state.items,
-    printPrecision,
-    // Publish progress so the BusyIndicator can show a progress bar
-    // while the regen runs.  Clear it at the end (in the finally below)
-    // so the bar doesn't linger after work finishes.
-    (p) => useStore.getState().setRegenProgress(p),
-  );
-  useStore.getState().setRegenProgress(null);
-  if (newItems !== state.items) {
-    useStore.setState({ items: newItems });
-  }
-}
-
 // Incremental (JIT) recompute predicate: can this step reuse its existing
 // cache?  Yes when the entry isn't flagged dirty AND the item's geometry is
 // fresh for the current precision — a regenerated body whose regeneratedAt
@@ -69,6 +53,38 @@ function geomTargetId(inst) {
   return null;
 }
 
+// RE-ENTRANCY GUARD: recalcs must never overlap.  A pass reads the history at
+// its start and stamps results at its end; a second trigger firing while the
+// first is awaiting OCC (a store update, a resolution change racing the items
+// write, …) would read the still-unstamped history and RECOMPUTE the same
+// entries — every op ran twice.  Serialize: while a pass runs, remember at most
+// ONE follow-up (collapsing any number of triggers) and run it after; it sees
+// the stamped state and skips clean entries, so the follow-up is cheap.
+let recalcRunning = null;
+let recalcQueued = false;
+let recalcQueuedForce = false;
+export function recalculateTimeline(force = false) {
+  if (recalcRunning) {
+    recalcQueued = true;
+    recalcQueuedForce = recalcQueuedForce || force;
+    return recalcRunning;
+  }
+  recalcRunning = (async () => {
+    try {
+      await runRecalcPass(force);
+    } finally {
+      recalcRunning = null;
+      if (recalcQueued) {
+        recalcQueued = false;
+        const f = recalcQueuedForce;
+        recalcQueuedForce = false;
+        recalculateTimeline(f);
+      }
+    }
+  })();
+  return recalcRunning;
+}
+
 // Force every CSG / chamfer regenerator to re-run from scratch — used by
 // the Timeline's "Recalculate" button.  This processes the ENTIRE timeline,
 // not just the steps up to the currently-selected entry, and crucially
@@ -78,7 +94,7 @@ function geomTargetId(inst) {
 // items keep the cache an earlier step just wrote (regeneratedAt ===
 // printPrecision), so each regen only rebuilds the one new item.  Navigating
 // the timeline or reloading then shows the correct geometry at every step.
-export async function recalculateTimeline(force = false) {
+async function runRecalcPass(force = false) {
   const state = useStore.getState();
   const history = state.history;
   const printPrecision = activePrecision(state);
