@@ -212,6 +212,13 @@ The working mechanism (keep all three pieces in lockstep):
     prism's near-touching bent triangles, so it sews cutting-OFF and relies on
     per-shell `OrientClosedSolid` + `ShapeFix_Shell` (in `MakeSolidFromMesh`) to
     fix face orientation instead. Keep cutting ON for any OTHER booleaned solid.
+- **Conform emboss on a CLOSED wall must WRAP, not clamp, at the curve seam.**
+  `buildDevelopableConformMesh#sampleAt` wraps the arc-length parameter modulo
+  the closed loop (closure detected by the small first↔last gap; open S-curve
+  walls still clamp). Clamping squashed seam-adjacent text into degenerate
+  self-intersecting slivers — missing/garbled letters AND minutes-long booleans,
+  triggered by wherever the user happened to click (`embossRingWrap.test.js`
+  drives the real repro scene through the op).
 - **Conform emboss: the stamp mesh MUST be consistently wound.**
   `prismFromLoops` (`embossTessellate.js`) can emit mixed-handedness triangles for
   holed glyphs (O/A/e); sewn, that's a watertight but inconsistently-oriented
