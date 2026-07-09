@@ -224,6 +224,16 @@ The working mechanism (keep all three pieces in lockstep):
   rather than reaching for the `kMaxFaces` cap. (History: a coarsening experiment
   once made this look like an 88s O(faces²) wall — it wasn't; see the
   `conform-emboss-rework` memory.)
+- **`BRepAlgoAPI_Fuse`'s two-shape constructor silently DROPS a COMPOUND tool.**
+  A multi-letter emboss stamp is a compound (one sewn solid per letter); fusing it
+  the two-argument way returns just the body — "missing letters", no error.
+  `BooleanOp` explodes compound args/tools into a `TopTools_ListOfShape` and uses
+  `SetArguments`/`SetTools` for all three ops. Don't revert to the two-shape ctor.
+- **A sewn triangle shell can come out INSIDE-OUT despite `OrientClosedSolid`.**
+  Its point classification silently fails on sewn tessellations; an inside-out
+  tool vanishes from a union and inverts a difference. `MakeSolidFromMesh`
+  measures each solid with `BRepGProp::VolumeProperties` and reverses on negative
+  volume — signed volume is ground truth. Keep that guard.
 - **Do NOT hand-build a shared-topology shell to skip sewing.** Building faces
   from shared `TopoDS_Edge`s (index-buffer topology) is fast and yields a valid
   6-face solid, but downstream `chamfer`/`fillet` reject it ("no suitable edges")
