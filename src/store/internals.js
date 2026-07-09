@@ -289,6 +289,38 @@ export const saveTimeline = (history, activeHistoryId) => {
   }
 };
 
+// One-time migration for saved documents from before the emboss authored-frame
+// record existed: derive sourceCenterOffset from the STILL-FROZEN source (at
+// load time it is the authored one — a later relink would replace it, which is
+// exactly why this must run at load).  Without it, reordering/deleting a step
+// around an old emboss shifts the relief by the source-frame delta.
+export const backfillEmbossFrames = (history) =>
+  history.map((e) => {
+    const inst = e.instruction;
+    const holder =
+      inst?.type === "modify"
+        ? inst.patches
+        : inst?.type === "create"
+          ? inst.item
+          : null;
+    const r = holder?.regenerator;
+    if (!r || r.kind !== "emboss" || r.sourceCenterOffset) return e;
+    const off = r.source?.regenerator?.centerOffset ?? { cx: 0, cy: 0, cz: 0 };
+    const regenerator = { ...r, sourceCenterOffset: off };
+    return inst.type === "modify"
+      ? {
+          ...e,
+          instruction: {
+            ...inst,
+            patches: { ...inst.patches, regenerator },
+          },
+        }
+      : {
+          ...e,
+          instruction: { ...inst, item: { ...inst.item, regenerator } },
+        };
+  });
+
 export const loadTimeline = () => {
   try {
     const parsed = db.getTimeline();
@@ -301,7 +333,7 @@ export const loadTimeline = () => {
       }
       const maxId = Math.max(...parsed.history.map((h) => h.id));
       setNextHistoryId(maxId + 1);
-      return parsed;
+      return { ...parsed, history: backfillEmbossFrames(parsed.history) };
     }
   } catch (e) {
     console.warn("Failed to load timeline from storage:", e);

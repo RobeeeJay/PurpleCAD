@@ -10,6 +10,7 @@ import {
   withOrphanFlags,
   setNextHistoryId,
   loadMaterialSettings,
+  backfillEmbossFrames,
 } from "./internals.js";
 import { DEFAULT_MATERIAL } from "../three/materialPresets.js";
 
@@ -35,7 +36,7 @@ function projectStatePatch() {
     ],
     activeHistoryId: null,
   };
-  const history = timeline.history;
+  const history = backfillEmbossFrames(timeline.history);
   const activeHistoryId = timeline.activeHistoryId ?? null;
   const maxId = Math.max(0, ...history.map((h) => h.id));
   setNextHistoryId(maxId + 1);

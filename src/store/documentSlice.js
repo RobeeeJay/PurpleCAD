@@ -10,6 +10,7 @@ import {
   saveVariables,
   saveFolders,
   setNextHistoryId,
+  backfillEmbossFrames,
 } from "./internals.js";
 import { clearCamera } from "./db.js";
 
@@ -58,26 +59,27 @@ export const createDocumentSlice = (set) => ({
         );
         return {};
       }
-      const maxId = Math.max(...data.history.map((h) => h.id));
+      const history = backfillEmbossFrames(data.history);
+      const maxId = Math.max(...history.map((h) => h.id));
       setNextHistoryId(maxId + 1);
       const newActiveHistoryId =
         data.activeHistoryId !== undefined ? data.activeHistoryId : null;
-      saveTimeline(data.history, newActiveHistoryId);
+      saveTimeline(history, newActiveHistoryId);
       clearCamera();
       const targetIdx =
         newActiveHistoryId !== null
-          ? data.history.findIndex((h) => h.id === newActiveHistoryId)
-          : data.history.length - 1;
+          ? history.findIndex((h) => h.id === newActiveHistoryId)
+          : history.length - 1;
       const items = replayUpTo(
-        data.history,
-        targetIdx !== -1 ? targetIdx : data.history.length - 1,
+        history,
+        targetIdx !== -1 ? targetIdx : history.length - 1,
       );
       const variables = Array.isArray(data.variables) ? data.variables : [];
       saveVariables(variables);
       saveFolders([]);
       return {
         items,
-        history: withOrphanFlags(data.history),
+        history: withOrphanFlags(history),
         activeHistoryId: newActiveHistoryId,
         selectedId: null,
         selectedIds: [],
