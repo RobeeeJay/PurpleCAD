@@ -17,6 +17,8 @@ import { activePrecision } from "../../three/resolution.js";
 import {
   buildChamferSourceAndSubGeo,
   commitChamferResult,
+  chamferPreviewKey,
+  takeChamferPreview,
 } from "../../three/cameraControls/chamferCommit.js";
 import FormulaInput from "../FormulaInput";
 import { evalValue, useDebouncedPreview } from "../inputs.jsx";
@@ -135,15 +137,29 @@ export default function ChamferOverlay() {
       });
       if (subGeo.edges.length === 0 && subGeo.faces.length === 0) return;
 
-      const result = await chamferOrFilletItem({
+      // Reuse the live preview's already-computed geometry when its inputs
+      // match — Confirm then commits instantly with zero OCC work.  Any
+      // mismatch (params changed after the last preview settled, or no
+      // preview ran) recomputes as before.
+      const key = chamferPreviewKey({
         source,
         subGeo,
         amount,
         angleRad,
         segments,
-        allItems: items,
         printPrecision,
       });
+      const result =
+        takeChamferPreview(key) ??
+        (await chamferOrFilletItem({
+          source,
+          subGeo,
+          amount,
+          angleRad,
+          segments,
+          allItems: items,
+          printPrecision,
+        }));
       if (!result) {
         // A null result from a user-cancelled op isn't a failure — stay quiet.
         if (!useStore.getState().operationCancelled)

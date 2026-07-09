@@ -17,6 +17,8 @@ import { activePrecision } from "../resolution.js";
 import {
   buildChamferSourceAndSubGeo,
   chamferResultTransform,
+  chamferPreviewKey,
+  stashChamferPreview,
 } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 
@@ -125,6 +127,20 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
     // Leave whatever preview is currently shown when the geometry is
     // unworkable (eg distance too large) — better than flickering it away.
     if (!result) return;
+
+    // Remember this result so Confirm can commit it directly — it will build
+    // the identical recipe, so re-running the OCC op there is pure waste.
+    stashChamferPreview(
+      chamferPreviewKey({
+        source,
+        subGeo,
+        amount,
+        angleRad,
+        segments,
+        printPrecision,
+      }),
+      result,
+    );
 
     const { positions, normals, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();

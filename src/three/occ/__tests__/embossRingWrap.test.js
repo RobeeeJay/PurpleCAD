@@ -74,6 +74,63 @@ async function buildScene() {
   return { profiles, dev, R };
 }
 
+describe("chamfer/fillet on the ring's CLOSED top rims", () => {
+  it("both ops handle full closed-loop edge rings (no seam issue)", async () => {
+    // The emboss wrap had a closed-loop seam bug; verify the chamfer/fillet
+    // path — which selects discrete OCC edges, no arc-length parameterisation —
+    // handles a fully closed rim (inner + outer circles of the annulus top).
+    const { ops, buildItemShapeLocal } = await import("../../occOps.js");
+    const req2 = createRequire(import.meta.url);
+    const occ2 = req2(
+      "../../../../native/occ-addon/build/Release/occ_addon.node",
+    );
+    const bodyId = buildItemShapeLocal(extrude, [sketch, extrude], 0.1);
+    const t = occ2.tessellate(bodyId, 0.1);
+    occ2.releaseShape(bodyId);
+    // Collect the OUTER top rim as chained edge segments (z = max).
+    let maxZ = -1e9;
+    for (let i = 0; i < t.positions.length; i += 3)
+      maxZ = Math.max(maxZ, t.positions[i + 2]);
+    let maxR = 0;
+    for (let i = 0; i < t.positions.length; i += 3) {
+      if (Math.abs(t.positions[i + 2] - maxZ) > 1e-3) continue;
+      maxR = Math.max(maxR, Math.hypot(t.positions[i], t.positions[i + 1]));
+    }
+    const seen = new Set();
+    const rim = [];
+    for (let i = 0; i < t.positions.length; i += 3) {
+      if (Math.abs(t.positions[i + 2] - maxZ) > 1e-3) continue;
+      if (
+        Math.abs(Math.hypot(t.positions[i], t.positions[i + 1]) - maxR) > 0.02
+      )
+        continue;
+      const a = Math.atan2(t.positions[i + 1], t.positions[i]).toFixed(4);
+      if (seen.has(a)) continue;
+      seen.add(a);
+      rim.push({ x: t.positions[i], y: t.positions[i + 1], a: Number(a) });
+    }
+    rim.sort((p, q) => p.a - q.a);
+    const edges = rim.map((p, i) => {
+      const q = rim[(i + 1) % rim.length];
+      return { ax: p.x, ay: p.y, az: maxZ, bx: q.x, by: q.y, bz: maxZ };
+    });
+    expect(edges.length).toBeGreaterThan(8);
+    for (const segments of [1, 3]) {
+      const res = await ops.chamferOrFilletItem({
+        source: extrude,
+        subGeo: { edges, faces: [] },
+        amount: 0.05,
+        angleRad: null,
+        segments,
+        allItems: [sketch, extrude],
+        printPrecision: 0.1,
+      });
+      expect(res).toBeTruthy();
+      expect(res.geometryData.positions.length).toBeGreaterThan(0);
+    }
+  }, 120000);
+});
+
 describe("conform text emboss on a closed ring wall", () => {
   it("emboss + deboss survive a seam-adjacent anchor (wrap, not clamp)", async () => {
     const { buildEmbossStamp } = await import("../../embossGeometry.js");

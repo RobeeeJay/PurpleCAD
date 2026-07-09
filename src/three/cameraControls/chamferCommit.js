@@ -11,6 +11,41 @@ import {
   withLiveDepth,
 } from "../csgUtils.js";
 
+// Preview-result cache: Confirm reuses the geometry the live preview already
+// computed for the SAME inputs instead of re-running the OCC op — the preview
+// ran the identical chamferOrFilletItem recipe moments earlier (mirrors the
+// emboss previewCache).  Keyed on everything the result depends on; any
+// mismatch (or no preview) falls back to a fresh build.  Consumed on take.
+let previewCache = null;
+export const chamferPreviewKey = ({
+  source,
+  subGeo,
+  amount,
+  angleRad,
+  segments,
+  printPrecision,
+}) =>
+  JSON.stringify({
+    amount,
+    angleRad,
+    segments,
+    printPrecision,
+    sid: source?.id,
+    p: source?.position,
+    r: source?.rotation,
+    sc: source?.scale,
+    sg: subGeo,
+  });
+export function stashChamferPreview(key, result) {
+  previewCache = { key, result };
+}
+export function takeChamferPreview(key) {
+  const hit =
+    previewCache && previewCache.key === key ? previewCache.result : null;
+  previewCache = null; // consume regardless — a stale entry must not linger
+  return hit;
+}
+
 // The newly-clicked face/edge selection is in the rendered (bbox-centred)
 // mesh's frame; prior.subGeo lives in the source's frame, offset by
 // -centerOffset.  Shift the new picks back into the source frame so they
