@@ -140,10 +140,15 @@ export function meshGlyphCaps(loops, maxEdge, pointBudget = 1000) {
     area > 0 ? Math.sqrt(area / (pointBudget * 0.43)) : maxEdge,
   );
 
+  // Densify the CONTOUR at half the interior step: the Delaunay is
+  // unconstrained, so across a concave notch (the '5'/'6'/'9' counters) it will
+  // happily chord between the two rims when no nearer boundary point blocks the
+  // circumcircle — a triangle protruding OUTSIDE the glyph (distorted relief).
+  // Closer boundary points make the triangulation follow the contour.
   const points = [];
   for (const lp of loops)
     for (const ring of [lp.outer, ...lp.holes])
-      for (const p of densifyRing(ring, step)) points.push(p);
+      for (const p of densifyRing(ring, step / 2)) points.push(p);
   const nBoundary = points.length;
 
   // Interior triangular lattice, kept inside the region and a margin off the
@@ -178,10 +183,43 @@ export function meshGlyphCaps(loops, maxEdge, pointBudget = 1000) {
     }
   }
 
+  // Keep a triangle when its centroid is in the region AND none of its edges
+  // properly crosses a contour segment.  The centroid test alone admits
+  // notch-chording triangles (centroid inside, apex outside) — the backstop for
+  // any chord the densified boundary didn't already prevent.
+  const contourSegs = [];
+  for (const lp of loops)
+    for (const ring of [lp.outer, ...lp.holes])
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i],
+          b = ring[(i + 1) % ring.length];
+        contourSegs.push([a.x, a.y, b.x, b.y]);
+      }
+  const orient = (ax, ay, bx, by, cx, cy) =>
+    (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  // STRICT (proper) crossing only: collinear overlaps and shared endpoints —
+  // boundary-band triangle edges lying ON a contour segment — must not count.
+  const properlyCrosses = (p, q, s) => {
+    const d1 = orient(s[0], s[1], s[2], s[3], p[0], p[1]);
+    const d2 = orient(s[0], s[1], s[2], s[3], q[0], q[1]);
+    if (!((d1 > 1e-12 && d2 < -1e-12) || (d1 < -1e-12 && d2 > 1e-12)))
+      return false;
+    const d3 = orient(p[0], p[1], q[0], q[1], s[0], s[1]);
+    const d4 = orient(p[0], p[1], q[0], q[1], s[2], s[3]);
+    return (d3 > 1e-12 && d4 < -1e-12) || (d3 < -1e-12 && d4 > 1e-12);
+  };
   const tris = delaunay(points).filter(([a, b, c]) => {
     const cx = (points[a][0] + points[b][0] + points[c][0]) / 3;
     const cy = (points[a][1] + points[b][1] + points[c][1]) / 3;
-    return inRegion(cx, cy, loops);
+    if (!inRegion(cx, cy, loops)) return false;
+    for (const [u, v] of [
+      [a, b],
+      [b, c],
+      [c, a],
+    ])
+      for (const s of contourSegs)
+        if (properlyCrosses(points[u], points[v], s)) return false;
+    return true;
   });
 
   // Surviving boundary edges = edges used by exactly one kept triangle.
