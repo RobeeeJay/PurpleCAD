@@ -37,8 +37,11 @@ jobs:
       - name: Clone OCC source
         if: steps.cache-occ.outputs.cache-hit != 'true'
         run: |
+          # Org is Open-Cascade-SAS — a wrong/nonexistent repo makes git prompt
+          # for credentials (private-repo fallback), which fails headless with
+          # "could not read Username ... Device not configured".
           git clone --depth 1 --branch V7_9_0 \
-            https://github.com/Open-Cascade-Technology/OCCT.git /tmp/occt
+            https://github.com/Open-Cascade-SAS/OCCT.git /tmp/occt
 
       - name: Build and install OCC
         if: steps.cache-occ.outputs.cache-hit != 'true'
