@@ -25,10 +25,28 @@ export const createHistoryNavSlice = (set) => ({
       if (toIdx === 0) return {};
       if (toIdx === fromIdx || toIdx === fromIdx + 1) return {};
 
-      const rawHistory = [...state.history];
+      let rawHistory = [...state.history];
       const [moved] = rawHistory.splice(fromIdx, 1);
       const insertAt = toIdx > fromIdx ? toIdx - 1 : toIdx;
       rawHistory.splice(insertAt, 0, moved);
+
+      // A reorder changes what each op in the affected span builds ON — but the
+      // ops carry FROZEN source snapshots from the old order (a chamfer moved
+      // before an emboss still holds the embossed body as its source, and the
+      // emboss then re-stamps on top of it: doubled relief).  Re-bind the moved
+      // item's source chain to the NEW accumulation order and forward-invalidate
+      // from the first affected index so the recalc genuinely replays the new
+      // order instead of trusting stale snapshots/baked meshes (mirrors
+      // deleteHistoryEntry).
+      const movedInst = moved.instruction;
+      const affectedId =
+        movedInst?.type === "modify"
+          ? movedInst.itemId
+          : (movedInst?.item?.id ?? null);
+      const firstAffected = Math.min(fromIdx, insertAt);
+      if (affectedId != null)
+        rawHistory = relinkSourceChain(rawHistory, affectedId, firstAffected);
+      rawHistory = dirtyEntriesFrom(rawHistory, firstAffected);
 
       const activeIdx =
         state.activeHistoryId !== null
