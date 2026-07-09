@@ -437,6 +437,48 @@ export function reviveDevelopable(faceSet, liveSource /*, frozenSource */) {
   return { ...faceSet, developable: { ...dev, curve, arc, norms } };
 }
 
+// The emboss face/faceSet anchors are absolute coordinates in the frame the
+// emboss was AUTHORED in.  A relink (reorder / delete of an upstream step) can
+// swap the source kind — an extrude delivers its raw local frame, a csg is
+// bbox-centred by its centerOffset — so translate the anchors by
+// (authoredOffset - currentOffset) to express them in the CURRENT source's
+// frame.  The wrap curve itself is centroid-relative (reviveDevelopable), so
+// only the absolute pieces move: the face point, the developable's axial extent
+// (aMin/aMax along the axis), and the cylinder/sphere fit centres.
+export function shiftEmbossFrame(face, faceSet, regenerator, source) {
+  const auth = regenerator.sourceCenterOffset;
+  if (!auth) return { face, faceSet }; // legacy recipe — keep today's behaviour
+  const cur = source?.regenerator?.centerOffset ?? { cx: 0, cy: 0, cz: 0 };
+  const dx = auth.cx - cur.cx,
+    dy = auth.cy - cur.cy,
+    dz = auth.cz - cur.cz;
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9 && Math.abs(dz) < 1e-9)
+    return { face, faceSet };
+  const shiftPt = (p) =>
+    p && p.cx != null
+      ? { ...p, cx: p.cx + dx, cy: p.cy + dy, cz: p.cz + dz }
+      : p;
+  const out = { face: shiftPt(face), faceSet };
+  if (faceSet) {
+    const fs = { ...faceSet };
+    if (fs.developable) {
+      const dev = fs.developable;
+      const along = dev.axis
+        ? dx * dev.axis[0] + dy * dev.axis[1] + dz * dev.axis[2]
+        : 0;
+      fs.developable = {
+        ...dev,
+        ...(Number.isFinite(dev.aMin) ? { aMin: dev.aMin + along } : null),
+        ...(Number.isFinite(dev.aMax) ? { aMax: dev.aMax + along } : null),
+      };
+    }
+    if (fs.cylinder) fs.cylinder = shiftPt(fs.cylinder);
+    if (fs.sphere) fs.sphere = shiftPt(fs.sphere);
+    out.faceSet = fs;
+  }
+  return out;
+}
+
 // Rebuild an emboss/deboss relief from its live source + sketch geometry.  The
 // stamp is recomputed from the (possibly edited) sketch profiles each pass.
 async function regenerateEmboss(
@@ -454,17 +496,25 @@ async function regenerateEmboss(
     liveItems,
     printPrecision,
   );
+  // Express the authored anchors in the CURRENT source's frame (a relink may
+  // have swapped the source kind — see shiftEmbossFrame).
+  const { face: frameFace, faceSet: frameFaceSet } = shiftEmbossFrame(
+    regenerator.face,
+    regenerator.faceSet,
+    regenerator,
+    source,
+  );
   // Re-derive the wrap curve from the live wall so the relief follows a resized
   // profile instead of wrapping the baked (old-radius) developable.
   const liveFaceSet = reviveDevelopable(
-    regenerator.faceSet,
+    frameFaceSet,
     source,
     regenerator.source,
   );
   const stamp =
     buildEmbossStamp(
       regenerator.profiles,
-      regenerator.face,
+      frameFace,
       regenerator.params,
       liveItems,
       printPrecision,

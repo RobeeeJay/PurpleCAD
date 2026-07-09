@@ -128,6 +128,17 @@ export async function commitEmboss({ items, printPrecision }) {
     stamp,
     centerOffset,
     basePosition: basePos,
+    // The frame the face/faceSet anchors were AUTHORED in: an extrude source is
+    // its raw local frame (offset 0), a csg source is bbox-centred by its own
+    // centerOffset.  If a relink later swaps the source kind (reorder/delete of
+    // an upstream step), regenerateEmboss translates the anchors by
+    // (authored - current) so the relief stays put instead of jumping by the
+    // frame delta (half the body height for an extrude→chamfer swap).
+    sourceCenterOffset: source?.regenerator?.centerOffset ?? {
+      cx: 0,
+      cy: 0,
+      cz: 0,
+    },
     regeneratedAt: printPrecision,
   };
   if (editEntryId != null) {
