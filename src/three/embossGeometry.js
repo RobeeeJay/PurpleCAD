@@ -195,12 +195,36 @@ function buildDevelopableConformMesh(loops, dev, face, params, invScale = 1) {
       sAnchor = arc[i];
     }
   }
+  // A ring wall's cross-section is a CLOSED loop, but the sampled curve doesn't
+  // repeat its first point — detect closure by the small first↔last gap and wrap
+  // the arc-length parameter around it.  Without this, text anchored near the
+  // curve's seam (wherever the user happened to click) ran past the end and was
+  // CLAMPED flat onto the seam: letters squashed into degenerate slivers —
+  // missing/garbled relief and a boolean that chews on self-intersections.
+  const L = curve.length - 1;
+  const closeGap = Math.hypot(curve[0].u - curve[L].u, curve[0].v - curve[L].v);
+  const avgStep = total / Math.max(1, L);
+  const isClosed = closeGap < avgStep * 3;
+  const period = isClosed ? total + closeGap : total;
   const sampleAt = (s) => {
-    const L = curve.length - 1;
-    if (s <= arc[0])
-      return { u: curve[0].u, v: curve[0].v, nu: norms[0].u, nv: norms[0].v };
-    if (s >= total)
-      return { u: curve[L].u, v: curve[L].v, nu: norms[L].u, nv: norms[L].v };
+    if (isClosed) {
+      s = ((s % period) + period) % period;
+      if (s >= total) {
+        // Inside the closing segment (last → first).
+        const t = (s - total) / (closeGap || 1);
+        return {
+          u: curve[L].u + (curve[0].u - curve[L].u) * t,
+          v: curve[L].v + (curve[0].v - curve[L].v) * t,
+          nu: norms[L].u + (norms[0].u - norms[L].u) * t,
+          nv: norms[L].v + (norms[0].v - norms[L].v) * t,
+        };
+      }
+    } else {
+      if (s <= arc[0])
+        return { u: curve[0].u, v: curve[0].v, nu: norms[0].u, nv: norms[0].v };
+      if (s >= total)
+        return { u: curve[L].u, v: curve[L].v, nu: norms[L].u, nv: norms[L].v };
+    }
     let i = 1;
     while (i < arc.length && arc[i] < s) i++;
     const t = (s - arc[i - 1]) / (arc[i] - arc[i - 1] || 1);
