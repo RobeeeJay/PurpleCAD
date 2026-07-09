@@ -154,6 +154,10 @@ async function runRecalcPass(force = false) {
   // keying the solid cache by entry id (not item id) is essential because
   // in-place chains (extrude→chamfer→emboss) all share one item id.
   const lastEntryForItem = new Map();
+  // Items whose geometry was RECOMPUTED (not cache-skipped) earlier in this
+  // pass — a later same-item op's frozen source snapshot is then stale and must
+  // be refreshed from the accumulated state (see the dirty-map below).
+  const recomputedItems = new Set();
   // itemId → the live world position its most recent geometry step resolved to.
   // A body-anchored op (emboss: centerOffset 0, no bbox re-centre) must inherit
   // this — otherwise when an upstream bevel is inserted and re-centres the body,
@@ -174,8 +178,13 @@ async function runRecalcPass(force = false) {
       newHistory.push(entry);
       continue;
     }
+    // The item's accumulated state BEFORE this entry applies — the live result
+    // of its previous step, used to refresh a stale frozen source below.
+    const preTargetId = geomTargetId(entry.instruction);
+    const prevItemState =
+      preTargetId != null ? accItems.find((it) => it.id === preTargetId) : null;
     accItems = applyInstruction(accItems, entry.instruction);
-    const targetId = geomTargetId(entry.instruction);
+    const targetId = preTargetId;
     if (targetId == null) {
       newHistory.push(entry);
       continue;
@@ -220,27 +229,55 @@ async function runRecalcPass(force = false) {
     // (source is itself a chamfer/push-pull CSG) keep their position —
     // buildBrushTransform has no live centroid there and any gizmo move lives in
     // a separate later transform entry.
+    // When this op's INPUT (the same item's previous step) was itself recomputed
+    // this pass, its frozen source snapshot is stale — a reorder/relink bound it
+    // to the OLD order's transform, so both the position delta math and the
+    // brush frame double-count (the "reorder moves the whole object" bug).
+    // Refresh the snapshot to the live pre-entry state and re-anchor from
+    // scratch: dropping the stored position is safe, user gizmo moves live in
+    // separate `transform` entries that replay on top.
+    const inputRecomputed =
+      recomputedItems.has(targetId) && prevItemState != null;
     accItems = accItems.map((it) => {
       if (it.id !== targetId || it.type !== "csg" || !it.regenerator) return it;
       const src = it.regenerator.source;
+      const singleInput =
+        it.regenerator.kind === "chamfer" ||
+        it.regenerator.kind === "pushpull" ||
+        it.regenerator.kind === "shell" ||
+        it.regenerator.kind === "hole" ||
+        it.regenerator.kind === "emboss" ||
+        it.regenerator.kind === "draft" ||
+        it.regenerator.kind === "revolve";
       const recenter =
-        ((it.regenerator.kind === "chamfer" ||
-          it.regenerator.kind === "pushpull" ||
-          it.regenerator.kind === "shell" ||
-          it.regenerator.kind === "hole" ||
-          it.regenerator.kind === "emboss" ||
-          it.regenerator.kind === "draft" ||
-          it.regenerator.kind === "revolve") &&
-          (src?.type === "extrude" || src?.regenerator?.kind === "boolean")) ||
+        (singleInput &&
+          (src?.type === "extrude" ||
+            src?.regenerator?.kind === "boolean" ||
+            inputRecomputed)) ||
         // Pipe and loft are built in world and their position IS the bbox
         // centre; drop it so a sketch edit to an input re-centres the result.
         ((it.regenerator.kind === "pipe" || it.regenerator.kind === "loft") &&
           it.regenerator.profileSource?.type === "extrude") ||
         // A 3D pattern is world-built and follows its source — always recentre.
         it.regenerator.kind === "pattern3d";
+      // Refresh only chain-style sources (extrude / single-input csg).  A
+      // boolean/extrudeUnion source has its own re-localisation frame
+      // (originalCentre) that the accumulated item state doesn't reproduce —
+      // swapping it in breaks the union-source chamfer's recentring.
+      const booleanish = (k) => k === "boolean" || k === "extrudeUnion";
+      const refreshSource =
+        singleInput &&
+        inputRecomputed &&
+        it.regenerator.source != null &&
+        !booleanish(it.regenerator.source?.regenerator?.kind) &&
+        !booleanish(prevItemState?.regenerator?.kind);
       return {
         ...it,
-        regenerator: { ...it.regenerator, regeneratedAt: "dirty" },
+        regenerator: {
+          ...it.regenerator,
+          ...(refreshSource ? { source: prevItemState } : null),
+          regeneratedAt: "dirty",
+        },
         geometryData: null,
         ...(recenter ? { position: undefined } : {}),
       };
@@ -287,6 +324,7 @@ async function runRecalcPass(force = false) {
     const resultSolid = solidCtx.results.get(targetId);
     if (resultSolid != null) setSolid(entry.id, resultSolid, printPrecision);
     lastEntryForItem.set(targetId, entry.id);
+    recomputedItems.add(targetId);
     done += 1;
     useStore.getState().setRegenProgress({ current: done, total });
     await breathe();
