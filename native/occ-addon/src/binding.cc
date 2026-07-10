@@ -73,6 +73,8 @@
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopAbs_Orientation.hxx>
@@ -530,6 +532,42 @@ static bool NormalSetMatches(const std::vector<FaceNormal>& edgeNormals,
   return present(ep.n1x, ep.n1y, ep.n1z) && present(ep.n2x, ep.n2y, ep.n2z);
 }
 
+// Side-of-centroid disambiguation for the normal-set fallback.  On a revolved
+// body (a ring), the edge diametrically OPPOSITE a stored segment carries the
+// identical adjacent-normal pair — e.g. an inner-rim edge at angle th+180 has
+// the same {top, (cos th, sin th, 0)} normals as the outer-rim segment at th —
+// so normal matching alone selects the wrong rim whenever the coordinate
+// passes miss (stale selection after a reorder / appended re-run).  The sign
+// of dot(normal, midpoint - bodyCentre) distinguishes them: outward wall
+// normals point away from the centre on the OUTER rim and toward it on the
+// inner.  Near-zero dots (normal ~ perpendicular to the offset, e.g. the top
+// normal against an in-plane offset) are treated as "don't care".
+static bool SameSideAsSpec(const TopoDS_Edge& edge,
+                           const EdgeFaceSpec::EdgeEp& ep,
+                           const gp_Pnt& centre) {
+  gp_Pnt mid;
+  try {
+    BRepAdaptor_Curve c(edge);
+    mid = c.Value((c.FirstParameter() + c.LastParameter()) / 2.0);
+  } catch (...) {
+    return true; // can't evaluate — don't reject on this filter alone
+  }
+  const double sx = (ep.ax + ep.bx) / 2.0 - centre.X();
+  const double sy = (ep.ay + ep.by) / 2.0 - centre.Y();
+  const double sz = (ep.az + ep.bz) / 2.0 - centre.Z();
+  const double cx = mid.X() - centre.X();
+  const double cy = mid.Y() - centre.Y();
+  const double cz = mid.Z() - centre.Z();
+  const double kTol = 1e-3;
+  auto sideOk = [&](double nx, double ny, double nz) {
+    const double ds = nx * sx + ny * sy + nz * sz;
+    const double dc = nx * cx + ny * cy + nz * cz;
+    if (std::abs(ds) < kTol || std::abs(dc) < kTol) return true;
+    return (ds > 0) == (dc > 0);
+  };
+  return sideOk(ep.n1x, ep.n1y, ep.n1z) && sideOk(ep.n2x, ep.n2y, ep.n2z);
+}
+
 // Match a shape edge against a stored edge spec: by adjacent-face-normals
 // when the spec carries them (resize-invariant), otherwise by endpoint
 // coordinates (legacy chamfers saved before topological naming existed).
@@ -742,6 +780,18 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(
   TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
   TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaceMap);
 
+  // Body centre for the normal-fallback's side disambiguation (SameSideAsSpec).
+  gp_Pnt shapeCentre(0, 0, 0);
+  {
+    Bnd_Box bb;
+    BRepBndLib::Add(shape, bb);
+    if (!bb.IsVoid()) {
+      Standard_Real x0, y0, z0, x1, y1, z1;
+      bb.Get(x0, y0, z0, x1, y1, z1);
+      shapeCentre = gp_Pnt((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    }
+  }
+
   auto faceTouchingEdge = [&](const TopoDS_Edge& edge) -> TopoDS_Face {
     if (edgeFaceMap.Contains(edge)) {
       const TopTools_ListOfShape& fs = edgeFaceMap.FindFromKey(edge);
@@ -801,7 +851,8 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(
     if (!matched && ep.hasNormals) {
       for (TopExp_Explorer e2(shape, TopAbs_EDGE); e2.More(); e2.Next()) {
         TopoDS_Edge edge = TopoDS::Edge(e2.Current());
-        if (NormalSetMatches(EdgeAdjacentNormals(edge, edgeFaceMap), ep))
+        if (NormalSetMatches(EdgeAdjacentNormals(edge, edgeFaceMap), ep) &&
+            SameSideAsSpec(edge, ep, shapeCentre))
           addEdge(edge, faceTouchingEdge(edge));
       }
     }

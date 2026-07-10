@@ -58,4 +58,26 @@ describe("high-res chamfer selection", () => {
     // tessellation noise).  The bug pushes it outward by ~the chamfer amount.
     expect(Math.abs(after.minR - before.minR)).toBeLessThan(0.03);
   }, 240000);
+
+  it("moving a chamfer before the emboss keeps the later chamfers off the inner rim", async () => {
+    const doc = JSON.parse(
+      fs.readFileSync("test-files/high-quality-chamfer-fail.pcad", "utf8"),
+    );
+    useStore.getState().loadDocument(doc);
+    await recalculateTimeline();
+    let item = useStore.getState().items.find((i) => i.regenerator);
+    const before = topRadii(item);
+    console.log("pre-reorder:", JSON.stringify(before));
+
+    // Move the first chamfer (23) before the emboss (22): the later appended
+    // chamfers' stored rim segments become stale (the rim is beveled earlier
+    // now) — they must SKIP gracefully, not grab the inner rim via the
+    // normal-set fallback's diametric ambiguity.
+    useStore.getState().reorderHistory(23, 22);
+    await recalculateTimeline();
+    item = useStore.getState().items.find((i) => i.regenerator);
+    const after = topRadii(item);
+    console.log("post-reorder:", JSON.stringify(after));
+    expect(Math.abs(after.minR - before.minR)).toBeLessThan(0.03);
+  }, 240000);
 });

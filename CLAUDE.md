@@ -391,7 +391,10 @@ Established landmines (each was a real bug — extend this list, never shrink it
   beveled — coordinate matching misses, and the normal fallback then selects a
   ring's INNER rim too (the diametrically-opposite inner edge has the identical
   adjacent-normal pair — an inherent ambiguity of `NormalSetMatches` on
-  revolved bodies). The orchestrator compares the frozen source's (type,
+  revolved bodies, now guarded by `SameSideAsSpec`: the sign of
+  dot(normal, midpoint − bodyCentre) must match between the stored segment and
+  the candidate, so a stale selection skips gracefully instead of grabbing the
+  opposite rim — the reorder-a-chamfer-before-the-emboss case). The orchestrator compares the frozen source's (type,
   regenerator kind) against the previous step's result; on mismatch the op
   rebuilds from its own recipe with no input shortcut (`chamferHighRes.test.js`).
   Relatedly, `attemptFaceRim` must feed only the WIRE(s) containing the selected
