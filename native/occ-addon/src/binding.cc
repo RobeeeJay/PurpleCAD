@@ -72,6 +72,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopAbs_Orientation.hxx>
@@ -1617,10 +1618,14 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       return mk.Shape();
     };
 
-    // Fallback: chamfer the whole boundary of the FACE the selected edges bound.
+    // Fallback: chamfer the boundary of the FACE the selected edges bound.
     // A rim whose individual edges OCC rejects (a thin ring at coarse preview
     // tessellation) usually succeeds as the face's rim — and yields a clean
     // solid, so a downstream emboss builds fast instead of on a slow mesh-sew.
+    // ONLY the wire(s) the selection actually lies on: a holed face (a ring's
+    // top cap) has separate inner and outer boundary wires, and feeding ALL the
+    // face's edges bevelled the never-selected inner rim too (the "high-res
+    // chamfers both rings" bug).
     auto attemptFaceRim = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
       auto selected = SelectSubGeoEdges(s, spec, &rec.faces, &rec.edges);
       if (selected.empty()) return TopoDS_Shape();
@@ -1628,8 +1633,24 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       if (face.IsNull()) return TopoDS_Shape();
       BRepFilletAPI_MakeChamfer mk(s);
       int n = 0;
-      for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next(), ++n)
-        mk.Add(amount, TopoDS::Edge(e.Current()));
+      TopTools_IndexedMapOfShape added;
+      for (TopExp_Explorer w(face, TopAbs_WIRE); w.More(); w.Next()) {
+        bool wireSelected = false;
+        for (TopExp_Explorer e(w.Current(), TopAbs_EDGE);
+             e.More() && !wireSelected; e.Next())
+          for (const auto& se : selected)
+            if (e.Current().IsSame(se.edge)) {
+              wireSelected = true;
+              break;
+            }
+        if (!wireSelected) continue;
+        for (TopExp_Explorer e(w.Current(), TopAbs_EDGE); e.More(); e.Next()) {
+          if (added.Contains(e.Current())) continue; // seam edges appear twice
+          added.Add(e.Current());
+          mk.Add(amount, TopoDS::Edge(e.Current()));
+          ++n;
+        }
+      }
       if (n == 0) return TopoDS_Shape();
       mk.Build(CancelRange());
       if (!mk.IsDone()) return TopoDS_Shape();

@@ -236,8 +236,29 @@ async function runRecalcPass(force = false) {
     // Refresh the snapshot to the live pre-entry state and re-anchor from
     // scratch: dropping the stored position is safe, user gizmo moves live in
     // separate `transform` entries that replay on top.
+    // Does this op's frozen source actually DESCRIBE the previous same-item
+    // step's result?  Usually yes (op chains: each op builds on the previous
+    // result).  But an APPENDED chamfer re-runs its merged selection on the
+    // PRE-chamfer source — its source describes an EARLIER state (kind
+    // "emboss" while the previous entry's result is kind "chamfer").  Feeding
+    // such an op the previous RESULT (cached solid / sewn mesh / refreshed
+    // snapshot) hands it a body whose selected rim was already beveled away:
+    // the coordinate passes miss and the normal fallback grabs the ring's
+    // INNER rim (a diametrically-opposite inner edge carries the identical
+    // adjacent-normal pair) — the "high-res chamfers both rings" bug.  Match
+    // on (type, regenerator kind): a mismatch means re-run from the recipe.
+    const curSrc = accItems.find((it) => it.id === targetId)?.regenerator
+      ?.source;
+    const sourceDescribesPrev =
+      prevItemState != null &&
+      curSrc != null &&
+      curSrc.type === prevItemState.type &&
+      (curSrc.regenerator?.kind ?? null) ===
+        (prevItemState.regenerator?.kind ?? null);
     const inputRecomputed =
-      recomputedItems.has(targetId) && prevItemState != null;
+      recomputedItems.has(targetId) &&
+      prevItemState != null &&
+      sourceDescribesPrev;
     accItems = accItems.map((it) => {
       if (it.id !== targetId || it.type !== "csg" || !it.regenerator) return it;
       const src = it.regenerator.source;
@@ -289,7 +310,11 @@ async function runRecalcPass(force = false) {
     // than re-running the upstream recipe (which can fail to re-select geometry,
     // e.g. a rim chamfer on a re-tessellated ring — the cause of the emboss
     // shift).  A miss on both still falls back to the recipe (correct).
-    const inputEntryId = lastEntryForItem.get(targetId);
+    // No cached/sewn input for an op whose source describes an EARLIER state
+    // (see sourceDescribesPrev above) — it must rebuild from its own recipe.
+    const inputEntryId = sourceDescribesPrev
+      ? lastEntryForItem.get(targetId)
+      : undefined;
     let inputSolid =
       inputEntryId != null ? getSolid(inputEntryId, printPrecision) : null;
     if (inputSolid == null && inputEntryId != null) {
