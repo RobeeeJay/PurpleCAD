@@ -315,23 +315,23 @@ app.whenReady().then(() => {
     console.warn("[main] SQLite KV store unavailable:", err.message);
   }
 
-  // Serve dist files over `app://./<path>`.  Handler decodes the URL
-  // and pipes the matching dist file back via a stream response.
+  // Serve dist files over `app://./<path>`.  protocol.handle is the modern API —
+  // registerFileProtocol was deprecated in Electron 25 and removed in later
+  // majors.  net.fetch on a file:// URL streams the dist file back.
   const DIST = path.join(__dirname, "..", "dist");
-  protocol.registerFileProtocol("app", (request, callback) => {
+  protocol.handle("app", (request) => {
     const url = new urlMod.URL(request.url);
     // The host part of `app://./index.html` is "." — strip it.
     const pathname = decodeURIComponent(url.pathname);
     const filePath = path.normalize(path.join(DIST, pathname));
     // Refuse traversal outside dist/.
     if (!filePath.startsWith(DIST)) {
-      callback({ error: -10 /* ACCESS_DENIED */ });
-      return;
+      return new Response("forbidden", { status: 403 });
     }
-    fsMod.stat(filePath, (err) => {
-      if (err) callback({ error: -6 /* FILE_NOT_FOUND */ });
-      else callback({ path: filePath });
-    });
+    if (!fsMod.existsSync(filePath)) {
+      return new Response("not found", { status: 404 });
+    }
+    return electron.net.fetch(urlMod.pathToFileURL(filePath).toString());
   });
 
   createWindow();
