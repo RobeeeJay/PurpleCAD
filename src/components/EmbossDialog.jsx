@@ -19,6 +19,7 @@ import {
 const EmbossDialog = () => {
   const embossTool = useStore((s) => s.embossTool);
   const items = useStore((s) => s.items);
+  const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
   const setEmbossPicking = useStore((s) => s.setEmbossPicking);
   const updateEmbossParams = useStore((s) => s.updateEmbossParams);
@@ -152,6 +153,7 @@ const EmbossDialog = () => {
           <NumberInput
             step="5"
             value={params.angleDeg}
+            variables={variables}
             onCommit={(n) => {
               if (Number.isFinite(n)) updateEmbossParams({ angleDeg: n });
             }}
@@ -163,6 +165,7 @@ const EmbossDialog = () => {
           <NumberInput
             step="0.5"
             value={params.offsetMm}
+            variables={variables}
             onCommit={(n) => {
               if (Number.isFinite(n)) updateEmbossParams({ offsetMm: n });
             }}
@@ -174,6 +177,7 @@ const EmbossDialog = () => {
           <NumberInput
             step="0.5"
             value={params.offsetVMm}
+            variables={variables}
             onCommit={(n) => {
               if (Number.isFinite(n)) updateEmbossParams({ offsetVMm: n });
             }}
@@ -186,6 +190,7 @@ const EmbossDialog = () => {
             min="0.01"
             step="0.1"
             value={params.scale}
+            variables={variables}
             onCommit={(n) => {
               if (n > 0) updateEmbossParams({ scale: n });
             }}
@@ -198,6 +203,7 @@ const EmbossDialog = () => {
             min="0"
             step="0.5"
             value={params.distanceMm}
+            variables={variables}
             onCommit={(n) => {
               if (n > 0) updateEmbossParams({ distanceMm: n });
             }}
