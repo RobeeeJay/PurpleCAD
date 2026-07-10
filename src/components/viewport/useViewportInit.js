@@ -241,8 +241,12 @@ export function useViewportInit({
       }
       sketchModeRef.current = false;
       setSketchMode(false);
-      if (containerRef.current)
-        containerRef.current.removeChild(renderer.domElement);
+      // React 19 nulls element refs BEFORE effect cleanup runs, so the old
+      // `if (containerRef.current) containerRef.current.removeChild(...)` guard
+      // silently skipped under StrictMode's dev double-mount — leaving the dead
+      // first canvas stacked over the live one (all mouse input dead in dev).
+      // Remove via the element itself; it needs no ref.
+      renderer.domElement.remove();
       renderer.dispose();
     };
   }, [theme, setHoveredId]); // eslint-disable-line react-hooks/exhaustive-deps
