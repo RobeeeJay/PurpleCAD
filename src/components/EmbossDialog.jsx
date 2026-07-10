@@ -237,9 +237,35 @@ const EmbossDialog = () => {
           onClick={confirm}
           disabled={!ready}
           title={ready ? "Stamp the relief" : "Pick geometry and a face first"}
-          style={barBtn(true, !ready)}
+          aria-label="Confirm"
+          style={{
+            ...barBtn(true, !ready),
+            padding: "4px 8px",
+            display: "inline-flex",
+            alignItems: "center",
+          }}
         >
-          Confirm
+          <svg viewBox="0 0 24 24" width="14" height="14">
+            {/* Thin circle: the body being embossed */}
+            <circle
+              cx="12"
+              cy="12"
+              r="6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              opacity="0.5"
+            />
+            {/* Bold arc wrapping around it: the stamped relief conforming to
+                the surface */}
+            <path
+              d="M18.55 7.41 A8 8 0 1 1 18.55 16.59"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.3"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
       </div>
       <ToolErrorLine />
