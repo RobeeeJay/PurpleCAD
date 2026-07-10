@@ -384,6 +384,18 @@ Established landmines (each was a real bug — extend this list, never shrink it
   `reorderPosition.test.js` drives BOTH reorder directions of the real scene
   through the full store + recalc pipeline and asserts the world bbox never
   moves — extend it when touching relink/anchor code.
+- **Not every op builds on the previous step's result — check `sourceDescribesPrev`.**
+  An APPENDED chamfer merges the prior chamfer's selection and re-runs on the
+  PRE-chamfer source; feeding it the previous entry's result (JIT cached solid /
+  sewn mesh / refreshed snapshot) hands it a body whose selected rim was already
+  beveled — coordinate matching misses, and the normal fallback then selects a
+  ring's INNER rim too (the diametrically-opposite inner edge has the identical
+  adjacent-normal pair — an inherent ambiguity of `NormalSetMatches` on
+  revolved bodies). The orchestrator compares the frozen source's (type,
+  regenerator kind) against the previous step's result; on mismatch the op
+  rebuilds from its own recipe with no input shortcut (`chamferHighRes.test.js`).
+  Relatedly, `attemptFaceRim` must feed only the WIRE(s) containing the selected
+  edges — a holed face has separate inner/outer boundary wires.
 - **A chained op's position must RE-ANCHOR to its live source, not be kept.**
   chamfer/emboss/hole/shell/draft/pushpull store `regenerator.basePosition` = the
   SOURCE brush position they were placed against. Each recalc,
