@@ -54,7 +54,7 @@ test.describe.serial("push/pull lifecycle", () => {
 
     const overlay = page.locator(".sketch-distance-input-overlay");
     await expect(overlay).toBeVisible();
-    await overlay.locator('input[type="number"]').fill("5");
+    await overlay.locator("input").first().fill("5");
     await page.getByTitle("Confirm — apply the push/pull").click();
 
     // The cube became a push/pull CSG, recorded as a "Pulled" timeline step.
@@ -84,7 +84,7 @@ test.describe.serial("push/pull lifecycle", () => {
       hasText: "Edit push/pull",
     });
     await expect(dialog).toBeVisible();
-    await dialog.locator('input[type="number"]').fill("12");
+    await dialog.locator("input").first().fill("12");
     await dialog.getByRole("button", { name: "Save" }).click();
 
     // 12 mm → 1.2 scene units; updatePushPullParams writes it synchronously.

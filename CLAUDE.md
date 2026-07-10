@@ -26,8 +26,9 @@ npx vite build         # production bundle, ~3s
 
 Both must succeed before declaring work done. The build sometimes catches
 issues vitest misses (native module leaking into the renderer bundle, etc.).
-Vite 4.5.x is pinned; `vite.config.js` marks `occOps.js` as external so
-the Node.js `createRequire` usage doesn't pollute the browser bundle.
+`vite.config.js` marks `occOps.js` as external so the Node.js
+`createRequire` usage doesn't pollute the browser bundle — verify that external
+survives any Vite upgrade (grep dist for `occ_addon`; it must be absent).
 
 ## Stale IDE diagnostics
 
