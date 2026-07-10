@@ -217,6 +217,8 @@ const EmbossDialog = () => {
           style={{
             ...toggleStyle(params.projection === "conform"),
             marginLeft: 10,
+            display: "inline-flex",
+            alignItems: "center",
           }}
           onClick={() =>
             updateEmbossParams({
@@ -225,25 +227,7 @@ const EmbossDialog = () => {
             })
           }
           title="On wraps the geometry around a cylindrical face (conform, falls back to flat on a flat face); off projects from the centre-most face's plane (center)"
-        >
-          Conform
-        </button>
-
-        <button type="button" onClick={cancel} title="Cancel" style={barBtn()}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={confirm}
-          disabled={!ready}
-          title={ready ? "Stamp the relief" : "Pick geometry and a face first"}
-          aria-label="Confirm"
-          style={{
-            ...barBtn(true, !ready),
-            padding: "4px 8px",
-            display: "inline-flex",
-            alignItems: "center",
-          }}
+          aria-label="Conform"
         >
           <svg viewBox="0 0 24 24" width="14" height="14">
             {/* Thin circle: the body being embossed */}
@@ -266,6 +250,19 @@ const EmbossDialog = () => {
               strokeLinecap="round"
             />
           </svg>
+        </button>
+
+        <button type="button" onClick={cancel} title="Cancel" style={barBtn()}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!ready}
+          title={ready ? "Stamp the relief" : "Pick geometry and a face first"}
+          style={barBtn(true, !ready)}
+        >
+          Confirm
         </button>
       </div>
       <ToolErrorLine />
