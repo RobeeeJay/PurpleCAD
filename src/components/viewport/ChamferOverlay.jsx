@@ -39,8 +39,6 @@ export default function ChamferOverlay() {
   const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
   const showNotification = useStore((s) => s.showNotification);
-  const chamferRetargetTarget = useStore((s) => s.chamferRetargetTarget);
-  const setChamferRetargetTarget = useStore((s) => s.setChamferRetargetTarget);
 
   // Raw strings so the field can be cleared while typing and so variable
   // formulas (resolved against `variables`) are accepted.
@@ -59,21 +57,6 @@ export default function ChamferOverlay() {
   const angValid =
     !isChamfer || (Number.isFinite(angVal) && angVal > 0 && angVal < 90);
   const valid = distValid && angValid;
-
-  // beginChamferRetarget pre-selects the prior subGeo and arms
-  // chamferRetargetTarget — seed the inputs from that operation's recipe so
-  // Confirm reproduces it by default (the user can still tweak before
-  // confirming).
-  useEffect(() => {
-    if (!chamferRetargetTarget) return;
-    const item = items.find((i) => i.id === chamferRetargetTarget.itemId);
-    const prior = item?.regenerator;
-    if (!prior || prior.kind !== "chamfer") return;
-    setDistanceMm(String(prior.amount * MM_PER_UNIT));
-    setAngleDeg(
-      prior.angleRad != null ? String((prior.angleRad * 180) / Math.PI) : "45",
-    );
-  }, [chamferRetargetTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live preview: debounced re-run while a valid distance/angle and a selection
   // exist; cleared the moment the value goes blank/invalid.
@@ -101,7 +84,6 @@ export default function ChamferOverlay() {
     useStore.getState()._cameraControls?.clearChamferPreview?.();
     clearSelectedSubGeometry();
     setChamferSelectMode(null);
-    setChamferRetargetTarget(null);
   };
 
   // `segments` here is preserved from the old (custom-mesh) chamfer API:
@@ -111,10 +93,6 @@ export default function ChamferOverlay() {
     const segments = isChamfer ? 1 : 3;
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
-    const retargetEntryId =
-      chamferRetargetTarget?.itemId === item.id
-        ? chamferRetargetTarget.entryId
-        : null;
 
     try {
       const amount = distVal / MM_PER_UNIT;
@@ -133,7 +111,6 @@ export default function ChamferOverlay() {
         amount,
         segments,
         printPrecision,
-        retargeting: !!retargetEntryId,
       });
       if (subGeo.edges.length === 0 && subGeo.faces.length === 0) return;
 
@@ -182,10 +159,8 @@ export default function ChamferOverlay() {
           regeneratedAt: printPrecision,
         },
         segments === 1 ? "Chamfered" : "Filleted",
-        retargetEntryId,
       );
       setChamferSelectMode(null);
-      if (retargetEntryId) setChamferRetargetTarget(null);
     } catch (err) {
       console.error("Chamfer operation failed:", err);
       showNotification(err.message);

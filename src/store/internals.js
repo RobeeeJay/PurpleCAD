@@ -185,7 +185,7 @@ export const relinkAfterEntryEdit = (history, entryId) => {
 // Commit an entry edit: relink downstream frozen sources (so a later op rebuilds
 // against the edited result) and mark every LATER entry dirty (forward
 // invalidation).  The edited entry itself is NOT flagged — its own payload
-// decides: a full-payload update (updateEmbossEntry, retargetChamferEntry, …)
+// decides: a full-payload update (updateEmbossEntry, retargetPushPullEntry, …)
 // carries freshly-computed geometry + regeneratedAt, so recomputing it would
 // re-run the exact op Confirm just ran; a param-only edit (updateChamferParams,
 // …) stamps regeneratedAt:"dirty" + clears geometryData, which already fails

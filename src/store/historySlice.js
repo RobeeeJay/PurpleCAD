@@ -812,7 +812,7 @@ export const createHistorySlice = (set) => ({
 
   // Update an existing push/pull history entry's patches in place — used by
   // PushPullOverlay's retarget confirm (geometry already rebuilt against the
-  // new face selection).  Mirrors retargetChamferEntry.
+  // new face selection).
   retargetPushPullEntry: (entryId, patches) =>
     set((state) => {
       const newHistory = state.history.map((entry) => {
@@ -979,41 +979,6 @@ export const createHistorySlice = (set) => ({
   // (position/regenerator/geometryData), without inserting a new entry —
   // used by BevelSection's retarget(), which has already rebuilt the
   // geometry and just needs the timeline step to point at the new result.
-  retargetChamferEntry: (entryId, patches) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        if (inst.patches?.regenerator?.kind !== "chamfer") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches,
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        {
-          items,
-          history: withOrphanFlags(relinked),
-        },
-        withUndo(state),
-      );
-    }),
 
   retargetExtrude: (extrudeId, newProfile, newDepth, startOffset = 0) =>
     set((state) => {

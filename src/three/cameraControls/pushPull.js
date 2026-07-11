@@ -21,8 +21,7 @@ const GHOST_OPACITY = 0.12;
 // Arm a push/pull retarget: pre-select the faces the original op used (shifted
 // from the source frame back into this item's rendered, bbox-centred frame)
 // and open PushPullOverlay.  The user can then add/remove faces (live preview)
-// before confirming, which updates the entry in place.  Mirrors
-// beginChamferRetarget.
+// before confirming, which updates the entry in place.
 export const beginPushPullRetarget = (itemId, entryId) => {
   const store = useStore.getState();
   const item = store.items.find((i) => i.id === itemId);

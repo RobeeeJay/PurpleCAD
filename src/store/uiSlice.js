@@ -74,14 +74,6 @@ export const uiInitial = {
   // Modal state for editing chamfer/fillet parameters from the timeline.
   chamferEditTarget: null,
 
-  // Set by the Timeline's chamfer/fillet "Retarget" button:
-  // { itemId, entryId }. While set, BevelSection watches
-  // selectedSubGeometry and automatically re-applies that chamfer/fillet
-  // to the next face/edge picked on this item — updating entryId's
-  // history entry in place rather than appending a new step — then
-  // clears this back to null.
-  chamferRetargetTarget: null,
-
   // null | "chamfer" | "fillet" — toggled by BevelSection's toolbar
   // buttons. While set, ChamferOverlay shows a hint banner and (once
   // selectedSubGeometry has faces/edges) the distance/angle confirmation
@@ -98,7 +90,7 @@ export const uiInitial = {
   // Set by the Timeline's push/pull "Retarget" button: { itemId, entryId }.
   // While set, PushPullOverlay re-applies to the next face selection by
   // updating entryId's history entry in place (rather than appending a new
-  // step), then clears back to null — mirrors chamferRetargetTarget.
+  // step), then clears back to null.
   pushPullRetargetTarget: null,
 
   // Modal state for editing a committed push/pull's distance from the
@@ -298,7 +290,6 @@ export const TOOL_RESET_PATCH = {
   extrudeDepthInput: null,
   cutExtrudeInProgress: false,
   chamferSelectMode: null,
-  chamferRetargetTarget: null,
   chamferEditTarget: null,
   pushPullSelectMode: null,
   pushPullRetargetTarget: null,
@@ -359,7 +350,6 @@ export const createUiSlice = (set) => ({
 
   setExtrudeDepthInput: (v) => set({ extrudeDepthInput: v }),
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
-  setChamferRetargetTarget: (target) => set({ chamferRetargetTarget: target }),
   // Setting either face-select mode clears the other — only one pick/confirm
   // overlay can be active at a time.
   setChamferSelectMode: (mode) =>

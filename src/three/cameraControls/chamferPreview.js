@@ -212,8 +212,7 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
   // stale async results (superseded by a newer call) are discarded.
   const updateChamferPreview = async (distanceMm, angleDeg) => {
     const myRequest = ++requestId;
-    const { chamferSelectMode, selectedSubGeometry, chamferRetargetTarget } =
-      useStore.getState();
+    const { chamferSelectMode, selectedSubGeometry } = useStore.getState();
     if (!chamferSelectMode || !selectedSubGeometry) {
       clearChamferPreview();
       return;
@@ -237,7 +236,6 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
         ? (angleDeg * Math.PI) / 180
         : null;
     const printPrecision = activePrecision();
-    const retargeting = chamferRetargetTarget?.itemId === item.id;
 
     const { source, subGeo } = buildChamferSourceAndSubGeo({
       item,
@@ -246,7 +244,6 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
       amount,
       segments,
       printPrecision,
-      retargeting,
     });
     if (subGeo.edges.length === 0 && subGeo.faces.length === 0) {
       clearChamferPreview();

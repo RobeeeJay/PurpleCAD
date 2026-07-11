@@ -33,7 +33,6 @@ export function anyToolActive(s) {
     s.extrudeRetargetGroup ||
     s.extrudeDepthInput ||
     s.chamferSelectMode ||
-    s.chamferRetargetTarget ||
     s.chamferEditTarget ||
     s.pushPullSelectMode ||
     s.pushPullRetargetTarget ||

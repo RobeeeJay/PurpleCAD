@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
 import { anyToolActive } from "../store/selectionMode.js";
-import { beginChamferRetarget } from "../three/cameraControls/chamferCommit.js";
 import { beginPushPullRetarget } from "../three/cameraControls/pushPull.js";
 import {
   beginRevolveEdit,
@@ -263,9 +262,6 @@ const Timeline = () => {
   const deleteHistoryEntry = useStore((state) => state.deleteHistoryEntry);
   const reorderHistory = useStore((state) => state.reorderHistory);
   const setChamferEditTarget = useStore((state) => state.setChamferEditTarget);
-  const chamferRetargetTarget = useStore(
-    (state) => state.chamferRetargetTarget,
-  );
   const setPushPullEditTarget = useStore(
     (state) => state.setPushPullEditTarget,
   );
@@ -592,65 +588,18 @@ const Timeline = () => {
                   return ids.length ? <ExtrudeActions groupIds={ids} /> : null;
                 })()}
               {chamferInfo(entry) && (
-                <>
-                  <button
-                    className={`timeline-action-btn${
-                      chamferRetargetTarget?.itemId === entry.itemId
-                        ? " active"
-                        : ""
-                    }`}
-                    title={`Retarget ${
-                      chamferInfo(entry).isFillet ? "fillet" : "chamfer"
-                    } — adjust the selected face(s)/edge(s) and confirm`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      restoreToHistory(entry.id);
-                      selectItem(entry.itemId);
-                      beginChamferRetarget(entry.itemId, entry.id);
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" width="14" height="14">
-                      <rect
-                        x="3"
-                        y="14"
-                        width="12"
-                        height="7"
-                        rx="1"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      />
-                      <polygon
-                        points="3,14 6,9 18,9 18,14"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        opacity="0.6"
-                      />
-                      <circle
-                        cx="19"
-                        cy="5"
-                        r="3"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                      />
-                      <circle cx="19" cy="5" r="1" fill="currentColor" />
-                    </svg>
-                  </button>
-                  <button
-                    className="timeline-action-btn"
-                    title={`Edit ${
-                      chamferInfo(entry).isFillet ? "fillet" : "chamfer"
-                    } parameters`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setChamferEditTarget({ entryId: entry.id });
-                    }}
-                  >
-                    <EditIcon />
-                  </button>
-                </>
+                <button
+                  className="timeline-action-btn"
+                  title={`Edit ${
+                    chamferInfo(entry).isFillet ? "fillet" : "chamfer"
+                  } parameters`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setChamferEditTarget({ entryId: entry.id });
+                  }}
+                >
+                  <EditIcon />
+                </button>
               )}
               {pushPullInfo(entry) && (
                 <>
