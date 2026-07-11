@@ -187,6 +187,54 @@ function createProject(name) {
   return id;
 }
 
+// Copy a project and everything it owns (timeline, variables, folders,
+// material presets, camera) in one transaction; returns the new id.
+function duplicateProject(id) {
+  if (!stmts) return null;
+  const src = db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
+  if (!src) return null;
+  const t = now();
+  let newId = null;
+  db.transaction(() => {
+    newId = Number(
+      db
+        .prepare(
+          "INSERT INTO projects (name, thumbnail, active_history_id, default_material, created_at, updated_at) " +
+            "VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          `${src.name} copy`,
+          src.thumbnail,
+          src.active_history_id,
+          src.default_material,
+          t,
+          t,
+        ).lastInsertRowid,
+    );
+    db.prepare(
+      "INSERT INTO timeline_entry (project_id, seq, entry_id, entry) " +
+        "SELECT ?, seq, entry_id, entry FROM timeline_entry WHERE project_id = ?",
+    ).run(newId, id);
+    db.prepare(
+      "INSERT INTO variable (project_id, seq, name, value) " +
+        "SELECT ?, seq, name, value FROM variable WHERE project_id = ?",
+    ).run(newId, id);
+    db.prepare(
+      "INSERT INTO folder (project_id, seq, folder_id, name, data) " +
+        "SELECT ?, seq, folder_id, name, data FROM folder WHERE project_id = ?",
+    ).run(newId, id);
+    db.prepare(
+      "INSERT INTO material_preset (project_id, seq, data) " +
+        "SELECT ?, seq, data FROM material_preset WHERE project_id = ?",
+    ).run(newId, id);
+    db.prepare(
+      "INSERT INTO camera_state (project_id, state) " +
+        "SELECT ?, state FROM camera_state WHERE project_id = ?",
+    ).run(newId, id);
+  })();
+  return newId;
+}
+
 function renameProject(id, name) {
   if (stmts) stmts.projRename.run(name, id);
 }
@@ -369,6 +417,7 @@ module.exports = {
   settingRemove,
   listProjects,
   createProject,
+  duplicateProject,
   renameProject,
   deleteProject,
   setThumbnail,

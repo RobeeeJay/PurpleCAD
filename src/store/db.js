@@ -111,6 +111,29 @@ export function createProject(name) {
   );
   return id;
 }
+// Copy a project and all its per-project data; returns the new id.  The
+// fallback path replays the copy through the generic get/save helpers.
+export function duplicateProject(id) {
+  const a = api();
+  if (a) return a.projDuplicate(id);
+  const list = fallbackProjects();
+  const src = list.find((p) => p.id === id);
+  if (!src) return null;
+  const newId = Math.max(0, ...list.map((p) => p.id)) + 1;
+  list.unshift({
+    id: newId,
+    name: `${src.name} copy`,
+    thumbnail: src.thumbnail,
+  });
+  jSet("projects", list);
+  saveTimeline(getTimeline(id), newId);
+  saveVariables(getVariables(id), newId);
+  saveFolders(getFolders(id), newId);
+  saveMaterial(getMaterial(id), newId);
+  const cam = getCamera(id);
+  if (cam != null) saveCamera(cam, newId);
+  return newId;
+}
 export function renameProject(id, name) {
   const a = api();
   if (a) return a.projRename(id, name);

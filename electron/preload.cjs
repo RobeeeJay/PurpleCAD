@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   settingRemove: (key) => sync("db:settingRemove", key),
   projListProjects: () => sync("db:listProjects"),
   projCreate: (name) => sync("db:createProject", name),
+  projDuplicate: (id) => sync("db:duplicateProject", id),
   projRename: (id, name) => sync("db:renameProject", { id, name }),
   projDelete: (id) => sync("db:deleteProject", id),
   projSetThumbnail: (id, thumbnail) => sync("db:setThumbnail", { id, thumbnail }),

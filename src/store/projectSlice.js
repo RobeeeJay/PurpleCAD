@@ -89,6 +89,13 @@ export const createProjectSlice = (set, get) => ({
     set({ projects: db.listProjects() });
   },
 
+  // Copy a project (timeline, variables, folders, material, camera) without
+  // switching to it — the new card appears in the grid for the user to pick.
+  duplicateProject: (id) => {
+    db.duplicateProject(id);
+    set({ projects: db.listProjects() });
+  },
+
   renameProject: (id, name) => {
     db.renameProject(id, name);
     set({ projects: db.listProjects() });

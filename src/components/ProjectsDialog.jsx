@@ -15,6 +15,7 @@ const ProjectsDialog = () => {
   const createProject = useStore((s) => s.createProject);
   const renameProject = useStore((s) => s.renameProject);
   const deleteProject = useStore((s) => s.deleteProject);
+  const duplicateProject = useStore((s) => s.duplicateProject);
 
   const [renamingId, setRenamingId] = useState(null);
   const [draftName, setDraftName] = useState("");
@@ -134,6 +135,34 @@ const ProjectsDialog = () => {
                         y2="11"
                         stroke="currentColor"
                         strokeWidth="1.6"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    className="project-icon-btn"
+                    title="Duplicate project"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      duplicateProject(p.id);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="15" height="15">
+                      <rect
+                        x="8"
+                        y="8"
+                        width="12"
+                        height="12"
+                        rx="1.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                      />
+                      <path
+                        d="M16 4 L5.5 4 A1.5 1.5 0 0 0 4 5.5 L4 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
                       />
                     </svg>
                   </button>

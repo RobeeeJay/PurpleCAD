@@ -54,3 +54,45 @@ test("the store test hook is exposed for state-driven assertions", async () => {
   );
   expect(itemCount).toBeGreaterThanOrEqual(0);
 });
+
+test("duplicating a project copies its timeline and data", async () => {
+  const result = await page.evaluate(() => {
+    const s = window.__store.getState();
+    s.addItem({
+      id: 7,
+      name: "Cube 7",
+      type: "cube",
+      children: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    });
+    const before = window.__store.getState();
+    const srcId = before.activeProjectId;
+    const src = before.projects.find((p) => p.id === srcId);
+    before.duplicateProject(srcId);
+    const after = window.__store.getState();
+    const copy = after.projects.find(
+      (p) => p.id !== srcId && p.name === `${src.name} copy`,
+    );
+    return {
+      copied: !!copy,
+      stillActive: after.activeProjectId === srcId,
+      count: after.projects.length,
+      prevCount: before.projects.length,
+    };
+  });
+  expect(result.copied).toBe(true);
+  expect(result.stillActive).toBe(true);
+  expect(result.count).toBe(result.prevCount + 1);
+
+  // Switching to the copy loads the duplicated timeline (the cube is there).
+  const inCopy = await page.evaluate(async () => {
+    const s = window.__store.getState();
+    const srcId = s.activeProjectId;
+    const copy = s.projects.find((p) => p.id !== srcId);
+    await s.switchProject(copy.id);
+    const items = window.__store.getState().items;
+    return items.some((i) => i.name === "Cube 7");
+  });
+  expect(inCopy).toBe(true);
+});

@@ -149,6 +149,7 @@ const syncHandlers = {
   "db:settingRemove": (a) => (kvStore.settingRemove(a), true),
   "db:listProjects": () => kvStore.listProjects(),
   "db:createProject": (a) => kvStore.createProject(a),
+  "db:duplicateProject": (a) => kvStore.duplicateProject(a),
   "db:renameProject": (a) => (kvStore.renameProject(a.id, a.name), true),
   "db:deleteProject": (a) => (kvStore.deleteProject(a), true),
   "db:setThumbnail": (a) => (kvStore.setThumbnail(a.id, a.thumbnail), true),
