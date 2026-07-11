@@ -1,12 +1,5 @@
-import { test, expect, _electron as electron } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const projectRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
-
+import { test, expect } from "@playwright/test";
+import { launchApp } from "./launch.js";
 // Visual regression on the WebGL viewport.  WebGL output varies by GPU/driver/
 // OS, so the committed baseline is environment-specific: regenerate with
 // `npm run test:e2e:run -- --update-snapshots` on the target machine (pin a
@@ -14,9 +7,7 @@ const projectRoot = path.resolve(
 // antialiasing differences.  Treat a failure here as "the render changed",
 // then eyeball the diff Playwright writes to playwright-report/.
 test("the viewport renders a created cube", async () => {
-  const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
-  const app = await electron.launch({ args: [projectRoot], env });
+  const app = await launchApp();
   try {
     const page = await app.firstWindow();
     await expect(page.locator(".toolbar")).toBeVisible();

@@ -2,22 +2,13 @@
 // visible (non-black) traced image — the tracer runs its own RAF loop and
 // blits through the denoise pass, both of which have silently broken before
 // (stale raster left on the canvas / black object).
-import { test, expect, _electron as electron } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const projectRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
-
+import { test, expect } from "@playwright/test";
+import { launchApp } from "./launch.js";
 let app;
 let page;
 
 test.beforeAll(async () => {
-  const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
-  app = await electron.launch({ args: [projectRoot], env });
+  app = await launchApp();
   page = await app.firstWindow();
   page.on("console", (msg) => {
     const t = msg.type();

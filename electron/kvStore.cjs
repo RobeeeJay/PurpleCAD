@@ -7,16 +7,18 @@
 // callers keep their localStorage-style semantics.
 
 const path = require("path");
+const fs = require("fs");
 
 let db = null;
 let stmts = null;
 
-function init(userDataDir) {
+function init(dbFile) {
   if (db) return;
   // Require lazily so a missing/unbuilt native module degrades to a warning in
   // main rather than crashing the whole app at load time.
   const Database = require("better-sqlite3");
-  db = new Database(path.join(userDataDir, "cad.sqlite"));
+  fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+  db = new Database(dbFile);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 

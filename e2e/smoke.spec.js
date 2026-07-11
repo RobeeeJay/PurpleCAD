@@ -1,21 +1,10 @@
-import { test, expect, _electron as electron } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
+import { test, expect } from "@playwright/test";
+import { launchApp } from "./launch.js";
 let app;
 let page;
 
 test.beforeAll(async () => {
-  // Launch the real Electron app at the project root (package.json `main` →
-  // electron/main.cjs).  Leave ELECTRON_START_URL unset so it loads the built
-  // renderer from dist/ via app://, and strip ELECTRON_RUN_AS_NODE (the test
-  // runner's node sets it, which would make Electron run as a plain node
-  // process instead of opening a window).
-  const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
-  app = await electron.launch({ args: [projectRoot], env });
+  app = await launchApp();
   page = await app.firstWindow();
   // Surface renderer console errors in the test output for easier debugging.
   page.on("console", (msg) => {

@@ -310,7 +310,12 @@ app.whenReady().then(() => {
   // Open the database before the window loads so the renderer's first
   // synchronous db read (during store init) finds it ready.
   try {
-    kvStore.init(app.getPath("userData"));
+    // --db-path=<file> overrides the SQLite location (e2e runs point it at a
+    // throwaway file so tests never touch the user's database).
+    const dbPath =
+      app.commandLine.getSwitchValue("db-path") ||
+      path.join(app.getPath("userData"), "cad.sqlite");
+    kvStore.init(dbPath);
   } catch (err) {
     console.warn("[main] SQLite KV store unavailable:", err.message);
   }

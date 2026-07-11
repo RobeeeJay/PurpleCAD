@@ -1,12 +1,5 @@
-import { test, expect, _electron as electron } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const projectRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
-
+import { test, expect } from "@playwright/test";
+import { launchApp } from "./launch.js";
 // Full push/pull lifecycle against the real app: create → push/pull (overlay
 // Confirm) → edit distance (Timeline + dialog) → retarget (Timeline + overlay).
 // Geometry/IPC work is driven and asserted through window.__store; the UI
@@ -21,9 +14,7 @@ test.describe.serial("push/pull lifecycle", () => {
   const CUBE_ID = 4242;
 
   test.beforeAll(async () => {
-    const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE;
-    app = await electron.launch({ args: [projectRoot], env });
+    app = await launchApp();
     page = await app.firstWindow();
     await expect(page.locator(".toolbar")).toBeVisible();
   });
