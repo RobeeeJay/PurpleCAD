@@ -393,11 +393,13 @@ export function createAxisGroup(scene) {
     new THREE.Vector3(0, AXIS_LEN / 2, 0),
     new THREE.Vector3(0, AXIS_LEN + CONE_H / 2, 0),
   );
+  // The UX frame is Z-up matching exports (user Y = internal −z), so the
+  // third arrow points along internal −z and is labeled "Y" below.
   addAxisArrow(
     AXIS_Z_COLOR,
-    new THREE.Euler(Math.PI / 2, 0, 0),
-    new THREE.Vector3(0, 0, AXIS_LEN / 2),
-    new THREE.Vector3(0, 0, AXIS_LEN + CONE_H / 2),
+    new THREE.Euler(-Math.PI / 2, 0, 0),
+    new THREE.Vector3(0, 0, -AXIS_LEN / 2),
+    new THREE.Vector3(0, 0, -(AXIS_LEN + CONE_H / 2)),
   );
 
   const makeAxisLabel = (text, color) => {
@@ -423,12 +425,12 @@ export function createAxisGroup(scene) {
   const xLabel = makeAxisLabel("X", toCssHex(AXIS_X_COLOR));
   xLabel.position.set(LABEL_DIST, 0, 0);
   axisGroup.add(xLabel);
-  const yLabel = makeAxisLabel("Y", toCssHex(AXIS_Y_COLOR));
-  yLabel.position.set(0, LABEL_DIST, 0);
-  axisGroup.add(yLabel);
-  const zLabel = makeAxisLabel("Z", toCssHex(AXIS_Z_COLOR));
-  zLabel.position.set(0, 0, LABEL_DIST);
+  const zLabel = makeAxisLabel("Z", toCssHex(AXIS_Y_COLOR));
+  zLabel.position.set(0, LABEL_DIST, 0);
   axisGroup.add(zLabel);
+  const yLabel = makeAxisLabel("Y", toCssHex(AXIS_Z_COLOR));
+  yLabel.position.set(0, 0, -LABEL_DIST);
+  axisGroup.add(yLabel);
 
   scene.add(axisGroup);
   return axisGroup;

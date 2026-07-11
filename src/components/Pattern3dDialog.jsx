@@ -148,16 +148,16 @@ const Pattern3dDialog = () => {
         },
       };
     }
-    const sx = dxV / MM_PER_UNIT,
-      sy = dyV / MM_PER_UNIT,
-      sz = dzV / MM_PER_UNIT;
+    // Fields are in the Z-up display frame; the grid vector is internal
+    // (user X,Y,Z = internal x,−z,y), so the "Y" column drives internal −z
+    // and the "Z" column internal y.
     const grid = {
       countX: Math.round(countXV),
-      countY: Math.round(countYV),
-      countZ: Math.round(countZV),
-      dx: sx,
-      dy: sy,
-      dz: sz,
+      countY: Math.round(countZV),
+      countZ: Math.round(countYV),
+      dx: dxV / MM_PER_UNIT,
+      dy: dzV / MM_PER_UNIT,
+      dz: -dyV / MM_PER_UNIT,
     };
     return {
       params: grid,

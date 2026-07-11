@@ -303,8 +303,20 @@ The working mechanism (keep all three pieces in lockstep):
 
 ## Coordinate system
 
-- Viewport is Y-up. STL/STEP exports rotate `+π/2` around X to match the
-  Z-up convention every CAD reader assumes.
+- The SCENE is three.js Y-up; STL/STEP exports rotate `+π/2` around X to the
+  Z-up convention every CAD reader assumes. Neither changes.
+- **The UX shows a Z-up right-handed frame — the SAME frame as the exports:
+  user X, Y, Z = internal x, −z, y.** Every UI surface that shows an axis
+  letter or an axis-labeled value (transform panel, plane dialog, pattern
+  spacing, the world axis indicator) maps through
+  `src/utils/axisDisplay.js#DISPLAY_AXES`. A hardcoded axis letter in a
+  dialog LIES about the internal component under it — new axis-labeled UI
+  must route through that table (label + key + sign; the sign applies to
+  signed quantities like position/rotation/spacing, never lengths/scales).
+  `axisDisplay.test.js` pins the mapping to the export rotation.
+- Caveat: per-component Euler edits map component-wise (user Y° = −rot.z,
+  user Z° = rot.y); single-axis rotations are exact, but the COMPOSITION
+  order of multi-axis Euler edits is still the internal XYZ order.
 - Extrudes start at the sketch plane (base at local z=0, top at z=±depth)
   — they do NOT straddle the plane. Don't add midpoint-centering back.
 - Negative depths are valid (backwards extrude). `THREE.ExtrudeGeometry`

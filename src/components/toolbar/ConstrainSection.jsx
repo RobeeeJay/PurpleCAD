@@ -447,7 +447,7 @@ const ConstrainSection = ({ isSketchMode }) => {
       ) : (
         <button
           className="toolbar-btn"
-          title="Drop to ground — moves the selection so its lowest point sits on Y=0"
+          title="Drop to ground — moves the selection so its lowest point sits on Z=0"
           disabled={!canDrop}
           onClick={handleDrop}
         >

@@ -53,7 +53,9 @@ const PlaneDialog = () => {
   const finalFrame = () =>
     applyPlaneAdjust(
       planeTool.base,
-      { x: rxv, y: ryv, z: rzv },
+      // Fields are in the Z-up display frame (user X,Y,Z = internal x,−z,y);
+      // applyPlaneAdjust takes internal-frame angles.
+      { x: rxv, y: rzv, z: -ryv },
       // Offset is entered in mm; the scene works in scene units.
       offv / MM_PER_UNIT,
     );
@@ -120,17 +122,20 @@ const PlaneDialog = () => {
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
         <Field label="Base:">
+          {/* Labels are the Z-up display frame: XY is the ground plane
+              (internal xz), XZ the vertical internal-xy plane; YZ is the same
+              plane in both frames. */}
           <button
             type="button"
             style={pickBtn()}
-            onClick={() => setBase({ x: 0, y: 0, z: 0 })}
+            onClick={() => setBase({ x: -Math.PI / 2, y: 0, z: 0 })}
           >
             XY
           </button>
           <button
             type="button"
             style={pickBtn()}
-            onClick={() => setBase({ x: -Math.PI / 2, y: 0, z: 0 })}
+            onClick={() => setBase({ x: 0, y: 0, z: 0 })}
           >
             XZ
           </button>

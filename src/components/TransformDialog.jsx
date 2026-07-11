@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { NumberInput } from "./inputs";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import { lengthToScale, scaleToLength } from "../utils/transformMath.js";
+import { DISPLAY_AXES } from "../utils/axisDisplay.js";
 import "../styles/TransformDialog.css";
 
 // Floating transform panel shown while a single non-sketch object is selected
@@ -11,7 +12,6 @@ import "../styles/TransformDialog.css";
 // lock scales the lengths proportionally across all axes; unlocked edits one
 // axis.  Each edit applies live (setItemTransform) and merges into the
 // timeline's Moved/Scaled/Rotated step (recordTransformHistory).
-const AXES = ["x", "y", "z"];
 const RAD2DEG = 180 / Math.PI;
 const DEG2RAD = Math.PI / 180;
 
@@ -52,15 +52,23 @@ const TransformDialog = () => {
   const local = cameraControls?.getItemLocalSizeMm?.(selectedId) || null;
   const lengthMm = (a) => scaleToLength(scale, local, a);
 
+  // `a` is a DISPLAY_AXES entry — the UX shows the Z-up export frame, so the
+  // "Y" column reads/writes internal −z, "Z" internal y (sign on the signed
+  // quantities only; lengths have none).
   const applyPos = (a, mm) => {
     if (!Number.isFinite(mm)) return;
-    setItemTransform(selectedId, { ...pos, [a]: mm / MM_PER_UNIT }, null, null);
+    setItemTransform(
+      selectedId,
+      { ...pos, [a.key]: (a.sign * mm) / MM_PER_UNIT },
+      null,
+      null,
+    );
     recordTransformHistory(selectedId, "Moved");
   };
 
   const applyLength = (a, mm) => {
     const next = Number.isFinite(mm)
-      ? lengthToScale(scale, local, a, mm, locked)
+      ? lengthToScale(scale, local, a.key, mm, locked)
       : null;
     if (!next) return;
     setItemTransform(selectedId, null, next, null);
@@ -69,7 +77,10 @@ const TransformDialog = () => {
 
   const applyRot = (a, deg) => {
     if (!Number.isFinite(deg)) return;
-    setItemTransform(selectedId, null, null, { ...rot, [a]: deg * DEG2RAD });
+    setItemTransform(selectedId, null, null, {
+      ...rot,
+      [a.key]: a.sign * deg * DEG2RAD,
+    });
     recordTransformHistory(selectedId, "Rotated");
   };
 
@@ -77,9 +88,12 @@ const TransformDialog = () => {
     <div className="tf-row">
       <span className="tf-label">{label}</span>
       <div className="tf-fields">
-        {AXES.map((a) => (
-          <label key={a} className={`tf-field tf-axis-${a}`}>
-            <span>{a.toUpperCase()}</span>
+        {DISPLAY_AXES.map((a) => (
+          <label
+            key={a.label}
+            className={`tf-field tf-axis-${a.label.toLowerCase()}`}
+          >
+            <span>{a.label}</span>
             {render(a)}
           </label>
         ))}
@@ -93,7 +107,7 @@ const TransformDialog = () => {
       <div className="tf-title">{item.name || "Object"}</div>
       {row("Position (mm)", (a) => (
         <NumberInput
-          value={pos[a] * MM_PER_UNIT}
+          value={a.sign * pos[a.key] * MM_PER_UNIT}
           onCommit={(v) => applyPos(a, v)}
         />
       ))}
@@ -101,7 +115,7 @@ const TransformDialog = () => {
         "Length (mm)",
         (a) => (
           <NumberInput
-            value={lengthMm(a) ?? 0}
+            value={lengthMm(a.key) ?? 0}
             disabled={!local}
             onCommit={(v) => applyLength(a, v)}
           />
@@ -120,7 +134,7 @@ const TransformDialog = () => {
       )}
       {row("Rotation (°)", (a) => (
         <NumberInput
-          value={rot[a] * RAD2DEG}
+          value={a.sign * rot[a.key] * RAD2DEG}
           onCommit={(v) => applyRot(a, v)}
         />
       ))}
