@@ -6,7 +6,7 @@ import { evalValue, useDebouncedPreview } from "./inputs.jsx";
 import "../styles/VariablesDialog.css";
 
 // Edit just the distance of a committed push/pull, from its timeline step.
-// Mirrors ChamferEditDialog: a non-blocking floating panel with a live preview
+// A non-blocking floating panel with a live preview
 // that re-runs the stored recipe at the typed distance before Save.  Distance
 // is signed — positive pulls the faces outward, negative pushes them in.  The
 // field accepts variable formulas and may be cleared while typing.

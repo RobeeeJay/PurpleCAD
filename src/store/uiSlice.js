@@ -71,7 +71,8 @@ export const uiInitial = {
   // MM_PER_UNIT for display).
   extrudeDepthInput: null,
 
-  // Modal state for editing chamfer/fillet parameters from the timeline.
+  // Arms the chamfer/fillet creation overlay as an editor: { itemId, entryId }
+  // of the committed entry being edited; Confirm updates it in place.
   chamferEditTarget: null,
 
   // null | "chamfer" | "fillet" — toggled by BevelSection's toolbar
@@ -94,7 +95,7 @@ export const uiInitial = {
   pushPullRetargetTarget: null,
 
   // Modal state for editing a committed push/pull's distance from the
-  // timeline: { entryId }.  Mirrors chamferEditTarget.
+  // timeline: { entryId }.
   pushPullEditTarget: null,
 
   // Shell dialog target.  { itemId } opens a fresh shell on a selected body;

@@ -39,6 +39,8 @@ export default function ChamferOverlay() {
   const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
   const showNotification = useStore((s) => s.showNotification);
+  const chamferEditTarget = useStore((s) => s.chamferEditTarget);
+  const setChamferEditTarget = useStore((s) => s.setChamferEditTarget);
 
   // Raw strings so the field can be cleared while typing and so variable
   // formulas (resolved against `variables`) are accepted.
@@ -57,6 +59,20 @@ export default function ChamferOverlay() {
   const angValid =
     !isChamfer || (Number.isFinite(angVal) && angVal > 0 && angVal < 90);
   const valid = distValid && angValid;
+
+  // beginChamferEdit pre-selects the entry's subGeo and arms chamferEditTarget —
+  // seed the fields from that operation's recipe so the overlay opens showing
+  // exactly what was committed (the user tweaks from there).
+  useEffect(() => {
+    if (!chamferEditTarget) return;
+    const item = items.find((i) => i.id === chamferEditTarget.itemId);
+    const prior = item?.regenerator;
+    if (!prior || prior.kind !== "chamfer") return;
+    setDistanceMm(String(prior.amount * MM_PER_UNIT));
+    setAngleDeg(
+      prior.angleRad != null ? String((prior.angleRad * 180) / Math.PI) : "45",
+    );
+  }, [chamferEditTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live preview: debounced re-run while a valid distance/angle and a selection
   // exist; cleared the moment the value goes blank/invalid.
@@ -84,6 +100,7 @@ export default function ChamferOverlay() {
     useStore.getState()._cameraControls?.clearChamferPreview?.();
     clearSelectedSubGeometry();
     setChamferSelectMode(null);
+    setChamferEditTarget(null);
   };
 
   // `segments` here is preserved from the old (custom-mesh) chamfer API:
@@ -93,6 +110,8 @@ export default function ChamferOverlay() {
     const segments = isChamfer ? 1 : 3;
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
+    const editEntryId =
+      chamferEditTarget?.itemId === item.id ? chamferEditTarget.entryId : null;
 
     try {
       const amount = distVal / MM_PER_UNIT;
@@ -111,6 +130,7 @@ export default function ChamferOverlay() {
         amount,
         segments,
         printPrecision,
+        editing: !!editEntryId,
       });
       if (subGeo.edges.length === 0 && subGeo.faces.length === 0) return;
 
@@ -159,8 +179,10 @@ export default function ChamferOverlay() {
           regeneratedAt: printPrecision,
         },
         segments === 1 ? "Chamfered" : "Filleted",
+        editEntryId,
       );
       setChamferSelectMode(null);
+      if (editEntryId) setChamferEditTarget(null);
     } catch (err) {
       console.error("Chamfer operation failed:", err);
       showNotification(err.message);

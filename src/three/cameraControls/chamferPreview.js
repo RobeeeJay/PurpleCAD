@@ -212,7 +212,8 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
   // stale async results (superseded by a newer call) are discarded.
   const updateChamferPreview = async (distanceMm, angleDeg) => {
     const myRequest = ++requestId;
-    const { chamferSelectMode, selectedSubGeometry } = useStore.getState();
+    const { chamferSelectMode, selectedSubGeometry, chamferEditTarget } =
+      useStore.getState();
     if (!chamferSelectMode || !selectedSubGeometry) {
       clearChamferPreview();
       return;
@@ -244,6 +245,7 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
       amount,
       segments,
       printPrecision,
+      editing: chamferEditTarget?.itemId === item.id,
     });
     if (subGeo.edges.length === 0 && subGeo.faces.length === 0) {
       clearChamferPreview();
@@ -263,45 +265,8 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
     });
   };
 
-  // Live preview for ChamferEditDialog: re-runs a committed chamfer/fillet's
-  // stored recipe (source + subGeo from its regenerator) with the new
-  // distance/angle the user is typing, so the edit is visible before Save.
-  // `itemId` is the existing chamfer result mesh to ghost while previewing.
-  const updateChamferEditPreview = async (
-    regenerator,
-    distanceMm,
-    angleDeg,
-    itemId,
-  ) => {
-    const myRequest = ++requestId;
-    if (regenerator?.kind !== "chamfer" || !regenerator.source) {
-      clearChamferPreview();
-      return;
-    }
-    const segments = regenerator.segments;
-    const amount = distanceMm / MM_PER_UNIT;
-    const angleRad =
-      segments === 1 && Math.abs(angleDeg - 45) > 0.1
-        ? (angleDeg * Math.PI) / 180
-        : null;
-    const printPrecision = activePrecision();
-
-    await runAndShow({
-      myRequest,
-      source: regenerator.source,
-      subGeo: regenerator.subGeo || { edges: [], faces: [] },
-      amount,
-      angleRad,
-      segments,
-      items: itemsRef.current,
-      printPrecision,
-      ghostItemId: itemId,
-    });
-  };
-
   return {
     updateChamferPreview,
-    updateChamferEditPreview,
     clearChamferPreview,
   };
 }

@@ -575,18 +575,6 @@ export function attachCameraControls(ctx) {
   });
   controls.updateChamferPreview = (distanceMm, angleDeg) =>
     chamferPreview.updateChamferPreview(distanceMm, angleDeg);
-  controls.updateChamferEditPreview = (
-    regenerator,
-    distanceMm,
-    angleDeg,
-    itemId,
-  ) =>
-    chamferPreview.updateChamferEditPreview(
-      regenerator,
-      distanceMm,
-      angleDeg,
-      itemId,
-    );
   controls.clearChamferPreview = () => chamferPreview.clearChamferPreview();
 
   // Live preview for PushPullOverlay: re-runs the push/pull recipe against the

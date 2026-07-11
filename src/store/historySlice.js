@@ -549,6 +549,44 @@ export const createHistorySlice = (set) => ({
   // `regeneratedAt` is reset (different from any valid printPrecision) and
   // `geometryData` is cleared so regenerateItemsForResolution's skip-check
   // misses, forcing a fresh tessellation with the new parameters.
+  // Replace a committed chamfer/fillet entry's FULL payload in place — the
+  // overlay Edit flow's commit (re-picked selection and/or new params, with the
+  // freshly computed geometry).  Downstream sources relink; the entry itself
+  // stays clean (its payload is fresh — see commitEntryEdit).
+  updateChamferEntry: (entryId, patches) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        if (inst.patches?.regenerator?.kind !== "chamfer") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches,
+          },
+        };
+      });
+      const relinked = commitEntryEdit(newHistory, entryId);
+      const activeIdx =
+        state.activeHistoryId != null
+          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+          : relinked.length - 1;
+      const items = replayUpTo(
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
+      );
+      saveTimeline(relinked, state.activeHistoryId);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(relinked),
+        },
+        withUndo(state),
+      );
+    }),
+
   updateChamferParams: (entryId, params) =>
     set((state) => {
       const newHistory = state.history.map((entry) => {

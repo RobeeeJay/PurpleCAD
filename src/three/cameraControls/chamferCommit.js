@@ -72,9 +72,32 @@ export const shiftSelectionToSource = (sel, centerOffset) => {
   };
 };
 
+// Open the CREATION overlay to edit a committed chamfer/fillet: pre-select the
+// faces/edges the entry used (shifted from the source frame back into this
+// item's rendered, bbox-centred frame), enter the matching select mode (the
+// same live ghost preview as creation), and arm chamferEditTarget so Confirm
+// updates the entry in place instead of appending a step.
+export const beginChamferEdit = (itemId, entryId) => {
+  const store = useStore.getState();
+  const item = store.items.find((i) => i.id === itemId);
+  const prior = item?.regenerator;
+  if (!prior || prior.kind !== "chamfer") return;
+  const { cx, cy, cz } = prior.centerOffset || { cx: 0, cy: 0, cz: 0 };
+  const rendered = shiftSelectionToSource(prior.subGeo || {}, {
+    cx: -cx,
+    cy: -cy,
+    cz: -cz,
+  });
+  store.setSelectedSubGeometry({ itemId, ...rendered });
+  store.setChamferSelectMode(prior.segments === 1 ? "chamfer" : "fillet");
+  store.setChamferEditTarget({ itemId, entryId });
+};
+
 // Derive the OCC source shape + subGeo selection for a chamfer/fillet —
 // shared by the live preview and the Confirm commit so both run the exact
-// same recipe. Two cases, in priority order:
+// same recipe. Three cases, in priority order:
+//  - editing: re-run against the FROZEN pre-chamfer source, replacing (not
+//    appending to) its subGeo with the current selection.
 //  - appending: a prior chamfer/fillet with the same amount/segments exists
 //    — re-run on ITS source with the union of its subGeo and the new picks.
 //  - fresh: snapshot the current item (with its live polygon/depth) as the
@@ -86,8 +109,21 @@ export const buildChamferSourceAndSubGeo = ({
   amount,
   segments,
   printPrecision,
+  editing,
 }) => {
   const prior = item.regenerator;
+  if (editing && prior?.kind === "chamfer") {
+    const source = withLivePolygons(
+      withLiveDepth({ ...prior.source }, item.depth ?? prior.source.depth),
+      items,
+      printPrecision,
+    );
+    const subGeo = shiftSelectionToSource(
+      selectedSubGeometry,
+      prior.centerOffset,
+    );
+    return { source, subGeo };
+  }
   if (
     prior?.kind === "chamfer" &&
     prior.amount === amount &&
@@ -172,6 +208,7 @@ export const commitChamferResult = (
   subGeo,
   regenBase,
   label,
+  editEntryId,
 ) => {
   const { geometryData, centerOffset } = result;
   // Store the topologically-resolved selection (edges carry their adjacent
@@ -199,7 +236,15 @@ export const commitChamferResult = (
     geometryData,
   };
 
+  // Editing a committed chamfer/fillet updates that step's patches in place; a
+  // first-time apply inserts a new "Chamfered"/"Filleted" history entry.
   const store = useStore.getState();
-  store.modifyItem(item.id, patches, label);
+  if (editEntryId) {
+    store.updateChamferEntry(editEntryId, patches);
+    // The entry keeps its fresh committed geometry (no recompute), so its OLD
+    // cached solid is stale — release it; a downstream consumer then rebuilds
+    // from the new baked mesh / recipe instead of the outdated B-rep.
+    releaseSolid(editEntryId);
+  } else store.modifyItem(item.id, patches, label);
   store.clearSelectedSubGeometry();
 };

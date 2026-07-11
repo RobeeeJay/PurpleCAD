@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
+import { beginChamferEdit } from "../three/cameraControls/chamferCommit.js";
 import { anyToolActive } from "../store/selectionMode.js";
 import { beginPushPullRetarget } from "../three/cameraControls/pushPull.js";
 import {
@@ -261,7 +262,6 @@ const Timeline = () => {
   const restoreToHistory = useStore((state) => state.restoreToHistory);
   const deleteHistoryEntry = useStore((state) => state.deleteHistoryEntry);
   const reorderHistory = useStore((state) => state.reorderHistory);
-  const setChamferEditTarget = useStore((state) => state.setChamferEditTarget);
   const setPushPullEditTarget = useStore(
     (state) => state.setPushPullEditTarget,
   );
@@ -592,10 +592,12 @@ const Timeline = () => {
                   className="timeline-action-btn"
                   title={`Edit ${
                     chamferInfo(entry).isFillet ? "fillet" : "chamfer"
-                  } parameters`}
+                  } — reopens the creation overlay with its selection and values`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setChamferEditTarget({ entryId: entry.id });
+                    restoreToHistory(entry.id);
+                    selectItem(entry.itemId);
+                    beginChamferEdit(entry.itemId, entry.id);
                   }}
                 >
                   <EditIcon />
