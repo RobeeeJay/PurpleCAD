@@ -595,8 +595,6 @@ const Timeline = () => {
                   } — reopens the creation overlay with its selection and values`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    restoreToHistory(entry.id);
-                    selectItem(entry.itemId);
                     beginChamferEdit(entry.itemId, entry.id);
                   }}
                 >

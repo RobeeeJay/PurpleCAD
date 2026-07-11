@@ -60,13 +60,12 @@ export default function ChamferOverlay() {
     !isChamfer || (Number.isFinite(angVal) && angVal > 0 && angVal < 90);
   const valid = distValid && angValid;
 
-  // beginChamferEdit pre-selects the entry's subGeo and arms chamferEditTarget —
-  // seed the fields from that operation's recipe so the overlay opens showing
-  // exactly what was committed (the user tweaks from there).
+  // beginChamferEdit pre-selects the entry's subGeo and arms chamferEditTarget
+  // (carrying the entry's recipe — the timeline is restored to the pre-chamfer
+  // step, so the live item no longer has it).  Seed the fields from that recipe
+  // so the overlay opens showing exactly what was committed.
   useEffect(() => {
-    if (!chamferEditTarget) return;
-    const item = items.find((i) => i.id === chamferEditTarget.itemId);
-    const prior = item?.regenerator;
+    const prior = chamferEditTarget?.prior;
     if (!prior || prior.kind !== "chamfer") return;
     setDistanceMm(String(prior.amount * MM_PER_UNIT));
     setAngleDeg(
@@ -100,6 +99,9 @@ export default function ChamferOverlay() {
     useStore.getState()._cameraControls?.clearChamferPreview?.();
     clearSelectedSubGeometry();
     setChamferSelectMode(null);
+    // Editing viewed the pre-chamfer step — put the user back on the entry.
+    if (chamferEditTarget)
+      useStore.getState().restoreToHistory(chamferEditTarget.entryId);
     setChamferEditTarget(null);
   };
 

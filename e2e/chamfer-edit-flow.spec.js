@@ -78,12 +78,25 @@ test.describe.serial("chamfer edit lifecycle", () => {
     const overlay = page.locator(".sketch-distance-input-overlay");
     await expect(overlay).toBeVisible();
     await expect(overlay.locator("input").first()).toHaveValue("2");
-    const armed = await page.evaluate(() => ({
-      edges: window.__store.getState().selectedSubGeometry?.edges?.length ?? 0,
-      editArmed: !!window.__store.getState().chamferEditTarget,
-    }));
+    const armed = await page.evaluate((id) => {
+      const s = window.__store.getState();
+      const entryIdx = s.history.findIndex(
+        (h) => h.id === s.chamferEditTarget?.entryId,
+      );
+      return {
+        edges: s.selectedSubGeometry?.edges?.length ?? 0,
+        editArmed: !!s.chamferEditTarget,
+        // The timeline must sit on the PREVIOUS step so the pre-chamfer body
+        // is what the user re-picks against.
+        viewingPrev:
+          entryIdx > 0 && s.activeHistoryId === s.history[entryIdx - 1].id,
+        itemType: s.items.find((i) => i.id === id)?.type,
+      };
+    }, CUBE_ID);
     expect(armed.edges).toBeGreaterThan(0);
     expect(armed.editArmed).toBe(true);
+    expect(armed.viewingPrev).toBe(true);
+    expect(armed.itemType).toBe("cube"); // pre-chamfer state on screen
 
     // Change the distance and confirm — the entry updates IN PLACE.
     await overlay.locator("input").first().fill("3");
@@ -99,11 +112,17 @@ test.describe.serial("chamfer edit lifecycle", () => {
         ),
       )
       .toBeCloseTo(0.3, 5);
-    const after = await page.evaluate(() => ({
-      entries: window.__store.getState().history.length,
-      editArmed: !!window.__store.getState().chamferEditTarget,
-    }));
+    const after = await page.evaluate(() => {
+      const s = window.__store.getState();
+      return {
+        entries: s.history.length,
+        editArmed: !!s.chamferEditTarget,
+        // Confirm lands back on the edited entry, showing the new result.
+        onEntry: s.activeHistoryId === s.history[s.history.length - 1].id,
+      };
+    });
     expect(after.entries).toBe(entriesBefore);
     expect(after.editArmed).toBe(false);
+    expect(after.onEntry).toBe(true);
   });
 });

@@ -2637,7 +2637,12 @@ export function createSketchInteraction(
         cameraControlsRef.current?.clearChamferPreview?.();
         useStore.getState().setChamferSelectMode(null);
         useStore.getState().clearSelectedSubGeometry();
-        useStore.getState().setChamferEditTarget(null);
+        const editTarget = useStore.getState().chamferEditTarget;
+        if (editTarget) {
+          // Editing viewed the pre-chamfer step — put the user back on the entry.
+          useStore.getState().restoreToHistory(editTarget.entryId);
+          useStore.getState().setChamferEditTarget(null);
+        }
         return;
       }
       if (sketchPlacementModeRef.current) {

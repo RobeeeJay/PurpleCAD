@@ -72,36 +72,37 @@ export const shiftSelectionToSource = (sel, centerOffset) => {
   };
 };
 
-// Open the CREATION overlay to edit a committed chamfer/fillet: pre-select the
-// faces/edges the entry used (shifted from the source frame back into this
-// item's rendered, bbox-centred frame), enter the matching select mode (the
-// same live ghost preview as creation), and arm chamferEditTarget so Confirm
-// updates the entry in place instead of appending a step.
+// Open the CREATION overlay to edit a committed chamfer/fillet.  The timeline
+// is restored to the PREVIOUS step so the pre-chamfer body is on screen — the
+// op re-runs on its source, and the rim being re-picked doesn't exist on the
+// beveled result mesh.  That is exactly the state the user picked against at
+// creation, so the stored subGeo (source frame) needs no centerOffset shift.
+// The entry's recipe rides along in chamferEditTarget because the replayed
+// item no longer carries it.
 export const beginChamferEdit = (itemId, entryId) => {
   const store = useStore.getState();
-  const item = store.items.find((i) => i.id === itemId);
-  const prior = item?.regenerator;
-  if (!prior || prior.kind !== "chamfer") return;
-  const { cx, cy, cz } = prior.centerOffset || { cx: 0, cy: 0, cz: 0 };
-  const rendered = shiftSelectionToSource(prior.subGeo || {}, {
-    cx: -cx,
-    cy: -cy,
-    cz: -cz,
+  const idx = store.history.findIndex((h) => h.id === entryId);
+  const prior = store.history[idx]?.instruction?.patches?.regenerator;
+  if (idx < 1 || !prior || prior.kind !== "chamfer") return;
+  store.restoreToHistory(store.history[idx - 1].id);
+  store.selectItem(itemId);
+  store.setSelectedSubGeometry({
+    itemId,
+    edges: prior.subGeo?.edges || [],
+    faces: prior.subGeo?.faces || [],
   });
-  store.setSelectedSubGeometry({ itemId, ...rendered });
   store.setChamferSelectMode(prior.segments === 1 ? "chamfer" : "fillet");
-  store.setChamferEditTarget({ itemId, entryId });
+  store.setChamferEditTarget({ itemId, entryId, prior });
 };
 
 // Derive the OCC source shape + subGeo selection for a chamfer/fillet —
 // shared by the live preview and the Confirm commit so both run the exact
-// same recipe. Three cases, in priority order:
-//  - editing: re-run against the FROZEN pre-chamfer source, replacing (not
-//    appending to) its subGeo with the current selection.
+// same recipe. Two cases:
 //  - appending: a prior chamfer/fillet with the same amount/segments exists
 //    — re-run on ITS source with the union of its subGeo and the new picks.
-//  - fresh: snapshot the current item (with its live polygon/depth) as the
-//    source and use the selection as-is.
+//  - fresh (also the editing path, which views the pre-chamfer step):
+//    snapshot the current item (with its live polygon/depth) as the source
+//    and use the selection as-is.
 export const buildChamferSourceAndSubGeo = ({
   item,
   items,
@@ -112,19 +113,13 @@ export const buildChamferSourceAndSubGeo = ({
   editing,
 }) => {
   const prior = item.regenerator;
-  if (editing && prior?.kind === "chamfer") {
-    const source = withLivePolygons(
-      withLiveDepth({ ...prior.source }, item.depth ?? prior.source.depth),
-      items,
-      printPrecision,
-    );
-    const subGeo = shiftSelectionToSource(
-      selectedSubGeometry,
-      prior.centerOffset,
-    );
-    return { source, subGeo };
-  }
+  // Editing runs with the timeline restored to the pre-chamfer step, so the
+  // live item IS the source and the picks are already in its frame — the
+  // fresh branch below is the exact creation-time recipe.  Only the append
+  // branch must be bypassed: at that step the item's own regenerator can be
+  // an EARLIER chamfer, and merging into it would rewrite the wrong entry.
   if (
+    !editing &&
     prior?.kind === "chamfer" &&
     prior.amount === amount &&
     prior.segments === segments

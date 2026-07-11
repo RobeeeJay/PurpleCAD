@@ -569,19 +569,19 @@ export const createHistorySlice = (set) => ({
         };
       });
       const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
+      // Editing views the PRE-chamfer step (beginChamferEdit) — land back on
+      // the edited entry so the freshly committed result is what's on screen.
+      const activeIdx = relinked.findIndex((h) => h.id === entryId);
       const items = replayUpTo(
         relinked,
         activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(relinked, state.activeHistoryId);
+      saveTimeline(relinked, entryId);
       return Object.assign(
         {
           items,
           history: withOrphanFlags(relinked),
+          activeHistoryId: entryId,
         },
         withUndo(state),
       );
