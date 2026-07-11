@@ -321,7 +321,7 @@ export const TOOL_RESET_PATCH = {
   toolError: null,
 };
 
-export const createUiSlice = (set) => ({
+export const createUiSlice = (set, get) => ({
   // Cancel every in-progress tool operation (used when a new tool is selected).
   cancelActiveTools: () => set({ ...TOOL_RESET_PATCH }),
 
@@ -562,7 +562,19 @@ export const createUiSlice = (set) => ({
         },
       },
     }),
-  cancelEmbossTool: () => set({ embossTool: null }),
+  // Editing views the pre-emboss step (beginEmbossEdit) — a plain cancel puts
+  // the user back on the entry.  After a commit, updateEmbossEntry has already
+  // landed there (active is the entry or null at the tip), so no restore.
+  cancelEmbossTool: () => {
+    const { embossTool, activeHistoryId, restoreToHistory } = get();
+    if (
+      embossTool?.editEntryId != null &&
+      activeHistoryId != null &&
+      activeHistoryId !== embossTool.editEntryId
+    )
+      restoreToHistory(embossTool.editEntryId);
+    set({ embossTool: null });
+  },
   // Arm one of the two picks (toggles off if it was already armed).
   setEmbossPicking: (kind) =>
     set((s) =>
@@ -618,28 +630,34 @@ export const createUiSlice = (set) => ({
           }
         : {},
     ),
-  // Re-open a committed emboss step to edit its params, replaying the frozen recipe.
-  beginEmbossEdit: (entryId) =>
-    set((state) => {
-      const entry = state.history.find((h) => h.id === entryId);
-      const r = entry?.instruction?.patches?.regenerator;
-      if (r?.kind !== "emboss") return {};
-      return {
-        embossTool: {
-          picking: null,
-          editEntryId: entryId,
-          itemId: entry.itemId,
-          source: r.source,
-          profiles: r.profiles || [],
-          face: r.face,
-          faceSet: r.faceSet || null,
-          faceTris: r.faceTris || null,
-          // A committed emboss had a valid face selection.
-          facesValid: true,
-          params: { ...r.params },
-        },
-      };
-    }),
+  // Re-open a committed emboss step to edit its params, replaying the frozen
+  // recipe.  The timeline is restored to the PREVIOUS step so the pre-emboss
+  // body is on screen: re-picking a face must happen against the source the op
+  // re-runs on — the same state the user picked at creation, in the same local
+  // frame — not the relief-carrying result mesh.
+  beginEmbossEdit: (entryId) => {
+    const state = get();
+    const idx = state.history.findIndex((h) => h.id === entryId);
+    const entry = state.history[idx];
+    const r = entry?.instruction?.patches?.regenerator;
+    if (idx < 1 || r?.kind !== "emboss") return;
+    state.restoreToHistory(state.history[idx - 1].id);
+    set({
+      embossTool: {
+        picking: null,
+        editEntryId: entryId,
+        itemId: entry.itemId,
+        source: r.source,
+        profiles: r.profiles || [],
+        face: r.face,
+        faceSet: r.faceSet || null,
+        faceTris: r.faceTris || null,
+        // A committed emboss had a valid face selection.
+        facesValid: true,
+        params: { ...r.params },
+      },
+    });
+  },
 
   // ── Draft tool ──────────────────────────────────────────────────────────
   // Guided like Hole/Emboss — no pre-selection needed; the body is learned from

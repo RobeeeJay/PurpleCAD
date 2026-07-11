@@ -689,7 +689,6 @@ const Timeline = () => {
                   title="Edit emboss — mode / angle / offset / scale / depth"
                   onClick={(e) => {
                     e.stopPropagation();
-                    restoreToHistory(entry.id);
                     beginEmbossEdit(entry.id);
                   }}
                 >

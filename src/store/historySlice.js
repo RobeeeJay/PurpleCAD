@@ -570,18 +570,20 @@ export const createHistorySlice = (set) => ({
       });
       const relinked = commitEntryEdit(newHistory, entryId);
       // Editing views the PRE-chamfer step (beginChamferEdit) — land back on
-      // the edited entry so the freshly committed result is what's on screen.
+      // the edited entry so the freshly committed result is what's on screen
+      // (null = the tip, matching restoreToHistory's convention).
       const activeIdx = relinked.findIndex((h) => h.id === entryId);
+      const newActive = activeIdx === relinked.length - 1 ? null : entryId;
       const items = replayUpTo(
         relinked,
         activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(relinked, entryId);
+      saveTimeline(relinked, newActive);
       return Object.assign(
         {
           items,
           history: withOrphanFlags(relinked),
-          activeHistoryId: entryId,
+          activeHistoryId: newActive,
         },
         withUndo(state),
       );
@@ -793,17 +795,22 @@ export const createHistorySlice = (set) => ({
       // Editing an upstream op must re-point downstream sources (an emboss on a
       // chamfer rebuilds against the edited chamfer, not its stale snapshot).
       const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
+      // Editing views the PRE-emboss step (beginEmbossEdit) — land back on the
+      // edited entry so the freshly committed result is what's on screen (null
+      // = the tip, matching restoreToHistory's convention).
+      const activeIdx = relinked.findIndex((h) => h.id === entryId);
+      const newActive = activeIdx === relinked.length - 1 ? null : entryId;
       const items = replayUpTo(
         relinked,
         activeIdx !== -1 ? activeIdx : relinked.length - 1,
       );
-      saveTimeline(relinked, state.activeHistoryId);
+      saveTimeline(relinked, newActive);
       return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
+        {
+          items,
+          history: withOrphanFlags(relinked),
+          activeHistoryId: newActive,
+        },
         withUndo(state),
       );
     }),

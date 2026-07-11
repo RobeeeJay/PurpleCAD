@@ -117,8 +117,9 @@ test.describe.serial("chamfer edit lifecycle", () => {
       return {
         entries: s.history.length,
         editArmed: !!s.chamferEditTarget,
-        // Confirm lands back on the edited entry, showing the new result.
-        onEntry: s.activeHistoryId === s.history[s.history.length - 1].id,
+        // Confirm lands back on the edited entry — here the last step, so
+        // active is null (restoreToHistory's at-the-tip convention).
+        onEntry: s.activeHistoryId === null,
       };
     });
     expect(after.entries).toBe(entriesBefore);
