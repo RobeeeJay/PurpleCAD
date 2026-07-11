@@ -2352,7 +2352,11 @@ function solidFromMesh({ positions, indices }) {
   if (!positions || positions.length < 9) return null;
   const pos = new Float64Array(positions);
   const idx = indices && indices.length ? new Uint32Array(indices) : null;
-  const id = occ.makeSolidFromMesh(pos, idx);
+  // skipCaps: this is a step's own baked mesh — a clean OCC tessellation, not
+  // an imported file, so the tri/face rejection caps guarding imports would
+  // wrongly reject a dense curved result (an emboss relief).  Full sew stays
+  // ON (cutting + unify): the solid feeds downstream booleans/chamfers.
+  const id = occ.makeSolidFromMesh(pos, idx, /*skipCaps*/ true, false);
   return id ? { shapeId: id } : null;
 }
 

@@ -208,7 +208,12 @@ The working mechanism (keep all three pieces in lockstep):
     hard meshes, so the `fastSew` branch has a full-sew fallback.
   - So: **import** = `(false,false)` cutting+unify+caps; **export** = `(true,true)`
     fast, no caps; **emboss faceted body** = `(true,false)` cutting+unify, no caps
-    (a clean OCC tessellation — cutting is safe). The **conform emboss STAMP** is
+    (a clean OCC tessellation — cutting is safe); **JIT input-fallback sew**
+    (`solidFromMesh` op — the orchestrator sewing an upstream step's baked mesh
+    as a downstream op's input) = `(true,false)` for the same reason — with caps
+    ON a dense emboss relief was rejected and the throw escaped the recalc
+    (stuck regen dialog; the sew is now also try/caught → recipe-rebuild
+    fallback, `recalcSewInput.test.js`). The **conform emboss STAMP** is
     the exception: `(true,true)` — cutting-ON *hangs* resolving the wrapped
     prism's near-touching bent triangles, so it sews cutting-OFF and relies on
     per-shell `OrientClosedSolid` + `ShapeFix_Shell` (in `MakeSolidFromMesh`) to

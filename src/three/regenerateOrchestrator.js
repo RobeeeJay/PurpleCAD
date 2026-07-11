@@ -329,10 +329,21 @@ async function runRecalcPass(force = false) {
       // consumer — skip it and let the recipe rebuild.
       const sewSafe = pkind !== "boolean" && pkind !== "extrudeUnion";
       if (sewSafe && gd?.positions?.length >= 9) {
-        const sewn = await solidFromMesh(gd);
-        if (sewn?.shapeId != null) {
-          inputSolid = sewn.shapeId;
-          setSolid(inputEntryId, inputSolid, printPrecision);
+        // A failed sew must not abort the whole recalculation (it left the
+        // regen dialog stuck) — the recipe rebuild below is the correct
+        // fallback for anything the sew can't handle.
+        try {
+          const sewn = await solidFromMesh(gd);
+          if (sewn?.shapeId != null) {
+            inputSolid = sewn.shapeId;
+            setSolid(inputEntryId, inputSolid, printPrecision);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[OCC] recalc: sew of entry ${inputEntryId}'s baked mesh failed ` +
+              `(${err?.message}); rebuilding input from its recipe`,
+          );
         }
       }
     }
