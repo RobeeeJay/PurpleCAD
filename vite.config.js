@@ -99,5 +99,11 @@ export default defineConfig({
     // Only the in-repo unit tests under src/.  The Playwright E2E specs live in
     // e2e/ and use their own runner — vitest must not try to collect them.
     include: ["src/**/*.test.{js,jsx}"],
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{js,jsx}", "electron/**/*.cjs"],
+      exclude: ["src/**/__tests__/**", "src/three/vendor/**"],
+      reporter: ["text-summary", "html"],
+    },
   },
 });

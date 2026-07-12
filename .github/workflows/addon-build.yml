@@ -2,13 +2,7 @@ name: OCC Addon
 
 on:
   push:
-    paths:
-      - 'native/occ-addon/**'
-      - '.github/workflows/addon-build.yml'
   pull_request:
-    paths:
-      - 'native/occ-addon/**'
-      - '.github/workflows/addon-build.yml'
 
 jobs:
   build:
@@ -75,6 +69,35 @@ jobs:
 
       - name: Test addon
         run: npm run addon:test
+
+      - name: Unit tests (vitest)
+        run: npx vitest run
+
+      - name: Renderer build (vite)
+        run: npx vite build
+
+      # occOps.js must stay external to the renderer bundle (its Node
+      # createRequire would crash the browser side) — see vite.config.js.
+      - name: Verify occ addon absent from bundle
+        run: |
+          if grep -R "occ_addon" dist/ -q; then
+            echo "occ_addon leaked into the renderer bundle" >&2
+            exit 1
+          fi
+
+      - name: E2E (Playwright + Electron)
+        run: |
+          npm run sqlite:rebuild
+          VITE_E2E=1 vite build
+          npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7
 
       - name: Upload addon artifact
         uses: actions/upload-artifact@v4

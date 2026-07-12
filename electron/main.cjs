@@ -325,13 +325,10 @@ app.whenReady().then(() => {
   // registerFileProtocol was deprecated in Electron 25 and removed in later
   // majors.  net.fetch on a file:// URL streams the dist file back.
   const DIST = path.join(__dirname, "..", "dist");
+  const { resolveAppPath } = require("./resolveAppPath.cjs");
   protocol.handle("app", (request) => {
-    const url = new urlMod.URL(request.url);
-    // The host part of `app://./index.html` is "." — strip it.
-    const pathname = decodeURIComponent(url.pathname);
-    const filePath = path.normalize(path.join(DIST, pathname));
-    // Refuse traversal outside dist/.
-    if (!filePath.startsWith(DIST)) {
+    const filePath = resolveAppPath(DIST, request.url);
+    if (filePath == null) {
       return new Response("forbidden", { status: 403 });
     }
     if (!fsMod.existsSync(filePath)) {
