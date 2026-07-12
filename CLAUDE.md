@@ -127,8 +127,11 @@ files just to make these go away.
   `booleanInputLocal`, `buildItemShapeLocal`, `performCsg`, `splitItem`,
   the export builder, or any op body: **edit BOTH files in the same commit**,
   and grep the bridge for the same landmine (`git grep -n "scaleShape\|t.scale\|buildBrushTransform" electron/occ-bridge.cjs`).
-  Vitest cannot catch a bridge drift (it never loads the `.cjs`); the only
-  guard is this rule + a manual Electron smoke check.
+  `bridgeParity.test.js` (src/three/occ/__tests__) machine-checks the core
+  ops by running BOTH implementations and diffing the geometry — extend it
+  when adding an op — and `e2e/bridge-parity.spec.js` covers the real IPC
+  path.  Those catch result drift; a bridge-only crash or an op the suites
+  don't cover still needs this rule + an Electron smoke check.
 
 ## Native OCC addon (native/occ-addon)
 
