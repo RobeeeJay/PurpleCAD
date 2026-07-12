@@ -2,13 +2,18 @@ import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
 let app;
 let page;
+const securityWarnings = [];
 
 test.beforeAll(async () => {
   app = await launchApp();
   page = await app.firstWindow();
-  // Surface renderer console errors in the test output for easier debugging.
+  // Surface renderer console errors in the test output for easier debugging,
+  // and collect Electron's security warnings (they only print in unpackaged
+  // runs — exactly what this suite is).
   page.on("console", (msg) => {
     if (msg.type() === "error") console.log(`[renderer error] ${msg.text()}`);
+    if (/Electron Security Warning|Content-Security-Policy/i.test(msg.text()))
+      securityWarnings.push(msg.text());
   });
 });
 
@@ -19,6 +24,13 @@ test.afterAll(async () => {
 test("app boots and the toolbar renders", async () => {
   // The React Toolbar root mounts once the renderer bundle has loaded.
   await expect(page.locator(".toolbar")).toBeVisible();
+});
+
+test("no Electron security warnings (CSP present, no unsafe-eval)", async () => {
+  // index.html ships a strict CSP; a missing policy (or one with
+  // unsafe-eval) makes unpackaged Electron print a console warning.
+  await page.waitForTimeout(500); // warnings print shortly after load
+  expect(securityWarnings).toEqual([]);
 });
 
 test("the OCC IPC bridge answers a push/pull request end-to-end", async () => {

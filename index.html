@@ -2,6 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <!-- Kills Electron's "Insecure Content-Security-Policy" warning and locks the
+       renderer down: no eval, no remote script/style/connect.  Notes:
+       - style-src 'unsafe-inline': React style props are inline style
+         attributes; CSP has no nonce mechanism for attributes.
+       - img-src data:/blob:: viewport thumbnails and texture data URLs.
+       - worker-src blob:: three.js/pathtracer workers are spawned from blobs.
+       - connect-src ws://localhost + 127.0.0.1: the Vite dev server's HMR
+         socket (dev only; inert in the packaged app, which serves app://). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:3000 ws://127.0.0.1:3000; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-src 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="./favicon.png">
   <title>PurpleCAD</title>
