@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { exportSTL, exportSTEP, importStep } from "../../three/occClient.js";
+import { packHistory } from "../../store/geometryPack.js";
 import { maxItemId } from "../../store/internals.js";
 import { activePrecision } from "../../three/resolution.js";
 import {
@@ -82,10 +83,17 @@ const DocumentSection = () => {
   );
 
   const handleSave = () => {
+    // Packed meshes (geometryPack.js): a dense displacement mesh as raw JSON
+    // float text made documents 100s of MB and the stringify itself OOM'd.
     const blob = new Blob(
       [
         JSON.stringify(
-          { version: 1, history, activeHistoryId, variables },
+          {
+            version: 1,
+            history: packHistory(history),
+            activeHistoryId,
+            variables,
+          },
           null,
           2,
         ),

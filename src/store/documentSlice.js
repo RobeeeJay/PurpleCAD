@@ -3,6 +3,7 @@
 // historySlice because they bypass undo/redo and touch persistence
 // directly.
 
+import { unpackHistory } from "./geometryPack.js";
 import {
   replayUpTo,
   withOrphanFlags,
@@ -11,6 +12,7 @@ import {
   saveFolders,
   setNextHistoryId,
   backfillEmbossFrames,
+  pruneTextureSourceChains,
 } from "./internals.js";
 import { clearCamera } from "./db.js";
 
@@ -59,7 +61,9 @@ export const createDocumentSlice = (set) => ({
         );
         return {};
       }
-      const history = backfillEmbossFrames(data.history);
+      const history = pruneTextureSourceChains(
+        backfillEmbossFrames(unpackHistory(data.history)),
+      );
       const maxId = Math.max(...history.map((h) => h.id));
       setNextHistoryId(maxId + 1);
       const newActiveHistoryId =

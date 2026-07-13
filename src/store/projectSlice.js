@@ -11,6 +11,7 @@ import {
   setNextHistoryId,
   loadMaterialSettings,
   backfillEmbossFrames,
+  pruneTextureSourceChains,
 } from "./internals.js";
 import { DEFAULT_MATERIAL } from "../three/materialPresets.js";
 
@@ -36,7 +37,9 @@ function projectStatePatch() {
     ],
     activeHistoryId: null,
   };
-  const history = backfillEmbossFrames(timeline.history);
+  const history = pruneTextureSourceChains(
+    backfillEmbossFrames(timeline.history),
+  );
   const activeHistoryId = timeline.activeHistoryId ?? null;
   const maxId = Math.max(0, ...history.map((h) => h.id));
   setNextHistoryId(maxId + 1);

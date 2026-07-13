@@ -9,3 +9,4 @@ test-results/
 .env.local
 .env.*.local
 coverage/
+test-files/oom-crash.pcad

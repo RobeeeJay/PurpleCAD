@@ -1,3 +1,4 @@
+import { unpackHistory } from "./geometryPack.js";
 // Project-aware persistence facade.  In Electron it's backed by the normalised
 // SQLite database in the main process (synchronous IPC).  In a plain browser it
 // falls back to localStorage; under node/vitest it uses an in-memory map.  The
@@ -170,8 +171,9 @@ const pid = (id) => (id == null ? activeProjectId : id);
 
 export function getTimeline(id) {
   const a = api();
-  if (a) return a.dbGetTimeline(pid(id));
-  return jGet(`p${pid(id)}:timeline`, null);
+  const raw = a ? a.dbGetTimeline(pid(id)) : jGet(`p${pid(id)}:timeline`, null);
+  if (raw?.history) return { ...raw, history: unpackHistory(raw.history) };
+  return raw;
 }
 export function saveTimeline(data, id) {
   const a = api();

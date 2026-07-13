@@ -10,6 +10,8 @@
 // Electron, localStorage in a plain browser, in-memory under tests) rather than
 // touching localStorage here.  Everything here operates on the active project.
 import * as db from "./db.js";
+import { packHistory, unpackHistory } from "./geometryPack.js";
+import { pruneNestedSourceGeometry } from "../three/textureDisplace.js";
 
 // ---------------------------------------------------------------------------
 // Instruction application
@@ -280,8 +282,8 @@ export const saveTimeline = (history, activeHistoryId) => {
     // `dirty` is transient runtime cache state (JIT timeline model) — never
     // persist it; a reload trusts the stored per-entry geometry until something
     // invalidates it.
-    const persisted = history.map((e) =>
-      e.dirty ? (({ dirty, ...rest }) => rest)(e) : e,
+    const persisted = packHistory(
+      history.map((e) => (e.dirty ? (({ dirty, ...rest }) => rest)(e) : e)),
     );
     db.saveTimeline({ history: persisted, activeHistoryId });
   } catch (e) {
@@ -321,6 +323,29 @@ export const backfillEmbossFrames = (history) =>
         };
   });
 
+// One-time migration for documents saved before texture commits pruned their
+// frozen sources: stacked displacement maps nested every prior step's DENSE
+// mesh inside the next source (O(k²) copies — a 300 MB document / renderer
+// OOM).  Strip geometryData below level 1 of each texture source chain; the
+// level-1 mesh (the displacement base) is kept.
+export const pruneTextureSourceChains = (history) =>
+  history.map((e) => {
+    const inst = e.instruction;
+    const holder = inst?.type === "modify" ? inst.patches : inst?.item;
+    const r = holder?.regenerator;
+    if (r?.kind !== "texture" || !r.source?.regenerator?.source) return e;
+    const regenerator = {
+      ...r,
+      source: pruneNestedSourceGeometry(r.source),
+    };
+    return inst.type === "modify"
+      ? {
+          ...e,
+          instruction: { ...inst, patches: { ...inst.patches, regenerator } },
+        }
+      : { ...e, instruction: { ...inst, item: { ...inst.item, regenerator } } };
+  });
+
 export const loadTimeline = () => {
   try {
     const parsed = db.getTimeline();
@@ -333,7 +358,10 @@ export const loadTimeline = () => {
       }
       const maxId = Math.max(...parsed.history.map((h) => h.id));
       setNextHistoryId(maxId + 1);
-      return { ...parsed, history: backfillEmbossFrames(parsed.history) };
+      return {
+        ...parsed,
+        history: pruneTextureSourceChains(backfillEmbossFrames(parsed.history)),
+      };
     }
   } catch (e) {
     console.warn("Failed to load timeline from storage:", e);
