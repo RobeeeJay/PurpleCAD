@@ -169,9 +169,9 @@ export function createEmbossInteraction({
 
     // A cylinder primitive's curved side is a known wrap target (axis +Y).  Like
     // the sphere it's raymarched on a box hull, so project the box hit onto the
-    // actual surface (known radius 1, makeCylinder) for the anchor + radius.
+    // actual surface (its OCC local radius/height) for the anchor + radius.
     if (it?.type === "cylinder" && Math.abs(localN.y) < 0.7) {
-      const R = 1;
+      const R = it.dimensions?.radius ?? 1;
       const rad = Math.hypot(localP.x, localP.z) || 1;
       const sx = (localP.x / rad) * R,
         sz = (localP.z / rad) * R;
@@ -185,13 +185,29 @@ export function createEmbossInteraction({
         setPositions: null,
       };
     }
+    // Cylinder cap: a flat analytic face — no triangle set to grow (the hull
+    // mesh is a box, not the surface).  The plane rides in the faceSet so the
+    // texture region test can bound itself without faceTris.
+    if (it?.type === "cylinder") {
+      const h = it.dimensions?.height ?? 2;
+      const cy = localN.y > 0 ? h / 2 : -h / 2;
+      const face = {
+        nx: 0,
+        ny: Math.sign(localN.y),
+        nz: 0,
+        cx: localP.x,
+        cy,
+        cz: localP.z,
+      };
+      return { id, mesh, face, faceSet: { plane: face }, setPositions: null };
+    }
     // A sphere primitive is raymarched on a 3×3×3 box HULL, so the raycast hits
     // the box — not the sphere.  Derive the surface anchor from the hit DIRECTION
-    // and the known local radius (makeSphere(1.5)) instead of the box point /
-    // axis-aligned box normal, or the relief wraps onto an oversized sphere and
-    // floats off the body.
+    // and the known local radius instead of the box point / axis-aligned box
+    // normal, or the relief wraps onto an oversized sphere and floats off the
+    // body.
     if (it?.type === "sphere") {
-      const R = 1.5;
+      const R = it.dimensions?.radius ?? 1.5;
       const dir = new THREE.Vector3(localP.x, localP.y, localP.z);
       if (dir.lengthSq() < 1e-9) dir.set(0, 1, 0);
       dir.normalize();
@@ -207,6 +223,76 @@ export function createEmbossInteraction({
           cz: dir.z * R,
         },
         faceSet: { sphere: { cx: 0, cy: 0, cz: 0, radius: R } },
+        setPositions: null,
+      };
+    }
+    // Cone (axis +Y, centred): side picks carry the analytic cone; near-flat
+    // hits at the top/bottom rings are the caps.
+    if (it?.type === "cone") {
+      const rb = it.dimensions?.radiusBottom ?? 1;
+      const rt = it.dimensions?.radiusTop ?? 0;
+      const h = it.dimensions?.height ?? 2;
+      const capBottom = localP.y < -h / 2 + 1e-3 && Math.abs(localN.y) > 0.7;
+      const capTop =
+        rt > 1e-6 && localP.y > h / 2 - 1e-3 && Math.abs(localN.y) > 0.7;
+      if (capBottom || capTop) {
+        const cy = capTop ? h / 2 : -h / 2;
+        const face = {
+          nx: 0,
+          ny: capTop ? 1 : -1,
+          nz: 0,
+          cx: localP.x,
+          cy,
+          cz: localP.z,
+        };
+        return { id, mesh, face, faceSet: { plane: face }, setPositions: null };
+      }
+      // Project the hull hit onto the cone surface at its height.
+      const y = Math.max(-h / 2, Math.min(h / 2, localP.y));
+      const rAt = rb + ((rt - rb) * (y + h / 2)) / h;
+      const rad = Math.hypot(localP.x, localP.z) || 1;
+      const sx = (localP.x / rad) * rAt,
+        sz = (localP.z / rad) * rAt;
+      const slope = (rb - rt) / h;
+      const nl = Math.hypot(1, slope) || 1;
+      return {
+        id,
+        mesh,
+        face: {
+          nx: ((localP.x / rad) * 1) / nl,
+          ny: slope / nl,
+          nz: ((localP.z / rad) * 1) / nl,
+          cx: sx,
+          cy: y,
+          cz: sz,
+        },
+        faceSet: { cone: { rb, rt, h } },
+        setPositions: null,
+      };
+    }
+    // Torus (axis +Y, centred): the whole surface is one face.  Anchor =
+    // nearest point on the tube; normal = out of the tube.
+    if (it?.type === "torus") {
+      const R = it.dimensions?.major ?? 1;
+      const r = it.dimensions?.minor ?? 0.4;
+      const rad = Math.hypot(localP.x, localP.z) || 1;
+      const ring = { x: (localP.x / rad) * R, y: 0, z: (localP.z / rad) * R };
+      const dx = localP.x - ring.x,
+        dy = localP.y - ring.y,
+        dz = localP.z - ring.z;
+      const dl = Math.hypot(dx, dy, dz) || 1;
+      return {
+        id,
+        mesh,
+        face: {
+          nx: dx / dl,
+          ny: dy / dl,
+          nz: dz / dl,
+          cx: ring.x + (dx / dl) * r,
+          cy: ring.y + (dy / dl) * r,
+          cz: ring.z + (dz / dl) * r,
+        },
+        faceSet: { torus: { R, r } },
         setPositions: null,
       };
     }

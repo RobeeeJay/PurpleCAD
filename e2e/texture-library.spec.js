@@ -43,6 +43,86 @@ test.describe.serial("texture library", () => {
     expect(armed).toEqual({ name: "Knurled grip", hasPng: true });
   });
 
+  test("every default map tiles seamlessly (wrap without distortion)", async () => {
+    // Compare opposite edges of each generated bitmap: for a seamless tile
+    // the left/right columns and top/bottom rows must (nearly) match — a
+    // visible wrap seam shows up as a large mean edge difference.
+    // The dialog is open from the previous test — read each rendered
+    // thumbnail's dataURL straight from the DOM (the built app doesn't serve
+    // source modules).
+    await page.getByTitle("Choose a bump map from the texture library", {
+      exact: false,
+    }).click();
+    await expect(page.locator(".texture-library-dialog")).toBeVisible();
+    const seams = await page.evaluate(async () => {
+      const cards = [...document.querySelectorAll(".texture-card")];
+      const entries = cards.map((el) => ({
+        name: el.querySelector(".project-name")?.textContent ?? "?",
+        dataURL: el.querySelector("img")?.src,
+      }));
+      const out = [];
+      for (const entry of entries) {
+        const img = new Image();
+        await new Promise((res) => {
+          img.onload = res;
+          img.src = entry.dataURL;
+        });
+        const c = document.createElement("canvas");
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const d = ctx.getImageData(0, 0, c.width, c.height).data;
+        const px = (x, y) => d[(y * c.width + x) * 4];
+        // The wrap joint (last column → first column) is one pixel step in
+        // pattern space, the same as any interior adjacent-column step.  A
+        // real seam makes the joint difference far LARGER than the typical
+        // interior step, so measure the ratio, not the absolute difference.
+        const colDiff = (x1, x2) => {
+          let sum = 0;
+          for (let y = 0; y < c.height; y++)
+            sum += Math.abs(px(x1, y) - px(x2, y));
+          return sum / c.height;
+        };
+        const rowDiff = (y1, y2) => {
+          let sum = 0;
+          for (let x = 0; x < c.width; x++)
+            sum += Math.abs(px(x, y1) - px(x, y2));
+          return sum / c.width;
+        };
+        let adjX = 0,
+          adjY = 0;
+        const samples = 16;
+        for (let k = 1; k <= samples; k++) {
+          const x = Math.floor((c.width - 2) * (k / (samples + 1)));
+          const y = Math.floor((c.height - 2) * (k / (samples + 1)));
+          adjX += colDiff(x, x + 1);
+          adjY += rowDiff(y, y + 1);
+        }
+        adjX /= samples;
+        adjY /= samples;
+        out.push({
+          name: entry.name,
+          lr: colDiff(c.width - 1, 0),
+          tb: rowDiff(0, c.height - 1),
+          adjX,
+          adjY,
+        });
+      }
+      return out;
+    });
+    expect(seams.length).toBe(10);
+    for (const s of seams) {
+      expect(s.lr, `${s.name} left/right seam (adj ${s.adjX})`).toBeLessThan(
+        Math.max(8, 2.5 * s.adjX),
+      );
+      expect(s.tb, `${s.name} top/bottom seam (adj ${s.adjY})`).toBeLessThan(
+        Math.max(8, 2.5 * s.adjY),
+      );
+    }
+    await page.locator(".projects-close").click();
+  });
+
   test("import guards size, lands in rename, persists; delete warns", async () => {
     await page.getByTitle("Choose a bump map from the texture library", {
       exact: false,

@@ -118,6 +118,59 @@ export function regionTest(faceTris, tol = 0.02) {
   };
 }
 
+// Region test for a PRIMITIVE's analytic face (no pick-time triangle soup):
+// membership = "on the fitted surface", within tolerance.  The plane variant
+// bounds a cap; curved variants cover the whole curved face — which IS the
+// picked face on a primitive.
+export function surfaceRegionTest(faceSet, tol = 0.02) {
+  if (faceSet?.plane) {
+    const { nx, ny, nz, cx, cy, cz } = faceSet.plane;
+    return (x, y, z) =>
+      Math.abs((x - cx) * nx + (y - cy) * ny + (z - cz) * nz) <= tol;
+  }
+  if (faceSet?.cylinder) {
+    const { ax, ay, az, cx, cy, cz, radius } = faceSet.cylinder;
+    const A = norm3(ax, ay, az);
+    return (x, y, z) => {
+      const dx = x - cx,
+        dy = y - cy,
+        dz = z - cz;
+      const along = dx * A[0] + dy * A[1] + dz * A[2];
+      const rad = Math.hypot(
+        dx - along * A[0],
+        dy - along * A[1],
+        dz - along * A[2],
+      );
+      return Math.abs(rad - radius) <= tol;
+    };
+  }
+  if (faceSet?.sphere) {
+    const { cx, cy, cz, radius } = faceSet.sphere;
+    return (x, y, z) =>
+      Math.abs(Math.hypot(x - cx, y - cy, z - cz) - radius) <= tol;
+  }
+  if (faceSet?.cone) {
+    const { rb, rt, h } = faceSet.cone;
+    const rAt = (y) => rb + ((rt - rb) * (y + h / 2)) / h;
+    const slant = Math.hypot(1, (rb - rt) / h);
+    return (x, y, z) => {
+      if (y < -h / 2 - tol || y > h / 2 + tol) return false;
+      return Math.abs(Math.hypot(x, z) - rAt(y)) <= tol * slant;
+    };
+  }
+  if (faceSet?.torus) {
+    const { R, r } = faceSet.torus;
+    return (x, y, z) => {
+      const rad = Math.hypot(x, z) || 1;
+      const ring = [(x / rad) * R, 0, (z / rad) * R];
+      return (
+        Math.abs(Math.hypot(x - ring[0], y - ring[1], z - ring[2]) - r) <= tol
+      );
+    };
+  }
+  return null;
+}
+
 // ── Refinement ───────────────────────────────────────────────────────────────
 
 // Crack-free midpoint refinement: an EDGE splits when it is longer than
@@ -231,7 +284,9 @@ const norm3 = (x, y, z) => {
 // { uv(x,y,z) -> [u,v], normal(x,y,z) -> [nx,ny,nz] } or null.
 export function buildMapping(face, faceSet, projection) {
   const anchor = [face.cx, face.cy, face.cz];
-  if (projection !== "conform" || !faceSet) {
+  // A {plane} faceSet only bounds the REGION (primitive caps); its mapping is
+  // the flat one.
+  if (projection !== "conform" || !faceSet || faceSet.plane) {
     // Flat/centre projection: an in-plane basis around the anchor.
     const n = norm3(face.nx, face.ny, face.nz);
     const tmp = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
@@ -329,6 +384,63 @@ export function buildMapping(face, faceSet, projection) {
         return [Math.atan2(du, dn) * radius, Math.atan2(dv, dn) * radius];
       },
       normal: (x, y, z) => norm3(x - cx, y - cy, z - cz),
+    };
+  }
+  if (faceSet.cone) {
+    // Cone about +Y, centred at the origin (the primitive's local frame):
+    // u = arc length around the surface at the point's own radius, v = slant
+    // distance from the anchor's height.  Not a true unroll (rows don't share
+    // an apex angle) but wrap-consistent within each row.
+    const { rb, rt, h } = faceSet.cone;
+    const slope = (rb - rt) / h;
+    const slantPerY = Math.hypot(1, slope);
+    const rAt = (y) => rb + ((rt - rb) * (y + h / 2)) / h;
+    const theta = (x, z) => Math.atan2(z, x);
+    const theta0 = theta(anchor[0], anchor[2]);
+    const rAnchor = Math.max(rAt(anchor[1]), 1e-6);
+    return {
+      uv: (x, y, z) => {
+        let dth = theta(x, z) - theta0;
+        while (dth > Math.PI) dth -= 2 * Math.PI;
+        while (dth < -Math.PI) dth += 2 * Math.PI;
+        return [dth * Math.max(rAt(y), 1e-6), (y - anchor[1]) * slantPerY];
+      },
+      normal: (x, y, z) => {
+        const rad = Math.hypot(x, z) || 1;
+        const nl = Math.hypot(1, slope) || 1;
+        return [x / rad / nl, slope / nl, z / rad / nl];
+      },
+      circumference: 2 * Math.PI * rAnchor,
+    };
+  }
+  if (faceSet.torus) {
+    // Torus about +Y: u = major arc length along the centreline ring,
+    // v = minor arc length around the tube.  Both directions are closed.
+    const { R, r } = faceSet.torus;
+    const thetaOf = (x, z) => Math.atan2(z, x);
+    const minorOf = (x, y, z) => {
+      const rad = Math.hypot(x, z) || 1;
+      return Math.atan2(y, rad - R);
+    };
+    const theta0 = thetaOf(anchor[0], anchor[2]);
+    const phi0 = minorOf(anchor[0], anchor[1], anchor[2]);
+    const wrapPi = (a) => {
+      while (a > Math.PI) a -= 2 * Math.PI;
+      while (a < -Math.PI) a += 2 * Math.PI;
+      return a;
+    };
+    return {
+      uv: (x, y, z) => [
+        wrapPi(thetaOf(x, z) - theta0) * R,
+        wrapPi(minorOf(x, y, z) - phi0) * r,
+      ],
+      normal: (x, y, z) => {
+        const rad = Math.hypot(x, z) || 1;
+        const ring = [(x / rad) * R, 0, (z / rad) * R];
+        return norm3(x - ring[0], y - ring[1], z - ring[2]);
+      },
+      circumference: 2 * Math.PI * R,
+      circumferenceV: 2 * Math.PI * r,
     };
   }
   if (faceSet.developable) {
@@ -451,12 +563,15 @@ export function displaceMesh({
   params,
 }) {
   const mapping = buildMapping(face, faceSet, params.projection);
-  if (!mapping || !heightfield || !faceTris?.length) return null;
+  if (!mapping || !heightfield) return null;
+  const tol = Math.max(0.02, params.resolution * 0.5);
+  // Mesh picks carry a pick-time triangle soup; primitive picks are analytic
+  // (whole curved face / cap plane) and bound the region from the faceSet.
+  const inRegion = faceTris?.length
+    ? regionTest(faceTris, tol)
+    : surfaceRegionTest(faceSet, tol);
+  if (!inRegion) return null;
   const { verts: v0, tris: t0 } = weldMesh(mesh.positions, mesh.indices);
-  const inRegion = regionTest(
-    faceTris,
-    Math.max(0.02, params.resolution * 0.5),
-  );
 
   const verts = v0.slice();
   let tris = t0.slice();
@@ -485,8 +600,19 @@ export function displaceMesh({
   }
   const meshNormals = vertexNormals(verts, tris);
 
-  const sizeU = params.sizeU;
-  const sizeV = (sizeU * heightfield.height) / heightfield.width;
+  // Wrapping a CLOSED direction must fit a whole number of tiles or the
+  // pattern jumps at the seam: snap the tile size to the circumference.
+  let sizeU = params.sizeU;
+  let sizeV = (sizeU * heightfield.height) / heightfield.width;
+  if (params.wrap && mapping.circumference) {
+    const n = Math.max(1, Math.round(mapping.circumference / sizeU));
+    sizeU = mapping.circumference / n;
+    sizeV = (sizeU * heightfield.height) / heightfield.width;
+  }
+  if (params.wrap && mapping.circumferenceV) {
+    const n = Math.max(1, Math.round(mapping.circumferenceV / sizeV));
+    sizeV = mapping.circumferenceV / n;
+  }
   const cosR = Math.cos(params.rotationRad || 0);
   const sinR = Math.sin(params.rotationRad || 0);
   for (let i = 0; i < nVerts; i++) {

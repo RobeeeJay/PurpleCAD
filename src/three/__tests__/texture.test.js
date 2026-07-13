@@ -100,6 +100,49 @@ describe("texture regen", () => {
   }, 60000);
 });
 
+describe("texture on primitives", () => {
+  it("displaces a cylinder's curved wall from an analytic faceSet (no faceTris)", async () => {
+    const cyl = {
+      id: 6,
+      type: "cylinder",
+      position: O,
+      rotation: O,
+      scale: S,
+      dimensions: { radius: 1, height: 2 },
+    };
+    const item = {
+      ...cyl,
+      type: "csg",
+      regenerator: regen({
+        source: { ...cyl },
+        face: { nx: 1, ny: 0, nz: 0, cx: 1, cy: 0, cz: 0 },
+        faceSet: {
+          cylinder: { ax: 0, ay: 1, az: 0, cx: 0, cy: 0, cz: 0, radius: 1 },
+        },
+        faceTris: null,
+        params: {
+          ...regen().params,
+          projection: "conform",
+          wrap: true,
+          sizeMm: 15,
+          depthMm: 1,
+          resolutionMm: 2,
+        },
+      }),
+      geometryData: null,
+    };
+    const out = await regenerateItemsForResolution([item], 0.1, null, null);
+    const p = out.find((i) => i.id === 6).geometryData.positions;
+    let maxR = 0;
+    for (let i = 0; i < p.length; i += 3)
+      maxR = Math.max(maxR, Math.hypot(p[i], p[i + 2]));
+    // The wall bulges out by up to 1 mm (0.1 units) — proof the analytic
+    // region + conform mapping displaced the curved face.
+    expect(maxR).toBeGreaterThan(1.05);
+    expect(maxR).toBeLessThanOrEqual(1.1 + 1e-6);
+  }, 60000);
+});
+
 describe("texture timeline edit", () => {
   const geom = { positions: [0, 0, 0], normals: null, indices: [0] };
   const patches = (depthMm) => ({

@@ -167,23 +167,30 @@ const dimples = (n) => (ctx) => {
       );
 };
 
-// Hex honeycomb ridges.
+// Hex honeycomb ridges.  A regular hex grid's vertical period (r√3) can't
+// divide a square canvas, so the hexes are stretched a hair vertically to
+// make the pattern period exactly SIZE — that keeps the tile seamless.
 const hexes = (n) => (ctx) => {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, SIZE, SIZE);
-  const r = SIZE / n;
-  const h = r * Math.sqrt(3);
+  const r = SIZE / n; // horizontal period 3r divides SIZE when n % 3 === 0
+  const hIdeal = r * Math.sqrt(3);
+  // The vertical PERIOD is 2h (alternate rows shift by 1.5r), so the row
+  // count must be EVEN for the tile to wrap; squash the hexes to fit.
+  const rows = 2 * Math.max(1, Math.round(SIZE / (2 * hIdeal)));
+  const h = SIZE / rows;
+  const squash = h / hIdeal;
   ctx.strokeStyle = "#e6e6e6";
   ctx.lineWidth = r * 0.28;
-  for (let row = -1; row * h < SIZE + h; row++)
+  for (let row = -1; row <= rows + 1; row++)
     for (let col = -1; col * 3 * r < SIZE + 3 * r; col++) {
       const cx = col * 3 * r + (row % 2 ? 1.5 * r : 0);
-      const cy = (row * h) / 1;
+      const cy = row * h;
       ctx.beginPath();
       for (let k = 0; k <= 6; k++) {
         const a = (Math.PI / 3) * k;
         const px = cx + r * Math.cos(a);
-        const py = cy + r * Math.sin(a);
+        const py = cy + r * Math.sin(a) * squash;
         if (k === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
@@ -207,10 +214,15 @@ const brushed = () => (ctx) => {
     const v = Math.round(70 + rand() * 150);
     ctx.strokeStyle = `rgb(${v},${v},${v})`;
     ctx.lineWidth = 0.8 + rand() * 1.4;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + w, y);
-    ctx.stroke();
+    // Draw the streak at every wrap offset so edge-crossing strokes reappear
+    // on the opposite side — that's what makes the tile seamless.
+    for (const ox of [-SIZE, 0, SIZE])
+      for (const oy of [-SIZE, 0, SIZE]) {
+        ctx.beginPath();
+        ctx.moveTo(x + ox, y + oy);
+        ctx.lineTo(x + w + ox, y + oy);
+        ctx.stroke();
+      }
   }
 };
 
@@ -250,7 +262,7 @@ export const DEFAULT_TEXTURES = [
     id: "knurled",
     name: "Knurled grip",
     category: "Industrial",
-    draw: knurl(24),
+    draw: knurl(16),
   },
   {
     id: "dimpled",

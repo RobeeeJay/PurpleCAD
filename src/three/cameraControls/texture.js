@@ -80,7 +80,7 @@ export async function buildTextureResult(
   const displaced = displaceMesh({
     mesh,
     face: tt.face,
-    faceSet: tt.params.projection === "conform" ? tt.faceSet : null,
+    faceSet: tt.faceSet,
     faceTris: tt.faceTris,
     heightfield,
     params,

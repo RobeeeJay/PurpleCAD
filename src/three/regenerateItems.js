@@ -597,7 +597,7 @@ async function regenerateTexture(
       result = displaceMesh({
         mesh,
         face: frameFace,
-        faceSet: p.projection === "conform" ? frameFaceSet : null,
+        faceSet: frameFaceSet,
         faceTris: regenerator.faceTris,
         heightfield,
         params: {

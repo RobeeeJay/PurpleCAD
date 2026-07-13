@@ -10,6 +10,7 @@ import {
   buildMapping,
   sampleHeight,
   displaceMesh,
+  surfaceRegionTest,
 } from "../textureDisplace.js";
 
 // A unit-ish cube as a triangle soup (12 tris, duplicated verts) spanning
@@ -230,6 +231,63 @@ describe("displaceMesh", () => {
     const b = heightNear(run(-5), 0.5, 0);
     expect(a).toBeGreaterThan(1.05); // white side raised
     expect(b).toBeLessThan(a - 0.05); // offset slid the black half under it
+  });
+
+  it("primitive faceSets bound the region without faceTris", () => {
+    const cyl = surfaceRegionTest(
+      { cylinder: { ax: 0, ay: 1, az: 0, cx: 0, cy: 0, cz: 0, radius: 1 } },
+      0.05,
+    );
+    expect(cyl(1, 0.3, 0)).toBe(true); // on the wall
+    expect(cyl(0.5, 0.3, 0)).toBe(false); // inside
+    const cone = surfaceRegionTest({ cone: { rb: 1, rt: 0, h: 2 } }, 0.05);
+    expect(cone(0.5, 0, 0)).toBe(true); // mid-height radius 0.5
+    expect(cone(1, 0.9, 0)).toBe(false); // too wide near the apex
+    const tor = surfaceRegionTest({ torus: { R: 1, r: 0.4 } }, 0.05);
+    expect(tor(1.4, 0, 0)).toBe(true); // outer equator
+    expect(tor(1, 0.4, 0)).toBe(true); // top of tube
+    expect(tor(1, 0, 0)).toBe(false); // tube centreline
+    const cap = surfaceRegionTest(
+      { plane: { nx: 0, ny: 1, nz: 0, cx: 0, cy: 1, cz: 0 } },
+      0.05,
+    );
+    expect(cap(0.3, 1, 0.2)).toBe(true);
+    expect(cap(0.3, 0.5, 0.2)).toBe(false);
+  });
+
+  it("cone conform: u is the local arc length, v the slant distance", () => {
+    const mapping = buildMapping(
+      { nx: 1, ny: 0, nz: 0, cx: 0.5, cy: 0, cz: 0 }, // anchor mid-height
+      { cone: { rb: 1, rt: 0, h: 2 } },
+      "conform",
+    );
+    // Quarter turn at the anchor's height (r = 0.5).
+    const [u] = mapping.uv(0, 0, 0.5);
+    expect(Math.abs(u)).toBeCloseTo((Math.PI / 2) * 0.5, 5);
+    // Slant distance for dy=0.5 with slope 0.5: 0.5·√1.25.
+    const [, v] = mapping.uv(0.25, 0.5, 0);
+    expect(v).toBeCloseTo(0.5 * Math.hypot(1, 0.5), 5);
+    // Outward normal tilts up for a narrowing cone.
+    const n = mapping.normal(0.5, 0, 0);
+    expect(n[1]).toBeGreaterThan(0);
+    expect(n[0]).toBeGreaterThan(0);
+  });
+
+  it("torus conform: both directions closed, normals leave the tube", () => {
+    const mapping = buildMapping(
+      { nx: 1, ny: 0, nz: 0, cx: 1.4, cy: 0, cz: 0 }, // outer equator anchor
+      { torus: { R: 1, r: 0.4 } },
+      "conform",
+    );
+    const [u, v] = mapping.uv(0, 0, 1.4); // quarter major turn
+    expect(Math.abs(u)).toBeCloseTo(Math.PI / 2, 5);
+    expect(v).toBeCloseTo(0, 5);
+    const [, v2] = mapping.uv(1, 0.4, 0); // quarter minor turn
+    expect(Math.abs(v2)).toBeCloseTo((Math.PI / 2) * 0.4, 5);
+    expect(mapping.circumference).toBeCloseTo(2 * Math.PI, 5);
+    expect(mapping.circumferenceV).toBeCloseTo(2 * Math.PI * 0.4, 5);
+    const n = mapping.normal(1.4, 0, 0);
+    expect(n[0]).toBeCloseTo(1, 5);
   });
 
   it("cylinder conform wraps the arc-length parameter", () => {
