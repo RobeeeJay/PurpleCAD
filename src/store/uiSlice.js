@@ -121,6 +121,10 @@ export const uiInitial = {
   //   { picking:null|"geometry"|"faces", itemId, profiles:[], face, faceSet, params }
   embossTool: null,
 
+  // Texture tool: bump-map displacement on a picked connected-face set.
+  //   { picking:null|"faces", itemId, face, faceSet, faceTris, params }
+  textureTool: null,
+
   // The last operation error for the active tool dialog (emboss/draft/…), shown
   // as a line under the dialog.  The tool's live preview sets it on failure (with
   // the OCC message) and clears it on success; cleared when a tool starts.
@@ -298,6 +302,7 @@ export const TOOL_RESET_PATCH = {
   shellTarget: null,
   holeTool: null,
   embossTool: null,
+  textureTool: null,
   draftTool: null,
   measureTool: null,
   sweepSelectMode: null,
@@ -653,6 +658,118 @@ export const createUiSlice = (set, get) => ({
         faceSet: r.faceSet || null,
         faceTris: r.faceTris || null,
         // A committed emboss had a valid face selection.
+        facesValid: true,
+        params: { ...r.params },
+      },
+    });
+  },
+
+  // ── Texture tool ──────────────────────────────────────────────────────────
+  // Bump-map displacement on a picked connected-face set.  Mirrors the emboss
+  // state machine; the PNG rides as a dataURL in params so the recipe (and the
+  // saved document) is self-contained.
+  startTextureTool: () =>
+    set({
+      ...TOOL_RESET_PATCH,
+      textureTool: {
+        picking: "faces",
+        itemId: null,
+        face: null,
+        faceSet: null,
+        faceTris: null,
+        faceCount: 0,
+        facesValid: false,
+        params: {
+          png: null,
+          pngName: null,
+          projection: "center",
+          offsetHMm: 0,
+          offsetVMm: 0,
+          rotationDeg: 0,
+          sizeMm: 10,
+          depthMm: 1,
+          resolutionMm: 1,
+          wrap: false,
+        },
+      },
+    }),
+  // Editing views the pre-texture step (beginTextureEdit) — a plain cancel
+  // puts the user back on the entry; after a commit the update already landed.
+  cancelTextureTool: () => {
+    const { textureTool, activeHistoryId, restoreToHistory } = get();
+    if (
+      textureTool?.editEntryId != null &&
+      activeHistoryId != null &&
+      activeHistoryId !== textureTool.editEntryId
+    )
+      restoreToHistory(textureTool.editEntryId);
+    set({ textureTool: null });
+  },
+  setTexturePicking: (kind) =>
+    set((s) =>
+      s.textureTool
+        ? {
+            textureTool: {
+              ...s.textureTool,
+              picking: s.textureTool.picking === kind ? null : kind,
+            },
+          }
+        : {},
+    ),
+  // Same selection shape the emboss face pick produces; a curved pick nudges
+  // the still-default "center" projection to "conform" (same rationale).
+  setTextureFaceSelection: (sel) =>
+    set((s) => {
+      if (!s.textureTool) return {};
+      const params =
+        sel.faceSet && s.textureTool.params.projection === "center"
+          ? { ...s.textureTool.params, projection: "conform" }
+          : s.textureTool.params;
+      return {
+        textureTool: {
+          ...s.textureTool,
+          itemId: sel.itemId,
+          face: sel.face,
+          faceSet: sel.faceSet,
+          faceTris: sel.faceTris ?? null,
+          faceCount: sel.faceCount ?? 0,
+          facesValid: !!sel.valid,
+          picking: sel.keepPicking ? s.textureTool.picking : null,
+          params,
+        },
+      };
+    }),
+  updateTextureParams: (partial) =>
+    set((s) =>
+      s.textureTool
+        ? {
+            textureTool: {
+              ...s.textureTool,
+              params: { ...s.textureTool.params, ...partial },
+            },
+          }
+        : {},
+    ),
+  // Re-open a committed texture step for editing.  The timeline is restored to
+  // the PREVIOUS step so the pre-texture body is on screen: re-picking faces
+  // must happen against the source the op re-runs on, in its frame.
+  beginTextureEdit: (entryId) => {
+    const state = get();
+    const idx = state.history.findIndex((h) => h.id === entryId);
+    const entry = state.history[idx];
+    const r = entry?.instruction?.patches?.regenerator;
+    if (idx < 1 || r?.kind !== "texture") return;
+    state.restoreToHistory(state.history[idx - 1].id);
+    set({
+      textureTool: {
+        picking: null,
+        editEntryId: entryId,
+        itemId: entry.itemId,
+        source: r.source,
+        face: r.face,
+        faceSet: r.faceSet || null,
+        faceTris: r.faceTris || null,
+        faceCount: r.faceCount ?? 0,
         facesValid: true,
         params: { ...r.params },
       },

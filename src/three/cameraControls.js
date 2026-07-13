@@ -7,6 +7,7 @@ import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createShellPreviewHelpers } from "./cameraControls/shell.js";
 import { createHolePreviewHelpers } from "./cameraControls/hole.js";
 import { createEmbossPreviewHelpers } from "./cameraControls/emboss.js";
+import { createTexturePreviewHelpers } from "./cameraControls/texture.js";
 import { createDraftPreviewHelpers } from "./cameraControls/draft.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
@@ -331,19 +332,24 @@ export function attachCameraControls(ctx) {
     cancelExtrude,
   } = extrude;
 
-  const { handleEmbossHover, handleEmbossClick, syncEmbossFills } =
-    createEmbossInteraction({
-      renderer,
-      raycasterRef,
-      cameraRef,
-      mouseRef,
-      objectsRef,
-      itemsRef,
-      extrudeSelectGroupRef,
-      screenToSketchLocal,
-      pointInPolygon2D,
-      highlights,
-    });
+  const {
+    handleEmbossHover,
+    handleEmbossClick,
+    syncEmbossFills,
+    handleTextureHover,
+    handleTextureClick,
+  } = createEmbossInteraction({
+    renderer,
+    raycasterRef,
+    cameraRef,
+    mouseRef,
+    objectsRef,
+    itemsRef,
+    extrudeSelectGroupRef,
+    screenToSketchLocal,
+    pointInPolygon2D,
+    highlights,
+  });
   controls.syncEmbossFills = syncEmbossFills;
   // Clear the persistent multi-face selection highlight (on tool cancel/confirm).
   controls.clearEmbossSelectedFaces = () => highlights.clearSelectedFaces();
@@ -608,6 +614,13 @@ export function attachCameraControls(ctx) {
   });
   controls.updateEmbossPreview = () => embossPreview.updateEmbossPreview();
   controls.clearEmbossPreview = () => embossPreview.clearEmbossPreview();
+  const texturePreview = createTexturePreviewHelpers({
+    scene,
+    itemsRef,
+    objectsRef,
+  });
+  controls.updateTexturePreview = () => texturePreview.updateTexturePreview();
+  controls.clearTexturePreview = () => texturePreview.clearTexturePreview();
   const draftPreview = createDraftPreviewHelpers({
     scene,
     itemsRef,
@@ -2013,6 +2026,12 @@ export function attachCameraControls(ctx) {
       controls.mouseY = e.clientY;
       return;
     }
+    if (useStore.getState().textureTool?.picking) {
+      handleTextureHover(e.clientX, e.clientY);
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return;
+    }
     if (onSketchMouseMove(e)) return;
 
     clearSketchVisualsFor3D();
@@ -2063,6 +2082,12 @@ export function attachCameraControls(ctx) {
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5)
         handleEmbossClick(e.clientX, e.clientY, e.shiftKey);
+      return;
+    }
+    if (useStore.getState().textureTool?.picking && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) handleTextureClick(e.clientX, e.clientY);
       return;
     }
 

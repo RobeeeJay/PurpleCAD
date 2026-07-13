@@ -432,5 +432,98 @@ export function createEmbossInteraction({
     return true;
   };
 
-  return { handleEmbossHover, handleEmbossClick, syncEmbossFills };
+  // ── Texture tool face picking ─────────────────────────────────────────────
+  // Same analyze/toggle/fit pipeline as the emboss face pick, writing the
+  // textureTool's selection instead (no geometry-pick phase — the texture's
+  // "geometry" is a PNG chosen in the dialog).
+  const handleTextureHover = (x, y) => {
+    const tt = useStore.getState().textureTool;
+    if (!tt || tt.picking !== "faces") return false;
+    highlights.clearFaceHighlight();
+    const hit = pickFaceHit(x, y);
+    if (hit) {
+      const a = analyzeFace(hit);
+      if (a.setPositions)
+        highlights.highlightFaceSet(a.mesh, a.setPositions, FACE_HOVER_COLOR);
+      else highlights.applyFaceHighlight(hit, FACE_HOVER_COLOR);
+    }
+    return true;
+  };
+
+  const handleTextureClick = (x, y) => {
+    const store = useStore.getState();
+    const tt = store.textureTool;
+    if (!tt || tt.picking !== "faces") return false;
+    const hit = pickFaceHit(x, y);
+    if (!hit) return true;
+    const a = analyzeFace(hit);
+
+    // A primitive's curved face is parametric — one click is the whole face.
+    if (!a.setPositions) {
+      store.setTextureFaceSelection({
+        itemId: a.id,
+        face: a.face,
+        faceSet: a.faceSet,
+        faceTris: null,
+        valid: true,
+        keepPicking: false,
+      });
+      highlights.clearFaceHighlight();
+      highlights.clearSelectedFaces?.();
+      return true;
+    }
+
+    const startedNewBody = tt.itemId != null && tt.itemId !== a.id;
+    const prev = !startedNewBody && tt.faceTris ? tt.faceTris : [];
+    const combined = toggleRegion(prev, a.setPositions);
+    if (combined.length < 9) {
+      store.setTextureFaceSelection({
+        itemId: null,
+        face: null,
+        faceSet: null,
+        faceTris: null,
+        valid: false,
+        keepPicking: true,
+      });
+      highlights.clearSelectedFaces?.();
+    } else {
+      const { normals, centroids } = triData(combined);
+      const dev = extractDevelopableProfile(combined, normals);
+      const cyl = dev ? null : fitCylinderToFaceSet(normals, centroids);
+      const sph = dev || cyl ? null : fitSphereToFaceSet(normals, combined);
+      const center = centerFaceOfSet(normals, centroids) || a.face;
+      const valid = validateFaceSetConnectivity(combined, 45);
+      const faceCount = distinctFaceCount(combined);
+      store.setTextureFaceSelection({
+        itemId: a.id,
+        face: center,
+        faceSet: dev
+          ? { developable: dev }
+          : cyl
+            ? { cylinder: cyl }
+            : sph
+              ? { sphere: sph }
+              : null,
+        faceTris: combined,
+        faceCount,
+        valid,
+        keepPicking: true,
+      });
+      if (!valid)
+        store.showNotification?.(
+          "Selected faces aren't all connected within 45° — Confirm stays disabled.",
+        );
+      highlights.highlightSelectedFaces?.(a.mesh, combined, FACE_HOVER_COLOR);
+    }
+    highlights.clearFaceHighlight();
+    return true;
+  };
+
+  return {
+    handleEmbossHover,
+    handleEmbossClick,
+    syncEmbossFills,
+    handleTextureHover,
+    handleTextureClick,
+  };
 }

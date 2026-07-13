@@ -120,7 +120,7 @@ try {
   const OCC_OPS = [
     "performCsg", "chamferOrFilletItem", "pushPullFaces", "shellItem",
     "holeItem", "embossItem", "draftItem", "revolveItem", "pipeItem",
-    "loftItem", "exportSTL", "exportSTEP", "importStep", "splitItem",
+    "loftItem", "exportSTL", "exportSTEP", "importStep", "splitItem", "tessellateItem",
     "pattern3dItem", "releaseShape", "solidFromMesh",
   ];
   for (const op of OCC_OPS)

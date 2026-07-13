@@ -24,6 +24,7 @@ import {
   ShellIcon,
   HoleIcon,
   EmbossIcon,
+  TextureIcon,
   EditIcon,
   PlaneIcon,
   RevolveIcon,
@@ -75,6 +76,12 @@ const embossInfo = (entry) => {
   const inst = entry?.instruction;
   if (inst?.type !== "modify") return null;
   return inst.patches?.regenerator?.kind === "emboss" ? {} : null;
+};
+
+const textureInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  return inst.patches?.regenerator?.kind === "texture" ? {} : null;
 };
 
 const draftInfo = (entry) => {
@@ -152,6 +159,7 @@ const entryIcon = (entry) => {
   if (shellInfo(entry)) return <ShellIcon />;
   if (holeInfo(entry)) return <HoleIcon />;
   if (embossInfo(entry)) return <EmbossIcon />;
+  if (textureInfo(entry)) return <TextureIcon />;
   if (draftInfo(entry)) return <EmbossIcon />;
 
   const inst = entry.instruction;
@@ -268,6 +276,7 @@ const Timeline = () => {
   const setShellTarget = useStore((state) => state.setShellTarget);
   const beginHoleEdit = useStore((state) => state.beginHoleEdit);
   const beginEmbossEdit = useStore((state) => state.beginEmbossEdit);
+  const beginTextureEdit = useStore((state) => state.beginTextureEdit);
   const beginDraftEdit = useStore((state) => state.beginDraftEdit);
   const openBoxDialog = useStore((state) => state.openBoxDialog);
   const pushPullRetargetTarget = useStore(
@@ -690,6 +699,18 @@ const Timeline = () => {
                   onClick={(e) => {
                     e.stopPropagation();
                     beginEmbossEdit(entry.id);
+                  }}
+                >
+                  <EditIcon />
+                </button>
+              )}
+              {textureInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit texture — reopens the tool on the pre-texture step"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    beginTextureEdit(entry.id);
                   }}
                 >
                   <EditIcon />

@@ -219,6 +219,17 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     occ.releaseShape(b.shapeId);
   }, 30000);
 
+  it("tessellateItem", async () => {
+    const c = cube(11, {
+      position: { x: 1, y: 0.5, z: 0 },
+      scale: { x: 1, y: 2, z: 1 },
+    });
+    const args = { source: c, allItems: [c], printPrecision: 0.1 };
+    const a = await ops.tessellateItem(JSON.parse(JSON.stringify(args)));
+    const b = bridge.tessellateItem(JSON.parse(JSON.stringify(args)));
+    expect(summarize(b.geometryData)).toEqual(summarize(a.geometryData));
+  }, 30000);
+
   it("STL export is byte-identical", async () => {
     const item = cube(10, { position: { x: 0, y: 1, z: 0 } });
     const args = { items: [item], allItems: [item], precision: 0.1 };

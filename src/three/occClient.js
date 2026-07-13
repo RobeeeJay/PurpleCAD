@@ -141,6 +141,10 @@ export function releaseShape(id) {
 
 // Sew a baked mesh into a retained solid (JIT cache input fallback).  Direct
 // route (no busy/cancel wrapper) — it runs inside the recalc loop.
+export function tessellateItem(args) {
+  return runOp("tessellateItem", args);
+}
+
 export function solidFromMesh(geometryData) {
   return callOp("solidFromMesh", geometryData);
 }

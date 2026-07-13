@@ -23,6 +23,7 @@ import {
   performCsg,
 } from "./occClient.js";
 import { buildEmbossStamp } from "./embossGeometry.js";
+import { MM_PER_UNIT } from "./sceneObjects.js";
 
 // Items that came from CSG or chamfer operations store a `regenerator`
 // field describing how to re-run the operation.  This lets us recompute
@@ -551,6 +552,99 @@ async function regenerateEmboss(
   };
 }
 
+// Rebuild a texture (bump-map displacement) from its live source: base mesh →
+// displace by the stored heightfield params → bbox-centred result.  Pure JS
+// displacement (textureDisplace.js); only the base tessellation touches OCC.
+async function regenerateTexture(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const { displaceMesh } = await import("./textureDisplace.js");
+  const { decodeHeightfield } = await import("./textureImage.js");
+  const liveItems = accumulatedItems.map((i) =>
+    withLivePolygons(i, accumulatedItems, printPrecision),
+  );
+  const source = withLivePolygons(
+    regenerator.source,
+    liveItems,
+    printPrecision,
+  );
+  const { face: frameFace, faceSet: frameFaceSet } = shiftEmbossFrame(
+    regenerator.face,
+    regenerator.faceSet,
+    regenerator,
+    source,
+  );
+  let result = null;
+  try {
+    let mesh = source.geometryData;
+    if (!mesh?.positions?.length) {
+      const { tessellateItem } = await import("./occClient.js");
+      const tess = await tessellateItem({
+        source,
+        allItems: liveItems,
+        printPrecision,
+      });
+      mesh = tess?.geometryData;
+    }
+    const heightfield = await decodeHeightfield(regenerator.params.png);
+    if (mesh && heightfield) {
+      const p = regenerator.params;
+      const sc = source?.scale?.x ?? 1;
+      const mm = (v) => v / MM_PER_UNIT / sc;
+      result = displaceMesh({
+        mesh,
+        face: frameFace,
+        faceSet: p.projection === "conform" ? frameFaceSet : null,
+        faceTris: regenerator.faceTris,
+        heightfield,
+        params: {
+          projection: p.projection,
+          sizeU: Math.max(mm(p.sizeMm ?? 10), 1e-6),
+          depth: mm(p.depthMm ?? 1),
+          offsetU: mm(p.offsetHMm ?? 0),
+          offsetV: mm(p.offsetVMm ?? 0),
+          rotationRad: ((p.rotationDeg ?? 0) * Math.PI) / 180,
+          wrap: !!p.wrap,
+          resolution: Math.max(mm(p.resolutionMm ?? 1), 1e-4),
+        },
+      });
+    }
+  } catch (err) {
+    console.warn(`Texture regen failed (${err.message}); keeping geometry.`);
+    return null;
+  }
+  if (!result) return null;
+  // Bbox-centre (the csg convention) and re-anchor like every chained op.
+  const pos = result.positions;
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < pos.length; i += 3)
+    for (let k = 0; k < 3; k++) {
+      min[k] = Math.min(min[k], pos[i + k]);
+      max[k] = Math.max(max[k], pos[i + k]);
+    }
+  const centerOffset = {
+    cx: (min[0] + max[0]) / 2,
+    cy: (min[1] + max[1]) / 2,
+    cz: (min[2] + max[2]) / 2,
+  };
+  for (let i = 0; i < pos.length; i += 3) {
+    pos[i] -= centerOffset.cx;
+    pos[i + 1] -= centerOffset.cy;
+    pos[i + 2] -= centerOffset.cz;
+  }
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    centerOffset,
+    currentPosition,
+    regenerator.basePosition,
+  );
+  return { position, basePosition, geometryData: result, centerOffset };
+}
+
 async function regenerateRevolve(
   regenerator,
   accumulatedItems,
@@ -889,6 +983,8 @@ export async function regenerateItemsForResolution(
           return regenerateHole(r, out, printPrecision, item.position, opts);
         case "emboss":
           return regenerateEmboss(r, out, printPrecision, item.position, opts);
+        case "texture":
+          return regenerateTexture(r, out, printPrecision, item.position);
         case "draft":
           return regenerateDraft(r, out, printPrecision, item.position, opts);
         case "revolve":

@@ -1750,6 +1750,24 @@ function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision
   return result;
 }
 
+// Tessellate an item's rebuilt solid in its LOCAL frame (Texture tool base
+// mesh).  Mirrors occOps.js#tessellateItem.
+function tessellateItem({ source, sourceShapeId, allItems, printPrecision }) {
+  const { id, owns } = resolveSourceSolid(
+    sourceShapeId,
+    source,
+    allItems,
+    printPrecision,
+  );
+  if (id == null) return null;
+  try {
+    const tess = occ.tessellate(id, printPrecision ?? 0.5);
+    return tess ? { geometryData: tess } : null;
+  } finally {
+    if (owns) occ.releaseShape(id);
+  }
+}
+
 // Sew a baked mesh into a retained OCC solid (JIT cache input fallback).
 function solidFromMesh({ positions, indices }) {
   if (!positions || positions.length < 9) return null;
@@ -1778,4 +1796,4 @@ function setCancelBuffer(view) {
   occ.setCancelBuffer(view);
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, setCancelBuffer };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, setCancelBuffer };

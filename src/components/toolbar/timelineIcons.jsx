@@ -448,6 +448,31 @@ export const ShellIcon = () => (
   </svg>
 );
 
+export const TextureIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    {/* Cube face with bump dots (matches the toolbar Texture button) */}
+    <path
+      d="M4 8 L12 4 L20 8 L20 17 L12 21 L4 17 Z"
+      fill="currentColor"
+      fillOpacity="0.12"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M4 8 L12 12 L20 8"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinejoin="round"
+    />
+    <circle cx="8" cy="13" r="1.1" fill="currentColor" />
+    <circle cx="9.6" cy="16.4" r="1.1" fill="currentColor" />
+    <circle cx="15.4" cy="13.4" r="1.1" fill="currentColor" />
+    <circle cx="16.8" cy="16.6" r="1.1" fill="currentColor" />
+  </svg>
+);
+
 export const EmbossIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14">
     {/* Cylinder */}

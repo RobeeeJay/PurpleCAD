@@ -30,6 +30,7 @@ const TransformDialog = () => {
         s.boxDialog ||
         s.holeTool ||
         s.embossTool ||
+        s.textureTool ||
         s.draftTool ||
         s.planeTool ||
         s.sweepSelectMode ||

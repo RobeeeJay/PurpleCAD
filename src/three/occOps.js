@@ -2343,6 +2343,25 @@ async function importStep({ stepText, printPrecision }) {
   };
 }
 
+// Tessellate an item's rebuilt solid in its LOCAL frame — the Texture tool's
+// base mesh when the source has no baked geometryData (primitives, extrudes).
+// Thin by design: resolveSourceSolid + tessellate + release.
+function tessellateItem({ source, sourceShapeId, allItems, printPrecision }) {
+  const { id, owns } = resolveSourceSolid(
+    sourceShapeId,
+    source,
+    allItems,
+    printPrecision,
+  );
+  if (id == null) return null;
+  try {
+    const tess = occ.tessellate(id, printPrecision ?? 0.5);
+    return tess ? { geometryData: tess } : null;
+  } finally {
+    if (owns) occ.releaseShape(id);
+  }
+}
+
 // Sew a baked mesh into a retained OCC solid (JIT timeline cache).  Lets a
 // downstream op build on an upstream step's ALREADY-BUILT result (its display
 // mesh, the truth) instead of re-running the upstream recipe — which can fail to
@@ -2391,4 +2410,5 @@ export const ops = {
   importStep,
   releaseShape,
   solidFromMesh,
+  tessellateItem,
 };

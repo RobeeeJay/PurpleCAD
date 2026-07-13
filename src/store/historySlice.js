@@ -815,6 +815,51 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Replace a committed texture entry's payload in place — the tool's edit
+  // commit.  Mirrors updateEmbossEntry.
+  updateTextureEntry: (entryId, patch) =>
+    set((state) => {
+      const newHistory = state.history.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        const inst = entry.instruction;
+        if (inst?.type !== "modify") return entry;
+        if (inst.patches?.regenerator?.kind !== "texture") return entry;
+        return {
+          ...entry,
+          instruction: {
+            ...inst,
+            patches: {
+              ...inst.patches,
+              position: patch.position,
+              geometryData: patch.geometryData,
+              regenerator: patch.regenerator,
+            },
+          },
+        };
+      });
+      // Editing an upstream op must re-point downstream sources (an emboss on a
+      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+      const relinked = commitEntryEdit(newHistory, entryId);
+      // Editing views the PRE-texture step (beginTextureEdit) — land back on the
+      // edited entry so the freshly committed result is what's on screen (null
+      // = the tip, matching restoreToHistory's convention).
+      const activeIdx = relinked.findIndex((h) => h.id === entryId);
+      const newActive = activeIdx === relinked.length - 1 ? null : entryId;
+      const items = replayUpTo(
+        relinked,
+        activeIdx !== -1 ? activeIdx : relinked.length - 1,
+      );
+      saveTimeline(relinked, newActive);
+      return Object.assign(
+        {
+          items,
+          history: withOrphanFlags(relinked),
+          activeHistoryId: newActive,
+        },
+        withUndo(state),
+      );
+    }),
+
   // Edit a committed draft step in place (angle/flip/faces changed, geometry
   // already rebuilt).  Mirrors updateEmbossEntry.
   updateDraftEntry: (entryId, patch) =>
