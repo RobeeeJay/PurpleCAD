@@ -183,7 +183,7 @@ test.describe.serial("texture lifecycle", () => {
         pngName: "e2e.png",
         wrap: true,
         projection: "conform",
-        resolutionMm: 0.12,
+        resolutionMm: 0.15,
         depthMm: 0.5,
       });
     }, PNG_2x2);

@@ -345,17 +345,22 @@ export function createTexturePreviewHelpers({ scene, itemsRef, objectsRef }) {
     );
     fill.renderOrder = 990;
     group.add(fill);
-    const lines = new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({
-        color: WIREFRAME_EDGE_COLOR,
-        depthTest: false,
-        transparent: true,
-        opacity: 0.25,
-      }),
-    );
-    lines.renderOrder = 999;
-    group.add(lines);
+    // EdgesGeometry hashes every edge into one object — on a million-tri
+    // displacement it approaches V8's own-property ceiling and takes seconds.
+    // The fill alone reads fine for dense previews.
+    if ((indices?.length ?? positions.length / 3) / 3 <= 250000) {
+      const lines = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geometry),
+        new THREE.LineBasicMaterial({
+          color: WIREFRAME_EDGE_COLOR,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.25,
+        }),
+      );
+      lines.renderOrder = 999;
+      group.add(lines);
+    }
     group.position.set(position.x, position.y, position.z);
     group.rotation.set(rotation.x || 0, rotation.y || 0, rotation.z || 0);
     // Unscaled result mesh + the body's scale re-applied, same as emboss.

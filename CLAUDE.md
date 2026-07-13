@@ -456,7 +456,12 @@ Established landmines (each was a real bug — extend this list, never shrink it
   strips `geometryData` from everything deeper — recipes/frames/params stay.
   Apply it when committing any op whose results are mesh-dense, and guard
   unbounded density up front (`assertTriBudget` — both the tool AND regen
-  paths; the regen path missing it OOM'd vitest before the guard).
+  paths; the regen path missing it OOM'd vitest before the guard).  Density
+  guards are TWO-layer: the pre-flight estimate carries a measured slop
+  factor (bisection refinement of pathological OCC wall tessellations ran
+  3–10× the equilateral estimate — a 9.4M-tri mesh where 0.6M was expected),
+  and `refineMesh` enforces the `HARD_MAX_TRIS` ceiling DURING refinement as
+  ground truth.  Estimates alone cannot see sliver cascades.
 
 **Checklist when adding/altering any op or feature that touches existing bodies:**
 

@@ -183,12 +183,17 @@ export function refineMesh(
   tris,
   inRegionTri,
   targetLen,
-  maxPasses = 12,
+  maxPasses = 48,
+  maxTris = Infinity,
 ) {
   // inRegionTri(t, tris, verts) — the CURRENT arrays are passed because they
   // are rebuilt every pass; a closure over the caller's originals goes stale.
   const t2 = targetLen * targetLen;
   for (let pass = 0; pass < maxPasses; pass++) {
+    if (tris.length / 3 > maxTris)
+      throw new Error(
+        `texture-too-dense: refinement passed ${Math.round(maxTris / 1000)}k triangles`,
+      );
     const edgeSplit = new Map(); // "a_b" (a<b) -> midpoint index (lazy)
     const wantSplit = new Set();
     const ekey = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
@@ -198,13 +203,27 @@ export function refineMesh(
       const dz = verts[a * 3 + 2] - verts[b * 3 + 2];
       return dx * dx + dy * dy + dz * dz;
     };
-    // Pass 1: mark long edges of region triangles.
+    // Pass 1: mark each region triangle's LONGEST over-target edge only
+    // (Rivara-style longest-edge bisection).  Marking every long edge at once
+    // bisects pathological aspect ratios — the tall thin wall quads an OCC
+    // cylinder tessellation produces — into storms of slivers: measured 16×
+    // the equilateral-coverage estimate (9.4M triangles where ~0.6M was
+    // expected), which is what actually OOM'd the renderer.  Longest-edge
+    // bisection restores bounded quality; short-but-over-target edges get
+    // their turn once they become the longest.
     for (let t = 0; t < tris.length; t += 3) {
       if (!inRegionTri(t, tris, verts)) continue;
-      const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]];
-      if (len2(a, b) > t2) wantSplit.add(ekey(a, b));
-      if (len2(b, c) > t2) wantSplit.add(ekey(b, c));
-      if (len2(c, a) > t2) wantSplit.add(ekey(c, a));
+      const a = tris[t],
+        b = tris[t + 1],
+        c = tris[t + 2];
+      const ab = len2(a, b),
+        bc = len2(b, c),
+        ca = len2(c, a);
+      const m = Math.max(ab, bc, ca);
+      if (m <= t2) continue;
+      if (m === ab) wantSplit.add(ekey(a, b));
+      else if (m === bc) wantSplit.add(ekey(b, c));
+      else wantSplit.add(ekey(c, a));
     }
     if (wantSplit.size === 0) return { verts, tris };
     const midpoint = (a, b) => {
@@ -583,7 +602,24 @@ export function displaceMesh({
       (V[T[t] * 3 + 2] + V[T[t + 1] * 3 + 2] + V[T[t + 2] * 3 + 2]) / 3;
     return inRegion(cx, cy, cz);
   };
-  const refined = refineMesh(verts, tris, triInRegion, params.resolution);
+  let refined;
+  try {
+    refined = refineMesh(
+      verts,
+      tris,
+      triInRegion,
+      params.resolution,
+      48,
+      HARD_MAX_TRIS,
+    );
+  } catch (e) {
+    if (/texture-too-dense/.test(e?.message || ""))
+      throw new Error(
+        "This face is too dense to displace at that resolution — increase " +
+          "the resolution value (coarser) or shrink the face.",
+      );
+    throw e;
+  }
   tris = refined.tris;
 
   // Vertex classification: displace verts whose EVERY adjacent triangle is in
@@ -689,7 +725,11 @@ export const pruneNestedSourceGeometry = (source) => {
 // triangle count from the region's area (picked soup or analytic surface)
 // and the target edge length.  A refined equilateral-ish triangle covers
 // ~res²·√3/4; past the cap the renderer OOMs long before the user sees it.
-export const MAX_TRIS = 600000;
+// Hard ceiling enforced DURING refinement (the ground truth — estimates
+// can't see sliver cascades) and the pre-flight slop factor measured on
+// pathological OCC wall tessellations (actual/estimate ran 3–10×).
+export const HARD_MAX_TRIS = 2000000;
+export const ESTIMATE_SLOP = 6;
 export const estimateTriCount = (faceTris, faceSet, dims, resolution) => {
   let area = 0;
   if (faceTris?.length) {
@@ -728,11 +768,11 @@ export function assertTriBudget(
   resolutionMm,
 ) {
   const estimate = estimateTriCount(faceTris, faceSet, dims, resolution);
-  if (estimate > MAX_TRIS) {
+  if (estimate * ESTIMATE_SLOP > HARD_MAX_TRIS) {
     throw new Error(
-      `Resolution ${resolutionMm} mm would create roughly ` +
-        `${Math.round(estimate / 1000)}k triangles on this face — too dense ` +
-        `to work with. Increase the resolution value (coarser) or shrink the face.`,
+      `Resolution ${resolutionMm} mm is too dense for this face (roughly ` +
+        `${Math.round((estimate * ESTIMATE_SLOP) / 1000)}k triangles after ` +
+        `refinement). Increase the resolution value (coarser) or shrink the face.`,
     );
   }
 }
