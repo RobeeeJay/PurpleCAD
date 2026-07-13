@@ -140,9 +140,63 @@ export function createEmbossInteraction({
     return raycasterRef.current.intersectObjects(meshes, false)[0] || null;
   };
 
+  // A primitive's picked face as a LOCAL-frame triangle soup, so the shared
+  // highlight helpers (hover + selected) give the same visual feedback a mesh
+  // face pick gets.  Built from the analytic surface, NOT the raymarch hull.
+  const primitiveFaceSoup = (it, faceSet, face) => {
+    const d = it.dimensions || {};
+    let geo = null;
+    if (faceSet?.cylinder) {
+      const { radius } = faceSet.cylinder;
+      geo = new THREE.CylinderGeometry(
+        radius,
+        radius,
+        d.height ?? 2,
+        48,
+        1,
+        true,
+      );
+    } else if (faceSet?.sphere) {
+      geo = new THREE.SphereGeometry(faceSet.sphere.radius, 48, 24);
+    } else if (faceSet?.cone) {
+      const { rb, rt, h } = faceSet.cone;
+      geo = new THREE.CylinderGeometry(Math.max(rt, 1e-4), rb, h, 48, 1, true);
+    } else if (faceSet?.torus) {
+      const { R, r } = faceSet.torus;
+      geo = new THREE.TorusGeometry(R, r, 24, 48);
+      geo.rotateX(Math.PI / 2); // THREE's torus rings around Z; ours around Y
+    } else if (faceSet?.plane && face) {
+      // Cap disc at the picked plane's height, radius from the primitive.
+      const radius =
+        it.type === "cone"
+          ? face.ny > 0
+            ? (d.radiusTop ?? 0)
+            : (d.radiusBottom ?? 1)
+          : (d.radius ?? 1);
+      if (radius > 1e-4) {
+        geo = new THREE.CircleGeometry(radius, 48);
+        geo.rotateX(face.ny > 0 ? -Math.PI / 2 : Math.PI / 2);
+        geo.translate(0, face.cy, 0);
+      }
+    }
+    if (!geo) return null;
+    const soup = geo.toNonIndexed().attributes.position.array;
+    geo.dispose();
+    return Array.from(soup);
+  };
+
   // Turn a face hit into { id, mesh, face (centre plane, body-local), faceSet
-  // (cylinder fit or null), setPositions (the connected set's tris for hover) }.
+  // (cylinder fit or null), setPositions (the connected set's tris for hover),
+  // surfaceSoup (primitive-only: analytic tris for highlight display) }.
   const analyzeFace = (hit) => {
+    const a = analyzeFaceInner(hit);
+    if (a && !a.setPositions && a.faceSet) {
+      const it = itemsRef.current.find((i) => i.id === a.id);
+      a.surfaceSoup = primitiveFaceSoup(it, a.faceSet, a.face);
+    }
+    return a;
+  };
+  const analyzeFaceInner = (hit) => {
     const mesh = hit.object;
     const id = mesh.userData.itemId;
     const it = itemsRef.current.find((i) => i.id === id);
@@ -400,8 +454,8 @@ export function createEmbossInteraction({
     const hit = pickFaceHit(x, y);
     if (hit) {
       const a = analyzeFace(hit);
-      if (a.setPositions)
-        highlights.highlightFaceSet(a.mesh, a.setPositions, FACE_HOVER_COLOR);
+      const soup = a.setPositions || a.surfaceSoup;
+      if (soup) highlights.highlightFaceSet(a.mesh, soup, FACE_HOVER_COLOR);
       else highlights.applyFaceHighlight(hit, FACE_HOVER_COLOR);
     }
     return true;
@@ -461,7 +515,13 @@ export function createEmbossInteraction({
         keepPicking: false,
       });
       highlights.clearFaceHighlight();
-      highlights.clearSelectedFaces?.();
+      if (a.surfaceSoup)
+        highlights.highlightSelectedFaces?.(
+          a.mesh,
+          a.surfaceSoup,
+          FACE_HOVER_COLOR,
+        );
+      else highlights.clearSelectedFaces?.();
       return true;
     }
 
@@ -529,8 +589,8 @@ export function createEmbossInteraction({
     const hit = pickFaceHit(x, y);
     if (hit) {
       const a = analyzeFace(hit);
-      if (a.setPositions)
-        highlights.highlightFaceSet(a.mesh, a.setPositions, FACE_HOVER_COLOR);
+      const soup = a.setPositions || a.surfaceSoup;
+      if (soup) highlights.highlightFaceSet(a.mesh, soup, FACE_HOVER_COLOR);
       else highlights.applyFaceHighlight(hit, FACE_HOVER_COLOR);
     }
     return true;
@@ -555,7 +615,14 @@ export function createEmbossInteraction({
         keepPicking: false,
       });
       highlights.clearFaceHighlight();
-      highlights.clearSelectedFaces?.();
+      // Same feedback a mesh pick gets: the analytic face lights up.
+      if (a.surfaceSoup)
+        highlights.highlightSelectedFaces?.(
+          a.mesh,
+          a.surfaceSoup,
+          FACE_HOVER_COLOR,
+        );
+      else highlights.clearSelectedFaces?.();
       return true;
     }
 

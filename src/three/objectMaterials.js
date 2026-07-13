@@ -590,6 +590,9 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
 // not user-editable material.
 export function applyMaterialToMesh(mesh, item, materialProps) {
   if (item.type === "sketch") return;
+  // Ghosted by a tool preview — don't stomp its temporary opacity (the
+  // preview's unghost restores the real material state).
+  if (mesh.userData?.ghosted) return;
   const opacity = materialProps.opacity ?? 1;
   const transparent = opacity < 1;
   const mat = mesh.material;

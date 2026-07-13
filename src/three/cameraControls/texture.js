@@ -193,6 +193,7 @@ export function createTexturePreviewHelpers({ scene, itemsRef, objectsRef }) {
     else mat.opacity = GHOST_OPACITY;
     mat.needsUpdate = true;
     mesh.children.forEach((c) => (c.visible = false));
+    mesh.userData.ghosted = true;
   };
 
   const unghostSource = () => {
@@ -208,6 +209,7 @@ export function createTexturePreviewHelpers({ scene, itemsRef, objectsRef }) {
       mat.needsUpdate = true;
     }
     edges.forEach(({ child, visible }) => (child.visible = visible));
+    delete mesh.userData.ghosted;
     ghosted = null;
   };
 

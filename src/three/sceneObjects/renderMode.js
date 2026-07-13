@@ -104,6 +104,11 @@ export function applyRenderMode(renderMode, ctx) {
         mesh.visible = false;
         return;
       }
+      // A tool preview has GHOSTED this mesh (see the ghostSource helpers) —
+      // re-applying the render mode would reset its opacity every sync and
+      // pop the body back opaque over the preview.  Leave it alone; unghost
+      // restores it and the next mode pass re-applies normally.
+      if (mesh.userData.ghosted) return;
       // A Plane object keeps its own translucent reference material.
       if (itemData?.type === "plane") {
         mesh.visible = true;
@@ -182,6 +187,11 @@ export function applyRenderMode(renderMode, ctx) {
         mesh.visible = false;
         return;
       }
+      // A tool preview has GHOSTED this mesh (see the ghostSource helpers) —
+      // re-applying the render mode would reset its opacity every sync and
+      // pop the body back opaque over the preview.  Leave it alone; unghost
+      // restores it and the next mode pass re-applies normally.
+      if (mesh.userData.ghosted) return;
       // A Plane object keeps its own translucent reference material.
       if (itemData?.type === "plane") {
         mesh.visible = true;

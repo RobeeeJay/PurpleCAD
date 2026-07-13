@@ -177,6 +177,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     mesh.children.forEach((c) => {
       c.visible = false;
     });
+    mesh.userData.ghosted = true;
   };
 
   const unghostSource = () => {
@@ -194,6 +195,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     edges.forEach(({ child, visible }) => {
       child.visible = visible;
     });
+    delete mesh.userData.ghosted;
     ghosted = null;
   };
 
