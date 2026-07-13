@@ -26,6 +26,35 @@ test("app boots and the toolbar renders", async () => {
   await expect(page.locator(".toolbar")).toBeVisible();
 });
 
+test("every toolbar button and dropdown item has a hover tooltip", async () => {
+  const missing = await page.evaluate(
+    () =>
+      [...document.querySelectorAll(".toolbar button")]
+        .filter((b) => !b.title?.trim())
+        .map((b) => b.textContent?.trim() || b.className)
+        .slice(0, 10), // enough to name the offenders
+  );
+  expect(missing).toEqual([]);
+
+  // Dropdown menus render on demand — open each known trigger and audit its
+  // items the same way.
+  for (const trigger of ["Save / Export", "Load / Import"]) {
+    const btn = page.getByTitle(trigger, { exact: false }).first();
+    if ((await btn.count()) === 0) continue;
+    await btn.click();
+    const items = await page.evaluate(() =>
+      [...document.querySelectorAll(".toolbar-dropdown-item")].map((b) => ({
+        label: b.textContent?.trim().slice(0, 30),
+        titled: !!b.title?.trim(),
+      })),
+    );
+    expect(items.length).toBeGreaterThan(0);
+    for (const it of items) expect(it.titled, `"${it.label}"`).toBe(true);
+    await page.keyboard.press("Escape");
+    await page.mouse.click(600, 400); // close the menu
+  }
+});
+
 test("no Electron security warnings (CSP present, no unsafe-eval)", async () => {
   // index.html ships a strict CSP; a missing policy (or one with
   // unsafe-eval) makes unpackaged Electron print a console warning.

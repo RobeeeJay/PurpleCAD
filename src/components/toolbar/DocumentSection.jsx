@@ -400,19 +400,32 @@ const DocumentSection = () => {
             ref={saveMenuRef}
             style={{ top: saveMenuPos.top, left: saveMenuPos.left }}
           >
-            <button className="toolbar-dropdown-item" onClick={handleSave}>
+            <button
+              className="toolbar-dropdown-item"
+              title="Save the document as a portable .pcad file"
+              onClick={handleSave}
+            >
               Save document (.pcad)
             </button>
-            <button className="toolbar-dropdown-item" onClick={handleExportSTL}>
+            <button
+              className="toolbar-dropdown-item"
+              title="Export the visible bodies as a 3D-printable STL mesh"
+              onClick={handleExportSTL}
+            >
               Export as STL
             </button>
             <button
               className="toolbar-dropdown-item"
+              title="Export the visible bodies as a STEP file for other CAD tools"
               onClick={handleExportSTEP}
             >
               Export as STEP
             </button>
-            <button className="toolbar-dropdown-item" onClick={handleSaveImage}>
+            <button
+              className="toolbar-dropdown-item"
+              title="Save a PNG screenshot of the viewport"
+              onClick={handleSaveImage}
+            >
               Save image (.png)
             </button>
           </div>,
@@ -461,22 +474,32 @@ const DocumentSection = () => {
             ref={importMenuRef}
             style={{ top: importMenuPos.top, left: importMenuPos.left }}
           >
-            <button className="toolbar-dropdown-item" onClick={handleLoadClick}>
+            <button
+              className="toolbar-dropdown-item"
+              title="Open a saved .pcad document"
+              onClick={handleLoadClick}
+            >
               Load document (.pcad)
             </button>
             <button
               className="toolbar-dropdown-item"
+              title="Import an STL mesh as a solid body"
               onClick={() => handleImportKind(".stl")}
             >
               Import STL
             </button>
             <button
               className="toolbar-dropdown-item"
+              title="Import a STEP file as a solid body"
               onClick={() => handleImportKind(".step,.stp")}
             >
               Import STEP
             </button>
-            <button className="toolbar-dropdown-item" disabled>
+            <button
+              className="toolbar-dropdown-item"
+              title="Import image — coming soon"
+              disabled
+            >
               Import image (.png)
             </button>
           </div>,

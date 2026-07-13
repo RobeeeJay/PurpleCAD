@@ -115,6 +115,7 @@ const SWEEPS = [
   {
     kind: "revolve",
     label: "Revolve",
+    title: "Revolve — spin a sketch profile around a picked axis",
     icon: <RevolveIcon />,
     title:
       "Revolve — sweep a sketch profile around an axis line (toggle Prism for a faceted sweep)",
@@ -122,6 +123,7 @@ const SWEEPS = [
   {
     kind: "pipe",
     label: "Pipe",
+    title: "Pipe — sweep a circular section along a sketch path",
     icon: <PipeIcon />,
     title:
       "Pipe — sweep a sketch profile along a path line from another sketch",
@@ -129,6 +131,7 @@ const SWEEPS = [
   {
     kind: "loft",
     label: "Loft",
+    title: "Loft — blend between two sketch profiles",
     icon: <LoftIcon />,
     title: "Loft — blend a solid between two sketch regions on parallel planes",
   },
@@ -156,6 +159,7 @@ const SweepSection = ({ bare = false }) => {
       items={SWEEPS.map((s) => ({
         key: s.kind,
         label: s.label,
+        title: s.title,
         icon: s.icon,
         active: sweepSelectMode?.kind === s.kind,
         onClick: () => toggle(s.kind),

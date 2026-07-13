@@ -54,6 +54,7 @@ const ToolbarDropdown = ({ trigger, title, triggerActive = false, items }) => {
               <button
                 key={it.key}
                 className={`toolbar-dropdown-item ${it.active ? "active" : ""}`}
+                title={it.title || it.label}
                 disabled={it.disabled}
                 onClick={() => {
                   setOpen(false);

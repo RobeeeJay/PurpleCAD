@@ -108,18 +108,21 @@ const Pattern3dSection = ({ bare = false }) => {
         {
           key: "mirror",
           label: "Mirror",
+          title: "Mirror — reflect the selected body across a picked plane",
           icon: <MirrorIcon />,
           onClick: handleMirror,
         },
         {
           key: "circular",
           label: "Circular",
+          title: "Circular pattern — repeat the body around a picked axis",
           icon: <CircularIcon />,
           onClick: handleCircular,
         },
         {
           key: "rectangular",
           label: "Rectangular",
+          title: "Rectangular pattern — repeat the body on an X/Y/Z grid",
           icon: <RectangularIcon />,
           onClick: handleRectangular,
         },

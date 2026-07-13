@@ -144,18 +144,21 @@ const CombineSection = ({ bare = false }) => {
         {
           key: "union",
           label: "Union",
+          title: "Union — fuse the selected bodies into one solid",
           icon: <UnionIcon />,
           onClick: () => startBooleanTool("union"),
         },
         {
           key: "difference",
           label: "Cut",
+          title: "Cut — subtract the cutter bodies from the target",
           icon: <DifferenceIcon />,
           onClick: () => startBooleanTool("difference"),
         },
         {
           key: "intersection",
           label: "Intersection",
+          title: "Intersection — keep only the overlapping volume",
           icon: <IntersectionIcon />,
           onClick: () => startBooleanTool("intersection"),
         },

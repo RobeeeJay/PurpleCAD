@@ -198,6 +198,7 @@ const ObjectCreateSection = () => {
               <button
                 key={p.type}
                 className="toolbar-dropdown-item"
+                title={`Add a ${p.label.toLowerCase()} to the scene`}
                 onClick={() => {
                   setPrimMenuOpen(false);
                   createItem(p.type);
