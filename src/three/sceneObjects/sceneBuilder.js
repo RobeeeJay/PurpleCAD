@@ -7,7 +7,11 @@
 // pre-tessellated `geometryData` for csg results).
 
 import * as THREE from "three";
-import { createMaterial, resolveItemMaterial } from "../objectMaterials.js";
+import {
+  createMaterial,
+  resolveItemMaterial,
+  applyMaterialToMesh,
+} from "../objectMaterials.js";
 import { resolveItemDepth } from "../geometryParams.js";
 import { DEFAULT_MATERIAL } from "../materialPresets.js";
 import {
@@ -75,20 +79,49 @@ export function buildSceneObjects(
   precision = null,
   defaultMaterial = DEFAULT_MATERIAL,
 ) {
-  Object.values(objectsRef.current).forEach((mesh) => {
-    scene.remove(mesh);
-    mesh.geometry.dispose();
-    if (Array.isArray(mesh.material)) mesh.material.forEach((m) => m.dispose());
-    else mesh.material.dispose();
-    mesh.children.forEach((child) => {
-      child.geometry && child.geometry.dispose();
-      child.material && child.material.dispose();
-    });
-  });
+  // Incremental rebuild: a csg mesh whose geometryData REFERENCE is unchanged
+  // (only moved/rotated/scaled — a gizmo release, a re-anchored position) is
+  // reused as-is.  Rebuilding it means re-uploading the BufferGeometry AND
+  // recomputing its EdgesGeometry child — on a document with dense texture
+  // meshes that was a 5-second main-thread freeze after every drag.
+  const previousMeshes = objectsRef.current;
+  const previousMaterials = originalMaterialsRef.current;
+  const reused = new Set();
   objectsRef.current = {};
   originalMaterialsRef.current = {};
 
   items.forEach((item) => {
+    const prev = previousMeshes[item.id];
+    if (
+      item.type === "csg" &&
+      prev &&
+      item.geometryData &&
+      prev.userData.geometrySource === item.geometryData
+    ) {
+      const p = item.position;
+      const rot = item.rotation;
+      const sc = item.scale;
+      if (rot) prev.rotation.set(rot.x || 0, rot.y || 0, rot.z || 0);
+      prev.scale.set(sc?.x ?? 1, sc?.y ?? 1, sc?.z ?? 1);
+      prev.position.set(p ? p.x : 0, p ? p.y : 2, p ? p.z : 0);
+      prev.visible = item.visible !== false;
+      // Material props may have changed independently of the geometry.
+      const mp = resolveItemMaterial(item, items, defaultMaterial);
+      applyMaterialToMesh(prev, item, mp);
+      objectsRef.current[item.id] = prev;
+      originalMaterialsRef.current[item.id] = {
+        ...(previousMaterials[item.id] || {}),
+        color: new THREE.Color(mp.color ?? DEFAULT_MESH_COLOR),
+        metalness: mp.metalness ?? 0.3,
+        roughness: mp.roughness ?? 0.5,
+        opacity: mp.opacity ?? 1,
+        clearcoat: mp.clearcoat ?? 0,
+        clearcoatRoughness: mp.clearcoatRoughness ?? 0,
+        emissive: new THREE.Color(NO_EMISSIVE),
+      };
+      reused.add(prev);
+      return;
+    }
     let geometry;
     let extrudeLocalOffset = null; // set by the extrude case; used for mesh positioning
     switch (item.type) {
@@ -559,6 +592,9 @@ export function buildSceneObjects(
     }
 
     mesh.visible = item.visible !== false;
+    // The reuse key for the next rebuild: any regen/commit replaces the
+    // geometryData object, so reference equality is exactly "same geometry".
+    if (item.type === "csg") mesh.userData.geometrySource = item.geometryData;
     scene.add(mesh);
     objectsRef.current[item.id] = mesh;
     originalMaterialsRef.current[item.id] = {
@@ -570,5 +606,18 @@ export function buildSceneObjects(
       clearcoatRoughness: materialProps.clearcoatRoughness ?? 0,
       emissive: new THREE.Color(NO_EMISSIVE),
     };
+  });
+
+  // Tear down whatever wasn't reused or rebuilt under the same id.
+  Object.values(previousMeshes).forEach((mesh) => {
+    if (reused.has(mesh)) return;
+    scene.remove(mesh);
+    mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) mesh.material.forEach((m) => m.dispose());
+    else mesh.material.dispose();
+    mesh.children.forEach((child) => {
+      child.geometry && child.geometry.dispose();
+      child.material && child.material.dispose();
+    });
   });
 }
