@@ -19,6 +19,7 @@ import OriginDialog from "./OriginDialog";
 import HoleDialog from "./HoleDialog";
 import EmbossDialog from "./EmbossDialog";
 import TextureDialog from "./TextureDialog";
+import TextureLibraryDialog from "./TextureLibraryDialog";
 import DraftDialog from "./DraftDialog";
 import BoxDialog from "./BoxDialog";
 import ProjectsDialog from "./ProjectsDialog";
@@ -358,6 +359,7 @@ const Viewport = () => {
       <HoleDialog />
       <EmbossDialog />
       <TextureDialog />
+      <TextureLibraryDialog />
       <DraftDialog />
       <BoxDialog />
       <ProjectsDialog />

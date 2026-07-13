@@ -124,6 +124,8 @@ export const uiInitial = {
   // Texture tool: bump-map displacement on a picked connected-face set.
   //   { picking:null|"faces", itemId, face, faceSet, faceTris, params }
   textureTool: null,
+  // Texture library picker (defaults + imports) opened from TextureDialog.
+  textureLibraryOpen: false,
 
   // The last operation error for the active tool dialog (emboss/draft/…), shown
   // as a line under the dialog.  The tool's live preview sets it on failure (with
@@ -705,6 +707,7 @@ export const createUiSlice = (set, get) => ({
       restoreToHistory(textureTool.editEntryId);
     set({ textureTool: null });
   },
+  setTextureLibraryOpen: (open) => set({ textureLibraryOpen: open }),
   setTexturePicking: (kind) =>
     set((s) =>
       s.textureTool

@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React from "react";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitTexture } from "../three/cameraControls/texture.js";
@@ -24,7 +24,7 @@ const TextureDialog = () => {
   const setTexturePicking = useStore((s) => s.setTexturePicking);
   const updateTextureParams = useStore((s) => s.updateTextureParams);
   const cancelTextureTool = useStore((s) => s.cancelTextureTool);
-  const fileRef = useRef(null);
+  const setTextureLibraryOpen = useStore((s) => s.setTextureLibraryOpen);
 
   const open = !!textureTool;
   const params = textureTool?.params;
@@ -78,16 +78,6 @@ const TextureDialog = () => {
     else if (e.key === "Escape") cancel();
   };
 
-  const onFile = (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // re-picking the same file must re-fire
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () =>
-      updateTextureParams({ png: reader.result, pngName: file.name });
-    reader.readAsDataURL(file);
-  };
-
   const toggleStyle = (on) => ({ ...toggleBtn(on), marginRight: 4 });
   const num = (label, key, step = "1", extra) => (
     <Field label={label} style={{ marginLeft: 8 }}>
@@ -108,18 +98,11 @@ const TextureDialog = () => {
     <>
       <div className="sketch-placement-hint">{hint}</div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/png,image/jpeg"
-          style={{ display: "none" }}
-          onChange={onFile}
-        />
         <button
           type="button"
           style={pickBtn(!hasPng)}
-          onClick={() => fileRef.current?.click()}
-          title="Choose a black-and-white image — white displaces outward, black stays"
+          onClick={() => setTextureLibraryOpen(true)}
+          title="Choose a bump map from the texture library — white displaces outward, black stays"
         >
           {params.pngName ? `Image: ${params.pngName}` : "Image…"}
         </button>
