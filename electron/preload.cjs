@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   projSetActive: (id) => sync("db:setActiveProjectId", id),
   dbGetTimeline: (pid) => sync("db:getTimeline", pid),
   dbSaveTimeline: (pid, data) => sync("db:saveTimeline", { pid, data }),
+  // Async variant for the hot save path: a big document's timeline is tens of
+  // MB — sendSync would freeze the renderer for the IPC clone + SQLite write.
+  dbSaveTimelineAsync: (pid, data) =>
+    ipcRenderer.invoke("db:saveTimelineAsync", { pid, data }),
   dbGetVariables: (pid) => sync("db:getVariables", pid),
   dbSaveVariables: (pid, data) => sync("db:saveVariables", { pid, data }),
   dbGetFolders: (pid) => sync("db:getFolders", pid),

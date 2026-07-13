@@ -68,6 +68,7 @@ let activeProjectId = (() => {
 
 export const getActiveProjectId = () => activeProjectId;
 export function setActiveProjectId(id) {
+  flushTimelineSave();
   activeProjectId = id;
   const a = api();
   if (a) a.projSetActive(id);
@@ -115,6 +116,7 @@ export function createProject(name) {
 // Copy a project and all its per-project data; returns the new id.  The
 // fallback path replays the copy through the generic get/save helpers.
 export function duplicateProject(id) {
+  flushTimelineSave();
   const a = api();
   if (a) return a.projDuplicate(id);
   const list = fallbackProjects();
@@ -146,6 +148,7 @@ export function renameProject(id, name) {
   }
 }
 export function deleteProject(id) {
+  flushTimelineSave();
   const a = api();
   if (a) return a.projDelete(id);
   jSet(
@@ -169,7 +172,28 @@ export function setThumbnail(id, thumbnail) {
 // ── Per-project data (current active project unless a pid is passed) ──────────
 const pid = (id) => (id == null ? activeProjectId : id);
 
+// Timeline saves COALESCE: a burst of mutations (each gizmo release appends a
+// step and re-saves) collapses to one async write ~150 ms later, so the
+// renderer never blocks on the IPC clone + SQLite rewrite of a big document.
+// Anything that READS or re-points the timeline flushes the pending save
+// first, and beforeunload flushes synchronously so nothing is lost on quit.
+let pendingTimelineSave = null; // { pid, data, timer }
+
+export function flushTimelineSave() {
+  if (!pendingTimelineSave) return;
+  const { pid: savePid, data, timer } = pendingTimelineSave;
+  clearTimeout(timer);
+  pendingTimelineSave = null;
+  const a = api();
+  if (a) a.dbSaveTimeline(savePid, data);
+  else jSet(`p${savePid}:timeline`, data);
+}
+
+if (typeof window !== "undefined")
+  window.addEventListener("beforeunload", flushTimelineSave);
+
 export function getTimeline(id) {
+  flushTimelineSave();
   const a = api();
   const raw = a ? a.dbGetTimeline(pid(id)) : jGet(`p${pid(id)}:timeline`, null);
   if (raw?.history) return { ...raw, history: unpackHistory(raw.history) };
@@ -177,8 +201,23 @@ export function getTimeline(id) {
 }
 export function saveTimeline(data, id) {
   const a = api();
-  if (a) a.dbSaveTimeline(pid(id), data);
-  else jSet(`p${pid(id)}:timeline`, data);
+  if (!a?.dbSaveTimelineAsync) {
+    // Fallback paths (node/browser) stay synchronous — cheap there.
+    if (a) a.dbSaveTimeline(pid(id), data);
+    else jSet(`p${pid(id)}:timeline`, data);
+    return;
+  }
+  const savePid = pid(id); // resolve NOW — a project switch must not re-target it
+  if (pendingTimelineSave) clearTimeout(pendingTimelineSave.timer);
+  pendingTimelineSave = {
+    pid: savePid,
+    data,
+    timer: setTimeout(() => {
+      const send = pendingTimelineSave;
+      pendingTimelineSave = null;
+      api()?.dbSaveTimelineAsync(send.pid, send.data);
+    }, 150),
+  };
 }
 export function getVariables(id) {
   const a = api();

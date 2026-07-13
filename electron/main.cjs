@@ -172,6 +172,12 @@ for (const [channel, fn] of Object.entries(syncHandlers)) {
     e.returnValue = fn(arg);
   });
 }
+// Async timeline save (invoke): the hot path — a mouseup commit on a big
+// document must not block the renderer on the IPC round-trip + SQLite write.
+ipcMain.handle("db:saveTimelineAsync", (_e, a) => {
+  kvStore.saveTimeline(a.pid, a.data);
+  return true;
+});
 
 // 512px source covers window/taskbar icon use across platforms; packaged
 // builds get their app icon from `build.icon` in package.json instead.

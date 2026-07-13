@@ -29,10 +29,20 @@ const isGeometryData = (v) =>
   !Array.isArray(v) &&
   (Array.isArray(v.positions) || v.__packedGeometry === 1);
 
+// Pack/unpack results are memoised by OBJECT IDENTITY: the history walker is
+// structurally shared, so an unchanged entry presents the same geometryData
+// reference on every save — without the memo, every mouseup that appends a
+// transform step re-base64'd every dense mesh in the document (seconds of
+// main-thread freeze on multi-texture documents).
+const packMemo = new WeakMap();
+const unpackMemo = new WeakMap();
+
 export function packGeometryData(g) {
   if (!g || g.__packedGeometry === 1) return g;
   if (!Array.isArray(g.positions) || g.positions.length < PACK_THRESHOLD)
     return g;
+  const hit = packMemo.get(g);
+  if (hit) return hit;
   const out = {
     __packedGeometry: 1,
     p: toB64(new Uint8Array(new Float32Array(g.positions).buffer)),
@@ -41,16 +51,24 @@ export function packGeometryData(g) {
     out.i = toB64(new Uint8Array(new Uint32Array(g.indices).buffer));
   if (g.normals?.length)
     out.n = toB64(new Uint8Array(new Float32Array(g.normals).buffer));
+  packMemo.set(g, out);
+  // A later unpack of this exact packed object returns the ORIGINAL arrays —
+  // free, and identity-stable across a save/load cycle in the same session.
+  unpackMemo.set(out, g);
   return out;
 }
 
 export function unpackGeometryData(g) {
   if (!g || g.__packedGeometry !== 1) return g;
+  const hit = unpackMemo.get(g);
+  if (hit) return hit;
   const out = { positions: Array.from(new Float32Array(fromB64(g.p).buffer)) };
   out.indices = g.i
     ? Array.from(new Uint32Array(fromB64(g.i).buffer))
     : g.indices || null;
   out.normals = g.n ? Array.from(new Float32Array(fromB64(g.n).buffer)) : null;
+  unpackMemo.set(g, out);
+  packMemo.set(out, g);
   return out;
 }
 
