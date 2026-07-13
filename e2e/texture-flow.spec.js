@@ -175,14 +175,15 @@ test.describe.serial("texture lifecycle", () => {
         valid: true,
         keepPicking: false,
       });
-      // Punishing resolution: the displacement runs long enough that the
-      // busy indicator must appear and Cancel must land mid-run.
+      // Punishing-but-legal resolution (just under the triangle budget):
+      // the displacement runs long enough that the busy indicator must
+      // appear and Cancel must land mid-run.
       s.updateTextureParams({
         png,
         pngName: "e2e.png",
         wrap: true,
         projection: "conform",
-        resolutionMm: 0.08,
+        resolutionMm: 0.12,
         depthMm: 0.5,
       });
     }, PNG_2x2);
@@ -211,6 +212,18 @@ test.describe.serial("texture lifecycle", () => {
       };
     });
     expect(after).toEqual({ committed: false, toolOpen: true, pending: 0 });
+
+    // Past the triangle budget, Confirm refuses up front with a clear error
+    // instead of grinding toward an OOM (the preview never trips it — its
+    // resolution is floored at 0.5 mm).
+    await page.evaluate(() =>
+      window.__store.getState().updateTextureParams({ resolutionMm: 0.02 }),
+    );
+    await page.waitForTimeout(700);
+    await page.getByTitle("Confirm — apply the texture").click();
+    await expect
+      .poll(() => page.evaluate(() => window.__store.getState().toolError))
+      .toMatch(/too dense/);
 
     // The abort left the app healthy: a sane resolution commits fine.
     await page.evaluate(() =>

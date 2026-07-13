@@ -143,6 +143,80 @@ describe("texture on primitives", () => {
   }, 60000);
 });
 
+describe("memory guards", () => {
+  it("pruneNestedSourceGeometry keeps the level-1 mesh, strips deeper ones", async () => {
+    const { pruneNestedSourceGeometry } =
+      await import("../cameraControls/texture.js");
+    const dense = { positions: new Array(30).fill(1), indices: [0, 1, 2] };
+    const source = {
+      id: 5,
+      type: "csg",
+      geometryData: dense, // the displacement base — must survive
+      regenerator: {
+        kind: "texture",
+        source: {
+          id: 5,
+          type: "csg",
+          geometryData: dense, // nested copy — must be stripped
+          regenerator: {
+            kind: "emboss",
+            source: { id: 5, type: "extrude", geometryData: dense },
+            params: { distanceMm: 2 },
+          },
+        },
+        params: { depthMm: 1 },
+      },
+    };
+    const pruned = pruneNestedSourceGeometry(source);
+    expect(pruned.geometryData).toBe(dense);
+    expect(pruned.regenerator.source.geometryData).toBeUndefined();
+    expect(
+      pruned.regenerator.source.regenerator.source.geometryData,
+    ).toBeUndefined();
+    // Metadata (kinds/params) survives for relink/regen.
+    expect(pruned.regenerator.source.regenerator.kind).toBe("emboss");
+    expect(pruned.regenerator.source.regenerator.params.distanceMm).toBe(2);
+    // The original was not mutated.
+    expect(source.regenerator.source.geometryData).toBe(dense);
+  });
+
+  it("a too-fine resolution is refused with a clear error", async () => {
+    const item = {
+      ...cube,
+      type: "csg",
+      regenerator: regen({
+        params: { ...regen().params, resolutionMm: 0.01 }, // ~46M triangles
+      }),
+      geometryData: null,
+    };
+    const out = await regenerateItemsForResolution([item], 0.1, null, null);
+    // The regen swallowed the guard error and kept last-good geometry
+    // (settle semantics) — nothing exploded.
+    const rebuilt = out.find((i) => i.id === 5);
+    expect(rebuilt.geometryData).toBe(null);
+  });
+
+  it("estimateTriCount covers the analytic surfaces", async () => {
+    const { estimateTriCount } = await import("../cameraControls/texture.js");
+    // Cylinder wall 2π·1·2 ≈ 12.57 area at res 0.1 → ~2900 tris.
+    const cyl = estimateTriCount(
+      null,
+      { cylinder: { radius: 1 } },
+      { height: 2 },
+      0.1,
+    );
+    expect(cyl).toBeGreaterThan(2000);
+    expect(cyl).toBeLessThan(4000);
+    const sph = estimateTriCount(null, { sphere: { radius: 1.5 } }, {}, 0.1);
+    expect(sph).toBeGreaterThan(5000);
+    // Pick-time soup: two unit right triangles = area 1.
+    const soup = [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0];
+    const flat = estimateTriCount(soup, null, {}, 0.1);
+    expect(flat).toBeGreaterThan(150);
+    expect(flat).toBeLessThan(300);
+  });
+});
+
 describe("texture timeline edit", () => {
   const geom = { positions: [0, 0, 0], normals: null, indices: [0] };
   const patches = (depthMm) => ({

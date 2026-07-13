@@ -447,6 +447,17 @@ Established landmines (each was a real bug — extend this list, never shrink it
   item-id lookup silently misses and every export falls back to the slow rebuild —
   the exact bug this replaced.
 
+- **Frozen sources nest — NEVER let dense meshes ride the chain.** Each op's
+  `regenerator.source` snapshot contains the prior item INCLUDING its
+  `geometryData` and ITS nested source… stacking ops on one body stores
+  O(k²) mesh copies (three 90k-tri displacement maps OOM'd the renderer at
+  1.4 GB when the path tracer allocated on top).  `pruneNestedSourceGeometry`
+  (`textureDisplace.js`) keeps the level-1 baked mesh (the rebuild base) and
+  strips `geometryData` from everything deeper — recipes/frames/params stay.
+  Apply it when committing any op whose results are mesh-dense, and guard
+  unbounded density up front (`assertTriBudget` — both the tool AND regen
+  paths; the regen path missing it OOM'd vitest before the guard).
+
 **Checklist when adding/altering any op or feature that touches existing bodies:**
 
 1. Route through the shared `buildItemShapeLocal` + `buildBrushTransform` +

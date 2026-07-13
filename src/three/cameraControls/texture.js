@@ -9,6 +9,14 @@ import { activePrecision } from "../resolution.js";
 import { withLivePolygons } from "../csgUtils.js";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { displaceMeshAsync } from "../textureWorkerClient.js";
+import {
+  pruneNestedSourceGeometry,
+  assertTriBudget,
+} from "../textureDisplace.js";
+
+// Re-exported for tests and any future callers that reach for them here.
+export { pruneNestedSourceGeometry } from "../textureDisplace.js";
+export { estimateTriCount } from "../textureDisplace.js";
 import { decodeHeightfield } from "../textureImage.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { releaseSolid } from "../solidCache.js";
@@ -102,6 +110,13 @@ export async function buildTextureResult(
       : tt.params,
     source,
   );
+  assertTriBudget(
+    tt.faceTris,
+    tt.faceSet,
+    item.dimensions,
+    params.resolution,
+    effectiveResolutionMm,
+  );
   // Off-thread in the app (worker) so the UI stays live; the busy counter is
   // owned by the callers (preview / commit) around this whole build.
   const displaced = await displaceMeshAsync({
@@ -173,7 +188,7 @@ export async function commitTexture({ items, printPrecision }) {
   store._cameraControls?.clearEmbossSelectedFaces?.();
   const regenerator = {
     kind: "texture",
-    source,
+    source: pruneNestedSourceGeometry(source),
     face: result.face,
     faceSet: result.faceSet,
     faceTris: result.faceTris,

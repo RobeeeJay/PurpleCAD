@@ -656,3 +656,83 @@ export function displaceMesh({
   }
   return { positions: verts, indices: Array.from(tris), normals };
 }
+
+// A frozen texture source must keep ITS OWN baked mesh (the displacement's
+// base — display truth), but everything deeper in the recipe chain only
+// contributes metadata (kinds, params, frames).  Without this, stacking
+// displacement maps nests each prior step's dense mesh inside the next
+// source — O(k²) copies of 100k-triangle meshes in the store/history, which
+// OOM'd the renderer the moment the path tracer asked for more memory.
+export const pruneNestedSourceGeometry = (source) => {
+  if (!source?.regenerator?.source) return source;
+  const stripDeep = (node) => {
+    if (!node || typeof node !== "object") return node;
+    const out = { ...node };
+    delete out.geometryData;
+    if (out.regenerator?.source)
+      out.regenerator = {
+        ...out.regenerator,
+        source: stripDeep(out.regenerator.source),
+      };
+    return out;
+  };
+  return {
+    ...source,
+    regenerator: {
+      ...source.regenerator,
+      source: stripDeep(source.regenerator.source),
+    },
+  };
+};
+
+// Refuse displacements that would explode the mesh: estimate the refined
+// triangle count from the region's area (picked soup or analytic surface)
+// and the target edge length.  A refined equilateral-ish triangle covers
+// ~res²·√3/4; past the cap the renderer OOMs long before the user sees it.
+export const MAX_TRIS = 600000;
+export const estimateTriCount = (faceTris, faceSet, dims, resolution) => {
+  let area = 0;
+  if (faceTris?.length) {
+    for (let i = 0; i + 8 < faceTris.length; i += 9) {
+      const ux = faceTris[i + 3] - faceTris[i];
+      const uy = faceTris[i + 4] - faceTris[i + 1];
+      const uz = faceTris[i + 5] - faceTris[i + 2];
+      const vx = faceTris[i + 6] - faceTris[i];
+      const vy = faceTris[i + 7] - faceTris[i + 1];
+      const vz = faceTris[i + 8] - faceTris[i + 2];
+      area +=
+        Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
+    }
+  } else if (faceSet?.cylinder) {
+    area = 2 * Math.PI * faceSet.cylinder.radius * (dims?.height ?? 2);
+  } else if (faceSet?.sphere) {
+    area = 4 * Math.PI * faceSet.sphere.radius ** 2;
+  } else if (faceSet?.cone) {
+    const { rb, rt, h } = faceSet.cone;
+    area = Math.PI * (rb + rt) * Math.hypot(h, rb - rt);
+  } else if (faceSet?.torus) {
+    area = 4 * Math.PI * Math.PI * faceSet.torus.R * faceSet.torus.r;
+  } else if (faceSet?.plane) {
+    area = Math.PI * (dims?.radius ?? 1) ** 2;
+  }
+  return area / ((resolution * resolution * Math.sqrt(3)) / 4);
+};
+
+// Throws when the estimated refined density exceeds the budget — both the
+// tool (preview/commit) and the timeline regen call this before displacing.
+export function assertTriBudget(
+  faceTris,
+  faceSet,
+  dims,
+  resolution,
+  resolutionMm,
+) {
+  const estimate = estimateTriCount(faceTris, faceSet, dims, resolution);
+  if (estimate > MAX_TRIS) {
+    throw new Error(
+      `Resolution ${resolutionMm} mm would create roughly ` +
+        `${Math.round(estimate / 1000)}k triangles on this face — too dense ` +
+        `to work with. Increase the resolution value (coarser) or shrink the face.`,
+    );
+  }
+}
