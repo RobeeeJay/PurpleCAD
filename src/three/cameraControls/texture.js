@@ -8,7 +8,7 @@ import { useStore } from "../../store";
 import { activePrecision } from "../resolution.js";
 import { withLivePolygons } from "../csgUtils.js";
 import { MM_PER_UNIT } from "../sceneObjects.js";
-import { displaceMesh } from "../textureDisplace.js";
+import { displaceMeshAsync } from "../textureWorkerClient.js";
 import { decodeHeightfield } from "../textureImage.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { releaseSolid } from "../solidCache.js";
@@ -77,7 +77,9 @@ export async function buildTextureResult(
       : tt.params,
     source,
   );
-  const displaced = displaceMesh({
+  // Off-thread in the app (worker) so the UI stays live; the busy counter is
+  // owned by the callers (preview / commit) around this whole build.
+  const displaced = await displaceMeshAsync({
     mesh,
     face: tt.face,
     faceSet: tt.faceSet,
@@ -120,8 +122,22 @@ export async function buildTextureResult(
 }
 
 export async function commitTexture({ items, printPrecision }) {
-  const result = await buildTextureResult(items, printPrecision, null);
-  if (!result) return false;
+  // The busy indicator (with its Cancel button) attaches for the whole build;
+  // Cancel bumps the epoch, kills the displacement worker, and the result —
+  // even one that still lands — is discarded.
+  const epoch = useStore.getState().cancelEpoch;
+  useStore.getState().beginOperation();
+  let result;
+  try {
+    result = await buildTextureResult(items, printPrecision, null);
+  } catch (e) {
+    if (useStore.getState().cancelEpoch === epoch)
+      useStore.getState().setToolError(e?.message || "Texture failed.");
+    return false;
+  } finally {
+    useStore.getState().endOperation();
+  }
+  if (!result || useStore.getState().cancelEpoch !== epoch) return false;
   const store = useStore.getState();
   const { item, source, geometryData, centerOffset } = result;
   const { position, basePos } = chamferResultTransform(source, centerOffset);
@@ -224,17 +240,26 @@ export function createTexturePreviewHelpers({ scene, itemsRef, objectsRef }) {
     const myRequest = ++requestId;
     const items = itemsRef.current;
     const printPrecision = activePrecision();
+    const epoch = useStore.getState().cancelEpoch;
     let result;
+    useStore.getState().beginOperation();
     try {
       // Floor the preview's subdivision at 0.5 mm so typing stays responsive;
       // Confirm runs the full requested resolution.
       result = await buildTextureResult(items, printPrecision, 0.5);
     } catch (e) {
-      if (myRequest === requestId)
+      if (myRequest === requestId && useStore.getState().cancelEpoch === epoch)
         useStore.getState().setToolError(e?.message || "Texture failed.");
       return;
+    } finally {
+      useStore.getState().endOperation();
     }
     if (myRequest !== requestId) return;
+    if (useStore.getState().cancelEpoch !== epoch) {
+      removePreview();
+      unghostSource();
+      return;
+    }
     if (!result) {
       removePreview();
       unghostSource();

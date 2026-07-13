@@ -153,4 +153,81 @@ test.describe.serial("texture lifecycle", () => {
         backOnEntry: true,
       });
   });
+
+  test("heavy displacement shows the busy dialog, keeps the UI live, and cancels", async () => {
+    await page.evaluate((png) => {
+      const s = window.__store.getState();
+      s.addItem({
+        id: 62,
+        name: "sphere",
+        type: "sphere",
+        children: [],
+        position: { x: 5, y: 1.5, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      s.startTextureTool();
+      s.setTextureFaceSelection({
+        itemId: 62,
+        face: { nx: 1, ny: 0, nz: 0, cx: 1.5, cy: 0, cz: 0 },
+        faceSet: { sphere: { cx: 0, cy: 0, cz: 0, radius: 1.5 } },
+        faceTris: null,
+        faceCount: 1,
+        valid: true,
+        keepPicking: false,
+      });
+      // Punishing resolution: the displacement runs long enough that the
+      // busy indicator must appear and Cancel must land mid-run.
+      s.updateTextureParams({
+        png,
+        pngName: "e2e.png",
+        wrap: true,
+        projection: "conform",
+        resolutionMm: 0.08,
+        depthMm: 0.5,
+      });
+    }, PNG_2x2);
+    await page.waitForTimeout(1500); // clamped preview settles
+
+    await page.getByTitle("Confirm — apply the texture").click();
+    await expect(page.locator(".busy-indicator")).toBeVisible({
+      timeout: 10000,
+    });
+    // The worker owns the grind — a DOM interaction completes immediately.
+    const t0 = Date.now();
+    await page.locator(".timeline-header").click();
+    expect(Date.now() - t0).toBeLessThan(1500);
+
+    await page.locator(".busy-cancel").click();
+    await expect(page.locator(".busy-indicator")).toBeHidden({
+      timeout: 5000,
+    });
+    const after = await page.evaluate(() => {
+      const s = window.__store.getState();
+      return {
+        committed:
+          s.items.find((i) => i.id === 62)?.regenerator?.kind === "texture",
+        toolOpen: !!s.textureTool,
+        pending: s.pendingOperations,
+      };
+    });
+    expect(after).toEqual({ committed: false, toolOpen: true, pending: 0 });
+
+    // The abort left the app healthy: a sane resolution commits fine.
+    await page.evaluate(() =>
+      window.__store.getState().updateTextureParams({ resolutionMm: 1.5 }),
+    );
+    await page.waitForTimeout(700);
+    await page.getByTitle("Confirm — apply the texture").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              window.__store.getState().items.find((i) => i.id === 62)
+                ?.regenerator?.kind ?? null,
+          ),
+        { timeout: 60000 },
+      )
+      .toBe("texture");
+  });
 });

@@ -561,7 +561,7 @@ async function regenerateTexture(
   printPrecision,
   currentPosition,
 ) {
-  const { displaceMesh } = await import("./textureDisplace.js");
+  const { displaceMeshAsync } = await import("./textureWorkerClient.js");
   const { decodeHeightfield } = await import("./textureImage.js");
   const liveItems = accumulatedItems.map((i) =>
     withLivePolygons(i, accumulatedItems, printPrecision),
@@ -594,7 +594,7 @@ async function regenerateTexture(
       const p = regenerator.params;
       const sc = source?.scale?.x ?? 1;
       const mm = (v) => v / MM_PER_UNIT / sc;
-      result = displaceMesh({
+      result = await displaceMeshAsync({
         mesh,
         face: frameFace,
         faceSet: frameFaceSet,

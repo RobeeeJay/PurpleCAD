@@ -303,6 +303,11 @@ const Viewport = () => {
   useEffect(() => {
     if (!cancelEpoch) return; // no cancel yet (mount)
     cancelOcc();
+    // The texture displacement worker is pure JS with no shared native state —
+    // terminating it mid-run is a true abort (unlike the OCC worker).
+    import("../three/textureWorkerClient.js").then((m) =>
+      m.cancelTextureWork(),
+    );
     clearSolids();
   }, [cancelEpoch]);
 
