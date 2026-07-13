@@ -12,9 +12,29 @@ import { displaceMeshAsync } from "../textureWorkerClient.js";
 import { decodeHeightfield } from "../textureImage.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { releaseSolid } from "../solidCache.js";
+import { requestRender } from "./animateLoop.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 
 const GHOST_OPACITY = 0.12;
+
+// Preview-result cache: Confirm reuses the geometry the live preview already
+// computed for the SAME inputs instead of re-running the displacement
+// (mirrors the chamfer/emboss previewCache).  The key carries the EFFECTIVE
+// resolution — a preview clamped to 0.5 mm can't stand in for a finer commit.
+let previewCache = null;
+const textureKey = (tt, source, printPrecision, effectiveResolutionMm) =>
+  JSON.stringify({
+    png: tt.params.png?.length,
+    face: tt.face,
+    faceSet: tt.faceSet,
+    tris: tt.faceTris?.length ?? 0,
+    params: { ...tt.params, resolutionMm: effectiveResolutionMm },
+    sid: source?.id,
+    p: source?.position,
+    r: source?.rotation,
+    sc: source?.scale,
+    printPrecision,
+  });
 
 // Displacement params in scene units.  Like the emboss stamp, the mesh is
 // built UNSCALED (the item's mesh.scale re-applies on top), so mm values are
@@ -65,6 +85,11 @@ export async function buildTextureResult(
     items,
     printPrecision,
   );
+  const effectiveResolutionMm = minResolutionMm
+    ? Math.max(tt.params.resolutionMm, minResolutionMm)
+    : tt.params.resolutionMm;
+  const key = textureKey(tt, source, printPrecision, effectiveResolutionMm);
+  if (previewCache?.key === key) return previewCache.result;
   const mesh = await baseMesh(source, items, printPrecision);
   if (!mesh) return null;
   const heightfield = await decodeHeightfield(tt.params.png);
@@ -108,7 +133,7 @@ export async function buildTextureResult(
     p[i + 1] -= centerOffset.cy;
     p[i + 2] -= centerOffset.cz;
   }
-  return {
+  const out = {
     item,
     source,
     geometryData: displaced,
@@ -119,6 +144,8 @@ export async function buildTextureResult(
     faceCount: tt.faceCount ?? 0,
     params: { ...tt.params },
   };
+  previewCache = { key, result: out };
+  return out;
 }
 
 export async function commitTexture({ items, printPrecision }) {
@@ -233,7 +260,9 @@ export function createTexturePreviewHelpers({ scene, itemsRef, objectsRef }) {
     requestId++;
     removePreview();
     unghostSource();
+    previewCache = null; // tool closed / superseded — drop the stashed result
     useStore.getState().setToolError(null);
+    requestRender();
   };
 
   const updateTexturePreview = async () => {
@@ -319,6 +348,9 @@ export function createTexturePreviewHelpers({ scene, itemsRef, objectsRef }) {
     group.scale.setScalar(s);
     scene.add(group);
     previewGroup = group;
+    // On-demand rendering: a direct scene mutation must invalidate the frame
+    // or the new preview waits for the next mouse move to appear.
+    requestRender();
   };
 
   return { updateTexturePreview, clearTexturePreview };

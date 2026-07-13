@@ -26,7 +26,10 @@ import {
   dedupProjectedShapes,
 } from "./sketchProjection.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
-import { createAnimateLoop } from "./cameraControls/animateLoop.js";
+import {
+  createAnimateLoop,
+  requestRender,
+} from "./cameraControls/animateLoop.js";
 import { primitiveDimensions } from "./sceneObjects/dimensions.js";
 import { createMaterial } from "./objectMaterials.js";
 import { DEFAULT_MESH_COLOR } from "./theme.js";
@@ -2167,6 +2170,13 @@ export function attachCameraControls(ctx) {
     setRotationState,
   });
 
+  // On-demand rendering: invalidate a frame on EVERY store change (the
+  // animate-loop comment always promised this wiring).  Without it, updates
+  // that land asynchronously outside a pointer/key activity window — a
+  // debounced tool preview finishing, a worker result, a dialog edit — sat
+  // stale until the next mouse move over the viewport.
+  const unsubscribeRender = useStore.subscribe(() => requestRender());
+
   // ── Attach listeners ───────────────────────────────────────────────────────
 
   const el = renderer.domElement;
@@ -2184,6 +2194,7 @@ export function attachCameraControls(ctx) {
 
   return () => {
     animateLoop.stop();
+    unsubscribeRender();
     disposeNavigation();
     el.removeEventListener("mousedown", onMouseDown);
     el.removeEventListener("mousemove", onMouseMove);
