@@ -36,6 +36,16 @@ test("every toolbar button and dropdown item has a hover tooltip", async () => {
   );
   expect(missing).toEqual([]);
 
+  // A title only shows if hover reaches the element: pointer-events:none on
+  // disabled buttons silently killed every disabled-tool tooltip.
+  const hoverBlocked = await page.evaluate(() =>
+    [...document.querySelectorAll(".toolbar button")]
+      .filter((b) => getComputedStyle(b).pointerEvents === "none")
+      .map((b) => b.title || b.className)
+      .slice(0, 10),
+  );
+  expect(hoverBlocked).toEqual([]);
+
   // Dropdown menus render on demand — open each known trigger and audit its
   // items the same way.
   for (const trigger of ["Save / Export", "Load / Import"]) {
