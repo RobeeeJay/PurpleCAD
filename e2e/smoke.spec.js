@@ -147,6 +147,20 @@ test("the corner tag shows scene totals and memory beside the version", async ()
   expect(text).toMatch(/\d[\d.km]* pts/i);
   expect(text).toMatch(/\d+ MB/);
   expect(text).toMatch(/v\d+\.\d+/);
+
+  // Hovering lifts the tag to full-contrast black-on-light for readability.
+  const box = await page.locator(".version-tag").boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+    steps: 3,
+  });
+  await expect
+    .poll(() =>
+      page
+        .locator(".version-tag")
+        .evaluate((el) => getComputedStyle(el).color),
+    )
+    .toBe("rgb(0, 0, 0)");
+  await page.mouse.move(400, 300);
 });
 
 test("the store test hook is exposed for state-driven assertions", async () => {
