@@ -128,6 +128,27 @@ test("the OCC IPC bridge answers a push/pull request end-to-end", async () => {
   expect(heightY).toBeCloseTo(2.5, 2);
 });
 
+test("the corner tag shows scene totals and memory beside the version", async () => {
+  await page.evaluate(() => {
+    window.__store.getState().addItem({
+      id: 8,
+      name: "Cube 8",
+      type: "cube",
+      children: [],
+      position: { x: 0, y: 1, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    });
+  });
+  await expect(page.locator(".version-tag")).toContainText("faces", {
+    timeout: 5000,
+  });
+  const text = await page.locator(".version-tag").textContent();
+  expect(text).toMatch(/\d[\d.km]* faces/i);
+  expect(text).toMatch(/\d[\d.km]* pts/i);
+  expect(text).toMatch(/\d+ MB/);
+  expect(text).toMatch(/v\d+\.\d+/);
+});
+
 test("the store test hook is exposed for state-driven assertions", async () => {
   // VITE_E2E build exposes window.__store so future tests can read state /
   // drive actions instead of asserting on opaque WebGL canvas pixels.

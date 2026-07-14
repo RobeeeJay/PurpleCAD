@@ -708,6 +708,24 @@ export function attachCameraControls(ctx) {
   };
   // World position + triangle/vertex counts of a selected object's live mesh,
   // for the status line.
+  // Whole-scene totals for the corner stats tag: faces/points of every model
+  // mesh currently displayed (sketches and reference planes excluded).
+  controls.getSceneStats = () => {
+    let faces = 0;
+    let points = 0;
+    for (const mesh of Object.values(objectsRef.current)) {
+      const item = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
+      if (!item || item.type === "sketch" || item.type === "plane") continue;
+      if (item.visible === false) continue;
+      const g = mesh.geometry;
+      const pos = g?.getAttribute("position");
+      if (!pos) continue;
+      points += pos.count;
+      faces += g.index ? g.index.count / 3 : pos.count / 3;
+    }
+    return { faces: Math.round(faces), points };
+  };
+
   controls.getObjectStats = (id) => {
     const mesh = objectsRef.current[id];
     const g = mesh?.geometry;
