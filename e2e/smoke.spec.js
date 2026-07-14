@@ -52,16 +52,47 @@ test("every toolbar button and dropdown item has a hover tooltip", async () => {
     const btn = page.getByTitle(trigger, { exact: false }).first();
     if ((await btn.count()) === 0) continue;
     await btn.click();
+    await page.locator(".toolbar-dropdown-item").first().waitFor();
     const items = await page.evaluate(() =>
       [...document.querySelectorAll(".toolbar-dropdown-item")].map((b) => ({
         label: b.textContent?.trim().slice(0, 30),
-        titled: !!b.title?.trim(),
+        // The tooltip layer parks a hovered element's title in data-tooltip;
+        // either location counts as "has a tooltip".
+        titled: !!(b.title?.trim() || b.dataset.tooltip?.trim()),
       })),
     );
     expect(items.length).toBeGreaterThan(0);
     for (const it of items) expect(it.titled, `"${it.label}"`).toBe(true);
-    await page.keyboard.press("Escape");
-    await page.mouse.click(600, 400); // close the menu
+    await btn.click(); // toggle the menu closed
+    await page
+      .locator(".toolbar-dropdown-item")
+      .first()
+      .waitFor({ state: "detached" });
+  }
+});
+
+test("hovering a toolbar button displays the app tooltip", async () => {
+  for (const name of ["Chamfer", "Bevel"]) {
+    const btn = page.getByTitle(name, { exact: false }).first();
+    const box = await btn.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(page.locator(".app-tooltip.visible")).toBeVisible({
+      timeout: 2000,
+    });
+    await expect(page.locator(".app-tooltip")).toContainText(name);
+    // Moving away hides it and restores the title attribute for the next
+    // audit / assistive tech.
+    await page.mouse.move(10, 400);
+    await expect(page.locator(".app-tooltip.visible")).toBeHidden();
+    expect(
+      await page.evaluate(
+        (n) =>
+          [...document.querySelectorAll(".toolbar button")].some((b) =>
+            b.title.startsWith(n),
+          ),
+        name,
+      ),
+    ).toBe(true);
   }
 });
 

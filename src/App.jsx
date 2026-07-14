@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import TooltipLayer from "./components/TooltipLayer";
 import Toolbar from "./components/Toolbar";
 import Viewport from "./components/Viewport";
 import TreeView from "./components/TreeView";
@@ -163,6 +164,7 @@ function App() {
       <ProjectDialog />
       <TextDialog />
       <ShortcutsOverlay />
+      <TooltipLayer />
       <StatusLine />
       <VersionTag />
       {notification && (
