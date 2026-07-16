@@ -19,6 +19,7 @@ import {
 const EmbossDialog = () => {
   const embossTool = useStore((s) => s.embossTool);
   const items = useStore((s) => s.items);
+  const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
   const setEmbossPicking = useStore((s) => s.setEmbossPicking);
   const updateEmbossParams = useStore((s) => s.updateEmbossParams);
@@ -28,6 +29,7 @@ const EmbossDialog = () => {
   const params = embossTool?.params;
   const nProfiles = embossTool?.profiles?.length || 0;
   const hasFace = !!embossTool?.face;
+  const faceCount = embossTool?.faceCount || 0;
   const facesValid = !!embossTool?.facesValid;
   const ready = nProfiles > 0 && hasFace && facesValid;
 
@@ -114,7 +116,9 @@ const EmbossDialog = () => {
           onClick={() => setEmbossPicking("faces")}
           title="Pick one or more connected faces to emboss onto (click again to deselect)"
         >
-          {!hasFace ? "Faces" : facesValid ? "Faces ✓" : "Faces ⚠"}
+          {!hasFace
+            ? "Faces"
+            : `Faces${faceCount > 0 ? ` (${faceCount})` : ""} ${facesValid ? "✓" : "⚠"}`}
         </button>
 
         <button
@@ -149,6 +153,7 @@ const EmbossDialog = () => {
           <NumberInput
             step="5"
             value={params.angleDeg}
+            variables={variables}
             onCommit={(n) => {
               if (Number.isFinite(n)) updateEmbossParams({ angleDeg: n });
             }}
@@ -160,6 +165,7 @@ const EmbossDialog = () => {
           <NumberInput
             step="0.5"
             value={params.offsetMm}
+            variables={variables}
             onCommit={(n) => {
               if (Number.isFinite(n)) updateEmbossParams({ offsetMm: n });
             }}
@@ -171,6 +177,7 @@ const EmbossDialog = () => {
           <NumberInput
             step="0.5"
             value={params.offsetVMm}
+            variables={variables}
             onCommit={(n) => {
               if (Number.isFinite(n)) updateEmbossParams({ offsetVMm: n });
             }}
@@ -183,6 +190,7 @@ const EmbossDialog = () => {
             min="0.01"
             step="0.1"
             value={params.scale}
+            variables={variables}
             onCommit={(n) => {
               if (n > 0) updateEmbossParams({ scale: n });
             }}
@@ -195,6 +203,7 @@ const EmbossDialog = () => {
             min="0"
             step="0.5"
             value={params.distanceMm}
+            variables={variables}
             onCommit={(n) => {
               if (n > 0) updateEmbossParams({ distanceMm: n });
             }}
@@ -208,6 +217,8 @@ const EmbossDialog = () => {
           style={{
             ...toggleStyle(params.projection === "conform"),
             marginLeft: 10,
+            display: "inline-flex",
+            alignItems: "center",
           }}
           onClick={() =>
             updateEmbossParams({
@@ -216,8 +227,29 @@ const EmbossDialog = () => {
             })
           }
           title="On wraps the geometry around a cylindrical face (conform, falls back to flat on a flat face); off projects from the centre-most face's plane (center)"
+          aria-label="Conform"
         >
-          Conform
+          <svg viewBox="0 0 24 24" width="14" height="14">
+            {/* Thin circle: the body being embossed */}
+            <circle
+              cx="12"
+              cy="12"
+              r="6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              opacity="0.5"
+            />
+            {/* Bold arc wrapping around it: the stamped relief conforming to
+                the surface */}
+            <path
+              d="M18.55 7.41 A8 8 0 1 1 18.55 16.59"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.3"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
 
         <button type="button" onClick={cancel} title="Cancel" style={barBtn()}>

@@ -11,12 +11,15 @@ import SweepOverlay from "./viewport/SweepOverlay";
 import SvgPlacementOverlay from "./viewport/SvgPlacementOverlay";
 import PlaneDialog from "./PlaneDialog";
 import MirrorDialog from "./MirrorDialog";
+import BooleanDialog from "./BooleanDialog";
 import Pattern3dDialog from "./Pattern3dDialog";
 import SplitDialog from "./SplitDialog";
 import ShellDialog from "./ShellDialog";
 import OriginDialog from "./OriginDialog";
 import HoleDialog from "./HoleDialog";
 import EmbossDialog from "./EmbossDialog";
+import TextureDialog from "./TextureDialog";
+import TextureLibraryDialog from "./TextureLibraryDialog";
 import DraftDialog from "./DraftDialog";
 import BoxDialog from "./BoxDialog";
 import ProjectsDialog from "./ProjectsDialog";
@@ -31,6 +34,8 @@ import { useSceneSync } from "./viewport/useSceneSync";
 import "../styles/Viewport.css";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
+import { clearSolids } from "../three/solidCache.js";
+import { cancelOcc } from "../three/occClient.js";
 
 const Viewport = () => {
   const containerRef = useRef(null);
@@ -116,6 +121,7 @@ const Viewport = () => {
   const widgetVisible = useStore((state) => state.widgetVisible);
   const axisVisible = useStore((state) => state.axisVisible);
   const cameraResetTrigger = useStore((state) => state.cameraResetTrigger);
+  const cancelEpoch = useStore((state) => state.cancelEpoch);
   const sketchPlacementMode = useStore((state) => state.sketchPlacementMode);
   const extrudeSelectMode = useStore((state) => state.extrudeSelectMode);
   const sweepSelectMode = useStore((state) => state.sweepSelectMode);
@@ -282,6 +288,29 @@ const Viewport = () => {
     setRotationState,
   });
 
+  // Drop the timeline's cached OCC solids on any document boundary (new / load /
+  // project switch — each bumps cameraResetTrigger).  Entry ids restart per
+  // document, so a stale solid could otherwise be handed to a colliding id in
+  // the next document.  Clearing is always safe: a miss just rebuilds.
+  useEffect(() => {
+    clearSolids();
+  }, [cameraResetTrigger]);
+
+  // On Cancel (cancelEpoch bump), tell the OCC worker to abort its in-flight
+  // native op (frees the CPU) and drop the solid cache — a half-built shape was
+  // never stored, and the aborted op's inputs may be mid-recompute, so the next
+  // recalc rebuilds cleanly from the last committed state.
+  useEffect(() => {
+    if (!cancelEpoch) return; // no cancel yet (mount)
+    cancelOcc();
+    // The texture displacement worker is pure JS with no shared native state —
+    // terminating it mid-run is a true abort (unlike the OCC worker).
+    import("../three/textureWorkerClient.js").then((m) =>
+      m.cancelTextureWork(),
+    );
+    clearSolids();
+  }, [cancelEpoch]);
+
   return (
     <div className="viewport-container">
       <div
@@ -327,12 +356,15 @@ const Viewport = () => {
       <SweepOverlay />
       <PlaneDialog />
       <MirrorDialog />
+      <BooleanDialog />
       <Pattern3dDialog />
       <SplitDialog />
       <ShellDialog />
       <OriginDialog />
       <HoleDialog />
       <EmbossDialog />
+      <TextureDialog />
+      <TextureLibraryDialog />
       <DraftDialog />
       <BoxDialog />
       <ProjectsDialog />

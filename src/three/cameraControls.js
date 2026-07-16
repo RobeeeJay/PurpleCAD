@@ -7,9 +7,11 @@ import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createShellPreviewHelpers } from "./cameraControls/shell.js";
 import { createHolePreviewHelpers } from "./cameraControls/hole.js";
 import { createEmbossPreviewHelpers } from "./cameraControls/emboss.js";
+import { createTexturePreviewHelpers } from "./cameraControls/texture.js";
 import { createDraftPreviewHelpers } from "./cameraControls/draft.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
+import { fitPointsToView, meshFitPoints, boxCorners } from "./cameraFit.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "./sceneObjects.js";
 import { textShapeContours, makeTextShape } from "./sketchText.js";
 import { bboxCenterOf, massCentroidOf } from "./objectOrigin.js";
@@ -24,7 +26,10 @@ import {
   dedupProjectedShapes,
 } from "./sketchProjection.js";
 import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
-import { createAnimateLoop } from "./cameraControls/animateLoop.js";
+import {
+  createAnimateLoop,
+  requestRender,
+} from "./cameraControls/animateLoop.js";
 import { primitiveDimensions } from "./sceneObjects/dimensions.js";
 import { createMaterial } from "./objectMaterials.js";
 import { DEFAULT_MESH_COLOR } from "./theme.js";
@@ -330,19 +335,24 @@ export function attachCameraControls(ctx) {
     cancelExtrude,
   } = extrude;
 
-  const { handleEmbossHover, handleEmbossClick, syncEmbossFills } =
-    createEmbossInteraction({
-      renderer,
-      raycasterRef,
-      cameraRef,
-      mouseRef,
-      objectsRef,
-      itemsRef,
-      extrudeSelectGroupRef,
-      screenToSketchLocal,
-      pointInPolygon2D,
-      highlights,
-    });
+  const {
+    handleEmbossHover,
+    handleEmbossClick,
+    syncEmbossFills,
+    handleTextureHover,
+    handleTextureClick,
+  } = createEmbossInteraction({
+    renderer,
+    raycasterRef,
+    cameraRef,
+    mouseRef,
+    objectsRef,
+    itemsRef,
+    extrudeSelectGroupRef,
+    screenToSketchLocal,
+    pointInPolygon2D,
+    highlights,
+  });
   controls.syncEmbossFills = syncEmbossFills;
   // Clear the persistent multi-face selection highlight (on tool cancel/confirm).
   controls.clearEmbossSelectedFaces = () => highlights.clearSelectedFaces();
@@ -574,18 +584,6 @@ export function attachCameraControls(ctx) {
   });
   controls.updateChamferPreview = (distanceMm, angleDeg) =>
     chamferPreview.updateChamferPreview(distanceMm, angleDeg);
-  controls.updateChamferEditPreview = (
-    regenerator,
-    distanceMm,
-    angleDeg,
-    itemId,
-  ) =>
-    chamferPreview.updateChamferEditPreview(
-      regenerator,
-      distanceMm,
-      angleDeg,
-      itemId,
-    );
   controls.clearChamferPreview = () => chamferPreview.clearChamferPreview();
 
   // Live preview for PushPullOverlay: re-runs the push/pull recipe against the
@@ -619,6 +617,13 @@ export function attachCameraControls(ctx) {
   });
   controls.updateEmbossPreview = () => embossPreview.updateEmbossPreview();
   controls.clearEmbossPreview = () => embossPreview.clearEmbossPreview();
+  const texturePreview = createTexturePreviewHelpers({
+    scene,
+    itemsRef,
+    objectsRef,
+  });
+  controls.updateTexturePreview = () => texturePreview.updateTexturePreview();
+  controls.clearTexturePreview = () => texturePreview.clearTexturePreview();
   const draftPreview = createDraftPreviewHelpers({
     scene,
     itemsRef,
@@ -703,6 +708,24 @@ export function attachCameraControls(ctx) {
   };
   // World position + triangle/vertex counts of a selected object's live mesh,
   // for the status line.
+  // Whole-scene totals for the corner stats tag: faces/points of every model
+  // mesh currently displayed (sketches and reference planes excluded).
+  controls.getSceneStats = () => {
+    let faces = 0;
+    let points = 0;
+    for (const mesh of Object.values(objectsRef.current)) {
+      const item = itemsRef.current.find((i) => i.id === mesh.userData.itemId);
+      if (!item || item.type === "sketch" || item.type === "plane") continue;
+      if (item.visible === false) continue;
+      const g = mesh.geometry;
+      const pos = g?.getAttribute("position");
+      if (!pos) continue;
+      points += pos.count;
+      faces += g.index ? g.index.count / 3 : pos.count / 3;
+    }
+    return { faces: Math.round(faces), points };
+  };
+
   controls.getObjectStats = (id) => {
     const mesh = objectsRef.current[id];
     const g = mesh?.geometry;
@@ -804,6 +827,47 @@ export function attachCameraControls(ctx) {
     patternPreviewGroup = group;
   };
   controls.clearPattern3dPreview = () => controls.previewPattern3d(null);
+
+  // Boolean/Cut preview: fade the input bodies to 15% opacity so the translucent
+  // result ghost reads clearly through them, then show the ghost.  Restored by
+  // clearBooleanPreview.  Handles both the primitive shader materials (uOpacity
+  // uniform) and the standard mesh materials (material.opacity).
+  let booleanDimmed = [];
+  const BOOLEAN_DIM_OPACITY = 0.15;
+  controls.previewBoolean = (result, inputIds) => {
+    controls.clearBooleanPreview();
+    for (const id of inputIds || []) {
+      const mesh = objectsRef.current[id];
+      const m = mesh?.material;
+      if (!m) continue;
+      const u = m.uniforms?.uOpacity;
+      booleanDimmed.push({
+        m,
+        u,
+        prevTransparent: m.transparent,
+        prevOpacity: m.opacity,
+        prevDepthWrite: m.depthWrite,
+        prevU: u ? u.value : null,
+      });
+      m.transparent = true;
+      m.depthWrite = false;
+      if (u) u.value = BOOLEAN_DIM_OPACITY;
+      else m.opacity = BOOLEAN_DIM_OPACITY;
+      m.needsUpdate = true;
+    }
+    controls.previewPattern3d(result);
+  };
+  controls.clearBooleanPreview = () => {
+    for (const d of booleanDimmed) {
+      d.m.transparent = d.prevTransparent;
+      d.m.opacity = d.prevOpacity;
+      d.m.depthWrite = d.prevDepthWrite;
+      if (d.u && d.prevU != null) d.u.value = d.prevU;
+      d.m.needsUpdate = true;
+    }
+    booleanDimmed = [];
+    controls.previewPattern3d(null);
+  };
 
   // Pick 3 points (snapping to object vertices) to define a new Plane.  Markers
   // mark each pick; the 3rd derives a frame and opens the creation dialog.
@@ -1567,6 +1631,188 @@ export function attachCameraControls(ctx) {
   controls.captureScreenshot = () =>
     new Promise((resolve) => renderer.domElement.toBlob(resolve, "image/png"));
 
+  // Capture a clean thumbnail of the project (a small JPEG data URL): reset-view
+  // (isometric fit-all) framing, geometry shaded, with the ground plane / ruler
+  // labels / sketches hidden.  When there are no solid objects, keep the sketch
+  // plane and frame the origin instead.  Synchronous (render → toDataURL →
+  // restore, all in one tick) so it also works during an unload/quit.
+  controls.captureThumbnailDataUrl = () => {
+    const cam = cameraRef.current;
+    if (!cam) return null;
+
+    // Solid (non-sketch, visible) meshes + the fit-point cloud (analytic
+    // silhouette for round primitives, AABB corners otherwise) so the thumbnail
+    // frames exactly like the Reset-view button.
+    let any = false;
+    const solidMeshes = [];
+    const fitPts = [];
+    for (const item of itemsRef.current) {
+      if (item.type === "sketch" || item.visible === false) continue;
+      const mesh = objectsRef.current[item.id];
+      if (!mesh) continue;
+      mesh.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(mesh);
+      if (b.isEmpty()) continue;
+      any = true;
+      solidMeshes.push(mesh);
+      meshFitPoints(item, mesh, fitPts);
+    }
+
+    // Hide overlays (restored after the capture).
+    const hidden = [];
+    const hide = (o) => {
+      if (o && o.visible) {
+        o.visible = false;
+        hidden.push(o);
+      }
+    };
+    let gridMesh = null;
+    scene.traverse((o) => {
+      if (o.isMesh && o.material === gridMaterial) gridMesh = o;
+      if (o.userData?.isShadowGround) hide(o);
+      // Sketch line overlays: hide when there's a solid to show (they'd clutter
+      // an object thumbnail); kept — and framed — when the project is sketch-only.
+      if (o.userData?.isSketchOverlay) {
+        if (any) hide(o);
+        else if (o.visible) {
+          o.updateWorldMatrix(true, true);
+          const b = new THREE.Box3().setFromObject(o);
+          if (!b.isEmpty()) boxCorners(b, fitPts);
+        }
+      }
+    });
+    hide(gridMesh);
+    hide(rulerGroup);
+    hide(sketchGridGroupRef?.current);
+    hide(axisGroupRef?.current);
+    handlesRef?.current?.forEach((h) => hide(h.mesh));
+    const bb = boundingBoxRef?.current;
+    if (bb) {
+      hide(bb.boxMesh);
+      hide(bb.labelX?.sprite);
+      hide(bb.labelY?.sprite);
+      hide(bb.labelZ?.sprite);
+    }
+    // The sketch plane is the fallback subject when the project has no objects.
+    if (any) hide(planeRef?.current);
+
+    // Force each solid to its shaded (analytic) material, opaque, for the shot.
+    const matRestore = [];
+    for (const mesh of solidMeshes) {
+      const rec = { mesh, mat: mesh.material, geo: mesh.geometry };
+      if (
+        mesh.userData.hullGeometry &&
+        mesh.geometry !== mesh.userData.hullGeometry
+      )
+        mesh.geometry = mesh.userData.hullGeometry;
+      if (mesh.userData.shaderMat && mesh.material !== mesh.userData.shaderMat)
+        mesh.material = mesh.userData.shaderMat;
+      const m = mesh.material;
+      if (m && "opacity" in m) {
+        rec.opMat = m;
+        rec.op = { t: m.transparent, o: m.opacity, d: m.depthWrite };
+        m.transparent = false;
+        m.opacity = 1;
+        m.depthWrite = true;
+        m.needsUpdate = true;
+      }
+      matRestore.push(rec);
+    }
+
+    // Isometric fit-all pose — the exact same fit as the Reset-view / Home
+    // button, so a thumbnail frames identically to the default view.  The full
+    // frame (no left-panel offset) is used since the shot has no overlay.
+    const saved = {
+      pos: cam.position.clone(),
+      quat: cam.quaternion.clone(),
+      zoom: cam.zoom,
+    };
+    const rotX = Math.asin(Math.sqrt(1 / 3));
+    const rotY = Math.PI / 4;
+    const dir = new THREE.Vector3(
+      Math.sin(rotY) * Math.cos(rotX),
+      Math.sin(rotX),
+      Math.cos(rotY) * Math.cos(rotX),
+    ).normalize();
+    let center;
+    if (fitPts.length > 0) {
+      const fit = fitPointsToView(fitPts, dir, cam, 0.9);
+      center = fit.target;
+      cam.position.copy(fit.target).addScaledVector(dir, fit.distance);
+      if (fit.endZoom != null) cam.zoom = fit.endZoom;
+    } else {
+      center = new THREE.Vector3();
+      cam.position.copy(center).addScaledVector(dir, 15);
+    }
+    cam.up.set(0, 1, 0);
+    cam.lookAt(center);
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+
+    // Render one clean frame (no bloom composer), read it, downscale to the
+    // project card's display size, then restore camera / overlays / materials.
+    renderer.render(scene, cam);
+    const src = renderer.domElement;
+    // Match the card thumbnail (4:3, ~240 CSS px wide) at the device pixel ratio
+    // so it's crisp on hi-DPI; cap at 2× to keep the stored data URL small.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const tw = Math.round(240 * dpr);
+    const th = Math.round(180 * dpr);
+    // Stepped halving keeps large minifications from aliasing, then a final
+    // high-quality cover-crop into the 4:3 box.
+    let cur = src;
+    let cw = src.width;
+    let ch = src.height;
+    const cap = Math.max(tw, th) * 2;
+    while (Math.min(cw, ch) > cap) {
+      const nw = Math.max(tw, Math.round(cw / 2));
+      const nh = Math.max(th, Math.round(ch / 2));
+      const half = document.createElement("canvas");
+      half.width = nw;
+      half.height = nh;
+      const hx = half.getContext("2d");
+      hx.imageSmoothingEnabled = true;
+      hx.imageSmoothingQuality = "high";
+      hx.drawImage(cur, 0, 0, nw, nh);
+      cur = half;
+      cw = nw;
+      ch = nh;
+    }
+    const thumb = document.createElement("canvas");
+    thumb.width = tw;
+    thumb.height = th;
+    const ctx = thumb.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    const cover = Math.max(tw / cw, th / ch);
+    ctx.drawImage(
+      cur,
+      (tw - cw * cover) / 2,
+      (th - ch * cover) / 2,
+      cw * cover,
+      ch * cover,
+    );
+    const dataUrl = thumb.toDataURL("image/jpeg", 0.72);
+
+    cam.position.copy(saved.pos);
+    cam.quaternion.copy(saved.quat);
+    cam.zoom = saved.zoom;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+    for (const o of hidden) o.visible = true;
+    for (const r of matRestore) {
+      r.mesh.geometry = r.geo;
+      if (r.op) {
+        r.opMat.transparent = r.op.t;
+        r.opMat.opacity = r.op.o;
+        r.opMat.depthWrite = r.op.d;
+        r.opMat.needsUpdate = true;
+      }
+      r.mesh.material = r.mat;
+    }
+    return dataUrl;
+  };
+
   // Drop the selected non-sketch objects so their lowest world-Y point
   // sits on the ground plane (Y=0).  Computes the min Y across all
   // selected meshes' world-space bounding boxes, then dispatches a
@@ -1801,6 +2047,12 @@ export function attachCameraControls(ctx) {
       controls.mouseY = e.clientY;
       return;
     }
+    if (useStore.getState().textureTool?.picking) {
+      handleTextureHover(e.clientX, e.clientY);
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return;
+    }
     if (onSketchMouseMove(e)) return;
 
     clearSketchVisualsFor3D();
@@ -1851,6 +2103,12 @@ export function attachCameraControls(ctx) {
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5)
         handleEmbossClick(e.clientX, e.clientY, e.shiftKey);
+      return;
+    }
+    if (useStore.getState().textureTool?.picking && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5) handleTextureClick(e.clientX, e.clientY);
       return;
     }
 
@@ -1914,6 +2172,7 @@ export function attachCameraControls(ctx) {
     cameraRef,
     targetRef,
     cameraAnimRef,
+    cameraControlsRef,
     sketchModeRef,
     sketchGridGroupRef,
     sketchShapesGroupRef,
@@ -1928,6 +2187,13 @@ export function attachCameraControls(ctx) {
     composerRef,
     setRotationState,
   });
+
+  // On-demand rendering: invalidate a frame on EVERY store change (the
+  // animate-loop comment always promised this wiring).  Without it, updates
+  // that land asynchronously outside a pointer/key activity window — a
+  // debounced tool preview finishing, a worker result, a dialog edit — sat
+  // stale until the next mouse move over the viewport.
+  const unsubscribeRender = useStore.subscribe(() => requestRender());
 
   // ── Attach listeners ───────────────────────────────────────────────────────
 
@@ -1946,6 +2212,7 @@ export function attachCameraControls(ctx) {
 
   return () => {
     animateLoop.stop();
+    unsubscribeRender();
     disposeNavigation();
     el.removeEventListener("mousedown", onMouseDown);
     el.removeEventListener("mousemove", onMouseMove);

@@ -175,10 +175,17 @@ function buildDevelopableConformMesh(loops, dev, face, params, invScale = 1) {
   const { curve, arc, norms } = dev;
   const total = arc[arc.length - 1] || 1;
 
-  // Anchor the wrap at the curve point nearest the picked face point.
+  // Anchor the wrap at the curve point nearest the picked face point (around the
+  // wall), but CENTRE it on the wall's axial extent (mid-face) rather than the
+  // click height — so the relief sits centred on the selected face, and stays
+  // centred through a resize.  Falls back to the click height for older face
+  // sets that didn't store the extent.
   const fu = face.cx * e1.x + face.cy * e1.y + face.cz * e1.z;
   const fv = face.cx * e2.x + face.cy * e2.y + face.cz * e2.z;
-  const fAlong = face.cx * A.x + face.cy * A.y + face.cz * A.z;
+  const fAlong =
+    Number.isFinite(dev.aMin) && Number.isFinite(dev.aMax)
+      ? (dev.aMin + dev.aMax) / 2
+      : face.cx * A.x + face.cy * A.y + face.cz * A.z;
   let sAnchor = 0,
     bestD = Infinity;
   for (let i = 0; i < curve.length; i++) {
@@ -188,12 +195,36 @@ function buildDevelopableConformMesh(loops, dev, face, params, invScale = 1) {
       sAnchor = arc[i];
     }
   }
+  // A ring wall's cross-section is a CLOSED loop, but the sampled curve doesn't
+  // repeat its first point — detect closure by the small first↔last gap and wrap
+  // the arc-length parameter around it.  Without this, text anchored near the
+  // curve's seam (wherever the user happened to click) ran past the end and was
+  // CLAMPED flat onto the seam: letters squashed into degenerate slivers —
+  // missing/garbled relief and a boolean that chews on self-intersections.
+  const L = curve.length - 1;
+  const closeGap = Math.hypot(curve[0].u - curve[L].u, curve[0].v - curve[L].v);
+  const avgStep = total / Math.max(1, L);
+  const isClosed = closeGap < avgStep * 3;
+  const period = isClosed ? total + closeGap : total;
   const sampleAt = (s) => {
-    const L = curve.length - 1;
-    if (s <= arc[0])
-      return { u: curve[0].u, v: curve[0].v, nu: norms[0].u, nv: norms[0].v };
-    if (s >= total)
-      return { u: curve[L].u, v: curve[L].v, nu: norms[L].u, nv: norms[L].v };
+    if (isClosed) {
+      s = ((s % period) + period) % period;
+      if (s >= total) {
+        // Inside the closing segment (last → first).
+        const t = (s - total) / (closeGap || 1);
+        return {
+          u: curve[L].u + (curve[0].u - curve[L].u) * t,
+          v: curve[L].v + (curve[0].v - curve[L].v) * t,
+          nu: norms[L].u + (norms[0].u - norms[L].u) * t,
+          nv: norms[L].v + (norms[0].v - norms[L].v) * t,
+        };
+      }
+    } else {
+      if (s <= arc[0])
+        return { u: curve[0].u, v: curve[0].v, nu: norms[0].u, nv: norms[0].v };
+      if (s >= total)
+        return { u: curve[L].u, v: curve[L].v, nu: norms[L].u, nv: norms[L].v };
+    }
     let i = 1;
     while (i < arc.length && arc[i] < s) i++;
     const t = (s - arc[i - 1]) / (arc[i] - arc[i - 1] || 1);

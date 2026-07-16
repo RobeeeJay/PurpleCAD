@@ -506,6 +506,18 @@ export function extractDevelopableProfile(positions, normals) {
     return { u: nu / l, v: nv / l };
   });
 
+  // The wall's axial extent (min/max along A) — its centre is where the relief
+  // is centred vertically, so the text sits mid-face instead of at the click
+  // height (and stays centred when the wall is resized).
+  let aMin = Infinity,
+    aMax = -Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    const a =
+      positions[i] * A.x + positions[i + 1] * A.y + positions[i + 2] * A.z;
+    if (a < aMin) aMin = a;
+    if (a > aMax) aMax = a;
+  }
+
   return {
     axis: [A.x, A.y, A.z],
     e1: [e1.x, e1.y, e1.z],
@@ -513,6 +525,8 @@ export function extractDevelopableProfile(positions, normals) {
     curve,
     arc,
     norms,
+    aMin,
+    aMax,
   };
 }
 

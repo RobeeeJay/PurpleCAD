@@ -9,6 +9,10 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
+import { useStore } from "../store";
+import { cancelOcc } from "../three/occClient.js";
+import { clearSolids } from "../three/solidCache.js";
+import FormulaInput from "./FormulaInput";
 
 export const PREVIEW_DEBOUNCE_MS = 350;
 
@@ -35,6 +39,14 @@ export function useDebouncedPreview(valid, run, clear, deps) {
       return;
     }
     const t = setTimeout(() => {
+      // A previous preview's OCC op may still be running (a slow op that outlived
+      // the debounce); it would serialise ahead of this new one and keep eating
+      // CPU.  Abort it so the latest preview computes now.  Only when something
+      // is actually in flight.
+      if (useStore.getState().pendingOperations > 0) {
+        cancelOcc();
+        clearSolids();
+      }
       if (runRef.current) runRef.current();
     }, PREVIEW_DEBOUNCE_MS);
     return () => clearTimeout(t);
@@ -67,11 +79,17 @@ const fmt = (v) =>
 // no longer triggers a store write / re-render.  Re-seeds only when `value`
 // changes from the OUTSIDE (not our own committed echo).  The wheel is disabled
 // globally (main.jsx) and spinners via CSS, so it is keyboard-entry only.
+//
+// Pass `variables` to accept formulas too: a native type="number" input rejects
+// any non-digit keystroke outright (so "width/2" couldn't even be typed), so
+// this switches to a free-text FormulaInput (suggestions + evalValue parsing)
+// instead.  Omitting `variables` keeps the plain numeric-only behaviour.
 export function NumberInput({
   value,
   onCommit,
   debounceMs = PREVIEW_DEBOUNCE_MS,
   onKeyDown,
+  variables,
   ...rest
 }) {
   const [raw, setRaw] = useState(() => fmt(value));
@@ -88,10 +106,17 @@ export function NumberInput({
   onCommitRef.current = onCommit;
   const rawRef = useRef(raw);
   rawRef.current = raw;
+  const variablesRef = useRef(variables);
+  variablesRef.current = variables;
   const flush = () => {
     const r = rawRef.current;
     seeded.current = r;
-    onCommitRef.current?.(r.trim() === "" ? NaN : Number(r), r);
+    const n = variablesRef.current
+      ? evalValue(r, variablesRef.current)
+      : r.trim() === ""
+        ? NaN
+        : Number(r);
+    onCommitRef.current?.(n, r);
   };
   const flushRef = useRef(flush);
   flushRef.current = flush;
@@ -102,16 +127,33 @@ export function NumberInput({
     return () => clearTimeout(t);
   }, [raw, debounceMs]);
 
+  const handleChange = (e) => setRaw(e.target.value);
+  const handleBlur = () => flushRef.current();
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") flushRef.current();
+    onKeyDown?.(e);
+  };
+
+  if (variables) {
+    return (
+      <FormulaInput
+        variables={variables}
+        value={raw}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        {...rest}
+      />
+    );
+  }
+
   return (
     <input
       type="number"
       value={raw}
-      onChange={(e) => setRaw(e.target.value)}
-      onBlur={() => flushRef.current()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") flushRef.current();
-        onKeyDown?.(e);
-      }}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
       {...rest}
     />
   );

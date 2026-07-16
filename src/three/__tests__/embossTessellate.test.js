@@ -98,4 +98,101 @@ describe("embossTessellate", () => {
     }
     expect([...ec.values()].filter((c) => c !== 2).length).toBe(0);
   });
+
+  it("meshGlyphCaps triangles never cross a concave contour (no protrusions)", () => {
+    // A deep concave notch (like the counter of a '5'): the unconstrained
+    // Delaunay used to CHORD across it — a triangle with its centroid inside but
+    // an apex outside the glyph — which wrapped into visibly distorted relief on
+    // 5/6/9. The densified boundary + crossing filter must keep every triangle
+    // inside: cap area == polygon area, and no edge properly crosses the contour.
+    const notched = [
+      {
+        outer: [
+          { x: 0, y: 0 },
+          { x: 3, y: 0 },
+          { x: 3, y: 2 },
+          { x: 0.4, y: 2 },
+          { x: 0.4, y: 1.2 }, // deep narrow notch back into the shape
+          { x: 2.6, y: 1.1 },
+          { x: 2.6, y: 0.9 },
+          { x: 0, y: 0.8 },
+        ],
+        holes: [],
+      },
+    ];
+    const { points, tris } = meshGlyphCaps(notched, 0.43);
+    const ring = notched[0].outer;
+    let polyArea = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i],
+        q = ring[(i + 1) % ring.length];
+      polyArea += p.x * q.y - q.x * p.y;
+    }
+    polyArea = Math.abs(polyArea) / 2;
+    let capArea = 0;
+    for (const [a, b, c] of tris) capArea += triArea(points, a, b, c);
+    expect(capArea).toBeCloseTo(polyArea, 5);
+    const ori = (ax, ay, bx, by, cx, cy) =>
+      (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const crosses = (p, q, a, b) => {
+      const d1 = ori(a.x, a.y, b.x, b.y, p[0], p[1]);
+      const d2 = ori(a.x, a.y, b.x, b.y, q[0], q[1]);
+      const d3 = ori(p[0], p[1], q[0], q[1], a.x, a.y);
+      const d4 = ori(p[0], p[1], q[0], q[1], b.x, b.y);
+      return (
+        ((d1 > 1e-12 && d2 < -1e-12) || (d1 < -1e-12 && d2 > 1e-12)) &&
+        ((d3 > 1e-12 && d4 < -1e-12) || (d3 < -1e-12 && d4 > 1e-12))
+      );
+    };
+    let crossing = 0;
+    for (const [a, b, c] of tris)
+      for (const [u, v] of [
+        [a, b],
+        [b, c],
+        [c, a],
+      ])
+        for (let i = 0; i < ring.length; i++)
+          if (
+            crosses(points[u], points[v], ring[i], ring[(i + 1) % ring.length])
+          )
+            crossing++;
+    expect(crossing).toBe(0);
+  });
+
+  it("prismFromLoops has CONSISTENT winding on a holed glyph (correct normals)", () => {
+    // Square with a square hole (like O/A/e).  Regression: the raw cap+wall mesh
+    // wound some faces backward → the sewn solid was watertight but had reversed
+    // faces (wrong render normals) that OCC's global orient couldn't fix.  A
+    // consistently-wound closed mesh uses every DIRECTED edge exactly once.
+    const holed = [
+      {
+        outer: [
+          { x: -2, y: -2 },
+          { x: 2, y: -2 },
+          { x: 2, y: 2 },
+          { x: -2, y: 2 },
+        ],
+        holes: [
+          [
+            { x: -1, y: -1 },
+            { x: -1, y: 1 },
+            { x: 1, y: 1 },
+            { x: 1, y: -1 },
+          ],
+        ],
+      },
+    ];
+    const { indices } = prismFromLoops(holed, 1, 0.5);
+    const dir = new Map();
+    for (let i = 0; i < indices.length; i += 3) {
+      const t = [indices[i], indices[i + 1], indices[i + 2]];
+      for (const [a, b] of [
+        [t[0], t[1]],
+        [t[1], t[2]],
+        [t[2], t[0]],
+      ])
+        dir.set(`${a}_${b}`, (dir.get(`${a}_${b}`) || 0) + 1);
+    }
+    expect([...dir.values()].filter((c) => c !== 1).length).toBe(0);
+  });
 });

@@ -6,6 +6,7 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
+import { releaseSolid } from "../solidCache.js";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { activePrecision } from "../resolution.js";
 import { withLivePolygons, withLiveDepth } from "../csgUtils.js";
@@ -20,8 +21,7 @@ const GHOST_OPACITY = 0.12;
 // Arm a push/pull retarget: pre-select the faces the original op used (shifted
 // from the source frame back into this item's rendered, bbox-centred frame)
 // and open PushPullOverlay.  The user can then add/remove faces (live preview)
-// before confirming, which updates the entry in place.  Mirrors
-// beginChamferRetarget.
+// before confirming, which updates the entry in place.
 export const beginPushPullRetarget = (itemId, entryId) => {
   const store = useStore.getState();
   const item = store.items.find((i) => i.id === itemId);
@@ -113,7 +113,7 @@ export async function commitPushPull({
   if (!result) return false;
 
   const { geometryData, centerOffset } = result;
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
   store._cameraControls?.clearPushPullPreview?.();
   const patches = {
     type: "csg",
@@ -124,12 +124,17 @@ export async function commitPushPull({
       source,
       subGeo: result.resolvedSubGeo || subGeo,
       centerOffset,
+      basePosition: basePos,
       regeneratedAt: printPrecision,
     },
     geometryData,
   };
-  if (retargetEntryId) store.retargetPushPullEntry(retargetEntryId, patches);
-  else store.modifyItem(item.id, patches, distance >= 0 ? "Pulled" : "Pushed");
+  if (retargetEntryId) {
+    store.retargetPushPullEntry(retargetEntryId, patches);
+    // Fresh committed geometry stays (no recompute) — drop the stale cached solid.
+    releaseSolid(retargetEntryId);
+  } else
+    store.modifyItem(item.id, patches, distance >= 0 ? "Pulled" : "Pushed");
   store.clearSelectedSubGeometry();
   if (retargetEntryId) store.setPushPullRetargetTarget(null);
   return true;
@@ -172,6 +177,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     mesh.children.forEach((c) => {
       c.visible = false;
     });
+    mesh.userData.ghosted = true;
   };
 
   const unghostSource = () => {
@@ -189,6 +195,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     edges.forEach(({ child, visible }) => {
       child.visible = visible;
     });
+    delete mesh.userData.ghosted;
     ghosted = null;
   };
 

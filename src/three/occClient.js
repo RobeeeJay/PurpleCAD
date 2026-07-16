@@ -66,24 +66,99 @@ function dec() {
   if (typeof s.endOperation === "function") s.endOperation();
 }
 
+const now = () =>
+  typeof performance !== "undefined" ? performance.now() : Date.now();
+
+// Wall-clock HH:MM:SS.mmm for the debug logs.
+const clock = () => {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+};
+
 async function callOp(op, args) {
-  if (isElectron) {
-    return window.electronAPI.invokeOcc(op, resolveArgDepths(args));
+  // Debug timing: log every OCC op's start + end wall-clock time + duration
+  // (round-trip, including IPC to the worker).  Grep the console for "[OCC]".
+  const t0 = now();
+  /* eslint-disable no-console */
+  console.log(`[OCC] ${op} start ${clock()}`);
+  try {
+    const result = isElectron
+      ? await window.electronAPI.invokeOcc(op, resolveArgDepths(args))
+      : await (async () => {
+          const ops = await getInProcessOps();
+          const fn = ops[op];
+          if (typeof fn !== "function") throw new Error(`Unknown op "${op}"`);
+          return fn(args);
+        })();
+    console.log(`[OCC] ${op} end ${clock()} (${(now() - t0).toFixed(1)}ms)`);
+    return result;
+  } catch (e) {
+    console.log(
+      `[OCC] ${op} FAILED ${clock()} (${(now() - t0).toFixed(1)}ms): ${e.message}`,
+    );
+    throw e;
   }
-  const ops = await getInProcessOps();
-  const fn = ops[op];
-  if (typeof fn !== "function") throw new Error(`Unknown op "${op}"`);
-  return fn(args);
+  /* eslint-enable no-console */
 }
 
 async function runOp(op, args) {
   inc();
+  // Cancel has two layers: the worker's native op aborts via the shared cancel
+  // flag (cancelOcc, frees the CPU), and this soft layer discards any result
+  // that still lands (an op that finished before the flag was seen, or a
+  // non-abortable op) so a stale result never reaches the UI.
+  const epoch = useStore.getState().cancelEpoch;
+  const cancelled = () => useStore.getState().cancelEpoch !== epoch;
   try {
     await new Promise((r) => setTimeout(r, 0));
-    return await callOp(op, args);
+    if (cancelled()) {
+      // eslint-disable-next-line no-console
+      console.log(`[OCC] ${op} CANCELLED before start (skipped)`);
+      return null;
+    }
+    const result = await callOp(op, args);
+    if (cancelled()) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[OCC] ${op} CANCELLED after completion (result discarded; op still ran)`,
+      );
+      return null;
+    }
+    return result;
   } finally {
     dec();
   }
+}
+
+// Release a cached OCC solid (JIT-timeline solid cache).  Lightweight cleanup:
+// bypasses the busy-counter / cancel machinery of runOp — it must always run,
+// even mid-cancel, and shouldn't flash the spinner.
+export function releaseShape(id) {
+  if (id == null) return Promise.resolve(null);
+  return callOp("releaseShape", { id });
+}
+
+// Sew a baked mesh into a retained solid (JIT cache input fallback).  Direct
+// route (no busy/cancel wrapper) — it runs inside the recalc loop.
+export function tessellateItem(args) {
+  return runOp("tessellateItem", args);
+}
+
+export function solidFromMesh(geometryData) {
+  return callOp("solidFromMesh", geometryData);
+}
+
+// Genuine cancel: ask the main process to flip the shared cancel flag, so the
+// worker's in-flight native OCC op aborts (UserBreak) and frees the CPU — no
+// process/worker kill, so nothing shared is corrupted.  Electron-only; a no-op
+// elsewhere.  The op still rejects/returns null via the soft-cancel epoch, and
+// the caller clears the solid cache (a half-built shape was never stored).
+export function cancelOcc() {
+  if (!isElectron) return Promise.resolve(null);
+  // eslint-disable-next-line no-console
+  console.log("[OCC] requesting cancel (worker abort)");
+  return window.electronAPI.invokeOcc("cancel");
 }
 
 export function chamferOrFilletItem(args) {

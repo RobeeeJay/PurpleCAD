@@ -1,11 +1,10 @@
 import React, { useEffect } from "react";
+import TooltipLayer from "./components/TooltipLayer";
 import Toolbar from "./components/Toolbar";
 import Viewport from "./components/Viewport";
 import TreeView from "./components/TreeView";
 import Timeline from "./components/Timeline";
 import VariablesDialog from "./components/VariablesDialog";
-import ExtrudeLengthDialog from "./components/ExtrudeLengthDialog";
-import ChamferEditDialog from "./components/ChamferEditDialog";
 import PushPullEditDialog from "./components/PushPullEditDialog";
 import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
@@ -47,6 +46,21 @@ function App() {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+  // The Electron menu's "About PurpleCAD" opens the same in-app About dialog.
+  useEffect(() => {
+    window.electronAPI?.onMenuAbout?.(() =>
+      useStore.getState().setAboutDialogOpen(true),
+    );
+  }, []);
+  // Capture the active project's thumbnail when leaving the app.
+  useEffect(() => {
+    const onLeave = () => {
+      const s = useStore.getState();
+      s.refreshThumbnail?.(s.activeProjectId);
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, []);
   useEffect(() => {
     const name = projects.find((p) => p.id === activeProjectId)?.name;
     document.title = name ? `${name} — PurpleCAD` : "PurpleCAD";
@@ -142,8 +156,6 @@ function App() {
         <Viewport />
       </div>
       <VariablesDialog />
-      <ExtrudeLengthDialog />
-      <ChamferEditDialog />
       <PushPullEditDialog />
       <RevolveEditDialog />
       <MaterialDialog />
@@ -152,6 +164,7 @@ function App() {
       <ProjectDialog />
       <TextDialog />
       <ShortcutsOverlay />
+      <TooltipLayer />
       <StatusLine />
       <VersionTag />
       {notification && (

@@ -91,22 +91,11 @@ export function createShadowGround(scene) {
 
 export function createLights(scene, camera) {
   scene.add(new THREE.AmbientLight(LIGHT_COLOR, 0.4));
+  // Key lights ride the camera so shading follows the view.  They do NOT cast
+  // shadows — the ground shadow comes from a separate fixed light below.
   const dir1 = new THREE.DirectionalLight(LIGHT_COLOR, 1.0);
   dir1.position.set(10, 15, 10);
-  // Disabled by default — the Render-section shadow toggle flips this on.
-  // Without these orthographic-camera frustum settings the default shadow
-  // camera covers a tiny 10-unit cube which clips the scene and produces
-  // a near-black ground plane.
   dir1.castShadow = false;
-  dir1.shadow.mapSize.set(1024, 1024);
-  dir1.shadow.camera.left = -25;
-  dir1.shadow.camera.right = 25;
-  dir1.shadow.camera.top = 25;
-  dir1.shadow.camera.bottom = -25;
-  dir1.shadow.camera.near = 0.5;
-  dir1.shadow.camera.far = 80;
-  dir1.shadow.bias = -0.0005;
-  dir1.shadow.normalBias = 0.02;
   camera.add(dir1);
   const dir2 = new THREE.DirectionalLight(LIGHT_COLOR, 0.5);
   dir2.position.set(-10, 10, -10);
@@ -114,8 +103,30 @@ export function createLights(scene, camera) {
   const pt = new THREE.PointLight(LIGHT_COLOR, 0.3, 50);
   pt.position.set(0, 10, 0);
   camera.add(pt);
-  // Return dir1 so the Viewport can toggle castShadow at runtime.
-  return { dir1 };
+
+  // Dedicated shadow caster: fixed straight down in WORLD space so the shadow
+  // drops vertically onto the ground and never swings as the view orbits.
+  // Intensity 0 → it contributes only its shadow to the ground ShadowMaterial,
+  // no extra lighting.  Disabled by default — the Render-section shadow toggle
+  // flips castShadow on.  The wide ortho frustum + far plane keep the shadow
+  // camera from clipping the scene (a tiny default frustum blackens the ground).
+  const shadowLight = new THREE.DirectionalLight(LIGHT_COLOR, 0);
+  shadowLight.position.set(0, 40, 0);
+  shadowLight.target.position.set(0, 0, 0);
+  shadowLight.castShadow = false;
+  shadowLight.shadow.mapSize.set(2048, 2048);
+  shadowLight.shadow.camera.left = -40;
+  shadowLight.shadow.camera.right = 40;
+  shadowLight.shadow.camera.top = 40;
+  shadowLight.shadow.camera.bottom = -40;
+  shadowLight.shadow.camera.near = 0.5;
+  shadowLight.shadow.camera.far = 120;
+  shadowLight.shadow.bias = -0.0005;
+  shadowLight.shadow.normalBias = 0.02;
+  scene.add(shadowLight);
+  scene.add(shadowLight.target);
+  // Returned as `dir1` for the Viewport's shadow toggle (flips castShadow).
+  return { dir1: shadowLight };
 }
 
 // Three size tiers: "coarse" (50 mm labels), "fine" (10 mm), "ultra" (1 mm).
@@ -382,11 +393,13 @@ export function createAxisGroup(scene) {
     new THREE.Vector3(0, AXIS_LEN / 2, 0),
     new THREE.Vector3(0, AXIS_LEN + CONE_H / 2, 0),
   );
+  // The UX frame is Z-up matching exports (user Y = internal −z), so the
+  // third arrow points along internal −z and is labeled "Y" below.
   addAxisArrow(
     AXIS_Z_COLOR,
-    new THREE.Euler(Math.PI / 2, 0, 0),
-    new THREE.Vector3(0, 0, AXIS_LEN / 2),
-    new THREE.Vector3(0, 0, AXIS_LEN + CONE_H / 2),
+    new THREE.Euler(-Math.PI / 2, 0, 0),
+    new THREE.Vector3(0, 0, -AXIS_LEN / 2),
+    new THREE.Vector3(0, 0, -(AXIS_LEN + CONE_H / 2)),
   );
 
   const makeAxisLabel = (text, color) => {
@@ -412,12 +425,12 @@ export function createAxisGroup(scene) {
   const xLabel = makeAxisLabel("X", toCssHex(AXIS_X_COLOR));
   xLabel.position.set(LABEL_DIST, 0, 0);
   axisGroup.add(xLabel);
-  const yLabel = makeAxisLabel("Y", toCssHex(AXIS_Y_COLOR));
-  yLabel.position.set(0, LABEL_DIST, 0);
-  axisGroup.add(yLabel);
-  const zLabel = makeAxisLabel("Z", toCssHex(AXIS_Z_COLOR));
-  zLabel.position.set(0, 0, LABEL_DIST);
+  const zLabel = makeAxisLabel("Z", toCssHex(AXIS_Y_COLOR));
+  zLabel.position.set(0, LABEL_DIST, 0);
   axisGroup.add(zLabel);
+  const yLabel = makeAxisLabel("Y", toCssHex(AXIS_Z_COLOR));
+  yLabel.position.set(0, 0, -LABEL_DIST);
+  axisGroup.add(yLabel);
 
   scene.add(axisGroup);
   return axisGroup;
@@ -445,7 +458,17 @@ export function setupResize(containerRef, cameraRef, renderer, composerRef) {
     const height = containerRef.current.clientHeight;
     const cam = cameraRef.current;
     if (!cam) return;
-    cam.aspect = width / height;
+    const aspect = width / height;
+    if (cam.isOrthographicCamera) {
+      // Ortho has no `aspect`; setting it is a no-op that leaves the frustum
+      // stretched after a resize (breaking zoom/pan feel + on-screen overlays).
+      // Keep the vertical extent and rebuild left/right for the new aspect.
+      const frustH = cam.top - cam.bottom;
+      cam.left = (-frustH * aspect) / 2;
+      cam.right = (frustH * aspect) / 2;
+    } else {
+      cam.aspect = aspect;
+    }
     cam.updateProjectionMatrix();
     renderer.setSize(width, height);
     if (composerRef.current) composerRef.current.setSize(width, height);

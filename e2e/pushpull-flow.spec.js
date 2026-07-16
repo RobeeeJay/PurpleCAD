@@ -1,12 +1,5 @@
-import { test, expect, _electron as electron } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const projectRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
-
+import { test, expect } from "@playwright/test";
+import { launchApp } from "./launch.js";
 // Full push/pull lifecycle against the real app: create → push/pull (overlay
 // Confirm) → edit distance (Timeline + dialog) → retarget (Timeline + overlay).
 // Geometry/IPC work is driven and asserted through window.__store; the UI
@@ -21,9 +14,7 @@ test.describe.serial("push/pull lifecycle", () => {
   const CUBE_ID = 4242;
 
   test.beforeAll(async () => {
-    const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE;
-    app = await electron.launch({ args: [projectRoot], env });
+    app = await launchApp();
     page = await app.firstWindow();
     await expect(page.locator(".toolbar")).toBeVisible();
   });
@@ -54,7 +45,7 @@ test.describe.serial("push/pull lifecycle", () => {
 
     const overlay = page.locator(".sketch-distance-input-overlay");
     await expect(overlay).toBeVisible();
-    await overlay.locator('input[type="number"]').fill("5");
+    await overlay.locator("input").first().fill("5");
     await page.getByTitle("Confirm — apply the push/pull").click();
 
     // The cube became a push/pull CSG, recorded as a "Pulled" timeline step.
@@ -84,7 +75,7 @@ test.describe.serial("push/pull lifecycle", () => {
       hasText: "Edit push/pull",
     });
     await expect(dialog).toBeVisible();
-    await dialog.locator('input[type="number"]').fill("12");
+    await dialog.locator("input").first().fill("12");
     await dialog.getByRole("button", { name: "Save" }).click();
 
     // 12 mm → 1.2 scene units; updatePushPullParams writes it synchronously.

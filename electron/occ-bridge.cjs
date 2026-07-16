@@ -292,10 +292,14 @@ function resolveDepth(depth, fallback = 1) {
   return Number.isFinite(n) ? n / 10 : fallback;
 }
 
-// Mirrors csgUtils.js#buildBrushTransform without THREE.js.
+// Mirrors csgUtils.js#buildBrushTransform without THREE.js.  Returns the full
+// per-axis scale (in the LOCAL geometry frame) so a non-uniformly stretched
+// body rebuilds at its visible size.  The extrude centroid offset is UNSCALED —
+// the renderer adds it via mesh.position, which mesh.scale never touches.
 function buildBrushTransform(item) {
   const r = item.rotation || { x: 0, y: 0, z: 0 };
-  const s = item.scale ? item.scale.x : 1;
+  const sc = item.scale || {};
+  const s = { x: sc.x ?? 1, y: sc.y ?? 1, z: sc.z ?? 1 };
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
     const c = polyAreaCentroid(item.profile.polygon2D);
     const rotated = applyEulerXYZ(c.x, c.y, 0, r.x||0, r.y||0, r.z||0);
@@ -313,6 +317,43 @@ function buildBrushTransform(item) {
   };
 }
 
+// Mirrors occOps.js#scaleLocal — apply an item's local-frame scale to a shape
+// before it is rotated/translated.  Uniform → analytic scaleShape; per-axis →
+// affine scaleShapeXYZ.  Returns the scaled id (input released) or `localId`.
+function scaleLocal(localId, scale) {
+  const sx = scale && scale.x != null ? scale.x : 1;
+  const sy = scale && scale.y != null ? scale.y : 1;
+  const sz = scale && scale.z != null ? scale.z : 1;
+  const uniform = Math.abs(sx - sy) < 1e-9 && Math.abs(sy - sz) < 1e-9;
+  if (uniform) {
+    if (Math.abs(sx - 1) < 1e-9) return localId;
+    const id = occ.scaleShape(localId, sx);
+    occ.releaseShape(localId);
+    return id;
+  }
+  const id = occ.scaleShapeXYZ(localId, sx, sy, sz);
+  occ.releaseShape(localId);
+  return id;
+}
+
+// Mirrors occOps.js#booleanInputLocal — a transformed csg body must contribute
+// the EXACT geometry the user sees.  Under a non-uniform gizmo scale a recipe
+// re-derivation can diverge from the baked geometryData, so sew the baked mesh.
+function booleanInputLocal(item, allItems, precision) {
+  const s = item.scale || {};
+  const sx = s.x ?? 1, sy = s.y ?? 1, sz = s.z ?? 1;
+  const nonUniform = Math.abs(sx - sy) > 1e-9 || Math.abs(sy - sz) > 1e-9;
+  if (item.type === "csg" && item.geometryData && nonUniform) {
+    const g = item.geometryData;
+    if (g.positions && g.positions.length >= 9) {
+      const positions = new Float64Array(g.positions);
+      const indices = g.indices && g.indices.length ? new Uint32Array(g.indices) : null;
+      return occ.makeSolidFromMesh(positions, indices);
+    }
+  }
+  return buildItemShapeLocal(item, allItems, precision);
+}
+
 function bboxOf(positions) {
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -325,6 +366,49 @@ function bboxOf(positions) {
     if (positions[i+2] > maxZ) maxZ = positions[i+2];
   }
   return { minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+// ── Cached-solid op helpers (JIT timeline) — mirror occOps.js ──────────────
+// A source-based op can take the previous entry's CACHED solid (sourceShapeId)
+// instead of rebuilding the frozen `source`.  We only own/release an id we
+// built ourselves; a cached id is owned by its entry and left alive.
+function resolveSourceSolid(sourceShapeId, source, allItems, precision) {
+  const owns = sourceShapeId == null;
+  const id = owns ? buildItemShapeLocal(source, allItems, precision) : sourceShapeId;
+  return { id, owns };
+}
+
+// Tessellate + bbox-centre an op result, releasing it unless the caller wants
+// to cache it (retainResult).  `extra` merges op-specific return fields.
+function finishSolidResult(resultId, precision, retainResult, extra) {
+  let tess;
+  try {
+    tess = occ.tessellate(resultId, precision ?? 0.5);
+  } finally {
+    if (!retainResult) occ.releaseShape(resultId);
+  }
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
+  const arr = Array.from(tess.positions);
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+  const centered = arr.slice();
+  for (let i = 0; i < centered.length; i += 3) {
+    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
+  }
+  // Re-centre the cached solid to buildItemShapeLocal's frame (mirrors occOps.js).
+  const shapeId = retainResult
+    ? occ.transformShape(resultId, -cx, -cy, -cz, 0, 0, 0)
+    : null;
+  if (retainResult) occ.releaseShape(resultId);
+  return {
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    centerOffset: { cx, cy, cz },
+    ...(retainResult ? { shapeId } : null),
+    ...extra,
+  };
 }
 
 // ── Shape builder ────────────────────────────────────────────────────────
@@ -591,11 +675,7 @@ function buildItemShapeLocal(item, allItems, precision) {
           if (localId == null) return null;
           const t = buildBrushTransform(inp);
           // Scale BEFORE translate+rotate (mirrors occOps.js#performCsg)
-          let scaledId = localId;
-          if (Math.abs(t.scale - 1) > 1e-9) {
-            scaledId = occ.scaleShape(localId, t.scale);
-            occ.releaseShape(localId);
-          }
+          const scaledId = scaleLocal(localId, t.scale);
           const worldId = occ.transformShape(
             scaledId,
             t.position.x, t.position.y, t.position.z,
@@ -644,11 +724,7 @@ function buildItemShapeLocal(item, allItems, precision) {
         const localId = buildItemShapeLocal(inp, allItems, precision);
         if (localId == null) return null;
         const t = buildBrushTransform(inp);
-        let scaledId = localId;
-        if (Math.abs(t.scale - 1) > 1e-9) {
-          scaledId = occ.scaleShape(localId, t.scale);
-          occ.releaseShape(localId);
-        }
+        const scaledId = scaleLocal(localId, t.scale);
         const worldId = occ.transformShape(
           scaledId,
           t.position.x, t.position.y, t.position.z,
@@ -694,16 +770,12 @@ function performCsg({ selectedItems, allItems, operation, printPrecision }) {
   const worldAnchors = [];
 
   for (const item of selectedItems) {
-    const localId = buildItemShapeLocal(item, sources, printPrecision);
+    const localId = booleanInputLocal(item, sources, printPrecision);
     if (localId == null) continue;
     const t = buildBrushTransform(item);
 
     // Apply scale before rotate+translate (mirrors occOps.js)
-    let scaledId = localId;
-    if (Math.abs(t.scale - 1) > 1e-9) {
-      scaledId = occ.scaleShape(localId, t.scale);
-      occ.releaseShape(localId);
-    }
+    const scaledId = scaleLocal(localId, t.scale);
     const worldId = occ.transformShape(
       scaledId,
       t.position.x, t.position.y, t.position.z,
@@ -763,8 +835,11 @@ function performCsg({ selectedItems, allItems, operation, printPrecision }) {
   };
 }
 
-function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function chamferOrFilletItem({ source, sourceShapeId, retainResult, subGeo, amount, angleRad, segments, allItems, printPrecision }) {
+  // JIT-timeline model (mirrors occOps.js): chamfer a CACHED input solid when
+  // one is handed in, and retain the result solid for the next op to chain off.
+  const ownsSource = sourceShapeId == null;
+  const sourceId = ownsSource ? buildItemShapeLocal(source, allItems, printPrecision) : sourceShapeId;
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe (boolean / chamfer) is missing or references deleted inputs."
@@ -786,7 +861,7 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
       ? occ.chamferShape(sourceId, resolvedSubGeo, amount, angleRad ?? null)
       : occ.filletShape(sourceId, resolvedSubGeo, amount);
   } finally {
-    occ.releaseShape(sourceId);
+    if (ownsSource) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -803,9 +878,12 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
   try {
     tess = occ.tessellate(resultId, printPrecision ?? 0.5);
   } finally {
-    occ.releaseShape(resultId);
+    if (!retainResult) occ.releaseShape(resultId);
   }
-  if (!tess) return null;
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
 
   const arr = Array.from(tess.positions);
   const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
@@ -814,18 +892,24 @@ function chamferOrFilletItem({ source, subGeo, amount, angleRad, segments, allIt
   for (let i = 0; i < centered.length; i += 3) {
     centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
   }
+  // Re-centre the cached solid to buildItemShapeLocal's frame (mirrors occOps.js).
+  const shapeId = retainResult
+    ? occ.transformShape(resultId, -cx, -cy, -cz, 0, 0, 0)
+    : null;
+  if (retainResult) occ.releaseShape(resultId);
 
   return {
     geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo,
+    ...(retainResult ? { shapeId } : null),
   };
 }
 
 // Mirrors occOps.js#pushPullFaces — move the selected faces along their
 // normals by `distance` (signed: +pull / -push), then bbox-centre the result.
-function pushPullFaces({ source, subGeo, distance, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function pushPullFaces({ source, sourceShapeId, retainResult, subGeo, distance, allItems, printPrecision }) {
+  const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe (boolean / chamfer / push-pull) is missing or references deleted inputs."
@@ -836,7 +920,7 @@ function pushPullFaces({ source, subGeo, distance, allItems, printPrecision }) {
   try {
     resultId = occ.pushPullFaces(sourceId, subGeo, distance);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -846,33 +930,13 @@ function pushPullFaces({ source, subGeo, distance, allItems, printPrecision }) {
     );
   }
 
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
-
-  return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
-    resolvedSubGeo: subGeo,
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult, { resolvedSubGeo: subGeo });
 }
 
 // Mirrors occOps.js#shellItem — hollow the source solid into a shell of
 // `thickness` (scene units), then bbox-centre the result.
-function shellItem({ source, thickness, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function shellItem({ source, sourceShapeId, retainResult, thickness, allItems, printPrecision }) {
+  const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs."
@@ -883,7 +947,7 @@ function shellItem({ source, thickness, allItems, printPrecision }) {
   try {
     resultId = occ.makeShell(sourceId, thickness);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
@@ -892,32 +956,13 @@ function shellItem({ source, thickness, allItems, printPrecision }) {
     );
   }
 
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
-
-  return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Mirrors occOps.js#draftItem — taper selected faces about the neutral (main)
 // face's plane, then bbox-centre.
-function draftItem({ source, neutral, faces, angleDeg, flip, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function draftItem({ source, sourceShapeId, retainResult, neutral, faces, angleDeg, flip, allItems, printPrecision }) {
+  const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs."
@@ -928,31 +973,14 @@ function draftItem({ source, neutral, faces, angleDeg, flip, allItems, printPrec
     const angleRad = (((angleDeg || 0) * Math.PI) / 180) * (flip ? -1 : 1);
     resultId = occ.draftFaces(sourceId, neutral, { faces: faces || [] }, angleRad);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
   if (!resultId) {
     throw new Error(
       "Draft failed — try a smaller angle, or faces that share an edge with the main face."
     );
   }
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
-  return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Mirrors occOps.js#buildHoleShape — cut a bore (+ optional ISO thread groove)
@@ -1002,8 +1030,8 @@ function buildHoleShape(partId, h) {
 }
 
 // Mirrors occOps.js#holeItem — drill a hole into the source body, bbox-centred.
-function holeItem({ source, hole, allItems, printPrecision }) {
-  const sourceId = buildItemShapeLocal(source, allItems, printPrecision);
+function holeItem({ source, sourceShapeId, retainResult, hole, allItems, printPrecision }) {
+  const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
       "Could not rebuild the source shape — the item's recipe is missing or references deleted inputs."
@@ -1013,31 +1041,14 @@ function holeItem({ source, hole, allItems, printPrecision }) {
   try {
     resultId = buildHoleShape(sourceId, hole);
   } finally {
-    occ.releaseShape(sourceId);
+    if (owns) occ.releaseShape(sourceId);
   }
   if (!resultId) {
     throw new Error(
       "Hole failed — the cut produced nothing. Check the diameter/length and that the point is on the body."
     );
   }
-  let tess;
-  try {
-    tess = occ.tessellate(resultId, printPrecision ?? 0.5);
-  } finally {
-    occ.releaseShape(resultId);
-  }
-  if (!tess) return null;
-  const arr = Array.from(tess.positions);
-  const { minX, minY, minZ, maxX, maxY, maxZ } = bboxOf(arr);
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
-  const centered = arr.slice();
-  for (let i = 0; i < centered.length; i += 3) {
-    centered[i] -= cx; centered[i+1] -= cy; centered[i+2] -= cz;
-  }
-  return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
-    centerOffset: { cx, cy, cz },
-  };
+  return finishSolidResult(resultId, printPrecision, retainResult);
 }
 
 // Build the emboss/deboss stamp tool from a baked recipe (see occOps.js).
@@ -1048,7 +1059,11 @@ function buildEmbossStampShape(stamp) {
     if (!m || !m.positions || m.positions.length < 9) return 0;
     const positions = new Float64Array(m.positions);
     const indices = m.indices && m.indices.length ? new Uint32Array(m.indices) : null;
-    return occ.makeSolidFromMesh(positions, indices) || 0;
+    // The wrapped-text stamp is a flat-prism mesh bent over the wall — cutting-ON
+    // sewing hangs resolving the near-touching bent triangles.  fastSew=true sews
+    // cutting-OFF (fast) + skips unify (unify mangled the un-cut shell into a
+    // "single line").  skipCaps: dense + must be booleaned.  Mirrors occOps.js.
+    return occ.makeSolidFromMesh(positions, indices, true, true) || 0;
   }
   if (!stamp.loops || stamp.loops.length === 0) return 0;
   const { placement: pl, depth } = stamp;
@@ -1090,9 +1105,13 @@ function embossResultShape(targetId, stamp, printPrecision) {
     const t = occ.tessellate(targetId, printPrecision ?? 0.1);
     if (t && t.positions && t.indices) {
       try {
+        // skipCaps: a fine-tessellated curved body exceeds the import face cap at
+        // print resolution; it's booleaned here, so keep cutting + unify.
         faceted = occ.makeSolidFromMesh(
           new Float64Array(t.positions),
           new Uint32Array(t.indices),
+          true,
+          false,
         );
       } catch {
         faceted = 0;
@@ -1130,8 +1149,8 @@ function embossResultShape(targetId, stamp, printPrecision) {
   return result || 0;
 }
 
-function embossItem({ source, stamp, allItems, printPrecision }) {
-  const targetId = buildItemShapeLocal(source, allItems, printPrecision);
+function embossItem({ source, sourceShapeId, retainResult, stamp, allItems, printPrecision }) {
+  const { id: targetId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (targetId == null) {
     throw new Error("Could not rebuild the body to emboss onto.");
   }
@@ -1139,7 +1158,7 @@ function embossItem({ source, stamp, allItems, printPrecision }) {
   try {
     resultId = embossResultShape(targetId, stamp, printPrecision);
   } finally {
-    occ.releaseShape(targetId);
+    if (owns) occ.releaseShape(targetId);
   }
   if (!resultId) {
     throw new Error("Emboss failed — the geometry didn't reach the face. Check distance/scale/offset.");
@@ -1148,14 +1167,18 @@ function embossItem({ source, stamp, allItems, printPrecision }) {
   try {
     tess = occ.tessellate(resultId, printPrecision ?? 0.5);
   } finally {
-    occ.releaseShape(resultId);
+    if (!retainResult) occ.releaseShape(resultId);
   }
-  if (!tess) return null;
+  if (!tess) {
+    if (retainResult) occ.releaseShape(resultId);
+    return null;
+  }
   // No bbox-centring — anchor to the body's frame so the offset doesn't drag the
   // object (see occOps.js embossItem).
   return {
     geometryData: { positions: Array.from(tess.positions), normals: null, indices: Array.from(tess.indices) },
     centerOffset: { cx: 0, cy: 0, cz: 0 },
+    ...(retainResult ? { shapeId: resultId } : null),
   };
 }
 
@@ -1167,25 +1190,47 @@ const MM_PER_UNIT = 10;
 // Build each visible exportable item as a world-space OCC shape, scaled to
 // millimetres and rotated +π/2 around X (viewport Y-up → export Z-up).
 // Returns an array of { id } objects; caller must releaseShape each id.
-function buildExportShapes(items) {
+// `allItems` = whole scene so a csg recipe resolves inputs when exporting a
+// selected subset (mirrors occOps.js).
+// LOCAL-frame solid to export for one item: prefer the BAKED mesh (the exact
+// high-res on-screen geometry) sewn cap-free, else recipe rebuild.  Mirrors
+// occOps.js#exportLocalSolid.
+function exportLocalSolid(item, allItems, precision) {
+  const gd = item.geometryData;
+  if (gd?.positions?.length >= 9) {
+    try {
+      const id = occ.makeSolidFromMesh(
+        new Float64Array(gd.positions),
+        gd.indices && gd.indices.length ? new Uint32Array(gd.indices) : null,
+        true, // skipCaps — exported mesh, never booleaned
+        true, // fastSew — cutting off + no unify (near-instant)
+      );
+      if (id != null) return id;
+    } catch {
+      // fall through to the recipe rebuild
+    }
+  }
+  return buildItemShapeLocal(item, allItems, precision);
+}
+
+function buildExportShapes(items, allItems = items, precision = 0.01) {
   const out = [];
-  const exportPrecision = 0.01;
   for (const item of items) {
     if (item.visible === false) continue;
     if (!EXPORTABLE_TYPES.has(item.type)) continue;
 
-    const localId = buildItemShapeLocal(item, items, exportPrecision);
+    const localId = exportLocalSolid(item, allItems, precision);
     if (localId == null) continue;
 
     const t = buildBrushTransform(item);
-    const finalScale = (t.scale != null ? t.scale : 1) * MM_PER_UNIT;
 
-    // Apply item scale * MM_PER_UNIT, then world rotation + translation.
-    let scaledId = localId;
-    if (Math.abs(finalScale - 1) > 1e-9) {
-      scaledId = occ.scaleShape(localId, finalScale);
-      occ.releaseShape(localId);
-    }
+    // Per-axis scale, then the mm unit conversion folded onto every axis, then
+    // world rotation + translation.
+    const scaledId = scaleLocal(localId, {
+      x: t.scale.x * MM_PER_UNIT,
+      y: t.scale.y * MM_PER_UNIT,
+      z: t.scale.z * MM_PER_UNIT,
+    });
 
     const worldId = occ.transformShape(
       scaledId,
@@ -1208,23 +1253,67 @@ function buildExportShapes(items) {
   return out;
 }
 
-// Binary STL: tessellate all export shapes at fine precision (0.01 scene
-// units = 0.1 mm chord deviation) and write the binary STL format.
-// Returns a Buffer (Uint8Array) suitable for Electron IPC + new Blob([buf]).
-function exportSTL({ items }) {
-  const shapeIds = buildExportShapes(items);
-  if (shapeIds.length === 0) return null;
+// World-space tessellation of an item's BAKED mesh for STL (mirrors
+// occOps.js#bakedWorldTessellation): the baked mesh is already a watertight OCC
+// tessellation, so transform its triangles to world and write them verbatim —
+// sewing + re-tessellating round-trips through OCC and can open the seams.
+function bakedWorldTessellation(item) {
+  const gd = item.geometryData;
+  const bt = buildBrushTransform(item);
+  const sx = (bt.scale.x != null ? bt.scale.x : 1) * MM_PER_UNIT;
+  const sy = (bt.scale.y != null ? bt.scale.y : 1) * MM_PER_UNIT;
+  const sz = (bt.scale.z != null ? bt.scale.z : 1) * MM_PER_UNIT;
+  const rot = bt.rotation || { x: 0, y: 0, z: 0 };
+  const px = (bt.position.x || 0) * MM_PER_UNIT;
+  const py = (bt.position.y || 0) * MM_PER_UNIT;
+  const pz = (bt.position.z || 0) * MM_PER_UNIT;
+  const src = gd.positions;
+  const pos = new Array(src.length);
+  for (let i = 0; i < src.length; i += 3) {
+    const r = applyEulerXYZ(
+      src[i] * sx,
+      src[i + 1] * sy,
+      src[i + 2] * sz,
+      rot.x || 0,
+      rot.y || 0,
+      rot.z || 0,
+    );
+    const o = applyEulerXYZ(r.x + px, r.y + py, r.z + pz, Math.PI / 2, 0, 0);
+    pos[i] = o.x;
+    pos[i + 1] = o.y;
+    pos[i + 2] = o.z;
+  }
+  const idx =
+    gd.indices && gd.indices.length
+      ? gd.indices
+      : Array.from({ length: src.length / 3 }, (_, k) => k);
+  return { pos, idx, n: idx.length / 3 };
+}
 
+// Binary STL: write each item's exact on-screen watertight baked mesh (or, for a
+// primitive/extrude with no baked mesh, tessellate its analytic solid) at 0.1 mm
+// chord deviation.  Returns a Buffer suitable for Electron IPC + new Blob([buf]).
+function exportSTL({ items, allItems, precision }) {
+  const all = allItems || items;
   const tessellations = [];
   let triCount = 0;
-  for (const id of shapeIds) {
-    // Export precision in scene units: 0.01 (fine mesh for printing).
-    const tess = occ.tessellate(id, 0.01);
-    occ.releaseShape(id);
-    if (!tess) continue;
-    const n = tess.indices.length / 3;
-    tessellations.push({ pos: tess.positions, idx: tess.indices, n });
-    triCount += n;
+  for (const item of items) {
+    if (item.visible === false) continue;
+    if (!EXPORTABLE_TYPES.has(item.type)) continue;
+    let entry;
+    if (item.geometryData && item.geometryData.positions
+      && item.geometryData.positions.length >= 9) {
+      entry = bakedWorldTessellation(item);
+    } else {
+      const ids = buildExportShapes([item], all, precision ?? 0.01);
+      if (ids.length === 0) continue;
+      const t = occ.tessellate(ids[0], 0.01);
+      occ.releaseShape(ids[0]);
+      if (!t) continue;
+      entry = { pos: t.positions, idx: t.indices, n: t.indices.length / 3 };
+    }
+    tessellations.push(entry);
+    triCount += entry.n;
   }
   if (triCount === 0) return null;
 
@@ -1257,8 +1346,8 @@ function exportSTL({ items }) {
 
 // Export as STEP.  Builds all shapes, passes their IDs to the C++ writer,
 // and returns the ISO-10303-21 file content as a string.
-function exportSTEP({ items }) {
-  const shapeIds = buildExportShapes(items);
+function exportSTEP({ items, allItems, precision }) {
+  const shapeIds = buildExportShapes(items, allItems || items, precision ?? 0.01);
   if (shapeIds.length === 0) return null;
   try {
     return occ.exportSTEP(shapeIds);
@@ -1393,11 +1482,7 @@ function splitItem({ target, plane, allItems, printPrecision }) {
   const localId = buildItemShapeLocal(target, allItems, printPrecision);
   if (localId == null) throw new Error("Couldn't build the object to split.");
   const t = buildBrushTransform(target);
-  let scaledId = localId;
-  if (Math.abs(t.scale - 1) > 1e-9) {
-    scaledId = occ.scaleShape(localId, t.scale);
-    occ.releaseShape(localId);
-  }
+  const scaledId = scaleLocal(localId, t.scale);
   const solidId = occ.transformShape(
     scaledId, t.position.x, t.position.y, t.position.z,
     t.rotation.x || 0, t.rotation.y || 0, t.rotation.z || 0,
@@ -1456,11 +1541,7 @@ function buildWorldSolid(item, allItems, precision) {
   const localId = buildItemShapeLocal(item, allItems, precision);
   if (localId == null) return null;
   const t = buildBrushTransform(item);
-  let id = localId;
-  if (Math.abs(t.scale - 1) > 1e-9) {
-    id = occ.scaleShape(localId, t.scale);
-    occ.releaseShape(localId);
-  }
+  const id = scaleLocal(localId, t.scale);
   const w = occ.transformShape(
     id, t.position.x, t.position.y, t.position.z,
     t.rotation.x || 0, t.rotation.y || 0, t.rotation.z || 0,
@@ -1669,4 +1750,50 @@ function pattern3dItem({ patternType, sourceId, params, allItems, printPrecision
   return result;
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep };
+// Tessellate an item's rebuilt solid in its LOCAL frame (Texture tool base
+// mesh).  Mirrors occOps.js#tessellateItem.
+function tessellateItem({ source, sourceShapeId, allItems, printPrecision }) {
+  const { id, owns } = resolveSourceSolid(
+    sourceShapeId,
+    source,
+    allItems,
+    printPrecision,
+  );
+  if (id == null) return null;
+  try {
+    const tess = occ.tessellate(id, printPrecision ?? 0.5);
+    return tess ? { geometryData: tess } : null;
+  } finally {
+    if (owns) occ.releaseShape(id);
+  }
+}
+
+// Sew a baked mesh into a retained OCC solid (JIT cache input fallback).
+function solidFromMesh({ positions, indices }) {
+  if (!positions || positions.length < 9) return null;
+  const pos = new Float64Array(positions);
+  const idx = indices && indices.length ? new Uint32Array(indices) : null;
+  // skipCaps: this is a step's own baked mesh — a clean OCC tessellation, not
+  // an imported file, so the tri/face rejection caps guarding imports would
+  // wrongly reject a dense curved result (an emboss relief).  Full sew stays
+  // ON (cutting + unify): the solid feeds downstream booleans/chamfers.
+  const id = occ.makeSolidFromMesh(pos, idx, /*skipCaps*/ true, false);
+  return id ? { shapeId: id } : null;
+}
+
+// Release a cached OCC solid (JIT-timeline cache); no-op if already gone.
+function releaseShape({ id }) {
+  if (id != null) {
+    try { occ.releaseShape(id); } catch { /* already gone */ }
+  }
+  return null;
+}
+
+// Register the shared cancel flag (an Int32Array over a SharedArrayBuffer).  The
+// native builders poll it via UserBreak and abort mid-op when another thread
+// flips it — see binding.cc's CancelIndicator.
+function setCancelBuffer(view) {
+  occ.setCancelBuffer(view);
+}
+
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, setCancelBuffer };

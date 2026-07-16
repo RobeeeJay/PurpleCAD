@@ -2394,6 +2394,22 @@ export function createSketchInteraction(
       return;
     }
 
+    // Shift+Z / Shift+X toggle constraint / dimension visibility — the two
+    // toggles the Shift-held selection widget shows — in both 3D and sketch.
+    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === "z") {
+        e.preventDefault();
+        useStore.getState().toggleConstraintsVisible();
+        return;
+      }
+      if (k === "x") {
+        e.preventDefault();
+        useStore.getState().toggleDimensionsVisible();
+        return;
+      }
+    }
+
     // Z X C V B toggle the selection-type filters, in a shared widget order, for
     // whichever selection widget is showing (object → region → edge/line → point,
     // then constraint): 3D = object/face/edge/point (no fifth type, so B is a
@@ -2621,7 +2637,12 @@ export function createSketchInteraction(
         cameraControlsRef.current?.clearChamferPreview?.();
         useStore.getState().setChamferSelectMode(null);
         useStore.getState().clearSelectedSubGeometry();
-        useStore.getState().setChamferRetargetTarget(null);
+        const editTarget = useStore.getState().chamferEditTarget;
+        if (editTarget) {
+          // Editing viewed the pre-chamfer step — put the user back on the entry.
+          useStore.getState().restoreToHistory(editTarget.entryId);
+          useStore.getState().setChamferEditTarget(null);
+        }
         return;
       }
       if (sketchPlacementModeRef.current) {
@@ -2684,8 +2705,8 @@ export function createSketchInteraction(
       const store = useStore.getState();
       const renderModeKeys = {
         1: "wireframe",
-        2: "shaded",
-        3: "transparent",
+        2: "transparent",
+        3: "shaded",
       };
       if (renderModeKeys[e.key]) {
         e.preventDefault();

@@ -14,7 +14,7 @@ import { effectiveSelectionTypes } from "../../store/selectionMode.js";
 // vertex when close, else the clicked planar face (its triangles + normal); for a
 // raymarched primitive (box-hull geometry, so no real faces) use the clicked
 // surface point.
-function buildMeasureEntity(mesh, hit, isPrimitive) {
+function buildMeasureEntity(mesh, hit, isPrimitive, allowFace = true) {
   if (!hit) return null;
   const localToWorldArr = (x, y, z) => {
     const w = mesh.localToWorld(new THREE.Vector3(x, y, z));
@@ -38,12 +38,11 @@ function buildMeasureEntity(mesh, hit, isPrimitive) {
       return { kind: "point", p, at: p, itemId: id, pick: "vertex" };
     }
   }
-  const grown = growConnectedFaceSet(
-    mesh.geometry,
-    hit.faceIndex,
-    hit.face.normal,
-    1.5,
-  );
+  // Only measure a face when the active selection types permit it — in
+  // Edge/Point mode a click falls through to the surface point instead.
+  const grown = allowFace
+    ? growConnectedFaceSet(mesh.geometry, hit.faceIndex, hit.face.normal, 1.5)
+    : null;
   if (grown && grown.positions.length >= 9) {
     const pts = [];
     for (let i = 0; i < grown.positions.length; i += 3)
@@ -478,7 +477,16 @@ export function createViewInteraction(
             const isPrim = ["sphere", "cylinder", "torus", "cone"].includes(
               it.type,
             );
-            const entity = buildMeasureEntity(hit.object, hit, isPrim);
+            // Respect the selection widget: faces are pickable only in Object or
+            // Face mode, so measuring in Edge/Point mode won't grab a face.
+            const eff = effectiveSelectionTypes(useStore.getState());
+            const allowFace = eff.object || eff.face;
+            const entity = buildMeasureEntity(
+              hit.object,
+              hit,
+              isPrim,
+              allowFace,
+            );
             if (entity) useStore.getState().addMeasurePick(entity);
           }
         }
@@ -779,13 +787,17 @@ export function createViewInteraction(
             selectItem(null);
           }
         } else {
-          // Normal (object-mode) click: shift adds to multi-object selection.
+          // Normal (object-mode) click: shift — or a tool's additive-pick mode
+          // (e.g. the Boolean dialog) — adds to / toggles the multi-selection.
           useStore.getState().clearSelectedSubGeometry();
-          if (e.shiftKey && clickedId)
+          const additive = e.shiftKey || useStore.getState().additiveObjectPick;
+          if (additive && clickedId)
             useStore.getState().addToSelection(clickedId);
           else selectItem(clickedId);
         }
-      } else if (!e.shiftKey) {
+      } else if (!e.shiftKey && !useStore.getState().additiveObjectPick) {
+        // Empty-space click clears the selection — but not while an additive
+        // pick tool is gathering objects (a stray miss shouldn't wipe them).
         selectItem(null);
         useStore.getState().clearSelectedSubGeometry();
       }

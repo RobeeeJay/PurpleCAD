@@ -140,10 +140,15 @@ export function meshGlyphCaps(loops, maxEdge, pointBudget = 1000) {
     area > 0 ? Math.sqrt(area / (pointBudget * 0.43)) : maxEdge,
   );
 
+  // Densify the CONTOUR at half the interior step: the Delaunay is
+  // unconstrained, so across a concave notch (the '5'/'6'/'9' counters) it will
+  // happily chord between the two rims when no nearer boundary point blocks the
+  // circumcircle — a triangle protruding OUTSIDE the glyph (distorted relief).
+  // Closer boundary points make the triangulation follow the contour.
   const points = [];
   for (const lp of loops)
     for (const ring of [lp.outer, ...lp.holes])
-      for (const p of densifyRing(ring, step)) points.push(p);
+      for (const p of densifyRing(ring, step / 2)) points.push(p);
   const nBoundary = points.length;
 
   // Interior triangular lattice, kept inside the region and a margin off the
@@ -178,10 +183,43 @@ export function meshGlyphCaps(loops, maxEdge, pointBudget = 1000) {
     }
   }
 
+  // Keep a triangle when its centroid is in the region AND none of its edges
+  // properly crosses a contour segment.  The centroid test alone admits
+  // notch-chording triangles (centroid inside, apex outside) — the backstop for
+  // any chord the densified boundary didn't already prevent.
+  const contourSegs = [];
+  for (const lp of loops)
+    for (const ring of [lp.outer, ...lp.holes])
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i],
+          b = ring[(i + 1) % ring.length];
+        contourSegs.push([a.x, a.y, b.x, b.y]);
+      }
+  const orient = (ax, ay, bx, by, cx, cy) =>
+    (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  // STRICT (proper) crossing only: collinear overlaps and shared endpoints —
+  // boundary-band triangle edges lying ON a contour segment — must not count.
+  const properlyCrosses = (p, q, s) => {
+    const d1 = orient(s[0], s[1], s[2], s[3], p[0], p[1]);
+    const d2 = orient(s[0], s[1], s[2], s[3], q[0], q[1]);
+    if (!((d1 > 1e-12 && d2 < -1e-12) || (d1 < -1e-12 && d2 > 1e-12)))
+      return false;
+    const d3 = orient(p[0], p[1], q[0], q[1], s[0], s[1]);
+    const d4 = orient(p[0], p[1], q[0], q[1], s[2], s[3]);
+    return (d3 > 1e-12 && d4 < -1e-12) || (d3 < -1e-12 && d4 > 1e-12);
+  };
   const tris = delaunay(points).filter(([a, b, c]) => {
     const cx = (points[a][0] + points[b][0] + points[c][0]) / 3;
     const cy = (points[a][1] + points[b][1] + points[c][1]) / 3;
-    return inRegion(cx, cy, loops);
+    if (!inRegion(cx, cy, loops)) return false;
+    for (const [u, v] of [
+      [a, b],
+      [b, c],
+      [c, a],
+    ])
+      for (const s of contourSegs)
+        if (properlyCrosses(points[u], points[v], s)) return false;
+    return true;
   });
 
   // Surviving boundary edges = edges used by exactly one kept triangle.
@@ -237,5 +275,88 @@ export function prismFromLoops(loops, depth, maxEdge) {
     indices.push(a, b, nP + b); // wall quad → two triangles
     indices.push(a, nP + b, nP + a);
   }
-  return { positions, indices };
+  // The glyph cap triangulation + walls can emit MIXED-handedness triangles
+  // (holed letters especially), so the raw mesh has faces wound both ways.  Sewn,
+  // that's a watertight but inconsistently-oriented solid → reversed render
+  // normals that OCC's per-shell OrientClosedSolid (a global flip) can't fix.
+  // Flood-fill a consistent winding here; OCC then flips each shell outward.
+  return { positions, indices: orientWindingConsistent(indices) };
+}
+
+// Make triangle winding CONSISTENT across each connected component: BFS over
+// edge-adjacency, flipping any neighbour whose shared edge runs the SAME
+// direction as ours (a consistent pair shares an edge in OPPOSITE directions).
+// Leaves the global sense alone — the caller's per-shell OrientClosedSolid points
+// each component outward.  O(tris).
+export function orientWindingConsistent(indices) {
+  const nt = indices.length / 3;
+  const key = (u, v) => (u < v ? u * 2147483647 + v : v * 2147483647 + u);
+  const edgeTris = new Map(); // undirected edge → [triIdx, …]
+  for (let t = 0; t < nt; t++) {
+    const a = indices[t * 3],
+      b = indices[t * 3 + 1],
+      c = indices[t * 3 + 2];
+    for (const [u, v] of [
+      [a, b],
+      [b, c],
+      [c, a],
+    ]) {
+      const k = key(u, v);
+      let l = edgeTris.get(k);
+      if (!l) edgeTris.set(k, (l = []));
+      l.push(t);
+    }
+  }
+  const flip = new Array(nt).fill(false);
+  const seen = new Array(nt).fill(false);
+  // Directed edges of a triangle given its current flip state.
+  const dirs = (t) => {
+    const a = indices[t * 3],
+      b = indices[t * 3 + 1],
+      c = indices[t * 3 + 2];
+    return flip[t]
+      ? [
+          [a, c],
+          [c, b],
+          [b, a],
+        ]
+      : [
+          [a, b],
+          [b, c],
+          [c, a],
+        ];
+  };
+  for (let s = 0; s < nt; s++) {
+    if (seen[s]) continue;
+    seen[s] = true;
+    const stack = [s];
+    while (stack.length) {
+      const t = stack.pop();
+      for (const [u, v] of dirs(t)) {
+        for (const nb of edgeTris.get(key(u, v))) {
+          if (nb === t || seen[nb]) continue;
+          // Consistent when nb traverses this edge v→u; if it also goes u→v, flip.
+          if (dirs(nb).some(([x, y]) => x === u && y === v)) flip[nb] = true;
+          seen[nb] = true;
+          stack.push(nb);
+        }
+      }
+    }
+  }
+  const out = new Array(indices.length);
+  for (let t = 0; t < nt; t++) {
+    const a = indices[t * 3],
+      b = indices[t * 3 + 1],
+      c = indices[t * 3 + 2];
+    if (flip[t]) {
+      out[t * 3] = a;
+      out[t * 3 + 1] = c;
+      out[t * 3 + 2] = b;
+    } else {
+      out[t * 3] = a;
+      out[t * 3 + 1] = b;
+      out[t * 3 + 2] = c;
+    }
+  }
+  return out;
 }

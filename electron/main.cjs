@@ -22,9 +22,13 @@ if (process.env.ELECTRON_START_URL) {
 }
 
 const electron = require("electron");
-const { app, BrowserWindow, ipcMain, protocol, session } = electron;
+const { app, BrowserWindow, ipcMain, protocol, session, Menu } = electron;
 const fsMod = require("fs");
 const urlMod = require("url");
+
+// Name the app so the macOS menu bar, About item, Hide/Quit labels, etc. all
+// read "PurpleCAD" rather than "Electron" (set before `ready`).
+app.setName("PurpleCAD");
 
 // Registering as a standard scheme up front (before app `ready`) makes
 // `app://`-served pages behave like HTTPS for fetch + worker semantics.
@@ -47,35 +51,90 @@ const path = require("path");
 // invoke OCC operations without accessing Node.js or native modules directly.
 // We defer the require to here so the ELECTRON_RUN_AS_NODE guard above fires
 // before we attempt to load the addon.
-let occBridge = null;
+// Host the OCC addon in a worker_thread so its synchronous native calls never
+// block the main process event loop — a long boolean/chamfer used to freeze the
+// whole window (no input, no spinner, no Cancel).  ONE worker only: the addon is
+// single-threaded and keeps a shared shape store, so ops must serialise (they
+// queue on the worker's event loop in FIFO order).
+const { Worker } = require("worker_threads");
+let occWorker = null;
+const occPending = new Map();
+let occNextId = 1;
+
+// Shared cancel flag (one int32) the worker's native OCC builders poll to abort
+// a long op mid-flight — genuine cancel that frees the CPU, without killing the
+// worker (which shares OCC's non-thread-safe globals and crashes on terminate).
+// We flip element 0 to 1 from THIS (main) thread while the worker is blocked in
+// the synchronous native call; UserBreak in binding.cc sees it and throws.
+const occCancelBuffer = new SharedArrayBuffer(4);
+const occCancelView = new Int32Array(occCancelBuffer);
+
+function failAllOcc(err) {
+  for (const p of occPending.values()) p.reject(err);
+  occPending.clear();
+}
+
+function startOccWorker() {
+  const w = new Worker(path.join(__dirname, "occ-worker.cjs"), {
+    workerData: { cancelBuffer: occCancelBuffer },
+  });
+  occWorker = w;
+  w.on("message", (msg) => {
+    if (msg.id == null) {
+      if (msg.ready === false)
+        console.warn("[main] OCC worker addon unavailable:", msg.error);
+      return;
+    }
+    const p = occPending.get(msg.id);
+    if (!p) return;
+    occPending.delete(msg.id);
+    if (msg.error) p.reject(new Error(msg.error));
+    else p.resolve(msg.result);
+  });
+  w.on("error", (e) => {
+    console.error("[main] OCC worker error:", e.message);
+    if (occWorker === w) failAllOcc(e);
+  });
+  w.on("exit", (code) => {
+    if (occWorker === w) failAllOcc(new Error("OCC worker exited"));
+    // A crash loses the native shape store; restart so the app keeps working (a
+    // missing id just rebuilds from recipe on the next recalc).
+    if (code !== 0 && occWorker === w) {
+      console.warn("[main] OCC worker exited (" + code + "), restarting");
+      startOccWorker();
+    }
+  });
+}
+
+function callOcc(op, args) {
+  return new Promise((resolve, reject) => {
+    if (!occWorker) return reject(new Error("OCC worker not started"));
+    const id = occNextId++;
+    occPending.set(id, { resolve, reject });
+    occWorker.postMessage({ id, op, args });
+  });
+}
+
 try {
-  occBridge = require("./occ-bridge.cjs");
-  // performCsg / chamferOrFilletItem are synchronous in C++ but can throw.
-  // ipcMain.handle wraps the return value in a promise automatically.
-  ipcMain.handle("occ:performCsg", (_e, args) => occBridge.performCsg(args));
-  ipcMain.handle("occ:chamferOrFilletItem", (_e, args) =>
-    occBridge.chamferOrFilletItem(args),
-  );
-  ipcMain.handle("occ:pushPullFaces", (_e, args) =>
-    occBridge.pushPullFaces(args),
-  );
-  ipcMain.handle("occ:shellItem", (_e, args) => occBridge.shellItem(args));
-  ipcMain.handle("occ:holeItem", (_e, args) => occBridge.holeItem(args));
-  ipcMain.handle("occ:embossItem", (_e, args) => occBridge.embossItem(args));
-  ipcMain.handle("occ:draftItem", (_e, args) => occBridge.draftItem(args));
-  ipcMain.handle("occ:revolveItem", (_e, args) => occBridge.revolveItem(args));
-  ipcMain.handle("occ:pipeItem", (_e, args) => occBridge.pipeItem(args));
-  ipcMain.handle("occ:loftItem", (_e, args) => occBridge.loftItem(args));
-  ipcMain.handle("occ:exportSTL", (_e, args) => occBridge.exportSTL(args));
-  ipcMain.handle("occ:exportSTEP", (_e, args) => occBridge.exportSTEP(args));
-  ipcMain.handle("occ:importStep", (_e, args) => occBridge.importStep(args));
-  ipcMain.handle("occ:splitItem", (_e, args) => occBridge.splitItem(args));
-  ipcMain.handle("occ:pattern3dItem", (_e, args) =>
-    occBridge.pattern3dItem(args),
-  );
+  startOccWorker();
+  const OCC_OPS = [
+    "performCsg", "chamferOrFilletItem", "pushPullFaces", "shellItem",
+    "holeItem", "embossItem", "draftItem", "revolveItem", "pipeItem",
+    "loftItem", "exportSTL", "exportSTEP", "importStep", "splitItem", "tessellateItem",
+    "pattern3dItem", "releaseShape", "solidFromMesh",
+  ];
+  for (const op of OCC_OPS)
+    ipcMain.handle(`occ:${op}`, (_e, args) => callOcc(op, args));
+  // Genuine cancel: flip the shared flag so the worker's in-flight native op
+  // aborts (UserBreak) and frees the CPU.  The worker clears it before the next
+  // op.  Cheap and non-destructive — the worker (and its shape store) survives.
+  ipcMain.handle("occ:cancel", () => {
+    Atomics.store(occCancelView, 0, 1);
+    console.log("[OCC] cancel flag set (worker will abort current op)");
+    return true;
+  });
 } catch (err) {
-  // Addon not built or OCC dylib missing — fall back to WASM path in renderer.
-  console.warn("[main] native OCC addon unavailable:", err.message);
+  console.warn("[main] OCC worker failed to start:", err.message);
 }
 
 // SQLite-backed persistence for renderer settings/data (replaces localStorage).
@@ -90,6 +149,7 @@ const syncHandlers = {
   "db:settingRemove": (a) => (kvStore.settingRemove(a), true),
   "db:listProjects": () => kvStore.listProjects(),
   "db:createProject": (a) => kvStore.createProject(a),
+  "db:duplicateProject": (a) => kvStore.duplicateProject(a),
   "db:renameProject": (a) => (kvStore.renameProject(a.id, a.name), true),
   "db:deleteProject": (a) => (kvStore.deleteProject(a), true),
   "db:setThumbnail": (a) => (kvStore.setThumbnail(a.id, a.thumbnail), true),
@@ -112,6 +172,12 @@ for (const [channel, fn] of Object.entries(syncHandlers)) {
     e.returnValue = fn(arg);
   });
 }
+// Async timeline save (invoke): the hot path — a mouseup commit on a big
+// document must not block the renderer on the IPC round-trip + SQLite write.
+ipcMain.handle("db:saveTimelineAsync", (_e, a) => {
+  kvStore.saveTimeline(a.pid, a.data);
+  return true;
+});
 
 // 512px source covers window/taskbar icon use across platforms; packaged
 // builds get their app icon from `build.icon` in package.json instead.
@@ -171,7 +237,76 @@ function createWindow() {
   }
 }
 
+// Application menu.  "About PurpleCAD" opens the SAME in-app About dialog the
+// Settings dialog's About button does — main just tells the renderer to show it
+// (menu:about), so there's one source of truth for the About contents.
+function buildAppMenu() {
+  const isMac = process.platform === "darwin";
+  const openAbout = () => {
+    const win =
+      BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    win?.webContents.send("menu:about");
+  };
+  const aboutItem = { label: `About ${app.name}`, click: openAbout };
+  const template = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              aboutItem,
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
+    },
+    {
+      role: "help",
+      submenu: isMac ? [] : [aboutItem],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 app.whenReady().then(() => {
+  buildAppMenu();
   // BrowserWindow's `icon` option doesn't reach the Dock on macOS; packaged
   // builds get their Dock icon from `build.icon`, but dev runs (launched as
   // a bare Electron binary) still show Electron's default unless set here.
@@ -182,28 +317,30 @@ app.whenReady().then(() => {
   // Open the database before the window loads so the renderer's first
   // synchronous db read (during store init) finds it ready.
   try {
-    kvStore.init(app.getPath("userData"));
+    // --db-path=<file> overrides the SQLite location (e2e runs point it at a
+    // throwaway file so tests never touch the user's database).
+    const dbPath =
+      app.commandLine.getSwitchValue("db-path") ||
+      path.join(app.getPath("userData"), "cad.sqlite");
+    kvStore.init(dbPath);
   } catch (err) {
     console.warn("[main] SQLite KV store unavailable:", err.message);
   }
 
-  // Serve dist files over `app://./<path>`.  Handler decodes the URL
-  // and pipes the matching dist file back via a stream response.
+  // Serve dist files over `app://./<path>`.  protocol.handle is the modern API —
+  // registerFileProtocol was deprecated in Electron 25 and removed in later
+  // majors.  net.fetch on a file:// URL streams the dist file back.
   const DIST = path.join(__dirname, "..", "dist");
-  protocol.registerFileProtocol("app", (request, callback) => {
-    const url = new urlMod.URL(request.url);
-    // The host part of `app://./index.html` is "." — strip it.
-    const pathname = decodeURIComponent(url.pathname);
-    const filePath = path.normalize(path.join(DIST, pathname));
-    // Refuse traversal outside dist/.
-    if (!filePath.startsWith(DIST)) {
-      callback({ error: -10 /* ACCESS_DENIED */ });
-      return;
+  const { resolveAppPath } = require("./resolveAppPath.cjs");
+  protocol.handle("app", (request) => {
+    const filePath = resolveAppPath(DIST, request.url);
+    if (filePath == null) {
+      return new Response("forbidden", { status: 403 });
     }
-    fsMod.stat(filePath, (err) => {
-      if (err) callback({ error: -6 /* FILE_NOT_FOUND */ });
-      else callback({ path: filePath });
-    });
+    if (!fsMod.existsSync(filePath)) {
+      return new Response("not found", { status: 404 });
+    }
+    return electron.net.fetch(urlMod.pathToFileURL(filePath).toString());
   });
 
   createWindow();

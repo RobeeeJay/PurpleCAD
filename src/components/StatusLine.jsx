@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
+import { DISPLAY_AXES, toDisplay } from "../utils/axisDisplay.js";
 
 // A status line shown while an object is selected: its world-space position
 // (mm) and the face / point counts of its mesh.  Reads the live scene mesh via
@@ -35,7 +36,10 @@ const StatusLine = () => {
       <span className="status-line-name">{selected.name}</span>
       <span className="status-line-sep">·</span>
       <span>
-        X {mm(p.x)} &nbsp;Y {mm(p.y)} &nbsp;Z {mm(p.z)} mm
+        {DISPLAY_AXES.map((a) => `${a.label} ${mm(toDisplay(p, a))}`).join(
+          "  ",
+        )}{" "}
+        mm
       </span>
       <span className="status-line-sep">·</span>
       <span>{Math.round(stats.faces).toLocaleString()} faces</span>

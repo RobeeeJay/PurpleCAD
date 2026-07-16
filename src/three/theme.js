@@ -129,6 +129,9 @@ export const NO_EMISSIVE = 0x000000;
 export const EMISSIVE_SELECTED = 0x006666;
 export const EMISSIVE_MULTI_SELECTED = 0x550011;
 export const EMISSIVE_HOVERED = 0x444444;
+// The cutting objects (tools) of a Boolean Cut, tinted red to read as "these
+// get removed", distinct from the teal base object.
+export const EMISSIVE_CUT = 0x992222;
 
 // --- Face / edge selection & hover highlights ----------------------------
 export const FACE_SELECT_COLOR = 0x3377cc;

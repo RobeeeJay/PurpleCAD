@@ -17,9 +17,12 @@ import { activePrecision } from "../../three/resolution.js";
 import {
   buildChamferSourceAndSubGeo,
   commitChamferResult,
+  chamferPreviewKey,
+  takeChamferPreview,
 } from "../../three/cameraControls/chamferCommit.js";
 import FormulaInput from "../FormulaInput";
 import { evalValue, useDebouncedPreview } from "../inputs.jsx";
+import { pickBtn } from "./overlayBar.js";
 
 const fieldStyle = (ok) => ({
   width: 64,
@@ -36,8 +39,8 @@ export default function ChamferOverlay() {
   const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
   const showNotification = useStore((s) => s.showNotification);
-  const chamferRetargetTarget = useStore((s) => s.chamferRetargetTarget);
-  const setChamferRetargetTarget = useStore((s) => s.setChamferRetargetTarget);
+  const chamferEditTarget = useStore((s) => s.chamferEditTarget);
+  const setChamferEditTarget = useStore((s) => s.setChamferEditTarget);
 
   // Raw strings so the field can be cleared while typing and so variable
   // formulas (resolved against `variables`) are accepted.
@@ -57,20 +60,18 @@ export default function ChamferOverlay() {
     !isChamfer || (Number.isFinite(angVal) && angVal > 0 && angVal < 90);
   const valid = distValid && angValid;
 
-  // beginChamferRetarget pre-selects the prior subGeo and arms
-  // chamferRetargetTarget — seed the inputs from that operation's recipe so
-  // Confirm reproduces it by default (the user can still tweak before
-  // confirming).
+  // beginChamferEdit pre-selects the entry's subGeo and arms chamferEditTarget
+  // (carrying the entry's recipe — the timeline is restored to the pre-chamfer
+  // step, so the live item no longer has it).  Seed the fields from that recipe
+  // so the overlay opens showing exactly what was committed.
   useEffect(() => {
-    if (!chamferRetargetTarget) return;
-    const item = items.find((i) => i.id === chamferRetargetTarget.itemId);
-    const prior = item?.regenerator;
+    const prior = chamferEditTarget?.prior;
     if (!prior || prior.kind !== "chamfer") return;
     setDistanceMm(String(prior.amount * MM_PER_UNIT));
     setAngleDeg(
       prior.angleRad != null ? String((prior.angleRad * 180) / Math.PI) : "45",
     );
-  }, [chamferRetargetTarget]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chamferEditTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live preview: debounced re-run while a valid distance/angle and a selection
   // exist; cleared the moment the value goes blank/invalid.
@@ -98,20 +99,21 @@ export default function ChamferOverlay() {
     useStore.getState()._cameraControls?.clearChamferPreview?.();
     clearSelectedSubGeometry();
     setChamferSelectMode(null);
-    setChamferRetargetTarget(null);
+    // Editing viewed the pre-chamfer step — put the user back on the entry.
+    if (chamferEditTarget)
+      useStore.getState().restoreToHistory(chamferEditTarget.entryId);
+    setChamferEditTarget(null);
   };
 
   // `segments` here is preserved from the old (custom-mesh) chamfer API:
   // segments=1 → chamfer (flat); segments>1 → bevel (rounded).
   const applyChamfer = async () => {
-    if (!valid) return;
+    if (!valid || !hasSelection) return;
     const segments = isChamfer ? 1 : 3;
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
-    const retargetEntryId =
-      chamferRetargetTarget?.itemId === item.id
-        ? chamferRetargetTarget.entryId
-        : null;
+    const editEntryId =
+      chamferEditTarget?.itemId === item.id ? chamferEditTarget.entryId : null;
 
     try {
       const amount = distVal / MM_PER_UNIT;
@@ -130,23 +132,39 @@ export default function ChamferOverlay() {
         amount,
         segments,
         printPrecision,
-        retargeting: !!retargetEntryId,
+        editing: !!editEntryId,
       });
       if (subGeo.edges.length === 0 && subGeo.faces.length === 0) return;
 
-      const result = await chamferOrFilletItem({
+      // Reuse the live preview's already-computed geometry when its inputs
+      // match — Confirm then commits instantly with zero OCC work.  Any
+      // mismatch (params changed after the last preview settled, or no
+      // preview ran) recomputes as before.
+      const key = chamferPreviewKey({
         source,
         subGeo,
         amount,
         angleRad,
         segments,
-        allItems: items,
         printPrecision,
       });
+      const result =
+        takeChamferPreview(key) ??
+        (await chamferOrFilletItem({
+          source,
+          subGeo,
+          amount,
+          angleRad,
+          segments,
+          allItems: items,
+          printPrecision,
+        }));
       if (!result) {
-        showNotification(
-          "Could not apply — the distance may be too large for the selected geometry.",
-        );
+        // A null result from a user-cancelled op isn't a failure — stay quiet.
+        if (!useStore.getState().operationCancelled)
+          showNotification(
+            "Could not apply — the distance may be too large for the selected geometry.",
+          );
         return;
       }
       useStore.getState()._cameraControls?.clearChamferPreview?.();
@@ -163,10 +181,10 @@ export default function ChamferOverlay() {
           regeneratedAt: printPrecision,
         },
         segments === 1 ? "Chamfered" : "Filleted",
-        retargetEntryId,
+        editEntryId,
       );
       setChamferSelectMode(null);
-      if (retargetEntryId) setChamferRetargetTarget(null);
+      if (editEntryId) setChamferEditTarget(null);
     } catch (err) {
       console.error("Chamfer operation failed:", err);
       showNotification(err.message);
@@ -176,86 +194,100 @@ export default function ChamferOverlay() {
   const handleKeyDown = (e) => {
     e.stopPropagation();
     if (e.key === "Enter") {
-      if (valid) applyChamfer();
+      if (valid && hasSelection) applyChamfer();
     } else if (e.key === "Escape") cancel();
   };
+
+  const selCount =
+    (selectedSubGeometry?.faces?.length ?? 0) +
+    (selectedSubGeometry?.edges?.length ?? 0);
+
+  const confirmOk = valid && hasSelection;
 
   return (
     <>
       <div className="sketch-placement-hint">
         {hasSelection
           ? "Set the distance below, then Confirm · Esc to cancel"
-          : "Alt+click faces or Ctrl+click edges to select geometry to chamfer/fillet · Esc to cancel"}
+          : "Alt+click faces (chained) or Ctrl+click edges to select geometry to chamfer/fillet · Esc to cancel"}
       </div>
-      {hasSelection && (
-        <div className="sketch-distance-input-overlay">
-          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
-            Distance (mm):
-          </span>
-          <FormulaInput
-            variables={variables}
-            autoFocus
-            value={distanceMm}
-            onChange={(e) => setDistanceMm(e.target.value)}
-            onKeyDown={handleKeyDown}
-            style={fieldStyle(distValid)}
-          />
-          {isChamfer && (
-            <>
-              <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
-                Angle (°):
-              </span>
-              <FormulaInput
-                variables={variables}
-                value={angleDeg}
-                onChange={(e) => setAngleDeg(e.target.value)}
-                onKeyDown={handleKeyDown}
-                style={fieldStyle(angValid)}
-              />
-            </>
-          )}
-          <button
-            type="button"
-            onClick={cancel}
-            title="Cancel"
-            style={{
-              fontSize: 11,
-              padding: "3px 10px",
-              marginLeft: 8,
-              borderRadius: 3,
-              border: "1px solid var(--border-color)",
-              background: "var(--bg-tertiary)",
-              color: "var(--text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={applyChamfer}
-            disabled={!valid}
-            title={
-              valid
-                ? `Confirm — apply the ${isChamfer ? "chamfer" : "fillet"}`
-                : "Enter a valid value to confirm"
-            }
-            style={{
-              fontSize: 11,
-              padding: "3px 10px",
-              marginLeft: 8,
-              borderRadius: 3,
-              border: "1px solid var(--accent, #4488ff)",
-              background: "var(--accent, #4488ff)",
-              color: "#fff",
-              cursor: valid ? "pointer" : "not-allowed",
-              opacity: valid ? 1 : 0.5,
-            }}
-          >
-            Confirm
-          </button>
-        </div>
-      )}
+      <div className="sketch-distance-input-overlay">
+        <button
+          type="button"
+          onClick={() => clearSelectedSubGeometry()}
+          title="Pick geometry — Alt+click faces, Ctrl+click edges (click to clear + re-pick)"
+          style={{ ...pickBtn(!hasSelection), marginRight: 8 }}
+        >
+          {hasSelection ? `Geometry: ${selCount}` : "Select geometry"}
+        </button>
+        <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+          Distance (mm):
+        </span>
+        <FormulaInput
+          variables={variables}
+          autoFocus
+          value={distanceMm}
+          onChange={(e) => setDistanceMm(e.target.value)}
+          onKeyDown={handleKeyDown}
+          style={fieldStyle(distValid)}
+        />
+        {isChamfer && (
+          <>
+            <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+              Angle (°):
+            </span>
+            <FormulaInput
+              variables={variables}
+              value={angleDeg}
+              onChange={(e) => setAngleDeg(e.target.value)}
+              onKeyDown={handleKeyDown}
+              style={fieldStyle(angValid)}
+            />
+          </>
+        )}
+        <button
+          type="button"
+          onClick={cancel}
+          title="Cancel"
+          style={{
+            fontSize: 11,
+            padding: "3px 10px",
+            marginLeft: 8,
+            borderRadius: 3,
+            border: "1px solid var(--border-color)",
+            background: "var(--bg-tertiary)",
+            color: "var(--text-primary)",
+            cursor: "pointer",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={applyChamfer}
+          disabled={!confirmOk}
+          title={
+            confirmOk
+              ? `Confirm — apply the ${isChamfer ? "chamfer" : "fillet"}`
+              : hasSelection
+                ? "Enter a valid value to confirm"
+                : "Select geometry first"
+          }
+          style={{
+            fontSize: 11,
+            padding: "3px 10px",
+            marginLeft: 8,
+            borderRadius: 3,
+            border: "1px solid var(--accent, #4488ff)",
+            background: "var(--accent, #4488ff)",
+            color: "#fff",
+            cursor: confirmOk ? "pointer" : "not-allowed",
+            opacity: confirmOk ? 1 : 0.5,
+          }}
+        >
+          Confirm
+        </button>
+      </div>
     </>
   );
 }

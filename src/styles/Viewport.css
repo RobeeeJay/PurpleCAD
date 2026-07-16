@@ -75,6 +75,29 @@
   cursor: default;
 }
 
+/* Curve-angle input that appears beside the chain toggle when chaining is on. */
+.selection-widget-angle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.selection-widget-angle input {
+  width: 38px;
+  height: 30px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  /* Pair bg-tertiary with text-primary — a theme-guaranteed contrast pairing
+     (the prior translucent panel bg left the value text unreadable). */
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: right;
+}
+
 .viewport canvas {
   display: block;
   width: 100%;

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
+import { beginChamferEdit } from "../three/cameraControls/chamferCommit.js";
 import { anyToolActive } from "../store/selectionMode.js";
-import { beginChamferRetarget } from "../three/cameraControls/chamferCommit.js";
 import { beginPushPullRetarget } from "../three/cameraControls/pushPull.js";
 import {
   beginRevolveEdit,
@@ -24,6 +24,7 @@ import {
   ShellIcon,
   HoleIcon,
   EmbossIcon,
+  TextureIcon,
   EditIcon,
   PlaneIcon,
   RevolveIcon,
@@ -75,6 +76,12 @@ const embossInfo = (entry) => {
   const inst = entry?.instruction;
   if (inst?.type !== "modify") return null;
   return inst.patches?.regenerator?.kind === "emboss" ? {} : null;
+};
+
+const textureInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  return inst.patches?.regenerator?.kind === "texture" ? {} : null;
 };
 
 const draftInfo = (entry) => {
@@ -152,6 +159,7 @@ const entryIcon = (entry) => {
   if (shellInfo(entry)) return <ShellIcon />;
   if (holeInfo(entry)) return <HoleIcon />;
   if (embossInfo(entry)) return <EmbossIcon />;
+  if (textureInfo(entry)) return <TextureIcon />;
   if (draftInfo(entry)) return <EmbossIcon />;
 
   const inst = entry.instruction;
@@ -218,9 +226,11 @@ const getDisplayLabel = (entry, history) => {
   return label;
 };
 
-// Retarget + edit-length controls for an extrude entry.  With `groupIds` the
-// controls act on a whole multi-area group as one unit; otherwise on the single
-// `itemId`.
+// Edit control for an extrude entry.  Editing re-enters profile-select mode
+// seeded with the extrude's current profile, so the user can change the profile
+// AND the length and Confirm edits the entry in place (retargetExtrude).  With
+// `groupIds` it acts on a whole multi-area group as one unit; otherwise on the
+// single `itemId`.
 function ExtrudeActions({ itemId, groupIds }) {
   const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
   const extrudeRetargetId = useStore((s) => s.extrudeRetargetId);
@@ -228,94 +238,29 @@ function ExtrudeActions({ itemId, groupIds }) {
   const setExtrudeRetargetId = useStore((s) => s.setExtrudeRetargetId);
   const setExtrudeRetargetGroup = useStore((s) => s.setExtrudeRetargetGroup);
   const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
-  const setExtrudeEditTarget = useStore((s) => s.setExtrudeEditTarget);
   const isGroup = !!groupIds;
-  const retargetActive =
+  const editActive =
     extrudeSelectMode === "profile" &&
     (isGroup
       ? !!extrudeRetargetGroup && extrudeRetargetGroup[0] === groupIds[0]
       : !extrudeRetargetGroup && extrudeRetargetId === itemId);
   return (
-    <>
-      <button
-        className={`timeline-action-btn${retargetActive ? " active" : ""}`}
-        title="Retarget Profile — pick the face(s) or sketch region(s) to extrude from"
-        onClick={(e) => {
-          e.stopPropagation();
-          setExtrudeRetargetGroup(isGroup ? groupIds : null);
-          setExtrudeRetargetId(isGroup ? groupIds[0] : itemId);
-          setExtrudeSelectMode("profile");
-        }}
-      >
-        <svg viewBox="0 0 24 24" width="14" height="14">
-          <circle
-            cx="12"
-            cy="12"
-            r="9"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-          <circle
-            cx="12"
-            cy="12"
-            r="5.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-          <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
-          <line
-            x1="12"
-            y1="2"
-            x2="12"
-            y2="4"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-          <line
-            x1="12"
-            y1="20"
-            x2="12"
-            y2="22"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-          <line
-            x1="2"
-            y1="12"
-            x2="4"
-            y2="12"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-          <line
-            x1="20"
-            y1="12"
-            x2="22"
-            y2="12"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          />
-        </svg>
-      </button>
-      <button
-        className="timeline-action-btn"
-        title="Edit extrusion length"
-        onClick={(e) => {
-          e.stopPropagation();
-          setExtrudeEditTarget(
-            isGroup ? { groupItemIds: groupIds } : { itemId },
-          );
-        }}
-      >
-        <EditIcon />
-      </button>
-    </>
+    <button
+      className={`timeline-action-btn${editActive ? " active" : ""}`}
+      title="Edit extrusion — change the profile and length, then Confirm"
+      onClick={(e) => {
+        e.stopPropagation();
+        // Enter profile mode FIRST: setExtrudeSelectMode spreads
+        // TOOL_RESET_PATCH when freshly entering extrude, which nulls
+        // extrudeRetargetId/Group — so arming the edit target before it would
+        // be wiped, and Confirm would build a NEW extrude instead of editing.
+        setExtrudeSelectMode("profile");
+        setExtrudeRetargetGroup(isGroup ? groupIds : null);
+        setExtrudeRetargetId(isGroup ? groupIds[0] : itemId);
+      }}
+    >
+      <EditIcon />
+    </button>
   );
 }
 
@@ -325,16 +270,13 @@ const Timeline = () => {
   const restoreToHistory = useStore((state) => state.restoreToHistory);
   const deleteHistoryEntry = useStore((state) => state.deleteHistoryEntry);
   const reorderHistory = useStore((state) => state.reorderHistory);
-  const setChamferEditTarget = useStore((state) => state.setChamferEditTarget);
-  const chamferRetargetTarget = useStore(
-    (state) => state.chamferRetargetTarget,
-  );
   const setPushPullEditTarget = useStore(
     (state) => state.setPushPullEditTarget,
   );
   const setShellTarget = useStore((state) => state.setShellTarget);
   const beginHoleEdit = useStore((state) => state.beginHoleEdit);
   const beginEmbossEdit = useStore((state) => state.beginEmbossEdit);
+  const beginTextureEdit = useStore((state) => state.beginTextureEdit);
   const beginDraftEdit = useStore((state) => state.beginDraftEdit);
   const openBoxDialog = useStore((state) => state.openBoxDialog);
   const pushPullRetargetTarget = useStore(
@@ -520,7 +462,9 @@ const Timeline = () => {
             // the worker's transitive graph (see regenerateOrchestrator.js
             // for the cycle constraint).
             import("../three/regenerateOrchestrator.js").then((m) => {
-              m.recalculateTimeline();
+              // force=true: rebuild EVERY step from the beginning, ignoring the
+              // incremental valid-cache skip — the button's whole purpose.
+              m.recalculateTimeline(true);
             });
           }}
         >
@@ -653,65 +597,18 @@ const Timeline = () => {
                   return ids.length ? <ExtrudeActions groupIds={ids} /> : null;
                 })()}
               {chamferInfo(entry) && (
-                <>
-                  <button
-                    className={`timeline-action-btn${
-                      chamferRetargetTarget?.itemId === entry.itemId
-                        ? " active"
-                        : ""
-                    }`}
-                    title={`Retarget ${
-                      chamferInfo(entry).isFillet ? "fillet" : "chamfer"
-                    } — adjust the selected face(s)/edge(s) and confirm`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      restoreToHistory(entry.id);
-                      selectItem(entry.itemId);
-                      beginChamferRetarget(entry.itemId, entry.id);
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" width="14" height="14">
-                      <rect
-                        x="3"
-                        y="14"
-                        width="12"
-                        height="7"
-                        rx="1"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      />
-                      <polygon
-                        points="3,14 6,9 18,9 18,14"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        opacity="0.6"
-                      />
-                      <circle
-                        cx="19"
-                        cy="5"
-                        r="3"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                      />
-                      <circle cx="19" cy="5" r="1" fill="currentColor" />
-                    </svg>
-                  </button>
-                  <button
-                    className="timeline-action-btn"
-                    title={`Edit ${
-                      chamferInfo(entry).isFillet ? "fillet" : "chamfer"
-                    } parameters`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setChamferEditTarget({ entryId: entry.id });
-                    }}
-                  >
-                    <EditIcon />
-                  </button>
-                </>
+                <button
+                  className="timeline-action-btn"
+                  title={`Edit ${
+                    chamferInfo(entry).isFillet ? "fillet" : "chamfer"
+                  } — reopens the creation overlay with its selection and values`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    beginChamferEdit(entry.itemId, entry.id);
+                  }}
+                >
+                  <EditIcon />
+                </button>
               )}
               {pushPullInfo(entry) && (
                 <>
@@ -801,8 +698,19 @@ const Timeline = () => {
                   title="Edit emboss — mode / angle / offset / scale / depth"
                   onClick={(e) => {
                     e.stopPropagation();
-                    restoreToHistory(entry.id);
                     beginEmbossEdit(entry.id);
+                  }}
+                >
+                  <EditIcon />
+                </button>
+              )}
+              {textureInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit texture — reopens the tool on the pre-texture step"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    beginTextureEdit(entry.id);
                   }}
                 >
                   <EditIcon />

@@ -1,6 +1,7 @@
 import React from "react";
 import { useStore } from "../store";
 import { effectiveSketchSelTypes } from "../store/selectionMode.js";
+import VisibilityToggles, { useShiftHeld } from "./VisibilityToggles";
 
 // Sketch-mode selection-type widget (top-right of the view): choose what a click
 // resolves to — Object (only while the Project tool picks 3D geometry), Shape (an
@@ -140,8 +141,12 @@ const SketchSelectionWidget = () => {
   const sketchConstraintMode = useStore((s) => s.sketchConstraintMode);
   const toggleSketchSelType = useStore((s) => s.toggleSketchSelType);
   const soloSketchSelType = useStore((s) => s.soloSketchSelType);
+  const shiftHeld = useShiftHeld();
 
   if (!sketchMode) return null;
+  // While Shift is held, swap for the constraint/dimension visibility toggles.
+  if (shiftHeld)
+    return <VisibilityToggles className="sketch-selection-widget" />;
 
   const { eff, allowed } = effectiveSketchSelTypes({
     sketchSelTypes,

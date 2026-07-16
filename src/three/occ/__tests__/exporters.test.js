@@ -36,6 +36,96 @@ describe("occOps.exportSTL / exportSTEP", () => {
     expect(await ops.exportSTL({ items: [] })).toBeNull();
   });
 
+  it("exports a selected subset, resolving recipes against the whole scene", async () => {
+    const { ops } = await import("../../occOps.js");
+    const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    // A chamfer whose recipe source (the cube) is NOT in the export subset —
+    // it must still resolve via allItems.
+    const chamfered = {
+      id: 2,
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      regenerator: {
+        kind: "chamfer",
+        source: cube,
+        subGeo: { edges: [], faces: [{ nx: 0, ny: 1, nz: 0 }] },
+        amount: 0.1,
+        segments: 1,
+      },
+    };
+    const scene = [cube, chamfered];
+    const buf = await ops.exportSTL({ items: [chamfered], allItems: scene });
+    expect(buf).toBeInstanceOf(ArrayBuffer);
+    const only = new DataView(buf).getUint32(80, true);
+    const all = new DataView(await ops.exportSTL({ items: scene })).getUint32(
+      80,
+      true,
+    );
+    // Selected body exports (non-empty) and is a subset of the whole scene.
+    expect(only).toBeGreaterThan(0);
+    expect(only).toBeLessThan(all);
+  });
+
+  it("exportSTL builds from an item's BAKED mesh, not a recipe rebuild", async () => {
+    // Export must use the exact on-screen high-res geometry (item.geometryData),
+    // not re-run the recipe (slow + can diverge for csg/emboss).  Prove it by
+    // exporting a csg item that carries ONLY a baked mesh and NO regenerator — a
+    // recipe rebuild would have nothing to build, so a non-empty STL can only come
+    // from the baked mesh.
+    const { ops, buildItemShapeLocal } = await import("../../occOps.js");
+    const { tessellate: tess } = await import("../tessellate.js");
+    const cube = { id: 9, type: "cube", position: { x: 0, y: 0, z: 0 } };
+    const cubeSolid = buildItemShapeLocal(cube, [cube]);
+    const geo = tess(cubeSolid, 0.1);
+    const pos = geo.getAttribute("position").array;
+    const idx = geo.index.array;
+    const baked = {
+      id: 1,
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      geometryData: {
+        positions: Array.from(pos),
+        indices: Array.from(idx),
+      },
+      // deliberately no regenerator — only the baked mesh can produce output
+    };
+    const buf = await ops.exportSTL({ items: [baked], allItems: [baked] });
+    expect(buf).toBeInstanceOf(ArrayBuffer);
+    const dv = new DataView(buf);
+    const tris = dv.getUint32(80, true);
+    expect(tris).toBeGreaterThan(0);
+
+    // WATERTIGHT: writing the baked mesh verbatim must keep it closed — every
+    // undirected edge shared by exactly two triangles.  The old sew + re-
+    // tessellate round-trip opened seams (open edges), which this catches.
+    const key = (x, y, z) =>
+      `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`;
+    const edgeUse = new Map();
+    let off = 84;
+    for (let t = 0; t < tris; t++) {
+      const v = [];
+      for (let k = 0; k < 3; k++) {
+        const o = off + 12 + k * 12;
+        v.push(
+          key(
+            dv.getFloat32(o, true),
+            dv.getFloat32(o + 4, true),
+            dv.getFloat32(o + 8, true),
+          ),
+        );
+      }
+      for (let k = 0; k < 3; k++) {
+        const a = v[k],
+          b = v[(k + 1) % 3];
+        const e = a < b ? `${a}|${b}` : `${b}|${a}`;
+        edgeUse.set(e, (edgeUse.get(e) || 0) + 1);
+      }
+      off += 50;
+    }
+    const openEdges = [...edgeUse.values()].filter((c) => c !== 2).length;
+    expect(openEdges).toBe(0);
+  });
+
   it("exportSTEP emits an ISO-10303-21 file", async () => {
     const { ops } = await import("../../occOps.js");
     const items = [{ id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } }];

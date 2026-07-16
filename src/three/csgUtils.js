@@ -16,12 +16,19 @@ import {
 // plane rather than at the sketch origin.
 export function buildBrushTransform(item) {
   const r = item.rotation || { x: 0, y: 0, z: 0 };
-  const s = item.scale ? item.scale.x : 1;
+  // Full per-axis scale (in the shape's local frame) so a non-uniformly
+  // stretched body rebuilds at its visible size for CSG/split/export, not just
+  // its scale.x.  Callers apply it before the rotation, matching the mesh's
+  // T·R·S order.
+  const sc = item.scale || {};
+  const s = { x: sc.x ?? 1, y: sc.y ?? 1, z: sc.z ?? 1 };
 
   if (item.type === "extrude" && item.profile?.polygon2D?.length >= 3) {
     const poly = item.profile.polygon2D;
     // Area centroid (not the vertex mean) so a re-tessellated curve doesn't shift
-    // the pivot — must match the centring in occOps.js makeExtrude.
+    // the pivot — must match the centring in occOps.js makeExtrude.  The offset
+    // is UNSCALED: the renderer adds it via mesh.position, which mesh.scale does
+    // not touch (only the geometry scales, about this centroid).
     const c = polyAreaCentroid(poly);
     const offset = new THREE.Vector3(c.x, c.y, 0);
     offset.applyEuler(new THREE.Euler(r.x || 0, r.y || 0, r.z || 0));
@@ -98,7 +105,20 @@ export function extrudeWithLivePolygon(item, allItems, precision) {
     const containing = allEntries.filter((g) =>
       polyContainsPoint(g.polygon, pc),
     );
-    const pool = containing.length > 0 ? containing : allEntries;
+    let pool = containing.length > 0 ? containing : allEntries;
+    // A ring's inner loop shows up BOTH as the outer entry's hole AND as a
+    // spurious standalone disc entry with the SAME centroid — so the distance
+    // test below can't tell them apart and the area tiebreak (against the stale
+    // stored area) can pick the disc after a resize, collapsing the ring to a
+    // solid inner cylinder.  When the stored profile was a ring (had holes),
+    // keep only entries that also have holes, dropping the disc.
+    const storedHasHoles = (profile.holes || []).some((h) => h.length >= 3);
+    if (storedHasHoles) {
+      const withHoles = pool.filter((g) =>
+        (g.holes || []).some((h) => h.length >= 3),
+      );
+      if (withHoles.length > 0) pool = withHoles;
+    }
     // Rank by spatial distance from the stored centroid first, area only as a
     // tiebreaker.  Area-alone fallback once mismatched a glyph whose centroid
     // (in its counter) stopped landing inside its own re-simplified loop to a

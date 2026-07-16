@@ -7,10 +7,33 @@ import { useStore } from "../../store";
 import { activePrecision } from "../resolution.js";
 import { withLivePolygons } from "../csgUtils.js";
 import { buildEmbossStamp } from "../embossGeometry.js";
+import { reviveDevelopable } from "../regenerateItems.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
+import { releaseSolid } from "../solidCache.js";
 
 const GHOST_OPACITY = 0.12;
+
+// The live preview already ran embossItem for the exact recipe the user is about
+// to confirm; cache its result so Confirm reuses it instead of recomputing the
+// same OCC boolean.  Keyed by a cheap signature of the stamp + source transform
+// (what the result depends on); a mismatch (or no preview) falls back to a fresh
+// build.  Consumed on commit.
+let previewCache = null;
+const embossKey = (recipe) => {
+  const s = recipe.stamp || {};
+  const pos = s.mesh?.positions || s.positions || [];
+  const n = pos.length;
+  const h = n ? pos[0] + pos[n >> 1] + pos[n - 1] : 0;
+  return JSON.stringify({
+    n,
+    h,
+    d: !!recipe.params?.deboss,
+    p: recipe.source?.position,
+    r: recipe.source?.rotation,
+    sc: recipe.source?.scale,
+  });
+};
 
 // Source snapshot + baked stamp recipe for the active emboss tool, or null until
 // at least one sketch profile and a face are picked.
@@ -19,17 +42,26 @@ export function buildEmbossRecipe(items, printPrecision) {
   if (!et || !et.face || !et.profiles || et.profiles.length === 0) return null;
   const item = items.find((i) => i.id === et.itemId);
   if (!item) return null;
-  // Editing replays the FROZEN pre-emboss source; a fresh emboss snapshots live.
-  const source = et.source
-    ? et.source
-    : withLivePolygons({ ...item }, items, printPrecision);
+  // Re-derive the source's profiles from the LIVE sketch — for a fresh emboss
+  // (snapshot the current body) AND when editing (the stored pre-emboss source
+  // is frozen at emboss-create time; using it raw rebuilds the edit on the OLD
+  // size, reverting a since-resized body).  withLivePolygons keeps the source's
+  // structure but refreshes its extrude polygons to the current sketch.
+  const source = withLivePolygons(
+    et.source || { ...item },
+    items,
+    printPrecision,
+  );
+  // Scale the wrap curve to the live wall radius so an edit after a resize wraps
+  // the current wall, not the baked (old) radius.  No-op for a fresh emboss.
+  const liveFaceSet = reviveDevelopable(et.faceSet, source, et.source || item);
   const stamp = buildEmbossStamp(
     et.profiles,
     et.face,
     et.params,
     items,
     printPrecision,
-    et.faceSet,
+    liveFaceSet,
     source?.scale?.x ?? 1,
   );
   if (!stamp) return null;
@@ -39,7 +71,9 @@ export function buildEmbossRecipe(items, printPrecision) {
     stamp,
     profiles: et.profiles,
     face: et.face,
-    faceSet: et.faceSet || null,
+    // Store the wrap curve re-baselined to the CURRENT wall (with the live
+    // source), so a later resize scales from this size rather than a stale one.
+    faceSet: liveFaceSet || null,
     params: { ...et.params },
   };
 }
@@ -50,20 +84,33 @@ export async function commitEmboss({ items, printPrecision }) {
   if (!recipe) return false;
   const { item, source, stamp, profiles, face, faceSet, params } = recipe;
   let result;
-  try {
-    result = await embossItem({
-      source,
-      stamp,
-      allItems: items,
-      printPrecision,
-    });
-  } catch (e) {
-    useStore.getState().setToolError(e?.message || "Emboss failed.");
-    return false;
+  const cached =
+    previewCache && previewCache.key === embossKey(recipe)
+      ? previewCache
+      : null;
+  previewCache = null; // consume regardless
+  if (cached) {
+    // Reuse the preview's already-computed geometry — no OCC work on Confirm.
+    result = {
+      geometryData: cached.geometryData,
+      centerOffset: cached.centerOffset,
+    };
+  } else {
+    try {
+      result = await embossItem({
+        source,
+        stamp,
+        allItems: items,
+        printPrecision,
+      });
+    } catch (e) {
+      useStore.getState().setToolError(e?.message || "Emboss failed.");
+      return false;
+    }
   }
   if (!result) return false;
   const { geometryData, centerOffset } = result;
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
   const store = useStore.getState();
   const editEntryId = store.embossTool?.editEntryId;
   store._cameraControls?.clearEmbossPreview?.();
@@ -80,6 +127,18 @@ export async function commitEmboss({ items, printPrecision }) {
     params,
     stamp,
     centerOffset,
+    basePosition: basePos,
+    // The frame the face/faceSet anchors were AUTHORED in: an extrude source is
+    // its raw local frame (offset 0), a csg source is bbox-centred by its own
+    // centerOffset.  If a relink later swaps the source kind (reorder/delete of
+    // an upstream step), regenerateEmboss translates the anchors by
+    // (authored - current) so the relief stays put instead of jumping by the
+    // frame delta (half the body height for an extrude→chamfer swap).
+    sourceCenterOffset: source?.regenerator?.centerOffset ?? {
+      cx: 0,
+      cy: 0,
+      cz: 0,
+    },
     regeneratedAt: printPrecision,
   };
   if (editEntryId != null) {
@@ -88,6 +147,10 @@ export async function commitEmboss({ items, printPrecision }) {
       position,
       geometryData,
     });
+    // The entry keeps this freshly-committed geometry (no recompute), so its
+    // OLD cached solid is stale — release it so a downstream consumer rebuilds
+    // from the new baked mesh / recipe instead of the outdated B-rep.
+    releaseSolid(editEntryId);
   } else {
     store.modifyItem(
       item.id,
@@ -133,6 +196,7 @@ export function createEmbossPreviewHelpers({ scene, itemsRef, objectsRef }) {
     else mat.opacity = GHOST_OPACITY;
     mat.needsUpdate = true;
     mesh.children.forEach((c) => (c.visible = false));
+    mesh.userData.ghosted = true;
   };
 
   const unghostSource = () => {
@@ -148,6 +212,7 @@ export function createEmbossPreviewHelpers({ scene, itemsRef, objectsRef }) {
       mat.needsUpdate = true;
     }
     edges.forEach(({ child, visible }) => (child.visible = visible));
+    delete mesh.userData.ghosted;
     ghosted = null;
   };
 
@@ -183,6 +248,13 @@ export function createEmbossPreviewHelpers({ scene, itemsRef, objectsRef }) {
     }
     if (myRequest !== requestId || !result) return;
     useStore.getState().setToolError(null);
+    // Stash for Confirm to reuse (see commitEmboss) — this is the exact result
+    // the user is looking at.
+    previewCache = {
+      key: embossKey(recipe),
+      geometryData: result.geometryData,
+      centerOffset: result.centerOffset,
+    };
 
     const { positions, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();

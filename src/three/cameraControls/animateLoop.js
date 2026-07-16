@@ -12,11 +12,26 @@ import {
   CROSS_SECTION_PLANE,
   updateCrossSectionPlane,
   crossSectionViewPlane,
+  orientationFromAngles,
 } from "../crossSection.js";
 import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
+
+// On-demand rendering.  The loop keeps ticking (cheap) but only does the
+// expensive per-frame work + render() when something actually changed, instead
+// of pinning ~60 fps of bloom-composer raster on a static scene.  A frame is
+// rendered when: an explicit invalidation is pending (requestRender — wired to
+// every store change), the camera pose moved, a continuous state is running
+// (camera tween / cross-section), or we're inside the short activity window a
+// pointer/wheel/key press opens (so interaction never stutters even if an update
+// lands a frame late).  Conservative on purpose — over-rendering a little beats a
+// stale view.
+let _needsRender = true;
+export function requestRender() {
+  _needsRender = true;
+}
 
 // Width of the left objects/timeline overlay (`.left-panel` in App.css). The
 // axis indicator is nudged right by half this so it reads centred in the 3D
@@ -29,6 +44,7 @@ export function createAnimateLoop({
   cameraRef,
   targetRef,
   cameraAnimRef,
+  cameraControlsRef,
   sketchModeRef,
   sketchGridGroupRef,
   sketchShapesGroupRef,
@@ -44,8 +60,83 @@ export function createAnimateLoop({
   setRotationState,
 }) {
   let animId;
+  // Frozen camera pose while cross-section is active (orbit/pan then move the
+  // cut plane instead of the view).  Re-captured after any camera animation.
+  let frozenPose = null;
+  let prevAnimActive = false;
+
+  // On-demand gate state.  lastCam remembers the pose we last rendered so we can
+  // detect a camera move; activeUntil holds a short "keep rendering" window that
+  // any pointer/wheel/key interaction opens.
+  const lastCam = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 0, zoom: 0 };
+  let activeUntil = 0;
+  const ACTIVITY_MS = 400;
+  const bumpActivity = () => {
+    activeUntil = performance.now() + ACTIVITY_MS;
+  };
+  // Any store change may alter what's drawn (selection, hover, items, material,
+  // theme, render mode …) — open the activity window rather than enumerate every
+  // key.  A window (not a one-shot) because the scene mutation happens in a React
+  // effect that runs AFTER the state change: a one-shot flag could be consumed by
+  // a frame that renders the pre-effect scene, leaving the update stale.  The
+  // window keeps rendering long enough to catch the effect (and short async mesh
+  // builds that resolve just after).
+  const unsubscribe = useStore.subscribe(bumpActivity);
+  // Pointer/wheel/key activity opens the window so interaction stays smooth even
+  // for updates that don't move the camera or hit the store this exact frame.
+  const canvas = renderer.domElement;
+  const onActivity = () => bumpActivity();
+  const activityEvents = ["pointerdown", "pointermove", "wheel", "keydown"];
+  for (const ev of activityEvents)
+    canvas.addEventListener(ev, onActivity, { passive: true });
+  // A resize changes the canvas/camera but isn't a canvas pointer event, so it
+  // must invalidate explicitly or an idle view would render at the old size.
+  window.addEventListener("resize", onActivity, { passive: true });
+
+  const cameraMoved = () => {
+    const cam = cameraRef.current;
+    if (!cam) return false;
+    const p = cam.position,
+      q = cam.quaternion;
+    const moved =
+      p.x !== lastCam.x ||
+      p.y !== lastCam.y ||
+      p.z !== lastCam.z ||
+      q.x !== lastCam.qx ||
+      q.y !== lastCam.qy ||
+      q.z !== lastCam.qz ||
+      q.w !== lastCam.qw ||
+      cam.zoom !== lastCam.zoom;
+    if (moved) {
+      lastCam.x = p.x;
+      lastCam.y = p.y;
+      lastCam.z = p.z;
+      lastCam.qx = q.x;
+      lastCam.qy = q.y;
+      lastCam.qz = q.z;
+      lastCam.qw = q.w;
+      lastCam.zoom = cam.zoom;
+    }
+    return moved;
+  };
+
   const animate = () => {
     animId = requestAnimationFrame(animate);
+
+    // Continuous states that must render every frame while they run: a camera
+    // tween, and cross-section (orbiting moves the CUT while the camera is held,
+    // so cameraMoved() can't see it).  The path tracer owns the canvas itself.
+    const continuous =
+      !!cameraAnimRef.current || useStore.getState().crossSectionView;
+    // Skip the whole per-frame body + render when nothing changed.  cameraMoved()
+    // is called for its side effect (updating lastCam) only when we might skip,
+    // so an active frame doesn't wastefully re-latch it.
+    if (!_needsRender && !continuous && performance.now() >= activeUntil) {
+      if (!cameraMoved()) return; // truly idle — don't touch the GPU
+    } else {
+      cameraMoved(); // keep lastCam current so the next idle check is correct
+    }
+    _needsRender = false;
 
     if (cameraAnimRef.current) {
       const anim = cameraAnimRef.current;
@@ -274,10 +365,33 @@ export function createAnimateLoop({
     // Keep the cross-section cut locked to the camera as it orbits / pans,
     // re-pose the hatched caps, and feed the view-space plane to the analytic
     // primitive shaders (they clip their computed surface point themselves).
+    const animActive = !!cameraAnimRef.current;
     if (useStore.getState().crossSectionView) {
-      updateCrossSectionPlane(cameraRef.current, targetRef.current);
+      const cam = cameraRef.current;
+      const cc = cameraControlsRef?.current;
+      // Freeze the camera: snapshot the pose when cross-section starts (or just
+      // after a camera animation ends), then hold it there every frame so orbit
+      // /pan gestures move the CUT rather than the view.
+      if (!frozenPose || (prevAnimActive && !animActive)) {
+        frozenPose = {
+          pos: cam.position.clone(),
+          quat: cam.quaternion.clone(),
+          rotX: cc ? cc.targetRotationX : 0,
+          rotY: cc ? cc.targetRotationY : 0,
+        };
+      }
+      if (!animActive && frozenPose) {
+        cam.position.copy(frozenPose.pos);
+        cam.quaternion.copy(frozenPose.quat);
+        cam.updateMatrixWorld(true);
+      }
+      // The cut spins with the live orbit angles even though the camera is held.
+      const orient = cc
+        ? orientationFromAngles(cc.targetRotationX, cc.targetRotationY)
+        : cam.quaternion;
+      updateCrossSectionPlane(orient, targetRef.current);
       updateCaps(CROSS_SECTION_PLANE, targetRef.current);
-      const vp = crossSectionViewPlane(cameraRef.current);
+      const vp = crossSectionViewPlane(cam);
       Object.values(objectsRef.current).forEach((mesh) => {
         const u = mesh.userData.shaderMat?.uniforms;
         if (u?.uClipEnabled) {
@@ -285,7 +399,16 @@ export function createAnimateLoop({
           u.uClipConstant.value = vp.constant;
         }
       });
+    } else if (frozenPose) {
+      // Leaving cross-section: put the orbit angles back where the frozen camera
+      // is, so exiting doesn't snap the view to wherever the cut was dragged to.
+      if (cameraControlsRef?.current && frozenPose.rotX != null) {
+        cameraControlsRef.current.targetRotationX = frozenPose.rotX;
+        cameraControlsRef.current.targetRotationY = frozenPose.rotY;
+      }
+      frozenPose = null;
     }
+    prevAnimActive = animActive;
     // While the path-traced render is actually running it owns the canvas (its
     // own RAF loop accumulates samples) — skip the raster render so we don't
     // fight it.  Gated on pathTracerActive (not the toggle) so a failed start
@@ -296,6 +419,12 @@ export function createAnimateLoop({
   };
   animate();
   return {
-    stop: () => cancelAnimationFrame(animId),
+    stop: () => {
+      cancelAnimationFrame(animId);
+      unsubscribe();
+      for (const ev of activityEvents)
+        canvas.removeEventListener(ev, onActivity);
+      window.removeEventListener("resize", onActivity);
+    },
   };
 }

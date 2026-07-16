@@ -18,8 +18,8 @@ const GENERAL = [
 
 const VIEW_3D = [
   { keys: ["1"], label: "Wireframe" },
-  { keys: ["2"], label: "Shaded" },
-  { keys: ["3"], label: "Transparent" },
+  { keys: ["2"], label: "Transparent" },
+  { keys: ["3"], label: "Shaded" },
   { keys: ["4"], label: "Path-traced render" },
   { keys: ["5"], label: "Toggle shadows" },
   { keys: ["6"], label: "Toggle cross-section" },
@@ -28,6 +28,8 @@ const VIEW_3D = [
   { keys: ["X"], label: "Select faces" },
   { keys: ["C"], label: "Select edges" },
   { keys: ["V"], label: "Select points" },
+  { keys: [SHIFT, "Z"], label: "Toggle constraints (hold Shift for widget)" },
+  { keys: [SHIFT, "X"], label: "Toggle dimensions" },
 ];
 
 const SKETCH = [
@@ -43,6 +45,8 @@ const SKETCH = [
   { keys: ["C"], label: "Select lines / curves" },
   { keys: ["V"], label: "Select points" },
   { keys: ["B"], label: "Select constraints" },
+  { keys: [SHIFT, "Z"], label: "Toggle constraints (hold Shift for widget)" },
+  { keys: [SHIFT, "X"], label: "Toggle dimensions" },
   { keys: ["↑", "↓", "←", "→"], label: "Nudge selection 1mm" },
   { keys: [MOD, "G"], label: "Group selection" },
   { keys: [MOD, "U"], label: "Ungroup selection" },

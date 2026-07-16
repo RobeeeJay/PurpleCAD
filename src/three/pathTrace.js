@@ -15,6 +15,7 @@ import { WebGLPathTracer, DenoiseMaterial } from "three-gpu-pathtracer";
 import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
 import { useStore } from "../store";
 import { DEFAULT_MESH_COLOR } from "./theme.js";
+import { primitiveDimensions } from "./sceneObjects/dimensions.js";
 import { buildStudioEnvTexture } from "./pathTraceEnv.js";
 
 let pathTracer = null;
@@ -55,19 +56,34 @@ const installSceneRotationShim = () => {
   });
 };
 
-// Real geometry standing in for each item's display mesh.  Primitive constants
-// match the analytic shaders / raycasters (sphere r=1.5, cylinder r=1 h=2,
-// torus R=1 r=0.4); everything else reuses the live mesh's own geometry.
+// Real geometry standing in for each item's display mesh.  The primitives are
+// box-hull + shader in the live view, so build true geometry at the item's
+// ACTUAL dimensions (primitiveDimensions — matching the analytic shaders /
+// raycasters).  The item's gizmo scale is applied via the mesh transform, so
+// only the intrinsic dimensions go here.  Everything else (cube / extrude /
+// csg) already has real geometry.  Axis conventions match the shaders:
+// cylinder/cone axis = object Y, torus ring in the XZ plane (hole faces +Y).
 const renderGeometryFor = (item, mesh) => {
+  const d = primitiveDimensions(item);
   switch (item.type) {
     case "sphere":
-      return new THREE.SphereGeometry(1.5, 64, 32);
+      return new THREE.SphereGeometry(d.radius, 64, 32);
     case "cylinder":
-      return new THREE.CylinderGeometry(1, 1, 2, 64);
-    case "torus":
-      return new THREE.TorusGeometry(1.0, 0.4, 32, 96);
+      return new THREE.CylinderGeometry(d.radius, d.radius, d.height, 64);
+    case "cone":
+      return new THREE.CylinderGeometry(
+        d.radiusTop,
+        d.radiusBottom,
+        d.height,
+        64,
+      );
+    case "torus": {
+      const g = new THREE.TorusGeometry(d.major, d.minor, 32, 96);
+      g.rotateX(Math.PI / 2); // ring into the XZ plane, hole facing +Y
+      return g;
+    }
     default:
-      return mesh.geometry; // cube / extrude / csg already have real geometry
+      return mesh.geometry;
   }
 };
 

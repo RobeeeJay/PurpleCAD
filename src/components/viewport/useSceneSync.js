@@ -95,6 +95,10 @@ export function useSceneSync({
   const defaultMaterial = useStore((s) => s.defaultMaterial);
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
   const soloItemId = useStore((s) => s.soloItemId);
+  const booleanTool = useStore((s) => s.booleanTool);
+  const booleanCutIds = useStore((s) => s.booleanCutIds);
+  const pattern3dTool = useStore((s) => s.pattern3dTool);
+  const mirror3dTool = useStore((s) => s.mirror3dTool);
   // The Emboss tool reuses the extrude-select fills to pick sketch geometry.
   const embossGeomPicking = useStore(
     (s) => s.embossTool?.picking === "geometry",
@@ -269,29 +273,30 @@ export function useSceneSync({
     const fullRecalc =
       upstreamChanged || precisionChanged || (isFirst && hasStale);
 
-    // While a sketch is open, defer the full timeline recalc until it's closed
-    // — recomputing every downstream step on each point drag is wasteful (and
-    // the 3D solids are hidden behind the sketch anyway).  The deferred recalc
-    // runs in the sketch-close effect below.
-    if (fullRecalc && sketchMode) {
+    // Anything to do?  Either an upstream/precision change, or the viewed step
+    // has a stale/uncomputed cache (e.g. navigating to a step we haven't built
+    // yet).  Nothing stale and no change — e.g. adding a primitive — skips the
+    // regen pass entirely (no busy flash).
+    const needsRecalc = fullRecalc || hasStale;
+    if (!needsRecalc) return;
+
+    // While a sketch is open, defer the recalc until it's closed — recomputing
+    // every downstream step on each point drag is wasteful (and the 3D solids
+    // are hidden behind the sketch anyway).  Runs in the sketch-close effect.
+    if (sketchMode) {
       pendingRecalcRef.current = true;
       return;
     }
-    // Nothing to do: no upstream change, same precision, and no stale cache — e.g.
-    // adding a primitive — so skip the regen pass entirely (no busy flash).
-    if (!fullRecalc && !hasStale) return;
 
-    // The orchestrator is a UI-only module that's never reachable from
-    // the OCC worker's transitive imports, so it can route per-item regen
-    // through occClient → worker without creating a bundling cycle.
+    // The orchestrator is a UI-only module that's never reachable from the OCC
+    // worker's transitive imports, so it can route per-item regen through
+    // occClient → worker without creating a bundling cycle.  recalculateTimeline
+    // is now incremental (JIT) — it rebuilds only stale/dirty steps up to the
+    // viewed one and stamps the result back into history, so navigating to an
+    // already-built step is free and a first visit caches the step.
     import("../../three/regenerateOrchestrator.js").then((m) => {
-      if (fullRecalc) {
-        pendingRecalcRef.current = false;
-        m.recalculateTimeline();
-      } else {
-        // First load or a stale cache: the cheap current-view regen suffices.
-        m.regenerateForResolution(printPrecision);
-      }
+      pendingRecalcRef.current = false;
+      m.recalculateTimeline();
     });
   }, [items, printPrecision, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -418,7 +423,11 @@ export function useSceneSync({
       boundingBoxRef.current = null;
     }
 
-    if (!selectedId) return;
+    // Object-picking tools (boolean, 3D pattern, mirror) gather whole objects
+    // as their source; the transform gizmo has no meaning there (and its
+    // bounding box jumps around as the picked object changes), so suppress it
+    // entirely while one of those dialogs is open.
+    if (!selectedId || booleanTool || pattern3dTool || mirror3dTool) return;
 
     const result = buildTransformHandles(selectedId, items, objectsRef);
     if (!result) return;
@@ -467,7 +476,14 @@ export function useSceneSync({
         boundingBoxRef.current = null;
       }
     };
-  }, [selectedId, selectedIds, items]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    selectedId,
+    selectedIds,
+    items,
+    booleanTool,
+    pattern3dTool,
+    mirror3dTool,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sketch mode (top-down view + grid) ───────────────────────────────────
 
@@ -528,6 +544,7 @@ export function useSceneSync({
     );
     if (group) {
       if (renderMode === "smooth") group.visible = false;
+      group.userData.isSketchOverlay = true;
       scene.add(group);
       sketchShapesGroupRef.current = group;
     }
@@ -563,6 +580,7 @@ export function useSceneSync({
     );
     if (group) {
       if (renderMode === "smooth") group.visible = false;
+      group.userData.isSketchOverlay = true;
       scene.add(group);
       allSketchGroupRef.current = group;
     }
@@ -682,7 +700,17 @@ export function useSceneSync({
     if (materialDialogTarget != null) {
       updateEmissive(objectsRef, null, [], null);
     } else {
-      updateEmissive(objectsRef, selectedId, selectedIds, hoveredId);
+      // In a boolean pick every gathered object is an equal input, so tint them
+      // all with the single-selection colour rather than the primary/secondary
+      // (multi-select) split.
+      updateEmissive(
+        objectsRef,
+        selectedId,
+        selectedIds,
+        hoveredId,
+        !!booleanTool,
+        booleanCutIds,
+      );
     }
     // Reveal a sketch's reference plane while it's hovered in the objects list.
     updateSketchPlaneVisibility(
@@ -698,7 +726,14 @@ export function useSceneSync({
       selectedIds,
       useStore.getState().soloItemId,
     );
-  }, [hoveredId, selectedId, selectedIds, materialDialogTarget]);
+  }, [
+    hoveredId,
+    selectedId,
+    selectedIds,
+    materialDialogTarget,
+    booleanTool,
+    booleanCutIds,
+  ]);
 
   // ── Render mode ───────────────────────────────────────────────────────────
   // Also re-runs on printPrecision changes so the wireframe (and the
@@ -751,7 +786,7 @@ export function useSceneSync({
     // Seed the plane for the live camera so the cut is correct on this frame;
     // the animate loop keeps it tracking the camera thereafter.
     if (crossSectionView && cameraRef.current)
-      updateCrossSectionPlane(cameraRef.current, targetRef.current);
+      updateCrossSectionPlane(cameraRef.current.quaternion, targetRef.current);
     const planes = crossSectionView ? [CROSS_SECTION_PLANE] : null;
     Object.values(objectsRef.current).forEach((mesh) => {
       // The sketch plane square is a reference surface, not solid — never clip

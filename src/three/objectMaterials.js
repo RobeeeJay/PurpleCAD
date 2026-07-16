@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   DEFAULT_MESH_COLOR,
+  EMISSIVE_CUT,
   EMISSIVE_HOVERED,
   EMISSIVE_MULTI_SELECTED,
   EMISSIVE_SELECTED,
@@ -58,30 +59,57 @@ export const SPHERE_FRAGMENT_SHADER = `
   bool clipped(vec3 p) {
     return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
   }
+  // Screen-space diagonal hatch for the cross-section cut face — matches the
+  // tessellated-mesh section caps (crossSectionCaps.js: fill 0x9aa0a8 / line
+  // 0x2a2a2a, 9px spacing).
+  vec4 sectionCap() {
+    float spc = 9.0; float thk = 1.5;
+    float dd = mod(gl_FragCoord.x + gl_FragCoord.y, spc);
+    float ln = smoothstep(thk, 0.0, min(dd, spc - dd));
+    vec3 col = mix(vec3(0.604, 0.627, 0.659), vec3(0.165, 0.165, 0.165), ln);
+    return vec4(col, uOpacity);
+  }
   void main() {
     vec3 sc = vSphereCenter;
     float sr = vSphereRadius;
-    vec3 rd = normalize(vViewPos);
-    float b = dot(rd, sc);
-    float c = dot(sc, sc) - sr * sr;
+    // Orthographic (isometric) cameras cast PARALLEL rays; a perspective ray
+    // from the eye distorts the analytic shape.  Detect ortho from the
+    // projection matrix (m[3][3]==1) and use a parallel ray from the fragment.
+    bool ortho = projectionMatrix[3][3] > 0.5;
+    vec3 ro = ortho ? vViewPos : vec3(0.0);
+    vec3 rd = ortho ? vec3(0.0, 0.0, -1.0) : normalize(vViewPos);
+    vec3 oc = sc - ro;
+    float b = dot(rd, oc);
+    float c = dot(oc, oc) - sr * sr;
     float disc = b * b - c;
     if (disc < 0.0) discard;
     float sq = sqrt(disc);
     float t = b - sq;
     if (t < 0.0) t = b + sq;
     if (t < 0.0) discard;
-    vec3 hit = rd * t;
-    // If the near surface is on the clipped side, fall through to the far
+    vec3 hit = ro + rd * t;
+    // If the near surface is on the clipped side, draw the hatched section cap
+    // where the clip plane cuts the solid; else fall through to the far
     // (interior) surface so the cut reveals the inside rather than a hole.
     if (clipped(hit)) {
+      float denom = dot(rd, uClipNormal);
+      float tp = abs(denom) > 1e-6
+        ? -(dot(ro, uClipNormal) + uClipConstant) / denom : -1.0;
+      vec3 pp = ro + rd * tp;
+      if (tp > 0.0 && dot(pp - sc, pp - sc) <= sr * sr) {
+        gl_FragColor = sectionCap();
+        vec4 cpp = projectionMatrix * vec4(pp, 1.0);
+        gl_FragDepth = cpp.z / cpp.w * 0.5 + 0.5;
+        return;
+      }
       t = b + sq;
-      hit = rd * t;
+      hit = ro + rd * t;
       if (t < 0.0 || clipped(hit)) discard;
     }
     vec3 n = normalize(hit - sc);
     vec3 L1 = normalize(vec3(10.0, 15.0, 10.0));
     vec3 L2 = normalize(vec3(-10.0, 10.0, -10.0));
-    vec3 V  = normalize(-hit);
+    vec3 V  = normalize(ro - hit);
     float d1 = max(dot(n, L1), 0.0);
     float d2 = max(dot(n, L2), 0.0) * 0.4;
     float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
@@ -127,13 +155,32 @@ export const CYLINDER_FRAGMENT_SHADER = `
   bool clipped(vec3 p) {
     return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
   }
+  // Screen-space diagonal hatch for the cross-section cut face — matches the
+  // tessellated-mesh section caps (crossSectionCaps.js: fill 0x9aa0a8 / line
+  // 0x2a2a2a, 9px spacing).
+  vec4 sectionCap() {
+    float spc = 9.0; float thk = 1.5;
+    float dd = mod(gl_FragCoord.x + gl_FragCoord.y, spc);
+    float ln = smoothstep(thk, 0.0, min(dd, spc - dd));
+    vec3 col = mix(vec3(0.604, 0.627, 0.659), vec3(0.165, 0.165, 0.165), ln);
+    return vec4(col, uOpacity);
+  }
   void main() {
     vec3 sc = vCylCenter;
     vec3 a  = vCylAxis;
     float r = vCylRadius;
     float h = vCylHalfH;
-    vec3 rd  = normalize(vViewPos);
-    vec3 oc  = -sc;
+    // Parallel ray for an orthographic (isometric) camera; eye ray otherwise.
+    // For ortho, start the ray on a plane IN FRONT of the whole cylinder (same
+    // pixel column, pushed forward in +Z) so the body/cap hits land at t>0 —
+    // starting it on the box hull leaves them at t≈0, which the t>0.001 guards
+    // below reject (the tangent lines show as 4 vertical slits, caps vanish).
+    bool ortho = projectionMatrix[3][3] > 0.5;
+    vec3 rd = ortho ? vec3(0.0, 0.0, -1.0) : normalize(vViewPos);
+    vec3 ro = ortho
+      ? vec3(vViewPos.xy, sc.z + h + r + 1.0)
+      : vec3(0.0);
+    vec3 oc  = ro - sc;
     float da  = dot(rd, a);
     float oca = dot(oc, a);
     float A = 1.0 - da*da;
@@ -150,10 +197,10 @@ export const CYLINDER_FRAGMENT_SHADER = `
         for (int si = 0; si < 2; si++) {
           float ts = (si == 0) ? (-B - sq)/(2.0*A) : (-B + sq)/(2.0*A);
           if (ts > 0.001 && (tHit < 0.0 || ts < tHit)) {
-            float ys = dot(rd*ts - sc, a);
-            vec3 ps = rd*ts;
+            vec3 ps = ro + rd*ts;
+            float ys = dot(ps - sc, a);
             if (abs(ys) <= h && !clipped(ps)) {
-              tHit = ts; nHit = normalize((rd*ts - sc) - ys*a);
+              tHit = ts; nHit = normalize((ps - sc) - ys*a);
             }
           }
         }
@@ -165,20 +212,39 @@ export const CYLINDER_FRAGMENT_SHADER = `
         float capH = capSign * h;
         float tCap = (capH - oca) / da;
         if (tCap > 0.001 && (tHit < 0.0 || tCap < tHit)) {
-          vec3 radial = rd*tCap - sc - capH*a;
-          vec3 pc = rd*tCap;
+          vec3 pc = ro + rd*tCap;
+          vec3 radial = pc - sc - capH*a;
           if (dot(radial, radial) <= r*r && !clipped(pc)) {
             tHit = tCap; nHit = capSign * a;
           }
         }
       }
     }
+    // Section cap: where the clip plane cuts the cylinder and no kept surface
+    // sits in front of it, draw the hatched cap.
+    if (uClipEnabled > 0.5) {
+      float denom = dot(rd, uClipNormal);
+      float tp = abs(denom) > 1e-6
+        ? -(dot(ro, uClipNormal) + uClipConstant) / denom : -1.0;
+      if (tp > 0.0 && (tHit < 0.0 || tp <= tHit)) {
+        vec3 pp = ro + rd * tp;
+        vec3 rel = pp - sc;
+        float axl = dot(rel, a);
+        float rad2 = dot(rel, rel) - axl * axl;
+        if (abs(axl) <= h && rad2 <= r * r) {
+          gl_FragColor = sectionCap();
+          vec4 cpp = projectionMatrix * vec4(pp, 1.0);
+          gl_FragDepth = cpp.z / cpp.w * 0.5 + 0.5;
+          return;
+        }
+      }
+    }
     if (tHit < 0.0) discard;
-    vec3 hit = rd * tHit;
+    vec3 hit = ro + rd * tHit;
     vec3 n = nHit;
     vec3 L1 = normalize(vec3(10.0, 15.0, 10.0));
     vec3 L2 = normalize(vec3(-10.0, 10.0, -10.0));
-    vec3 V  = normalize(-hit);
+    vec3 V  = normalize(ro - hit);
     float d1 = max(dot(n, L1), 0.0);
     float d2 = max(dot(n, L2), 0.0) * 0.4;
     float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
@@ -225,6 +291,16 @@ export const TORUS_FRAGMENT_SHADER = `
   bool clipped(vec3 p) {
     return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
   }
+  // Screen-space diagonal hatch for the cross-section cut face — matches the
+  // tessellated-mesh section caps (crossSectionCaps.js: fill 0x9aa0a8 / line
+  // 0x2a2a2a, 9px spacing).
+  vec4 sectionCap() {
+    float spc = 9.0; float thk = 1.5;
+    float dd = mod(gl_FragCoord.x + gl_FragCoord.y, spc);
+    float ln = smoothstep(thk, 0.0, min(dd, spc - dd));
+    vec3 col = mix(vec3(0.604, 0.627, 0.659), vec3(0.165, 0.165, 0.165), ln);
+    return vec4(col, uOpacity);
+  }
   float sdTorus(vec3 p) {
     vec3 q = p - vTorusCenter;
     float axial  = dot(q, vTorusNormal);
@@ -232,24 +308,51 @@ export const TORUS_FRAGMENT_SHADER = `
     return length(vec2(radial - vTorusR, axial)) - vTorusr;
   }
   void main() {
-    vec3 rd = normalize(vViewPos);
-    float t  = max(0.01, length(vTorusCenter) - vTorusR - vTorusr - 0.2);
+    // Parallel ray for an orthographic (isometric) camera; eye ray otherwise.
+    bool ortho = projectionMatrix[3][3] > 0.5;
+    vec3 ro = ortho ? vViewPos : vec3(0.0);
+    vec3 rd = ortho ? vec3(0.0, 0.0, -1.0) : normalize(vViewPos);
+    // March from the fragment (ortho) or from a bound near the torus (persp).
+    float ext = vTorusR + vTorusr;
+    float t  = ortho ? 0.0 : max(0.01, length(vTorusCenter) - ext - 0.2);
+    // Convergence threshold scaled by the camera→torus distance (≈ t at the hit
+    // for perspective), so screen-space precision holds in both projections.
+    float hitEps = 0.0002 * length(vTorusCenter);
+    // Max march distance, RELATIVE to the object — a fixed cap makes a far torus
+    // vanish (its t starts past the cap in perspective).
+    float tMax = ortho ? (2.0 * ext + 2.0) : (length(vTorusCenter) + ext + 1.0);
     bool hit = false;
     for (int i = 0; i < 160; i++) {
-      vec3 p = rd * t;
+      vec3 p = ro + rd * t;
       float d = sdTorus(p);
-      if (d < 0.0002 * t) {
+      if (d < hitEps) {
         // Surface reached — accept it unless it's on the clipped side, in which
         // case step forward to the next (interior) surface past the cut.
         if (!clipped(p)) { hit = true; break; }
         t += 0.02;
         continue;
       }
-      if (t > 60.0) break;
+      if (t > tMax) break;
       t += max(d, 0.001);
     }
+    // Section cap: where the clip plane cuts the torus tube and no kept surface
+    // is in front of it, draw the hatched cap.
+    if (uClipEnabled > 0.5) {
+      float denom = dot(rd, uClipNormal);
+      float tp = abs(denom) > 1e-6
+        ? -(dot(ro, uClipNormal) + uClipConstant) / denom : -1.0;
+      if (tp > 0.0 && (!hit || tp <= t)) {
+        vec3 pp = ro + rd * tp;
+        if (sdTorus(pp) <= 0.0) {
+          gl_FragColor = sectionCap();
+          vec4 cpp = projectionMatrix * vec4(pp, 1.0);
+          gl_FragDepth = cpp.z / cpp.w * 0.5 + 0.5;
+          return;
+        }
+      }
+    }
     if (!hit) discard;
-    vec3 hitPos = rd * t;
+    vec3 hitPos = ro + rd * t;
     const float eps = 0.002;
     vec3 n = normalize(vec3(
       sdTorus(hitPos + vec3(eps,0.0,0.0)) - sdTorus(hitPos - vec3(eps,0.0,0.0)),
@@ -258,7 +361,7 @@ export const TORUS_FRAGMENT_SHADER = `
     ));
     vec3 L1 = normalize(vec3(10.0, 15.0, 10.0));
     vec3 L2 = normalize(vec3(-10.0, 10.0, -10.0));
-    vec3 V  = normalize(-hitPos);
+    vec3 V  = normalize(ro - hitPos);
     float d1 = max(dot(n, L1), 0.0);
     float d2 = max(dot(n, L2), 0.0) * 0.4;
     float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
@@ -309,6 +412,16 @@ export const CONE_FRAGMENT_SHADER = `
   bool clipped(vec3 p) {
     return uClipEnabled > 0.5 && dot(p, uClipNormal) + uClipConstant < 0.0;
   }
+  // Screen-space diagonal hatch for the cross-section cut face — matches the
+  // tessellated-mesh section caps (crossSectionCaps.js: fill 0x9aa0a8 / line
+  // 0x2a2a2a, 9px spacing).
+  vec4 sectionCap() {
+    float spc = 9.0; float thk = 1.5;
+    float dd = mod(gl_FragCoord.x + gl_FragCoord.y, spc);
+    float ln = smoothstep(thk, 0.0, min(dd, spc - dd));
+    vec3 col = mix(vec3(0.604, 0.627, 0.659), vec3(0.165, 0.165, 0.165), ln);
+    return vec4(col, uOpacity);
+  }
   // IQ capped-cone SDF in (radial, axial) coords: bottom radius vRb at axial
   // -vHalfH, top radius vRt at +vHalfH.
   float sdCone(vec3 p) {
@@ -325,22 +438,47 @@ export const CONE_FRAGMENT_SHADER = `
     return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
   }
   void main() {
-    vec3 rd = normalize(vViewPos);
-    float t  = max(0.01, length(vConeCenter) - max(vRb, vRt) - vHalfH - 0.2);
+    // Parallel ray for an orthographic (isometric) camera; eye ray otherwise.
+    bool ortho = projectionMatrix[3][3] > 0.5;
+    vec3 ro = ortho ? vViewPos : vec3(0.0);
+    vec3 rd = ortho ? vec3(0.0, 0.0, -1.0) : normalize(vViewPos);
+    float ext = max(vRb, vRt) + vHalfH;
+    float t  = ortho ? 0.0 : max(0.01, length(vConeCenter) - ext - 0.2);
+    // Threshold scaled by camera→cone distance so precision holds in both modes.
+    float hitEps = 0.0002 * length(vConeCenter);
+    // Max march distance, RELATIVE to the object — a fixed cap makes a far cone
+    // vanish (its t starts past the cap in perspective).
+    float tMax = ortho ? (2.0 * ext + 2.0) : (length(vConeCenter) + ext + 1.0);
     bool hit = false;
     for (int i = 0; i < 160; i++) {
-      vec3 p = rd * t;
+      vec3 p = ro + rd * t;
       float d = sdCone(p);
-      if (d < 0.0002 * t) {
+      if (d < hitEps) {
         if (!clipped(p)) { hit = true; break; }
         t += 0.02;
         continue;
       }
-      if (t > 60.0) break;
+      if (t > tMax) break;
       t += max(d, 0.001);
     }
+    // Section cap: where the clip plane cuts the cone and no kept surface is in
+    // front of it, draw the hatched cap.
+    if (uClipEnabled > 0.5) {
+      float denom = dot(rd, uClipNormal);
+      float tp = abs(denom) > 1e-6
+        ? -(dot(ro, uClipNormal) + uClipConstant) / denom : -1.0;
+      if (tp > 0.0 && (!hit || tp <= t)) {
+        vec3 pp = ro + rd * tp;
+        if (sdCone(pp) <= 0.0) {
+          gl_FragColor = sectionCap();
+          vec4 cpp = projectionMatrix * vec4(pp, 1.0);
+          gl_FragDepth = cpp.z / cpp.w * 0.5 + 0.5;
+          return;
+        }
+      }
+    }
     if (!hit) discard;
-    vec3 hitPos = rd * t;
+    vec3 hitPos = ro + rd * t;
     const float eps = 0.002;
     vec3 n = normalize(vec3(
       sdCone(hitPos + vec3(eps,0.0,0.0)) - sdCone(hitPos - vec3(eps,0.0,0.0)),
@@ -349,7 +487,7 @@ export const CONE_FRAGMENT_SHADER = `
     ));
     vec3 L1 = normalize(vec3(10.0, 15.0, 10.0));
     vec3 L2 = normalize(vec3(-10.0, 10.0, -10.0));
-    vec3 V  = normalize(-hitPos);
+    vec3 V  = normalize(ro - hitPos);
     float d1 = max(dot(n, L1), 0.0);
     float d2 = max(dot(n, L2), 0.0) * 0.4;
     float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
@@ -452,6 +590,9 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
 // not user-editable material.
 export function applyMaterialToMesh(mesh, item, materialProps) {
   if (item.type === "sketch") return;
+  // Ghosted by a tool preview — don't stomp its temporary opacity (the
+  // preview's unghost restores the real material state).
+  if (mesh.userData?.ghosted) return;
   const opacity = materialProps.opacity ?? 1;
   const transparent = opacity < 1;
   const mat = mesh.material;
@@ -474,14 +615,25 @@ export function applyMaterialToMesh(mesh, item, materialProps) {
   mat.needsUpdate = true;
 }
 
-export function updateEmissive(objectsRef, selectedId, selectedIds, hoveredId) {
+export function updateEmissive(
+  objectsRef,
+  selectedId,
+  selectedIds,
+  hoveredId,
+  uniformSelect = false,
+  cutIds = [],
+) {
   Object.entries(objectsRef.current).forEach(([itemId, mesh]) => {
     const id = parseInt(itemId);
-    const hex =
-      id === selectedId
+    // Boolean Cut tools tint red (checked first: a cutter can also be selectedId).
+    const hex = cutIds.includes(id)
+      ? EMISSIVE_CUT
+      : id === selectedId
         ? EMISSIVE_SELECTED
         : selectedIds.includes(id)
-          ? EMISSIVE_MULTI_SELECTED
+          ? uniformSelect
+            ? EMISSIVE_SELECTED
+            : EMISSIVE_MULTI_SELECTED
           : id === hoveredId
             ? EMISSIVE_HOVERED
             : NO_EMISSIVE;

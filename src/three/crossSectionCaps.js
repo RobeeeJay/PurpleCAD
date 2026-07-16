@@ -22,6 +22,7 @@ const CAP_LINE_COLOR = 0x2a2a2a;
 let capsGroup = null;
 let stencilGroup = null; // holds the per-object back/front stencil meshes
 let capMesh = null;
+let planeMesh = null; // translucent green hatched indicator of the cut plane
 let attachedScene = null;
 
 const _Z = new THREE.Vector3(0, 0, 1);
@@ -42,6 +43,37 @@ const HATCH_FRAGMENT = `
 const HATCH_VERTEX = `
   void main() {
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+// Translucent sheet drawn ON the cut plane so the section plane is visible: a
+// wide blue grid MAPPED TO THE PLANE (in the plane's own coordinates, so it
+// rotates and slides with the cut), see-through.  `fwidth` keeps the lines a
+// constant screen width whatever the zoom.
+const PLANE_VERTEX = `
+  varying vec2 vLocal;
+  varying float vWorldY;
+  void main() {
+    vLocal = position.xy;
+    vWorldY = (modelMatrix * vec4(position, 1.0)).y;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const PLANE_FRAGMENT = `
+  varying vec2 vLocal;
+  varying float vWorldY;
+  void main() {
+    float spacing = 6.0;   // world units per cell (wide)
+    vec2 coord = vLocal / spacing;
+    vec2 g = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+    float line = 1.0 - min(min(g.x, g.y), 1.0);
+    float a = mix(0.10, 0.6, line);
+    // Fade out with distance from the plane centre (≈ the camera's look-at point).
+    a *= 1.0 - smoothstep(45.0, 135.0, length(vLocal));
+    // Drop 30% opacity where the section dips below the ground plane (Y < 0).
+    if (vWorldY < 0.0) a *= 0.7;
+    // Faint blue fill, brighter blue grid lines.
+    gl_FragColor = vec4(0.26, 0.55, 1.0, a);
   }
 `;
 
@@ -90,6 +122,18 @@ export function ensureCaps(scene) {
   // if autoClearStencil is disabled by a render pass.
   capMesh.onAfterRender = (renderer) => renderer.clearStencil();
   capsGroup.add(capMesh);
+
+  // Translucent green indicator of the whole cut plane (drawn after the caps).
+  const planeMat = new THREE.ShaderMaterial({
+    vertexShader: PLANE_VERTEX,
+    fragmentShader: PLANE_FRAGMENT,
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,
+  });
+  planeMesh = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), planeMat);
+  planeMesh.renderOrder = 3;
+  capsGroup.add(planeMesh);
 
   scene.add(capsGroup);
   attachedScene = scene;
@@ -142,4 +186,9 @@ export function updateCaps(plane, target) {
   capMesh.position.copy(plane.coplanarPoint(_pt));
   capMesh.quaternion.setFromUnitVectors(_Z, plane.normal);
   capMesh.updateMatrix();
+  if (planeMesh) {
+    planeMesh.position.copy(capMesh.position);
+    planeMesh.quaternion.copy(capMesh.quaternion);
+    planeMesh.updateMatrix();
+  }
 }

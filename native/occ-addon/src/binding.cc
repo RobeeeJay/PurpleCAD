@@ -30,6 +30,11 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepBuilderAPI_MakeShape.hxx>
+#include <BRepBuilderAPI_ModifyShape.hxx>
+#include <gp_GTrsf.hxx>
+#include <gp_Mat.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -45,8 +50,20 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <ChFi3d_FilletShape.hxx>
 
+// ── Cooperative cancel (long-op abort) ───────────────────────────────────
+#include <Message_ProgressIndicator.hxx>
+#include <Message_ProgressRange.hxx>
+
+// ── Solid volume check (mesh-sew orientation guard) ─────────────────────
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+
+// ── Signal → exception conversion (survive kernel faults) ───────────────
+#include <OSD.hxx>
+
 // ── Meshing + tessellation access ────────────────────────────────────────
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <IMeshTools_Parameters.hxx>
 #include <BRep_Tool.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Poly_Triangle.hxx>
@@ -55,6 +72,9 @@
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopAbs_Orientation.hxx>
@@ -62,10 +82,15 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Vertex.hxx>
+#include <TopoDS_Compound.hxx>
+#include <TopoDS_Shell.hxx>
+#include <BRep_Builder.hxx>
+#include <ShapeFix_Shell.hxx>
 #include <TopLoc_Location.hxx>
 
 // ── Face-normal + edge-distance helpers ─────────────────────────────────
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <Extrema_ExtFlag.hxx>
 #include <Extrema_ExtAlgo.hxx>
@@ -91,25 +116,90 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <map>
 #include <unordered_map>
+#include <BRepTools.hxx>
 #include <vector>
 
 // ════════════════════════════════════════════════════════════════════════
 // Shape store
 // ════════════════════════════════════════════════════════════════════════
 
-static std::unordered_map<int, TopoDS_Shape> g_shapes;
+// Persistent topological naming: a stored shape carries a table of stable
+// NAMES for its faces/edges, derived from creation provenance (which sketch
+// entity / op produced them) rather than coordinates.  A selection stores a
+// name; on rebuild the name resolves to the current subshape even after the
+// geometry moved (a dimension edit), so chamfers/etc. stay bound to the
+// intended face.  The maps hold the actual TopoDS_Shape subshapes of `shape`;
+// they are valid only for THIS shape instance and are re-derived by each op.
+struct ShapeRecord {
+  TopoDS_Shape shape;
+  std::map<std::string, TopoDS_Shape> faces;
+  std::map<std::string, TopoDS_Shape> edges;
+};
+
+static std::unordered_map<int, ShapeRecord> g_shapes;
 static std::atomic<int> g_nextId{1};
 static std::mutex g_mu;
 
-static int StoreShape(const TopoDS_Shape& s) {
+// ── Cooperative cancel ───────────────────────────────────────────────────
+// A long OCC build (boolean/chamfer/loft/…) is a single synchronous native
+// call; the JS thread hosting it is blocked and can't receive a "cancel"
+// message.  So the cancel flag lives in a SharedArrayBuffer written by ANOTHER
+// thread (the Electron main process) and read here — OCC's builders poll
+// UserBreak() through a Message_ProgressRange and throw when it flips, aborting
+// the op mid-flight and freeing the CPU.  g_cancelPtr aliases the SAB's first
+// int32 (0 = run, non-0 = cancel); it never moves (a SAB never detaches).
+static volatile int32_t* g_cancelPtr = nullptr;
+
+class CancelIndicator : public Message_ProgressIndicator {
+ public:
+  Standard_Boolean UserBreak() override {
+    return g_cancelPtr != nullptr && *g_cancelPtr != 0;
+  }
+  // Pure virtual in Message_ProgressIndicator; we don't render progress, only
+  // poll UserBreak, so this is a no-op.
+  void Show(const Message_ProgressScope&, const bool) override {}
+};
+
+// Fresh range for one build; a static indicator is fine (only UserBreak
+// matters, the progress fraction is unused).  The returned range references the
+// indicator's root scope for the duration of the Build() call it's passed to.
+static Message_ProgressRange CancelRange() {
+  static Handle(CancelIndicator) ind = new CancelIndicator();
+  return ind->Start();
+}
+
+// Direct flag read for OUR OWN hot loops (per-triangle face building etc.),
+// which aren't OCC algorithms and so never get a Message_ProgressRange.  Poll
+// this every N iterations and throw to abort — the only way to make those
+// stages cancellable.
+static inline bool CancelRequested() {
+  return g_cancelPtr != nullptr && *g_cancelPtr != 0;
+}
+
+static int StoreRecord(const TopoDS_Shape& s,
+                       std::map<std::string, TopoDS_Shape> faces,
+                       std::map<std::string, TopoDS_Shape> edges) {
   int id = g_nextId.fetch_add(1, std::memory_order_relaxed);
   std::lock_guard<std::mutex> lk(g_mu);
-  g_shapes[id] = s;
+  g_shapes[id] = ShapeRecord{s, std::move(faces), std::move(edges)};
   return id;
 }
 
+// Store a shape with no names (ops that don't yet propagate naming).
+static int StoreShape(const TopoDS_Shape& s) { return StoreRecord(s, {}, {}); }
+
 static TopoDS_Shape FetchShape(int id) {
+  std::lock_guard<std::mutex> lk(g_mu);
+  auto it = g_shapes.find(id);
+  if (it == g_shapes.end())
+    throw std::runtime_error("unknown shape id: " + std::to_string(id));
+  return it->second.shape;
+}
+
+// Copy of the full record (shape + name tables).  Empty maps when unnamed.
+static ShapeRecord FetchRecord(int id) {
   std::lock_guard<std::mutex> lk(g_mu);
   auto it = g_shapes.find(id);
   if (it == g_shapes.end())
@@ -170,7 +260,15 @@ static gp_Trsf BuildTransform(double tx, double ty, double tz,
 static void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
                             std::vector<float>& positions,
                             std::vector<uint32_t>& indices) {
-  BRepMesh_IncrementalMesh mesher(shape, linearDeflection, false, 0.3, false);
+  // Mesh via the parameters+range overload so a long tessellation polls the
+  // cancel flag (UserBreak) and can be aborted — a high-precision emboss/boolean
+  // result is one of the slowest stages.
+  IMeshTools_Parameters meshParams;
+  meshParams.Deflection = linearDeflection;
+  meshParams.Angle = 0.3;
+  meshParams.Relative = Standard_False;
+  meshParams.InParallel = Standard_False;
+  BRepMesh_IncrementalMesh mesher(shape, meshParams, CancelRange());
 
   TopExp_Explorer explorer(shape, TopAbs_FACE);
   for (; explorer.More(); explorer.Next()) {
@@ -260,6 +358,38 @@ static bool EdgeMatchesEndpoints(const TopoDS_Edge& edge,
   return pointOnEdge(posA) && pointOnEdge(posB);
 }
 
+// Tessellation-robust match: is the edge's midpoint on the stored segment
+// posA→posB (within tol)?  A stored edge selection is a polyline approximation
+// of a curve at the CREATION tessellation; toggling print resolution rebuilds
+// the body at a different density, moving every vertex, so the exact-endpoint
+// match fails.  The stored ring still traces the same curve, so an OCC edge
+// that belongs to it has its midpoint sitting on one of the stored segments —
+// which picks the ring precisely without the adjacent-normal set's tendency to
+// over-select on bodies whose walls were split into many faces (emboss/deboss).
+static bool EdgeMidpointOnSegment(const TopoDS_Edge& edge, const Vec3d& a,
+                                  const Vec3d& b, double tol) {
+  double mx, my, mz;
+  try {
+    BRepAdaptor_Curve c(edge);
+    double um = (c.FirstParameter() + c.LastParameter()) / 2.0;
+    gp_Pnt m = c.Value(um);
+    mx = m.X();
+    my = m.Y();
+    mz = m.Z();
+  } catch (...) {
+    return false;
+  }
+  const double abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+  const double ab2 = abx * abx + aby * aby + abz * abz;
+  double t = ab2 > 1e-12
+                 ? ((mx - a.x) * abx + (my - a.y) * aby + (mz - a.z) * abz) / ab2
+                 : 0.0;
+  t = std::max(0.0, std::min(1.0, t));
+  const double dx = mx - (a.x + abx * t), dy = my - (a.y + aby * t),
+               dz = mz - (a.z + abz * t);
+  return std::sqrt(dx * dx + dy * dy + dz * dz) < tol;
+}
+
 // Compute the outward face normal at the UV midpoint.
 // Mirrors computeFaceNormal() from operations.js.
 struct FaceNormal { double x, y, z; bool valid; };
@@ -293,12 +423,19 @@ struct EdgeFaceSpec {
     double ax, ay, az, bx, by, bz;
     bool hasNormals;
     double n1x, n1y, n1z, n2x, n2y, n2z;
+    // Persistent name (topological naming): the sorted pair of adjacent face
+    // names.  Resolved directly before any coordinate/normal matching, so a rim
+    // chamfer survives a re-tessellation that moves every vertex.
+    std::string name;
   };
-  // Face normal + optional centroid (for face selection)
+  // Face normal + optional centroid (for face selection), plus an optional
+  // persistent name (topological naming) that resolves the exact face directly
+  // when present, before any coordinate/normal matching.
   struct FaceNorm {
     double nx, ny, nz;
     bool hasCentroid;
     double cx, cy, cz;
+    std::string name;
   };
   std::vector<EdgeEp> edges;
   std::vector<FaceNorm> faces;
@@ -328,13 +465,15 @@ static EdgeFaceSpec ParseSubGeo(const Napi::Object& subGeo) {
       EdgeFaceSpec::EdgeEp ep{
         GetDouble(e.Get("ax")), GetDouble(e.Get("ay")), GetDouble(e.Get("az")),
         GetDouble(e.Get("bx")), GetDouble(e.Get("by")), GetDouble(e.Get("bz")),
-        false, 0, 0, 0, 0, 0, 0
+        false, 0, 0, 0, 0, 0, 0, ""
       };
       if (e.Has("n1") && e.Has("n2")) {
         ep.hasNormals =
           ReadVec3(e.Get("n1"), ep.n1x, ep.n1y, ep.n1z) &&
           ReadVec3(e.Get("n2"), ep.n2x, ep.n2y, ep.n2z);
       }
+      if (e.Has("name") && e.Get("name").IsString())
+        ep.name = e.Get("name").As<Napi::String>().Utf8Value();
       spec.edges.push_back(ep);
     }
   }
@@ -343,12 +482,16 @@ static EdgeFaceSpec ParseSubGeo(const Napi::Object& subGeo) {
     for (uint32_t i = 0; i < arr.Length(); i++) {
       Napi::Object f = arr.Get(i).As<Napi::Object>();
       bool hasCx = f.Has("cx") && !f.Get("cx").IsNull() && !f.Get("cx").IsUndefined();
+      std::string name;
+      if (f.Has("name") && f.Get("name").IsString())
+        name = f.Get("name").As<Napi::String>().Utf8Value();
       spec.faces.push_back({
         GetDouble(f.Get("nx")), GetDouble(f.Get("ny")), GetDouble(f.Get("nz")),
         hasCx,
         hasCx ? GetDouble(f.Get("cx")) : 0.0,
         hasCx ? GetDouble(f.Get("cy")) : 0.0,
-        hasCx ? GetDouble(f.Get("cz")) : 0.0
+        hasCx ? GetDouble(f.Get("cz")) : 0.0,
+        name
       });
     }
   }
@@ -389,6 +532,42 @@ static bool NormalSetMatches(const std::vector<FaceNormal>& edgeNormals,
   return present(ep.n1x, ep.n1y, ep.n1z) && present(ep.n2x, ep.n2y, ep.n2z);
 }
 
+// Side-of-centroid disambiguation for the normal-set fallback.  On a revolved
+// body (a ring), the edge diametrically OPPOSITE a stored segment carries the
+// identical adjacent-normal pair — e.g. an inner-rim edge at angle th+180 has
+// the same {top, (cos th, sin th, 0)} normals as the outer-rim segment at th —
+// so normal matching alone selects the wrong rim whenever the coordinate
+// passes miss (stale selection after a reorder / appended re-run).  The sign
+// of dot(normal, midpoint - bodyCentre) distinguishes them: outward wall
+// normals point away from the centre on the OUTER rim and toward it on the
+// inner.  Near-zero dots (normal ~ perpendicular to the offset, e.g. the top
+// normal against an in-plane offset) are treated as "don't care".
+static bool SameSideAsSpec(const TopoDS_Edge& edge,
+                           const EdgeFaceSpec::EdgeEp& ep,
+                           const gp_Pnt& centre) {
+  gp_Pnt mid;
+  try {
+    BRepAdaptor_Curve c(edge);
+    mid = c.Value((c.FirstParameter() + c.LastParameter()) / 2.0);
+  } catch (...) {
+    return true; // can't evaluate — don't reject on this filter alone
+  }
+  const double sx = (ep.ax + ep.bx) / 2.0 - centre.X();
+  const double sy = (ep.ay + ep.by) / 2.0 - centre.Y();
+  const double sz = (ep.az + ep.bz) / 2.0 - centre.Z();
+  const double cx = mid.X() - centre.X();
+  const double cy = mid.Y() - centre.Y();
+  const double cz = mid.Z() - centre.Z();
+  const double kTol = 1e-3;
+  auto sideOk = [&](double nx, double ny, double nz) {
+    const double ds = nx * sx + ny * sy + nz * sz;
+    const double dc = nx * cx + ny * cy + nz * cz;
+    if (std::abs(ds) < kTol || std::abs(dc) < kTol) return true;
+    return (ds > 0) == (dc > 0);
+  };
+  return sideOk(ep.n1x, ep.n1y, ep.n1z) && sideOk(ep.n2x, ep.n2y, ep.n2z);
+}
+
 // Match a shape edge against a stored edge spec: by adjacent-face-normals
 // when the spec carries them (resize-invariant), otherwise by endpoint
 // coordinates (legacy chamfers saved before topological naming existed).
@@ -415,13 +594,203 @@ struct SelectedEdge {
 // centroid used only to pick the nearest among same-normal faces (a
 // tie-break, not a hard cutoff, so a resized face still matches).  Shared by
 // ChamferShape and FilletShape so the two never drift apart.
-static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
-                                                   const EdgeFaceSpec& spec) {
+// Resolve a face spec's persistent name to the actual face on `shape`.  The
+// named subshape is confirmed still present (IsSame) so a stale name falls
+// through to coordinate matching rather than selecting a dangling handle.
+static TopoDS_Face ResolveNamedFace(
+    const TopoDS_Shape& shape,
+    const std::map<std::string, TopoDS_Shape>* named,
+    const std::string& name) {
+  if (!named || name.empty()) return TopoDS_Face();
+  auto it = named->find(name);
+  if (it == named->end() || it->second.ShapeType() != TopAbs_FACE)
+    return TopoDS_Face();
+  TopoDS_Face nf = TopoDS::Face(it->second);
+  for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next())
+    if (f.Current().IsSame(nf)) return nf;
+  return TopoDS_Face();
+}
+
+// Is face `f` present in `shape` (by identity)?
+static bool FaceInShape(const TopoDS_Shape& shape, const TopoDS_Shape& f) {
+  for (TopExp_Explorer e(shape, TopAbs_FACE); e.More(); e.Next())
+    if (e.Current().IsSame(f)) return true;
+  return false;
+}
+
+// Carry face names from an op's INPUT to its RESULT using the builder's history:
+// a named input face maps to its Modified() face(s) if the op reshaped it, or
+// keeps its name if it survived unchanged (not IsDeleted, still present).  Faces
+// the op created (chamfer surfaces, etc.) are left unnamed here.  This is the
+// core of persistent topological naming across operations.
+static std::map<std::string, TopoDS_Shape> PropagateFaceNames(
+    BRepBuilderAPI_MakeShape& mk, const TopoDS_Shape& result,
+    const std::map<std::string, TopoDS_Shape>& inFaces) {
+  std::map<std::string, TopoDS_Shape> out;
+  for (const auto& kv : inFaces) {
+    const TopoDS_Shape& s = kv.second;
+    bool placed = false;
+    try {
+      const TopTools_ListOfShape& mod = mk.Modified(s);
+      for (const TopoDS_Shape& m : mod)
+        if (FaceInShape(result, m)) { out[kv.first] = m; placed = true; break; }
+    } catch (...) { /* op has no history for this subshape */ }
+    if (!placed) {
+      bool deleted = false;
+      try { deleted = mk.IsDeleted(s); } catch (...) {}
+      if (!deleted && FaceInShape(result, s)) out[kv.first] = s;
+    }
+  }
+  return out;
+}
+
+// Remap names through a rigid/affine transform (transform/mirror/scale): the
+// builder gives each subshape's single image via ModifiedShape.  Keeps names
+// attached as a body is positioned/scaled through the op pipeline.
+static std::map<std::string, TopoDS_Shape> RemapFaceNames(
+    BRepBuilderAPI_ModifyShape& mk,
+    const std::map<std::string, TopoDS_Shape>& inFaces) {
+  std::map<std::string, TopoDS_Shape> out;
+  for (const auto& kv : inFaces) {
+    try {
+      TopoDS_Shape m = mk.ModifiedShape(kv.second);
+      if (!m.IsNull()) out[kv.first] = m;
+    } catch (...) {}
+  }
+  return out;
+}
+
+// Name a primitive's faces by geometry: each planar face by its dominant normal
+// axis (+x/-x/+y/-y/+z/-z), the lone curved lateral surface (cylinder/cone/
+// sphere/torus) as "side".  Deterministic and resize-invariant (a bigger box
+// still has a +x face), so a chamfer on a primitive face survives a dimension
+// edit.  First face wins on a name clash.
+static std::map<std::string, TopoDS_Shape> NamePrimitiveFaces(
+    const TopoDS_Shape& shape) {
+  std::map<std::string, TopoDS_Shape> faces;
+  for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next()) {
+    TopoDS_Face face = TopoDS::Face(f.Current());
+    std::string name;
+    BRepAdaptor_Surface s(face, false);
+    if (s.GetType() == GeomAbs_Plane) {
+      FaceNormal n = ComputeFaceNormal(face);
+      if (!n.valid) continue;
+      double ax = std::abs(n.x), ay = std::abs(n.y), az = std::abs(n.z);
+      if (ax >= ay && ax >= az) name = n.x > 0 ? "+x" : "-x";
+      else if (ay >= az)        name = n.y > 0 ? "+y" : "-y";
+      else                      name = n.z > 0 ? "+z" : "-z";
+    } else {
+      name = "side";
+    }
+    if (!name.empty() && !faces.count(name)) faces[name] = face;
+  }
+  return faces;
+}
+
+// Name each edge by the sorted pair of adjacent FACE names it borders
+// (e.g. "side3|top" for a top-rim edge).  Reuses the stable face names, so an
+// edge name survives a re-tessellation that moves every vertex — the fix for a
+// rim chamfer that used to fail re-matching by coordinates.  First edge wins a
+// duplicate name.
+static std::map<std::string, TopoDS_Shape> NameEdgesByFacePairs(
+    const TopoDS_Shape& shape,
+    const std::map<std::string, TopoDS_Shape>& faceNames) {
+  std::map<std::string, TopoDS_Shape> edges;
+  if (faceNames.empty()) return edges;
+  TopTools_IndexedDataMapOfShapeListOfShape efMap;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, efMap);
+  auto nameOfFace = [&](const TopoDS_Shape& f) -> std::string {
+    for (const auto& kv : faceNames)
+      if (kv.second.IsSame(f)) return kv.first;
+    return "";
+  };
+  for (int i = 1; i <= efMap.Extent(); ++i) {
+    const TopoDS_Shape& edge = efMap.FindKey(i);
+    std::vector<std::string> ns;
+    for (const TopoDS_Shape& f : efMap.FindFromIndex(i)) {
+      std::string n = nameOfFace(f);
+      if (!n.empty()) ns.push_back(n);
+    }
+    if (ns.size() < 2) continue;
+    std::sort(ns.begin(), ns.end());
+    std::string key = ns[0] + "|" + ns[1];
+    if (!edges.count(key)) edges[key] = edge;
+  }
+  return edges;
+}
+
+// Store a solid with a face-name map, deriving its edge names from the adjacent
+// face pairs.  The one place solids acquire both name tables.
+static int StoreNamedSolid(const TopoDS_Shape& s,
+                           std::map<std::string, TopoDS_Shape> faces) {
+  auto edges = NameEdgesByFacePairs(s, faces);
+  return StoreRecord(s, std::move(faces), std::move(edges));
+}
+
+// Resolve an edge spec's persistent name to the actual edge on `shape`,
+// confirming it is still present (IsSame) so a stale name falls through to
+// coordinate matching.
+static TopoDS_Edge ResolveNamedEdge(
+    const TopoDS_Shape& shape,
+    const std::map<std::string, TopoDS_Shape>* named,
+    const std::string& name) {
+  if (!named || name.empty()) return TopoDS_Edge();
+  auto it = named->find(name);
+  if (it == named->end() || it->second.ShapeType() != TopAbs_EDGE)
+    return TopoDS_Edge();
+  TopoDS_Edge ne = TopoDS::Edge(it->second);
+  for (TopExp_Explorer e(shape, TopAbs_EDGE); e.More(); e.Next())
+    if (e.Current().IsSame(ne)) return ne;
+  return TopoDS_Edge();
+}
+
+// The face adjacent to the most of the given edges — the face a rim selection
+// bounds (e.g. the top cap for a ring's top rim).  Used as a chamfer fallback:
+// individual rim edges OCC won't bevel together (a thin ring at coarse
+// tessellation) often succeed as that whole face's boundary, and the result is
+// a clean solid (far faster for a downstream op than a mesh-sewn one).
+static TopoDS_Face MostCommonAdjacentFace(
+    const TopoDS_Shape& shape, const std::vector<SelectedEdge>& edges) {
+  TopTools_IndexedDataMapOfShapeListOfShape efMap;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, efMap);
+  std::vector<std::pair<TopoDS_Face, int>> counts;
+  for (const auto& se : edges) {
+    if (!efMap.Contains(se.edge)) continue;
+    for (const TopoDS_Shape& f : efMap.FindFromKey(se.edge)) {
+      bool found = false;
+      for (auto& pc : counts)
+        if (pc.first.IsSame(f)) { pc.second++; found = true; break; }
+      if (!found) counts.push_back({TopoDS::Face(f), 1});
+    }
+  }
+  TopoDS_Face best;
+  int bestC = 0;
+  for (auto& pc : counts)
+    if (pc.second > bestC) { bestC = pc.second; best = pc.first; }
+  return best;
+}
+
+static std::vector<SelectedEdge> SelectSubGeoEdges(
+    const TopoDS_Shape& shape, const EdgeFaceSpec& spec,
+    const std::map<std::string, TopoDS_Shape>* namedFaces = nullptr,
+    const std::map<std::string, TopoDS_Shape>* namedEdges = nullptr) {
   std::vector<SelectedEdge> out;
   std::set<std::string> addedKeys;
 
   TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
   TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaceMap);
+
+  // Body centre for the normal-fallback's side disambiguation (SameSideAsSpec).
+  gp_Pnt shapeCentre(0, 0, 0);
+  {
+    Bnd_Box bb;
+    BRepBndLib::Add(shape, bb);
+    if (!bb.IsVoid()) {
+      Standard_Real x0, y0, z0, x1, y1, z1;
+      bb.Get(x0, y0, z0, x1, y1, z1);
+      shapeCentre = gp_Pnt((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    }
+  }
 
   auto faceTouchingEdge = [&](const TopoDS_Edge& edge) -> TopoDS_Face {
     if (edgeFaceMap.Contains(edge)) {
@@ -438,21 +807,67 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
     addedKeys.insert(key);
   };
 
-  if (!spec.edges.empty()) {
-    TopExp_Explorer eexp(shape, TopAbs_EDGE);
-    for (; eexp.More(); eexp.Next()) {
-      TopoDS_Edge edge = TopoDS::Edge(eexp.Current());
-      for (const auto& ep : spec.edges) {
-        if (EdgeMatchesSpec(edge, ep, edgeFaceMap)) {
+  for (const auto& ep : spec.edges) {
+    // Persistent name wins: resolve the exact edge by its face-pair name,
+    // skipping all coordinate/normal matching (survives a re-tessellation).
+    TopoDS_Edge namedEdge = ResolveNamedEdge(shape, namedEdges, ep.name);
+    if (!namedEdge.IsNull()) {
+      addEdge(namedEdge, faceTouchingEdge(namedEdge));
+      continue;
+    }
+    // Pass 1: precise endpoint match.  When the stored endpoints still lie on
+    // the shape (a fresh chamfer, or a regen with no resize) this pins the
+    // exact edge — crucial on bodies whose walls were split into many faces by
+    // an emboss/deboss, where several edges share the same adjacent-normal pair
+    // and the normal-set match below would over-select a set OCC can't bevel.
+    bool matched = false;
+    for (TopExp_Explorer e1(shape, TopAbs_EDGE); e1.More(); e1.Next()) {
+      TopoDS_Edge edge = TopoDS::Edge(e1.Current());
+      if (EdgeMatchesEndpoints(edge, {ep.ax, ep.ay, ep.az},
+                               {ep.bx, ep.by, ep.bz})) {
+        addEdge(edge, faceTouchingEdge(edge));
+        matched = true;
+      }
+    }
+    // Pass 2: tessellation-robust proximity.  If the exact endpoints didn't
+    // match (the body was rebuilt at a different resolution — toggling print
+    // mode — so every vertex moved), select the OCC edges whose midpoint sits
+    // on this stored segment.  This tracks the SAME curve precisely, so it
+    // avoids the normal-set over-selection that makes MakeChamfer reject the
+    // result on emboss-split walls.
+    if (!matched) {
+      for (TopExp_Explorer em(shape, TopAbs_EDGE); em.More(); em.Next()) {
+        TopoDS_Edge edge = TopoDS::Edge(em.Current());
+        if (EdgeMidpointOnSegment(edge, {ep.ax, ep.ay, ep.az},
+                                  {ep.bx, ep.by, ep.bz}, 0.05)) {
           addEdge(edge, faceTouchingEdge(edge));
-          break;
+          matched = true;
         }
+      }
+    }
+    // Pass 3: resize-invariant normal fallback — only when the endpoints have
+    // moved off the shape entirely (a parametric resize repositions the curve),
+    // so the precise passes win whenever the selection still traces the body.
+    if (!matched && ep.hasNormals) {
+      for (TopExp_Explorer e2(shape, TopAbs_EDGE); e2.More(); e2.Next()) {
+        TopoDS_Edge edge = TopoDS::Edge(e2.Current());
+        if (NormalSetMatches(EdgeAdjacentNormals(edge, edgeFaceMap), ep) &&
+            SameSideAsSpec(edge, ep, shapeCentre))
+          addEdge(edge, faceTouchingEdge(edge));
       }
     }
   }
 
   const double eps = 0.05;
   for (const auto& req : spec.faces) {
+    // Persistent name wins: resolve the exact face directly, skipping the
+    // coordinate/normal search entirely (survives a dimension edit).
+    TopoDS_Face named = ResolveNamedFace(shape, namedFaces, req.name);
+    if (!named.IsNull()) {
+      for (TopExp_Explorer eexp(named, TopAbs_EDGE); eexp.More(); eexp.Next())
+        addEdge(TopoDS::Edge(eexp.Current()), named);
+      continue;
+    }
     TopoDS_Face best;
     double bestDist = 1e300;
     bool found = false;
@@ -460,25 +875,32 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
     TopExp_Explorer fexp(shape, TopAbs_FACE);
     for (; fexp.More(); fexp.Next()) {
       TopoDS_Face face = TopoDS::Face(fexp.Current());
-      auto n = ComputeFaceNormal(face);
-      if (!n.valid) continue;
-      if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
-          std::abs(req.nz - n.z) >= eps)
-        continue;
-      if (!req.hasCentroid) {
+      if (req.hasCentroid) {
+        // Point-on-face match: the clicked sample point lies on exactly one
+        // face, so nearest-distance identifies it.  This works for CURVED faces
+        // too (whose representative normal differs from the clicked-point
+        // normal), letting a single click select the whole cylindrical /
+        // arc-swept face — the normal filter below would wrongly reject them.
+        gp_Pnt pnt(req.cx, req.cy, req.cz);
+        BRepBuilderAPI_MakeVertex vMk(pnt);
+        BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
+                                        Extrema_ExtAlgo_Grad);
+        dist.Perform();
+        double d =
+            (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
+        if (!found || d < bestDist) {
+          best = face;
+          bestDist = d;
+          found = true;
+        }
+      } else {
+        // Legacy spec (no sample point): match every same-normal face.
+        auto n = ComputeFaceNormal(face);
+        if (!n.valid) continue;
+        if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
+            std::abs(req.nz - n.z) >= eps)
+          continue;
         allNormalMatches.push_back(face);
-        continue;
-      }
-      gp_Pnt pnt(req.cx, req.cy, req.cz);
-      BRepBuilderAPI_MakeVertex vMk(pnt);
-      BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
-                                      Extrema_ExtAlgo_Grad);
-      dist.Perform();
-      double d = (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
-      if (!found || d < bestDist) {
-        best = face;
-        bestDist = d;
-        found = true;
       }
     }
     std::vector<TopoDS_Face> chosen;
@@ -501,11 +923,17 @@ static std::vector<SelectedEdge> SelectSubGeoEdges(const TopoDS_Shape& shape,
 // chamfer/fillet).  Matches by normal, using the stored centroid only as a
 // nearest tie-break among same-normal faces so a resized face still matches.
 // Used by push/pull, which needs the TopoDS_Face itself to sweep a prism.
-static std::vector<TopoDS_Face> SelectSubGeoFaces(const TopoDS_Shape& shape,
-                                                  const EdgeFaceSpec& spec) {
+static std::vector<TopoDS_Face> SelectSubGeoFaces(
+    const TopoDS_Shape& shape, const EdgeFaceSpec& spec,
+    const std::map<std::string, TopoDS_Shape>* namedFaces = nullptr) {
   std::vector<TopoDS_Face> out;
   const double eps = 0.05;
   for (const auto& req : spec.faces) {
+    TopoDS_Face named = ResolveNamedFace(shape, namedFaces, req.name);
+    if (!named.IsNull()) {
+      out.push_back(named);
+      continue;
+    }
     TopoDS_Face best;
     double bestDist = 1e300;
     bool found = false;
@@ -522,6 +950,11 @@ static std::vector<TopoDS_Face> SelectSubGeoFaces(const TopoDS_Shape& shape,
         allNormalMatches.push_back(face);
         continue;
       }
+      // Push/pull stores a face centroid that may sit OFF the face plane (the
+      // profile centroid, not an on-surface hit point), so match by normal and
+      // use the centroid only as a nearest tie-break among same-normal faces.
+      // (SelectSubGeoEdges, used by chamfer/fillet, gets an on-surface hit
+      // point and can match curved faces by point-on-face instead.)
       gp_Pnt pnt(req.cx, req.cy, req.cz);
       BRepBuilderAPI_MakeVertex vMk(pnt);
       BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
@@ -569,7 +1002,7 @@ Napi::Number MakeBox(const Napi::CallbackInfo& info) {
     double x1 = GetDouble(info[0]), y1 = GetDouble(info[1]), z1 = GetDouble(info[2]);
     double x2 = GetDouble(info[3]), y2 = GetDouble(info[4]), z2 = GetDouble(info[5]);
     BRepPrimAPI_MakeBox mk(gp_Pnt(x1, y1, z1), gp_Pnt(x2, y2, z2));
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -579,7 +1012,7 @@ Napi::Number MakeSphere(const Napi::CallbackInfo& info) {
   try {
     double r = GetDouble(info[0], 1.5);
     BRepPrimAPI_MakeSphere mk(r);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -594,7 +1027,7 @@ Napi::Number MakeCylinder(const Napi::CallbackInfo& info) {
     double height  = GetDouble(info[2], 2.0);
     gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeCylinder mk(ax, radius, height);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -609,7 +1042,7 @@ Napi::Number MakeCone(const Napi::CallbackInfo& info) {
     double height  = GetDouble(info[3], 2.0);
     gp_Ax2 ax(gp_Pnt(0, originY, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeCone mk(ax, r1, r2, height);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -622,7 +1055,7 @@ Napi::Number MakeTorus(const Napi::CallbackInfo& info) {
     double minorR = GetDouble(info[1], 0.4);
     gp_Ax2 ax(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0));
     BRepPrimAPI_MakeTorus mk(ax, majorR, minorR);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    return Napi::Number::New(env, StoreNamedSolid(mk.Shape(), NamePrimitiveFaces(mk.Shape())));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -687,7 +1120,29 @@ Napi::Number MakeExtrude(const Napi::CallbackInfo& info) {
     BRepPrimAPI_MakePrism prismMk(face, dir, false, true);
     if (!prismMk.IsDone())
       throw std::runtime_error("prism builder failed");
-    return Napi::Number::New(env, StoreShape(prismMk.Shape()));
+
+    // Persistent names, from creation provenance: base/top caps and one side
+    // face per OUTER profile edge, indexed by the edge's position in the wire
+    // (== the sketch line order the caller passed).  The names survive a
+    // dimension edit — a resized profile re-extrudes to the same names, so a
+    // face chamfer stays bound to `side{i}` / `top` rather than a coordinate.
+    std::map<std::string, TopoDS_Shape> faces, edges;
+    if (!prismMk.FirstShape().IsNull()) faces["bottom"] = prismMk.FirstShape();
+    if (!prismMk.LastShape().IsNull()) faces["top"] = prismMk.LastShape();
+    TopoDS_Wire outerW = BRepTools::OuterWire(face);
+    int ei = 0;
+    for (TopExp_Explorer ex(outerW, TopAbs_EDGE); ex.More(); ex.Next(), ++ei) {
+      const TopTools_ListOfShape& gen = prismMk.Generated(ex.Current());
+      for (const TopoDS_Shape& g : gen) {
+        if (g.ShapeType() == TopAbs_FACE) {
+          faces["side" + std::to_string(ei)] = g;
+          break;
+        }
+      }
+    }
+    edges = NameEdgesByFacePairs(prismMk.Shape(), faces);
+    return Napi::Number::New(env, StoreRecord(prismMk.Shape(), std::move(faces),
+                                              std::move(edges)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -748,7 +1203,7 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
             BRepBuilderAPI_Transform(base, tr.Multiplied(rot), true).Shape());
         loft.AddWire(w);
       }
-      loft.Build();
+      loft.Build(CancelRange());
       if (!loft.IsDone()) throw std::runtime_error("helical revolve failed");
       return Napi::Number::New(env, StoreShape(loft.Shape()));
     }
@@ -789,7 +1244,7 @@ Napi::Number MakeRevolve(const Napi::CallbackInfo& info) {
         } else {
           BRepAlgoAPI_Fuse fuse(result, wedge);
           fuse.SetFuzzyValue(kFuzzy);
-          fuse.Build();
+          fuse.Build(CancelRange());
           if (fuse.IsDone()) result = fuse.Shape();
         }
       }
@@ -856,7 +1311,7 @@ Napi::Number MakePipe(const Napi::CallbackInfo& info) {
       TopoDS_Face placed =
           TopoDS::Face(BRepBuilderAPI_Transform(face, place, true).Shape());
       BRepOffsetAPI_MakePipe pipe(wireMk.Wire(), placed);
-      pipe.Build();
+      pipe.Build(CancelRange());
       if (!pipe.IsDone()) throw std::runtime_error("pipe sweep failed");
       return Napi::Number::New(env, StoreShape(pipe.Shape()));
     }
@@ -937,7 +1392,7 @@ Napi::Number MakePipe(const Napi::CallbackInfo& info) {
       loft.AddWire(
           TopoDS::Wire(BRepBuilderAPI_Transform(base, place, true).Shape()));
     }
-    loft.Build();
+    loft.Build(CancelRange());
     if (!loft.IsDone()) throw std::runtime_error("pipe sweep (twist) failed");
     return Napi::Number::New(env, StoreShape(loft.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -976,7 +1431,7 @@ Napi::Number MakeLoft(const Napi::CallbackInfo& info) {
                                     Standard_False /*ruled → smooth*/);
     loft.AddWire(wa);
     loft.AddWire(wb);
-    loft.Build();
+    loft.Build(CancelRange());
     if (!loft.IsDone()) throw std::runtime_error("loft failed");
     return Napi::Number::New(env, StoreShape(loft.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -994,10 +1449,11 @@ Napi::Number TransformShape(const Napi::CallbackInfo& info) {
     int id    = info[0].As<Napi::Number>().Int32Value();
     double tx = GetDouble(info[1]), ty = GetDouble(info[2]), tz = GetDouble(info[3]);
     double rx = GetDouble(info[4]), ry = GetDouble(info[5]), rz = GetDouble(info[6]);
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_Trsf trsf = BuildTransform(tx, ty, tz, rx, ry, rz);
-    BRepBuilderAPI_Transform mk(shape, trsf, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
+    return Napi::Number::New(env,
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1011,11 +1467,12 @@ Napi::Number MirrorShape(const Napi::CallbackInfo& info) {
     double nx = GetDouble(info[4]), ny = GetDouble(info[5]), nz = GetDouble(info[6]);
     double len = std::sqrt(nx * nx + ny * ny + nz * nz);
     if (len < 1e-9) throw std::runtime_error("mirror plane normal is degenerate");
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_Trsf trsf;
     trsf.SetMirror(gp_Ax2(gp_Pnt(ox, oy, oz), gp_Dir(nx / len, ny / len, nz / len)));
-    BRepBuilderAPI_Transform mk(shape, trsf, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
+    return Napi::Number::New(env,
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1030,11 +1487,12 @@ Napi::Number RotateShapeAxis(const Napi::CallbackInfo& info) {
     double angle = GetDouble(info[7], 0.0);
     double len = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (len < 1e-9) throw std::runtime_error("rotation axis is degenerate");
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_Trsf trsf;
     trsf.SetRotation(gp_Ax1(gp_Pnt(ox, oy, oz), gp_Dir(dx / len, dy / len, dz / len)), angle);
-    BRepBuilderAPI_Transform mk(shape, trsf, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
+    return Napi::Number::New(env,
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1044,11 +1502,32 @@ Napi::Number ScaleShape(const Napi::CallbackInfo& info) {
   try {
     int id       = info[0].As<Napi::Number>().Int32Value();
     double scale = GetDouble(info[1], 1.0);
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
     gp_Trsf trsf;
     trsf.SetScaleFactor(scale);
-    BRepBuilderAPI_Transform mk(shape, trsf, true);
-    return Napi::Number::New(env, StoreShape(mk.Shape()));
+    BRepBuilderAPI_Transform mk(rec.shape, trsf, true);
+    return Napi::Number::New(env,
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// scaleShapeXYZ(id, sx, sy, sz) → newShapeId
+// Non-uniform scale about the origin in the shape's local frame (a per-axis
+// stretch), via an affine gp_GTrsf.  Used so a boolean/split input rebuilds at
+// the size the user stretched it to; uniform scales can still use ScaleShape.
+Napi::Number ScaleShapeXYZ(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    int id      = info[0].As<Napi::Number>().Int32Value();
+    double sx   = GetDouble(info[1], 1.0);
+    double sy   = GetDouble(info[2], 1.0);
+    double sz   = GetDouble(info[3], 1.0);
+    ShapeRecord rec = FetchRecord(id);
+    gp_GTrsf gt;
+    gt.SetVectorialPart(gp_Mat(sx, 0, 0, 0, sy, 0, 0, 0, sz));
+    BRepBuilderAPI_GTransform mk(rec.shape, gt, true);
+    return Napi::Number::New(env,
+        StoreNamedSolid(mk.Shape(), RemapFaceNames(mk, rec.faces)));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
 
@@ -1073,21 +1552,46 @@ Napi::Number BooleanOp(const Napi::CallbackInfo& info) {
     // i.e. ~1e-4 mm: far above float round-off, far below any real feature.
     const Standard_Real kFuzzy = 1.0e-5;
 
+    // A tool can be a COMPOUND of several solids (a sewn multi-letter emboss
+    // stamp).  BRepAlgoAPI_Fuse's two-shape constructor silently DROPS a
+    // compound tool (the union comes back as just the body — "missing
+    // letters"), so explode compounds into the BOP tools list instead.
+    auto appendSolids = [](const TopoDS_Shape& s, TopTools_ListOfShape& into) {
+      if (s.ShapeType() == TopAbs_COMPOUND) {
+        bool any = false;
+        for (TopExp_Explorer ex(s, TopAbs_SOLID); ex.More(); ex.Next()) {
+          into.Append(ex.Current());
+          any = true;
+        }
+        if (any) return;
+      }
+      into.Append(s);
+    };
+
     TopoDS_Shape result = FetchShape(ids.Get(0u).As<Napi::Number>().Int32Value());
     for (uint32_t i = 1; i < ids.Length(); i++) {
       TopoDS_Shape tool = FetchShape(ids.Get(i).As<Napi::Number>().Int32Value());
+      TopTools_ListOfShape args, tools;
+      appendSolids(result, args);
+      appendSolids(tool, tools);
       if (op == "union") {
-        BRepAlgoAPI_Fuse fuse(result, tool);
+        BRepAlgoAPI_Fuse fuse;
+        fuse.SetArguments(args);
+        fuse.SetTools(tools);
         fuse.SetFuzzyValue(kFuzzy);
-        fuse.Build();
+        fuse.Build(CancelRange());
         result = fuse.Shape();
       } else if (op == "difference") {
-        BRepAlgoAPI_Cut cut(result, tool);
-        cut.Build();
+        BRepAlgoAPI_Cut cut;
+        cut.SetArguments(args);
+        cut.SetTools(tools);
+        cut.Build(CancelRange());
         result = cut.Shape();
       } else if (op == "intersection") {
-        BRepAlgoAPI_Common common(result, tool);
-        common.Build();
+        BRepAlgoAPI_Common common;
+        common.SetArguments(args);
+        common.SetTools(tools);
+        common.Build(CancelRange());
         result = common.Shape();
       } else {
         throw std::runtime_error("unknown boolean operation: " + op);
@@ -1130,34 +1634,126 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
                       info[3].IsNumber() && std::isfinite(GetDouble(info[3]));
     double angleRad = useAngle ? GetDouble(info[3]) : 0.0;
 
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec  = ParseSubGeo(sg);
     if (spec.edges.empty() && spec.faces.empty()) {
       // Nothing to do — return the same shape
       return Napi::Number::New(env, StoreShape(shape));
     }
 
-    try {
-      BRepFilletAPI_MakeChamfer mk(shape);
-      auto selected = SelectSubGeoEdges(shape, spec);
+    // Build the chamfer on a given shape.  A null return means no edges
+    // matched (sentinel); a throw means a genuine computation failure.
+    std::map<std::string, TopoDS_Shape> resultFaces;
+    auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
+      BRepFilletAPI_MakeChamfer mk(s);
+      auto selected = SelectSubGeoEdges(s, spec, &rec.faces, &rec.edges);
+      if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) {
-        if (useAngle && !se.refFace.IsNull()) {
+        if (useAngle && !se.refFace.IsNull())
           mk.AddDA(amount, angleRad, se.edge, se.refFace);
-        } else {
+        else
           mk.Add(amount, se.edge);
+      }
+      mk.Build(CancelRange());
+      if (!mk.IsDone())
+        throw std::runtime_error(
+          "chamfer computation failed (geometry rejected the operation)");
+      // Carry names forward from the original faces — only valid on the primary
+      // attempt (chamfering `shape` itself).  A unified-copy retry loses subshape
+      // identity, so names don't propagate there and the result falls back to
+      // coordinate selection.
+      resultFaces = s.IsSame(shape)
+                        ? PropagateFaceNames(mk, mk.Shape(), rec.faces)
+                        : std::map<std::string, TopoDS_Shape>{};
+      return mk.Shape();
+    };
+
+    // Fallback: chamfer the boundary of the FACE the selected edges bound.
+    // A rim whose individual edges OCC rejects (a thin ring at coarse preview
+    // tessellation) usually succeeds as the face's rim — and yields a clean
+    // solid, so a downstream emboss builds fast instead of on a slow mesh-sew.
+    // ONLY the wire(s) the selection actually lies on: a holed face (a ring's
+    // top cap) has separate inner and outer boundary wires, and feeding ALL the
+    // face's edges bevelled the never-selected inner rim too (the "high-res
+    // chamfers both rings" bug).
+    auto attemptFaceRim = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
+      auto selected = SelectSubGeoEdges(s, spec, &rec.faces, &rec.edges);
+      if (selected.empty()) return TopoDS_Shape();
+      TopoDS_Face face = MostCommonAdjacentFace(s, selected);
+      if (face.IsNull()) return TopoDS_Shape();
+      BRepFilletAPI_MakeChamfer mk(s);
+      int n = 0;
+      TopTools_IndexedMapOfShape added;
+      for (TopExp_Explorer w(face, TopAbs_WIRE); w.More(); w.Next()) {
+        bool wireSelected = false;
+        for (TopExp_Explorer e(w.Current(), TopAbs_EDGE);
+             e.More() && !wireSelected; e.Next())
+          for (const auto& se : selected)
+            if (e.Current().IsSame(se.edge)) {
+              wireSelected = true;
+              break;
+            }
+        if (!wireSelected) continue;
+        for (TopExp_Explorer e(w.Current(), TopAbs_EDGE); e.More(); e.Next()) {
+          if (added.Contains(e.Current())) continue; // seam edges appear twice
+          added.Add(e.Current());
+          mk.Add(amount, TopoDS::Edge(e.Current()));
+          ++n;
         }
       }
+      if (n == 0) return TopoDS_Shape();
+      mk.Build(CancelRange());
+      if (!mk.IsDone()) return TopoDS_Shape();
+      resultFaces = s.IsSame(shape)
+                        ? PropagateFaceNames(mk, mk.Shape(), rec.faces)
+                        : std::map<std::string, TopoDS_Shape>{};
+      return mk.Shape();
+    };
 
-      // 0 = sentinel "no edges matched" — bridge throws a descriptive error.
-      if (selected.empty()) return Napi::Number::New(env, 0);
-      mk.Build();
-      if (!mk.IsDone())
-        throw std::runtime_error("chamfer computation failed (geometry rejected the operation)");
-      return Napi::Number::New(env, StoreShape(mk.Shape()));
+    try {
+      TopoDS_Shape result;
+      try {
+        result = attempt(shape);
+      } catch (const std::exception&) {
+        // Retry on a same-domain-unified copy.  Booleans / shell / timeline
+        // regeneration can leave sliver coplanar faces and hairline seams that
+        // MakeChamfer rejects even when the distance is small — the very
+        // artefacts the union path unifies away up front.  Merging them into
+        // clean single faces lets the chamfer run; if it still fails it's a
+        // real limit and the outer catch reports it.
+        TopoDS_Shape unified = shape;
+        try {
+          ShapeUpgrade_UnifySameDomain u(shape, Standard_True, Standard_True,
+                                         Standard_True);
+          u.Build();
+          unified = u.Shape();
+        } catch (...) { /* keep the original if unify throws */ }
+        try {
+          result = attempt(unified);
+        } catch (const std::exception&) {
+          // Last resort: the face-rim fallback (see above).  Null → the outer
+          // catch reports the original rejection.
+          result = attemptFaceRim(shape);
+          if (result.IsNull()) result = attemptFaceRim(unified);
+          if (result.IsNull())
+            throw std::runtime_error(
+                "chamfer computation failed (geometry rejected the operation)");
+        }
+      }
+      // 0 = sentinel "no edges matched" — the bridge throws a descriptive error.
+      if (result.IsNull()) return Napi::Number::New(env, 0);
+      return Napi::Number::New(env, StoreNamedSolid(result, resultFaces));
     } catch (const std::exception& e) {
+      // Two common causes, and the distance being small rules out neither:
+      //  - the distance exceeds the material the chamfer runs into (e.g. wider
+      //    than a hollow body's wall), or
+      //  - the selected edges meet in a way OCC can't bevel together (adjacent
+      //    edges around a tight ring, a seam, or a near-tangent join).
       throw std::runtime_error(
-        std::string("Chamfer failed — try a smaller distance or a different "
-                    "edge / face (") + e.what() + ")");
+        std::string("Chamfer failed — OCC rejected this combination of edges "
+                    "and distance. Try a smaller distance, select fewer edges, "
+                    "or select the whole face/rim instead. (") + e.what() + ")");
     }
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
@@ -1171,26 +1767,53 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
     Napi::Object sg = info[1].As<Napi::Object>();
     double radius = GetDouble(info[2], 0.05);
 
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec  = ParseSubGeo(sg);
     if (spec.edges.empty() && spec.faces.empty()) {
       return Napi::Number::New(env, StoreShape(shape));
     }
 
-    try {
-      BRepFilletAPI_MakeFillet mk(shape, ChFi3d_Rational);
-      auto selected = SelectSubGeoEdges(shape, spec);
+    // Null return = no edges matched (sentinel); throw = computation failure.
+    auto attempt = [&](const TopoDS_Shape& s) -> TopoDS_Shape {
+      BRepFilletAPI_MakeFillet mk(s, ChFi3d_Rational);
+      auto selected = SelectSubGeoEdges(s, spec, &rec.faces, &rec.edges);
+      if (selected.empty()) return TopoDS_Shape();
       for (const auto& se : selected) mk.Add(radius, se.edge);
-
-      if (selected.empty()) return Napi::Number::New(env, 0);
-      mk.Build();
+      mk.Build(CancelRange());
       if (!mk.IsDone())
-        throw std::runtime_error("fillet computation failed (geometry rejected the operation)");
-      return Napi::Number::New(env, StoreShape(mk.Shape()));
+        throw std::runtime_error(
+          "fillet computation failed (geometry rejected the operation)");
+      return mk.Shape();
+    };
+
+    try {
+      TopoDS_Shape result;
+      try {
+        result = attempt(shape);
+      } catch (const std::exception&) {
+        // Retry on a same-domain-unified copy — see ChamferShape.  Sliver
+        // coplanar faces / hairline seams left by booleans, shell or timeline
+        // regeneration make MakeFillet reject an otherwise-valid radius.
+        TopoDS_Shape unified = shape;
+        try {
+          ShapeUpgrade_UnifySameDomain u(shape, Standard_True, Standard_True,
+                                         Standard_True);
+          u.Build();
+          unified = u.Shape();
+        } catch (...) { /* keep the original if unify throws */ }
+        result = attempt(unified);
+      }
+      if (result.IsNull()) return Napi::Number::New(env, 0);
+      return Napi::Number::New(env, StoreShape(result));
     } catch (const std::exception& e) {
+      // Same two causes as chamfer (see ChamferShape): too-large radius for the
+      // material, or a set of edges OCC can't roll together — a small radius
+      // rules out neither.
       throw std::runtime_error(
-        std::string("Fillet failed — try a smaller radius or a different "
-                    "edge / face (") + e.what() + ")");
+        std::string("Fillet failed — OCC rejected this combination of edges "
+                    "and radius. Try a smaller radius, select fewer edges, or "
+                    "select the whole face/rim instead. (") + e.what() + ")");
     }
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
@@ -1212,13 +1835,14 @@ Napi::Number PushPullFaces(const Napi::CallbackInfo& info) {
     Napi::Object sg = info[1].As<Napi::Object>();
     double distance = GetDouble(info[2], 0.0);
 
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec  = ParseSubGeo(sg);
     // No faces, or a zero move — nothing to do; hand back the input unchanged.
     if (spec.faces.empty() || std::abs(distance) < 1e-9)
       return Napi::Number::New(env, StoreShape(shape));
 
-    auto faces = SelectSubGeoFaces(shape, spec);
+    auto faces = SelectSubGeoFaces(shape, spec, &rec.faces);
     // 0 = sentinel "no faces matched" — the JS bridge turns this into a
     // descriptive error (same convention as chamfer/fillet).
     if (faces.empty()) return Napi::Number::New(env, 0);
@@ -1237,19 +1861,19 @@ Napi::Number PushPullFaces(const Napi::CallbackInfo& info) {
         gp_Vec vec(n.x * distance, n.y * distance, n.z * distance);
         if (vec.Magnitude() < 1e-12) continue;
         BRepPrimAPI_MakePrism prismMk(face, vec, Standard_False, Standard_True);
-        prismMk.Build();
+        prismMk.Build(CancelRange());
         if (!prismMk.IsDone()) continue;
         TopoDS_Shape prism = prismMk.Shape();
         if (pull) {
           BRepAlgoAPI_Fuse fuse(result, prism);
           fuse.SetFuzzyValue(kFuzzy);
-          fuse.Build();
+          fuse.Build(CancelRange());
           if (!fuse.IsDone()) throw std::runtime_error("fuse rejected the prism");
           result = fuse.Shape();
         } else {
           BRepAlgoAPI_Cut cut(result, prism);
           cut.SetFuzzyValue(kFuzzy);
-          cut.Build();
+          cut.Build(CancelRange());
           if (!cut.IsDone()) throw std::runtime_error("cut rejected the prism");
           result = cut.Shape();
         }
@@ -1287,7 +1911,8 @@ Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
     Napi::Object sg      = info[2].As<Napi::Object>();
     double angle         = GetDouble(info[3], 0.0);
 
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec  = ParseSubGeo(sg);
     if (spec.faces.empty() || std::abs(angle) < 1e-9)
       return Napi::Number::New(env, StoreShape(shape));
@@ -1301,7 +1926,7 @@ Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
     gp_Dir pullDir(nv);
     gp_Pln neutralPlane(gp_Pnt(cx, cy, cz), pullDir);
 
-    auto faces = SelectSubGeoFaces(shape, spec);
+    auto faces = SelectSubGeoFaces(shape, spec, &rec.faces);
     if (faces.empty()) return Napi::Number::New(env, 0);
 
     try {
@@ -1313,9 +1938,11 @@ Napi::Number DraftFaces(const Napi::CallbackInfo& info) {
         else draft.Remove(face);  // skip a face the draft can't take
       }
       if (!any) return Napi::Number::New(env, 0);
-      draft.Build();
+      draft.Build(CancelRange());
       if (!draft.IsDone()) return Napi::Number::New(env, 0);
-      return Napi::Number::New(env, StoreShape(draft.Shape()));
+      return Napi::Number::New(env,
+          StoreNamedSolid(draft.Shape(),
+                          PropagateFaceNames(draft, draft.Shape(), rec.faces)));
     } catch (const std::exception& e) {
       throw std::runtime_error(
         std::string("Draft failed — try a smaller angle or a different face (") +
@@ -1356,7 +1983,7 @@ Napi::Number MakeShell(const Napi::CallbackInfo& info) {
 
     BRepAlgoAPI_Cut cut(shape, inner);
     cut.SetFuzzyValue(1.0e-5);
-    cut.Build();
+    cut.Build(CancelRange());
     if (!cut.IsDone()) return Napi::Number::New(env, 0);
     return Napi::Number::New(env, StoreShape(cut.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -1402,7 +2029,7 @@ static TopoDS_Shape BuildThreadGroove(
     BRepOffsetAPI_MakePipeShell pipe(helixW);
     pipe.Add(profile);
     pipe.SetMode(Standard_True); // Frenet frame — stable on a constant helix
-    pipe.Build();
+    pipe.Build(CancelRange());
     if (!pipe.IsDone()) return TopoDS_Shape();
     if (!pipe.MakeSolid()) return TopoDS_Shape();
     return pipe.Shape();
@@ -1432,7 +2059,7 @@ Napi::Number MakeHole(const Napi::CallbackInfo& info) {
     if (dv.Magnitude() < 1e-9) return Napi::Number::New(env, 0);
     gp_Ax2 ax(gp_Pnt(px, py, pz), gp_Dir(dv));
     BRepPrimAPI_MakeCylinder cyl(ax, diameter / 2.0 + tolerance, length);
-    cyl.Build();
+    cyl.Build(CancelRange());
     if (!cyl.IsDone()) return Napi::Number::New(env, 0);
     return Napi::Number::New(env, StoreShape(cyl.Shape()));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -1479,7 +2106,8 @@ Napi::Value EnrichSubGeo(const Napi::CallbackInfo& info) {
   try {
     int id = info[0].As<Napi::Number>().Int32Value();
     Napi::Object sg = info[1].As<Napi::Object>();
-    TopoDS_Shape shape = FetchShape(id);
+    ShapeRecord rec = FetchRecord(id);
+    const TopoDS_Shape& shape = rec.shape;
     EdgeFaceSpec spec = ParseSubGeo(sg);
 
     TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
@@ -1491,6 +2119,42 @@ Napi::Value EnrichSubGeo(const Napi::CallbackInfo& info) {
       Napi::Object eo = Napi::Object::New(env);
       eo.Set("ax", ep.ax); eo.Set("ay", ep.ay); eo.Set("az", ep.az);
       eo.Set("bx", ep.bx); eo.Set("by", ep.by); eo.Set("bz", ep.bz);
+
+      // Stamp the persistent edge name (its adjacent face-pair) so a later regen
+      // resolves the rim by name — robust to a re-tessellation that moves the
+      // endpoints.  The picked coords come from the DISPLAY mesh, whose
+      // tessellation may differ from this OCC solid, so match tolerantly:
+      // exact endpoints first, then midpoint-on-segment (same as the regen
+      // selector), before naming the edge from rec.edges.
+      if (ep.name.empty() && !rec.edges.empty()) {
+        TopoDS_Shape hit;
+        for (TopExp_Explorer ee(shape, TopAbs_EDGE); ee.More(); ee.Next()) {
+          if (EdgeMatchesEndpoints(TopoDS::Edge(ee.Current()),
+                                   {ep.ax, ep.ay, ep.az},
+                                   {ep.bx, ep.by, ep.bz})) {
+            hit = ee.Current();
+            break;
+          }
+        }
+        if (hit.IsNull()) {
+          for (TopExp_Explorer ee(shape, TopAbs_EDGE); ee.More(); ee.Next()) {
+            if (EdgeMidpointOnSegment(TopoDS::Edge(ee.Current()),
+                                      {ep.ax, ep.ay, ep.az},
+                                      {ep.bx, ep.by, ep.bz}, 0.05)) {
+              hit = ee.Current();
+              break;
+            }
+          }
+        }
+        if (!hit.IsNull())
+          for (const auto& kv : rec.edges)
+            if (kv.second.IsSame(hit)) {
+              eo.Set("name", Napi::String::New(env, kv.first));
+              break;
+            }
+      } else if (!ep.name.empty()) {
+        eo.Set("name", Napi::String::New(env, ep.name));
+      }
 
       double n1[3], n2[3];
       bool have = false;
@@ -1527,10 +2191,38 @@ Napi::Value EnrichSubGeo(const Napi::CallbackInfo& info) {
       outEdges.Set(uint32_t(i), eo);
     }
 
+    // Faces: pass through unchanged, but stamp each with the persistent NAME of
+    // the face it currently selects, so later regens resolve it by name instead
+    // of coordinates.  Resolve the pick to a face (coord/normal), then match it
+    // to a named face by identity (IsSame).
+    Napi::Array outFaces;
+    if (sg.Has("faces") && sg.Get("faces").IsArray()) {
+      Napi::Array inFaces = sg.Get("faces").As<Napi::Array>();
+      outFaces = Napi::Array::New(env, inFaces.Length());
+      for (uint32_t i = 0; i < inFaces.Length() && i < spec.faces.size(); i++) {
+        Napi::Object fo = inFaces.Get(i).As<Napi::Object>();
+        if (spec.faces[i].name.empty()) {
+          EdgeFaceSpec one;
+          one.faces.push_back(spec.faces[i]);
+          auto sel = SelectSubGeoFaces(shape, one);
+          if (!sel.empty()) {
+            for (const auto& kv : rec.faces) {
+              if (kv.second.IsSame(sel[0])) {
+                fo.Set("name", Napi::String::New(env, kv.first));
+                break;
+              }
+            }
+          }
+        }
+        outFaces.Set(i, fo);
+      }
+    } else {
+      outFaces = Napi::Array::New(env, 0);
+    }
+
     Napi::Object out = Napi::Object::New(env);
     out.Set("edges", outEdges);
-    if (sg.Has("faces")) out.Set("faces", sg.Get("faces"));
-    else out.Set("faces", Napi::Array::New(env, 0));
+    out.Set("faces", outFaces);
     return out;
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
@@ -1568,6 +2260,45 @@ Napi::Object TessellateShape(const Napi::CallbackInfo& info) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// Persistent topological naming — queries
+// ════════════════════════════════════════════════════════════════════════
+
+// faceNames(shapeId) → [name, ...] : the stable names this shape carries.
+Napi::Value FaceNames(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    ShapeRecord rec = FetchRecord(info[0].As<Napi::Number>().Int32Value());
+    Napi::Array out = Napi::Array::New(env, rec.faces.size());
+    uint32_t i = 0;
+    for (const auto& kv : rec.faces) out.Set(i++, Napi::String::New(env, kv.first));
+    return out;
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// namedFacePoint(shapeId, name) → [x,y,z] at the face's UV midpoint, or null.
+// Lets a caller (and the tests) confirm a name resolves to the intended face
+// after a rebuild — the point moves with the geometry, the name does not.
+Napi::Value NamedFacePoint(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  try {
+    ShapeRecord rec = FetchRecord(info[0].As<Napi::Number>().Int32Value());
+    std::string name = info[1].As<Napi::String>().Utf8Value();
+    auto it = rec.faces.find(name);
+    if (it == rec.faces.end() || it->second.ShapeType() != TopAbs_FACE)
+      return env.Null();
+    BRepAdaptor_Surface s(TopoDS::Face(it->second), false);
+    double u = (s.FirstUParameter() + s.LastUParameter()) / 2.0;
+    double v = (s.FirstVParameter() + s.LastVParameter()) / 2.0;
+    gp_Pnt p = s.Value(u, v);
+    Napi::Array out = Napi::Array::New(env, 3);
+    out.Set(0u, Napi::Number::New(env, p.X()));
+    out.Set(1u, Napi::Number::New(env, p.Y()));
+    out.Set(2u, Napi::Number::New(env, p.Z()));
+    return out;
+  } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // Exported functions — shape-store management
 // ════════════════════════════════════════════════════════════════════════
 
@@ -1587,6 +2318,16 @@ Napi::Value ClearAll(const Napi::CallbackInfo& info) {
 Napi::Number ShapeCount(const Napi::CallbackInfo& info) {
   std::lock_guard<std::mutex> lk(g_mu);
   return Napi::Number::New(info.Env(), static_cast<int>(g_shapes.size()));
+}
+
+// Register the shared cancel flag: an Int32Array over a SharedArrayBuffer whose
+// element 0 the caller flips to non-zero (from another thread) to abort the
+// current long build.  We stash the backing pointer; a SAB never detaches, so
+// it stays valid for the process lifetime.  Called once at worker startup.
+Napi::Value SetCancelBuffer(const Napi::CallbackInfo& info) {
+  Napi::Int32Array arr = info[0].As<Napi::Int32Array>();
+  g_cancelPtr = reinterpret_cast<volatile int32_t*>(arr.Data());
+  return info.Env().Undefined();
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1655,83 +2396,174 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
     Napi::Float64Array pos = info[0].As<Napi::Float64Array>();
     const double* p = pos.Data();
     const bool hasIdx = info[1].IsTypedArray();
+    // Two independent knobs for the callers:
+    //   skipCaps  — skip the tri/face REJECTION caps (which exist so an import's
+    //               dense mesh can't hang a later boolean).  Export needs this
+    //               (no boolean at all); the emboss stamp/body needs it too (a
+    //               legitimately dense curved wrap that MUST be booleaned).
+    //   fastSew   — sew with cutting OFF and skip the coplanar UnifySameDomain
+    //               pass: near-instant, for EXPORT only (only tessellated/written,
+    //               never booleaned).  A booleaned solid must keep cutting ON +
+    //               unify so its faces share edges and the boolean stays cheap.
+    // So: import = (false,false); export = (true,true); emboss = (true,false).
+    const bool skipCaps =
+        info.Length() > 2 && info[2].IsBoolean() && info[2].As<Napi::Boolean>();
+    const bool fastSew =
+        info.Length() > 3 && info[3].IsBoolean() && info[3].As<Napi::Boolean>();
 
     // Sewing then unifying a very dense mesh is itself slow, so bail before that.
     const size_t kMaxTris = 50000;
     size_t triCount =
         hasIdx ? info[1].As<Napi::Uint32Array>().ElementLength() / 3
                : (pos.ElementLength() / 3) / 3;
-    if (triCount > kMaxTris)
+    if (!skipCaps && triCount > kMaxTris)
       throw std::runtime_error(
           "Imported mesh is too detailed (" + std::to_string(triCount) +
           " triangles) to use in a boolean. Simplify or decimate it first.");
 
-    BRepBuilderAPI_Sewing sew(1.0e-6);
-    auto addTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) {
-      gp_Pnt a(p[ia * 3], p[ia * 3 + 1], p[ia * 3 + 2]);
-      gp_Pnt b(p[ib * 3], p[ib * 3 + 1], p[ib * 3 + 2]);
-      gp_Pnt c(p[ic * 3], p[ic * 3 + 1], p[ic * 3 + 2]);
-      if (a.Distance(b) < 1e-12 || b.Distance(c) < 1e-12 ||
-          c.Distance(a) < 1e-12)
-        return;
-      BRepBuilderAPI_MakePolygon poly(a, b, c, Standard_True);
-      if (!poly.IsDone()) return;
-      BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
-      if (face.IsDone()) sew.Add(face.Face());
+    const uint32_t nv = (uint32_t)(pos.ElementLength() / 3);
+    // Add every (non-degenerate) triangle as a face to a sewing pass, polling
+    // the cancel flag periodically.  Reusable so we can try a fast pass then a
+    // thorough fallback.
+    auto fillSew = [&](BRepBuilderAPI_Sewing& sew) {
+      auto addTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) {
+        gp_Pnt a(p[ia * 3], p[ia * 3 + 1], p[ia * 3 + 2]);
+        gp_Pnt b(p[ib * 3], p[ib * 3 + 1], p[ib * 3 + 2]);
+        gp_Pnt c(p[ic * 3], p[ic * 3 + 1], p[ic * 3 + 2]);
+        if (a.Distance(b) < 1e-12 || b.Distance(c) < 1e-12 ||
+            c.Distance(a) < 1e-12)
+          return;
+        BRepBuilderAPI_MakePolygon poly(a, b, c, Standard_True);
+        if (!poly.IsDone()) return;
+        BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
+        if (face.IsDone()) sew.Add(face.Face());
+      };
+      if (hasIdx) {
+        Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
+        for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3) {
+          if ((i & 0x3FF) == 0 && CancelRequested())
+            throw std::runtime_error("cancelled");
+          addTri(idx[i], idx[i + 1], idx[i + 2]);
+        }
+      } else {
+        for (uint32_t i = 0; i + 2 < nv; i += 3) {
+          if ((i & 0x3FF) == 0 && CancelRequested())
+            throw std::runtime_error("cancelled");
+          addTri(i, i + 1, i + 2);
+        }
+      }
     };
 
-    if (hasIdx) {
-      Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
-      for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3)
-        addTri(idx[i], idx[i + 1], idx[i + 2]);
+    // Sewing options (tol, sewingMode, analysis, CUTTING, nonManifold).  The
+    // cutting pass splits faces to resolve intersections; it's slow but produces
+    // properly-shared edges so a later ShapeUpgrade_UnifySameDomain can merge
+    // coplanar faces and the following BOOLEAN stays cheap.
+    //   • Export (skipCaps): the solid is only tessellated / written, never
+    //     booleaned, so cutting is pointless — disable it for a near-instant sew.
+    //   • Boolean path (emboss stamp/body, STL import): cutting ON is REQUIRED —
+    //     without it the un-cut per-triangle shell doesn't unify, the face count
+    //     stays ~= the triangle count (blowing the kMaxFaces cap, or hanging the
+    //     boolean), which broke emboss when this was globally disabled.
+    TopoDS_Shape sewn;
+    if (fastSew) {
+      BRepBuilderAPI_Sewing sew(1.0e-6, Standard_True, Standard_True,
+                                Standard_False, Standard_False);
+      fillSew(sew);
+      sew.Perform(CancelRange());
+      sewn = sew.SewedShape();
+      if (sewn.IsNull()) {
+        // Fast pass produced nothing (a mesh that needs cutting) — retry full.
+        BRepBuilderAPI_Sewing sewFull(1.0e-6);
+        fillSew(sewFull);
+        sewFull.Perform(CancelRange());
+        sewn = sewFull.SewedShape();
+      }
     } else {
-      uint32_t nv = (uint32_t)(pos.ElementLength() / 3);
-      for (uint32_t i = 0; i + 2 < nv; i += 3) addTri(i, i + 1, i + 2);
+      BRepBuilderAPI_Sewing sew(1.0e-6);
+      fillSew(sew);
+      sew.Perform(CancelRange());
+      sewn = sew.SewedShape();
     }
-
-    sew.Perform();
-    TopoDS_Shape sewn = sew.SewedShape();
     if (sewn.IsNull()) throw std::runtime_error("mesh sewing produced nothing");
 
+    // Build a solid from EACH closed shell and orient each for positive volume
+    // (material inside).  Orienting a multi-shell solid as a whole flips it by
+    // TOTAL volume, so several disjoint shells (e.g. one per emboss letter) can
+    // come out inside-out — wrong normals after the boolean, especially on the
+    // fast (cutting-off) sew that doesn't re-orient faces itself.  Per-shell
+    // orientation fixes each letter independently.
     TopoDS_Shape result = sewn;
-    BRepBuilderAPI_MakeSolid mk;
-    bool anyShell = false;
+    std::vector<TopoDS_Solid> solids;
     for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next()) {
-      mk.Add(TopoDS::Shell(ex.Current()));
-      anyShell = true;
+      TopoDS_Shell shell = TopoDS::Shell(ex.Current());
+      if (fastSew) {
+        // Cutting-off sewing keeps the mesh's own winding, which the developable
+        // emboss wrap can leave INCONSISTENT (a curved / S-curve wall flips
+        // handedness region to region — some triangles reversed).  Cutting-on
+        // would re-orient them but hangs on this mesh; ShapeFix_Shell propagates a
+        // consistent orientation across the shell (the same result, cheaply), so
+        // the boolean and the rendered normals come out right.
+        Handle(ShapeFix_Shell) sfs = new ShapeFix_Shell(shell);
+        sfs->FixFaceOrientation(shell);
+        if (!sfs->Shell().IsNull()) shell = sfs->Shell();
+      }
+      BRepBuilderAPI_MakeSolid ms(shell);
+      if (!ms.IsDone()) {
+        solids.clear();
+        break;
+      }
+      TopoDS_Solid sol = ms.Solid();
+      BRepLib::OrientClosedSolid(sol);
+      // OrientClosedSolid can silently FAIL on a sewn triangle shell (its point
+      // classification is unreliable there), leaving the solid inside-out —
+      // negative volume.  An inside-out tool VANISHES from a union and inverts a
+      // difference (the "missing letters" emboss bug).  Measure and flip: the
+      // signed volume is ground truth.
+      GProp_GProps props;
+      BRepGProp::VolumeProperties(sol, props);
+      if (props.Mass() < 0) sol = TopoDS::Solid(sol.Reversed());
+      solids.push_back(sol);
     }
-    if (anyShell && mk.IsDone()) {
-      // Orient so the solid's material is on the inside of the shell (positive
-      // volume).  A mesh whose winding came out inverted — e.g. the deboss wrap,
-      // whose radial map flips handedness, or a badly-wound imported mesh — would
-      // otherwise become an inside-out solid that breaks the difference boolean.
-      TopoDS_Solid solid = mk.Solid();
-      BRepLib::OrientClosedSolid(solid);
-      result = solid;
+    if (solids.size() == 1) {
+      result = solids[0];
+    } else if (solids.size() > 1) {
+      BRep_Builder bld;
+      TopoDS_Compound comp;
+      bld.MakeCompound(comp);
+      for (const TopoDS_Solid& s : solids) bld.Add(comp, s);
+      result = comp;
     }
 
     // Merge coplanar faces so a tessellated flat model collapses to a handful of
     // faces (a box: 12 triangles → 6 faces) the boolean can handle quickly.
-    try {
-      ShapeUpgrade_UnifySameDomain unify(result, Standard_True, Standard_True,
-                                         Standard_False);
-      unify.Build();
-      if (!unify.Shape().IsNull()) result = unify.Shape();
-    } catch (const std::exception&) {
-      // keep the un-unified shape
+    // Skipped only for the fast export sew (no boolean; unify is slow on a curved
+    // mesh and would alter the triangles).
+    if (!fastSew) {
+      try {
+        ShapeUpgrade_UnifySameDomain unify(result, Standard_True, Standard_True,
+                                           Standard_False);
+        unify.Build();
+        if (!unify.Shape().IsNull()) result = unify.Shape();
+      } catch (const std::exception&) {
+        // keep the un-unified shape
+      }
     }
 
     // After merging, a still-huge face count means a curved/organic mesh whose
-    // boolean would hang the main thread — reject it instead.
-    const int kMaxFaces = 5000;
-    int faceCount = 0;
-    for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
-      if (++faceCount > kMaxFaces) break;
+    // boolean would hang the main thread — reject it, UNLESS the caller opted out
+    // (skipCaps): export never booleans, and the emboss stamp is a legitimately
+    // dense curved wrap that must be booleaned (and is now cancellable).
+    if (!skipCaps) {
+      const int kMaxFaces = 5000;
+      int faceCount = 0;
+      for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
+        if (++faceCount > kMaxFaces) break;
+      }
+      if (faceCount > kMaxFaces)
+        throw std::runtime_error(
+            "Imported mesh has too many curved faces to use in a boolean. "
+            "Simplify it, or boolean against a primitive instead.");
     }
-    if (faceCount > kMaxFaces)
-      throw std::runtime_error(
-          "Imported mesh has too many curved faces to use in a boolean. "
-          "Simplify it, or boolean against a primitive instead.");
 
     return Napi::Number::New(env, StoreShape(result));
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
@@ -1776,6 +2608,18 @@ Napi::Object MakeCubeTessellated(const Napi::CallbackInfo& info) {
 // ════════════════════════════════════════════════════════════════════════
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  // Convert hardware faults inside OCC algorithms (SIGSEGV/SIGFPE/…) into
+  // catchable Standard_Failure exceptions on this thread.  OCC's fillet/chamfer
+  // kernel (ChFi3d) occasionally NULL-derefs on degenerate stripe configurations
+  // instead of throwing — observed in ChFi3d_Builder::PerformSetOfSurf when
+  // chamfering faceted emboss geometry after a resolution switch — and since the
+  // addon shares the app's process (worker_thread), that killed the whole app.
+  // With SetSignal, the attempt fails like any other rejected geometry (our ops
+  // already catch std::exception, which Standard_Failure derives from).  The
+  // addon loads on the OCC worker thread, so this lands on the thread that runs
+  // every op.
+  OSD::SetSignal(Standard_False);
+
   // Smoke tests
   exports.Set("ping",               Napi::Function::New(env, PingStr));
   exports.Set("makeCubeTessellated",Napi::Function::New(env, MakeCubeTessellated));
@@ -1796,6 +2640,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("mirrorShape",        Napi::Function::New(env, MirrorShape));
   exports.Set("rotateShapeAxis",    Napi::Function::New(env, RotateShapeAxis));
   exports.Set("scaleShape",         Napi::Function::New(env, ScaleShape));
+  exports.Set("scaleShapeXYZ",      Napi::Function::New(env, ScaleShapeXYZ));
 
   // Boolean ops
   exports.Set("booleanOp",          Napi::Function::New(env, BooleanOp));
@@ -1809,6 +2654,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("makeHole",           Napi::Function::New(env, MakeHole));
   exports.Set("makeThread",         Napi::Function::New(env, MakeThread));
   exports.Set("enrichSubGeo",       Napi::Function::New(env, EnrichSubGeo));
+  exports.Set("faceNames",          Napi::Function::New(env, FaceNames));
+  exports.Set("namedFacePoint",     Napi::Function::New(env, NamedFacePoint));
 
   // Tessellation
   exports.Set("tessellate",         Napi::Function::New(env, TessellateShape));
@@ -1822,6 +2669,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("releaseShape",       Napi::Function::New(env, ReleaseShape));
   exports.Set("clearAll",           Napi::Function::New(env, ClearAll));
   exports.Set("shapeCount",         Napi::Function::New(env, ShapeCount));
+  exports.Set("setCancelBuffer",    Napi::Function::New(env, SetCancelBuffer));
 
   return exports;
 }

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   settingRemove: (key) => sync("db:settingRemove", key),
   projListProjects: () => sync("db:listProjects"),
   projCreate: (name) => sync("db:createProject", name),
+  projDuplicate: (id) => sync("db:duplicateProject", id),
   projRename: (id, name) => sync("db:renameProject", { id, name }),
   projDelete: (id) => sync("db:deleteProject", id),
   projSetThumbnail: (id, thumbnail) => sync("db:setThumbnail", { id, thumbnail }),
@@ -20,6 +21,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   projSetActive: (id) => sync("db:setActiveProjectId", id),
   dbGetTimeline: (pid) => sync("db:getTimeline", pid),
   dbSaveTimeline: (pid, data) => sync("db:saveTimeline", { pid, data }),
+  // Async variant for the hot save path: a big document's timeline is tens of
+  // MB — sendSync would freeze the renderer for the IPC clone + SQLite write.
+  dbSaveTimelineAsync: (pid, data) =>
+    ipcRenderer.invoke("db:saveTimelineAsync", { pid, data }),
   dbGetVariables: (pid) => sync("db:getVariables", pid),
   dbSaveVariables: (pid, data) => sync("db:saveVariables", { pid, data }),
   dbGetFolders: (pid) => sync("db:getFolders", pid),
@@ -29,4 +34,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   dbGetCamera: (pid) => sync("db:getCamera", pid),
   dbSaveCamera: (pid, state) => sync("db:saveCamera", { pid, state }),
   dbClearCamera: (pid) => sync("db:clearCamera", pid),
+  // Menu → renderer: the native "About PurpleCAD" item opens the in-app dialog.
+  // Replaces any prior listener so a re-register can't stack duplicates.
+  onMenuAbout: (cb) => {
+    ipcRenderer.removeAllListeners("menu:about");
+    ipcRenderer.on("menu:about", () => cb());
+  },
 });

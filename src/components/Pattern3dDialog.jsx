@@ -14,6 +14,16 @@ import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
 
+const SOLID_TYPES = [
+  "cube",
+  "sphere",
+  "cylinder",
+  "torus",
+  "cone",
+  "extrude",
+  "csg",
+];
+
 // Parameters for a circular or rectangular 3D pattern, with a live preview.
 // Circular tiles `count` copies over `angle` about the plane's normal axis;
 // rectangular tiles a countX×countY grid along the world X/Y axes.  Confirm adds
@@ -21,8 +31,11 @@ import { MM_PER_UNIT } from "../three/sceneObjects.js";
 const Pattern3dDialog = () => {
   const tool = useStore((s) => s.pattern3dTool);
   const cancelPattern3d = useStore((s) => s.cancelPattern3d);
+  const updatePattern3d = useStore((s) => s.updatePattern3d);
   const setCircularAxisPick = useStore((s) => s.setCircularAxisPick);
   const circularAxisPick = useStore((s) => s.circularAxisPick);
+  const selectedIds = useStore((s) => s.selectedIds);
+  const setSelection = useStore((s) => s.setSelection);
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const addItem = useStore((s) => s.addItem);
@@ -30,6 +43,27 @@ const Pattern3dDialog = () => {
 
   const open = !!tool;
   const circular = tool?.patternType === "circular";
+
+  // Object-pick phase: true while a click in the view should choose the source
+  // object to pattern.  Auto-armed when the tool opens with nothing picked.
+  const [pickSource, setPickSource] = useState(false);
+  useEffect(() => {
+    if (open) setPickSource(!tool?.sourceId);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Capture the picked solid as the pattern source, then leave pick mode.
+  useEffect(() => {
+    if (!open || !pickSource) return;
+    const src = selectedIds
+      .map((id) => items.find((i) => i.id === id))
+      .find((i) => i && SOLID_TYPES.includes(i.type));
+    if (src) {
+      updatePattern3d({ sourceId: src.id });
+      setPickSource(false);
+    }
+  }, [selectedIds, pickSource, open, items]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sourceName = items.find((i) => i.id === tool?.sourceId)?.name;
 
   const [count, setCount] = useState("4");
   const [angle, setAngle] = useState("360");
@@ -65,22 +99,24 @@ const Pattern3dDialog = () => {
   const countZV = evalValue(countZ, variables);
   const dzV = evalValue(dz, variables);
 
-  const valid = circular
-    ? Number.isFinite(countV) &&
-      countV >= 2 &&
-      Number.isFinite(angleV) &&
-      angleV > 0 &&
-      Number.isFinite(axialOffsetV) &&
-      !!tool?.axis
-    : Number.isFinite(countXV) &&
-      countXV >= 1 &&
-      Number.isFinite(countYV) &&
-      countYV >= 1 &&
-      Number.isFinite(countZV) &&
-      countZV >= 1 &&
-      Number.isFinite(dxV) &&
-      Number.isFinite(dyV) &&
-      Number.isFinite(dzV);
+  const valid =
+    !!tool?.sourceId &&
+    (circular
+      ? Number.isFinite(countV) &&
+        countV >= 2 &&
+        Number.isFinite(angleV) &&
+        angleV > 0 &&
+        Number.isFinite(axialOffsetV) &&
+        !!tool?.axis
+      : Number.isFinite(countXV) &&
+        countXV >= 1 &&
+        Number.isFinite(countYV) &&
+        countYV >= 1 &&
+        Number.isFinite(countZV) &&
+        countZV >= 1 &&
+        Number.isFinite(dxV) &&
+        Number.isFinite(dyV) &&
+        Number.isFinite(dzV));
 
   // Resolve the live OCC params + the regenerator to persist.
   const build = () => {
@@ -112,16 +148,16 @@ const Pattern3dDialog = () => {
         },
       };
     }
-    const sx = dxV / MM_PER_UNIT,
-      sy = dyV / MM_PER_UNIT,
-      sz = dzV / MM_PER_UNIT;
+    // Fields are in the Z-up display frame; the grid vector is internal
+    // (user X,Y,Z = internal x,−z,y), so the "Y" column drives internal −z
+    // and the "Z" column internal y.
     const grid = {
       countX: Math.round(countXV),
-      countY: Math.round(countYV),
-      countZ: Math.round(countZV),
-      dx: sx,
-      dy: sy,
-      dz: sz,
+      countY: Math.round(countZV),
+      countZ: Math.round(countYV),
+      dx: dxV / MM_PER_UNIT,
+      dy: dzV / MM_PER_UNIT,
+      dz: -dyV / MM_PER_UNIT,
     };
     return {
       params: grid,
@@ -189,8 +225,15 @@ const Pattern3dDialog = () => {
 
   if (!open) return null;
 
+  const pickObject = () => {
+    useStore.getState()._cameraControls?.clearPattern3dPreview?.();
+    setCircularAxisPick(false); // mutually exclusive with axis picking
+    setPickSource(true);
+    setSelection(tool?.sourceId != null ? [tool.sourceId] : []);
+  };
   const pickAxis = () => {
     useStore.getState()._cameraControls?.clearPattern3dPreview?.();
+    setPickSource(false); // mutually exclusive with source picking
     setCircularAxisPick(true);
   };
   const confirm = async () => {
@@ -253,10 +296,22 @@ const Pattern3dDialog = () => {
   return (
     <>
       <div className="sketch-placement-hint">
-        Set the {circular ? "circular" : "rectangular"} pattern options, then
-        Confirm · Esc to cancel
+        {pickSource
+          ? "Click the object to pattern in the view"
+          : `Set the ${circular ? "circular" : "rectangular"} pattern options, then Confirm`}{" "}
+        · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
+        <Field label="Object">
+          <button
+            type="button"
+            onClick={pickObject}
+            style={pickBtn(pickSource)}
+            title="Pick the object to pattern"
+          >
+            {pickSource ? "Click an object…" : (sourceName ?? "Pick object")}
+          </button>
+        </Field>
         {circular ? (
           <>
             <Field label="Axis">

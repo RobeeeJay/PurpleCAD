@@ -10,6 +10,8 @@
 // Electron, localStorage in a plain browser, in-memory under tests) rather than
 // touching localStorage here.  Everything here operates on the active project.
 import * as db from "./db.js";
+import { packHistory, unpackHistory } from "./geometryPack.js";
+import { pruneNestedSourceGeometry } from "../three/textureDisplace.js";
 
 // ---------------------------------------------------------------------------
 // Instruction application
@@ -70,6 +72,30 @@ export const maxItemId = (history) => {
   return maxId;
 };
 
+// ── Per-entry cache invalidation (JIT timeline model) ──────────────────────
+// Each history entry owns its cache validity via a single `dirty` flag:
+// `dirty === true` means the geometry this entry produced is stale for the
+// current state/precision and must be recomputed before the entry's result is
+// shown or fed to a later entry.  These pure helpers set the flag following the
+// spec's forward-invalidation rules; the JIT evaluator clears it when it
+// recomputes the entry.
+
+// Mark every entry from index `from` (inclusive) onward dirty.  Returns the same
+// array when nothing changed so callers can skip a store update.
+export const dirtyEntriesFrom = (history, from) => {
+  const start = Math.max(0, from);
+  let changed = false;
+  const out = history.map((e, i) => {
+    if (i < start || e.dirty) return e;
+    changed = true;
+    return { ...e, dirty: true };
+  });
+  return changed ? out : history;
+};
+
+// Resolution toggle invalidates the whole timeline.
+export const dirtyAllEntries = (history) => dirtyEntriesFrom(history, 0);
+
 export const replayUpTo = (history, upToIndex) => {
   let items = [];
   const end = Math.min(upToIndex, history.length - 1);
@@ -86,6 +112,91 @@ export const replayUpTo = (history, upToIndex) => {
       ? Object.assign({}, item, { visible: false })
       : item,
   );
+};
+
+// Re-derive the `regenerator.source` of each in-place op (chamfer/emboss/…) on
+// `itemId` from the item's accumulated state just BEFORE that step, for every
+// step at or after `fromIndex`.  Each op modifies the item in place, so its
+// frozen source is a snapshot of the previous step's result — when a middle op
+// is deleted, downstream sources still embed it (the emboss keeps rebuilding a
+// removed chamfer).  Walking the surviving history and re-pointing each source
+// at the live upstream state splices the deleted layer out of the whole chain
+// (nested sources included, since each source is rebuilt from the corrected
+// earlier state).  Marks the re-pointed steps dirty so the recalc rebuilds them.
+export const relinkSourceChain = (history, itemId, fromIndex = 0) => {
+  let acc = null; // the item's accumulated state as we walk
+  let changed = false;
+  const out = history.map((entry, idx) => {
+    const inst = entry.instruction;
+    if (inst?.type === "create" && inst.item?.id === itemId) {
+      acc = inst.item;
+      return entry;
+    }
+    if (inst?.type === "createGroup") {
+      const found = (inst.items || []).find((it) => it.id === itemId);
+      if (found) acc = found;
+      return entry;
+    }
+    if (inst?.type === "delete" && inst.itemId === itemId) {
+      acc = null;
+      return entry;
+    }
+    if (inst?.type === "transform" && inst.itemId === itemId && acc) {
+      acc = applyInstruction([acc], inst)[0];
+      return entry;
+    }
+    if (inst?.type === "modify" && inst.itemId === itemId) {
+      const patches = inst.patches;
+      if (idx >= fromIndex && acc && patches?.regenerator?.source) {
+        const regen = patches.regenerator;
+        const newPatches = {
+          ...patches,
+          regenerator: { ...regen, source: acc, regeneratedAt: "dirty" },
+        };
+        acc = Object.assign({}, acc, newPatches);
+        changed = true;
+        return { ...entry, instruction: { ...inst, patches: newPatches } };
+      }
+      if (acc) acc = Object.assign({}, acc, patches);
+      return entry;
+    }
+    return entry;
+  });
+  return changed ? out : history;
+};
+
+// After editing/retargeting one timeline entry (`entryId`), re-derive the
+// sources of any LATER ops on that same item so a downstream op (an emboss on
+// top of a chamfer, say) rebuilds against the EDITED upstream result instead of
+// the stale snapshot it froze at creation.  A no-op when nothing downstream
+// references the item.  Returns the same array when unchanged.
+export const relinkAfterEntryEdit = (history, entryId) => {
+  const idx = history.findIndex((h) => h.id === entryId);
+  if (idx < 0) return history;
+  const inst = history[idx].instruction;
+  const itemId =
+    inst?.type === "modify"
+      ? inst.itemId
+      : inst?.type === "create"
+        ? inst.item?.id
+        : null;
+  if (itemId == null) return history;
+  return relinkSourceChain(history, itemId, idx + 1);
+};
+
+// Commit an entry edit: relink downstream frozen sources (so a later op rebuilds
+// against the edited result) and mark every LATER entry dirty (forward
+// invalidation).  The edited entry itself is NOT flagged — its own payload
+// decides: a full-payload update (updateEmbossEntry, retargetPushPullEntry, …)
+// carries freshly-computed geometry + regeneratedAt, so recomputing it would
+// re-run the exact op Confirm just ran; a param-only edit (updateChamferParams,
+// …) stamps regeneratedAt:"dirty" + clears geometryData, which already fails
+// entryCacheValid and recomputes.  Flagging the entry regardless (the old
+// behaviour) doubled every edit/retarget's OCC work.
+export const commitEntryEdit = (history, entryId) => {
+  const relinked = relinkAfterEntryEdit(history, entryId);
+  const idx = relinked.findIndex((h) => h.id === entryId);
+  return idx < 0 ? relinked : dirtyEntriesFrom(relinked, idx + 1);
 };
 
 // The set of hidden item ids a freshly-inserted entry should start from —
@@ -168,11 +279,72 @@ export const makeEntry = (label, itemId, instruction) => ({
 
 export const saveTimeline = (history, activeHistoryId) => {
   try {
-    db.saveTimeline({ history, activeHistoryId });
+    // `dirty` is transient runtime cache state (JIT timeline model) — never
+    // persist it; a reload trusts the stored per-entry geometry until something
+    // invalidates it.
+    const persisted = packHistory(
+      history.map((e) => (e.dirty ? (({ dirty, ...rest }) => rest)(e) : e)),
+    );
+    db.saveTimeline({ history: persisted, activeHistoryId });
   } catch (e) {
     console.warn("Failed to save timeline to storage:", e);
   }
 };
+
+// One-time migration for saved documents from before the emboss authored-frame
+// record existed: derive sourceCenterOffset from the STILL-FROZEN source (at
+// load time it is the authored one — a later relink would replace it, which is
+// exactly why this must run at load).  Without it, reordering/deleting a step
+// around an old emboss shifts the relief by the source-frame delta.
+export const backfillEmbossFrames = (history) =>
+  history.map((e) => {
+    const inst = e.instruction;
+    const holder =
+      inst?.type === "modify"
+        ? inst.patches
+        : inst?.type === "create"
+          ? inst.item
+          : null;
+    const r = holder?.regenerator;
+    if (!r || r.kind !== "emboss" || r.sourceCenterOffset) return e;
+    const off = r.source?.regenerator?.centerOffset ?? { cx: 0, cy: 0, cz: 0 };
+    const regenerator = { ...r, sourceCenterOffset: off };
+    return inst.type === "modify"
+      ? {
+          ...e,
+          instruction: {
+            ...inst,
+            patches: { ...inst.patches, regenerator },
+          },
+        }
+      : {
+          ...e,
+          instruction: { ...inst, item: { ...inst.item, regenerator } },
+        };
+  });
+
+// One-time migration for documents saved before texture commits pruned their
+// frozen sources: stacked displacement maps nested every prior step's DENSE
+// mesh inside the next source (O(k²) copies — a 300 MB document / renderer
+// OOM).  Strip geometryData below level 1 of each texture source chain; the
+// level-1 mesh (the displacement base) is kept.
+export const pruneTextureSourceChains = (history) =>
+  history.map((e) => {
+    const inst = e.instruction;
+    const holder = inst?.type === "modify" ? inst.patches : inst?.item;
+    const r = holder?.regenerator;
+    if (r?.kind !== "texture" || !r.source?.regenerator?.source) return e;
+    const regenerator = {
+      ...r,
+      source: pruneNestedSourceGeometry(r.source),
+    };
+    return inst.type === "modify"
+      ? {
+          ...e,
+          instruction: { ...inst, patches: { ...inst.patches, regenerator } },
+        }
+      : { ...e, instruction: { ...inst, item: { ...inst.item, regenerator } } };
+  });
 
 export const loadTimeline = () => {
   try {
@@ -186,7 +358,10 @@ export const loadTimeline = () => {
       }
       const maxId = Math.max(...parsed.history.map((h) => h.id));
       setNextHistoryId(maxId + 1);
-      return parsed;
+      return {
+        ...parsed,
+        history: pruneTextureSourceChains(backfillEmbossFrames(parsed.history)),
+      };
     }
   } catch (e) {
     console.warn("Failed to load timeline from storage:", e);
@@ -299,6 +474,7 @@ export const SNAP_DEFAULTS = {
   previewPrecisionMm: 0.1,
   printPrecisionMm: 0.01,
   alwaysExtrudeSingleObject: true,
+  axisVisible: false,
 };
 
 export const loadSnapSettings = () => {
@@ -319,6 +495,8 @@ export const loadSnapSettings = () => {
         parsed.printPrecisionMm > 0 ? parsed.printPrecisionMm : 0.01,
       // Default on (combine) — only an explicit false turns it off.
       alwaysExtrudeSingleObject: parsed.alwaysExtrudeSingleObject !== false,
+      // Combined-axis indicator defaults off — only an explicit true shows it.
+      axisVisible: parsed.axisVisible === true,
     };
   } catch {
     return { ...SNAP_DEFAULTS };
@@ -338,6 +516,7 @@ export const saveSnapSettings = (snap) => {
         previewPrecisionMm: snap.previewPrecisionMm,
         printPrecisionMm: snap.printPrecisionMm,
         alwaysExtrudeSingleObject: snap.alwaysExtrudeSingleObject,
+        axisVisible: snap.axisVisible,
       }),
     );
   } catch (e) {

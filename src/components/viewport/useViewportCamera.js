@@ -7,6 +7,13 @@ import { useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { saveCameraState } from "../../three/cameraControls.js";
+import { analyticLocalPoints, fitPointsToView } from "../../three/cameraFit.js";
+
+// Width (px) of the objects/timeline overlay that floats over the LEFT of the
+// canvas.  The 3D canvas spans the full width, but this strip is obscured, so
+// "centred" means centred in the visible region to its right.  Mirrors the
+// value the animate loop uses to place the axis indicator.
+const LEFT_PANEL_PX = 250;
 
 export function useViewportCamera({
   containerRef,
@@ -68,37 +75,69 @@ export function useViewportCamera({
       Math.cos(rotY) * Math.cos(rotX),
     ).normalize();
 
-    const box = new THREE.Box3();
-    let any = false;
+    // Collect world-space sample points to fit — the TRUE silhouette for round
+    // primitives (see analyticLocalPoints), the real AABB corners for
+    // everything else.  Framing points (not unioned AABBs) is what lets the
+    // fit ignore the oversized shader-hull box around a sphere/cylinder.
+    const pts = [];
+    const _m = new THREE.Matrix4();
     for (const item of itemsRef.current) {
       if (item.type === "sketch" || item.visible === false) continue;
       const mesh = objectsRef.current[item.id];
       if (!mesh) continue;
       mesh.updateMatrixWorld(true);
-      const b = new THREE.Box3().setFromObject(mesh);
-      if (b.isEmpty()) continue;
-      box.union(b);
-      any = true;
+      const local = analyticLocalPoints(item);
+      if (local) {
+        _m.copy(mesh.matrixWorld);
+        for (const lp of local) pts.push(lp.clone().applyMatrix4(_m));
+      } else {
+        const b = new THREE.Box3().setFromObject(mesh);
+        if (b.isEmpty()) continue;
+        for (let i = 0; i < 8; i++)
+          pts.push(
+            new THREE.Vector3(
+              i & 1 ? b.max.x : b.min.x,
+              i & 2 ? b.max.y : b.min.y,
+              i & 4 ? b.max.z : b.min.z,
+            ),
+          );
+      }
     }
+    // Include the drawn sketch geometry (the object-view line overlays) when
+    // it's visible, so a reset frames sketches too — not their 1000-unit plane
+    // (that's the mesh in objectsRef), just the shapes.
+    sceneRef.current?.traverse((o) => {
+      if (!o.userData?.isSketchOverlay || !o.visible) return;
+      o.updateWorldMatrix(true, true);
+      const b = new THREE.Box3().setFromObject(o);
+      if (b.isEmpty()) return;
+      for (let i = 0; i < 8; i++)
+        pts.push(
+          new THREE.Vector3(
+            i & 1 ? b.max.x : b.min.x,
+            i & 2 ? b.max.y : b.min.y,
+            i & 4 ? b.max.z : b.min.z,
+          ),
+        );
+    });
 
     let center, distance;
     let endZoom = null;
+    const any = pts.length > 0;
     if (any) {
-      center = box.getCenter(new THREE.Vector3());
-      const radius = box.getSize(new THREE.Vector3()).length() / 2 || 1;
-      const pad = 1.25;
-      if (camera.isOrthographicCamera) {
-        const fw = camera.right - camera.left;
-        const fh = camera.top - camera.bottom;
-        // zoom small enough that the tighter frustum dimension still spans the bbox
-        endZoom = Math.min(fw, fh) / (2 * radius * pad);
-        distance = radius * 4 + 5; // clear of the 0.1–1000 near/far planes
-      } else {
-        const vfov = (camera.fov * Math.PI) / 180;
-        const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
-        const fitFov = Math.min(vfov, hfov);
-        distance = (radius * pad) / Math.sin(fitFov / 2);
-      }
+      // The objects/timeline overlay hides a strip on the LEFT of the canvas;
+      // frame into the visible region to its right so the model isn't pushed
+      // half under the panel.  cx = panel/width is that region's NDC centre;
+      // its NDC half-width shrinks by the same fraction.
+      const canvasW = rendererRef.current?.domElement?.clientWidth || 1;
+      const panel = Math.min(LEFT_PANEL_PX, canvasW * 0.8);
+      const frac = panel / canvasW;
+      const frame = { cx: frac, cy: 0, halfW: 1 - frac, halfH: 1 };
+      // 0.9 == frame the tightest extent to 90% of the usable view, centred.
+      const fit = fitPointsToView(pts, dir, camera, 0.9, frame);
+      center = fit.target;
+      distance = fit.distance;
+      endZoom = fit.endZoom;
     } else {
       center = targetRef.current.clone();
       distance = camera.position.distanceTo(targetRef.current);
@@ -196,7 +235,10 @@ export function useViewportCamera({
     }
   }, [isInSketchMode, projectionMode]);
 
-  // ── Camera reset ──────────────────────────────────────────────────────────
+  // ── Camera reset (document / project load) ─────────────────────────────────
+  // Reset == the Home button's isometric fit-all, so a loaded project frames
+  // its geometry.  Deferred a frame so the new scene's meshes exist before we
+  // measure them.
   useEffect(() => {
     if (
       !cameraRef.current ||
@@ -204,14 +246,8 @@ export function useViewportCamera({
       cameraResetTrigger === 0
     )
       return;
-    const camera = cameraRef.current;
-    const controls = cameraControlsRef.current;
-    targetRef.current.set(0, 0, 0);
-    controls.targetRotationX = Math.asin(Math.sqrt(1 / 3));
-    controls.targetRotationY = Math.PI / 4;
-    camera.position.set(10, 10, 10);
-    camera.lookAt(targetRef.current);
-    setRotationState(camera.quaternion.clone());
+    const raf = requestAnimationFrame(() => handleHome());
+    return () => cancelAnimationFrame(raf);
   }, [cameraResetTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { handleOrientationChange, handleHome };

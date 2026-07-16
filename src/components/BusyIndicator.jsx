@@ -16,6 +16,7 @@ const APPEAR_DELAY_MS = 200;
 const BusyIndicator = () => {
   const pending = useStore((s) => s.pendingOperations);
   const regenProgress = useStore((s) => s.regenProgress);
+  const requestOperationCancel = useStore((s) => s.requestOperationCancel);
   const [showing, setShowing] = useState(false);
 
   const regenActive = regenProgress != null && regenProgress.total > 0;
@@ -56,6 +57,14 @@ const BusyIndicator = () => {
           <div className="busy-progress-fill" style={{ width: `${pct}%` }} />
         </div>
       )}
+      <button
+        type="button"
+        className="busy-cancel"
+        onClick={requestOperationCancel}
+        title="Stop this operation"
+      >
+        Cancel
+      </button>
     </div>
   );
 };

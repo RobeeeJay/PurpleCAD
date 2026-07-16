@@ -8,6 +8,7 @@ import { activePrecision } from "../resolution.js";
 import { withLivePolygons } from "../csgUtils.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
+import { releaseSolid } from "../solidCache.js";
 
 const GHOST_OPACITY = 0.12;
 
@@ -53,7 +54,7 @@ export async function commitDraft({ items, printPrecision }) {
   }
   if (!result) return false;
   const { geometryData, centerOffset } = result;
-  const { position } = chamferResultTransform(source, centerOffset);
+  const { position, basePos } = chamferResultTransform(source, centerOffset);
   const store = useStore.getState();
   const editEntryId = store.draftTool?.editEntryId;
   store._cameraControls?.clearDraftPreview?.();
@@ -65,6 +66,7 @@ export async function commitDraft({ items, printPrecision }) {
     angleDeg,
     flip,
     centerOffset,
+    basePosition: basePos,
     regeneratedAt: printPrecision,
   };
   if (editEntryId != null) {
@@ -73,6 +75,8 @@ export async function commitDraft({ items, printPrecision }) {
       position,
       geometryData,
     });
+    // Fresh committed geometry stays (no recompute) — drop the stale cached solid.
+    releaseSolid(editEntryId);
   } else {
     store.modifyItem(
       item.id,

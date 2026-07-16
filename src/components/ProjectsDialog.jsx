@@ -15,6 +15,7 @@ const ProjectsDialog = () => {
   const createProject = useStore((s) => s.createProject);
   const renameProject = useStore((s) => s.renameProject);
   const deleteProject = useStore((s) => s.deleteProject);
+  const duplicateProject = useStore((s) => s.duplicateProject);
 
   const [renamingId, setRenamingId] = useState(null);
   const [draftName, setDraftName] = useState("");
@@ -28,11 +29,13 @@ const ProjectsDialog = () => {
     close();
   };
 
-  const create = async () => {
-    const name = window.prompt("Name for the new project:", "Untitled");
-    if (name == null) return; // cancelled
-    await createProject(name.trim() || "Untitled");
-    close();
+  // Electron has no window.prompt, so create with a default name and drop the
+  // new (now-active) card straight into inline rename instead of prompting.
+  const create = () => {
+    createProject("Untitled");
+    const id = useStore.getState().activeProjectId;
+    setRenamingId(id);
+    setDraftName("Untitled");
   };
 
   const commitRename = (id) => {
@@ -49,15 +52,20 @@ const ProjectsDialog = () => {
       >
         <div className="projects-header">
           <h2>Projects</h2>
-          <button className="projects-close" onClick={close} title="Close">
-            ×
-          </button>
+          <div className="projects-header-actions">
+            <button
+              className="projects-new-btn"
+              onClick={create}
+              title="Create a new project"
+            >
+              + New project
+            </button>
+            <button className="projects-close" onClick={close} title="Close">
+              ×
+            </button>
+          </div>
         </div>
         <div className="projects-grid">
-          <button className="project-card project-new" onClick={create}>
-            <div className="project-new-plus">+</div>
-            <div className="project-name">New project</div>
-          </button>
           {projects.map((p) => (
             <div
               key={p.id}
@@ -80,6 +88,7 @@ const ProjectsDialog = () => {
                     className="project-rename"
                     autoFocus
                     value={draftName}
+                    onFocus={(e) => e.target.select()}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => setDraftName(e.target.value)}
                     onBlur={() => commitRename(p.id)}
@@ -126,6 +135,34 @@ const ProjectsDialog = () => {
                         y2="11"
                         stroke="currentColor"
                         strokeWidth="1.6"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    className="project-icon-btn"
+                    title="Duplicate project"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      duplicateProject(p.id);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="15" height="15">
+                      <rect
+                        x="8"
+                        y="8"
+                        width="12"
+                        height="12"
+                        rx="1.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                      />
+                      <path
+                        d="M16 4 L5.5 4 A1.5 1.5 0 0 0 4 5.5 L4 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
                       />
                     </svg>
                   </button>

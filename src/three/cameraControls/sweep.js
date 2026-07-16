@@ -9,6 +9,7 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { useStore } from "../../store";
+import { releaseSolid } from "../solidCache.js";
 import { maxItemId } from "../../store/internals.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { getSketchShapePoints, MM_PER_UNIT } from "../sceneObjects.js";
@@ -619,6 +620,8 @@ export function createSweepHelpers({
         position,
         rotation: { x: 0, y: 0, z: 0 },
       });
+      // Fresh committed geometry stays (no recompute) — drop the stale cached solid.
+      releaseSolid(retarget.entryId);
       store.setSweepRetargetTarget(null);
     } else {
       const id = maxItemId(store.history) + 1;
@@ -677,6 +680,8 @@ export function createSweepHelpers({
         position,
         rotation: { x: 0, y: 0, z: 0 },
       });
+      // Fresh committed geometry stays (no recompute) — drop the stale cached solid.
+      releaseSolid(retarget.entryId);
       store.setSweepRetargetTarget(null);
     } else {
       const id = maxItemId(store.history) + 1;
@@ -756,6 +761,8 @@ export function createSweepHelpers({
         position,
         rotation: source.rotation,
       });
+      // Fresh committed geometry stays (no recompute) — drop the stale cached solid.
+      releaseSolid(retarget.entryId);
       store.setSweepRetargetTarget(null);
     } else {
       const id = maxItemId(store.history) + 1;

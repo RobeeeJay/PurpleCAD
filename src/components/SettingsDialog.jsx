@@ -27,6 +27,8 @@ const SettingsDialog = () => {
   const toggleTheme = useStore((s) => s.toggleTheme);
   const widgetVisible = useStore((s) => s.widgetVisible);
   const toggleWidgetVisibility = useStore((s) => s.toggleWidgetVisibility);
+  const axisVisible = useStore((s) => s.axisVisible);
+  const toggleAxisVisibility = useStore((s) => s.toggleAxisVisibility);
   const alwaysExtrudeSingleObject = useStore(
     (s) => s.alwaysExtrudeSingleObject,
   );
@@ -223,6 +225,17 @@ const SettingsDialog = () => {
               style={{ minWidth: 56 }}
             >
               {widgetVisible ? "On" : "Off"}
+            </button>
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>Combined axis</span>
+            <button
+              className="variables-btn"
+              onClick={toggleAxisVisibility}
+              style={{ minWidth: 56 }}
+            >
+              {axisVisible ? "On" : "Off"}
             </button>
           </div>
 

@@ -31,10 +31,8 @@ export function anyToolActive(s) {
     s.extrudeSelectMode ||
     s.extrudeRetargetId ||
     s.extrudeRetargetGroup ||
-    s.extrudeEditTarget ||
     s.extrudeDepthInput ||
     s.chamferSelectMode ||
-    s.chamferRetargetTarget ||
     s.chamferEditTarget ||
     s.pushPullSelectMode ||
     s.pushPullRetargetTarget ||
@@ -90,6 +88,26 @@ export function effectiveSketchSelTypes(s) {
   // allowed set so the required pick still works.
   if (!any) for (const k of KEYS) eff[k] = !!allowed[k];
   return { eff, allowed };
+}
+
+// A hair of angle so that with chaining OFF a flat face's coplanar triangles
+// (and a straight edge's collinear segments) still select as one, while any
+// real curvature stops the growth at the first facet/segment.
+const NO_CHAIN_ANGLE_DEG = 0.5;
+
+// The dihedral/turn limit (degrees) selection chaining should use right now.
+// With the chain toggle on AND a face/edge type effectively selectable, it's
+// the user's curveDetectionAngleDeg (follow the curve); otherwise it collapses
+// to NO_CHAIN_ANGLE_DEG (pick just the clicked facet / segment).  Shared by the
+// hover-highlight, persistent-selection, and pending-selection code so all
+// three agree on what one click grabs.
+export function selectionChainAngle(s) {
+  // No store handed in (unit tests exercising the pure highlight builders) —
+  // fall back to the default chain angle, matching the prior always-chaining.
+  if (!s) return 5;
+  const eff = effectiveSelectionTypes(s);
+  const on = !!(s.selChain && (eff.face || eff.edge));
+  return on ? (s.curveDetectionAngleDeg ?? 5) : NO_CHAIN_ANGLE_DEG;
 }
 
 // What the 3D view's selection widget currently allows.  A tool override (e.g.

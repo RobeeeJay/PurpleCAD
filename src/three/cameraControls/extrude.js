@@ -45,6 +45,12 @@ export function createExtrudeHelpers(
   // for the persistent highlight; `selectedFills` mirrors those refs.
   let extrudeProfileList = [];
   const selectedFills = new Set();
+  // True right after a single-extrude retarget preselects the original region:
+  // the next pick of a DIFFERENT region/face should REPLACE that preselection
+  // (re-point the extrude) rather than add a second profile — otherwise the
+  // original stays put and the new pick spawns an extra extrude, which reads as
+  // "a new one is created instead of editing the existing one".
+  let retargetSelectionUntouched = false;
   // The solid the user picked via "Start from" (if any) — a strong union target
   // so the new body merges into whatever it was started from.
   let extrudeStartSolidId = null;
@@ -269,6 +275,9 @@ export function createExtrudeHelpers(
     }));
     selectedFills.clear();
     picked.forEach(({ fill }) => selectedFills.add(fill));
+    // Only single-extrude retargets replace-on-first-pick; a group retarget is
+    // edited as a set, so its preselection accumulates as before.
+    retargetSelectionUntouched = !groupIds && retargetId != null;
     rebuildPreviews(resolveItemDepth(sourceItems[0]));
   };
 
@@ -407,6 +416,13 @@ export function createExtrudeHelpers(
       // word (all its letters) as one unit; Shift restricts it to this glyph so
       // a single letter can be extruded on its own.
       const selecting = !selectedFills.has(found.fill);
+      // Retarget: the first pick of a new region drops the preselected original
+      // so profiles[0] becomes the new target (re-point, not add-a-duplicate).
+      if (retargetSelectionUntouched && selecting) {
+        selectedFills.clear();
+        extrudeProfileList = [];
+      }
+      retargetSelectionUntouched = false;
       const group = shift ? [found.fill] : textGroupFills(found.fill);
       group.forEach((f) => setFillSelected(f, selecting));
     } else {
@@ -414,7 +430,16 @@ export function createExtrudeHelpers(
       const idx = extrudeProfileList.findIndex((p) =>
         sameFace(p, found.profile),
       );
-      if (idx >= 0) extrudeProfileList.splice(idx, 1);
+      // Same retarget replace-on-first-new-pick as the region branch above.
+      if (retargetSelectionUntouched && idx < 0) {
+        selectedFills.clear();
+        extrudeProfileList = [];
+      }
+      retargetSelectionUntouched = false;
+      const dedup = extrudeProfileList.findIndex((p) =>
+        sameFace(p, found.profile),
+      );
+      if (dedup >= 0) extrudeProfileList.splice(dedup, 1);
       else extrudeProfileList.push({ ...found.profile, _fill: null });
     }
     rebuildPreviews(currentDepthValue());
@@ -444,6 +469,10 @@ export function createExtrudeHelpers(
   // whose centre falls inside the screen box.  Faces aren't box-selectable.
   const handleExtrudeProfileBox = (x1, y1, x2, y2, remove, shift = false) => {
     clearExtrudeMarquee();
+    // A box-select during retarget is a deliberate multi-region pick — keep it
+    // additive, but consume the replace-on-first-pick arming so a later single
+    // click doesn't unexpectedly wipe the box selection.
+    retargetSelectionUntouched = false;
     const fills = extrudeSelectGroupRef?.current?.children ?? [];
     if (fills.length === 0) return;
     if (extrudeProfileList[0] && extrudeProfileList[0].type !== "sketchLoop")
@@ -696,6 +725,7 @@ export function createExtrudeHelpers(
     }
     extrudeProfileList = [];
     selectedFills.clear();
+    retargetSelectionUntouched = false;
     extrudeStartSolidId = null;
     store.setExtrudeSelectMode(null);
     store.setExtrudeDepthInput(null);
@@ -817,6 +847,7 @@ export function createExtrudeHelpers(
     clearExtrudePreview();
     extrudeProfileList = [];
     selectedFills.clear();
+    retargetSelectionUntouched = false;
     extrudeStartSolidId = null;
     const fills =
       extrudeSelectGroupRef && extrudeSelectGroupRef.current

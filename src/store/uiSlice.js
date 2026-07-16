@@ -7,6 +7,7 @@ import {
   getSystemTheme,
   loadSnapSettings,
   saveSnapSettings,
+  dirtyAllEntries,
   SNAP_DEFAULTS,
 } from "./internals.js";
 
@@ -19,7 +20,9 @@ export const uiInitial = {
   renderMode: "shaded",
   projectionMode: "perspective",
   widgetVisible: true,
-  axisVisible: true,
+  // Combined-axis indicator: off by default, persisted via snap settings
+  // (loadSnapSettings below overrides this with the saved value).
+  axisVisible: false,
   constraintsVisible: true,
   dimensionsVisible: true,
   cameraResetTrigger: 0,
@@ -46,7 +49,18 @@ export const uiInitial = {
   selFace: false,
   selEdge: false,
   selPoint: false,
+  // Chain selection: when on, a face/edge pick follows the curve across the
+  // curveDetectionAngleDeg limit (a whole fillet / smooth edge run selects as
+  // one).  Only meaningful for face/edge selection, so it's gated on those in
+  // the widget — but the flag is remembered while gated off so re-enabling a
+  // face/edge type restores the user's choice.  Default on preserves the
+  // previous always-chaining behaviour.
+  selChain: true,
   selectionOverride: null,
+  // When true, a plain object click adds to (toggles) the multi-selection
+  // instead of replacing it — no shift needed.  Set by pick tools that gather
+  // several objects at once (e.g. the Boolean dialog).
+  additiveObjectPick: false,
   // Saved selection-type set before a Cmd/Ctrl-click "solo" isolate, so a second
   // solo-click restores it.  Cleared by any normal toggle.
   selTypeSolo: null,
@@ -57,18 +71,9 @@ export const uiInitial = {
   // MM_PER_UNIT for display).
   extrudeDepthInput: null,
 
-  // Modal state for editing the depth/length of an extrude from the
-  // timeline, and chamfer/fillet parameters from the same.
-  extrudeEditTarget: null,
+  // Arms the chamfer/fillet creation overlay as an editor: { itemId, entryId }
+  // of the committed entry being edited; Confirm updates it in place.
   chamferEditTarget: null,
-
-  // Set by the Timeline's chamfer/fillet "Retarget" button:
-  // { itemId, entryId }. While set, BevelSection watches
-  // selectedSubGeometry and automatically re-applies that chamfer/fillet
-  // to the next face/edge picked on this item — updating entryId's
-  // history entry in place rather than appending a new step — then
-  // clears this back to null.
-  chamferRetargetTarget: null,
 
   // null | "chamfer" | "fillet" — toggled by BevelSection's toolbar
   // buttons. While set, ChamferOverlay shows a hint banner and (once
@@ -86,11 +91,11 @@ export const uiInitial = {
   // Set by the Timeline's push/pull "Retarget" button: { itemId, entryId }.
   // While set, PushPullOverlay re-applies to the next face selection by
   // updating entryId's history entry in place (rather than appending a new
-  // step), then clears back to null — mirrors chamferRetargetTarget.
+  // step), then clears back to null.
   pushPullRetargetTarget: null,
 
   // Modal state for editing a committed push/pull's distance from the
-  // timeline: { entryId }.  Mirrors chamferEditTarget.
+  // timeline: { entryId }.
   pushPullEditTarget: null,
 
   // Shell dialog target.  { itemId } opens a fresh shell on a selected body;
@@ -115,6 +120,12 @@ export const uiInitial = {
   // Emboss/deboss tool: stamp sketch geometry onto a body face as relief.
   //   { picking:null|"geometry"|"faces", itemId, profiles:[], face, faceSet, params }
   embossTool: null,
+
+  // Texture tool: bump-map displacement on a picked connected-face set.
+  //   { picking:null|"faces", itemId, face, faceSet, faceTris, params }
+  textureTool: null,
+  // Texture library picker (defaults + imports) opened from TextureDialog.
+  textureLibraryOpen: false,
 
   // The last operation error for the active tool dialog (emboss/draft/…), shown
   // as a line under the dialog.  The tool's live preview sets it on failure (with
@@ -179,6 +190,14 @@ export const uiInitial = {
   // colliding with the sketch slice's startMirrorTool (the 2D sketch mirror).
   mirror3dTool: null,
 
+  // Boolean (Union / Difference / Intersection) dialog: { operation }.  The
+  // dialog owns the picked primary/secondary object ids; this just carries which
+  // operation is running and gates visibility.
+  booleanTool: null,
+  // Ids of the Cut tool's cutting objects, so the 3D view can tint them red
+  // (distinct from the base).  Kept in sync by the dialog; empty otherwise.
+  booleanCutIds: [],
+
   // Sketch Project tool: while open, clicks/marquee-drags accumulate the
   // projected sketch shapes (with a live preview) into `shapes`; the dialog
   // confirms (commits them) or cancels.
@@ -232,6 +251,16 @@ export const uiInitial = {
   // are.
   regenProgress: null,
 
+  // Bumped each time the user hits Cancel in the BusyIndicator.  A
+  // synchronous native OCC call can't be interrupted mid-computation, so
+  // "cancel" means: stop the step-wise timeline recalc between steps AND
+  // discard the result of any single in-flight op (runOp captures this
+  // token and drops a result whose token has since changed).
+  cancelEpoch: 0,
+  // Set alongside a cancel bump so an op that returns "no result" because it
+  // was cancelled doesn't surface a misleading "could not apply" notice.
+  operationCancelled: false,
+
   // True from the moment the user confirms a cut-extrude until the
   // async CSG difference + consumeItems lands.  Lets the Viewport
   // keep "transparent" render mode active across the brief window
@@ -255,7 +284,54 @@ export const uiInitial = {
   ...loadSnapSettings(),
 };
 
-export const createUiSlice = (set) => ({
+// Every in-progress 3D tool / modal state, reset to its idle value.  Starting
+// any tool spreads this first (so its own state, set afterwards, wins), which
+// cancels whatever operation was in progress.  The tools' React overlays /
+// dialogs watch these fields and tear down their previews when they go idle.
+// (Sketch-mode drawing tools are excluded — they own their own switching.)
+export const TOOL_RESET_PATCH = {
+  sketchPlacementMode: false,
+  extrudeSelectMode: null,
+  extrudeRetargetId: null,
+  extrudeRetargetGroup: null,
+  extrudeDepthInput: null,
+  cutExtrudeInProgress: false,
+  chamferSelectMode: null,
+  chamferEditTarget: null,
+  pushPullSelectMode: null,
+  pushPullRetargetTarget: null,
+  pushPullEditTarget: null,
+  shellTarget: null,
+  holeTool: null,
+  embossTool: null,
+  textureTool: null,
+  draftTool: null,
+  measureTool: null,
+  sweepSelectMode: null,
+  sweepRetargetTarget: null,
+  planeTool: null,
+  planePickActive: false,
+  pattern3dTool: null,
+  circularAxisPick: false,
+  mirror3dTool: null,
+  booleanTool: null,
+  booleanCutIds: [],
+  additiveObjectPick: false,
+  projectTool: null,
+  splitTool: null,
+  splitPick: null,
+  originToolActive: false,
+  originDialogItemId: null,
+  originVertexPick: null,
+  pointToPointTool: null,
+  selectionOverride: null,
+  toolError: null,
+};
+
+export const createUiSlice = (set, get) => ({
+  // Cancel every in-progress tool operation (used when a new tool is selected).
+  cancelActiveTools: () => set({ ...TOOL_RESET_PATCH }),
+
   selectItem: (id) =>
     set({ selectedId: id, selectedIds: id != null ? [id] : [] }),
 
@@ -281,23 +357,31 @@ export const createUiSlice = (set) => ({
   clearSelectedSubGeometry: () => set({ selectedSubGeometry: null }),
 
   setExtrudeDepthInput: (v) => set({ extrudeDepthInput: v }),
-  setExtrudeEditTarget: (target) => set({ extrudeEditTarget: target }),
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
-  setChamferRetargetTarget: (target) => set({ chamferRetargetTarget: target }),
   // Setting either face-select mode clears the other — only one pick/confirm
   // overlay can be active at a time.
   setChamferSelectMode: (mode) =>
-    set({
-      chamferSelectMode: mode,
-      pushPullSelectMode: null,
-      // Chamfer/fillet pick edges and faces; nothing else.
-      selectionOverride: mode ? ["edge", "face"] : null,
+    set((s) => {
+      const own = {
+        chamferSelectMode: mode,
+        pushPullSelectMode: null,
+        // Chamfer/fillet pick edges and faces; nothing else.
+        selectionOverride: mode ? ["edge", "face"] : null,
+      };
+      return mode && !s.chamferSelectMode
+        ? { ...TOOL_RESET_PATCH, ...own }
+        : own;
     }),
   setPushPullSelectMode: (mode) =>
-    set({
-      pushPullSelectMode: mode,
-      chamferSelectMode: null,
-      selectionOverride: mode ? ["face"] : null,
+    set((s) => {
+      const own = {
+        pushPullSelectMode: mode,
+        chamferSelectMode: null,
+        selectionOverride: mode ? ["face"] : null,
+      };
+      return mode && !s.pushPullSelectMode
+        ? { ...TOOL_RESET_PATCH, ...own }
+        : own;
     }),
 
   // Selection-widget toggles.  Turning a sub-type on leaves object mode; turning
@@ -322,6 +406,10 @@ export const createUiSlice = (set) => ({
       selPoint: !s.selPoint,
       selTypeSolo: null,
     })),
+  // Chain toggle: only actionable while a face or edge type is on (the widget
+  // greys it otherwise), but the value is kept either way so it's remembered.
+  toggleSelChain: () =>
+    set((s) => (s.selFace || s.selEdge ? { selChain: !s.selChain } : {})),
   // Cmd/Ctrl-click: isolate one type (others off), saving the prior set; a second
   // solo-click on the isolated type restores it.
   soloSelType: (key) =>
@@ -358,13 +446,21 @@ export const createUiSlice = (set) => ({
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
-  setShellTarget: (target) => set({ shellTarget: target }),
+  setShellTarget: (target) =>
+    set((s) =>
+      target && !s.shellTarget
+        ? { ...TOOL_RESET_PATCH, shellTarget: target }
+        : { shellTarget: target },
+    ),
   setOriginToolActive: (v) =>
-    set({
-      originToolActive: !!v,
-      // Origin works on whole objects → lock the selection widget to Object.
-      selectionOverride: v ? ["object"] : null,
-      ...(v ? null : { originDialogItemId: null, originVertexPick: null }),
+    set((s) => {
+      const own = {
+        originToolActive: !!v,
+        // Origin works on whole objects → lock the selection widget to Object.
+        selectionOverride: v ? ["object"] : null,
+        ...(v ? null : { originDialogItemId: null, originVertexPick: null }),
+      };
+      return v && !s.originToolActive ? { ...TOOL_RESET_PATCH, ...own } : own;
     }),
   openOriginDialog: (itemId) =>
     set({ originDialogItemId: itemId, originVertexPick: null }),
@@ -373,6 +469,7 @@ export const createUiSlice = (set) => ({
 
   startHoleTool: () =>
     set({
+      ...TOOL_RESET_PATCH,
       holeTool: {
         phase: "face",
         itemId: null,
@@ -447,7 +544,7 @@ export const createUiSlice = (set) => ({
   // ── Emboss tool ─────────────────────────────────────────────────────────
   startEmbossTool: () =>
     set({
-      toolError: null,
+      ...TOOL_RESET_PATCH,
       embossTool: {
         // Open straight into geometry picking — the first thing the user does.
         picking: "geometry",
@@ -472,7 +569,19 @@ export const createUiSlice = (set) => ({
         },
       },
     }),
-  cancelEmbossTool: () => set({ embossTool: null }),
+  // Editing views the pre-emboss step (beginEmbossEdit) — a plain cancel puts
+  // the user back on the entry.  After a commit, updateEmbossEntry has already
+  // landed there (active is the entry or null at the tip), so no restore.
+  cancelEmbossTool: () => {
+    const { embossTool, activeHistoryId, restoreToHistory } = get();
+    if (
+      embossTool?.editEntryId != null &&
+      activeHistoryId != null &&
+      activeHistoryId !== embossTool.editEntryId
+    )
+      restoreToHistory(embossTool.editEntryId);
+    set({ embossTool: null });
+  },
   // Arm one of the two picks (toggles off if it was already armed).
   setEmbossPicking: (kind) =>
     set((s) =>
@@ -510,6 +619,7 @@ export const createUiSlice = (set) => ({
           face: sel.face,
           faceSet: sel.faceSet,
           faceTris: sel.faceTris ?? null,
+          faceCount: sel.faceCount ?? 0,
           facesValid: !!sel.valid,
           picking: sel.keepPicking ? s.embossTool.picking : null,
           params,
@@ -527,28 +637,147 @@ export const createUiSlice = (set) => ({
           }
         : {},
     ),
-  // Re-open a committed emboss step to edit its params, replaying the frozen recipe.
-  beginEmbossEdit: (entryId) =>
-    set((state) => {
-      const entry = state.history.find((h) => h.id === entryId);
-      const r = entry?.instruction?.patches?.regenerator;
-      if (r?.kind !== "emboss") return {};
+  // Re-open a committed emboss step to edit its params, replaying the frozen
+  // recipe.  The timeline is restored to the PREVIOUS step so the pre-emboss
+  // body is on screen: re-picking a face must happen against the source the op
+  // re-runs on — the same state the user picked at creation, in the same local
+  // frame — not the relief-carrying result mesh.
+  beginEmbossEdit: (entryId) => {
+    const state = get();
+    const idx = state.history.findIndex((h) => h.id === entryId);
+    const entry = state.history[idx];
+    const r = entry?.instruction?.patches?.regenerator;
+    if (idx < 1 || r?.kind !== "emboss") return;
+    state.restoreToHistory(state.history[idx - 1].id);
+    set({
+      embossTool: {
+        picking: null,
+        editEntryId: entryId,
+        itemId: entry.itemId,
+        source: r.source,
+        profiles: r.profiles || [],
+        face: r.face,
+        faceSet: r.faceSet || null,
+        faceTris: r.faceTris || null,
+        // A committed emboss had a valid face selection.
+        facesValid: true,
+        params: { ...r.params },
+      },
+    });
+  },
+
+  // ── Texture tool ──────────────────────────────────────────────────────────
+  // Bump-map displacement on a picked connected-face set.  Mirrors the emboss
+  // state machine; the PNG rides as a dataURL in params so the recipe (and the
+  // saved document) is self-contained.
+  startTextureTool: () =>
+    set({
+      ...TOOL_RESET_PATCH,
+      textureTool: {
+        picking: "faces",
+        itemId: null,
+        face: null,
+        faceSet: null,
+        faceTris: null,
+        faceCount: 0,
+        facesValid: false,
+        params: {
+          png: null,
+          pngName: null,
+          projection: "center",
+          offsetHMm: 0,
+          offsetVMm: 0,
+          rotationDeg: 0,
+          sizeMm: 10,
+          depthMm: 1,
+          resolutionMm: 1,
+          wrap: false,
+        },
+      },
+    }),
+  // Editing views the pre-texture step (beginTextureEdit) — a plain cancel
+  // puts the user back on the entry; after a commit the update already landed.
+  cancelTextureTool: () => {
+    const { textureTool, activeHistoryId, restoreToHistory } = get();
+    if (
+      textureTool?.editEntryId != null &&
+      activeHistoryId != null &&
+      activeHistoryId !== textureTool.editEntryId
+    )
+      restoreToHistory(textureTool.editEntryId);
+    set({ textureTool: null });
+  },
+  setTextureLibraryOpen: (open) => set({ textureLibraryOpen: open }),
+  setTexturePicking: (kind) =>
+    set((s) =>
+      s.textureTool
+        ? {
+            textureTool: {
+              ...s.textureTool,
+              picking: s.textureTool.picking === kind ? null : kind,
+            },
+          }
+        : {},
+    ),
+  // Same selection shape the emboss face pick produces; a curved pick nudges
+  // the still-default "center" projection to "conform" (same rationale).
+  setTextureFaceSelection: (sel) =>
+    set((s) => {
+      if (!s.textureTool) return {};
+      const params =
+        sel.faceSet && s.textureTool.params.projection === "center"
+          ? { ...s.textureTool.params, projection: "conform" }
+          : s.textureTool.params;
       return {
-        embossTool: {
-          picking: null,
-          editEntryId: entryId,
-          itemId: entry.itemId,
-          source: r.source,
-          profiles: r.profiles || [],
-          face: r.face,
-          faceSet: r.faceSet || null,
-          faceTris: r.faceTris || null,
-          // A committed emboss had a valid face selection.
-          facesValid: true,
-          params: { ...r.params },
+        textureTool: {
+          ...s.textureTool,
+          itemId: sel.itemId,
+          face: sel.face,
+          faceSet: sel.faceSet,
+          faceTris: sel.faceTris ?? null,
+          faceCount: sel.faceCount ?? 0,
+          facesValid: !!sel.valid,
+          picking: sel.keepPicking ? s.textureTool.picking : null,
+          params,
         },
       };
     }),
+  updateTextureParams: (partial) =>
+    set((s) =>
+      s.textureTool
+        ? {
+            textureTool: {
+              ...s.textureTool,
+              params: { ...s.textureTool.params, ...partial },
+            },
+          }
+        : {},
+    ),
+  // Re-open a committed texture step for editing.  The timeline is restored to
+  // the PREVIOUS step so the pre-texture body is on screen: re-picking faces
+  // must happen against the source the op re-runs on, in its frame.
+  beginTextureEdit: (entryId) => {
+    const state = get();
+    const idx = state.history.findIndex((h) => h.id === entryId);
+    const entry = state.history[idx];
+    const r = entry?.instruction?.patches?.regenerator;
+    if (idx < 1 || r?.kind !== "texture") return;
+    state.restoreToHistory(state.history[idx - 1].id);
+    set({
+      textureTool: {
+        picking: null,
+        editEntryId: entryId,
+        itemId: entry.itemId,
+        source: r.source,
+        face: r.face,
+        faceSet: r.faceSet || null,
+        faceTris: r.faceTris || null,
+        faceCount: r.faceCount ?? 0,
+        facesValid: true,
+        params: { ...r.params },
+      },
+    });
+  },
 
   // ── Draft tool ──────────────────────────────────────────────────────────
   // Guided like Hole/Emboss — no pre-selection needed; the body is learned from
@@ -563,7 +792,8 @@ export const createUiSlice = (set) => ({
   closeBoxDialog: () => set({ boxDialog: null }),
 
   // ── Measure tool ──────────────────────────────────────────────────────────
-  startMeasureTool: () => set({ measureTool: { picks: [] } }),
+  startMeasureTool: () =>
+    set({ ...TOOL_RESET_PATCH, measureTool: { picks: [] } }),
   cancelMeasureTool: () => set({ measureTool: null }),
   // Add a clicked entity (3D); keep at most the last two so a third click starts
   // a fresh distance from the previous pick.
@@ -579,7 +809,7 @@ export const createUiSlice = (set) => ({
 
   startDraftTool: () =>
     set({
-      toolError: null,
+      ...TOOL_RESET_PATCH,
       draftTool: {
         picking: "main",
         itemId: null,
@@ -660,7 +890,10 @@ export const createUiSlice = (set) => ({
   // viewport click contributes to the plane being defined.
   setPlanePickActive: (v) => set({ planePickActive: v || false }),
   startPlaneTool: (base) =>
-    set({ planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 } }),
+    set({
+      ...TOOL_RESET_PATCH,
+      planeTool: { base, rot: { x: 0, y: 0, z: 0 }, offset: 0 },
+    }),
   updatePlaneTool: (partial) =>
     set((state) =>
       state.planeTool ? { planeTool: { ...state.planeTool, ...partial } } : {},
@@ -669,7 +902,11 @@ export const createUiSlice = (set) => ({
   // Mirror / circular / rectangular patterns all act on whole objects, so they
   // lock the selection widget to Object mode while active.
   startPattern3d: (v) =>
-    set({ pattern3dTool: v, selectionOverride: ["object"] }),
+    set({
+      ...TOOL_RESET_PATCH,
+      pattern3dTool: v,
+      selectionOverride: ["object"],
+    }),
   updatePattern3d: (partial) =>
     set((state) =>
       state.pattern3dTool
@@ -684,10 +921,34 @@ export const createUiSlice = (set) => ({
     }),
   setCircularAxisPick: (v) => set({ circularAxisPick: !!v }),
   startMirror3d: (seed) =>
-    set({ mirror3dTool: seed || {}, selectionOverride: ["object"] }),
+    set({
+      ...TOOL_RESET_PATCH,
+      mirror3dTool: seed || {},
+      selectionOverride: ["object"],
+    }),
   cancelMirror3d: () => set({ mirror3dTool: null, selectionOverride: null }),
 
-  startProjectTool: () => set({ projectTool: { shapes: [] } }),
+  // Boolean tools act on whole objects, so they lock the selection widget to
+  // Object mode while the dialog is open.
+  startBooleanTool: (operation) =>
+    set({
+      ...TOOL_RESET_PATCH,
+      booleanTool: { operation },
+      selectionOverride: ["object"],
+      additiveObjectPick: true,
+    }),
+  cancelBooleanTool: () =>
+    set({
+      booleanTool: null,
+      selectionOverride: null,
+      additiveObjectPick: false,
+      booleanCutIds: [],
+    }),
+  setAdditiveObjectPick: (v) => set({ additiveObjectPick: !!v }),
+  setBooleanCutIds: (ids) => set({ booleanCutIds: [...ids] }),
+
+  startProjectTool: () =>
+    set({ ...TOOL_RESET_PATCH, projectTool: { shapes: [] } }),
   addProjectShapes: (shapes) =>
     set((state) =>
       state.projectTool
@@ -701,6 +962,7 @@ export const createUiSlice = (set) => ({
   // clearItemSolo ends solo (the caller restores the view from soloView first).
   startSplit3d: (seed) =>
     set({
+      ...TOOL_RESET_PATCH,
       splitTool: {
         objectId: null,
         objectName: null,
@@ -719,7 +981,10 @@ export const createUiSlice = (set) => ({
 
   // ── Point-to-Point move ──────────────────────────────────────────────────
   startPointToPointTool: () =>
-    set({ pointToPointTool: { picking: "A", a: null, b: null } }),
+    set({
+      ...TOOL_RESET_PATCH,
+      pointToPointTool: { picking: "A", a: null, b: null },
+    }),
   cancelPointToPointTool: () => set({ pointToPointTool: null }),
   // Arm one of the two picks (toggles off if already armed).
   setPointToPointPicking: (which) =>
@@ -764,6 +1029,7 @@ export const createUiSlice = (set) => ({
     }),
   startSweepTool: (kind) =>
     set({
+      ...TOOL_RESET_PATCH,
       sweepSelectMode: {
         kind,
         profile: null,
@@ -771,9 +1037,6 @@ export const createUiSlice = (set) => ({
         secondProfile: null,
         params: { rotations: 1, offsetPerRotation: 0, prism: false, sides: 6 },
       },
-      chamferSelectMode: null,
-      pushPullSelectMode: null,
-      selectionOverride: null,
     }),
   cancelSweepTool: () =>
     set({ sweepSelectMode: null, sweepRetargetTarget: null }),
@@ -829,11 +1092,34 @@ export const createUiSlice = (set) => ({
   setCameraControls: (controls) => set({ _cameraControls: controls }),
 
   beginOperation: () =>
-    set((state) => ({ pendingOperations: state.pendingOperations + 1 })),
+    // A fresh operation clears any stale cancel flag from a prior one.
+    set((state) => ({
+      pendingOperations: state.pendingOperations + 1,
+      operationCancelled: false,
+    })),
   endOperation: () =>
     set((state) => ({
       pendingOperations: Math.max(0, state.pendingOperations - 1),
     })),
+
+  // Cancel whatever is driving the BusyIndicator.  Bumps cancelEpoch, which the
+  // Viewport observes to ask the worker to ABORT its in-flight native op (via
+  // the shared cancel flag — frees the CPU), the regen loop to bail between
+  // steps, and runOp to discard any result that still lands; the counters clear
+  // immediately so the dialog dismisses at once.
+  requestOperationCancel: () =>
+    set((state) => {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[OCC] CANCEL requested (epoch ${state.cancelEpoch} -> ${state.cancelEpoch + 1}); worker aborts the in-flight op, its result is discarded`,
+      );
+      return {
+        cancelEpoch: state.cancelEpoch + 1,
+        operationCancelled: true,
+        pendingOperations: 0,
+        regenProgress: null,
+      };
+    }),
 
   setRegenProgress: (progress) => set({ regenProgress: progress }),
 
@@ -842,13 +1128,30 @@ export const createUiSlice = (set) => ({
   toggleDimensionsVisible: () =>
     set((state) => ({ dimensionsVisible: !state.dimensionsVisible })),
   toggleCurveResolution: () =>
+    // Changing tessellation resolution invalidates every cached entry (JIT
+    // timeline): each step must re-tessellate at the new precision.
     set((state) => ({
       curveResolution: state.curveResolution === "print" ? "preview" : "print",
+      history: dirtyAllEntries(state.history),
     })),
 
-  setSketchPlacementMode: (active) => set({ sketchPlacementMode: active }),
+  setSketchPlacementMode: (active) =>
+    set((s) =>
+      active && !s.sketchPlacementMode
+        ? { ...TOOL_RESET_PATCH, sketchPlacementMode: true }
+        : { sketchPlacementMode: active },
+    ),
   setExtrudeSelectMode: (mode) =>
-    set({ extrudeSelectMode: mode, selectionOverride: mode ? ["face"] : null }),
+    set((s) => {
+      const own = {
+        extrudeSelectMode: mode,
+        selectionOverride: mode ? ["face"] : null,
+      };
+      // Only cancel other tools when ENTERING extrude, not on phase changes.
+      return mode && !s.extrudeSelectMode
+        ? { ...TOOL_RESET_PATCH, ...own }
+        : own;
+    }),
   setCutExtrudeInProgress: (v) => set({ cutExtrudeInProgress: !!v }),
   setExtrudeRetargetId: (id) => set({ extrudeRetargetId: id }),
   setExtrudeRetargetGroup: (ids) => set({ extrudeRetargetGroup: ids }),
@@ -873,7 +1176,11 @@ export const createUiSlice = (set) => ({
     set((state) => ({ widgetVisible: !state.widgetVisible })),
 
   toggleAxisVisibility: () =>
-    set((state) => ({ axisVisible: !state.axisVisible })),
+    set((state) => {
+      const axisVisible = !state.axisVisible;
+      saveSnapSettings({ ...state, axisVisible });
+      return { axisVisible };
+    }),
 
   toggleHideHiddenItems: () =>
     set((state) => ({ hideHiddenItems: !state.hideHiddenItems })),

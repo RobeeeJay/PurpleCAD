@@ -3,7 +3,9 @@ import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { exportSTL, exportSTEP, importStep } from "../../three/occClient.js";
+import { packHistory } from "../../store/geometryPack.js";
 import { maxItemId } from "../../store/internals.js";
+import { activePrecision } from "../../three/resolution.js";
 import {
   parseStl,
   parseSvgToSketchShapes,
@@ -17,10 +19,12 @@ const DocumentSection = () => {
   const loadDocument = useStore((s) => s.loadDocument);
   const createProject = useStore((s) => s.createProject);
   const items = useStore((s) => s.items);
+  const curveResolution = useStore((s) => s.curveResolution);
   const variables = useStore((s) => s.variables);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
   const cameraControls = useStore((s) => s._cameraControls);
   const selectedId = useStore((s) => s.selectedId);
+  const selectedIds = useStore((s) => s.selectedIds);
   const addItem = useStore((s) => s.addItem);
   const setSvgImport = useStore((s) => s.setSvgImport);
   const selectItem = useStore((s) => s.selectItem);
@@ -79,10 +83,17 @@ const DocumentSection = () => {
   );
 
   const handleSave = () => {
+    // Packed meshes (geometryPack.js): a dense displacement mesh as raw JSON
+    // float text made documents 100s of MB and the stringify itself OOM'd.
     const blob = new Blob(
       [
         JSON.stringify(
-          { version: 1, history, activeHistoryId, variables },
+          {
+            version: 1,
+            history: packHistory(history),
+            activeHistoryId,
+            variables,
+          },
           null,
           2,
         ),
@@ -92,7 +103,7 @@ const DocumentSection = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "scene.cad.json";
+    a.download = "scene.pcad";
     a.click();
     URL.revokeObjectURL(url);
     setSaveMenuOpen(false);
@@ -108,14 +119,51 @@ const DocumentSection = () => {
     URL.revokeObjectURL(url);
   };
 
+  // Exports tessellate at the ACTIVE resolution; in preview mode that's the
+  // coarse mesh, which pits/facets a printed part.  Warn before exporting so
+  // the user can switch on high-res print mode first.  Returns false to abort.
+  const confirmExportResolution = (kind) => {
+    if (curveResolution === "print") return true;
+    return window.confirm(
+      `High-resolution print mode is OFF, so this ${kind} will export at the ` +
+        `coarser preview tessellation (curved surfaces will look faceted).\n\n` +
+        `Turn on print mode (the resolution toggle) for a smooth mesh, then ` +
+        `export again.\n\nExport at preview resolution anyway?`,
+    );
+  };
+
+  // Export the selected objects (single or multi) in their current cached
+  // timeline state, or the whole scene when nothing is selected.
+  const exportItems = () => {
+    const ids = new Set(
+      selectedIds?.length
+        ? selectedIds
+        : selectedId != null
+          ? [selectedId]
+          : [],
+    );
+    return ids.size ? items.filter((i) => ids.has(i.id)) : items;
+  };
+
+  // Export payload: the chosen items, the whole scene (so a selected body's
+  // recipe still resolves its inputs), and the ACTIVE tessellation precision.
+  // The op prefers each item's baked high-res mesh (exact on-screen geometry) and
+  // only rebuilds the recipe at this precision for items with no baked mesh.
+  const exportPayload = (expItems) => ({
+    items: expItems,
+    allItems: items,
+    precision: activePrecision(useStore.getState()),
+  });
+
   const handleExportSTL = async () => {
     setSaveMenuOpen(false);
     if (items.length === 0) {
       alert("No objects to export.");
       return;
     }
+    if (!confirmExportResolution("STL")) return;
     try {
-      const buffer = await exportSTL({ items });
+      const buffer = await exportSTL(exportPayload(exportItems()));
       if (!buffer) {
         alert("No exportable objects in the scene.");
         return;
@@ -136,8 +184,9 @@ const DocumentSection = () => {
       alert("No objects to export.");
       return;
     }
+    if (!confirmExportResolution("STEP")) return;
     try {
-      const content = await exportSTEP({ items });
+      const content = await exportSTEP(exportPayload(exportItems()));
       if (!content) {
         alert("No exportable objects in the scene.");
         return;
@@ -168,8 +217,8 @@ const DocumentSection = () => {
     importInputRef.current.click();
   };
 
-  // Load a .cad.json document as a NEW project (existing projects untouched),
-  // then load its data into that fresh project.
+  // Load a .pcad document (JSON; legacy .cad.json still accepted) as a NEW
+  // project (existing projects untouched), then load its data into it.
   const handleLoadClick = () => {
     setImportMenuOpen(false);
     fileInputRef.current.value = "";
@@ -178,7 +227,7 @@ const DocumentSection = () => {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const baseName = file.name.replace(/\.(cad\.)?json$/i, "");
+    const baseName = file.name.replace(/\.(pcad|cad\.json|json)$/i, "");
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
@@ -351,19 +400,32 @@ const DocumentSection = () => {
             ref={saveMenuRef}
             style={{ top: saveMenuPos.top, left: saveMenuPos.left }}
           >
-            <button className="toolbar-dropdown-item" onClick={handleSave}>
-              Save document (.cad.json)
+            <button
+              className="toolbar-dropdown-item"
+              title="Save the document as a portable .pcad file"
+              onClick={handleSave}
+            >
+              Save document (.pcad)
             </button>
-            <button className="toolbar-dropdown-item" onClick={handleExportSTL}>
+            <button
+              className="toolbar-dropdown-item"
+              title="Export the visible bodies as a 3D-printable STL mesh"
+              onClick={handleExportSTL}
+            >
               Export as STL
             </button>
             <button
               className="toolbar-dropdown-item"
+              title="Export the visible bodies as a STEP file for other CAD tools"
               onClick={handleExportSTEP}
             >
               Export as STEP
             </button>
-            <button className="toolbar-dropdown-item" onClick={handleSaveImage}>
+            <button
+              className="toolbar-dropdown-item"
+              title="Save a PNG screenshot of the viewport"
+              onClick={handleSaveImage}
+            >
               Save image (.png)
             </button>
           </div>,
@@ -412,22 +474,32 @@ const DocumentSection = () => {
             ref={importMenuRef}
             style={{ top: importMenuPos.top, left: importMenuPos.left }}
           >
-            <button className="toolbar-dropdown-item" onClick={handleLoadClick}>
-              Load document (.cad.json)
+            <button
+              className="toolbar-dropdown-item"
+              title="Open a saved .pcad document"
+              onClick={handleLoadClick}
+            >
+              Load document (.pcad)
             </button>
             <button
               className="toolbar-dropdown-item"
+              title="Import an STL mesh as a solid body"
               onClick={() => handleImportKind(".stl")}
             >
               Import STL
             </button>
             <button
               className="toolbar-dropdown-item"
+              title="Import a STEP file as a solid body"
               onClick={() => handleImportKind(".step,.stp")}
             >
               Import STEP
             </button>
-            <button className="toolbar-dropdown-item" disabled>
+            <button
+              className="toolbar-dropdown-item"
+              title="Import image — coming soon"
+              disabled
+            >
               Import image (.png)
             </button>
           </div>,
@@ -482,7 +554,7 @@ const DocumentSection = () => {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".json,.cad.json"
+        accept=".pcad,.cad.json,.json"
         style={{ display: "none" }}
         onChange={handleFileChange}
       />

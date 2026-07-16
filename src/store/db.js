@@ -1,3 +1,4 @@
+import { unpackHistory } from "./geometryPack.js";
 // Project-aware persistence facade.  In Electron it's backed by the normalised
 // SQLite database in the main process (synchronous IPC).  In a plain browser it
 // falls back to localStorage; under node/vitest it uses an in-memory map.  The
@@ -67,6 +68,7 @@ let activeProjectId = (() => {
 
 export const getActiveProjectId = () => activeProjectId;
 export function setActiveProjectId(id) {
+  flushTimelineSave();
   activeProjectId = id;
   const a = api();
   if (a) a.projSetActive(id);
@@ -111,6 +113,30 @@ export function createProject(name) {
   );
   return id;
 }
+// Copy a project and all its per-project data; returns the new id.  The
+// fallback path replays the copy through the generic get/save helpers.
+export function duplicateProject(id) {
+  flushTimelineSave();
+  const a = api();
+  if (a) return a.projDuplicate(id);
+  const list = fallbackProjects();
+  const src = list.find((p) => p.id === id);
+  if (!src) return null;
+  const newId = Math.max(0, ...list.map((p) => p.id)) + 1;
+  list.unshift({
+    id: newId,
+    name: `${src.name} copy`,
+    thumbnail: src.thumbnail,
+  });
+  jSet("projects", list);
+  saveTimeline(getTimeline(id), newId);
+  saveVariables(getVariables(id), newId);
+  saveFolders(getFolders(id), newId);
+  saveMaterial(getMaterial(id), newId);
+  const cam = getCamera(id);
+  if (cam != null) saveCamera(cam, newId);
+  return newId;
+}
 export function renameProject(id, name) {
   const a = api();
   if (a) return a.projRename(id, name);
@@ -122,6 +148,7 @@ export function renameProject(id, name) {
   }
 }
 export function deleteProject(id) {
+  flushTimelineSave();
   const a = api();
   if (a) return a.projDelete(id);
   jSet(
@@ -145,15 +172,52 @@ export function setThumbnail(id, thumbnail) {
 // ── Per-project data (current active project unless a pid is passed) ──────────
 const pid = (id) => (id == null ? activeProjectId : id);
 
-export function getTimeline(id) {
+// Timeline saves COALESCE: a burst of mutations (each gizmo release appends a
+// step and re-saves) collapses to one async write ~150 ms later, so the
+// renderer never blocks on the IPC clone + SQLite rewrite of a big document.
+// Anything that READS or re-points the timeline flushes the pending save
+// first, and beforeunload flushes synchronously so nothing is lost on quit.
+let pendingTimelineSave = null; // { pid, data, timer }
+
+export function flushTimelineSave() {
+  if (!pendingTimelineSave) return;
+  const { pid: savePid, data, timer } = pendingTimelineSave;
+  clearTimeout(timer);
+  pendingTimelineSave = null;
   const a = api();
-  if (a) return a.dbGetTimeline(pid(id));
-  return jGet(`p${pid(id)}:timeline`, null);
+  if (a) a.dbSaveTimeline(savePid, data);
+  else jSet(`p${savePid}:timeline`, data);
+}
+
+if (typeof window !== "undefined")
+  window.addEventListener("beforeunload", flushTimelineSave);
+
+export function getTimeline(id) {
+  flushTimelineSave();
+  const a = api();
+  const raw = a ? a.dbGetTimeline(pid(id)) : jGet(`p${pid(id)}:timeline`, null);
+  if (raw?.history) return { ...raw, history: unpackHistory(raw.history) };
+  return raw;
 }
 export function saveTimeline(data, id) {
   const a = api();
-  if (a) a.dbSaveTimeline(pid(id), data);
-  else jSet(`p${pid(id)}:timeline`, data);
+  if (!a?.dbSaveTimelineAsync) {
+    // Fallback paths (node/browser) stay synchronous — cheap there.
+    if (a) a.dbSaveTimeline(pid(id), data);
+    else jSet(`p${pid(id)}:timeline`, data);
+    return;
+  }
+  const savePid = pid(id); // resolve NOW — a project switch must not re-target it
+  if (pendingTimelineSave) clearTimeout(pendingTimelineSave.timer);
+  pendingTimelineSave = {
+    pid: savePid,
+    data,
+    timer: setTimeout(() => {
+      const send = pendingTimelineSave;
+      pendingTimelineSave = null;
+      api()?.dbSaveTimelineAsync(send.pid, send.data);
+    }, 150),
+  };
 }
 export function getVariables(id) {
   const a = api();
