@@ -116,6 +116,156 @@ test.describe.serial("2D sketch workflow", () => {
     expect((await shapes()).length).toBe(5); // and back
   });
 
+  test("trim removes a segment up to the crossing line (real clicks)", async () => {
+    // Two crossing lines drawn with the mouse: a horizontal one through a
+    // vertical one; trimming the horizontal's left arm removes it up to the
+    // crossing.
+    const before = (await shapes()).length;
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const H1 = toScreen(-4, -2);
+    const H2 = toScreen(-1, -2);
+    await page.mouse.click(H1.x, H1.y);
+    await page.mouse.click(H2.x, H2.y);
+    await page.keyboard.press("Escape");
+    const V1 = toScreen(-2.5, -3);
+    const V2 = toScreen(-2.5, -1);
+    await page.mouse.click(V1.x, V1.y);
+    await page.mouse.click(V2.x, V2.y);
+    await page.keyboard.press("Escape");
+    await expect.poll(async () => (await shapes()).length).toBe(before + 2);
+
+    await page
+      .getByTitle("Trim — click or drag over a line", { exact: false })
+      .click();
+    const hit = toScreen(-3.5, -2); // on the horizontal's LEFT arm
+    await page.mouse.click(hit.x, hit.y);
+    await expect
+      .poll(async () => {
+        const line = (await shapes()).find(
+          (sh) =>
+            sh.type === "line" &&
+            Math.abs(sh.y1 - -2) < 0.05 &&
+            Math.abs(sh.y2 - -2) < 0.05,
+        );
+        return line ? Math.min(line.x1, line.x2) : null;
+      })
+      .toBeCloseTo(-2.5, 1); // left arm gone: line now starts at the crossing
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+  });
+
+  test("horizontal constraint straightens a slanted line via the toolbar", async () => {
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(-4, 1);
+    const B = toScreen(-1.5, 1.4); // slightly slanted
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.keyboard.press("Escape");
+    const idx = (await shapes()).length - 1;
+    // Select the line by clicking on it (select mode = no active tool).
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+    const mid = toScreen(-2.75, 1.2);
+    await page.mouse.click(mid.x, mid.y);
+    const selected = await page.evaluate(
+      () => window.__store.getState().selectedSketchElement,
+    );
+    expect(selected?.type).toBe("line");
+    expect(selected.shapeIdx).toBe(idx);
+
+    await page
+      .getByTitle("Horizontal — force the selected line", { exact: false })
+      .click();
+    const line = (await shapes())[idx];
+    expect(line.y1).toBeCloseTo(line.y2, 5);
+  });
+
+  test("offset creates a linked parallel copy of the selected circle", async () => {
+    const before = (await shapes()).length;
+    const circleIdx = (await shapes()).findIndex((sh) => sh.type === "circle");
+    // Select the circle by clicking its rim (right-most point).
+    const rim = toScreen(4.5, 0.75);
+    await page.mouse.click(rim.x, rim.y);
+    const sel = await page.evaluate(
+      () => window.__store.getState().selectedSketchElement,
+    );
+    expect(sel?.shapeIdx).toBe(circleIdx);
+
+    await page
+      .getByTitle("Offset — parallel copy of the selected lines", {
+        exact: false,
+      })
+      .click();
+    await expect.poll(async () => (await shapes()).length).toBe(before + 1);
+    const all = await shapes();
+    const circles = all.filter((sh) => sh.type === "circle");
+    expect(circles.length).toBe(2);
+    // 5 mm offset = 0.5 units: concentric circle, radius ± 0.5.
+    expect(Math.abs(circles[1].r - circles[0].r)).toBeCloseTo(0.5, 1);
+    expect(circles[1].cx).toBeCloseTo(circles[0].cx, 3);
+    // Linked by an offset constraint so the distance stays editable.
+    const constraints = await page.evaluate(
+      () =>
+        window.__store.getState().items.find((i) => i.id === 300).constraints,
+    );
+    expect(constraints.some((c) => c.type === "offset")).toBe(true);
+
+    // Commit the offset's live distance input so its overlay closes (the
+    // extrude flow opens its own overlay next).
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".sketch-distance-input-overlay")).toBeHidden();
+  });
+
+  test("distance dimension: pick two endpoints, type a length, solver obeys", async () => {
+    // The horizontal line from the constraint test spans x -4..-1.5 at y≈1.
+    const lineIdx = await page.evaluate(() => {
+      const shapes = window.__store
+        .getState()
+        .items.find((i) => i.id === 300).shapes;
+      return shapes.findIndex(
+        (sh) =>
+          sh.type === "line" &&
+          Math.abs(sh.y1 - sh.y2) < 1e-4 &&
+          Math.abs(sh.y1 - 1) < 0.4,
+      );
+    });
+    expect(lineIdx).toBeGreaterThanOrEqual(0);
+    const line = (await shapes())[lineIdx];
+
+    // D arms the distance-constraint tool; click both endpoints.
+    await page.keyboard.press("d");
+    const P1 = toScreen(line.x1, line.y1);
+    const P2 = toScreen(line.x2, line.y2);
+    await page.mouse.click(P1.x, P1.y);
+    await page.mouse.click(P2.x, P2.y);
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toBeVisible({ timeout: 5000 });
+    await overlay.locator("input").first().fill("30");
+    await overlay.locator("input").first().press("Enter");
+
+    // The solver moves an endpoint so the span is exactly 30 mm (3 units).
+    await expect
+      .poll(async () => {
+        const l = (await shapes())[lineIdx];
+        return Math.hypot(l.x2 - l.x1, l.y2 - l.y1);
+      })
+      .toBeCloseTo(3, 1);
+    // And the dimension persists as a constraint.
+    const hasDim = await page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.find((i) => i.id === 300)
+        .constraints.some((c) => /dist/i.test(c.type)),
+    );
+    expect(hasDim).toBe(true);
+  });
+
   test("extrude the drawn rectangle through the profile-pick flow", async () => {
     // Leave the drawing tool, then start the extrude profile pick.
     await page.evaluate(() => {
