@@ -103,7 +103,7 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**/*.{js,jsx}", "electron/**/*.cjs"],
       exclude: ["src/**/__tests__/**", "src/three/vendor/**"],
-      reporter: ["text-summary", "html"],
+      reporter: ["text-summary", "html", "json"],
     },
   },
 });
