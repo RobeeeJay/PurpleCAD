@@ -143,6 +143,28 @@ test.describe.serial("modify tools through their dialogs", () => {
     );
   });
 
+  test("material dialog applies a colour to the selected body", async () => {
+    await addCube(15, -10);
+    await page.evaluate(() => window.__store.getState().selectItem(15));
+    await page
+      .getByTitle("Material — edit the material for", { exact: false })
+      .click();
+    const dialog = page.locator(".variables-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.locator("input[type='color']").first().fill("#00ff00");
+    await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store.getState().items.find((i) => i.id === 15)?.material
+              ?.color ?? null,
+        ),
+      )
+      .toBe("#00ff00");
+    await page.evaluate(() => window.__store.getState().selectItem(null));
+  });
+
   test("split cuts a cube into two bodies via the dialog", async () => {
     await addCube(14, 10);
     const countBefore = await page.evaluate(

@@ -327,6 +327,108 @@ test.describe.serial("2D sketch workflow", () => {
     );
   });
 
+  test("circular pattern repeats a circle around a picked centre", async () => {
+    // Centre snap point: draw a short line whose endpoint is the hub.
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const HUB = { x: 4, y: 4 };
+    const L1 = toScreen(HUB.x, HUB.y);
+    const L2 = toScreen(HUB.x + 1, HUB.y);
+    await page.mouse.click(L1.x, L1.y);
+    await page.mouse.click(L2.x, L2.y);
+    await page.keyboard.press("Escape");
+    const before = (await shapes()).length;
+
+    await page
+      .getByTitle("Circular Pattern — pick a centre point", { exact: false })
+      .click();
+    await page.mouse.click(L1.x, L1.y); // phase 1: the hub endpoint
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store.getState().sketchCircularPatternState
+              ?.centerShapeIdx ?? null,
+        ),
+      )
+      .not.toBe(null);
+    // Phase 2: the original circle at (4, 0.75) joins the pattern set.
+    const rim = toScreen(4.5, 0.75);
+    await page.mouse.click(rim.x, rim.y);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store.getState().sketchCircularPatternState?.shapeIndices
+              ?.length ?? 0,
+        ),
+      )
+      .toBe(1);
+    await page.getByTitle("Confirm — create the patterned geometry").click();
+
+    // Copies appear (count comes from the document default, > 1), each the
+    // same radius at the same distance from the hub as the source.
+    const all = await shapes();
+    const copies = all.slice(before + 1).filter((sh) => sh.type === "circle");
+    expect(copies.length).toBeGreaterThan(0);
+    const srcDist = Math.hypot(4 - HUB.x, 0.75 - HUB.y);
+    for (const c of copies) {
+      expect(c.r).toBeCloseTo(0.5, 1);
+      expect(Math.hypot(c.cx - HUB.x, c.cy - HUB.y)).toBeCloseTo(srcDist, 1);
+    }
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+  });
+
+  test("text tool decomposes typed text into sketch geometry", async () => {
+    const before = (await shapes()).length;
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("text"),
+    );
+    const at = toScreen(-4, 4);
+    await page.mouse.click(at.x, at.y);
+    // The dialog opens seeded at the click point; type and create.
+    const dialog = page.locator(".variables-dialog");
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await dialog.locator("textarea").fill("OK");
+    await dialog.getByRole("button", { name: "Create" }).click();
+    await expect
+      .poll(async () => (await shapes()).length)
+      .toBeGreaterThan(before);
+    // Text persists as ONE "text" shape at the click point (its glyph
+    // outlines are decomposed later, at loop-finding/extrude time).
+    const added = (await shapes()).slice(before);
+    expect(added.length).toBe(1);
+    expect(added[0].type).toBe("text");
+    expect(added[0].text).toBe("OK");
+    expect(added[0].x).toBeCloseTo(-4, 0);
+    expect(added[0].y).toBeCloseTo(4, 0);
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+  });
+
+  test("measure reports the distance between two picked points", async () => {
+    await page.evaluate(() => window.__store.getState().startMeasureTool());
+    // Two known endpoints of the hub line drawn earlier: (4,4) and (5,4).
+    const P1 = toScreen(4, 4);
+    const P2 = toScreen(5, 4);
+    await page.mouse.click(P1.x, P1.y);
+    await page.mouse.click(P2.x, P2.y);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => window.__store.getState().measureTool?.picks?.length ?? 0,
+        ),
+      )
+      .toBe(2);
+    // The overlay reports 10 mm (1 scene unit).
+    await expect(page.locator(".measure-overlay")).toContainText("10");
+    await page.evaluate(() => window.__store.getState().cancelMeasureTool());
+  });
+
   test("extrude the drawn rectangle through the profile-pick flow", async () => {
     // Leave the drawing tool, then start the extrude profile pick.
     await page.evaluate(() => {
