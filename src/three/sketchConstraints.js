@@ -106,7 +106,7 @@ export function allConstraintsSatisfied(shapes, constraints, variables = null) {
       const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
       if (d > POS_TOL) return false;
     } else if (c.type === "midpoint") {
-      const p = getShapePoint(shapes[c.pointShapeIdx], "point");
+      const p = getShapePoint(shapes[c.pointShapeIdx], c.pointKey ?? "point");
       const m = shapeMidpoint(shapes[c.targetShapeIdx]);
       if (!p || !m || Math.hypot(p.x - m.x, p.y - m.y) > POS_TOL) return false;
     } else if (c.type === "angle") {
@@ -881,9 +881,15 @@ export function enforceConstraints(
     const target = updated.get(c.targetShapeIdx) ?? shapes[c.targetShapeIdx];
     const m = shapeMidpoint(target);
     const pt = updated.get(c.pointShapeIdx) ?? shapes[c.pointShapeIdx];
-    if (!m || pt?.type !== "point") continue;
-    if (Math.hypot(pt.x - m.x, pt.y - m.y) > 1e-9)
-      updated.set(c.pointShapeIdx, { ...pt, x: m.x, y: m.y });
+    if (!m || !pt) continue;
+    const cur = getShapePoint(pt, c.pointKey ?? "point");
+    if (!cur || Math.hypot(cur.x - m.x, cur.y - m.y) <= 1e-9) continue;
+    updated.set(
+      c.pointShapeIdx,
+      pt.type === "point"
+        ? { ...pt, x: m.x, y: m.y }
+        : moveShapePoint(pt, c.pointKey, m),
+    );
   }
   return updated;
 }

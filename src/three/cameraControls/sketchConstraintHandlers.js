@@ -321,9 +321,10 @@ export function createSketchConstraintHandlers(
     }
   };
 
-  // Guided midpoint flow: collect a POINT shape and a line/arc/bezier target
-  // in either order (each pick ringed), then apply and leave the mode —
-  // mirrors the coincident tool's UX.
+  // Guided midpoint flow: collect a point (a standalone point shape, or any
+  // snappable point of another shape — endpoint / centre) and a
+  // line/arc/bezier target in either order (each pick ringed), then apply
+  // and leave the mode — mirrors the coincident tool's UX.
   const MIDPOINT_TARGETS = ["line", "arc", "bezier"];
   const handleMidpointClick = (screenX, screenY) => {
     const selItem = itemsRef.current.find(
@@ -335,7 +336,7 @@ export function createSketchConstraintHandlers(
     const store = useStore.getState();
     const first = store.sketchMidpointFirst;
 
-    const finish = (pointIdx, targetIdx) => {
+    const finish = (pointIdx, pointKey, targetIdx) => {
       clearCoincidentFirstOverlay();
       store.setSketchMidpointFirst(null);
       store.setSketchConstraintMode(null);
@@ -344,6 +345,7 @@ export function createSketchConstraintHandlers(
         pointIdx,
         targetIdx,
         "midpoint",
+        { pointIdx, pointKey },
       );
     };
     const ringAt = (x, y) => {
@@ -357,20 +359,25 @@ export function createSketchConstraintHandlers(
       scene.add(overlay);
     };
 
-    // A snap on a standalone POINT shape wins; endpoint snaps of lines etc.
-    // are not midpoint subjects.
+    // A snapped point wins over a line-body hit: a standalone point shape or
+    // any keyed point (line/arc endpoint, circle/arc centre, bezier end).
     const snap = findSnap(screenX, screenY, shapes, sketchMesh);
-    if (snap && shapes[snap.shapeIdx]?.type === "point") {
-      if (first?.kind === "target") {
-        finish(snap.shapeIdx, first.shapeIdx);
-      } else {
-        store.setSketchMidpointFirst({
-          kind: "point",
-          shapeIdx: snap.shapeIdx,
-        });
-        ringAt(snap.x, snap.y);
+    if (snap) {
+      const pointShape = shapes[snap.shapeIdx];
+      const key = pointShape?.type === "point" ? null : (snap.pointKey ?? null);
+      if (pointShape?.type === "point" || key) {
+        if (first?.kind === "target") {
+          finish(snap.shapeIdx, key, first.shapeIdx);
+        } else {
+          store.setSketchMidpointFirst({
+            kind: "point",
+            shapeIdx: snap.shapeIdx,
+            pointKey: key,
+          });
+          ringAt(snap.x, snap.y);
+        }
+        return;
       }
-      return;
     }
 
     const sketchGroup = sketchShapesGroupRef?.current;
@@ -384,7 +391,7 @@ export function createSketchConstraintHandlers(
     const shape = shapes[idx];
     if (!MIDPOINT_TARGETS.includes(shape?.type)) return;
     if (first?.kind === "point") {
-      finish(first.shapeIdx, idx);
+      finish(first.shapeIdx, first.pointKey ?? null, idx);
     } else {
       const m =
         shape.type === "line"

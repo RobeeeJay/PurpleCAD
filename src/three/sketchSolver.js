@@ -125,8 +125,9 @@ function residuals(shapes, constraints, variables) {
         out.push(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len);
       } else out.push(0);
     } else if (c.type === "midpoint") {
-      // Pin a point shape to the geometric middle of a line / arc / bezier.
-      const p = pointOf(shapes[c.pointShapeIdx], "point");
+      // Pin a point (a standalone point shape, or a keyed point of another
+      // shape — endpoint / centre) to the middle of a line / arc / bezier.
+      const p = pointOf(shapes[c.pointShapeIdx], c.pointKey ?? "point");
       const m = shapeMidpoint(shapes[c.targetShapeIdx]);
       if (p && m) out.push(p.x - m.x, p.y - m.y);
       else out.push(0, 0);

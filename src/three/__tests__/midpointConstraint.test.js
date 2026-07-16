@@ -190,3 +190,120 @@ describe("store action validation", () => {
     expect(store.getState().items[0].constraints.length).toBe(1);
   });
 });
+
+describe("keyed points (endpoints / centres) as midpoint subjects", () => {
+  const makeStore = (shapes, constraints = []) =>
+    create((set) => ({
+      items: [
+        {
+          id: 1,
+          type: "sketch",
+          shapes,
+          constraints,
+          position: {},
+          rotation: {},
+        },
+      ],
+      history: [
+        {
+          id: 0,
+          instruction: {
+            type: "create",
+            item: { id: 1, type: "sketch", shapes, constraints },
+          },
+        },
+      ],
+      activeHistoryId: null,
+      undoStack: [],
+      redoStack: [],
+      ...createSketchSlice(set),
+    }));
+
+  it("store action pins a line ENDPOINT to another line's middle", () => {
+    const s = makeStore([
+      { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 },
+      { type: "line", x1: 2.2, y1: 0.3, x2: 6, y2: 3 },
+    ]);
+    s.getState().applySketchPairConstraint(1, 1, 0, "midpoint", {
+      pointIdx: 1,
+      pointKey: "start",
+    });
+    const item = s.getState().items[0];
+    expect(item.constraints).toEqual([
+      {
+        type: "midpoint",
+        pointShapeIdx: 1,
+        targetShapeIdx: 0,
+        pointKey: "start",
+      },
+    ]);
+    expect(item.shapes[1].x1).toBeCloseTo(2, 5);
+    expect(item.shapes[1].y1).toBeCloseTo(0, 5);
+  });
+
+  it("rejects a keyless non-point subject and a self-target", () => {
+    const s = makeStore([
+      { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 },
+      { type: "line", x1: 2, y1: 1, x2: 6, y2: 3 },
+    ]);
+    s.getState().applySketchPairConstraint(1, 1, 0, "midpoint");
+    expect(s.getState().notification).toMatch(/point and a line/i);
+    s.getState().applySketchPairConstraint(1, 0, 0, "midpoint", {
+      pointIdx: 0,
+      pointKey: "start",
+    });
+    expect(s.getState().notification).toMatch(/its own line/i);
+    expect(s.getState().items[0].constraints).toEqual([]);
+  });
+
+  it("solver + satisfied-check honour pointKey", () => {
+    const shapes = [
+      { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 },
+      { type: "line", x1: 2, y1: 0, x2: 6, y2: 3 },
+    ];
+    const constraints = [
+      {
+        type: "midpoint",
+        pointShapeIdx: 1,
+        targetShapeIdx: 0,
+        pointKey: "start",
+      },
+    ];
+    expect(allConstraintsSatisfied(shapes, constraints)).toBe(true);
+    const fixLine = (idx) =>
+      new Set([`${idx}:x1`, `${idx}:y1`, `${idx}:x2`, `${idx}:y2`]);
+    // Move the target up; the solver drags the endpoint with its middle.
+    const moved = shapes.slice();
+    moved[0] = { type: "line", x1: 0, y1: 1, x2: 4, y2: 1 };
+    const { shapes: solved, ok } = solveConstraints(moved, constraints, {
+      fixed: fixLine(0),
+    });
+    expect(ok).toBe(true);
+    expect(solved[1].x1).toBeCloseTo(2, 3);
+    expect(solved[1].y1).toBeCloseTo(1, 3);
+  });
+
+  it("fast drag path moves the ENDPOINT when the target line moves", () => {
+    const shapes = [
+      { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 },
+      { type: "line", x1: 2, y1: 0, x2: 6, y2: 3 },
+    ];
+    const constraints = [
+      {
+        type: "midpoint",
+        pointShapeIdx: 1,
+        targetShapeIdx: 0,
+        pointKey: "start",
+      },
+    ];
+    const moved = { type: "line", x1: 0, y1: 2, x2: 4, y2: 2 };
+    const updated = enforceConstraints(shapes, constraints, 0, moved);
+    const ln = updated.get(1);
+    expect(ln).toBeTruthy();
+    expect(ln.x1).toBeCloseTo(2, 9);
+    expect(ln.y1).toBeCloseTo(2, 9);
+    // The other endpoint is untouched (moveShapePoint moves only the key).
+    expect(ln.x2).toBeCloseTo(6, 9);
+    expect(ln.y2).toBeCloseTo(3, 9);
+  });
+});

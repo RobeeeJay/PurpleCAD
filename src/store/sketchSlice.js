@@ -14,6 +14,7 @@ import {
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
 import { shapeMidpoint } from "../three/sketchGeometry.js";
+import { moveShapePoint } from "../three/sceneObjects/sketchShapes.js";
 import { resolveValue } from "../three/geometryParams.js";
 import {
   MIRRORABLE_TYPES,
@@ -332,7 +333,7 @@ export const createSketchSlice = (set) => ({
         ? { sketchMidpointFirst: null }
         : null),
     })),
-  // Guided midpoint pick: { kind: 'point' | 'target', shapeIdx } | null.
+  // Guided midpoint pick: { kind: 'point' | 'target', shapeIdx, pointKey? } | null.
   sketchMidpointFirst: null,
   setSketchMidpointFirst: (v) => set({ sketchMidpointFirst: v }),
 
@@ -1344,10 +1345,17 @@ export const createSketchSlice = (set) => ({
   // Two-shape geometric constraint (parallel / colinear between two lines;
   // tangent between a line and an arc/circle, or two arcs/circles).  Adds the
   // constraint and re-solves the whole sketch; rejects if it can't be satisfied.
-  applySketchPairConstraint: (sketchId, idxA, idxB, type) =>
+  applySketchPairConstraint: (sketchId, idxA, idxB, type, opts = {}) =>
     set((state) => {
       const item = state.items.find((i) => i.id === sketchId);
-      if (!item || idxA === idxB) return {};
+      if (!item) return {};
+      if (idxA === idxB)
+        return type === "midpoint"
+          ? {
+              notification:
+                "Midpoint can't pin a point to its own line, arc or curve.",
+            }
+          : {};
       const shapes = item.shapes || [];
       const a = shapes[idxA],
         b = shapes[idxB];
@@ -1380,32 +1388,54 @@ export const createSketchSlice = (set) => ({
             "Equal needs two lines (length), or two circles/arcs (radius).",
         };
       // Midpoint: one POINT + one line/arc/bezier, order-independent.  The
-      // point is pinned to the target's geometric middle and tracks it.
+      // point is any snappable point — a standalone point shape, or a keyed
+      // point of another shape (endpoint / centre, named by opts.pointKey) —
+      // pinned to the target's geometric middle so it tracks it.
       let midpointFields = null;
       if (type === "midpoint") {
         const MIDPOINT_TARGETS = ["line", "arc", "bezier"];
-        const pointIdx =
-          a?.type === "point" ? idxA : b?.type === "point" ? idxB : null;
+        let pointIdx;
+        let pointKey = null;
+        if (opts.pointIdx != null) {
+          pointIdx = opts.pointIdx;
+          if (shapes[pointIdx]?.type !== "point")
+            pointKey = opts.pointKey ?? null;
+        } else {
+          pointIdx =
+            a?.type === "point" ? idxA : b?.type === "point" ? idxB : null;
+        }
         const targetIdx = pointIdx === idxA ? idxB : idxA;
         const target = shapes[targetIdx];
-        if (pointIdx == null || !MIDPOINT_TARGETS.includes(target?.type))
+        if (
+          pointIdx == null ||
+          (shapes[pointIdx]?.type !== "point" && !pointKey) ||
+          !MIDPOINT_TARGETS.includes(target?.type)
+        )
           return {
             notification: "Midpoint needs a point and a line, arc or curve.",
           };
         if (
           (item.constraints || []).some(
-            (c) => c.type === "midpoint" && c.pointShapeIdx === pointIdx,
+            (c) =>
+              c.type === "midpoint" &&
+              c.pointShapeIdx === pointIdx &&
+              (c.pointKey ?? null) === pointKey,
           )
         )
           return {
             notification: "That point already has a midpoint constraint.",
           };
-        midpointFields = { pointShapeIdx: pointIdx, targetShapeIdx: targetIdx };
+        midpointFields = {
+          pointShapeIdx: pointIdx,
+          targetShapeIdx: targetIdx,
+          ...(pointKey ? { pointKey } : {}),
+        };
       }
       const dup = (c) =>
         c.type === type &&
         (type === "midpoint"
           ? c.pointShapeIdx === midpointFields.pointShapeIdx &&
+            (c.pointKey ?? null) === (midpointFields.pointKey ?? null) &&
             c.targetShapeIdx === midpointFields.targetShapeIdx
           : (c.shapeAIdx === idxA && c.shapeBIdx === idxB) ||
             (c.shapeAIdx === idxB && c.shapeBIdx === idxA));
@@ -1420,12 +1450,12 @@ export const createSketchSlice = (set) => ({
       const pairInputShapes = shapes.slice();
       if (midpointFields) {
         const m = shapeMidpoint(pairInputShapes[midpointFields.targetShapeIdx]);
+        const pt = pairInputShapes[midpointFields.pointShapeIdx];
         if (m)
-          pairInputShapes[midpointFields.pointShapeIdx] = {
-            ...pairInputShapes[midpointFields.pointShapeIdx],
-            x: m.x,
-            y: m.y,
-          };
+          pairInputShapes[midpointFields.pointShapeIdx] =
+            pt.type === "point"
+              ? { ...pt, x: m.x, y: m.y }
+              : moveShapePoint(pt, midpointFields.pointKey, m);
       }
       const { shapes: solved, ok } = solveConstraints(
         pairInputShapes,

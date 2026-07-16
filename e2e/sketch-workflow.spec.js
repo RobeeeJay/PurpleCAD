@@ -561,6 +561,66 @@ test.describe.serial("2D sketch workflow", () => {
       .toBeLessThan(0.05);
   });
 
+  test("midpoint tool: a line ENDPOINT works as the point pick", async () => {
+    // Two plain lines; pin line B's start endpoint to line A's middle.
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A1 = toScreen(2, 6);
+    const A2 = toScreen(6, 6);
+    await page.mouse.click(A1.x, A1.y);
+    await page.mouse.click(A2.x, A2.y);
+    await page.keyboard.press("Escape");
+    const B1 = toScreen(3.5, 8);
+    const B2 = toScreen(8, 9);
+    await page.mouse.click(B1.x, B1.y);
+    await page.mouse.click(B2.x, B2.y);
+    await page.keyboard.press("Escape");
+    const aIdx = (await shapes()).length - 2;
+    const bIdx = aIdx + 1;
+    await page.evaluate(() => {
+      window.__store.getState().setActiveSketchTool(null);
+      window.__store.getState().setSelectedSketchElement(null);
+    });
+
+    await page
+      .getByTitle("Midpoint — pin a point to the middle", { exact: false })
+      .click();
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "Click a point",
+    );
+    // Click line B's START endpoint — an endpoint, not a point shape.
+    await page.mouse.click(B1.x, B1.y);
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "Now click a line",
+    );
+    // Then line A's body.
+    const onA = toScreen(3, 6);
+    await page.mouse.click(onA.x, onA.y);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store
+              .getState()
+              .items.find((i) => i.id === 300)
+              .constraints.find((c) => c.pointKey === "start") ?? null,
+        ),
+      )
+      .toMatchObject({
+        type: "midpoint",
+        pointShapeIdx: bIdx,
+        targetShapeIdx: aIdx,
+        pointKey: "start",
+      });
+    // The endpoint rides line A's middle (4, 6); B's far end stays put.
+    const b = (await shapes())[bIdx];
+    expect(b.x1).toBeCloseTo(4, 1);
+    expect(b.y1).toBeCloseTo(6, 1);
+    expect(b.x2).toBeCloseTo(8, 1);
+    expect(b.y2).toBeCloseTo(9, 1);
+  });
+
   test("midpoint tool: shift-click builds a point+line pair, button applies instantly", async () => {
     // Fresh line + point.
     await page.evaluate(() =>

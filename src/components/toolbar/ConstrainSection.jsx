@@ -78,11 +78,25 @@ const ConstrainSection = ({ isSketchMode }) => {
     }
     setSketchConstraintMode("midpoint");
     setSketchDistanceInput(null);
-    const selIdx = selectedSketchElement?.shapeIdx;
-    const kind = selIdx != null ? kindOf(selIdx) : null;
-    useStore
-      .getState()
-      .setSketchMidpointFirst(kind ? { kind, shapeIdx: selIdx } : null);
+    // Seed the first pick from the current selection.  A selected POINT
+    // element may be a keyed point of another shape (line endpoint, circle
+    // centre) — carry the key; a selected line/arc/bezier seeds the target.
+    const sel = selectedSketchElement;
+    let first = null;
+    if (sel?.shapeIdx != null) {
+      if (sel.type === "point")
+        first = {
+          kind: "point",
+          shapeIdx: sel.shapeIdx,
+          pointKey:
+            shapes[sel.shapeIdx]?.type === "point"
+              ? null
+              : (sel.pointKey ?? null),
+        };
+      else if (kindOf(sel.shapeIdx) === "target")
+        first = { kind: "target", shapeIdx: sel.shapeIdx };
+    }
+    useStore.getState().setSketchMidpointFirst(first);
   };
 
   const handleDistanceConstraint = () => {
