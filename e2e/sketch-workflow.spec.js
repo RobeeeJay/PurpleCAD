@@ -266,6 +266,67 @@ test.describe.serial("2D sketch workflow", () => {
     expect(hasDim).toBe(true);
   });
 
+  test("mirror reflects a clicked circle across a clicked line", async () => {
+    // Vertical mirror line at x=6, then mirror the circle at (4, 0.75).
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const M1 = toScreen(6, -1);
+    const M2 = toScreen(6, 2.5);
+    await page.mouse.click(M1.x, M1.y);
+    await page.mouse.click(M2.x, M2.y);
+    await page.keyboard.press("Escape");
+    const before = (await shapes()).length;
+
+    await page
+      .getByTitle("Mirror — pick a mirror line", { exact: false })
+      .click();
+    // First click: the mirror line; second: the geometry to reflect.
+    const onLine = toScreen(6, 1.5);
+    await page.mouse.click(onLine.x, onLine.y);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => window.__store.getState().sketchMirrorState?.lineIdx ?? null,
+        ),
+      )
+      .not.toBe(null);
+    const onCircle = toScreen(4.5, 0.75); // the circle's rim
+    await page.mouse.click(onCircle.x, onCircle.y);
+    // Phase 2 toggles shapes into the mirror SET (live preview); the copy is
+    // committed by the overlay's Confirm button.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store.getState().sketchMirrorState?.shapeIndices.length ??
+            0,
+        ),
+      )
+      .toBe(1);
+    await page
+      .getByTitle("Confirm — create the mirrored geometry")
+      .click();
+
+    await expect.poll(async () => (await shapes()).length).toBe(before + 1);
+    const circles = (await shapes()).filter((sh) => sh.type === "circle");
+    const mirrored = circles.find((c) => c.cx > 6);
+    expect(mirrored).toBeTruthy();
+    expect(mirrored.cx).toBeCloseTo(8, 1); // 4 reflected about x=6
+    expect(mirrored.cy).toBeCloseTo(0.75, 1);
+    // Linked with a mirror constraint (stays in sync with the source).
+    const hasMirror = await page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.find((i) => i.id === 300)
+        .constraints.some((c) => c.type === "mirror"),
+    );
+    expect(hasMirror).toBe(true);
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+  });
+
   test("extrude the drawn rectangle through the profile-pick flow", async () => {
     // Leave the drawing tool, then start the extrude profile pick.
     await page.evaluate(() => {
