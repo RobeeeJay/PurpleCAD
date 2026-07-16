@@ -323,8 +323,18 @@ export const createSketchSlice = (set) => ({
   selectedSketchElement: null, // { type:'point'|'line', shapeIdx, pointKey? }
   setSelectedSketchElement: (el) => set({ selectedSketchElement: el }),
 
-  sketchConstraintMode: null, // 'coincident' | 'distance' | null
-  setSketchConstraintMode: (mode) => set({ sketchConstraintMode: mode }),
+  sketchConstraintMode: null, // 'coincident' | 'distance' | 'midpoint' | null
+  setSketchConstraintMode: (mode) =>
+    set((s) => ({
+      sketchConstraintMode: mode,
+      // The midpoint tool's first pick only means anything inside its mode.
+      ...(mode !== "midpoint" && s.sketchMidpointFirst
+        ? { sketchMidpointFirst: null }
+        : null),
+    })),
+  // Guided midpoint pick: { kind: 'point' | 'target', shapeIdx } | null.
+  sketchMidpointFirst: null,
+  setSketchMidpointFirst: (v) => set({ sketchMidpointFirst: v }),
 
   sketchDistanceInput: null,
   setSketchDistanceInput: (v) => set({ sketchDistanceInput: v }),

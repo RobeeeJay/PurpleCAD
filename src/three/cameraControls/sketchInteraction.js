@@ -889,8 +889,11 @@ export function createSketchInteraction(
       setCoincidentFirstOverlay,
     },
   );
-  const { handleDistanceConstraintClick, handleCoincidentClick } =
-    sketchConstraints;
+  const {
+    handleDistanceConstraintClick,
+    handleCoincidentClick,
+    handleMidpointClick,
+  } = sketchConstraints;
   const applySketchDragMove = (screenX, screenY, shiftKey) => {
     if (!sketchDrag) return;
     const { kind, sketchMesh, selItemId, anchorLocal } = sketchDrag;
@@ -2060,6 +2063,10 @@ export function createSketchInteraction(
       }
       if (constraintMode === "distance") {
         handleDistanceConstraintClick(sx, sy);
+        return;
+      }
+      if (constraintMode === "midpoint") {
+        handleMidpointClick(sx, sy);
         return;
       }
 

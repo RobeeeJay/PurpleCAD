@@ -48,6 +48,43 @@ const ConstrainSection = ({ isSketchMode }) => {
     }
   };
 
+  // Midpoint works like Coincident: always enabled.  If a valid point +
+  // target pair is already selected it applies immediately; a single
+  // selected element seeds the guided mode's first pick; otherwise the mode
+  // asks for both picks.
+  const handleMidpointConstraint = () => {
+    if (sketchConstraintMode === "midpoint") {
+      setSketchConstraintMode(null);
+      return;
+    }
+    const sketch = items.find((i) => i.id === selectedId);
+    const shapes = sketch?.shapes || [];
+    const MIDPOINT_TARGETS = ["line", "arc", "bezier"];
+    const kindOf = (idx) =>
+      shapes[idx]?.type === "point"
+        ? "point"
+        : MIDPOINT_TARGETS.includes(shapes[idx]?.type)
+          ? "target"
+          : null;
+
+    const multi = multiSelectedIndices || [];
+    if (multi.length === 2) {
+      const kinds = multi.map(kindOf);
+      if (kinds.includes("point") && kinds.includes("target")) {
+        applySketchPairConstraint(selectedId, multi[0], multi[1], "midpoint");
+        useStore.getState()._cameraControls?.refreshSketchSelectionOverlay?.();
+        return;
+      }
+    }
+    setSketchConstraintMode("midpoint");
+    setSketchDistanceInput(null);
+    const selIdx = selectedSketchElement?.shapeIdx;
+    const kind = selIdx != null ? kindOf(selIdx) : null;
+    useStore
+      .getState()
+      .setSketchMidpointFirst(kind ? { kind, shapeIdx: selIdx } : null);
+  };
+
   const handleDistanceConstraint = () => {
     if (sketchConstraintMode === "distance") {
       setSketchConstraintMode(null);
@@ -117,6 +154,24 @@ const ConstrainSection = ({ isSketchMode }) => {
                 x2="16"
                 y2="12"
               />
+            </svg>
+          </button>
+          <button
+            className={`toolbar-btn ${sketchConstraintMode === "midpoint" ? "active" : ""}`}
+            title="Midpoint — pin a point to the middle of a line, arc or curve (click the point, then the target)"
+            onClick={handleMidpointConstraint}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <line
+                stroke="#6C3FD4"
+                strokeWidth="1.5"
+                strokeLinecap="square"
+                x1="4"
+                y1="17"
+                x2="20"
+                y2="7"
+              />
+              <circle cx="12" cy="12" r="2.6" fill="#D4A33F" />
             </svg>
           </button>
           <button
@@ -310,42 +365,6 @@ const ConstrainSection = ({ isSketchMode }) => {
             };
             return (
               <>
-                <button
-                  className="toolbar-btn"
-                  title="Midpoint — pin the selected point to the middle of the selected line, arc or curve"
-                  disabled={!ready}
-                  onClick={() => applyPair("midpoint")}
-                >
-                  <svg viewBox="0 0 24 24" width="20" height="20">
-                    {/* A line with its middle marked by a pinned point */}
-                    <line
-                      stroke="#6C3FD4"
-                      strokeWidth="1.5"
-                      strokeLinecap="square"
-                      x1="4"
-                      y1="17"
-                      x2="20"
-                      y2="7"
-                    />
-                    <circle cx="12" cy="12" r="2.6" fill="#D4A33F" />
-                    <line
-                      stroke="#c4c2b8"
-                      strokeWidth="1.2"
-                      x1="7"
-                      y1="13.5"
-                      x2="9.2"
-                      y2="12.2"
-                    />
-                    <line
-                      stroke="#c4c2b8"
-                      strokeWidth="1.2"
-                      x1="14.8"
-                      y1="10.4"
-                      x2="17"
-                      y2="9.1"
-                    />
-                  </svg>
-                </button>
                 <button
                   className="toolbar-btn"
                   title="Parallel — make two selected lines parallel (select two lines)"

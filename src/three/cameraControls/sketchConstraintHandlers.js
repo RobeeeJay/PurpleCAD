@@ -321,5 +321,83 @@ export function createSketchConstraintHandlers(
     }
   };
 
-  return { handleDistanceConstraintClick, handleCoincidentClick };
+  // Guided midpoint flow: collect a POINT shape and a line/arc/bezier target
+  // in either order (each pick ringed), then apply and leave the mode —
+  // mirrors the coincident tool's UX.
+  const MIDPOINT_TARGETS = ["line", "arc", "bezier"];
+  const handleMidpointClick = (screenX, screenY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const shapes = selItem.shapes || [];
+    const store = useStore.getState();
+    const first = store.sketchMidpointFirst;
+
+    const finish = (pointIdx, targetIdx) => {
+      clearCoincidentFirstOverlay();
+      store.setSketchMidpointFirst(null);
+      store.setSketchConstraintMode(null);
+      store.applySketchPairConstraint(
+        selectedIdRef.current,
+        pointIdx,
+        targetIdx,
+        "midpoint",
+      );
+    };
+    const ringAt = (x, y) => {
+      clearCoincidentFirstOverlay();
+      const overlay = makeRingOverlay(
+        { x, y },
+        sketchMesh,
+        CONSTRAINT_PARALLEL_PERP_COLOR,
+      );
+      setCoincidentFirstOverlay(overlay);
+      scene.add(overlay);
+    };
+
+    // A snap on a standalone POINT shape wins; endpoint snaps of lines etc.
+    // are not midpoint subjects.
+    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+    if (snap && shapes[snap.shapeIdx]?.type === "point") {
+      if (first?.kind === "target") {
+        finish(snap.shapeIdx, first.shapeIdx);
+      } else {
+        store.setSketchMidpointFirst({
+          kind: "point",
+          shapeIdx: snap.shapeIdx,
+        });
+        ringAt(snap.x, snap.y);
+      }
+      return;
+    }
+
+    const sketchGroup = sketchShapesGroupRef?.current;
+    if (!sketchGroup) return;
+    const hits = hitTestSketchLines(
+      makeRay(screenX, screenY),
+      sketchGroup.children.filter((c) => c.userData.shapeIdx != null),
+    );
+    const idx = hits[0]?.object?.userData?.shapeIdx;
+    if (idx == null) return;
+    const shape = shapes[idx];
+    if (!MIDPOINT_TARGETS.includes(shape?.type)) return;
+    if (first?.kind === "point") {
+      finish(first.shapeIdx, idx);
+    } else {
+      const m =
+        shape.type === "line"
+          ? { x: (shape.x1 + shape.x2) / 2, y: (shape.y1 + shape.y2) / 2 }
+          : null;
+      store.setSketchMidpointFirst({ kind: "target", shapeIdx: idx });
+      if (m) ringAt(m.x, m.y);
+    }
+  };
+
+  return {
+    handleDistanceConstraintClick,
+    handleCoincidentClick,
+    handleMidpointClick,
+  };
 }

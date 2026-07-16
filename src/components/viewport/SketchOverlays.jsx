@@ -27,6 +27,7 @@ export default function SketchOverlays({
   sketchDrawPhase,
   sketchMode,
   sketchConstraintMode,
+  sketchMidpointFirst,
   sketchConstraintFirstPoint,
   sketchModifyMode,
   sketchDistanceInput,
@@ -711,6 +712,15 @@ export default function SketchOverlays({
             </div>
           </>
         )}
+      {sketchMode && sketchConstraintMode === "midpoint" && (
+        <div className="sketch-placement-hint">
+          {sketchMidpointFirst?.kind === "point"
+            ? "Now click a line, arc or curve — the point pins to its middle · Esc to cancel"
+            : sketchMidpointFirst?.kind === "target"
+              ? "Now click a point — it pins to the middle · Esc to cancel"
+              : "Click a point, then a line, arc or curve · Esc to cancel"}
+        </div>
+      )}
       {sketchMode && sketchConstraintMode === "coincident" && (
         <div className="sketch-placement-hint">
           {sketchConstraintFirstPoint

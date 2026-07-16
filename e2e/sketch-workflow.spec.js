@@ -429,7 +429,7 @@ test.describe.serial("2D sketch workflow", () => {
     await page.evaluate(() => window.__store.getState().cancelMeasureTool());
   });
 
-  test("midpoint constraint pins a point to a line's middle and tracks drags", async () => {
+  test("midpoint tool: guided picks like coincident, then tracks drags", async () => {
     // Draw a fresh line and a point with the mouse.
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool("line"),
@@ -447,51 +447,51 @@ test.describe.serial("2D sketch workflow", () => {
     const lineIdx = (await shapes()).length - 2;
     const pointIdx = lineIdx + 1;
     expect((await shapes())[pointIdx].type).toBe("point");
-    await page.evaluate(() =>
-      window.__store.getState().setActiveSketchTool(null),
+    await page.evaluate(() => {
+      window.__store.getState().setActiveSketchTool(null);
+      window.__store.getState().setSelectedSketchElement(null);
+    });
+
+    // The button is ALWAYS enabled; with nothing selected it enters the
+    // guided mode and asks for a point first.
+    const midBtn = page.getByTitle("Midpoint — pin a point to the middle", {
+      exact: false,
+    });
+    await expect(midBtn).toBeEnabled();
+    await midBtn.click();
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "Click a point, then a line",
     );
 
-    // Select the POINT first, then shift-click the line (the shift-click
-    // hit-test targets line-drawn shapes; the seed carries any element kind).
-    const onPoint = toScreen(-1, -6.5);
-    await page.mouse.click(onPoint.x, onPoint.y);
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => window.__store.getState().selectedSketchElement?.type ?? null,
-        ),
-      )
-      .toBe("point");
-    const onLine = toScreen(-3, -5);
-    await page.keyboard.down("Shift");
+    // Pick the point → the hint asks for the target; pick the line → applied.
+    await page.mouse.click(P.x, P.y);
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "Now click a line",
+    );
+    const onLine = toScreen(-2, -5);
     await page.mouse.click(onLine.x, onLine.y);
-    await page.keyboard.up("Shift");
     await expect
       .poll(() =>
-        page.evaluate(
-          () =>
-            window.__store.getState().sketchMultiSelectedIndices?.length ?? 0,
+        page.evaluate(() =>
+          window.__store
+            .getState()
+            .items.find((i) => i.id === 300)
+            .constraints.some((c) => c.type === "midpoint"),
         ),
       )
-      .toBe(2);
-    await page
-      .getByTitle("Midpoint — pin the selected point", { exact: false })
-      .click();
-
-    // The point snapped to the line's middle and the constraint persisted.
+      .toBe(true);
+    // The mode exits after applying, and the point sits on the middle.
+    expect(
+      await page.evaluate(
+        () => window.__store.getState().sketchConstraintMode,
+      ),
+    ).toBe(null);
     let pt = (await shapes())[pointIdx];
     expect(pt.x).toBeCloseTo(-2, 1);
     expect(pt.y).toBeCloseTo(-5, 1);
-    const hasConstraint = await page.evaluate(() =>
-      window.__store
-        .getState()
-        .items.find((i) => i.id === 300)
-        .constraints.some((c) => c.type === "midpoint"),
-    );
-    expect(hasConstraint).toBe(true);
 
-    // Drag the line with the mouse — wherever it lands (endpoint stretch or
-    // whole-line translate depending on the grab), the point rides its middle.
+    // Drag the line with the mouse — wherever it lands, the point rides its
+    // middle.
     const end = toScreen(0, -5);
     const target = toScreen(2, -5);
     await page.mouse.move(end.x, end.y);
@@ -512,9 +512,53 @@ test.describe.serial("2D sketch workflow", () => {
         { timeout: 5000 },
       )
       .toBeLessThan(0.05);
-    // And the line really moved (the drag did something).
     const moved = (await shapes())[lineIdx];
     expect(Math.max(moved.x1, moved.x2)).toBeGreaterThan(0.5);
+  });
+
+  test("midpoint tool: a pre-selected point seeds the first pick", async () => {
+    // Second line + point; select the point BEFORE hitting the button.
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(3, -5);
+    const B = toScreen(7, -5);
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("point"),
+    );
+    const P = toScreen(6, -7);
+    await page.mouse.click(P.x, P.y);
+    const pointIdx = (await shapes()).length - 1;
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+    await page.mouse.click(P.x, P.y); // select the point
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => window.__store.getState().selectedSketchElement?.type ?? null,
+        ),
+      )
+      .toBe("point");
+
+    await page
+      .getByTitle("Midpoint — pin a point to the middle", { exact: false })
+      .click();
+    // The selection seeded pick #1 — the mode goes straight to the target ask.
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "Now click a line",
+    );
+    const onLine = toScreen(5, -5);
+    await page.mouse.click(onLine.x, onLine.y);
+    await expect
+      .poll(async () => {
+        const p = (await shapes())[pointIdx];
+        return Math.hypot(p.x - 5, p.y - -5);
+      })
+      .toBeLessThan(0.05);
   });
 
   test("extrude the drawn rectangle through the profile-pick flow", async () => {
