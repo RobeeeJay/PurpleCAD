@@ -46,6 +46,31 @@ const VersionTag = () => {
     const it = s.items.find((i) => i.id === s.selectedId);
     return it?.type === "sketch";
   });
+  // Encoded "points|lines|constraints" of the current sketch selection ("" =
+  // nothing selected) — a primitive so the selector doesn't thrash renders.
+  const selKey = useStore((s) => {
+    const it = s.items.find((i) => i.id === s.selectedId);
+    if (it?.type !== "sketch") return "";
+    const shapes = it.shapes || [];
+    let points = 0;
+    let lines = 0;
+    const multi = s.sketchMultiSelectedIndices || [];
+    multi.forEach((i) =>
+      shapes[i]?.type === "point" ? (points += 1) : (lines += 1),
+    );
+    const sel = s.selectedSketchElement;
+    if (sel && multi.length === 0)
+      sel.type === "point" ? (points += 1) : (lines += 1);
+    const constraints = s.selectedSketchConstraintIdx != null ? 1 : 0;
+    return points + lines + constraints > 0
+      ? `${points}|${lines}|${constraints}`
+      : "";
+  });
+  const selected = selKey
+    ? (([p, l, c]) => ({ points: p, lines: l, constraints: c }))(
+        selKey.split("|").map(Number),
+      )
+    : null;
 
   useEffect(() => {
     const tick = () => {
@@ -71,7 +96,28 @@ const VersionTag = () => {
       className={`version-tag${inSketch ? " version-tag-sketch" : ""}`}
       aria-hidden="true"
     >
-      {stats && stats.sketch && (
+      {stats && stats.sketch && selected && (
+        <>
+          <span title="Points / lines / constraints currently selected · renderer JS heap">
+            {[
+              selected.points > 0 && `${selected.points} pts`,
+              selected.lines > 0 && `${selected.lines} lines`,
+              selected.constraints > 0 && `${selected.constraints} constraints`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}{" "}
+            selected
+            {stats.mem != null && (
+              <>
+                <span className="version-tag-sep">·</span>
+                {stats.mem} MB
+              </>
+            )}
+          </span>
+          <span className="version-tag-sep">·</span>
+        </>
+      )}
+      {stats && stats.sketch && !selected && (
         <>
           <span title="Faces / lines / constraints in the open sketch · renderer JS heap">
             {compact(stats.sketch.faces)} faces

@@ -628,20 +628,70 @@ test.describe.serial("2D sketch workflow", () => {
     expect(pt.y).toBeCloseTo(-8, 1);
   });
 
-  test("version tag shows sketch stats above the bottom ruler", async () => {
+  test("version tag shows sketch totals, swapping to selection counts", async () => {
     const tag = page.locator(".version-tag");
-    // In sketch mode the totals switch to faces / lines / constraints.
+    // Nothing selected: totals for the open sketch.
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.setSelectedSketchElement(null);
+      s.setSketchMultiSelectedIndices([]);
+    });
     await expect(tag).toContainText("lines", { timeout: 5000 });
-    const text = await tag.textContent();
+    let text = await tag.textContent();
     expect(text).toMatch(/\d[\d.km]* faces/i);
     expect(text).toMatch(/\d[\d.km]* lines/i);
     expect(text).toMatch(/\d[\d.km]* constraints/i);
-    expect(text).not.toMatch(/pts/);
+    expect(text).not.toMatch(/pts|selected/);
 
     // Positioned clear of the 22px screen-locked bottom ruler.
     const box = await tag.boundingBox();
     const viewH = await page.evaluate(() => window.innerHeight);
     expect(box.y + box.height).toBeLessThanOrEqual(viewH - 22);
+
+    // Fresh unconstrained line + point (the earlier midpoint pair left a
+    // constraint icon on its line middle, which a click would select).
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(-9, 3);
+    const B = toScreen(-5, 3);
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("point"),
+    );
+    const P = toScreen(-7, 1);
+    await page.mouse.click(P.x, P.y);
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+
+    // Click the line: the tag swaps to the selection's counts.
+    const onLine = toScreen(-8, 3);
+    await page.mouse.click(onLine.x, onLine.y);
+    await expect(tag).toContainText("1 lines selected");
+    expect(await tag.textContent()).not.toMatch(/faces/);
+
+    // Shift-click the standalone point: pair counts, points included.
+    await page.keyboard.down("Shift");
+    await page.mouse.click(P.x, P.y);
+    await page.keyboard.up("Shift");
+    await expect(tag).toContainText("1 pts · 1 lines selected");
+
+    // Click the midpoint icon from the earlier pair test: constraint counts.
+    const icon = toScreen(-6, -8);
+    await page.mouse.click(icon.x, icon.y);
+    await expect(tag).toContainText("1 constraints selected");
+
+    // Clearing the selection returns the totals.
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.setSketchMultiSelectedIndices([]);
+      s.setSelectedSketchConstraintIdx(null);
+      s.setSelectedSketchElement(null);
+    });
+    await expect(tag).toContainText("faces");
   });
 
   test("extrude the drawn rectangle through the profile-pick flow", async () => {

@@ -63,6 +63,7 @@ export function createSketchHoverHelpers(
     });
     selectedConstraintIconRefs = [];
     selectedConstraintIdx = null;
+    useStore.getState().setSelectedSketchConstraintIdx(null);
   };
 
   const applyConstraintSelectionVisual = () => {
@@ -113,6 +114,7 @@ export function createSketchHoverHelpers(
     clearConstraintSelection();
     if (!isSame) {
       selectedConstraintIdx = constraintIdx;
+      useStore.getState().setSelectedSketchConstraintIdx(constraintIdx);
       applyConstraintSelectionVisual();
     }
   };

@@ -423,6 +423,11 @@ export const createSketchSlice = (set) => ({
 
   sketchMultiSelectedIndices: [],
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
+  // Mirror of sketchHover's closure-local constraint selection so React
+  // surfaces (the status tag) can count it.
+  selectedSketchConstraintIdx: null,
+  setSelectedSketchConstraintIdx: (v) =>
+    set({ selectedSketchConstraintIdx: v }),
 
   // Sketch selection-type filter (the top-right widget): which kinds a click
   // resolves to.  line/point/shape on by default (the priority point > line >
