@@ -191,6 +191,105 @@ describe("store action validation", () => {
   });
 });
 
+describe("staged solve minimises movement (first pick moves first)", () => {
+  const makeStore = (shapes, constraints = []) =>
+    create((set) => ({
+      items: [
+        {
+          id: 1,
+          type: "sketch",
+          shapes,
+          constraints,
+          position: {},
+          rotation: {},
+        },
+      ],
+      history: [
+        {
+          id: 0,
+          instruction: {
+            type: "create",
+            item: { id: 1, type: "sketch", shapes, constraints },
+          },
+        },
+      ],
+      activeHistoryId: null,
+      undoStack: [],
+      redoStack: [],
+      ...createSketchSlice(set),
+    }));
+  const slope = (l) => (l.y2 - l.y1) / (l.x2 - l.x1);
+  const expectUnmoved = (l, ref) => {
+    for (const f of ["x1", "y1", "x2", "y2"])
+      expect(l[f]).toBeCloseTo(ref[f], 9);
+  };
+
+  it("parallel: only the FIRST-picked line rotates", () => {
+    const A = { type: "line", x1: 0, y1: 0, x2: 4, y2: 1 };
+    const B = { type: "line", x1: 0, y1: 2, x2: 4, y2: 2 };
+    const s = makeStore([A, B]);
+    s.getState().applySketchPairConstraint(1, 0, 1, "parallel");
+    const [a, b] = s.getState().items[0].shapes;
+    expectUnmoved(b, B); // second pick untouched
+    expect(slope(a)).toBeCloseTo(slope(b), 4);
+  });
+
+  it("parallel: reversed pick order moves the other line", () => {
+    const A = { type: "line", x1: 0, y1: 0, x2: 4, y2: 1 };
+    const B = { type: "line", x1: 0, y1: 2, x2: 4, y2: 2 };
+    const s = makeStore([A, B]);
+    s.getState().applySketchPairConstraint(1, 1, 0, "parallel");
+    const [a, b] = s.getState().items[0].shapes;
+    expectUnmoved(a, A); // second pick untouched
+    expect(slope(b)).toBeCloseTo(slope(a), 4);
+  });
+
+  it("midpoint with the TARGET picked first translates the target to the point", () => {
+    const s = makeStore([
+      { type: "point", x: 9, y: 9 },
+      { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 },
+    ]);
+    // idxA = 1 (the line) — the first pick — so the LINE moves, not the point.
+    s.getState().applySketchPairConstraint(1, 1, 0, "midpoint");
+    const [pt, ln] = s.getState().items[0].shapes;
+    expect(pt.x).toBeCloseTo(9, 5);
+    expect(pt.y).toBeCloseTo(9, 5);
+    expect((ln.x1 + ln.x2) / 2).toBeCloseTo(9, 4);
+    expect((ln.y1 + ln.y2) / 2).toBeCloseTo(9, 4);
+    expect(ln.x2 - ln.x1).toBeCloseTo(4, 4); // rigid translate, no stretch
+  });
+
+  it("falls through the stages when the first pick alone can't satisfy", () => {
+    // The first-picked line's endpoints are pinned by fixed-field distance
+    // constraints? Simpler: first pick IS the point but it's the target's own
+    // frame that must give — a point whose position is also coincident-linked
+    // to a third anchor can't move alone, so the solve frees the second pick.
+    const anchor = { type: "point", x: 9, y: 9 };
+    const subject = { type: "point", x: 9, y: 9 };
+    const target = { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 };
+    const s = makeStore(
+      [anchor, subject, target],
+      [
+        {
+          type: "coincident",
+          shapeAIdx: 0,
+          pointA: "point",
+          shapeBIdx: 1,
+          pointB: "point",
+        },
+      ],
+    );
+    // Pick the SUBJECT point first: moving it alone breaks the coincident
+    // (the anchor is fixed in stage 1), moving subject+target works — the
+    // line comes to the point.
+    s.getState().applySketchPairConstraint(1, 1, 2, "midpoint");
+    const [a, p, ln] = s.getState().items[0].shapes;
+    expect(Math.hypot(a.x - p.x, a.y - p.y)).toBeLessThan(1e-3);
+    expect((ln.x1 + ln.x2) / 2).toBeCloseTo(p.x, 3);
+    expect((ln.y1 + ln.y2) / 2).toBeCloseTo(p.y, 3);
+  });
+});
+
 describe("keyed points (endpoints / centres) as midpoint subjects", () => {
   const makeStore = (shapes, constraints = []) =>
     create((set) => ({

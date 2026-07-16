@@ -683,9 +683,15 @@ test.describe.serial("2D sketch workflow", () => {
     expect(
       await page.evaluate(() => window.__store.getState().sketchConstraintMode),
     ).toBe(null);
-    const pt = (await shapes())[pointIdx];
-    expect(pt.x).toBeCloseTo(-6, 1);
-    expect(pt.y).toBeCloseTo(-8, 1);
+    // The LINE was picked first, so the staged solve moves IT: the line
+    // translates until its middle sits on the point; the point stays put.
+    const all = await shapes();
+    const pt = all[pointIdx];
+    const ln = all[lineIdx];
+    expect(pt.x).toBeCloseTo(-7, 1);
+    expect(pt.y).toBeCloseTo(-9.5, 1);
+    expect((ln.x1 + ln.x2) / 2).toBeCloseTo(pt.x, 1);
+    expect((ln.y1 + ln.y2) / 2).toBeCloseTo(pt.y, 1);
   });
 
   test("version tag shows sketch totals, swapping to selection counts", async () => {
@@ -740,7 +746,9 @@ test.describe.serial("2D sketch workflow", () => {
     await expect(tag).toContainText("1 pts · 1 lines selected");
 
     // Click the midpoint icon from the earlier pair test: constraint counts.
-    const icon = toScreen(-6, -8);
+    // (The LINE was picked first there, so it travelled to the point — the
+    // icon sits at the line's middle = the point's position.)
+    const icon = toScreen(-7, -9.5);
     await page.mouse.click(icon.x, icon.y);
     await expect(tag).toContainText("1 constraints selected");
 

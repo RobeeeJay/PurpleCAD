@@ -75,7 +75,12 @@ test("hovering a toolbar button displays the app tooltip", async () => {
   for (const name of ["Chamfer", "Bevel"]) {
     const btn = page.getByTitle(name, { exact: false }).first();
     const box = await btn.boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    // Approach in steps from elsewhere — the tooltip layer arms on mousemove,
+    // and a same-position "move" fires no event (the flake).
+    await page.mouse.move(10, 400);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+      steps: 4,
+    });
     await expect(page.locator(".app-tooltip.visible")).toBeVisible({
       timeout: 2000,
     });

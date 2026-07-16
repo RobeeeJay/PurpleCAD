@@ -13,8 +13,11 @@ import {
 } from "./internals.js";
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
-import { shapeMidpoint } from "../three/sketchGeometry.js";
-import { moveShapePoint } from "../three/sceneObjects/sketchShapes.js";
+import { shapeMidpoint, translateShape } from "../three/sketchGeometry.js";
+import {
+  moveShapePoint,
+  getShapePoint,
+} from "../three/sceneObjects/sketchShapes.js";
 import { resolveValue } from "../three/geometryParams.js";
 import {
   MIRRORABLE_TYPES,
@@ -31,7 +34,6 @@ import {
   translateShapeGeometry,
   applyRectangularPatternConstraints,
 } from "../three/sketchRectangularPattern.js";
-import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import { explodeContours, resizeCorner } from "../three/sketchGeometry.js";
 import {
@@ -1306,8 +1308,22 @@ export const createSketchSlice = (set) => ({
           : { ...shape, x1: mx, x2: mx };
       const inputShapes = (item.shapes || []).slice();
       inputShapes[shapeIdx] = snapped;
-      const { shapes: solved, ok } = solveConstraints(inputShapes, constraints);
-      if (!ok)
+      // Minimise movement: first try satisfying everything by moving ONLY the
+      // selected line; free the rest of the sketch only if that fails.
+      const othersFixed = new Set();
+      (item.shapes || []).forEach((sh, i) => {
+        if (i === shapeIdx) return;
+        for (const f of varFields(sh)) othersFixed.add(`${i}:${f}`);
+      });
+      let solved = null;
+      for (const opts of [{ fixed: othersFixed }, undefined]) {
+        const res = solveConstraints(inputShapes, constraints, opts);
+        if (res.ok) {
+          solved = res.shapes;
+          break;
+        }
+      }
+      if (!solved)
         return {
           notification:
             "Can't apply that constraint — it would break another constraint",
@@ -1445,23 +1461,58 @@ export const createSketchSlice = (set) => ({
           ? { type, ...midpointFields }
           : { type, shapeAIdx: idxA, shapeBIdx: idxB },
       ];
-      // Pre-seed the point onto the target's middle so the solver starts at
-      // (or very near) the solution.
-      const pairInputShapes = shapes.slice();
-      if (midpointFields) {
-        const m = shapeMidpoint(pairInputShapes[midpointFields.targetShapeIdx]);
-        const pt = pairInputShapes[midpointFields.pointShapeIdx];
-        if (m)
-          pairInputShapes[midpointFields.pointShapeIdx] =
+      // Staged solve, minimising movement: first only the FIRST-picked shape
+      // may move, then both picked shapes, then the whole sketch (idxA/idxB
+      // arrive in pick order).
+      const stagedFixed = (freeIdxs) => {
+        const freeSet = new Set(freeIdxs);
+        const fixed = new Set();
+        shapes.forEach((sh, i) => {
+          if (freeSet.has(i)) return;
+          for (const f of varFields(sh)) fixed.add(`${i}:${f}`);
+        });
+        return fixed;
+      };
+      // Seed each stage at (or near) the solution, but only ever by moving a
+      // shape that stage lets move: the point jumps to the target's middle
+      // when it is free, otherwise the target translates its middle onto the
+      // point.  The solver converges poorly from far seeds, so this matters.
+      const seedShapes = (freeIdxs) => {
+        const input = shapes.slice();
+        if (!midpointFields) return input;
+        const pi = midpointFields.pointShapeIdx;
+        const ti = midpointFields.targetShapeIdx;
+        const freeSet = freeIdxs ? new Set(freeIdxs) : null;
+        const m = shapeMidpoint(input[ti]);
+        if (!m) return input;
+        if (!freeSet || freeSet.has(pi)) {
+          const pt = input[pi];
+          input[pi] =
             pt.type === "point"
               ? { ...pt, x: m.x, y: m.y }
               : moveShapePoint(pt, midpointFields.pointKey, m);
+        } else if (freeSet.has(ti)) {
+          const p = getShapePoint(
+            input[pi],
+            midpointFields.pointKey ?? "point",
+          );
+          if (p) input[ti] = translateShape(input[ti], p.x - m.x, p.y - m.y);
+        }
+        return input;
+      };
+      let solved = null;
+      for (const free of [[idxA], [idxA, idxB], null]) {
+        const res = solveConstraints(
+          seedShapes(free),
+          constraints,
+          free ? { fixed: stagedFixed(free) } : undefined,
+        );
+        if (res.ok) {
+          solved = res.shapes;
+          break;
+        }
       }
-      const { shapes: solved, ok } = solveConstraints(
-        pairInputShapes,
-        constraints,
-      );
-      if (!ok)
+      if (!solved)
         return {
           notification:
             "Can't apply that constraint — it would break another constraint",

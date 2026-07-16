@@ -217,32 +217,36 @@ export function createSketchConstraintHandlers(
         firstPt.pointKey === snap.pointKey
       )
         return;
+      // Minimise movement: the FIRST-picked point travels to the second
+      // pick's location (the second pick and everything hanging off it stay
+      // put); coincident chains on the first point ride along via
+      // propagation.
       const firstShape = shapes[firstPt.shapeIdx];
-      const firstPos = firstShape
-        ? getShapePoint(firstShape, firstPt.pointKey)
+      const secondShape = shapes[snap.shapeIdx];
+      const firstPos = secondShape
+        ? getShapePoint(secondShape, snap.pointKey)
         : null;
       if (firstPos) {
-        const secondShape = shapes[snap.shapeIdx];
-        const newSecondShape = secondShape
-          ? moveShapePoint(secondShape, snap.pointKey, firstPos)
+        const newFirstShape = firstShape
+          ? moveShapePoint(firstShape, firstPt.pointKey, firstPos)
           : null;
         let currentShapes = shapes; // shapes after propagation, for coincident scan
-        if (newSecondShape) {
+        if (newFirstShape) {
           const propagated = propagateConstraints(
             selectedIdRef.current,
-            snap.shapeIdx,
-            newSecondShape,
-            snap.pointKey,
+            firstPt.shapeIdx,
+            newFirstShape,
+            firstPt.pointKey,
           );
           if (propagated.size > 1)
             store.updateSketchShapes(selectedIdRef.current, propagated);
           else
             store.updateSketchShape(
               selectedIdRef.current,
-              snap.shapeIdx,
-              newSecondShape,
+              firstPt.shapeIdx,
+              newFirstShape,
             );
-          // Build updated snapshot so we can detect which points landed at firstPos
+          // Build updated snapshot so we can detect which points landed at the junction
           currentShapes = shapes.slice();
           propagated.forEach((s, i) => {
             currentShapes[i] = s;
@@ -336,16 +340,24 @@ export function createSketchConstraintHandlers(
     const store = useStore.getState();
     const first = store.sketchMidpointFirst;
 
-    const finish = (pointIdx, pointKey, targetIdx) => {
+    // idxA/idxB go to the store in PICK order — the staged solve moves the
+    // first-picked shape before it considers touching the second.
+    const finish = (pointIdx, pointKey, targetIdx, targetFirst) => {
       clearCoincidentFirstOverlay();
       store.setSketchMidpointFirst(null);
       store.setSketchConstraintMode(null);
+      const [ia, ib] = targetFirst
+        ? [targetIdx, pointIdx]
+        : [pointIdx, targetIdx];
       store.applySketchPairConstraint(
         selectedIdRef.current,
-        pointIdx,
-        targetIdx,
+        ia,
+        ib,
         "midpoint",
-        { pointIdx, pointKey },
+        {
+          pointIdx,
+          pointKey,
+        },
       );
     };
     const ringAt = (x, y) => {
@@ -367,7 +379,7 @@ export function createSketchConstraintHandlers(
       const key = pointShape?.type === "point" ? null : (snap.pointKey ?? null);
       if (pointShape?.type === "point" || key) {
         if (first?.kind === "target") {
-          finish(snap.shapeIdx, key, first.shapeIdx);
+          finish(snap.shapeIdx, key, first.shapeIdx, true);
         } else {
           store.setSketchMidpointFirst({
             kind: "point",
@@ -391,7 +403,7 @@ export function createSketchConstraintHandlers(
     const shape = shapes[idx];
     if (!MIDPOINT_TARGETS.includes(shape?.type)) return;
     if (first?.kind === "point") {
-      finish(first.shapeIdx, first.pointKey ?? null, idx);
+      finish(first.shapeIdx, first.pointKey ?? null, idx, false);
     } else {
       const m =
         shape.type === "line"
