@@ -350,6 +350,70 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     });
   }, 60000);
 
+  it("loft", async () => {
+    const sk = (id, half, z) => ({
+      id,
+      type: "sketch",
+      position: { x: 0, y: 0, z },
+      rotation: O,
+      shapes: [
+        { type: "line", x1: -half, y1: -half, x2: half, y2: -half },
+        { type: "line", x1: half, y1: -half, x2: half, y2: half },
+        { type: "line", x1: half, y1: half, x2: -half, y2: half },
+        { type: "line", x1: -half, y1: half, x2: -half, y2: -half },
+      ],
+    });
+    const src = (sketchId, half, z) => ({
+      type: "extrude",
+      depth: 0,
+      position: { x: 0, y: 0, z },
+      rotation: O,
+      profile: {
+        sketchId,
+        profileCentroid: { x: 0, y: 0 },
+        polygon2D: [
+          { x: -half, y: -half },
+          { x: half, y: -half },
+          { x: half, y: half },
+          { x: -half, y: half },
+        ],
+        holes: [],
+        position: { x: 0, y: 0, z },
+        rotation: O,
+        normalWorld: { x: 0, y: 0, z: 1 },
+      },
+    });
+    await parity("loftItem", {
+      profileSource: src(31, 1, 0),
+      secondProfileSource: src(32, 0.5, 4),
+      allItems: [sk(31, 1, 0), sk(32, 0.5, 4)],
+      printPrecision: 0.05,
+    });
+  }, 60000);
+
+  it("pattern3d circular + rectangular", async () => {
+    const c = cube(16, { position: { x: 3, y: 0, z: 0 } });
+    await parity("pattern3dItem", {
+      patternType: "circular",
+      sourceId: 16,
+      params: {
+        origin: O,
+        axis: { x: 0, y: 0, z: 1 },
+        count: 4,
+        angleRad: 2 * Math.PI,
+      },
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+    await parity("pattern3dItem", {
+      patternType: "rectangular",
+      sourceId: 16,
+      params: { countX: 3, countY: 1, dx: 5, dy: 0 },
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+  }, 60000);
+
   it("pattern3d mirror", async () => {
     const c = cube(14, { position: { x: 3, y: 0, z: 0 } });
     await parity("pattern3dItem", {
