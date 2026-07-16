@@ -561,6 +561,89 @@ test.describe.serial("2D sketch workflow", () => {
       .toBeLessThan(0.05);
   });
 
+  test("midpoint tool: shift-click builds a point+line pair, button applies instantly", async () => {
+    // Fresh line + point.
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(-8, -8);
+    const B = toScreen(-4, -8);
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("point"),
+    );
+    const P = toScreen(-7, -9.5);
+    await page.mouse.click(P.x, P.y);
+    const lineIdx = (await shapes()).length - 2;
+    const pointIdx = lineIdx + 1;
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+
+    // Click the LINE, then SHIFT-click the standalone POINT — the pair lands
+    // in the multiselect (points aren't line objects; this is the snap path).
+    const onLine = toScreen(-5, -8);
+    await page.mouse.click(onLine.x, onLine.y);
+    await page.keyboard.down("Shift");
+    await page.mouse.click(P.x, P.y);
+    await page.keyboard.up("Shift");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store.getState().sketchMultiSelectedIndices?.length ?? 0,
+        ),
+      )
+      .toBe(2);
+
+    // With the pair selected the button applies immediately — no guided mode.
+    const before = await page.evaluate(
+      () =>
+        window.__store
+          .getState()
+          .items.find((i) => i.id === 300)
+          .constraints.filter((c) => c.type === "midpoint").length,
+    );
+    await page
+      .getByTitle("Midpoint — pin a point to the middle", { exact: false })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store
+              .getState()
+              .items.find((i) => i.id === 300)
+              .constraints.filter((c) => c.type === "midpoint").length,
+        ),
+      )
+      .toBe(before + 1);
+    expect(
+      await page.evaluate(() => window.__store.getState().sketchConstraintMode),
+    ).toBe(null);
+    const pt = (await shapes())[pointIdx];
+    expect(pt.x).toBeCloseTo(-6, 1);
+    expect(pt.y).toBeCloseTo(-8, 1);
+  });
+
+  test("version tag shows sketch stats above the bottom ruler", async () => {
+    const tag = page.locator(".version-tag");
+    // In sketch mode the totals switch to faces / lines / constraints.
+    await expect(tag).toContainText("lines", { timeout: 5000 });
+    const text = await tag.textContent();
+    expect(text).toMatch(/\d[\d.km]* faces/i);
+    expect(text).toMatch(/\d[\d.km]* lines/i);
+    expect(text).toMatch(/\d[\d.km]* constraints/i);
+    expect(text).not.toMatch(/pts/);
+
+    // Positioned clear of the 22px screen-locked bottom ruler.
+    const box = await tag.boundingBox();
+    const viewH = await page.evaluate(() => window.innerHeight);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewH - 22);
+  });
+
   test("extrude the drawn rectangle through the profile-pick flow", async () => {
     // Leave the drawing tool, then start the extrude profile pick.
     await page.evaluate(() => {

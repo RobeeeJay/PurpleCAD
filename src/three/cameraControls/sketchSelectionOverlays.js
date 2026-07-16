@@ -205,6 +205,18 @@ export function createSketchSelectionOverlays({
     indices.forEach((idx) => {
       const shape = shapes[idx];
       if (!shape) return;
+      // A standalone point can join the multiselect (midpoint pairs a point
+      // with a line/arc/curve) — mark it with a ring since it has no polyline.
+      if (shape.type === "point") {
+        const ring = makeRingOverlay(
+          { x: shape.x, y: shape.y },
+          sketchMesh,
+          SKETCH_SELECTION_BLUE,
+        );
+        scene.add(ring);
+        multiSelectOverlays.push(ring);
+        return;
+      }
       const pts = getSketchShapePoints(shape, sketchMesh);
       if (pts.length < 2) return;
       const geo = new LineGeometry();

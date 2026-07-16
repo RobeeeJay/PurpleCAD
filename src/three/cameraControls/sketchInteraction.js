@@ -2216,7 +2216,7 @@ export function createSketchInteraction(
       }
 
       if (shift) {
-        // Shift+click: toggle the hit line in/out of the multi-selection.
+        // Shift+click: toggle the hit element in/out of the multi-selection.
         // Selecting lines for a distance/length drops any measure point picks.
         if (useStore.getState().measureTool)
           useStore.getState().clearMeasurePicks();
@@ -2231,8 +2231,26 @@ export function createSketchInteraction(
             !c.userData.isRectangularPattern,
         );
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
-        if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
-          const hitIdx = hits[0].object.userData.shapeIdx;
+        let hitIdx =
+          hits.length > 0 && hits[0].object.userData.shapeIdx != null
+            ? hits[0].object.userData.shapeIdx
+            : null;
+        // Standalone POINT shapes aren't line objects, so the line hit-test
+        // never sees them — snap for one so a point can join the pair
+        // (midpoint's point + line/arc/curve selection).
+        if (hitIdx == null) {
+          const selItem = itemsRef.current.find(
+            (i) => i.id === selectedIdRef.current,
+          );
+          const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+          if (selItem && sketchMesh) {
+            const shapes = selItem.shapes || [];
+            const snap = findSnap(sx, sy, shapes, sketchMesh);
+            if (snap && shapes[snap.shapeIdx]?.type === "point")
+              hitIdx = snap.shapeIdx;
+          }
+        }
+        if (hitIdx != null) {
           // Seed from the current single-element selection so the natural
           // flow — click one element, shift-click a second — yields a 2-shape
           // multiselect.  Any element kind seeds: parallel/tangent want two
