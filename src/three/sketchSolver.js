@@ -9,6 +9,7 @@
 // the current one (and fixed points stay put).
 
 import { resolveConstraintDistance } from "./geometryParams.js";
+import { shapeMidpoint } from "./sketchGeometry.js";
 import { rederiveAllCorners } from "./sketchGeometry.js";
 
 // Which scalar fields of a shape the solver may move, in a stable order.
@@ -123,6 +124,12 @@ function residuals(shapes, constraints, variables) {
         const len = Math.hypot(dx, dy) || 1e-9;
         out.push(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len);
       } else out.push(0);
+    } else if (c.type === "midpoint") {
+      // Pin a point shape to the geometric middle of a line / arc / bezier.
+      const p = pointOf(shapes[c.pointShapeIdx], "point");
+      const m = shapeMidpoint(shapes[c.targetShapeIdx]);
+      if (p && m) out.push(p.x - m.x, p.y - m.y);
+      else out.push(0, 0);
     } else if (c.type === "offset") {
       // Parametric offset of a NEW line from its ORIGINAL: keep them parallel
       // and at a fixed signed perpendicular distance.  Two residuals: the
@@ -296,6 +303,7 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
     )
       link(c.shapeAIdx, c.shapeBIdx);
     else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);
+    else if (c.type === "midpoint") link(c.targetShapeIdx, c.pointShapeIdx);
     else if (c.type === "offset") link(c.shapeIdx, c.origIdx);
   }
   const dist = new Array(numShapes).fill(Infinity);

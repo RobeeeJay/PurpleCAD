@@ -5,6 +5,7 @@
 // on the shape/region geometry.
 
 import * as THREE from "three";
+import { shapeMidpoint } from "../sketchGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
@@ -379,6 +380,39 @@ export function addConstraintIconsToGroup(
       );
       group.add(seg);
       markFixedSize(seg, toWorld(mx, my, 0.005));
+    } else if (c.type === "midpoint") {
+      // A small diamond outline at the target's middle — the pinned point
+      // sits exactly there.
+      const m = shapeMidpoint(shapes[c.targetShapeIdx]);
+      if (m) {
+        const R = 0.09;
+        const pts = [
+          toWorld(m.x, m.y + R, 0.005),
+          toWorld(m.x + R, m.y, 0.005),
+          toWorld(m.x + R, m.y, 0.005),
+          toWorld(m.x, m.y - R, 0.005),
+          toWorld(m.x, m.y - R, 0.005),
+          toWorld(m.x - R, m.y, 0.005),
+          toWorld(m.x - R, m.y, 0.005),
+          toWorld(m.x, m.y + R, 0.005),
+        ];
+        const seg = new THREE.LineSegments(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({
+            color: CONSTRAINT_ON_LINE_COLOR,
+            depthTest: false,
+          }),
+        );
+        seg.renderOrder = 1004;
+        tag(
+          seg,
+          { x: m.x, y: m.y },
+          [c.pointShapeIdx, c.targetShapeIdx],
+          CONSTRAINT_ON_LINE_COLOR,
+        );
+        group.add(seg);
+        markFixedSize(seg, toWorld(m.x, m.y, 0.005));
+      }
     } else if (c.type === "tangent") {
       const a = shapes[c.shapeAIdx],
         b = shapes[c.shapeBIdx];

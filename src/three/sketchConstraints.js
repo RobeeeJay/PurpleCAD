@@ -1,4 +1,5 @@
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
+import { shapeMidpoint } from "./sketchGeometry.js";
 import { resolveConstraintDistance } from "./geometryParams.js";
 // Used by the solver internals (onLine projection + bevel recompute); also
 // re-exported below for consumers that import them from this module.
@@ -104,6 +105,10 @@ export function allConstraintsSatisfied(shapes, constraints, variables = null) {
       // Perpendicular distance to the infinite line.
       const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
       if (d > POS_TOL) return false;
+    } else if (c.type === "midpoint") {
+      const p = getShapePoint(shapes[c.pointShapeIdx], "point");
+      const m = shapeMidpoint(shapes[c.targetShapeIdx]);
+      if (!p || !m || Math.hypot(p.x - m.x, p.y - m.y) > POS_TOL) return false;
     } else if (c.type === "angle") {
       const target =
         typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
@@ -173,6 +178,7 @@ export function applyHVEnforcement(shape, movedKey, constraints, shapeIdx) {
 export {
   norm2,
   projectOntoLine,
+  shapeMidpoint,
   computeChamfer,
   chamferConstraints,
   buildBevelArc,
@@ -867,5 +873,17 @@ export function enforceConstraints(
     if (!changed) break;
   }
 
+  // Midpoint-constrained points ride their target's middle during the fast
+  // drag path too (the numeric solver covers the commit; this keeps the live
+  // preview honest when the target line/arc moved in this pass).
+  for (const c of constraints) {
+    if (c.type !== "midpoint") continue;
+    const target = updated.get(c.targetShapeIdx) ?? shapes[c.targetShapeIdx];
+    const m = shapeMidpoint(target);
+    const pt = updated.get(c.pointShapeIdx) ?? shapes[c.pointShapeIdx];
+    if (!m || pt?.type !== "point") continue;
+    if (Math.hypot(pt.x - m.x, pt.y - m.y) > 1e-9)
+      updated.set(c.pointShapeIdx, { ...pt, x: m.x, y: m.y });
+  }
   return updated;
 }

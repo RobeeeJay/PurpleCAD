@@ -529,3 +529,23 @@ export function collectConnectedShapes(startIdx, shapes, constraints) {
   }
   return [...visited];
 }
+
+// Geometric middle of a shape's drawn extent — the anchor a "midpoint"
+// constraint pins a point to.  Line: endpoint average.  Arc: the angular
+// middle of the drawn sweep.  Bezier: the curve point at t = 0.5.
+export function shapeMidpoint(s) {
+  if (!s) return null;
+  if (s.type === "line") return { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };
+  if (s.type === "arc") {
+    const mid = s.startAngle + (s.endAngle - s.startAngle) / 2;
+    return { x: s.cx + Math.cos(mid) * s.r, y: s.cy + Math.sin(mid) * s.r };
+  }
+  if (s.type === "bezier") {
+    const at = (a, b, c, d) => (a + 3 * b + 3 * c + d) / 8; // cubic at t=0.5
+    return {
+      x: at(s.p0.x, s.p1.x, s.p2.x, s.p3.x),
+      y: at(s.p0.y, s.p1.y, s.p2.y, s.p3.y),
+    };
+  }
+  return null;
+}

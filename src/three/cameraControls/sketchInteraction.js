@@ -2226,12 +2226,13 @@ export function createSketchInteraction(
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
         if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
           const hitIdx = hits[0].object.userData.shapeIdx;
-          // Seed from a current single-line selection so the natural flow —
-          // click one line, shift-click a second — yields a 2-shape multiselect
-          // (what the parallel / colinear / tangent constraints need).
+          // Seed from the current single-element selection so the natural
+          // flow — click one element, shift-click a second — yields a 2-shape
+          // multiselect.  Any element kind seeds: parallel/tangent want two
+          // lines, but midpoint pairs a POINT with a line/arc/curve.
           if (multiSelectedIndices.length === 0) {
             const sel = useStore.getState().selectedSketchElement;
-            if (sel?.type === "line" && sel.shapeIdx !== hitIdx)
+            if (sel?.shapeIdx != null && sel.shapeIdx !== hitIdx)
               multiSelectedIndices = [sel.shapeIdx];
           }
           multiSelectedIndices = multiSelectedIndices.includes(hitIdx)

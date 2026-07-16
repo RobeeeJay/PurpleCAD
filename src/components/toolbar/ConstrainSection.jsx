@@ -312,6 +312,42 @@ const ConstrainSection = ({ isSketchMode }) => {
               <>
                 <button
                   className="toolbar-btn"
+                  title="Midpoint — pin the selected point to the middle of the selected line, arc or curve"
+                  disabled={!ready}
+                  onClick={() => applyPair("midpoint")}
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20">
+                    {/* A line with its middle marked by a pinned point */}
+                    <line
+                      stroke="#6C3FD4"
+                      strokeWidth="1.5"
+                      strokeLinecap="square"
+                      x1="4"
+                      y1="17"
+                      x2="20"
+                      y2="7"
+                    />
+                    <circle cx="12" cy="12" r="2.6" fill="#D4A33F" />
+                    <line
+                      stroke="#c4c2b8"
+                      strokeWidth="1.2"
+                      x1="7"
+                      y1="13.5"
+                      x2="9.2"
+                      y2="12.2"
+                    />
+                    <line
+                      stroke="#c4c2b8"
+                      strokeWidth="1.2"
+                      x1="14.8"
+                      y1="10.4"
+                      x2="17"
+                      y2="9.1"
+                    />
+                  </svg>
+                </button>
+                <button
+                  className="toolbar-btn"
                   title="Parallel — make two selected lines parallel (select two lines)"
                   disabled={!ready}
                   onClick={() => applyPair("parallel")}
