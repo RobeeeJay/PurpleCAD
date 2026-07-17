@@ -69,6 +69,30 @@ export function createSketchConstraintHandlers(
       const lineIdx = hits[0].object.userData.shapeIdx;
       const shape = shapes[lineIdx];
       if (!shape || isOffsetCopy(lineIdx)) return;
+      // A point already picked + a line body: point-to-line perpendicular
+      // distance (a point on the line itself stays a same-line pick).
+      const firstPt0 = store.sketchConstraintFirstPoint;
+      if (firstPt0 && shape.type === "line" && firstPt0.shapeIdx !== lineIdx) {
+        const p = getShapePoint(shapes[firstPt0.shapeIdx], firstPt0.pointKey);
+        if (p) {
+          const dx = shape.x2 - shape.x1,
+            dy = shape.y2 - shape.y1;
+          const len = Math.hypot(dx, dy) || 1e-9;
+          store.setSketchDistanceInput({
+            pointLine: {
+              pointShapeIdx: firstPt0.shapeIdx,
+              pointKey: firstPt0.pointKey,
+              lineShapeIdx: lineIdx,
+            },
+            defaultDistance: Math.abs(
+              ((p.x - shape.x1) * dy - (p.y - shape.y1) * dx) / len,
+            ),
+          });
+          store.setSketchConstraintFirstPoint(null);
+          clearCoincidentFirstOverlay();
+          return;
+        }
+      }
       store.setSketchConstraintFirstPoint(null);
       clearCoincidentFirstOverlay();
       if (shape.type === "circle") {

@@ -1194,6 +1194,7 @@ export function createSketchInteraction(
   const CONSTRAINT_TYPE_LABELS = {
     coincident: "Coincident",
     distance: "Distance",
+    pointLineDistance: "Distance",
     onLine: "On Line",
     horizontal: "Horizontal",
     vertical: "Vertical",
@@ -2091,6 +2092,7 @@ export function createSketchInteraction(
             if (
               !cObj.userData.isConstraint ||
               (cObj.userData.constraintType !== "distance" &&
+                cObj.userData.constraintType !== "pointLineDistance" &&
                 cObj.userData.constraintType !== "offset" &&
                 cObj.userData.constraintType !== "rectangularPattern" &&
                 cObj.userData.constraintType !== "mirror" &&
@@ -2108,7 +2110,18 @@ export function createSketchInteraction(
             const cpy = ((-ndc2.y + 1) / 2) * rect2.height + rect2.top;
             if (Math.hypot(sx - cpx, sy - cpy) < 18) {
               const c = (dblSel.constraints || [])[cObj.userData.constraintIdx];
-              if (c && c.type === "distance") {
+              if (c && c.type === "pointLineDistance") {
+                useStore.getState().setSketchDistanceInput({
+                  pointLine: {
+                    pointShapeIdx: c.pointShapeIdx,
+                    pointKey: c.pointKey,
+                    lineShapeIdx: c.lineShapeIdx,
+                  },
+                  defaultDistance: c.distance,
+                  constraintIdx: cObj.userData.constraintIdx,
+                });
+                useStore.getState().setSketchConstraintMode("distance");
+              } else if (c && c.type === "distance") {
                 useStore.getState().setSketchDistanceInput({
                   shapeAIdx: c.shapeAIdx,
                   pointA: c.pointA,

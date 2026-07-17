@@ -124,6 +124,18 @@ function residuals(shapes, constraints, variables) {
         const len = Math.hypot(dx, dy) || 1e-9;
         out.push(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len);
       } else out.push(0);
+    } else if (c.type === "pointLineDistance") {
+      // Perpendicular distance from a point (standalone or keyed) to an
+      // infinite line = the dimension value.
+      const ln = shapes[c.lineShapeIdx];
+      const p = pointOf(shapes[c.pointShapeIdx], c.pointKey ?? "point");
+      const d = resolveConstraintDistance(c, variables);
+      if (ln?.type === "line" && p && d > 0) {
+        const dx = ln.x2 - ln.x1,
+          dy = ln.y2 - ln.y1;
+        const len = Math.hypot(dx, dy) || 1e-9;
+        out.push(Math.abs(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len) - d);
+      } else out.push(0);
     } else if (c.type === "midpoint") {
       // Pin a point (a standalone point shape, or a keyed point of another
       // shape — endpoint / centre) to the middle of a line / arc / bezier.
@@ -304,6 +316,8 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
     )
       link(c.shapeAIdx, c.shapeBIdx);
     else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);
+    else if (c.type === "pointLineDistance")
+      link(c.lineShapeIdx, c.pointShapeIdx);
     else if (c.type === "midpoint") link(c.targetShapeIdx, c.pointShapeIdx);
     else if (c.type === "offset") link(c.shapeIdx, c.origIdx);
   }

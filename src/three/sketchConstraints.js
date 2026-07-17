@@ -105,6 +105,18 @@ export function allConstraintsSatisfied(shapes, constraints, variables = null) {
       // Perpendicular distance to the infinite line.
       const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
       if (d > POS_TOL) return false;
+    } else if (c.type === "pointLineDistance") {
+      const target = resolveConstraintDistance(c, variables);
+      if (!(target > 0)) continue;
+      const line = shapes[c.lineShapeIdx];
+      const p = getShapePoint(shapes[c.pointShapeIdx], c.pointKey ?? "point");
+      if (!line || line.type !== "line" || !p) return false;
+      const dx = line.x2 - line.x1,
+        dy = line.y2 - line.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) return false;
+      const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
+      if (Math.abs(d - target) > POS_TOL) return false;
     } else if (c.type === "midpoint") {
       const p = getShapePoint(shapes[c.pointShapeIdx], c.pointKey ?? "point");
       const m = shapeMidpoint(shapes[c.targetShapeIdx]);
@@ -871,6 +883,39 @@ export function enforceConstraints(
       changed = true;
     }
     if (!changed) break;
+  }
+
+  // Point-line dimensions hold during the fast drag path: the point slides
+  // along the line's normal (same side preserved) to stay at the set
+  // distance when either end of the relationship moves.
+  for (const c of constraints) {
+    if (c.type !== "pointLineDistance") continue;
+    const target = resolveConstraintDistance(c);
+    if (!(target > 0)) continue;
+    const ln = updated.get(c.lineShapeIdx) ?? shapes[c.lineShapeIdx];
+    const ptShape = updated.get(c.pointShapeIdx) ?? shapes[c.pointShapeIdx];
+    if (!ln || ln.type !== "line" || !ptShape) continue;
+    const p = getShapePoint(ptShape, c.pointKey ?? "point");
+    if (!p) continue;
+    const dx = ln.x2 - ln.x1,
+      dy = ln.y2 - ln.y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) continue;
+    const signed = ((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len;
+    if (Math.abs(Math.abs(signed) - target) <= 1e-9) continue;
+    const side = signed >= 0 ? 1 : -1;
+    const nx = dy / len,
+      ny = -dx / len; // normal with positive signed distance
+    const goal = {
+      x: p.x + nx * (side * target - signed),
+      y: p.y + ny * (side * target - signed),
+    };
+    updated.set(
+      c.pointShapeIdx,
+      ptShape.type === "point"
+        ? { ...ptShape, x: goal.x, y: goal.y }
+        : moveShapePoint(ptShape, c.pointKey, goal),
+    );
   }
 
   // Midpoint-constrained points ride their target's middle during the fast

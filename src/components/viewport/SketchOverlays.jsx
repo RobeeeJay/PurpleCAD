@@ -16,7 +16,11 @@ import {
   getShapePoint,
   moveShapePoint,
 } from "../../three/sceneObjects.js";
-import { solveConstraints, fieldsForPoint } from "../../three/sketchSolver.js";
+import {
+  solveConstraints,
+  fieldsForPoint,
+  varFields,
+} from "../../three/sketchSolver.js";
 
 export default function SketchOverlays({
   // store-derived state
@@ -733,7 +737,7 @@ export default function SketchOverlays({
         !sketchDistanceInput && (
           <div className="sketch-placement-hint">
             {sketchConstraintFirstPoint
-              ? "Select second point · Esc to cancel"
+              ? "Select a second point, or a line for a point-to-line distance · Esc to cancel"
               : "Click a line to set its length, or click two points · Esc to cancel"}
           </div>
         )}
@@ -806,6 +810,88 @@ export default function SketchOverlays({
                       .resizeSketchCorner(sketchId, shapeIdx, mm);
                     cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
                   }
+                  useStore.getState().setSketchDistanceInput(null);
+                  useStore.getState().setSketchConstraintMode(null);
+                  return;
+                }
+                // Point-to-line perpendicular distance.  Staged solve in pick
+                // order: the point's shape moves first, then also the line,
+                // then the whole sketch.
+                if (sketchDistanceInput.pointLine) {
+                  if (Number.isFinite(mm) && mm > 0) {
+                    const { pointShapeIdx, pointKey, lineShapeIdx } =
+                      sketchDistanceInput.pointLine;
+                    const { constraintIdx } = sketchDistanceInput;
+                    const formula = raw;
+                    const store = useStore.getState();
+                    const freshItem = store.items.find(
+                      (i) => i.id === selectedId,
+                    );
+                    if (freshItem) {
+                      const newC = {
+                        type: "pointLineDistance",
+                        pointShapeIdx,
+                        pointKey,
+                        lineShapeIdx,
+                        distance: formula,
+                      };
+                      const proposed =
+                        constraintIdx != null
+                          ? (freshItem.constraints || []).map((c, i) =>
+                              i === constraintIdx &&
+                              c.type === "pointLineDistance"
+                                ? { ...c, distance: formula }
+                                : c,
+                            )
+                          : [...(freshItem.constraints || []), newC];
+                      const stagedFixed = (freeIdxs) => {
+                        const freeSet = new Set(freeIdxs);
+                        const fixed = new Set();
+                        freshItem.shapes.forEach((sh, i) => {
+                          if (freeSet.has(i)) return;
+                          for (const f of varFields(sh)) fixed.add(`${i}:${f}`);
+                        });
+                        return fixed;
+                      };
+                      let solved = null;
+                      for (const free of [
+                        [pointShapeIdx],
+                        [pointShapeIdx, lineShapeIdx],
+                        null,
+                      ]) {
+                        const res = solveConstraints(
+                          freshItem.shapes,
+                          proposed,
+                          {
+                            variables: variablesMap,
+                            ...(free ? { fixed: stagedFixed(free) } : {}),
+                          },
+                        );
+                        if (res.ok) {
+                          solved = res.shapes;
+                          break;
+                        }
+                      }
+                      if (solved) {
+                        if (constraintIdx != null)
+                          store.updateSketchConstraintDistance(
+                            selectedId,
+                            constraintIdx,
+                            formula,
+                          );
+                        else store.addSketchConstraints(selectedId, [newC]);
+                        const map = new Map();
+                        solved.forEach((sh, i) => map.set(i, sh));
+                        store.updateSketchShapes(selectedId, map);
+                        itemsRef.current = useStore.getState().items;
+                      } else {
+                        store.showNotification(
+                          "Can't apply that dimension — it would break another constraint",
+                        );
+                      }
+                    }
+                  }
+                  cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
                   useStore.getState().setSketchDistanceInput(null);
                   useStore.getState().setSketchConstraintMode(null);
                   return;

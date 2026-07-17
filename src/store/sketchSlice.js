@@ -2345,7 +2345,8 @@ export const createSketchSlice = (set) => ({
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
         const constraints = (item.constraints || []).map((c, i) =>
-          i === constraintIdx && c.type === "distance"
+          i === constraintIdx &&
+          (c.type === "distance" || c.type === "pointLineDistance")
             ? Object.assign({}, c, { distance: newDistance })
             : c,
         );

@@ -266,6 +266,76 @@ test.describe.serial("2D sketch workflow", () => {
     expect(hasDim).toBe(true);
   });
 
+  test("point-to-line distance: pick a point then a line body, type the gap", async () => {
+    // A line and a standalone point off it.
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const L1 = toScreen(8, -2);
+    const L2 = toScreen(12, -2);
+    await page.mouse.click(L1.x, L1.y);
+    await page.mouse.click(L2.x, L2.y);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("point"),
+    );
+    const P = toScreen(10, -3.2);
+    await page.mouse.click(P.x, P.y);
+    const lineIdx = (await shapes()).length - 2;
+    const pointIdx = lineIdx + 1;
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+
+    // D arms the distance tool; click the point, then the LINE BODY.
+    await page.keyboard.press("d");
+    await page.mouse.click(P.x, P.y);
+    const onLine = toScreen(9, -2);
+    await page.mouse.click(onLine.x, onLine.y);
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toBeVisible({ timeout: 5000 });
+    await overlay.locator("input").first().fill("20");
+    await overlay.locator("input").first().press("Enter");
+
+    // The constraint lands and the POINT (first pick) moved to the 2-unit
+    // gap; the line stays put.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store
+              .getState()
+              .items.find((i) => i.id === 300)
+              .constraints.find((c) => c.type === "pointLineDistance") ?? null,
+        ),
+      )
+      .toMatchObject({
+        pointShapeIdx: pointIdx,
+        lineShapeIdx: lineIdx,
+        distance: "20",
+      });
+    const all = await shapes();
+    const pt = all[pointIdx];
+    const ln = all[lineIdx];
+    expect(Math.abs(pt.y - ln.y1)).toBeCloseTo(2, 1);
+    expect(pt.y).toBeLessThan(ln.y1); // stayed on its original side
+    expect(ln.y1).toBeCloseTo(-2, 1); // line untouched
+
+    // Dragging the line down carries the point at the set distance.
+    const grab = toScreen(11.5, -2);
+    const drop = toScreen(11.5, -1);
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    await page.mouse.move(drop.x, drop.y, { steps: 8 });
+    await page.mouse.up();
+    await expect
+      .poll(async () => {
+        const cur = await shapes();
+        return Math.abs(cur[pointIdx].y - cur[lineIdx].y1);
+      })
+      .toBeCloseTo(2, 1);
+  });
+
   test("mirror reflects a clicked circle across a clicked line", async () => {
     // Vertical mirror line at x=6, then mirror the circle at (4, 0.75).
     await page.evaluate(() =>

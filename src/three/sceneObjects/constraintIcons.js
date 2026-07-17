@@ -267,6 +267,77 @@ export function addConstraintIconsToGroup(
       sprite.position.copy(labelPos);
       sprite.renderOrder = 1009;
       addTagged(sprite);
+    } else if (c.type === "pointLineDistance") {
+      if (!showDimensions) return;
+      const lineShape = shapes[c.lineShapeIdx];
+      const ptShape = shapes[c.pointShapeIdx];
+      if (!lineShape || lineShape.type !== "line" || !ptShape) return;
+      const pt = getShapePoint(ptShape, c.pointKey ?? "point");
+      if (!pt) return;
+      const ldx = lineShape.x2 - lineShape.x1,
+        ldy = lineShape.y2 - lineShape.y1;
+      const llen2 = Math.hypot(ldx, ldy);
+      if (llen2 < 1e-10) return;
+      // Foot of the perpendicular on the INFINITE line — the dimension line
+      // runs point → foot, with a tick at each end.
+      const t =
+        ((pt.x - lineShape.x1) * ldx + (pt.y - lineShape.y1) * ldy) /
+        (llen2 * llen2);
+      const foot = {
+        x: lineShape.x1 + ldx * t,
+        y: lineShape.y1 + ldy * t,
+      };
+      const wP = toWorld(pt.x, pt.y, 0.006);
+      const wF = toWorld(foot.x, foot.y, 0.006);
+      if (wP.distanceTo(wF) > 1e-6) {
+        const dimLine = addDimSeg(wP, wF);
+        const alongU = new THREE.Vector3().subVectors(wF, wP).normalize();
+        const tickU = sketchNormal.clone().cross(alongU).normalize();
+        addDimTick(wP, tickU);
+        addDimTick(wF, tickU);
+        tag(
+          dimLine,
+          { x: (pt.x + foot.x) / 2, y: (pt.y + foot.y) / 2 },
+          [c.pointShapeIdx, c.lineShapeIdx],
+          dimLineColorFor(theme),
+        );
+      }
+      const resolvedDist = resolveConstraintDistance(c);
+      const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
+      const formulaSrc =
+        typeof c.distance === "string" &&
+        !/^-?\d+(\.\d+)?$/.test(c.distance.trim())
+          ? c.distance.trim()
+          : null;
+      const labelText = formulaSrc
+        ? `${formulaSrc} = ${valueMm}mm`
+        : `${valueMm}mm`;
+      const canvas = document.createElement("canvas");
+      const tmpCtx = canvas.getContext("2d");
+      const labelFont = "bold 18px sans-serif";
+      tmpCtx.font = labelFont;
+      const measured = tmpCtx.measureText(labelText).width;
+      canvas.width = Math.max(160, Math.ceil(measured) + 24);
+      canvas.height = 32;
+      const ctx2d = canvas.getContext("2d");
+      ctx2d.fillStyle = dimLabelBgFor(theme);
+      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
+      ctx2d.font = labelFont;
+      ctx2d.textAlign = "center";
+      ctx2d.textBaseline = "middle";
+      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
+      const tex = new THREE.CanvasTexture(canvas);
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: tex, depthTest: false }),
+      );
+      const aspect = canvas.width / 160;
+      sprite.scale.set(0.7 * aspect, 0.175, 1);
+      sprite.position.copy(
+        new THREE.Vector3().addVectors(wP, wF).multiplyScalar(0.5),
+      );
+      sprite.renderOrder = 1009;
+      addTagged(sprite);
     } else if (c.type === "onLine") {
       const lineShape = shapes[c.lineShapeIdx];
       const ptShape = shapes[c.pointShapeIdx];
