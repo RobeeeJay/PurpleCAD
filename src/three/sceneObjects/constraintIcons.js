@@ -18,7 +18,6 @@ import {
   CONSTRAINT_HORIZONTAL_COLOR,
   CONSTRAINT_ON_LINE_COLOR,
   dimLabelBgFor,
-  dimLineColorFor,
   dimValueColorFor,
   sketchMirrorColorFor,
   sketchCircularPatternColorFor,
@@ -99,7 +98,7 @@ export function addConstraintIconsToGroup(
       const l = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([p0, p1]),
         new THREE.LineBasicMaterial({
-          color: dimLineColorFor(theme),
+          color: dimValueColorFor(theme),
           depthTest: false,
         }),
       );
@@ -118,7 +117,7 @@ export function addConstraintIconsToGroup(
           tip.clone().addScaledVector(perp, -TICK),
         ]),
         new THREE.LineBasicMaterial({
-          color: dimLineColorFor(theme),
+          color: dimValueColorFor(theme),
           depthTest: false,
         }),
       );
@@ -184,7 +183,7 @@ export function addConstraintIconsToGroup(
           leader,
           { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
           distShapes,
-          dimLineColorFor(theme),
+          dimValueColorFor(theme),
         );
         addDimTick(wB, perpU);
         labelPos = wLineTo.clone().addScaledVector(dir, 0.45);
@@ -217,7 +216,7 @@ export function addConstraintIconsToGroup(
             y: (posA.y + posB.y) / 2 + lpy * OFF,
           },
           distShapes,
-          dimLineColorFor(theme),
+          dimValueColorFor(theme),
         );
         addDimTick(A2, perpU);
         addDimTick(B2, perpU);
@@ -289,18 +288,46 @@ export function addConstraintIconsToGroup(
       };
       const wP = toWorld(pt.x, pt.y, 0.006);
       const wF = toWorld(foot.x, foot.y, 0.006);
+      let labelPos = new THREE.Vector3().addVectors(wP, wF).multiplyScalar(0.5);
       if (wP.distanceTo(wF) > 1e-6) {
-        const dimLine = addDimSeg(wP, wF);
-        const alongU = new THREE.Vector3().subVectors(wF, wP).normalize();
-        const tickU = sketchNormal.clone().cross(alongU).normalize();
-        addDimTick(wP, tickU);
-        addDimTick(wF, tickU);
+        // Same technical-drawing treatment as a two-point dimension: the
+        // dimension line sits OFFSET to the side (along the measured line's
+        // direction), bounded by witness lines from the point and the foot,
+        // with a tick at each end.
+        const dimU = new THREE.Vector3().subVectors(wF, wP).normalize();
+        const perpU = sketchNormal.clone().cross(dimU).normalize();
+        const OFF = 0.55,
+          GAP = 0.06,
+          OVER = 0.14;
+        const A2 = wP.clone().addScaledVector(perpU, OFF);
+        const B2 = wF.clone().addScaledVector(perpU, OFF);
+        addDimSeg(
+          wP.clone().addScaledVector(perpU, GAP),
+          A2.clone().addScaledVector(perpU, OVER),
+        );
+        addDimSeg(
+          wF.clone().addScaledVector(perpU, GAP),
+          B2.clone().addScaledVector(perpU, OVER),
+        );
+        const dimLine = addDimSeg(A2, B2);
+        // Hotspot on the dimension line, in sketch-local (perp of point→foot).
+        const fdx = foot.x - pt.x,
+          fdy = foot.y - pt.y;
+        const flen = Math.hypot(fdx, fdy) || 1;
+        const lpx = -fdy / flen,
+          lpy = fdx / flen;
         tag(
           dimLine,
-          { x: (pt.x + foot.x) / 2, y: (pt.y + foot.y) / 2 },
+          {
+            x: (pt.x + foot.x) / 2 + lpx * OFF,
+            y: (pt.y + foot.y) / 2 + lpy * OFF,
+          },
           [c.pointShapeIdx, c.lineShapeIdx],
-          dimLineColorFor(theme),
+          dimValueColorFor(theme),
         );
+        addDimTick(A2, perpU);
+        addDimTick(B2, perpU);
+        labelPos = new THREE.Vector3().addVectors(A2, B2).multiplyScalar(0.5);
       }
       const resolvedDist = resolveConstraintDistance(c);
       const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
@@ -333,9 +360,7 @@ export function addConstraintIconsToGroup(
       );
       const aspect = canvas.width / 160;
       sprite.scale.set(0.7 * aspect, 0.175, 1);
-      sprite.position.copy(
-        new THREE.Vector3().addVectors(wP, wF).multiplyScalar(0.5),
-      );
+      sprite.position.copy(labelPos);
       sprite.renderOrder = 1009;
       addTagged(sprite);
     } else if (c.type === "onLine") {
@@ -730,7 +755,7 @@ export function addConstraintIconsToGroup(
           dimLine,
           labelLocal,
           [c.shapeIdx, c.origIdx],
-          dimLineColorFor(theme),
+          dimValueColorFor(theme),
         );
       };
       if (nl.type === "circle") {
@@ -801,7 +826,7 @@ export function addConstraintIconsToGroup(
       sprite.renderOrder = 1009;
       // Tag with the icon's local position so the double-click hit-test can
       // find it and open the edit overlay.
-      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimLineColorFor(theme));
+      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimValueColorFor(theme));
       group.add(sprite);
     } else if (c.type === "mirror") {
       // Small fixed-size X glyph midway between the original's and the
