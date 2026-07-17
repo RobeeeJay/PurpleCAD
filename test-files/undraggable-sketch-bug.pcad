@@ -1,0 +1,436 @@
+{
+  "version": 1,
+  "history": [
+    {
+      "id": 0,
+      "label": "Scene created",
+      "itemId": null,
+      "instruction": {
+        "type": "scene_created"
+      },
+      "hiddenIds": [],
+      "_orphaned": false
+    },
+    {
+      "id": 1,
+      "label": "Added",
+      "itemId": 1,
+      "instruction": {
+        "type": "create",
+        "item": {
+          "parentId": null,
+          "material": {
+            "color": "#cccccc",
+            "metalness": 0.3,
+            "roughness": 0.5,
+            "opacity": 1,
+            "clearcoat": 0,
+            "clearcoatRoughness": 0
+          },
+          "id": 1,
+          "name": "Sketch 1",
+          "type": "sketch",
+          "children": [],
+          "position": {
+            "x": -0.9460285650638305,
+            "y": 0,
+            "z": 1.1701694345676619
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          },
+          "rotation": {
+            "x": -1.5707963267948966,
+            "y": 0,
+            "z": 0
+          },
+          "hostSolidId": null,
+          "shapes": [
+            {
+              "type": "line",
+              "x1": -6.851514744735142,
+              "y1": 6.096633538174453,
+              "x2": 12.833603509148825,
+              "y2": 6.09663348809435
+            },
+            {
+              "type": "line",
+              "x1": 13.133603508385608,
+              "y1": 5.7966334874654315,
+              "x2": 13.133603481818916,
+              "y2": -6.875931518610041
+            },
+            {
+              "type": "line",
+              "x1": 12.833603467151047,
+              "y1": -7.17593153329223,
+              "x2": -6.8515146724244955,
+              "y2": -7.175931575499647
+            },
+            {
+              "type": "line",
+              "x1": -7.151514673067735,
+              "y1": -6.875931577214311,
+              "x2": -7.15151474549836,
+              "y2": 5.796633536459789
+            },
+            {
+              "type": "circle",
+              "cx": -6.6515147265389905,
+              "cy": 5.596633525915825,
+              "r": 0.3
+            },
+            {
+              "type": "line",
+              "x1": 2.9172861680632822,
+              "y1": 6.096633506404174,
+              "x2": 2.9172860742282096,
+              "y2": -7.1759315344446435,
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": -7.151514709653287,
+              "y1": -0.4748713323409263,
+              "x2": 13.133603495238061,
+              "y2": -0.4748711848538085,
+              "dashed": true
+            },
+            {
+              "type": "arc",
+              "cx": -6.85151474549836,
+              "cy": 5.796633538174453,
+              "r": 0.2999999999999998,
+              "startAngle": -3.141592647874247,
+              "endAngle": -4.71238898292875,
+              "kind": "bevel",
+              "bevelData": {
+                "aIdx": 3,
+                "aKey": "end",
+                "bIdx": 0,
+                "bKey": "start",
+                "dist": 0.30000000247788144
+              },
+              "distanceFormula": "HoleDiameter"
+            },
+            {
+              "type": "arc",
+              "cx": 12.833603508385607,
+              "cy": 5.79663348809435,
+              "r": 0.3000000000000007,
+              "startAngle": -2.0963941693707916e-9,
+              "endAngle": 1.57079632425084,
+              "kind": "bevel",
+              "bevelData": {
+                "aIdx": 1,
+                "aKey": "start",
+                "bIdx": 0,
+                "bKey": "end",
+                "dist": 0.2999999998657005
+              },
+              "distanceFormula": "HoleDiameter"
+            },
+            {
+              "type": "arc",
+              "cx": 12.833603466507808,
+              "cy": -6.8759315179811225,
+              "r": 0.30000001531110776,
+              "startAngle": -2.0963940623770788e-9,
+              "endAngle": -1.570796324650769,
+              "kind": "bevel",
+              "bevelData": {
+                "aIdx": 1,
+                "aKey": "end",
+                "bIdx": 2,
+                "bKey": "start",
+                "dist": 0.300000014038951
+              },
+              "distanceFormula": "HoleDiameter"
+            },
+            {
+              "type": "arc",
+              "cx": -6.851514673067734,
+              "cy": -6.875931575499647,
+              "r": 0.3000000000000007,
+              "startAngle": -3.141592647874247,
+              "endAngle": -1.570796324650769,
+              "kind": "bevel",
+              "bevelData": {
+                "aIdx": 3,
+                "aKey": "start",
+                "bIdx": 2,
+                "bKey": "end",
+                "dist": 0.2999999989285747
+              },
+              "distanceFormula": "HoleDiameter"
+            },
+            {
+              "type": "circle",
+              "cx": -6.6515147265389905,
+              "cy": -6.703366474084175,
+              "r": 0.3
+            },
+            {
+              "type": "circle",
+              "cx": 12.64848527346101,
+              "cy": 5.596633525915825,
+              "r": 0.3
+            },
+            {
+              "type": "circle",
+              "cx": 12.64848527346101,
+              "cy": -6.703366474084175,
+              "r": 0.3
+            }
+          ],
+          "constraints": [
+            {
+              "type": "horizontal",
+              "shapeIdx": 0
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 1
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 2
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 3
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 4,
+              "pointA": "center",
+              "shapeBIdx": 4,
+              "pointB": "edge",
+              "distance": "HoleDiameter"
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 0,
+              "pointA": "start",
+              "shapeBIdx": 0,
+              "pointB": "end",
+              "distance": "Width"
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 3,
+              "pointA": "start",
+              "shapeBIdx": 3,
+              "pointB": "end",
+              "distance": "Depth"
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 5
+            },
+            {
+              "type": "onLine",
+              "pointShapeIdx": 5,
+              "pointKey": "start",
+              "lineShapeIdx": 0
+            },
+            {
+              "type": "onLine",
+              "pointShapeIdx": 5,
+              "pointKey": "end",
+              "lineShapeIdx": 2
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 6
+            },
+            {
+              "type": "onLine",
+              "pointShapeIdx": 6,
+              "pointKey": "end",
+              "lineShapeIdx": 1
+            },
+            {
+              "type": "onLine",
+              "pointShapeIdx": 6,
+              "pointKey": "start",
+              "lineShapeIdx": 3
+            },
+            {
+              "type": "pointLineDistance",
+              "pointShapeIdx": 4,
+              "pointKey": "center",
+              "lineShapeIdx": 3,
+              "distance": "WallThickness+HoleDiameter"
+            },
+            {
+              "type": "pointLineDistance",
+              "pointShapeIdx": 4,
+              "pointKey": "center",
+              "lineShapeIdx": 0,
+              "distance": "WallThickness+HoleDiameter"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 7,
+              "pointA": "start",
+              "shapeBIdx": 3,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 7,
+              "pointA": "end",
+              "shapeBIdx": 0,
+              "pointB": "start"
+            },
+            {
+              "type": "lineAngle",
+              "shapeAIdx": 3,
+              "shapeBIdx": 0,
+              "angle": 89.99999669270814
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 8,
+              "pointA": "start",
+              "shapeBIdx": 1,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 8,
+              "pointA": "end",
+              "shapeBIdx": 0,
+              "pointB": "end"
+            },
+            {
+              "type": "lineAngle",
+              "shapeAIdx": 1,
+              "shapeBIdx": 0,
+              "angle": 90.00000248146206
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 9,
+              "pointA": "start",
+              "shapeBIdx": 1,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 9,
+              "pointA": "end",
+              "shapeBIdx": 2,
+              "pointB": "start"
+            },
+            {
+              "type": "lineAngle",
+              "shapeAIdx": 1,
+              "shapeBIdx": 2,
+              "angle": 90.00000170058227
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 10,
+              "pointA": "start",
+              "shapeBIdx": 3,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 10,
+              "pointA": "end",
+              "shapeBIdx": 2,
+              "pointB": "end"
+            },
+            {
+              "type": "lineAngle",
+              "shapeAIdx": 3,
+              "shapeBIdx": 2,
+              "angle": 89.99999731875802
+            },
+            {
+              "type": "midpoint",
+              "pointShapeIdx": 5,
+              "targetShapeIdx": 0,
+              "pointKey": "start"
+            },
+            {
+              "type": "midpoint",
+              "pointShapeIdx": 6,
+              "targetShapeIdx": 3,
+              "pointKey": "start"
+            },
+            {
+              "type": "rectangularPattern",
+              "shapeIdx": 11,
+              "origIdx": 4,
+              "i": 0,
+              "j": 1,
+              "dx": 19.3,
+              "dy": -12.3,
+              "countX": 2,
+              "countY": 2,
+              "dxFormula": "Width - HoleDiameter - (WallThickness * 2)",
+              "dyFormula": "-Depth + HoleDiameter + (WallThickness * 2)"
+            },
+            {
+              "type": "rectangularPattern",
+              "shapeIdx": 12,
+              "origIdx": 4,
+              "i": 1,
+              "j": 0,
+              "dx": 19.3,
+              "dy": -12.3,
+              "countX": 2,
+              "countY": 2,
+              "dxFormula": "Width - HoleDiameter - (WallThickness * 2)",
+              "dyFormula": "-Depth + HoleDiameter + (WallThickness * 2)"
+            },
+            {
+              "type": "rectangularPattern",
+              "shapeIdx": 13,
+              "origIdx": 4,
+              "i": 1,
+              "j": 1,
+              "dx": 19.3,
+              "dy": -12.3,
+              "countX": 2,
+              "countY": 2,
+              "dxFormula": "Width - HoleDiameter - (WallThickness * 2)",
+              "dyFormula": "-Depth + HoleDiameter + (WallThickness * 2)"
+            }
+          ]
+        }
+      },
+      "hiddenIds": [],
+      "_orphaned": false
+    }
+  ],
+  "activeHistoryId": null,
+  "variables": [
+    {
+      "name": "HoleDiameter",
+      "formula": "3"
+    },
+    {
+      "name": "Width",
+      "formula": "200"
+    },
+    {
+      "name": "Depth",
+      "formula": "130"
+    },
+    {
+      "name": "Height",
+      "formula": "400"
+    },
+    {
+      "name": "WallThickness",
+      "formula": "2"
+    }
+  ]
+}

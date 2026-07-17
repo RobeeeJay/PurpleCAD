@@ -27,7 +27,9 @@ import {
 import {
   applyHVEnforcement,
   enforceConstraints,
+  allConstraintsSatisfied,
 } from "../sketchConstraints.js";
+import { variablesToMap } from "../../utils/formulas.js";
 import {
   translateShape,
   rotateShape,
@@ -1304,14 +1306,41 @@ export function createSketchInteraction(
   };
 
   const startSketchDrag = (screenX, screenY, shiftKey) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
+    let selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return false;
     // Shift is additive-selection only — never start a drag, so a shift click /
     // marquee adds to the current selection rather than moving or replacing it.
     if (shiftKey) return false;
+    // A saved sketch can VIOLATE its own constraints (drift from corner ops
+    // or older builds).  Every drag solve would then start from that bad seed
+    // and fail its residual guard — the whole sketch feels nailed down.
+    // Repair once up front: the unpinned solve converges when the system is
+    // healthy, and the drag proceeds from the repaired state.
+    {
+      const store = useStore.getState();
+      const varsMap = variablesToMap(store.variables);
+      const cs = selItem.constraints || [];
+      if (
+        cs.length > 0 &&
+        !allConstraintsSatisfied(selItem.shapes || [], cs, varsMap)
+      ) {
+        const res = solveConstraints(selItem.shapes || [], cs, {
+          maxIter: 200,
+          variables: varsMap,
+        });
+        if (res.ok) {
+          const map = new Map();
+          res.shapes.forEach((sh, i) => map.set(i, sh));
+          store.updateSketchShapes(selItem.id, map);
+          itemsRef.current = useStore.getState().items;
+          selItem = itemsRef.current.find(
+            (i) => i.id === selectedIdRef.current,
+          );
+          if (!selItem) return false;
+        }
+      }
+    }
     const shapes = selItem.shapes || [];
     clearAllSketchHover();
 

@@ -124,6 +124,12 @@ function residuals(shapes, constraints, variables) {
         const len = Math.hypot(dx, dy) || 1e-9;
         out.push(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len);
       } else out.push(0);
+    } else if (c.type === "_fixedRadius") {
+      const sh = shapes[c.shapeIdx];
+      out.push(Number.isFinite(sh?.r) ? sh.r - c.value : 0);
+    } else if (c.type === "_fixedLength") {
+      const sh = shapes[c.shapeIdx];
+      out.push(sh ? Math.hypot(sh.x2 - sh.x1, sh.y2 - sh.y1) - c.value : 0);
     } else if (c.type === "pointLineDistance") {
       // Perpendicular distance from a point (standalone or keyed) to an
       // infinite line = the dimension value.
@@ -386,6 +392,21 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   });
   const N = specs.length;
   const cs = (constraints || []).filter((c) => c.type !== undefined);
+  // Chamfer/bevel corner bridges must move RIGIDLY: nothing dimensions a
+  // bevel's radius or a chamfer bridge's length, so without these rows the
+  // solver satisfies a drag by inflating the corners (they absorb the whole
+  // translation and the far geometry never follows); the post-solve corner
+  // re-derive then snaps them back, leaving the sketch violated again.
+  base.forEach((sh, i) => {
+    if (sh.kind === "bevel" && Number.isFinite(sh.r))
+      cs.push({ type: "_fixedRadius", shapeIdx: i, value: sh.r });
+    else if (sh.kind === "chamfer" && sh.type === "line")
+      cs.push({
+        type: "_fixedLength",
+        shapeIdx: i,
+        value: Math.hypot(sh.x2 - sh.x1, sh.y2 - sh.y1),
+      });
+  });
   if (N === 0 || cs.length === 0)
     return { shapes: base, ok: true, maxResidual: 0 };
 
