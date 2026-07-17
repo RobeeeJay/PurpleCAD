@@ -9,6 +9,8 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { addConstraintIconsToGroup } from "./constraintIcons.js";
 import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
+import { shapeMidpoint } from "../sketchGeometry.js";
+import { MM_PER_UNIT } from "./dimensions.js";
 import { textShapeContours } from "../sketchText.js";
 import { useStore } from "../../store";
 import {
@@ -18,6 +20,9 @@ import {
 } from "./closedLoops.js";
 import {
   SKETCH_FACE_HIGHLIGHT,
+  dimLabelBgFor,
+  dimValueColorFor,
+  toCssHex,
   sketchConstructionColorFor,
   sketchLineColorFor,
   sketchNodeColorFor,
@@ -462,6 +467,69 @@ export function buildSketchShapesGroup(
     dots.renderOrder = 1003;
     dots.userData.isPointDots = true;
     group.add(dots);
+  }
+
+  // ── Chamfer / bevel value labels ────────────────────────────────────────
+  // Each corner bridge shows its setback / radius like a dimension label;
+  // clicking the label re-opens the resize input (isCornerDim hit-tested in
+  // sketchInteraction's click path).
+  if (showDimensions) {
+    const theme = useStore.getState().theme;
+    shapes.forEach((shape, shapeIdx) => {
+      if (shape.kind !== "chamfer" && shape.kind !== "bevel") return;
+      const isBevel = shape.kind === "bevel";
+      const valueUnits = isBevel ? shape.r : shape.chamferData?.dist;
+      if (!Number.isFinite(valueUnits)) return;
+      const mid = shapeMidpoint(shape);
+      if (!mid) return;
+      const labelText = `${isBevel ? "R " : ""}${(valueUnits * MM_PER_UNIT).toFixed(1)}mm`;
+      const canvas = document.createElement("canvas");
+      const tmpCtx = canvas.getContext("2d");
+      const labelFont = "bold 18px sans-serif";
+      tmpCtx.font = labelFont;
+      canvas.width = Math.max(
+        160,
+        Math.ceil(tmpCtx.measureText(labelText).width) + 24,
+      );
+      canvas.height = 32;
+      const ctx2d = canvas.getContext("2d");
+      ctx2d.fillStyle = dimLabelBgFor(theme);
+      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
+      ctx2d.font = labelFont;
+      ctx2d.textAlign = "center";
+      ctx2d.textBaseline = "middle";
+      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: new THREE.CanvasTexture(canvas),
+          depthTest: false,
+        }),
+      );
+      sprite.scale.set(0.7 * (canvas.width / 160), 0.175, 1);
+      // Park the label just off the bridge: a bevel offsets radially outward
+      // from its arc centre; a chamfer along its line normal.
+      let off = { x: 0, y: 0.35 };
+      if (isBevel) {
+        const dx = mid.x - shape.cx,
+          dy = mid.y - shape.cy;
+        const len = Math.hypot(dx, dy) || 1;
+        off = { x: (dx / len) * 0.45, y: (dy / len) * 0.45 };
+      } else {
+        const dx = shape.x2 - shape.x1,
+          dy = shape.y2 - shape.y1;
+        const len = Math.hypot(dx, dy) || 1;
+        off = { x: (-dy / len) * 0.4, y: (dx / len) * 0.4 };
+      }
+      const localPos = { x: mid.x + off.x, y: mid.y + off.y };
+      sprite.position.copy(toWorld(localPos.x, localPos.y, 0.007));
+      sprite.renderOrder = 1009;
+      sprite.frustumCulled = false;
+      sprite.userData.isCornerDim = true;
+      sprite.userData.shapeIdx = shapeIdx;
+      sprite.userData.cornerDimLocalPos = localPos;
+      group.add(sprite);
+    });
   }
 
   // ── Constraint icons ──────────────────────────────────────────────────────

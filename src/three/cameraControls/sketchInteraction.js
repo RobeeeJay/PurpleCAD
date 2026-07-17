@@ -2287,6 +2287,44 @@ export function createSketchInteraction(
         return;
       }
 
+      // A chamfer/bevel value label click re-opens the resize input (same
+      // flow as double-clicking the bridge itself).
+      {
+        const cg = sketchShapesGroupRef?.current;
+        const cSel = itemsRef.current.find(
+          (i) => i.id === selectedIdRef.current,
+        );
+        const cMesh = cSel ? objectsRef.current[cSel.id] : null;
+        if (cg && cMesh) {
+          const rect = renderer.domElement.getBoundingClientRect();
+          for (const obj of cg.children) {
+            if (!obj.userData.isCornerDim) continue;
+            const lp = obj.userData.cornerDimLocalPos;
+            const wp = new THREE.Vector3(lp.x, lp.y, 0.007)
+              .applyQuaternion(cMesh.quaternion)
+              .add(cMesh.position);
+            const ndc = wp.clone().project(cameraRef.current);
+            const px = ((ndc.x + 1) / 2) * rect.width + rect.left;
+            const py = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+            if (Math.hypot(sx - px, sy - py) < 20) {
+              const hs = (cSel.shapes || [])[obj.userData.shapeIdx];
+              if (hs && (hs.kind === "chamfer" || hs.kind === "bevel")) {
+                useStore.getState().setSketchDistanceInput({
+                  cornerResize: {
+                    sketchId: cSel.id,
+                    shapeIdx: obj.userData.shapeIdx,
+                    mode: hs.kind,
+                  },
+                  defaultDistance:
+                    hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0),
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+
       // Check for constraint icon click before doing normal element select
       // (only when the Constraint selection type is enabled).
       if (effectiveSketchSelTypes(useStore.getState()).eff.constraint) {

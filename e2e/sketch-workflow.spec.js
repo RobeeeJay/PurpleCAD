@@ -205,6 +205,27 @@ test.describe.serial("2D sketch workflow", () => {
     expect(
       await page.evaluate(() => window.__store.getState().sketchModifyMode),
     ).toBe(null);
+
+    // The bridge carries a value label like other dimensions; clicking it
+    // re-opens the resize input and the typed value re-cuts the corner.
+    const lbl = (await shapes()).find((sh) => sh.kind === "chamfer");
+    const mx = (lbl.x1 + lbl.x2) / 2;
+    const my = (lbl.y1 + lbl.y2) / 2;
+    const ldx = lbl.x2 - lbl.x1;
+    const ldy = lbl.y2 - lbl.y1;
+    const llen = Math.hypot(ldx, ldy);
+    const L = toScreen(mx + (-ldy / llen) * 0.4, my + (ldx / llen) * 0.4);
+    await page.mouse.click(L.x, L.y);
+    await expect(overlay).toBeVisible();
+    const rfield = overlay.locator("input").first();
+    await rfield.fill("6");
+    await rfield.press("Enter");
+    await expect
+      .poll(async () =>
+        (await shapes()).find((sh) => sh.kind === "chamfer")?.chamferData
+          ?.dist ?? null,
+      )
+      .toBeCloseTo(0.6, 2);
   });
 
   test("bevel dialog accepts a variable formula for the radius", async () => {

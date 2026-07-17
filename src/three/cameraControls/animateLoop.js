@@ -293,7 +293,9 @@ export function createAnimateLoop({
         const g = sketchShapesGroupRef.current;
         g.updateWorldMatrix(false, true);
         g.traverse((o) => {
-          const isLabel = o.isSprite && o.userData.isConstraintObj;
+          const isLabel =
+            o.isSprite &&
+            (o.userData.isConstraintObj || o.userData.isCornerDim);
           const isMark = o.userData.constraintMark;
           if (!isLabel && !isMark) return;
           _rulerPos.setFromMatrixPosition(o.matrixWorld);
