@@ -35,6 +35,7 @@ export function addConstraintIconsToGroup(
   res,
   showDimensions = true,
   editHidden = null,
+  showConstraints = true,
 ) {
   const R = 0.14;
   // The sketch plane's normal in world space (toWorld maps sketch-local → world,
@@ -58,6 +59,16 @@ export function addConstraintIconsToGroup(
       editHidden.has(c.shapeIdx)
     )
       return;
+    // The two visibility toggles are independent: "dimensions" owns the
+    // measured annotations (labels + their marker lines), "constraints" owns
+    // every other constraint icon.  An angle is both — its arc is an icon,
+    // its degree label a dimension (gated below).
+    const isDimensionType =
+      c.type === "distance" ||
+      c.type === "pointLineDistance" ||
+      c.type === "offset";
+    if (isDimensionType && !showDimensions) return;
+    if (!isDimensionType && !showConstraints) return;
     const tag = (obj, iconLocalPos, shapeIndices, color) => {
       obj.userData.isConstraintObj = true;
       obj.userData.isConstraint = true;
@@ -154,7 +165,6 @@ export function addConstraintIconsToGroup(
       group.add(cLine);
       markFixedSize(cLine, toWorld(pt.x, pt.y, 0.005));
     } else if (c.type === "distance") {
-      if (!showDimensions) return;
       const sA = shapes[c.shapeAIdx],
         sB = shapes[c.shapeBIdx];
       if (!sA || !sB) return;
@@ -267,7 +277,6 @@ export function addConstraintIconsToGroup(
       sprite.renderOrder = 1009;
       addTagged(sprite);
     } else if (c.type === "pointLineDistance") {
-      if (!showDimensions) return;
       const lineShape = shapes[c.lineShapeIdx];
       const ptShape = shapes[c.pointShapeIdx];
       if (!lineShape || lineShape.type !== "line" || !ptShape) return;
@@ -721,7 +730,6 @@ export function addConstraintIconsToGroup(
         addTagged(sprite);
       }
     } else if (c.type === "offset") {
-      if (!showDimensions) return;
       if (c.offsetGroup != null) {
         if (seenOffsetGroups.has(c.offsetGroup)) return;
         seenOffsetGroups.add(c.offsetGroup);
@@ -952,6 +960,7 @@ export function rebuildConstraintIconsForDrag(
   sketchMesh,
   renderer,
   showDimensions = true,
+  showConstraints = true,
 ) {
   const toRemove = group.children.filter((c) => c.userData.isConstraintObj);
   toRemove.forEach((obj) => {
@@ -979,5 +988,7 @@ export function rebuildConstraintIconsForDrag(
     toWorld,
     res,
     showDimensions,
+    null,
+    showConstraints,
   );
 }

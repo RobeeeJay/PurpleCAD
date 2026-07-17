@@ -951,6 +951,7 @@ export function createSketchInteraction(
           sketchMesh,
           renderer,
           useStore.getState().dimensionsVisible,
+          useStore.getState().constraintsVisible,
         );
         rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
         reapplyConstraintSelectionVisual();
@@ -1011,6 +1012,7 @@ export function createSketchInteraction(
           sketchMesh,
           renderer,
           useStore.getState().dimensionsVisible,
+          useStore.getState().constraintsVisible,
         );
         rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
         reapplyConstraintSelectionVisual();
@@ -1152,6 +1154,8 @@ export function createSketchInteraction(
         tempShapes,
         sketchMesh,
         renderer,
+        useStore.getState().dimensionsVisible,
+        useStore.getState().constraintsVisible,
       );
       rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
       updateSelectionForDrag(tempShapes, sketchMesh, true);

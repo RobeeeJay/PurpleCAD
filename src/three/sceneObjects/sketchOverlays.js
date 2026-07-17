@@ -466,7 +466,7 @@ export function buildSketchShapesGroup(
 
   // ── Constraint icons ──────────────────────────────────────────────────────
   const constraints = selItem.constraints || [];
-  if (showConstraints)
+  if (showConstraints || showDimensions)
     addConstraintIconsToGroup(
       group,
       constraints,
@@ -475,6 +475,7 @@ export function buildSketchShapesGroup(
       res,
       showDimensions,
       editHidden,
+      showConstraints,
     );
 
   // ── Enclosed region fills (hole-aware, hidden until hover) ──────────────────
