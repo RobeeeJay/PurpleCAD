@@ -814,11 +814,18 @@ export function createSketchInteraction(
   // a Map<idx, pointKey|null> — null pins the whole shape (a rigid translate).
   // `warm` (an array of the previous frame's solved shapes) is the starting
   // configuration: solving incrementally from it keeps each drag frame cheap.
+  // Repaired shapes computed at drag start when the sketch's saved state
+  // violates its constraints — used as the first solve's seed (see
+  // startSketchDrag).
+  let repairSeed = null;
+
   const solveDrag = (selItemId, placed, pointKeys, warm) => {
     const selItem = itemsRef.current.find((i) => i.id === selItemId);
     if (!selItem) return placed;
     const warmed = warm && warm.length > 0;
-    const input = (warmed ? warm : selItem.shapes || []).slice();
+    const input = (
+      warmed ? warm : (repairSeed ?? selItem.shapes ?? [])
+    ).slice();
     const fixed = new Set();
     for (const [idx, s] of placed) {
       const key = pointKeys.get(idx);
@@ -1306,7 +1313,9 @@ export function createSketchInteraction(
   };
 
   const startSketchDrag = (screenX, screenY, shiftKey) => {
-    let selItem = itemsRef.current.find((i) => i.id === selectedIdRef.current);
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return false;
     // Shift is additive-selection only — never start a drag, so a shift click /
@@ -1315,11 +1324,13 @@ export function createSketchInteraction(
     // A saved sketch can VIOLATE its own constraints (drift from corner ops
     // or older builds).  Every drag solve would then start from that bad seed
     // and fail its residual guard — the whole sketch feels nailed down.
-    // Repair once up front: the unpinned solve converges when the system is
-    // healthy, and the drag proceeds from the repaired state.
+    // Compute a repaired configuration and use it as the drag solver's SEED
+    // only: nothing is committed until the gesture ends (a bare click leaves
+    // the document untouched, and there's no mid-gesture store write to
+    // rebuild the scene under the drag).
+    repairSeed = null;
     {
-      const store = useStore.getState();
-      const varsMap = variablesToMap(store.variables);
+      const varsMap = variablesToMap(useStore.getState().variables);
       const cs = selItem.constraints || [];
       if (
         cs.length > 0 &&
@@ -1329,19 +1340,14 @@ export function createSketchInteraction(
           maxIter: 200,
           variables: varsMap,
         });
-        if (res.ok) {
-          const map = new Map();
-          res.shapes.forEach((sh, i) => map.set(i, sh));
-          store.updateSketchShapes(selItem.id, map);
-          itemsRef.current = useStore.getState().items;
-          selItem = itemsRef.current.find(
-            (i) => i.id === selectedIdRef.current,
-          );
-          if (!selItem) return false;
-        }
+        if (res.ok) repairSeed = res.shapes;
       }
     }
-    const shapes = selItem.shapes || [];
+    // Capture drag geometry from the REPAIRED configuration: pinning a shape
+    // taken from the drifted state freezes its defects into the solve (e.g. a
+    // border whose length violates its own dimension can never satisfy it
+    // while body-pinned), failing every drag.
+    const shapes = repairSeed ?? selItem.shapes ?? [];
     clearAllSketchHover();
 
     // Rotation handle: grab the knob to rotate the whole selection about its

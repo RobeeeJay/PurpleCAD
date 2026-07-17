@@ -126,10 +126,13 @@ function residuals(shapes, constraints, variables) {
       } else out.push(0);
     } else if (c.type === "_fixedRadius") {
       const sh = shapes[c.shapeIdx];
-      out.push(Number.isFinite(sh?.r) ? sh.r - c.value : 0);
+      out.push((Number.isFinite(sh?.r) ? sh.r - c.value : 0) * (c.weight ?? 1));
     } else if (c.type === "_fixedLength") {
       const sh = shapes[c.shapeIdx];
-      out.push(sh ? Math.hypot(sh.x2 - sh.x1, sh.y2 - sh.y1) - c.value : 0);
+      out.push(
+        (sh ? Math.hypot(sh.x2 - sh.x1, sh.y2 - sh.y1) - c.value : 0) *
+          (c.weight ?? 1),
+      );
     } else if (c.type === "pointLineDistance") {
       // Perpendicular distance from a point (standalone or keyed) to an
       // infinite line = the dimension value.
@@ -392,21 +395,32 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   });
   const N = specs.length;
   const cs = (constraints || []).filter((c) => c.type !== undefined);
-  // Chamfer/bevel corner bridges must move RIGIDLY: nothing dimensions a
+  // Chamfer/bevel corner bridges should move RIGIDLY: nothing dimensions a
   // bevel's radius or a chamfer bridge's length, so without these rows the
   // solver satisfies a drag by inflating the corners (they absorb the whole
-  // translation and the far geometry never follows); the post-solve corner
-  // re-derive then snaps them back, leaving the sketch violated again.
+  // translation and the far geometry never follows).  They are full-weight
+  // rows during the FIRST solve pass, but excluded from ok/maxResidual
+  // scoring; if that pass can't satisfy the REAL constraints (a legitimate
+  // corner-size change — a leg edit or resize — conflicts with rigidity),
+  // the solve reruns without them, restoring the old free-corner behaviour.
+  const stiffRows = [];
   base.forEach((sh, i) => {
     if (sh.kind === "bevel" && Number.isFinite(sh.r))
-      cs.push({ type: "_fixedRadius", shapeIdx: i, value: sh.r });
+      stiffRows.push({
+        type: "_fixedRadius",
+        shapeIdx: i,
+        value: sh.r,
+        weight: 1,
+      });
     else if (sh.kind === "chamfer" && sh.type === "line")
-      cs.push({
+      stiffRows.push({
         type: "_fixedLength",
         shapeIdx: i,
         value: Math.hypot(sh.x2 - sh.x1, sh.y2 - sh.y1),
+        weight: 1,
       });
   });
+  const solveCs = stiffRows.length > 0 ? [...cs, ...stiffRows] : cs;
   if (N === 0 || cs.length === 0)
     return { shapes: base, ok: true, maxResidual: 0 };
 
@@ -453,74 +467,94 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
     return out;
   };
   // Full residual: constraints first, then one regularization row per variable.
-  const fullRes = (xv) => {
-    const r = residuals(shapesAt(xv), cs, variables);
+  const makeFullRes = (activeCs) => (xv) => {
+    const r = residuals(shapesAt(xv), activeCs, variables);
     for (let j = 0; j < N; j++) r.push((xv[j] - x0[j]) * regWeight[j]);
     return r;
   };
+  let fullRes = makeFullRes(solveCs);
   const cost = (r) => r.reduce((a, v) => a + v * v, 0);
 
   let lambda = 1e-3;
   let r = fullRes(x);
   let c = cost(r);
   const h = 1e-6;
-  for (let iter = 0; iter < maxIter; iter++) {
-    if (c < 1e-18) break;
-    const M = r.length;
-    // Numerical Jacobian J (M×N).
-    const J = Array.from({ length: M }, () => new Array(N).fill(0));
-    for (let j = 0; j < N; j++) {
-      const xj = x.slice();
-      xj[j] += h;
-      const rj = fullRes(xj);
-      for (let m = 0; m < M; m++) J[m][j] = (rj[m] - r[m]) / h;
-    }
-    // Normal equations: (JᵀJ + λ·diag(JᵀJ))·dx = -Jᵀr.
-    const JtJ = Array.from({ length: N }, () => new Array(N).fill(0));
-    const Jtr = new Array(N).fill(0);
-    for (let a = 0; a < N; a++) {
-      for (let b = a; b < N; b++) {
-        let s = 0;
-        for (let m = 0; m < M; m++) s += J[m][a] * J[m][b];
-        JtJ[a][b] = s;
-        JtJ[b][a] = s;
+  const iterate = (iters) => {
+    for (let iter = 0; iter < iters; iter++) {
+      if (c < 1e-18) break;
+      const M = r.length;
+      // Numerical Jacobian J (M×N).
+      const J = Array.from({ length: M }, () => new Array(N).fill(0));
+      for (let j = 0; j < N; j++) {
+        const xj = x.slice();
+        xj[j] += h;
+        const rj = fullRes(xj);
+        for (let m = 0; m < M; m++) J[m][j] = (rj[m] - r[m]) / h;
       }
-      let g = 0;
-      for (let m = 0; m < M; m++) g += J[m][a] * r[m];
-      Jtr[a] = g;
+      // Normal equations: (JᵀJ + λ·diag(JᵀJ))·dx = -Jᵀr.
+      const JtJ = Array.from({ length: N }, () => new Array(N).fill(0));
+      const Jtr = new Array(N).fill(0);
+      for (let a = 0; a < N; a++) {
+        for (let b = a; b < N; b++) {
+          let s = 0;
+          for (let m = 0; m < M; m++) s += J[m][a] * J[m][b];
+          JtJ[a][b] = s;
+          JtJ[b][a] = s;
+        }
+        let g = 0;
+        for (let m = 0; m < M; m++) g += J[m][a] * r[m];
+        Jtr[a] = g;
+      }
+      const A = JtJ.map((row, a) =>
+        row.map((v, b) => (a === b ? v + lambda * (v || 1) : v)),
+      );
+      const dx = solveLinear(
+        A,
+        Jtr.map((v) => -v),
+      );
+      if (!dx) {
+        lambda *= 4;
+        if (lambda > 1e9) break;
+        continue;
+      }
+      const xNew = x.map((v, j) => v + dx[j]);
+      const rNew = fullRes(xNew);
+      const cNew = cost(rNew);
+      if (cNew < c) {
+        x = xNew;
+        r = rNew;
+        c = cNew;
+        lambda = Math.max(1e-7, lambda * 0.5);
+      } else {
+        lambda *= 3;
+        if (lambda > 1e9) break;
+      }
     }
-    const A = JtJ.map((row, a) =>
-      row.map((v, b) => (a === b ? v + lambda * (v || 1) : v)),
-    );
-    const dx = solveLinear(
-      A,
-      Jtr.map((v) => -v),
-    );
-    if (!dx) {
-      lambda *= 4;
-      if (lambda > 1e9) break;
-      continue;
-    }
-    const xNew = x.map((v, j) => v + dx[j]);
-    const rNew = fullRes(xNew);
-    const cNew = cost(rNew);
-    if (cNew < c) {
-      x = xNew;
-      r = rNew;
-      c = cNew;
-      lambda = Math.max(1e-7, lambda * 0.5);
-    } else {
-      lambda *= 3;
-      if (lambda > 1e9) break;
-    }
-  }
+  };
+  iterate(maxIter);
   // Repair any chamfer/bevel corners: the solver only pins a bridge's endpoints
   // to its legs, so a bevel arc's radius/centre drift free and the fillet breaks
   // as a connected line is dragged.  Re-deriving from the legs restores the proper
   // tangent arc (and the chamfer's exact setback) before residuals are scored.
-  const finalShapes = rederiveAllCorners(shapesAt(x), cs);
-  const finalRes = residuals(finalShapes, cs, variables);
-  let maxResidual = 0;
-  for (const v of finalRes) maxResidual = Math.max(maxResidual, Math.abs(v));
-  return { shapes: finalShapes, ok: maxResidual < successTol, maxResidual };
+  const score = (xv) => {
+    const finalShapes = rederiveAllCorners(shapesAt(xv), cs);
+    const finalRes = residuals(finalShapes, cs, variables);
+    let maxResidual = 0;
+    for (const v of finalRes) maxResidual = Math.max(maxResidual, Math.abs(v));
+    return { shapes: finalShapes, ok: maxResidual < successTol, maxResidual };
+  };
+  let result = score(x);
+  if (!result.ok && stiffRows.length > 0) {
+    // The rigid-corner pass couldn't satisfy the real constraints — the edit
+    // legitimately changes a corner's size.  Rerun without the stiff rows.
+    fullRes = makeFullRes(cs);
+    x = x0.slice();
+    lambda = 1e-3;
+    r = fullRes(x);
+    c = cost(r);
+    iterate(maxIter);
+    const retry = score(x);
+    if (retry.maxResidual < result.maxResidual) result = retry;
+  }
+  return result;
 }
