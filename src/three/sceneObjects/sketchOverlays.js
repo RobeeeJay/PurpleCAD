@@ -482,7 +482,17 @@ export function buildSketchShapesGroup(
       if (!Number.isFinite(valueUnits)) return;
       const mid = shapeMidpoint(shape);
       if (!mid) return;
-      const labelText = `${isBevel ? "R " : ""}${(valueUnits * MM_PER_UNIT).toFixed(1)}mm`;
+      // A formula value surfaces on the label like dimension constraints do;
+      // a bare-number string stays the plain mm readout.
+      const formulaSrc =
+        typeof shape.distanceFormula === "string" &&
+        !/^-?\d+(\.\d+)?$/.test(shape.distanceFormula.trim())
+          ? shape.distanceFormula.trim()
+          : null;
+      const valueMm = (valueUnits * MM_PER_UNIT).toFixed(1);
+      const labelText = `${isBevel ? "R " : ""}${
+        formulaSrc ? `${formulaSrc} = ${valueMm}mm` : `${valueMm}mm`
+      }`;
       const canvas = document.createElement("canvas");
       const tmpCtx = canvas.getContext("2d");
       const labelFont = "bold 18px sans-serif";

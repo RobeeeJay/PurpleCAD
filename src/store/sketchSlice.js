@@ -1074,7 +1074,7 @@ export const createSketchSlice = (set) => ({
   // Resize an existing chamfer / bevel corner to a new size (mm) — re-derives the
   // bridge + its two legs in place.  The geometry comes out self-consistent (the
   // bridge ends sit exactly on the trimmed leg corners), so no re-solve is needed.
-  resizeSketchCorner: (sketchId, bridgeIdx, sizeMm) =>
+  resizeSketchCorner: (sketchId, bridgeIdx, sizeMm, formula = null) =>
     set((state) => {
       const item = state.items.find((i) => i.id === sketchId);
       if (!item) return {};
@@ -1086,6 +1086,16 @@ export const createSketchSlice = (set) => ({
       if (!res) return {};
       pushSketchSnapshot(state, sketchId);
       const map = new Map(res.updates);
+      // The re-derived bridge keeps (or replaces) its formula so the label
+      // and the next edit still show what the user typed.
+      const bridge = map.get(bridgeIdx) ?? (item.shapes || [])[bridgeIdx];
+      if (bridge) {
+        const next = Object.assign({}, bridge);
+        if (formula && typeof formula === "string" && formula.trim())
+          next.distanceFormula = formula.trim();
+        else delete next.distanceFormula;
+        map.set(bridgeIdx, next);
+      }
       const updatedItems = state.items.map((it) =>
         it.id === sketchId
           ? Object.assign({}, it, {

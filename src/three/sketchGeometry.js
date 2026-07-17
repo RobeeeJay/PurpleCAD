@@ -331,6 +331,11 @@ export function resizeCorner(
       chamferData: newData,
     };
   }
+  // Carry non-geometric metadata through the re-derive: the user's formula
+  // must survive every post-solve corner repair or it silently degrades to a
+  // plain number.
+  if (typeof bridge.distanceFormula === "string")
+    newBridge.distanceFormula = bridge.distanceFormula;
   return {
     updates: [
       [bridgeIdx, newBridge],

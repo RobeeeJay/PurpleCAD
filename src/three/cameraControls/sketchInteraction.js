@@ -2216,7 +2216,8 @@ export function createSketchInteraction(
                   mode: hs.kind,
                 },
                 defaultDistance:
-                  hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0),
+                  hs.distanceFormula ??
+                  (hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0)),
               });
               return;
             }
@@ -2316,7 +2317,8 @@ export function createSketchInteraction(
                     mode: hs.kind,
                   },
                   defaultDistance:
-                    hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0),
+                    hs.distanceFormula ??
+                    (hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0)),
                 });
                 return;
               }

@@ -817,7 +817,7 @@ export default function SketchOverlays({
                       sketchDistanceInput.cornerResize;
                     useStore
                       .getState()
-                      .resizeSketchCorner(sketchId, shapeIdx, mm);
+                      .resizeSketchCorner(sketchId, shapeIdx, mm, raw);
                     cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
                   }
                   useStore.getState().setSketchDistanceInput(null);

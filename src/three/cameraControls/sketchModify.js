@@ -95,6 +95,11 @@ export function createSketchModifyHelpers(
     if (!found) return;
     const { edit } = found;
     const updates = new Map(edit.updates);
+    // Keep the raw dialog value on the bridge so the label can show the
+    // formula and edits reopen with it (mirrors dimension constraints).
+    const rawDist = useStore.getState().sketchModifyDistMm;
+    if (typeof rawDist === "string" && rawDist.trim())
+      edit.newShape.distanceFormula = rawDist.trim();
     // Replace the old corner joins (coincident + any angle lock spanning the
     // split corner) with the bridge element and its own joins; the two trimmed
     // legs are the only existing shapes that change.

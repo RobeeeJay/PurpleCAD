@@ -263,6 +263,40 @@ test.describe.serial("2D sketch workflow", () => {
       )
       .toBeCloseTo(0.5, 2);
     await page.getByTitle("Done — leave the bevel tool").click();
+
+    // The bridge stored the FORMULA, not just the number.
+    const bev = (await shapes()).find((sh) => sh.kind === "bevel");
+    expect(bev.distanceFormula).toBe("br");
+
+    // Double-clicking the bridge reopens the input seeded with the formula.
+    const midAng = (bev.startAngle + bev.endAngle) / 2;
+    const onArc = toScreen(
+      bev.cx + Math.cos(midAng) * bev.r,
+      bev.cy + Math.sin(midAng) * bev.r,
+    );
+    await page.mouse.dblclick(onArc.x, onArc.y);
+    const editOverlay = page.locator(".sketch-distance-input-overlay");
+    await expect(editOverlay).toBeVisible();
+    await expect(editOverlay.locator("input").first()).toHaveValue("br");
+    await page.keyboard.press("Escape");
+
+    // Changing the variable re-cuts the corner to the new radius.
+    await page.evaluate(() =>
+      window.__store
+        .getState()
+        .setVariables([{ name: "br", formula: "8" }]),
+    );
+    await expect
+      .poll(async () =>
+        (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
+      )
+      .toBeCloseTo(0.8, 2);
+    // The formula survives the re-cut.
+    expect(
+      (await shapes()).find((sh) => sh.kind === "bevel").distanceFormula,
+    ).toBe("br");
+    // Restore for later tests.
+    await page.evaluate(() => window.__store.getState().setVariables([]));
   });
 
   test("horizontal constraint straightens a slanted line via the toolbar", async () => {
