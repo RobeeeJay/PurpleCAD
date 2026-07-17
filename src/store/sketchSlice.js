@@ -347,6 +347,8 @@ export const createSketchSlice = (set) => ({
 
   // Chamfer setback / bevel radius, in mm (scene units × MM_PER_UNIT). Drives
   // both the modify preview and the committed cut.
+  // Chamfer setback / bevel radius: a bare mm number or a formula string
+  // over the document variables.
   sketchModifyDistMm: 2.5,
   setSketchModifyDistMm: (mm) => set({ sketchModifyDistMm: mm }),
 

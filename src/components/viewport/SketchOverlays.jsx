@@ -99,6 +99,9 @@ export default function SketchOverlays({
   // event) can read it; onChange already live-previews it via the store.
   const offsetDraftRef = React.useRef(null);
   const sketchModifyDistMm = useStore((s) => s.sketchModifyDistMm);
+  // Live draft of the chamfer/bevel value while typing (may be an incomplete
+  // formula); the store only receives values that evaluate.
+  const [modifyDraft, setModifyDraft] = React.useState(null);
 
   const confirmOffset = () => {
     const di = useStore.getState().sketchDistanceInput;
@@ -1094,14 +1097,26 @@ export default function SketchOverlays({
                 {sketchModifyMode === "chamfer"
                   ? "Setback (mm)"
                   : "Radius (mm)"}
-                <DebouncedNumberField
-                  min={0.1}
-                  step={0.5}
-                  storeValue={sketchModifyDistMm}
-                  validate={(v) => Number.isFinite(v) && v > 0}
-                  commit={(v) => useStore.getState().setSketchModifyDistMm(v)}
+                <FormulaInput
+                  type="text"
+                  key={sketchModifyMode}
+                  variables={variables}
+                  title="A number in mm, or a formula over the document variables"
+                  value={modifyDraft ?? String(sketchModifyDistMm)}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setModifyDraft(raw);
+                    const mm = evaluateFormula(
+                      raw,
+                      variablesToMap(useStore.getState().variables),
+                    );
+                    if (Number.isFinite(mm) && mm > 0)
+                      useStore.getState().setSketchModifyDistMm(raw.trim());
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  onBlur={() => setModifyDraft(null)}
                   style={{
-                    width: 56,
+                    width: 90,
                     fontSize: 11,
                     padding: "2px 4px",
                     borderRadius: 3,

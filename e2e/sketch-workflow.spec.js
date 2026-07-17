@@ -207,6 +207,43 @@ test.describe.serial("2D sketch workflow", () => {
     ).toBe(null);
   });
 
+  test("bevel dialog accepts a variable formula for the radius", async () => {
+    await page.evaluate(() =>
+      window.__store
+        .getState()
+        .setVariables([{ name: "br", formula: "5" }]),
+    );
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(8, -6);
+    const B = toScreen(12, -6); // the corner
+    const C = toScreen(12, -2);
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.mouse.click(C.x, C.y);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+
+    await page
+      .getByTitle("Bevel — trim two connected lines", { exact: false })
+      .click();
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toContainText("Radius (mm)");
+    const field = overlay.locator("input").first();
+    await field.fill("br");
+    // The formula lands in the store and drives the corner click: 5 mm.
+    await page.mouse.click(B.x, B.y);
+    await expect
+      .poll(async () =>
+        (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
+      )
+      .toBeCloseTo(0.5, 2);
+    await page.getByTitle("Done — leave the bevel tool").click();
+  });
+
   test("horizontal constraint straightens a slanted line via the toolbar", async () => {
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool("line"),

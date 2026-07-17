@@ -10,11 +10,21 @@ import { useStore } from "../../store";
 import { getSketchShapePoints, MM_PER_UNIT } from "../sceneObjects.js";
 import { buildChamferEdit } from "../sketchGeometry.js";
 import { SKETCH_MODIFY_HIGHLIGHT } from "../theme.js";
+import { evaluateFormula, variablesToMap } from "../../utils/formulas.js";
 
 // Setback (chamfer) / radius (bevel), in scene units, read live from the store
-// so the toolbar input drives the same value the preview and commit use.
-const modifyDist = () =>
-  (useStore.getState().sketchModifyDistMm ?? 2.5) / MM_PER_UNIT;
+// so the dialog input drives the same value the preview and commit use.  The
+// stored value is a bare mm number or a formula string over the document
+// variables ("width / 4").
+const modifyDist = () => {
+  const state = useStore.getState();
+  const raw = state.sketchModifyDistMm ?? 2.5;
+  const mm =
+    typeof raw === "string"
+      ? evaluateFormula(raw, variablesToMap(state.variables))
+      : raw;
+  return (Number.isFinite(mm) && mm > 0 ? mm : 2.5) / MM_PER_UNIT;
+};
 
 export function createSketchModifyHelpers(
   { scene, renderer, objectsRef, itemsRef, selectedIdRef },
