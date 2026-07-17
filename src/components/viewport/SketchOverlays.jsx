@@ -98,6 +98,7 @@ export default function SketchOverlays({
   // The latest typed value is tracked here so the Confirm button (which has no
   // event) can read it; onChange already live-previews it via the store.
   const offsetDraftRef = React.useRef(null);
+  const sketchModifyDistMm = useStore((s) => s.sketchModifyDistMm);
 
   const confirmOffset = () => {
     const di = useStore.getState().sketchDistanceInput;
@@ -334,11 +335,17 @@ export default function SketchOverlays({
         activeSketchTool !== "circularPattern" &&
         activeSketchTool !== "rectangularPattern" &&
         activeSketchTool !== "project" &&
+        activeSketchTool !== "trim" &&
         sketchDrawPhase !== "second" && (
           <div className="sketch-placement-hint">
             Click to set the start point
           </div>
         )}
+      {activeSketchTool === "trim" && (
+        <div className="sketch-placement-hint">
+          Click or drag over a line or a point · Esc to cancel
+        </div>
+      )}
       {activeSketchTool === "project" && (
         <div className="sketch-placement-hint">
           Click a 3D edge to project its connected edges, or drag a box to
@@ -1064,12 +1071,69 @@ export default function SketchOverlays({
           </div>
         )}
       {sketchMode && sketchModifyMode && (
-        <div className="sketch-placement-hint">
-          {sketchModifyMode === "chamfer"
-            ? "Click a corner between two lines to chamfer"
-            : "Click a corner between two lines to bevel"}{" "}
-          · Esc to cancel
-        </div>
+        <>
+          <div className="sketch-placement-hint">
+            {sketchModifyMode === "chamfer"
+              ? "Click a corner between two lines to chamfer"
+              : "Click a corner between two lines to bevel"}{" "}
+            · Esc to cancel
+          </div>
+          {!sketchDistanceInput && (
+            <div className="sketch-distance-input-overlay">
+              <span>
+                {sketchModifyMode === "chamfer" ? "Chamfer" : "Bevel"}
+              </span>
+              <label
+                style={{
+                  marginLeft: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                {sketchModifyMode === "chamfer"
+                  ? "Setback (mm)"
+                  : "Radius (mm)"}
+                <DebouncedNumberField
+                  min={0.1}
+                  step={0.5}
+                  storeValue={sketchModifyDistMm}
+                  validate={(v) => Number.isFinite(v) && v > 0}
+                  commit={(v) => useStore.getState().setSketchModifyDistMm(v)}
+                  style={{
+                    width: 56,
+                    fontSize: 11,
+                    padding: "2px 4px",
+                    borderRadius: 3,
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => useStore.getState().setSketchModifyMode(null)}
+                title={
+                  sketchModifyMode === "chamfer"
+                    ? "Done — leave the chamfer tool"
+                    : "Done — leave the bevel tool"
+                }
+                style={{
+                  fontSize: 11,
+                  padding: "3px 10px",
+                  marginLeft: 8,
+                  borderRadius: 3,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-tertiary)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                Done
+              </button>
+            </div>
+          )}
+        </>
       )}
       <div
         ref={dimHintRef}

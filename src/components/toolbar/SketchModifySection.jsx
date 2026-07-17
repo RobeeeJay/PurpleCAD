@@ -2,14 +2,11 @@ import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { offsetSelectedSketchGeometry } from "../../three/sketchModifyActions.js";
-import { NumberInput } from "../inputs.jsx";
 
 const SketchModifySection = () => {
   const selectedId = useStore((s) => s.selectedId);
   const sketchModifyMode = useStore((s) => s.sketchModifyMode);
   const setSketchModifyMode = useStore((s) => s.setSketchModifyMode);
-  const sketchModifyDistMm = useStore((s) => s.sketchModifyDistMm);
-  const setSketchModifyDistMm = useStore((s) => s.setSketchModifyDistMm);
   const activeSketchTool = useStore((s) => s.activeSketchTool);
   const startMirrorTool = useStore((s) => s.startMirrorTool);
   const cancelMirrorTool = useStore((s) => s.cancelMirrorTool);
@@ -233,38 +230,9 @@ const SketchModifySection = () => {
           />
         </svg>
       </button>
-      {(sketchModifyMode === "chamfer" || sketchModifyMode === "bevel") && (
-        <label
-          title={
-            sketchModifyMode === "chamfer"
-              ? "Chamfer setback (mm) along each edge"
-              : "Bevel arc radius (mm)"
-          }
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            fontSize: 11,
-            color: "var(--text-secondary)",
-            padding: "0 4px",
-          }}
-        >
-          {sketchModifyMode === "chamfer" ? "Setback" : "Radius"}
-          <NumberInput
-            min="0"
-            step="0.5"
-            value={sketchModifyDistMm}
-            onCommit={(v) => {
-              if (Number.isFinite(v) && v > 0) setSketchModifyDistMm(v);
-            }}
-            style={{ width: 46 }}
-          />
-          mm
-        </label>
-      )}
       <button
         className={`toolbar-btn ${activeSketchTool === "trim" ? "active" : ""}`}
-        title="Trim — click or drag over a line to remove it up to where it crosses another line or point"
+        title="Trim — click or drag over a line or a point; a line is removed up to where it crosses another line"
         onClick={handleTrim}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">

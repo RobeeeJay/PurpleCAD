@@ -139,6 +139,9 @@ test.describe.serial("2D sketch workflow", () => {
     await page
       .getByTitle("Trim — click or drag over a line", { exact: false })
       .click();
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "Click or drag over a line or a point",
+    );
     const hit = toScreen(-3.5, -2); // on the horizontal's LEFT arm
     await page.mouse.click(hit.x, hit.y);
     await expect
@@ -155,6 +158,53 @@ test.describe.serial("2D sketch workflow", () => {
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool(null),
     );
+  });
+
+  test("chamfer: setback lives in a bottom dialog; corner click applies it", async () => {
+    // An L-corner from two chained lines.
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(8, 2);
+    const B = toScreen(12, 2); // the corner
+    const C = toScreen(12, 6);
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.mouse.click(C.x, C.y);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+    const before = (await shapes()).length;
+
+    await page
+      .getByTitle("Chamfer — trim two connected lines", { exact: false })
+      .click();
+    // The value field moved off the toolbar into the bottom dialog.
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toBeVisible();
+    await expect(overlay).toContainText("Setback (mm)");
+    const field = overlay.locator("input").first();
+    await field.fill("4");
+    await field.press("Enter");
+
+    // Click the corner: a chamfer bridge appears at the typed setback.
+    await page.mouse.click(B.x, B.y);
+    await expect
+      .poll(async () =>
+        (await shapes()).some((sh) => sh.kind === "chamfer"),
+      )
+      .toBe(true);
+    const bridge = (await shapes()).find((sh) => sh.kind === "chamfer");
+    expect(bridge.chamferData?.dist).toBeCloseTo(0.4, 2); // 4 mm
+    expect((await shapes()).length).toBeGreaterThan(before);
+
+    // Done leaves the tool and closes the dialog.
+    await page.getByTitle("Done — leave the chamfer tool").click();
+    await expect(overlay).toBeHidden();
+    expect(
+      await page.evaluate(() => window.__store.getState().sketchModifyMode),
+    ).toBe(null);
   });
 
   test("horizontal constraint straightens a slanted line via the toolbar", async () => {
