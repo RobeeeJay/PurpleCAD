@@ -30,6 +30,81 @@ const bridgeSketch = () => ({
   constraints: [],
 });
 
+describe("rectangular pattern formulas", () => {
+  beforeEach(() => {
+    useStore.setState({
+      items: [
+        {
+          id: 88,
+          type: "sketch",
+          name: "P",
+          children: [],
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+          shapes: [{ type: "circle", cx: 0, cy: 0, r: 0.5 }],
+          constraints: [],
+        },
+      ],
+      history: [],
+      activeHistoryId: null,
+      variables: [{ name: "gap", formula: "30" }],
+      selectedId: 88,
+    });
+  });
+
+  it("confirm resolves mm formulas and stores them on the constraints", () => {
+    const s = useStore.getState();
+    s.startRectangularPatternTool();
+    s.toggleRectangularPatternShape(0);
+    s.setRectangularPatternCountX(2);
+    s.setRectangularPatternCountY(1);
+    s.setRectangularPatternOffsetX("gap");
+    s.setRectangularPatternOffsetY(0);
+    useStore.getState().confirmRectangularPattern(88);
+    const it = useStore.getState().items[0];
+    const c = it.constraints.find((x) => x.type === "rectangularPattern");
+    expect(c.dx).toBeCloseTo(3, 6); // 30 mm = 3 units
+    expect(c.dxFormula).toBe("gap");
+    expect(it.shapes[1].cx).toBeCloseTo(3, 6);
+  });
+
+  it("changing the variable re-spaces the copies", () => {
+    const s = useStore.getState();
+    s.startRectangularPatternTool();
+    s.toggleRectangularPatternShape(0);
+    s.setRectangularPatternCountX(2);
+    s.setRectangularPatternCountY(1);
+    s.setRectangularPatternOffsetX("gap");
+    s.setRectangularPatternOffsetY(0);
+    useStore.getState().confirmRectangularPattern(88);
+    useStore.getState().setVariables([{ name: "gap", formula: "50" }]);
+    const it = useStore.getState().items[0];
+    const c = it.constraints.find((x) => x.type === "rectangularPattern");
+    expect(c.dx).toBeCloseTo(5, 6);
+    expect(c.dxFormula).toBe("gap");
+    expect(it.shapes[1].cx).toBeCloseTo(5, 6);
+  });
+
+  it("edit seeding hands back the formula, plain offsets as mm", () => {
+    const s = useStore.getState();
+    s.startRectangularPatternTool();
+    s.toggleRectangularPatternShape(0);
+    s.setRectangularPatternCountX(2);
+    s.setRectangularPatternCountY(1);
+    s.setRectangularPatternOffsetX("gap");
+    s.setRectangularPatternOffsetY(20);
+    useStore.getState().confirmRectangularPattern(88);
+    const idx = useStore
+      .getState()
+      .items[0].constraints.findIndex((x) => x.type === "rectangularPattern");
+    useStore.getState().beginRectangularPatternEdit(88, idx);
+    const st = useStore.getState().sketchRectangularPatternState;
+    expect(st.offsetX).toBe("gap");
+    expect(st.offsetY).toBeCloseTo(20, 6); // mm, not units
+  });
+});
+
 describe("variable-driven corner re-cut", () => {
   beforeEach(() => {
     useStore.setState({

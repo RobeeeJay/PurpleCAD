@@ -4,9 +4,11 @@
 // and the preview overlay.
 
 import { useStore } from "../../store";
+import { variablesToMap } from "../../utils/formulas.js";
 import {
   RECTANGULAR_PATTERNABLE_TYPES,
   translateShapeGeometry,
+  resolveRectPatternParams,
 } from "../sketchRectangularPattern.js";
 import { sketchRectangularPatternColorFor } from "../theme.js";
 import { buildPatternPreviewObjects } from "./sketchPatternPreview.js";
@@ -44,9 +46,10 @@ export function createSketchRectangularPatternHelpers({
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     const shapes = selItem.shapes || [];
-    const countX = Math.max(1, Math.round(patternState.countX) || 1);
-    const countY = Math.max(1, Math.round(patternState.countY) || 1);
-    const { offsetX, offsetY } = patternState;
+    const { countX, countY, offsetX, offsetY } = resolveRectPatternParams(
+      patternState,
+      variablesToMap(useStore.getState().variables),
+    );
     const theme = useStore.getState().theme;
 
     const sourceShapes = [];

@@ -594,6 +594,72 @@ test.describe.serial("2D sketch workflow", () => {
     );
   });
 
+  test("rectangular pattern dialog takes formula offsets and tracks the variable", async () => {
+    await page.evaluate(() =>
+      window.__store
+        .getState()
+        .setVariables([{ name: "gap", formula: "30" }]),
+    );
+    // A circle to pattern.
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("circle"),
+    );
+    const C = toScreen(-8, 6);
+    const R = toScreen(-7.5, 6);
+    await page.mouse.click(C.x, C.y);
+    await page.mouse.click(R.x, R.y);
+    const circleIdx = (await shapes()).length - 1;
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+
+    await page
+      .getByTitle("Rectangular Pattern — repeat the selected", {
+        exact: false,
+      })
+      .click();
+    await page.mouse.click(R.x, R.y); // pick the circle (on its outline)
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toContainText("Patterning 1 item");
+    const inputs = overlay.locator("input");
+    await inputs.nth(0).fill("2"); // Count X
+    await inputs.nth(1).fill("gap"); // Offset X — a variable formula
+    await inputs.nth(2).fill("1"); // Count Y
+    await inputs.nth(3).fill("0"); // Offset Y
+    await page
+      .getByTitle("Confirm — create the patterned geometry")
+      .click();
+
+    // The copy sits 30 mm (3 units) right of the source; the constraint
+    // remembers the formula.
+    const cx0 = (await shapes())[circleIdx].cx;
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store
+              .getState()
+              .items.find((i) => i.id === 300)
+              .constraints.find((c) => c.type === "rectangularPattern") ??
+            null,
+        ),
+      )
+      .toMatchObject({ dxFormula: "gap" });
+    const copyIdx = (await shapes()).length - 1;
+    expect((await shapes())[copyIdx].cx).toBeCloseTo(cx0 + 3, 1);
+
+    // Changing the variable re-spaces the copies.
+    await page.evaluate(() =>
+      window.__store
+        .getState()
+        .setVariables([{ name: "gap", formula: "50" }]),
+    );
+    await expect
+      .poll(async () => (await shapes())[copyIdx].cx)
+      .toBeCloseTo(cx0 + 5, 1);
+    await page.evaluate(() => window.__store.getState().setVariables([]));
+  });
+
   test("text tool decomposes typed text into sketch geometry", async () => {
     const before = (await shapes()).length;
     await page.evaluate(() =>

@@ -578,11 +578,12 @@ export default function SketchOverlays({
                 <DebouncedNumberField
                   min={1}
                   step={1}
+                  variables={variables}
                   storeValue={sketchRectangularPatternState.countX}
                   validate={(v) => Number.isFinite(v) && v >= 1}
                   onValidChange={reportPatternValid("rectCountX")}
-                  commit={(v) =>
-                    useStore.getState().setRectangularPatternCountX(v)
+                  commit={(v, raw) =>
+                    useStore.getState().setRectangularPatternCountX(raw ?? v)
                   }
                   style={{
                     width: 44,
@@ -605,11 +606,12 @@ export default function SketchOverlays({
                 Offset X (mm)
                 <DebouncedNumberField
                   step="any"
+                  variables={variables}
                   storeValue={sketchRectangularPatternState.offsetX}
                   validate={(v) => Number.isFinite(v)}
                   onValidChange={reportPatternValid("rectOffsetX")}
-                  commit={(v) =>
-                    useStore.getState().setRectangularPatternOffsetX(v)
+                  commit={(v, raw) =>
+                    useStore.getState().setRectangularPatternOffsetX(raw ?? v)
                   }
                   style={{
                     width: 56,
@@ -633,11 +635,12 @@ export default function SketchOverlays({
                 <DebouncedNumberField
                   min={1}
                   step={1}
+                  variables={variables}
                   storeValue={sketchRectangularPatternState.countY}
                   validate={(v) => Number.isFinite(v) && v >= 1}
                   onValidChange={reportPatternValid("rectCountY")}
-                  commit={(v) =>
-                    useStore.getState().setRectangularPatternCountY(v)
+                  commit={(v, raw) =>
+                    useStore.getState().setRectangularPatternCountY(raw ?? v)
                   }
                   style={{
                     width: 44,
@@ -660,11 +663,12 @@ export default function SketchOverlays({
                 Offset Y (mm)
                 <DebouncedNumberField
                   step="any"
+                  variables={variables}
                   storeValue={sketchRectangularPatternState.offsetY}
                   validate={(v) => Number.isFinite(v)}
                   onValidChange={reportPatternValid("rectOffsetY")}
-                  commit={(v) =>
-                    useStore.getState().setRectangularPatternOffsetY(v)
+                  commit={(v, raw) =>
+                    useStore.getState().setRectangularPatternOffsetY(raw ?? v)
                   }
                   style={{
                     width: 56,

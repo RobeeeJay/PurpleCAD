@@ -19,6 +19,7 @@ import {
   getShapePoint,
 } from "../three/sceneObjects/sketchShapes.js";
 import { resolveValue } from "../three/geometryParams.js";
+import { variablesToMap } from "../utils/formulas.js";
 import {
   MIRRORABLE_TYPES,
   mirrorShapeGeometry,
@@ -33,6 +34,7 @@ import {
   RECTANGULAR_PATTERNABLE_TYPES,
   translateShapeGeometry,
   applyRectangularPatternConstraints,
+  resolveRectPatternParams,
 } from "../three/sketchRectangularPattern.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import { explodeContours, resizeCorner } from "../three/sketchGeometry.js";
@@ -650,6 +652,7 @@ export const createSketchSlice = (set) => ({
   // values entered so new rectangular patterns start from them.
   rectangularPatternDefaultCountX: 2,
   rectangularPatternDefaultCountY: 2,
+  // Offsets are mm (a number or a mm formula string); counts may be formulas.
   rectangularPatternDefaultOffsetX: 10,
   rectangularPatternDefaultOffsetY: 10,
 
@@ -738,10 +741,11 @@ export const createSketchSlice = (set) => ({
         activeSketchTool: "rectangularPattern",
         sketchRectangularPatternState: {
           shapeIndices: sourceIndices,
-          countX: clicked.countX,
-          countY: clicked.countY,
-          offsetX: clicked.dx,
-          offsetY: clicked.dy,
+          countX: clicked.countXFormula ?? clicked.countX,
+          countY: clicked.countYFormula ?? clicked.countY,
+          // Raw values are mm (or a mm formula); dx/dy are scene units.
+          offsetX: clicked.dxFormula ?? clicked.dx * MM_PER_UNIT,
+          offsetY: clicked.dyFormula ?? clicked.dy * MM_PER_UNIT,
           editCopyIndices: copyIndices,
         },
       };
@@ -2206,17 +2210,24 @@ export const createSketchSlice = (set) => ({
       const patternState = state.sketchRectangularPatternState;
       if (!item || !patternState) return {};
       const shapes = item.shapes || [];
-      const countX = Math.max(1, Math.round(patternState.countX) || 1);
-      const countY = Math.max(1, Math.round(patternState.countY) || 1);
-      const offsetX = patternState.offsetX;
-      const offsetY = patternState.offsetY;
+      // Raw params may be formulas (counts) / mm formulas (offsets); resolve
+      // against the live variables, keeping the raws for the constraints.
+      const { countX, countY, offsetX, offsetY } = resolveRectPatternParams(
+        patternState,
+        variablesToMap(state.variables),
+      );
+      const rawFormula = (v) => (typeof v === "string" ? v : null);
+      const dxFormula = rawFormula(patternState.offsetX);
+      const dyFormula = rawFormula(patternState.offsetY);
+      const countXFormula = rawFormula(patternState.countX);
+      const countYFormula = rawFormula(patternState.countY);
       const defaults = {
         activeSketchTool: null,
         sketchRectangularPatternState: null,
-        rectangularPatternDefaultCountX: countX,
-        rectangularPatternDefaultCountY: countY,
-        rectangularPatternDefaultOffsetX: offsetX,
-        rectangularPatternDefaultOffsetY: offsetY,
+        rectangularPatternDefaultCountX: countXFormula ?? countX,
+        rectangularPatternDefaultCountY: countYFormula ?? countY,
+        rectangularPatternDefaultOffsetX: dxFormula ?? patternState.offsetX,
+        rectangularPatternDefaultOffsetY: dyFormula ?? patternState.offsetY,
       };
       // Edit mode (double-clicked an existing pattern): drop the old copies
       // first, reindexing every surviving constraint, and carry the source
@@ -2274,6 +2285,10 @@ export const createSketchSlice = (set) => ({
               dy: offsetY,
               countX,
               countY,
+              ...(dxFormula ? { dxFormula } : {}),
+              ...(dyFormula ? { dyFormula } : {}),
+              ...(countXFormula ? { countXFormula } : {}),
+              ...(countYFormula ? { countYFormula } : {}),
             });
           }
         }

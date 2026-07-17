@@ -10,6 +10,7 @@
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
 import { resizeCorner } from "../three/sketchGeometry.js";
+import { applyRectangularPatternConstraints } from "../three/sketchRectangularPattern.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 
 // Whether two shape arrays differ beyond floating-point noise.
@@ -76,6 +77,31 @@ export const createVariablesSlice = (set) => ({
         }
         return shapes;
       };
+      // Rectangular patterns whose offsets are formulas re-space to the new
+      // values (counts are structural and stay as committed).
+      const refreshPatternOffsets = (item, shapes) => {
+        let changed = false;
+        const constraints = (item.constraints || []).map((c) => {
+          if (c.type !== "rectangularPattern" || (!c.dxFormula && !c.dyFormula))
+            return c;
+          const dxMm = c.dxFormula
+            ? evaluateFormula(c.dxFormula, newVarsMap)
+            : null;
+          const dyMm = c.dyFormula
+            ? evaluateFormula(c.dyFormula, newVarsMap)
+            : null;
+          const dx = Number.isFinite(dxMm) ? dxMm / MM_PER_UNIT : c.dx;
+          const dy = Number.isFinite(dyMm) ? dyMm / MM_PER_UNIT : c.dy;
+          if (dx === c.dx && dy === c.dy) return c;
+          changed = true;
+          return { ...c, dx, dy };
+        });
+        if (!changed) return { shapes, constraints: item.constraints };
+        return {
+          shapes: applyRectangularPatternConstraints(shapes, constraints),
+          constraints,
+        };
+      };
       const updatedItems = state.items.map((item) => {
         if (
           item.type === "sketch" &&
@@ -93,9 +119,15 @@ export const createVariablesSlice = (set) => ({
                 variables: newVarsMap,
               })
             : { shapes: orig, ok: true };
-          const final = ok ? recutCorners(solved) : orig;
-          if (ok && shapesDiffer(orig, final))
-            return { ...item, shapes: final };
+          const recut = ok ? recutCorners(solved) : orig;
+          const { shapes: final, constraints: finalConstraints } = ok
+            ? refreshPatternOffsets(item, recut)
+            : { shapes: orig, constraints: item.constraints };
+          if (
+            ok &&
+            (shapesDiffer(orig, final) || finalConstraints !== item.constraints)
+          )
+            return { ...item, shapes: final, constraints: finalConstraints };
           if (!ok) anyFailed = true;
           return item;
         }
@@ -132,7 +164,11 @@ export const createVariablesSlice = (set) => ({
                   ...entry,
                   instruction: {
                     ...inst,
-                    item: { ...inst.item, shapes: item.shapes },
+                    item: {
+                      ...inst.item,
+                      shapes: item.shapes,
+                      constraints: item.constraints,
+                    },
                   },
                 };
               }

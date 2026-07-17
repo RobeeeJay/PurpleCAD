@@ -172,9 +172,14 @@ export function DebouncedNumberField({
   validate,
   onValidChange,
   style,
+  variables,
   ...rest
 }) {
-  const [raw, setRaw] = useState(() => fmt(storeValue));
+  // With `variables`, the field accepts formulas: raw may be a formula
+  // string, the store keeps the raw value, and commit receives (number, raw).
+  const [raw, setRaw] = useState(() =>
+    typeof storeValue === "string" ? storeValue : fmt(storeValue),
+  );
   const lastCommitted = useRef(storeValue);
   const onValidRef = useRef(onValidChange);
   onValidRef.current = onValidChange;
@@ -182,11 +187,17 @@ export function DebouncedNumberField({
   useEffect(() => {
     if (storeValue !== lastCommitted.current) {
       lastCommitted.current = storeValue;
-      setRaw(fmt(storeValue));
+      setRaw(typeof storeValue === "string" ? storeValue : fmt(storeValue));
     }
   }, [storeValue]);
 
-  const num = raw.trim() === "" ? NaN : Number(raw);
+  const variablesRef = useRef(variables);
+  variablesRef.current = variables;
+  const num = variables
+    ? evalValue(raw, variables)
+    : raw.trim() === ""
+      ? NaN
+      : Number(raw);
   const valid = validate(num);
 
   useEffect(() => {
@@ -205,8 +216,19 @@ export function DebouncedNumberField({
   commitRef.current = commit;
   const numRef = useRef(num);
   numRef.current = num;
+  const rawRef2 = useRef(raw);
+  rawRef2.current = raw;
   const flush = () => {
     if (!validate(numRef.current)) return;
+    if (variablesRef.current) {
+      // Keep formulas as typed; plain numbers stay numbers.
+      const r = rawRef2.current.trim();
+      const asNum = r === "" ? NaN : Number(r);
+      const stored = Number.isFinite(asNum) ? asNum : r;
+      lastCommitted.current = stored;
+      commitRef.current(numRef.current, stored);
+      return;
+    }
     lastCommitted.current = numRef.current;
     commitRef.current(numRef.current);
   };
@@ -217,6 +239,25 @@ export function DebouncedNumberField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raw, valid]);
 
+  if (variables) {
+    return (
+      <FormulaInput
+        type="text"
+        variables={variables}
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        // Commit immediately when focus leaves (eg the user clicks Confirm) so
+        // a fast type-then-confirm doesn't race the debounce and use a stale
+        // value.
+        onBlur={flush}
+        style={{
+          ...style,
+          ...(valid ? null : { borderColor: "#e8754f", color: "#e8754f" }),
+        }}
+        {...rest}
+      />
+    );
+  }
   return (
     <input
       type="number"
