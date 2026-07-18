@@ -814,9 +814,13 @@ export default function SketchOverlays({
                   confirmOffset();
                   return;
                 }
-                // Chamfer/bevel resize: apply the new setback / radius.
+                // Chamfer/bevel resize: apply the new setback / radius.  A
+                // negative bevel radius is allowed (flips the arc); a chamfer
+                // stays positive.
                 if (sketchDistanceInput.cornerResize) {
-                  if (Number.isFinite(mm) && mm > 0) {
+                  const allowNeg =
+                    sketchDistanceInput.cornerResize.mode === "bevel";
+                  if (Number.isFinite(mm) && (allowNeg ? mm !== 0 : mm > 0)) {
                     const { sketchId, shapeIdx } =
                       sketchDistanceInput.cornerResize;
                     useStore
@@ -1105,7 +1109,11 @@ export default function SketchOverlays({
                   type="text"
                   key={sketchModifyMode}
                   variables={variables}
-                  title="A number in mm, or a formula over the document variables"
+                  title={
+                    sketchModifyMode === "bevel"
+                      ? "A number in mm (negative flips the arc), or a formula"
+                      : "A number in mm, or a formula over the document variables"
+                  }
                   value={modifyDraft ?? String(sketchModifyDistMm)}
                   onChange={(e) => {
                     const raw = e.target.value;
@@ -1114,7 +1122,8 @@ export default function SketchOverlays({
                       raw,
                       variablesToMap(useStore.getState().variables),
                     );
-                    if (Number.isFinite(mm) && mm > 0)
+                    const allowNeg = sketchModifyMode === "bevel";
+                    if (Number.isFinite(mm) && (allowNeg ? mm !== 0 : mm > 0))
                       useStore.getState().setSketchModifyDistMm(raw.trim());
                   }}
                   onKeyDown={(e) => e.stopPropagation()}

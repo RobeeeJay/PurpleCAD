@@ -23,7 +23,11 @@ const modifyDist = () => {
     typeof raw === "string"
       ? evaluateFormula(raw, variablesToMap(state.variables))
       : raw;
-  return (Number.isFinite(mm) && mm > 0 ? mm : 2.5) / MM_PER_UNIT;
+  // A negative fillet (bevel) radius is valid — it flips the arc.  Chamfer
+  // setbacks stay positive.  Zero / non-finite falls back to the default.
+  const allowNeg = state.sketchModifyMode === "bevel";
+  const ok = Number.isFinite(mm) && (allowNeg ? mm !== 0 : mm > 0);
+  return (ok ? mm : 2.5) / MM_PER_UNIT;
 };
 
 export function createSketchModifyHelpers(

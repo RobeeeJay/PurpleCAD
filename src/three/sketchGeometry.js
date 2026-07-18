@@ -94,7 +94,10 @@ export function chamferConstraints(newIdx, aIdx, aKey, bIdx, bKey, geom) {
 }
 
 // Build the arc geometry for a bevel/fillet between two trimmed lines.
-export function buildBevelArc(P, uA, uB, trimA, trimB) {
+// `flip` (a negative fillet radius) reflects the arc's centre across the chord
+// so the fillet curves the OTHER way — a concave scoop into the corner instead
+// of a convex round.  The trim points and radius are unchanged.
+export function buildBevelArc(P, uA, uB, trimA, trimB, flip = false) {
   const toB = { x: trimB.x - trimA.x, y: trimB.y - trimA.y };
   const pA1 = { x: -uA.y, y: uA.x },
     pA2 = { x: uA.y, y: -uA.x };
@@ -108,8 +111,26 @@ export function buildBevelArc(P, uA, uB, trimA, trimB) {
   const denom = pA.x * pB.y - pA.y * pB.x;
   if (Math.abs(denom) < 1e-10) return null;
   const t = (dx * pB.y - dy * pB.x) / denom;
-  const cx = trimA.x + t * pA.x,
+  let cx = trimA.x + t * pA.x,
     cy = trimA.y + t * pA.y;
+  // Reference point the arc should bulge toward: the corner P for a normal
+  // fillet; P mirrored across the chord for a flipped one.
+  let ref = P;
+  if (flip) {
+    const cl = Math.hypot(dx, dy) || 1;
+    const ux = dx / cl,
+      uy = dy / cl;
+    const reflect = (px, py) => {
+      const proj = (px - trimA.x) * ux + (py - trimA.y) * uy;
+      const fx = trimA.x + ux * proj,
+        fy = trimA.y + uy * proj;
+      return { x: 2 * fx - px, y: 2 * fy - py };
+    };
+    const c2 = reflect(cx, cy);
+    cx = c2.x;
+    cy = c2.y;
+    ref = reflect(P.x, P.y);
+  }
   const r = Math.hypot(cx - trimA.x, cy - trimA.y);
   const startAngle = Math.atan2(trimA.y - cy, trimA.x - cx);
   const rawEnd = Math.atan2(trimB.y - cy, trimB.x - cx);
@@ -118,12 +139,12 @@ export function buildBevelArc(P, uA, uB, trimA, trimB) {
   const midCW = startAngle - cwSpan / 2;
   const midCCW = startAngle + ccwSpan / 2;
   const dCW = Math.hypot(
-    cx + r * Math.cos(midCW) - P.x,
-    cy + r * Math.sin(midCW) - P.y,
+    cx + r * Math.cos(midCW) - ref.x,
+    cy + r * Math.sin(midCW) - ref.y,
   );
   const dCCW = Math.hypot(
-    cx + r * Math.cos(midCCW) - P.x,
-    cy + r * Math.sin(midCCW) - P.y,
+    cx + r * Math.cos(midCCW) - ref.x,
+    cy + r * Math.sin(midCCW) - ref.y,
   );
   const endAngle = dCW < dCCW ? startAngle - cwSpan : startAngle + ccwSpan;
   return { type: "arc", cx, cy, r, startAngle, endAngle };
@@ -164,7 +185,11 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
     sB = shapes[bIdx];
   if (sA?.type !== "line" || sB?.type !== "line") return null;
 
-  let legDist = dist;
+  // A negative fillet radius flips the arc (concave scoop); the magnitude sets
+  // the trim.  Chamfers stay straight, so a negative setback is just its size.
+  const flip = mode === "bevel" && dist < 0;
+  const mag = Math.abs(dist);
+  let legDist = mag;
   if (mode === "bevel") {
     const dirs = computeChamfer(sA, sB, aKey, bKey, 1);
     const dot = Math.max(
@@ -172,7 +197,7 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
       Math.min(1, dirs.uA.x * dirs.uB.x + dirs.uA.y * dirs.uB.y),
     );
     const halfTan = Math.tan(Math.acos(dot) / 2);
-    legDist = halfTan > 1e-6 ? dist / halfTan : dist;
+    legDist = halfTan > 1e-6 ? mag / halfTan : mag;
   }
 
   const m = computeChamfer(sA, sB, aKey, bKey, legDist);
@@ -203,10 +228,17 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
       coincident(newIdx, "end", bIdx, bKey),
     ];
   } else {
-    const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
+    const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB, flip);
     if (arc) {
       arc.kind = "bevel";
-      arc.bevelData = { aIdx, aKey, bIdx, bKey, dist: legDist };
+      arc.bevelData = {
+        aIdx,
+        aKey,
+        bIdx,
+        bKey,
+        dist: legDist,
+        ...(flip ? { flip: true } : {}),
+      };
       newShape = arc;
     } else {
       newShape = straight; // collinear legs: fall back to a straight bridge
@@ -304,18 +336,30 @@ export function resizeCorner(
   const P = { x: aOther.x + tInter * dx1, y: aOther.y + tInter * dy1 };
   const uA = norm2({ x: aOther.x - P.x, y: aOther.y - P.y });
   const uB = norm2({ x: bOther.x - P.x, y: bOther.y - P.y });
-  let legDist = sizeScene;
+  // A NEGATIVE fillet radius flips the arc (concave scoop instead of convex
+  // round).  On a direct edit the sign of the input carries it; on a re-derive
+  // (leg-dist mode) the flip is remembered on the bevel data.  The magnitude
+  // drives the trim either way — only bevels flip; a chamfer stays straight.
+  const flip =
+    bridge.kind === "bevel"
+      ? sizeIsLegDist
+        ? !!data.flip
+        : sizeScene < 0
+      : false;
+  const mag = Math.abs(sizeScene);
+  let legDist = mag;
   if (!sizeIsLegDist && bridge.kind === "bevel") {
     const dot = Math.max(-1, Math.min(1, uA.x * uB.x + uA.y * uB.y));
     const halfTan = Math.tan(Math.acos(dot) / 2);
-    legDist = halfTan > 1e-6 ? sizeScene / halfTan : sizeScene;
+    legDist = halfTan > 1e-6 ? mag / halfTan : mag;
   }
   const trimA = { x: P.x + uA.x * legDist, y: P.y + uA.y * legDist };
   const trimB = { x: P.x + uB.x * legDist, y: P.y + uB.y * legDist };
-  const newData = { ...data, dist: legDist };
+  const newData = { ...data, dist: legDist, ...(flip ? { flip: true } : {}) };
+  if (!flip) delete newData.flip;
   let newBridge;
   if (bridge.kind === "bevel") {
-    const arc = buildBevelArc(P, uA, uB, trimA, trimB);
+    const arc = buildBevelArc(P, uA, uB, trimA, trimB, flip);
     if (!arc) return null;
     arc.kind = "bevel";
     arc.bevelData = newData;
