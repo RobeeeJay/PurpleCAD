@@ -5,7 +5,7 @@
 // on the shape/region geometry.
 
 import * as THREE from "three";
-import { shapeMidpoint } from "../sketchGeometry.js";
+import { shapeMidpoint, cornerSetback } from "../sketchGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
@@ -172,9 +172,27 @@ export function addConstraintIconsToGroup(
         c.shapeAIdx === c.shapeBIdx &&
         c.pointB === "edge" &&
         sA.type === "circle";
-      const posA = getShapePoint(sA, c.pointA),
+      let posA = getShapePoint(sA, c.pointA),
         posB = getShapePoint(sB, c.pointB);
       if (!posA || !posB) return;
+      // A line-length dimension measures the SHARP corner, so its witness lines
+      // must reach the virtual (pre-chamfer/fillet) corner, not the trimmed
+      // edge — extend each end outward along the edge by its corner setback.
+      if (
+        !isRadius &&
+        c.shapeAIdx === c.shapeBIdx &&
+        sA.type === "line" &&
+        ["start", "end"].includes(c.pointA) &&
+        ["start", "end"].includes(c.pointB)
+      ) {
+        const setA = cornerSetback(shapes, c.shapeAIdx, c.pointA);
+        const setB = cornerSetback(shapes, c.shapeBIdx, c.pointB);
+        const len = Math.hypot(posB.x - posA.x, posB.y - posA.y) || 1;
+        const ux = (posB.x - posA.x) / len,
+          uy = (posB.y - posA.y) / len;
+        if (setA) posA = { x: posA.x - ux * setA, y: posA.y - uy * setA };
+        if (setB) posB = { x: posB.x + ux * setB, y: posB.y + uy * setB };
+      }
       const wA = toWorld(posA.x, posA.y, 0.006),
         wB = toWorld(posB.x, posB.y, 0.006);
       const dir = new THREE.Vector3().subVectors(wB, wA).normalize();
