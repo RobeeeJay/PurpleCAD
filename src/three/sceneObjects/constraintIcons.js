@@ -34,7 +34,7 @@ export function isFormulaValue(v) {
 // sprite; the caller sets its position and any userData.
 export function makeDimLabelSprite(
   text,
-  { theme, isFormula = false, baseW = 0.7 },
+  { theme, isFormula = false, baseW = 0.7, color = null },
 ) {
   const labelText = (isFormula ? "ƒ " : "") + text;
   const labelFont = "bold 18px sans-serif";
@@ -48,7 +48,7 @@ export function makeDimLabelSprite(
   canvas.height = 32;
   // No background fill — the label reads directly over the sketch.
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = toCssHex(dimValueColorFor(theme));
+  ctx.fillStyle = color ?? toCssHex(dimValueColorFor(theme));
   ctx.font = labelFont;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -700,26 +700,12 @@ export function addConstraintIconsToGroup(
       markFixedSize(arc, toWorld(P.x, P.y, 0.005));
       if (showDimensions) {
         const deg = typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
-        const labelText = `${Math.round(deg)}°`;
-        const canvas = document.createElement("canvas");
-        canvas.width = 96;
-        canvas.height = 32;
-        const ctx2d = canvas.getContext("2d");
-        // Transparent background — the value reads directly over the sketch.
-        ctx2d.clearRect(0, 0, canvas.width, canvas.height);
-        ctx2d.fillStyle = ANGLE_LABEL_TEXT;
-        ctx2d.font = "bold 18px sans-serif";
-        ctx2d.textAlign = "center";
-        ctx2d.textBaseline = "middle";
-        ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-        const sprite = new THREE.Sprite(
-          new THREE.SpriteMaterial({
-            map: new THREE.CanvasTexture(canvas),
-            depthTest: false,
-            transparent: true,
-          }),
-        );
-        sprite.scale.set(0.45, 0.15, 1);
+        // Same builder as every other dimension label so the font size matches;
+        // angle keeps its own colour and carries no formula prefix.
+        const sprite = makeDimLabelSprite(`${Math.round(deg)}°`, {
+          theme,
+          color: ANGLE_LABEL_TEXT,
+        });
         const midAng = aF + delta / 2;
         sprite.position.copy(
           toWorld(
