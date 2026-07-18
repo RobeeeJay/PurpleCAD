@@ -9,8 +9,8 @@
 // the current one (and fixed points stay put).
 
 import { resolveConstraintDistance } from "./geometryParams.js";
-import { shapeMidpoint } from "./sketchGeometry.js";
-import { rederiveAllCorners } from "./sketchGeometry.js";
+import { shapeMidpoint, sharpLineExtra } from "./sketchGeometry.js";
+import { rederiveAllCorners, extractCorners } from "./sketchGeometry.js";
 
 // Which scalar fields of a shape the solver may move, in a stable order.
 export function varFields(s) {
@@ -106,7 +106,12 @@ function residuals(shapes, constraints, variables) {
       } else {
         const a = pointOf(shapes[c.shapeAIdx], c.pointA);
         const b = pointOf(shapes[c.shapeBIdx], c.pointB);
-        if (a && b) out.push(Math.hypot(a.x - b.x, a.y - b.y) - d);
+        // Sharp semantics: an edge's dimension measures the virtual corner, so
+        // add back any chamfer/fillet setback trimming its ends.
+        if (a && b)
+          out.push(
+            Math.hypot(a.x - b.x, a.y - b.y) + sharpLineExtra(shapes, c) - d,
+          );
         else out.push(0);
       }
     } else if (c.type === "horizontal") {
@@ -124,15 +129,6 @@ function residuals(shapes, constraints, variables) {
         const len = Math.hypot(dx, dy) || 1e-9;
         out.push(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len);
       } else out.push(0);
-    } else if (c.type === "_fixedRadius") {
-      const sh = shapes[c.shapeIdx];
-      out.push((Number.isFinite(sh?.r) ? sh.r - c.value : 0) * (c.weight ?? 1));
-    } else if (c.type === "_fixedLength") {
-      const sh = shapes[c.shapeIdx];
-      out.push(
-        (sh ? Math.hypot(sh.x2 - sh.x1, sh.y2 - sh.y1) - c.value : 0) *
-          (c.weight ?? 1),
-      );
     } else if (c.type === "pointLineDistance") {
       // Perpendicular distance from a point (standalone or keyed) to an
       // infinite line = the dimension value.
@@ -370,14 +366,100 @@ function solveLinear(A, b) {
   return x;
 }
 
-// Solve the constraint system.  options:
+// Virtual-corner solve.  Chamfers and fillets are DERIVED, applied after the
+// constraints resolve: the solver never sees them.  When a sketch has corner
+// bridges, the system is solved on its SHARP polygon — each corner's legs
+// extended to their virtual intersection, the bridge removed, the two
+// bridge↔leg coincidents replaced by a single leg↔leg coincidence — and the
+// corners are re-derived (re-trimmed + rebuilt) from the solved legs after.
+// So a dimension on a chamfered edge measures the sharp corner, moves translate
+// the whole polygon, and corners simply re-apply at the destination.
+export function solveConstraints(inputShapes, constraints, options = {}) {
+  const corners = extractCorners(inputShapes);
+  if (corners.length === 0) return solveCore(inputShapes, constraints, options);
+
+  // Extend a leg's trimmed endpoint back to its sharp corner: LOCALLY, along
+  // the leg's own direction by the setback.  Both legs of a corner were trimmed
+  // that same distance from their intersection, so this lands them on the same
+  // point when the geometry is consistent — and, crucially, it doesn't read the
+  // adjacent leg, which may be stale mid-drag (the leg↔leg coincidence below
+  // reconciles the corner, propagating the move).
+  const extendEnd = (line, key, dist) => {
+    const [ex, ey, ox, oy] =
+      key === "start"
+        ? [line.x1, line.y1, line.x2, line.y2]
+        : [line.x2, line.y2, line.x1, line.y1];
+    const dx = ex - ox,
+      dy = ey - oy;
+    const len = Math.hypot(dx, dy) || 1;
+    const p = { x: ex + (dx / len) * dist, y: ey + (dy / len) * dist };
+    return key === "start"
+      ? { ...line, x1: p.x, y1: p.y }
+      : { ...line, x2: p.x, y2: p.y };
+  };
+  const sharp = inputShapes.map((s) => ({ ...s }));
+  const bridgeIdxs = new Set();
+  const legMeet = [];
+  for (const c of corners) {
+    bridgeIdxs.add(c.bi);
+    sharp[c.aIdx] = extendEnd(sharp[c.aIdx], c.aKey, c.dist);
+    sharp[c.bIdx] = extendEnd(sharp[c.bIdx], c.bKey, c.dist);
+    const b = sharp[c.bi];
+    delete b.kind;
+    delete b.bevelData;
+    delete b.chamferData;
+    legMeet.push({
+      type: "coincident",
+      shapeAIdx: c.aIdx,
+      pointA: c.aKey,
+      shapeBIdx: c.bIdx,
+      pointB: c.bKey,
+    });
+  }
+  const touchesBridge = (cn) =>
+    [
+      cn.shapeAIdx,
+      cn.shapeBIdx,
+      cn.shapeIdx,
+      cn.pointShapeIdx,
+      cn.lineShapeIdx,
+      cn.targetShapeIdx,
+    ].some((i) => i != null && bridgeIdxs.has(i));
+  const sharpConstraints = (constraints || [])
+    .filter((cn) => !touchesBridge(cn))
+    .concat(legMeet);
+
+  // The bridge shapes don't participate in the solve — pin every DOF so the
+  // stripped placeholders stay put (they're rebuilt by the re-derive).
+  const sharpFixed = new Set(options.fixed || []);
+  for (const bi of bridgeIdxs)
+    for (const f of varFields(sharp[bi])) sharpFixed.add(`${bi}:${f}`);
+
+  const res = solveCore(sharp, sharpConstraints, {
+    ...options,
+    fixed: sharpFixed,
+  });
+
+  // Re-derive corners from the solved sharp legs (restore each bridge's recipe,
+  // then re-trim + rebuild).
+  const finalArr = res.shapes.slice();
+  for (const c of corners) finalArr[c.bi] = inputShapes[c.bi];
+  return {
+    shapes: rederiveAllCorners(finalArr),
+    ok: res.ok,
+    maxResidual: res.maxResidual,
+  };
+}
+
+// Core Levenberg–Marquardt solve of the raw constraint system (no corner
+// handling — see solveConstraints).  options:
 //   variables  - variable map for formula-valued distances/angles
 //   fixed      - Set of "shapeIdx:field" coordinates to hold (e.g. a dragged point)
 //   reg        - weak regularization weight toward the start positions
 //   maxIter, successTol
 // Returns { shapes, ok, maxResidual }.  ok is false if it couldn't get every
 // constraint within successTol — the caller rejects the change in that case.
-export function solveConstraints(inputShapes, constraints, options = {}) {
+function solveCore(inputShapes, constraints, options = {}) {
   const {
     variables = null,
     fixed = new Set(),
@@ -395,32 +477,6 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   });
   const N = specs.length;
   const cs = (constraints || []).filter((c) => c.type !== undefined);
-  // Chamfer/bevel corner bridges should move RIGIDLY: nothing dimensions a
-  // bevel's radius or a chamfer bridge's length, so without these rows the
-  // solver satisfies a drag by inflating the corners (they absorb the whole
-  // translation and the far geometry never follows).  They are full-weight
-  // rows during the FIRST solve pass, but excluded from ok/maxResidual
-  // scoring; if that pass can't satisfy the REAL constraints (a legitimate
-  // corner-size change — a leg edit or resize — conflicts with rigidity),
-  // the solve reruns without them, restoring the old free-corner behaviour.
-  const stiffRows = [];
-  base.forEach((sh, i) => {
-    if (sh.kind === "bevel" && Number.isFinite(sh.r))
-      stiffRows.push({
-        type: "_fixedRadius",
-        shapeIdx: i,
-        value: sh.r,
-        weight: 1,
-      });
-    else if (sh.kind === "chamfer" && sh.type === "line")
-      stiffRows.push({
-        type: "_fixedLength",
-        shapeIdx: i,
-        value: Math.hypot(sh.x2 - sh.x1, sh.y2 - sh.y1),
-        weight: 1,
-      });
-  });
-  const solveCs = stiffRows.length > 0 ? [...cs, ...stiffRows] : cs;
   if (N === 0 || cs.length === 0)
     return { shapes: base, ok: true, maxResidual: 0 };
 
@@ -448,7 +504,7 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
     fixedShapeIdxs.size > 0
       ? shapeHopDistance(base.length, cs, fixedShapeIdxs)
       : null;
-  const regWeight = specs.map(({ i }, j) => {
+  let regWeight = specs.map(({ i }, j) => {
     if (isFixed[j]) return fixedW;
     if (!hop) return regW;
     const d = hop[i];
@@ -467,12 +523,11 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
     return out;
   };
   // Full residual: constraints first, then one regularization row per variable.
-  const makeFullRes = (activeCs) => (xv) => {
-    const r = residuals(shapesAt(xv), activeCs, variables);
+  const fullRes = (xv) => {
+    const r = residuals(shapesAt(xv), cs, variables);
     for (let j = 0; j < N; j++) r.push((xv[j] - x0[j]) * regWeight[j]);
     return r;
   };
-  let fullRes = makeFullRes(solveCs);
   const cost = (r) => r.reduce((a, v) => a + v * v, 0);
 
   let lambda = 1e-3;
@@ -532,29 +587,25 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
     }
   };
   iterate(maxIter);
-  // Repair any chamfer/bevel corners: the solver only pins a bridge's endpoints
-  // to its legs, so a bevel arc's radius/centre drift free and the fillet breaks
-  // as a connected line is dragged.  Re-deriving from the legs restores the proper
-  // tangent arc (and the chamfer's exact setback) before residuals are scored.
-  const score = (xv) => {
-    const finalShapes = rederiveAllCorners(shapesAt(xv), cs);
-    const finalRes = residuals(finalShapes, cs, variables);
-    let maxResidual = 0;
-    for (const v of finalRes) maxResidual = Math.max(maxResidual, Math.abs(v));
-    return { shapes: finalShapes, ok: maxResidual < successTol, maxResidual };
+  const realResidual = (xv) => {
+    const rr = residuals(shapesAt(xv), cs, variables);
+    let m = 0;
+    for (const v of rr) m = Math.max(m, Math.abs(v));
+    return m;
   };
-  let result = score(x);
-  if (!result.ok && stiffRows.length > 0) {
-    // The rigid-corner pass couldn't satisfy the real constraints — the edit
-    // legitimately changes a corner's size.  Rerun without the stiff rows.
-    fullRes = makeFullRes(cs);
-    x = x0.slice();
-    lambda = 1e-3;
+  // The weak gauge-fixing reg can floor a larger system's convergence a little
+  // above successTol (the virtual-corner sharp polygon is the usual culprit).
+  // The reg pass has already chosen the LOCAL solution — its purpose is served
+  // — so a short polish from here with the reg scaled down tightens the actual
+  // constraint satisfaction without disturbing that locality.
+  if (realResidual(x) > successTol) {
+    regWeight = regWeight.map((w, j) => (isFixed[j] ? w : w * 1e-3));
     r = fullRes(x);
     c = cost(r);
-    iterate(maxIter);
-    const retry = score(x);
-    if (retry.maxResidual < result.maxResidual) result = retry;
+    lambda = 1e-3;
+    iterate(40);
   }
-  return result;
+  const finalShapes = shapesAt(x);
+  const maxResidual = realResidual(x);
+  return { shapes: finalShapes, ok: maxResidual < successTol, maxResidual };
 }

@@ -1,5 +1,5 @@
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
-import { shapeMidpoint } from "./sketchGeometry.js";
+import { shapeMidpoint, sharpLineExtra } from "./sketchGeometry.js";
 import { resolveConstraintDistance } from "./geometryParams.js";
 // Used by the solver internals (onLine projection + bevel recompute); also
 // re-exported below for consumers that import them from this module.
@@ -32,14 +32,18 @@ export function resolveDistanceConstraints(
     const pA = getShapePoint(sA, c.pointA);
     const pB = getShapePoint(sB, c.pointB);
     if (!pA || !pB) continue;
+    // Sharp semantics: the target names the virtual-corner length, so the
+    // trimmed endpoints sit `setbacks` closer together.
+    const effTarget = target - sharpLineExtra(shapes, c);
+    if (!(effTarget > 0)) continue;
     const dx = pB.x - pA.x,
       dy = pB.y - pA.y;
     const cur = Math.hypot(dx, dy);
     if (cur < 1e-10) continue;
-    if (Math.abs(cur - target) < tol) continue;
+    if (Math.abs(cur - effTarget) < tol) continue;
     const newPt = {
-      x: pA.x + (dx / cur) * target,
-      y: pA.y + (dy / cur) * target,
+      x: pA.x + (dx / cur) * effTarget,
+      y: pA.y + (dy / cur) * effTarget,
     };
     // Same-shape (line-length / radius): slide pointB endpoint on the
     // same shape.  Two-shape: move pointB on shapeB.
@@ -84,8 +88,8 @@ export function allConstraintsSatisfied(shapes, constraints, variables = null) {
       const a = getShapePoint(shapes[c.shapeAIdx], c.pointA);
       const b = getShapePoint(shapes[c.shapeBIdx], c.pointB);
       if (!a || !b) return false;
-      if (Math.abs(Math.hypot(a.x - b.x, a.y - b.y) - target) > POS_TOL)
-        return false;
+      const meas = Math.hypot(a.x - b.x, a.y - b.y) + sharpLineExtra(shapes, c);
+      if (Math.abs(meas - target) > POS_TOL) return false;
     } else if (c.type === "horizontal") {
       const s = shapes[c.shapeIdx];
       if (!s || s.type !== "line" || Math.abs(s.y1 - s.y2) > POS_TOL)

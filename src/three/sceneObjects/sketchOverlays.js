@@ -443,6 +443,10 @@ export function buildSketchShapesGroup(
     if (isCircularPattern) line.userData.isCircularPattern = true;
     if (isRectangularPattern) line.userData.isRectangularPattern = true;
     if (isProjected) line.userData.isProjected = true;
+    // Chamfer/bevel corner bridges are derived — inert to select / drag /
+    // constraint hit-tests (their setback is edited via the value label).
+    if (shape.kind === "chamfer" || shape.kind === "bevel")
+      line.userData.isCornerBridge = true;
     group.add(line);
 
     // Collect key points for dots — not for offset/mirror/circular-pattern

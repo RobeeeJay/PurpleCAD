@@ -96,6 +96,14 @@ const isRectangularPatternShapeIdx = (selItem, idx) =>
     (c) => c.type === "rectangularPattern" && c.shapeIdx === idx,
   );
 
+// Chamfer/bevel corner bridges are DERIVED geometry — not directly
+// selectable, marquee-able, or draggable (their setback is edited via the
+// value label / timeline).  Other tools may still SNAP to their endpoints.
+const isCornerBridgeIdx = (selItem, idx) => {
+  const s = selItem?.shapes?.[idx];
+  return s?.kind === "chamfer" || s?.kind === "bevel";
+};
+
 export function createSketchInteraction(
   {
     scene,
@@ -523,7 +531,8 @@ export function createSketchInteraction(
         !isOffsetShapeIdx(selItem, pt.shapeIdx) &&
         !isMirrorShapeIdx(selItem, pt.shapeIdx) &&
         !isCircularPatternShapeIdx(selItem, pt.shapeIdx) &&
-        !isRectangularPatternShapeIdx(selItem, pt.shapeIdx)
+        !isRectangularPatternShapeIdx(selItem, pt.shapeIdx) &&
+        !isCornerBridgeIdx(selItem, pt.shapeIdx)
       )
         inRect.add(pt.shapeIdx);
     });
@@ -664,7 +673,8 @@ export function createSketchInteraction(
       !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
       !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
       !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
-      !isRectangularPatternShapeIdx(selItem, snap.shapeIdx)
+      !isRectangularPatternShapeIdx(selItem, snap.shapeIdx) &&
+      !isCornerBridgeIdx(selItem, snap.shapeIdx)
     ) {
       // Measure tool: accumulate the snapped point as a pick (highlighted by a
       // marker, and measured between picks) rather than a normal point select.
@@ -705,7 +715,8 @@ export function createSketchInteraction(
           !c.userData.isOffset &&
           !c.userData.isMirror &&
           !c.userData.isCircularPattern &&
-          !c.userData.isRectangularPattern,
+          !c.userData.isRectangularPattern &&
+          !c.userData.isCornerBridge,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -1260,7 +1271,8 @@ export function createSketchInteraction(
           !c.userData.isOffset &&
           !c.userData.isMirror &&
           !c.userData.isCircularPattern &&
-          !c.userData.isRectangularPattern,
+          !c.userData.isRectangularPattern &&
+          !c.userData.isCornerBridge,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       for (const hit of hits) {
@@ -1437,6 +1449,7 @@ export function createSketchInteraction(
         !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
         !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
         !isRectangularPatternShapeIdx(selItem, snap.shapeIdx) &&
+        !isCornerBridgeIdx(selItem, snap.shapeIdx) &&
         // Projected geometry is immovable until its constraint is released.
         !shapes[snap.shapeIdx]?.projection
       ) {
@@ -1490,7 +1503,8 @@ export function createSketchInteraction(
           !c.userData.isOffset &&
           !c.userData.isMirror &&
           !c.userData.isCircularPattern &&
-          !c.userData.isRectangularPattern,
+          !c.userData.isRectangularPattern &&
+          !c.userData.isCornerBridge,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (
@@ -1715,7 +1729,8 @@ export function createSketchInteraction(
         !c.userData.isOffset &&
         !c.userData.isMirror &&
         !c.userData.isCircularPattern &&
-        !c.userData.isRectangularPattern,
+        !c.userData.isRectangularPattern &&
+        !c.userData.isCornerBridge,
     );
     const hits = hitTestSketchLines(makeRay(screenX, screenY), lineObjs);
     const hitIdx = hits[0]?.object?.userData?.shapeIdx;
@@ -1873,7 +1888,8 @@ export function createSketchInteraction(
             !c.userData.isOffset &&
             !c.userData.isMirror &&
             !c.userData.isCircularPattern &&
-            !c.userData.isRectangularPattern,
+            !c.userData.isRectangularPattern &&
+            !c.userData.isCornerBridge,
         )
       : [];
     const hits = hitTestSketchLines(makeRay(clientX, clientY), lineObjs);
@@ -1911,7 +1927,8 @@ export function createSketchInteraction(
         !c.userData.isOffset &&
         !c.userData.isMirror &&
         !c.userData.isCircularPattern &&
-        !c.userData.isRectangularPattern,
+        !c.userData.isRectangularPattern &&
+        !c.userData.isCornerBridge,
     );
   };
 
@@ -2236,7 +2253,8 @@ export function createSketchInteraction(
               !c.userData.isOffset &&
               !c.userData.isMirror &&
               !c.userData.isCircularPattern &&
-              !c.userData.isRectangularPattern,
+              !c.userData.isRectangularPattern &&
+              !c.userData.isCornerBridge,
           );
           const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
           if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -2281,7 +2299,8 @@ export function createSketchInteraction(
             !c.userData.isOffset &&
             !c.userData.isMirror &&
             !c.userData.isCircularPattern &&
-            !c.userData.isRectangularPattern,
+            !c.userData.isRectangularPattern &&
+            !c.userData.isCornerBridge,
         );
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
         let hitIdx =

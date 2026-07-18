@@ -365,19 +365,17 @@ export function rederiveCornerFromLegs(shapes, bridgeIdx) {
 // dimension, rejecting the edit.  A plain drag — even body-dragging a leg, which
 // pins it just like a dimension does — carries no such constraint, so the corner
 // re-derives and holds its setback/angle instead of growing.
-export function rederiveAllCorners(shapes, constraints = null) {
-  const lengthPinned = (idx) =>
-    !!constraints &&
-    constraints.some(
-      (c) =>
-        c.type === "distance" && c.shapeAIdx === idx && c.shapeBIdx === idx,
-    );
+// Re-derive every chamfer/bevel corner from its (solved) legs.  Corners are
+// DERIVED geometry applied after the constraints resolve, so this runs after
+// every solve: it re-trims the legs and rebuilds the bridge at the stored
+// setback.  A dimension on a trimmed leg measures the SHARP corner (see
+// sharpLineExtra), so re-trimming no longer fights the dimension — the old
+// length-pinned skip is gone.
+export function rederiveAllCorners(shapes) {
   let out = null;
   for (let i = 0; i < shapes.length; i++) {
     const s = shapes[i];
     if (s?.kind !== "bevel" && s?.kind !== "chamfer") continue;
-    const data = s.chamferData || s.bevelData;
-    if (data && (lengthPinned(data.aIdx) || lengthPinned(data.bIdx))) continue;
     const res = rederiveCornerFromLegs(out || shapes, i);
     if (!res) continue;
     if (!out) out = shapes.slice();
@@ -538,6 +536,88 @@ export function collectConnectedShapes(startIdx, shapes, constraints) {
 // Geometric middle of a shape's drawn extent — the anchor a "midpoint"
 // constraint pins a point to.  Line: endpoint average.  Arc: the angular
 // middle of the drawn sweep.  Bezier: the curve point at t = 0.5.
+// The chamfer/bevel corner bridges in a shape list, with their leg refs.  Used
+// by the virtual-corner solve: bridges are DERIVED, so the solver works on the
+// sharp polygon (legs extended to their intersections) and re-derives corners
+// after — they never participate in or fight the constraint solve.
+export function extractCorners(shapes) {
+  const out = [];
+  for (let i = 0; i < shapes.length; i++) {
+    const s = shapes[i];
+    if (s?.kind !== "chamfer" && s?.kind !== "bevel") continue;
+    const d = s.chamferData || s.bevelData;
+    if (
+      !d ||
+      shapes[d.aIdx]?.type !== "line" ||
+      shapes[d.bIdx]?.type !== "line"
+    )
+      continue;
+    out.push({
+      bi: i,
+      aIdx: d.aIdx,
+      aKey: d.aKey,
+      bIdx: d.bIdx,
+      bKey: d.bKey,
+      dist: d.dist,
+      kind: s.kind,
+    });
+  }
+  return out;
+}
+
+// Intersection of the two infinite lines carrying line shapes sA and sB, or
+// null when parallel.  Trimming a corner moves an endpoint ALONG its leg, so a
+// trimmed leg lies on the same infinite line as the sharp one — this recovers
+// the sharp corner from the trimmed legs.
+export function lineLineIntersect(sA, sB) {
+  const den =
+    (sA.x1 - sA.x2) * (sB.y1 - sB.y2) - (sA.y1 - sA.y2) * (sB.x1 - sB.x2);
+  if (Math.abs(den) < 1e-10) return null;
+  const t =
+    ((sA.x1 - sB.x1) * (sB.y1 - sB.y2) - (sA.y1 - sB.y1) * (sB.x1 - sB.x2)) /
+    den;
+  return { x: sA.x1 + t * (sA.x2 - sA.x1), y: sA.y1 + t * (sA.y2 - sA.y1) };
+}
+
+// Setback of the chamfer/bevel corner (if any) that trims line `lineIdx` at
+// its `key` endpoint.  A chamfer/fillet is DERIVED, applied after dimensions:
+// a dimension on the edge measures the SHARP corner (the un-trimmed
+// intersection), so length measurements add this back for every trimmed end.
+// 0 when the endpoint isn't a corner leg.
+export function cornerSetback(shapes, lineIdx, key) {
+  if (!shapes) return 0;
+  for (const s of shapes) {
+    if (s?.kind !== "chamfer" && s?.kind !== "bevel") continue;
+    const d = s.chamferData || s.bevelData;
+    if (!d) continue;
+    if (
+      (d.aIdx === lineIdx && d.aKey === key) ||
+      (d.bIdx === lineIdx && d.bKey === key)
+    )
+      return d.dist || 0;
+  }
+  return 0;
+}
+
+// The sharp (virtual-corner) length of a line-length dimension: the trimmed
+// endpoint separation plus the setback of any corner cutting each end.  Only
+// meaningful for a same-line start↔end measurement, where the setbacks lie
+// along the measured direction and so add exactly.
+export function sharpLineExtra(shapes, c) {
+  if (c.shapeAIdx !== c.shapeBIdx) return 0;
+  const s = shapes[c.shapeAIdx];
+  if (s?.type !== "line") return 0;
+  if (
+    !["start", "end"].includes(c.pointA) ||
+    !["start", "end"].includes(c.pointB)
+  )
+    return 0;
+  return (
+    cornerSetback(shapes, c.shapeAIdx, c.pointA) +
+    cornerSetback(shapes, c.shapeBIdx, c.pointB)
+  );
+}
+
 export function shapeMidpoint(s) {
   if (!s) return null;
   if (s.type === "line") return { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };

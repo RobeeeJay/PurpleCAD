@@ -10,6 +10,7 @@ import { launchApp } from "./launch.js";
 
 let app;
 let page;
+let toScreen; // (lx,ly) -> screen {x,y}, set by the first test's calibration
 
 test.describe.serial("constraint-drifted sketch drags", () => {
   test.beforeAll(async () => {
@@ -47,7 +48,7 @@ test.describe.serial("constraint-drifted sketch drags", () => {
     const b = p1.x - a * probe.x1;
     const c = (p2.y - p1.y) / (probe.y2 - probe.y1);
     const d = p1.y - c * probe.y1;
-    const toScreen = (lx, ly) => ({ x: a * lx + b, y: c * ly + d });
+    toScreen = (lx, ly) => ({ x: a * lx + b, y: c * ly + d });
     await page.evaluate(() => window.__store.getState().undoSketch(1));
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool(null),
@@ -87,5 +88,64 @@ test.describe.serial("constraint-drifted sketch drags", () => {
         .shapes.map((s) => s.y1),
     );
     expect(after[2]).toBeGreaterThan(-5.7);
+    // The fillets rode along and kept their radius (derived, re-applied at the
+    // destination) rather than stretching.
+    const bevels = await page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.find((i) => i.id === 1)
+        .shapes.filter((s) => s.kind === "bevel")
+        .map((s) => s.r),
+    );
+    expect(bevels).toHaveLength(4);
+    for (const r of bevels) expect(r).toBeCloseTo(0.3, 1);
+  });
+
+  test("a fillet corner is not directly selectable or draggable", async () => {
+    // Click squarely on a bevel arc: it must NOT become the selection, and a
+    // drag from it must not move the sketch.
+    const bevel = await page.evaluate(() => {
+      const it = window.__store.getState().items.find((i) => i.id === 1);
+      return it.shapes.find((s) => s.kind === "bevel");
+    });
+    // A point on the arc.
+    const mid = (bevel.startAngle + bevel.endAngle) / 2;
+    const onArc = {
+      x: bevel.cx + Math.cos(mid) * bevel.r,
+      y: bevel.cy + Math.sin(mid) * bevel.r,
+    };
+    await page.evaluate(() => {
+      window.__store.getState().setSelectedSketchElement(null);
+      window.__store.getState().setSketchMultiSelectedIndices([]);
+    });
+    const before = await page.evaluate(() =>
+      JSON.stringify(
+        window.__store.getState().items.find((i) => i.id === 1).shapes,
+      ),
+    );
+    const p = toScreen(onArc.x, onArc.y);
+    await page.mouse.click(p.x, p.y);
+    // Nothing got selected (the bridge is inert).
+    expect(
+      await page.evaluate(() => {
+        const s = window.__store.getState();
+        return (
+          s.selectedSketchElement == null &&
+          (s.sketchMultiSelectedIndices || []).length === 0
+        );
+      }),
+    ).toBe(true);
+    // Dragging from the arc leaves the geometry untouched.
+    const q = toScreen(onArc.x + 2, onArc.y + 2);
+    await page.mouse.move(p.x, p.y);
+    await page.mouse.down();
+    await page.mouse.move(q.x, q.y, { steps: 8 });
+    await page.mouse.up();
+    const afterShapes = await page.evaluate(() =>
+      JSON.stringify(
+        window.__store.getState().items.find((i) => i.id === 1).shapes,
+      ),
+    );
+    expect(afterShapes).toBe(before);
   });
 });
