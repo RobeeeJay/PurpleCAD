@@ -300,7 +300,6 @@ export function addConstraintIconsToGroup(
       const sprite = makeDimLabelSprite(`${isRadius ? "R " : ""}${valueMm}mm`, {
         theme,
         isFormula: isFormulaValue(c.distance),
-        baseW: isRadius ? 0.85 : 0.7,
       });
       sprite.position.copy(labelPos);
       addTagged(sprite);
