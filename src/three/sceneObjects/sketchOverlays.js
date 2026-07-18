@@ -7,7 +7,11 @@ import * as THREE from "three";
 import { Line2 } from "three/addons/lines/Line2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
-import { addConstraintIconsToGroup } from "./constraintIcons.js";
+import {
+  addConstraintIconsToGroup,
+  makeDimLabelSprite,
+  isFormulaValue,
+} from "./constraintIcons.js";
 import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
 import { shapeMidpoint } from "../sketchGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
@@ -20,9 +24,6 @@ import {
 } from "./closedLoops.js";
 import {
   SKETCH_FACE_HIGHLIGHT,
-  dimLabelBgFor,
-  dimValueColorFor,
-  toCssHex,
   sketchConstructionColorFor,
   sketchLineColorFor,
   sketchNodeColorFor,
@@ -486,41 +487,11 @@ export function buildSketchShapesGroup(
       if (!Number.isFinite(valueUnits)) return;
       const mid = shapeMidpoint(shape);
       if (!mid) return;
-      // A formula value surfaces on the label like dimension constraints do;
-      // a bare-number string stays the plain mm readout.
-      const formulaSrc =
-        typeof shape.distanceFormula === "string" &&
-        !/^-?\d+(\.\d+)?$/.test(shape.distanceFormula.trim())
-          ? shape.distanceFormula.trim()
-          : null;
       const valueMm = (valueUnits * MM_PER_UNIT).toFixed(1);
-      const labelText = `${isBevel ? "R " : ""}${
-        formulaSrc ? `${formulaSrc} = ${valueMm}mm` : `${valueMm}mm`
-      }`;
-      const canvas = document.createElement("canvas");
-      const tmpCtx = canvas.getContext("2d");
-      const labelFont = "bold 18px sans-serif";
-      tmpCtx.font = labelFont;
-      canvas.width = Math.max(
-        160,
-        Math.ceil(tmpCtx.measureText(labelText).width) + 24,
-      );
-      canvas.height = 32;
-      const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = dimLabelBgFor(theme);
-      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
-      ctx2d.font = labelFont;
-      ctx2d.textAlign = "center";
-      ctx2d.textBaseline = "middle";
-      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: new THREE.CanvasTexture(canvas),
-          depthTest: false,
-        }),
-      );
-      sprite.scale.set(0.7 * (canvas.width / 160), 0.175, 1);
+      const sprite = makeDimLabelSprite(`${isBevel ? "R " : ""}${valueMm}mm`, {
+        theme,
+        isFormula: isFormulaValue(shape.distanceFormula),
+      });
       // Park the label just off the bridge: a bevel offsets radially outward
       // from its arc centre; a chamfer along its line normal.
       let off = { x: 0, y: 0.35 };

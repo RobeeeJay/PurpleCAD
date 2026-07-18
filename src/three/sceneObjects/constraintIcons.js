@@ -11,19 +11,59 @@ import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
 import { useStore } from "../../store";
 import {
-  ANGLE_LABEL_BG,
   ANGLE_LABEL_TEXT,
   CONSTRAINT_ANGLE_COLOR,
   CONSTRAINT_COINCIDENT_COLOR,
   CONSTRAINT_HORIZONTAL_COLOR,
   CONSTRAINT_ON_LINE_COLOR,
-  dimLabelBgFor,
   dimValueColorFor,
   sketchMirrorColorFor,
   sketchCircularPatternColorFor,
   sketchRectangularPatternColorFor,
   toCssHex,
 } from "../theme.js";
+
+// Whether a stored constraint value is a formula/variable (not a bare number).
+export function isFormulaValue(v) {
+  return typeof v === "string" && !/^-?\d+(\.\d+)?$/.test(v.trim());
+}
+
+// A dimension value label sprite: transparent background, value-only text.  A
+// formula/variable-derived value shows only the resolved value, prefixed with
+// the function symbol (ƒ) rather than spelling out the expression.  Returns the
+// sprite; the caller sets its position and any userData.
+export function makeDimLabelSprite(
+  text,
+  { theme, isFormula = false, baseW = 0.7 },
+) {
+  const labelText = (isFormula ? "ƒ " : "") + text;
+  const labelFont = "bold 18px sans-serif";
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.font = labelFont;
+  canvas.width = Math.max(
+    160,
+    Math.ceil(ctx.measureText(labelText).width) + 24,
+  );
+  canvas.height = 32;
+  // No background fill — the label reads directly over the sketch.
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = toCssHex(dimValueColorFor(theme));
+  ctx.font = labelFont;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(labelText, canvas.width / 2, canvas.height / 2);
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(canvas),
+      depthTest: false,
+      transparent: true,
+    }),
+  );
+  sprite.scale.set(baseW * (canvas.width / 160), 0.175, 1);
+  sprite.renderOrder = 1009;
+  return sprite;
+}
 
 // Builds constraint icon THREE.js objects into `group`. All objects are tagged
 // with userData.isConstraintObj so they can be found and replaced during drag.
@@ -257,42 +297,12 @@ export function addConstraintIconsToGroup(
       // variable / expression drives the dimension.  A bare-number string
       // ("10.5") is shown as just the mm value, matching the legacy look.
       const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
-      const formulaSrc =
-        typeof c.distance === "string" &&
-        !/^-?\d+(\.\d+)?$/.test(c.distance.trim())
-          ? c.distance.trim()
-          : null;
-      const labelText =
-        (isRadius ? "R " : "") +
-        (formulaSrc ? `${formulaSrc} = ${valueMm}mm` : `${valueMm}mm`);
-      const canvas = document.createElement("canvas");
-      const tmpCtx = canvas.getContext("2d");
-      const labelFont = "bold 18px sans-serif";
-      tmpCtx.font = labelFont;
-      // Measure first so longer formula labels don't get clipped at the
-      // edges; pad each side by 12px for the rounded background.
-      const measured = tmpCtx.measureText(labelText).width;
-      canvas.width = Math.max(160, Math.ceil(measured) + 24);
-      canvas.height = 32;
-      const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = dimLabelBgFor(theme);
-      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
-      ctx2d.font = labelFont;
-      ctx2d.textAlign = "center";
-      ctx2d.textBaseline = "middle";
-      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-      const tex = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: tex, depthTest: false }),
-      );
-      // Sprite world-size scales with the canvas's aspect ratio so longer
-      // formula labels stay readable instead of being squished.
-      const baseW = isRadius ? 0.85 : 0.7;
-      const aspect = canvas.width / 160;
-      sprite.scale.set(baseW * aspect, 0.175, 1);
+      const sprite = makeDimLabelSprite(`${isRadius ? "R " : ""}${valueMm}mm`, {
+        theme,
+        isFormula: isFormulaValue(c.distance),
+        baseW: isRadius ? 0.85 : 0.7,
+      });
       sprite.position.copy(labelPos);
-      sprite.renderOrder = 1009;
       addTagged(sprite);
     } else if (c.type === "pointLineDistance") {
       const lineShape = shapes[c.lineShapeIdx];
@@ -356,39 +366,12 @@ export function addConstraintIconsToGroup(
         addDimTick(B2, perpU);
         labelPos = new THREE.Vector3().addVectors(A2, B2).multiplyScalar(0.5);
       }
-      const resolvedDist = resolveConstraintDistance(c);
-      const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
-      const formulaSrc =
-        typeof c.distance === "string" &&
-        !/^-?\d+(\.\d+)?$/.test(c.distance.trim())
-          ? c.distance.trim()
-          : null;
-      const labelText = formulaSrc
-        ? `${formulaSrc} = ${valueMm}mm`
-        : `${valueMm}mm`;
-      const canvas = document.createElement("canvas");
-      const tmpCtx = canvas.getContext("2d");
-      const labelFont = "bold 18px sans-serif";
-      tmpCtx.font = labelFont;
-      const measured = tmpCtx.measureText(labelText).width;
-      canvas.width = Math.max(160, Math.ceil(measured) + 24);
-      canvas.height = 32;
-      const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = dimLabelBgFor(theme);
-      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
-      ctx2d.font = labelFont;
-      ctx2d.textAlign = "center";
-      ctx2d.textBaseline = "middle";
-      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-      const tex = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: tex, depthTest: false }),
-      );
-      const aspect = canvas.width / 160;
-      sprite.scale.set(0.7 * aspect, 0.175, 1);
+      const valueMm = (resolveConstraintDistance(c) * MM_PER_UNIT).toFixed(1);
+      const sprite = makeDimLabelSprite(`${valueMm}mm`, {
+        theme,
+        isFormula: isFormulaValue(c.distance),
+      });
       sprite.position.copy(labelPos);
-      sprite.renderOrder = 1009;
       addTagged(sprite);
     } else if (c.type === "onLine") {
       const lineShape = shapes[c.lineShapeIdx];
@@ -722,8 +705,8 @@ export function addConstraintIconsToGroup(
         canvas.width = 96;
         canvas.height = 32;
         const ctx2d = canvas.getContext("2d");
-        ctx2d.fillStyle = ANGLE_LABEL_BG;
-        ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+        // Transparent background — the value reads directly over the sketch.
+        ctx2d.clearRect(0, 0, canvas.width, canvas.height);
         ctx2d.fillStyle = ANGLE_LABEL_TEXT;
         ctx2d.font = "bold 18px sans-serif";
         ctx2d.textAlign = "center";
@@ -733,6 +716,7 @@ export function addConstraintIconsToGroup(
           new THREE.SpriteMaterial({
             map: new THREE.CanvasTexture(canvas),
             depthTest: false,
+            transparent: true,
           }),
         );
         sprite.scale.set(0.45, 0.15, 1);
@@ -816,40 +800,12 @@ export function addConstraintIconsToGroup(
       }
       // Signed value: the sign of the offset distance is meaningful (which
       // side the copy sits on), so keep it on the label.
-      const resolvedDist = resolveConstraintDistance(c);
-      const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
-      const formulaSrc =
-        typeof c.distance === "string" &&
-        !/^-?\d+(\.\d+)?$/.test(c.distance.trim())
-          ? c.distance.trim()
-          : null;
-      const labelText = formulaSrc
-        ? `${formulaSrc} = ${valueMm}mm`
-        : `${valueMm}mm`;
-      const canvas = document.createElement("canvas");
-      const tmpCtx = canvas.getContext("2d");
-      const labelFont = "bold 18px sans-serif";
-      tmpCtx.font = labelFont;
-      const measured = tmpCtx.measureText(labelText).width;
-      canvas.width = Math.max(160, Math.ceil(measured) + 24);
-      canvas.height = 32;
-      const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = dimLabelBgFor(theme);
-      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
-      ctx2d.font = labelFont;
-      ctx2d.textAlign = "center";
-      ctx2d.textBaseline = "middle";
-      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: new THREE.CanvasTexture(canvas),
-          depthTest: false,
-        }),
-      );
-      sprite.scale.set(0.7 * (canvas.width / 160), 0.175, 1);
+      const valueMm = (resolveConstraintDistance(c) * MM_PER_UNIT).toFixed(1);
+      const sprite = makeDimLabelSprite(`${valueMm}mm`, {
+        theme,
+        isFormula: isFormulaValue(c.distance),
+      });
       sprite.position.copy(toWorld(labelLocal.x, labelLocal.y, 0.006));
-      sprite.renderOrder = 1009;
       // Tag with the icon's local position so the double-click hit-test can
       // find it and open the edit overlay.
       tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimValueColorFor(theme));
