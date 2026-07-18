@@ -1957,6 +1957,45 @@ export const createSketchSlice = (set) => ({
           });
         }
 
+        // Deleting a mirror / pattern constraint removes the WHOLE operation —
+        // every copy shape and its constraint — leaving only the source.  Its
+        // copies are derived and otherwise non-selectable, so deleting one
+        // constraint at a time would strand the copy geometry.  Group by the
+        // same key the Edit flow uses.
+        const groupOf = (c) => {
+          if (c.type === "mirror")
+            return (k) => k.type === "mirror" && k.lineIdx === c.lineIdx;
+          if (c.type === "circularPattern")
+            return (k) =>
+              k.type === "circularPattern" &&
+              k.centerShapeIdx === c.centerShapeIdx &&
+              k.centerPointKey === c.centerPointKey &&
+              k.count === c.count;
+          if (c.type === "rectangularPattern")
+            return (k) =>
+              k.type === "rectangularPattern" &&
+              k.dx === c.dx &&
+              k.dy === c.dy &&
+              k.countX === c.countX &&
+              k.countY === c.countY;
+          return null;
+        };
+        const inGroup = removed && groupOf(removed);
+        if (inGroup) {
+          const copyIndices = oldConstraints
+            .filter(inGroup)
+            .map((c) => c.shapeIdx);
+          const { workShapes, workConstraints } = removeCopiesForEdit(
+            oldShapes,
+            oldConstraints,
+            copyIndices,
+          );
+          return Object.assign({}, item, {
+            shapes: workShapes,
+            constraints: workConstraints,
+          });
+        }
+
         return Object.assign({}, item, {
           constraints: oldConstraints.filter((_, i) => i !== constraintIdx),
         });
