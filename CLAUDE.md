@@ -20,9 +20,17 @@ whitespace noise in the diff.
 ## Verify with tests AND build, in that order
 
 ```bash
-npx vitest run         # all 433+ tests, runs in ~7s
+npm test               # all unit tests (vitest), runs in ~7s
 npx vite build         # production bundle, ~3s
+npm run test:e2e       # Electron e2e (builds VITE_E2E dist, then Playwright)
 ```
+
+Run tests through the npm scripts, not `npx vitest`/`playwright` directly:
+they route through `scripts/with-display.sh`, which runs the command under
+`xvfb-run` when it's available (headless Linux/CI) and directly otherwise
+(macOS provides its own window server). This gives the Electron e2e tests a
+virtual framebuffer on Linux without breaking macOS. On a headless Linux host
+install xvfb first (`apt-get install -y xvfb`).
 
 Both must succeed before declaring work done. The build sometimes catches
 issues vitest misses (native module leaking into the renderer bundle, etc.).
