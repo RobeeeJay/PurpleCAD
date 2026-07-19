@@ -12,7 +12,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { resolveItemDepth, formatAsFormula } from "../geometryParams.js";
-import { polyArea } from "../sceneObjects.js";
+import { polyArea, polyCentroid } from "../sceneObjects.js";
 import {
   makeExtrudePreviewMesh,
   extractFaceProfile,
@@ -26,6 +26,39 @@ import {
   EXTRUDE_FACE_HIGHLIGHT,
   EXTRUDE_FACE_HIGHLIGHT_ALT,
 } from "../theme.js";
+
+// Which candidate region profile is the one an extrude was built from?
+//
+// Matches on the stored profile's POLYGON — relative area, centroid, and hole
+// count — rather than "the smallest region containing the stored centroid".
+// A ring-shaped profile's centroid sits inside its own hole, so a containment
+// test skips the real region and matches a nested one instead, which made
+// editing an extrude start on the wrong geometry.  Returns the index of the
+// best candidate in `candidates`, or -1 when nothing matches the sketch.
+export function bestProfileMatchIndex(sp, candidates) {
+  if (!sp?.polygon2D) return -1;
+  const spArea = polyArea(sp.polygon2D);
+  const spC = polyCentroid(sp.polygon2D);
+  const spHoles = (sp.holes || []).length;
+  let bestIdx = -1;
+  let bestErr = Infinity;
+  candidates.forEach((fp, i) => {
+    if (!fp?.polygon2D || fp.sketchId !== sp.sketchId) return;
+    const fC = polyCentroid(fp.polygon2D);
+    // Relative area error tolerates a curve tessellated at a different
+    // resolution; the centroid term separates same-area regions; a hole-count
+    // mismatch is a strong (but not fatal) penalty.
+    const err =
+      Math.abs(polyArea(fp.polygon2D) - spArea) / Math.max(spArea, 1e-9) +
+      Math.hypot(fC.x - spC.x, fC.y - spC.y) * 0.1 +
+      ((fp.holes || []).length === spHoles ? 0 : 0.5);
+    if (err < bestErr) {
+      bestErr = err;
+      bestIdx = i;
+    }
+  });
+  return bestIdx;
+}
 
 export function createExtrudeHelpers(
   { scene, renderer, objectsRef, itemsRef, extrudeSelectGroupRef },
@@ -243,29 +276,17 @@ export function createExtrudeHelpers(
         : [];
     if (!sourceItems.length) return;
     const fills = extrudeSelectGroupRef?.current?.children ?? [];
-    const matchFill = (pc, sketchId) => {
-      let best = null;
-      let bestArea = Infinity;
-      for (const fill of fills) {
-        const fp = fill.userData.extrudeProfile;
-        if (!fp || fp.sketchId !== sketchId) continue;
-        if (!pointInPolygon2D(pc, fp.polygon2D)) continue;
-        if ((fp.holes || []).some((h) => pointInPolygon2D(pc, h))) continue;
-        const area = polyArea(fp.polygon2D);
-        if (area < bestArea) {
-          best = fill;
-          bestArea = area;
-        }
-      }
-      return best;
-    };
     const picked = [];
     for (const item of sourceItems) {
-      const pc = item?.profile?.profileCentroid;
-      if (!pc || item.profile.sketchId == null) continue;
-      const best = matchFill(pc, item.profile.sketchId);
+      const sp = item?.profile;
+      if (!sp?.polygon2D || sp.sketchId == null) continue;
+      const i = bestProfileMatchIndex(
+        sp,
+        fills.map((f) => f.userData.extrudeProfile),
+      );
+      const best = i >= 0 ? fills[i] : null;
       if (best && !picked.some((p) => p.fill === best))
-        picked.push({ fill: best, pc });
+        picked.push({ fill: best, pc: sp.profileCentroid });
     }
     if (!picked.length) return;
     extrudeProfileList = picked.map(({ fill, pc }) => ({
