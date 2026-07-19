@@ -94,7 +94,10 @@ export function chamferConstraints(newIdx, aIdx, aKey, bIdx, bKey, geom) {
 }
 
 // Build the arc geometry for a bevel/fillet between two trimmed lines.
-export function buildBevelArc(P, uA, uB, trimA, trimB) {
+// `flip` (a negative fillet radius) reflects the arc's centre across the chord
+// so the fillet curves the OTHER way — a concave scoop into the corner instead
+// of a convex round.  The trim points and radius are unchanged.
+export function buildBevelArc(P, uA, uB, trimA, trimB, flip = false) {
   const toB = { x: trimB.x - trimA.x, y: trimB.y - trimA.y };
   const pA1 = { x: -uA.y, y: uA.x },
     pA2 = { x: uA.y, y: -uA.x };
@@ -108,8 +111,26 @@ export function buildBevelArc(P, uA, uB, trimA, trimB) {
   const denom = pA.x * pB.y - pA.y * pB.x;
   if (Math.abs(denom) < 1e-10) return null;
   const t = (dx * pB.y - dy * pB.x) / denom;
-  const cx = trimA.x + t * pA.x,
+  let cx = trimA.x + t * pA.x,
     cy = trimA.y + t * pA.y;
+  // Reference point the arc should bulge toward: the corner P for a normal
+  // fillet; P mirrored across the chord for a flipped one.
+  let ref = P;
+  if (flip) {
+    const cl = Math.hypot(dx, dy) || 1;
+    const ux = dx / cl,
+      uy = dy / cl;
+    const reflect = (px, py) => {
+      const proj = (px - trimA.x) * ux + (py - trimA.y) * uy;
+      const fx = trimA.x + ux * proj,
+        fy = trimA.y + uy * proj;
+      return { x: 2 * fx - px, y: 2 * fy - py };
+    };
+    const c2 = reflect(cx, cy);
+    cx = c2.x;
+    cy = c2.y;
+    ref = reflect(P.x, P.y);
+  }
   const r = Math.hypot(cx - trimA.x, cy - trimA.y);
   const startAngle = Math.atan2(trimA.y - cy, trimA.x - cx);
   const rawEnd = Math.atan2(trimB.y - cy, trimB.x - cx);
@@ -118,12 +139,12 @@ export function buildBevelArc(P, uA, uB, trimA, trimB) {
   const midCW = startAngle - cwSpan / 2;
   const midCCW = startAngle + ccwSpan / 2;
   const dCW = Math.hypot(
-    cx + r * Math.cos(midCW) - P.x,
-    cy + r * Math.sin(midCW) - P.y,
+    cx + r * Math.cos(midCW) - ref.x,
+    cy + r * Math.sin(midCW) - ref.y,
   );
   const dCCW = Math.hypot(
-    cx + r * Math.cos(midCCW) - P.x,
-    cy + r * Math.sin(midCCW) - P.y,
+    cx + r * Math.cos(midCCW) - ref.x,
+    cy + r * Math.sin(midCCW) - ref.y,
   );
   const endAngle = dCW < dCCW ? startAngle - cwSpan : startAngle + ccwSpan;
   return { type: "arc", cx, cy, r, startAngle, endAngle };
@@ -164,7 +185,11 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
     sB = shapes[bIdx];
   if (sA?.type !== "line" || sB?.type !== "line") return null;
 
-  let legDist = dist;
+  // A negative fillet radius flips the arc (concave scoop); the magnitude sets
+  // the trim.  Chamfers stay straight, so a negative setback is just its size.
+  const flip = mode === "bevel" && dist < 0;
+  const mag = Math.abs(dist);
+  let legDist = mag;
   if (mode === "bevel") {
     const dirs = computeChamfer(sA, sB, aKey, bKey, 1);
     const dot = Math.max(
@@ -172,7 +197,7 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
       Math.min(1, dirs.uA.x * dirs.uB.x + dirs.uA.y * dirs.uB.y),
     );
     const halfTan = Math.tan(Math.acos(dot) / 2);
-    legDist = halfTan > 1e-6 ? dist / halfTan : dist;
+    legDist = halfTan > 1e-6 ? mag / halfTan : mag;
   }
 
   const m = computeChamfer(sA, sB, aKey, bKey, legDist);
@@ -203,10 +228,17 @@ export function buildChamferEdit(shapes, junc, mode, dist, constraints = []) {
       coincident(newIdx, "end", bIdx, bKey),
     ];
   } else {
-    const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB);
+    const arc = buildBevelArc(m.P, m.uA, m.uB, m.trimA, m.trimB, flip);
     if (arc) {
       arc.kind = "bevel";
-      arc.bevelData = { aIdx, aKey, bIdx, bKey, dist: legDist };
+      arc.bevelData = {
+        aIdx,
+        aKey,
+        bIdx,
+        bKey,
+        dist: legDist,
+        ...(flip ? { flip: true } : {}),
+      };
       newShape = arc;
     } else {
       newShape = straight; // collinear legs: fall back to a straight bridge
@@ -304,18 +336,30 @@ export function resizeCorner(
   const P = { x: aOther.x + tInter * dx1, y: aOther.y + tInter * dy1 };
   const uA = norm2({ x: aOther.x - P.x, y: aOther.y - P.y });
   const uB = norm2({ x: bOther.x - P.x, y: bOther.y - P.y });
-  let legDist = sizeScene;
+  // A NEGATIVE fillet radius flips the arc (concave scoop instead of convex
+  // round).  On a direct edit the sign of the input carries it; on a re-derive
+  // (leg-dist mode) the flip is remembered on the bevel data.  The magnitude
+  // drives the trim either way — only bevels flip; a chamfer stays straight.
+  const flip =
+    bridge.kind === "bevel"
+      ? sizeIsLegDist
+        ? !!data.flip
+        : sizeScene < 0
+      : false;
+  const mag = Math.abs(sizeScene);
+  let legDist = mag;
   if (!sizeIsLegDist && bridge.kind === "bevel") {
     const dot = Math.max(-1, Math.min(1, uA.x * uB.x + uA.y * uB.y));
     const halfTan = Math.tan(Math.acos(dot) / 2);
-    legDist = halfTan > 1e-6 ? sizeScene / halfTan : sizeScene;
+    legDist = halfTan > 1e-6 ? mag / halfTan : mag;
   }
   const trimA = { x: P.x + uA.x * legDist, y: P.y + uA.y * legDist };
   const trimB = { x: P.x + uB.x * legDist, y: P.y + uB.y * legDist };
-  const newData = { ...data, dist: legDist };
+  const newData = { ...data, dist: legDist, ...(flip ? { flip: true } : {}) };
+  if (!flip) delete newData.flip;
   let newBridge;
   if (bridge.kind === "bevel") {
-    const arc = buildBevelArc(P, uA, uB, trimA, trimB);
+    const arc = buildBevelArc(P, uA, uB, trimA, trimB, flip);
     if (!arc) return null;
     arc.kind = "bevel";
     arc.bevelData = newData;
@@ -331,6 +375,11 @@ export function resizeCorner(
       chamferData: newData,
     };
   }
+  // Carry non-geometric metadata through the re-derive: the user's formula
+  // must survive every post-solve corner repair or it silently degrades to a
+  // plain number.
+  if (typeof bridge.distanceFormula === "string")
+    newBridge.distanceFormula = bridge.distanceFormula;
   return {
     updates: [
       [bridgeIdx, newBridge],
@@ -360,19 +409,17 @@ export function rederiveCornerFromLegs(shapes, bridgeIdx) {
 // dimension, rejecting the edit.  A plain drag — even body-dragging a leg, which
 // pins it just like a dimension does — carries no such constraint, so the corner
 // re-derives and holds its setback/angle instead of growing.
-export function rederiveAllCorners(shapes, constraints = null) {
-  const lengthPinned = (idx) =>
-    !!constraints &&
-    constraints.some(
-      (c) =>
-        c.type === "distance" && c.shapeAIdx === idx && c.shapeBIdx === idx,
-    );
+// Re-derive every chamfer/bevel corner from its (solved) legs.  Corners are
+// DERIVED geometry applied after the constraints resolve, so this runs after
+// every solve: it re-trims the legs and rebuilds the bridge at the stored
+// setback.  A dimension on a trimmed leg measures the SHARP corner (see
+// sharpLineExtra), so re-trimming no longer fights the dimension — the old
+// length-pinned skip is gone.
+export function rederiveAllCorners(shapes) {
   let out = null;
   for (let i = 0; i < shapes.length; i++) {
     const s = shapes[i];
     if (s?.kind !== "bevel" && s?.kind !== "chamfer") continue;
-    const data = s.chamferData || s.bevelData;
-    if (data && (lengthPinned(data.aIdx) || lengthPinned(data.bIdx))) continue;
     const res = rederiveCornerFromLegs(out || shapes, i);
     if (!res) continue;
     if (!out) out = shapes.slice();
@@ -528,4 +575,106 @@ export function collectConnectedShapes(startIdx, shapes, constraints) {
     }
   }
   return [...visited];
+}
+
+// Geometric middle of a shape's drawn extent — the anchor a "midpoint"
+// constraint pins a point to.  Line: endpoint average.  Arc: the angular
+// middle of the drawn sweep.  Bezier: the curve point at t = 0.5.
+// The chamfer/bevel corner bridges in a shape list, with their leg refs.  Used
+// by the virtual-corner solve: bridges are DERIVED, so the solver works on the
+// sharp polygon (legs extended to their intersections) and re-derives corners
+// after — they never participate in or fight the constraint solve.
+export function extractCorners(shapes) {
+  const out = [];
+  for (let i = 0; i < shapes.length; i++) {
+    const s = shapes[i];
+    if (s?.kind !== "chamfer" && s?.kind !== "bevel") continue;
+    const d = s.chamferData || s.bevelData;
+    if (
+      !d ||
+      shapes[d.aIdx]?.type !== "line" ||
+      shapes[d.bIdx]?.type !== "line"
+    )
+      continue;
+    out.push({
+      bi: i,
+      aIdx: d.aIdx,
+      aKey: d.aKey,
+      bIdx: d.bIdx,
+      bKey: d.bKey,
+      dist: d.dist,
+      kind: s.kind,
+    });
+  }
+  return out;
+}
+
+// Intersection of the two infinite lines carrying line shapes sA and sB, or
+// null when parallel.  Trimming a corner moves an endpoint ALONG its leg, so a
+// trimmed leg lies on the same infinite line as the sharp one — this recovers
+// the sharp corner from the trimmed legs.
+export function lineLineIntersect(sA, sB) {
+  const den =
+    (sA.x1 - sA.x2) * (sB.y1 - sB.y2) - (sA.y1 - sA.y2) * (sB.x1 - sB.x2);
+  if (Math.abs(den) < 1e-10) return null;
+  const t =
+    ((sA.x1 - sB.x1) * (sB.y1 - sB.y2) - (sA.y1 - sB.y1) * (sB.x1 - sB.x2)) /
+    den;
+  return { x: sA.x1 + t * (sA.x2 - sA.x1), y: sA.y1 + t * (sA.y2 - sA.y1) };
+}
+
+// Setback of the chamfer/bevel corner (if any) that trims line `lineIdx` at
+// its `key` endpoint.  A chamfer/fillet is DERIVED, applied after dimensions:
+// a dimension on the edge measures the SHARP corner (the un-trimmed
+// intersection), so length measurements add this back for every trimmed end.
+// 0 when the endpoint isn't a corner leg.
+export function cornerSetback(shapes, lineIdx, key) {
+  if (!shapes) return 0;
+  for (const s of shapes) {
+    if (s?.kind !== "chamfer" && s?.kind !== "bevel") continue;
+    const d = s.chamferData || s.bevelData;
+    if (!d) continue;
+    if (
+      (d.aIdx === lineIdx && d.aKey === key) ||
+      (d.bIdx === lineIdx && d.bKey === key)
+    )
+      return d.dist || 0;
+  }
+  return 0;
+}
+
+// The sharp (virtual-corner) length of a line-length dimension: the trimmed
+// endpoint separation plus the setback of any corner cutting each end.  Only
+// meaningful for a same-line start↔end measurement, where the setbacks lie
+// along the measured direction and so add exactly.
+export function sharpLineExtra(shapes, c) {
+  if (c.shapeAIdx !== c.shapeBIdx) return 0;
+  const s = shapes[c.shapeAIdx];
+  if (s?.type !== "line") return 0;
+  if (
+    !["start", "end"].includes(c.pointA) ||
+    !["start", "end"].includes(c.pointB)
+  )
+    return 0;
+  return (
+    cornerSetback(shapes, c.shapeAIdx, c.pointA) +
+    cornerSetback(shapes, c.shapeBIdx, c.pointB)
+  );
+}
+
+export function shapeMidpoint(s) {
+  if (!s) return null;
+  if (s.type === "line") return { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };
+  if (s.type === "arc") {
+    const mid = s.startAngle + (s.endAngle - s.startAngle) / 2;
+    return { x: s.cx + Math.cos(mid) * s.r, y: s.cy + Math.sin(mid) * s.r };
+  }
+  if (s.type === "bezier") {
+    const at = (a, b, c, d) => (a + 3 * b + 3 * c + d) / 8; // cubic at t=0.5
+    return {
+      x: at(s.p0.x, s.p1.x, s.p2.x, s.p3.x),
+      y: at(s.p0.y, s.p1.y, s.p2.y, s.p3.y),
+    };
+  }
+  return null;
 }

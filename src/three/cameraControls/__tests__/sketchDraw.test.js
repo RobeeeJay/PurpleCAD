@@ -14,7 +14,7 @@ vi.mock("../sceneObjects.js", () => ({
 }));
 vi.mock("../theme.js", () => ({ SKETCH_DRAW_PREVIEW_COLOR: 0 }));
 
-import { axisAlignLine } from "../sketchDraw.js";
+import { axisAlignLine, snapAngleTo45 } from "../sketchDraw.js";
 
 const line = (x1, y1, x2, y2) => ({ type: "line", x1, y1, x2, y2 });
 
@@ -49,5 +49,34 @@ describe("axisAlignLine", () => {
 
   it("ignores degenerate zero-length lines", () => {
     expect(axisAlignLine(line(5, 5, 5, 5), 0, false, false)).toBeNull();
+  });
+});
+
+describe("snapAngleTo45 (shift-lock)", () => {
+  const S = { x: 2, y: 3 };
+  it("locks a near-horizontal drag to exactly horizontal", () => {
+    const p = snapAngleTo45(S, { x: 9, y: 3.4 });
+    expect(p.y).toBeCloseTo(3, 9); // exactly horizontal
+    expect(p.x).toBeGreaterThan(S.x);
+  });
+  it("locks a near-vertical drag to exactly vertical", () => {
+    const p = snapAngleTo45(S, { x: 2.3, y: -5 });
+    expect(p.x).toBeCloseTo(2, 9);
+  });
+  it("locks a near-diagonal drag to 45°, preserving distance", () => {
+    const cur = { x: 6, y: 6.5 }; // ~44° from S
+    const p = snapAngleTo45(S, cur);
+    expect(p.x - S.x).toBeCloseTo(p.y - S.y, 9); // 45°
+    const d0 = Math.hypot(cur.x - S.x, cur.y - S.y);
+    expect(Math.hypot(p.x - S.x, p.y - S.y)).toBeCloseTo(d0, 9);
+  });
+  it("a shift-locked horizontal line then gets a horizontal constraint", () => {
+    const p = snapAngleTo45(S, { x: 9, y: 3.4 });
+    const hv = axisAlignLine(line(S.x, S.y, p.x, p.y), 0, false, false);
+    expect(hv.constraint.type).toBe("horizontal");
+  });
+  it("a shift-locked 45° line gets NO axis constraint", () => {
+    const p = snapAngleTo45(S, { x: 6, y: 6.5 });
+    expect(axisAlignLine(line(S.x, S.y, p.x, p.y), 0, false, false)).toBeNull();
   });
 });

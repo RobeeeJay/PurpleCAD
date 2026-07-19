@@ -34,6 +34,22 @@ const gridSnapLocal = (pt) => {
 // coincident join); if both ends are pinned, the slope isn't ours to change so
 // we leave it alone.  Returns { shape, constraint } or null.
 const AXIS_TOL = 0.02; // sin of the angle tolerance, ~1.1°
+// Shift-lock: snap the point relative to `start` to the nearest 45° direction,
+// preserving its distance.  A line locked to 0°/90° comes out exactly axis-
+// aligned, so axisAlignLine then gives it a horizontal/vertical constraint.
+export function snapAngleTo45(start, cur) {
+  const dx = cur.x - start.x,
+    dy = cur.y - start.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1e-9) return { x: cur.x, y: cur.y };
+  const step = Math.PI / 4;
+  const ang = Math.round(Math.atan2(dy, dx) / step) * step;
+  return {
+    x: start.x + Math.cos(ang) * dist,
+    y: start.y + Math.sin(ang) * dist,
+  };
+}
+
 export function axisAlignLine(shape, shapeIdx, startSnapped, endSnapped) {
   if (!shape || shape.type !== "line") return null;
   if (startSnapped && endSnapped) return null;
@@ -114,6 +130,9 @@ export function createSketchDrawHelpers(
       } else {
         effectiveCur = gridSnapLocal(cur);
       }
+    } else if (draw.tool === "line" && draw.startLocal) {
+      // Shift held while drawing a line: lock the segment to a 45° direction.
+      effectiveCur = snapAngleTo45(draw.startLocal, cur);
     }
     draw.currentSnap = activeSnap;
 
@@ -212,6 +231,13 @@ export function createSketchDrawHelpers(
       clickSnap = findSnap(screenX, screenY, shapes, sketchMesh);
       if (clickSnap) localPt = { x: clickSnap.x, y: clickSnap.y };
       else localPt = gridSnapLocal(localPt);
+    } else if (
+      sketchDrawRef.current?.tool === "line" &&
+      sketchDrawRef.current.startLocal
+    ) {
+      // Shift held on the second+ click of a line: lock it to a 45° direction
+      // (axisAlignLine below then adds H/V for a 0°/90° result).
+      localPt = snapAngleTo45(sketchDrawRef.current.startLocal, localPt);
     }
 
     // Helper: build constraints from recorded snaps for a completed shape.

@@ -8,7 +8,12 @@ import { describe, it, expect, vi } from "vitest";
 import * as THREE from "three";
 
 vi.mock("../../store", () => ({
-  useStore: { getState: () => ({ theme: "dark" }) },
+  useStore: {
+    getState: () => ({
+      theme: "dark",
+      setSelectedSketchConstraintIdx: () => {},
+    }),
+  },
 }));
 
 import { createSketchHoverHelpers } from "../cameraControls/sketchHover.js";

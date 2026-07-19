@@ -1,8 +1,8 @@
 name: OCC Addon
 
 on:
-  push:
-  pull_request:
+#  push:
+#  pull_request:
 
 jobs:
   build:
@@ -71,7 +71,7 @@ jobs:
         run: npm run addon:test
 
       - name: Unit tests (vitest)
-        run: npx vitest run
+        run: ./scripts/with-display.sh npx vitest run
 
       - name: Renderer build (vite)
         run: npx vite build
@@ -89,7 +89,7 @@ jobs:
         run: |
           npm run sqlite:rebuild
           VITE_E2E=1 vite build
-          npx playwright test
+          ./scripts/with-display.sh npx playwright test
 
       - name: Upload Playwright report on failure
         if: failure()

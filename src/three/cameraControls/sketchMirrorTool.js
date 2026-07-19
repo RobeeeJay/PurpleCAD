@@ -75,11 +75,13 @@ export function createSketchMirrorHelpers({
     );
     const sketchGroup = sketchShapesGroupRef?.current;
     if (!selItem || !sketchGroup) return;
+    // Mirror-derived geometry (a mirror copy) is normally inert, but the
+    // Mirror tool may reference it — as the axis or as a shape to reflect —
+    // so a copy can be mirrored across a second line.  Its constraint is
+    // appended after the source's, so applyMirrorConstraints resolves the copy
+    // before this copy-of-a-copy.  Other derived kinds stay inert.
     const lineObjs = sketchGroup.children.filter(
-      (c) =>
-        c.userData.shapeIdx != null &&
-        !c.userData.isOffset &&
-        !c.userData.isMirror,
+      (c) => c.userData.shapeIdx != null && !c.userData.isOffset,
     );
     const hits = hitTestSketchLines(makeRay(screenX, screenY), lineObjs);
     if (hits.length === 0 || hits[0].object.userData.shapeIdx == null) return;

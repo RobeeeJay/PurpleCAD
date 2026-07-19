@@ -3,6 +3,25 @@
 // the affine interpolation `getSketchShapePoints` uses for arcs/beziers —
 // every shape type below has an EXACT translated copy.
 
+import { evaluateFormula } from "../utils/formulas.js";
+import { MM_PER_UNIT } from "./sceneObjects/dimensions.js";
+
+// Resolve the tool's raw params — counts and mm offsets, each a number or a
+// formula string over the document variables — to solver-ready numbers
+// (counts clamped to >=1 integers, offsets in scene units).
+export const resolveRectPatternParams = (patternState, varsMap = null) => {
+  const num = (v) =>
+    typeof v === "string" ? evaluateFormula(v, varsMap ?? new Map()) : v;
+  const ox = num(patternState.offsetX);
+  const oy = num(patternState.offsetY);
+  return {
+    countX: Math.max(1, Math.round(num(patternState.countX)) || 1),
+    countY: Math.max(1, Math.round(num(patternState.countY)) || 1),
+    offsetX: (Number.isFinite(ox) ? ox : 0) / MM_PER_UNIT,
+    offsetY: (Number.isFinite(oy) ? oy : 0) / MM_PER_UNIT,
+  };
+};
+
 // Shape types the Rectangular Pattern tool can copy — same set as
 // MIRRORABLE_TYPES / CIRCULAR_PATTERNABLE_TYPES.
 export const RECTANGULAR_PATTERNABLE_TYPES = [

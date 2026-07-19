@@ -13,7 +13,13 @@ import {
 } from "./internals.js";
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
+import { shapeMidpoint, translateShape } from "../three/sketchGeometry.js";
+import {
+  moveShapePoint,
+  getShapePoint,
+} from "../three/sceneObjects/sketchShapes.js";
 import { resolveValue } from "../three/geometryParams.js";
+import { variablesToMap } from "../utils/formulas.js";
 import {
   MIRRORABLE_TYPES,
   mirrorShapeGeometry,
@@ -28,8 +34,8 @@ import {
   RECTANGULAR_PATTERNABLE_TYPES,
   translateShapeGeometry,
   applyRectangularPatternConstraints,
+  resolveRectPatternParams,
 } from "../three/sketchRectangularPattern.js";
-import { getShapePoint } from "../three/sceneObjects/sketchShapes.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import { explodeContours, resizeCorner } from "../three/sketchGeometry.js";
 import {
@@ -322,8 +328,18 @@ export const createSketchSlice = (set) => ({
   selectedSketchElement: null, // { type:'point'|'line', shapeIdx, pointKey? }
   setSelectedSketchElement: (el) => set({ selectedSketchElement: el }),
 
-  sketchConstraintMode: null, // 'coincident' | 'distance' | null
-  setSketchConstraintMode: (mode) => set({ sketchConstraintMode: mode }),
+  sketchConstraintMode: null, // 'coincident' | 'distance' | 'midpoint' | null
+  setSketchConstraintMode: (mode) =>
+    set((s) => ({
+      sketchConstraintMode: mode,
+      // The midpoint tool's first pick only means anything inside its mode.
+      ...(mode !== "midpoint" && s.sketchMidpointFirst
+        ? { sketchMidpointFirst: null }
+        : null),
+    })),
+  // Guided midpoint pick: { kind: 'point' | 'target', shapeIdx, pointKey? } | null.
+  sketchMidpointFirst: null,
+  setSketchMidpointFirst: (v) => set({ sketchMidpointFirst: v }),
 
   sketchDistanceInput: null,
   setSketchDistanceInput: (v) => set({ sketchDistanceInput: v }),
@@ -333,6 +349,8 @@ export const createSketchSlice = (set) => ({
 
   // Chamfer setback / bevel radius, in mm (scene units × MM_PER_UNIT). Drives
   // both the modify preview and the committed cut.
+  // Chamfer setback / bevel radius: a bare mm number or a formula string
+  // over the document variables.
   sketchModifyDistMm: 2.5,
   setSketchModifyDistMm: (mm) => set({ sketchModifyDistMm: mm }),
 
@@ -412,6 +430,11 @@ export const createSketchSlice = (set) => ({
 
   sketchMultiSelectedIndices: [],
   setSketchMultiSelectedIndices: (v) => set({ sketchMultiSelectedIndices: v }),
+  // Mirror of sketchHover's closure-local constraint selection so React
+  // surfaces (the status tag) can count it.
+  selectedSketchConstraintIdx: null,
+  setSelectedSketchConstraintIdx: (v) =>
+    set({ selectedSketchConstraintIdx: v }),
 
   // Sketch selection-type filter (the top-right widget): which kinds a click
   // resolves to.  line/point/shape on by default (the priority point > line >
@@ -629,6 +652,7 @@ export const createSketchSlice = (set) => ({
   // values entered so new rectangular patterns start from them.
   rectangularPatternDefaultCountX: 2,
   rectangularPatternDefaultCountY: 2,
+  // Offsets are mm (a number or a mm formula string); counts may be formulas.
   rectangularPatternDefaultOffsetX: 10,
   rectangularPatternDefaultOffsetY: 10,
 
@@ -717,10 +741,11 @@ export const createSketchSlice = (set) => ({
         activeSketchTool: "rectangularPattern",
         sketchRectangularPatternState: {
           shapeIndices: sourceIndices,
-          countX: clicked.countX,
-          countY: clicked.countY,
-          offsetX: clicked.dx,
-          offsetY: clicked.dy,
+          countX: clicked.countXFormula ?? clicked.countX,
+          countY: clicked.countYFormula ?? clicked.countY,
+          // Raw values are mm (or a mm formula); dx/dy are scene units.
+          offsetX: clicked.dxFormula ?? clicked.dx * MM_PER_UNIT,
+          offsetY: clicked.dyFormula ?? clicked.dy * MM_PER_UNIT,
           editCopyIndices: copyIndices,
         },
       };
@@ -1053,7 +1078,7 @@ export const createSketchSlice = (set) => ({
   // Resize an existing chamfer / bevel corner to a new size (mm) — re-derives the
   // bridge + its two legs in place.  The geometry comes out self-consistent (the
   // bridge ends sit exactly on the trimmed leg corners), so no re-solve is needed.
-  resizeSketchCorner: (sketchId, bridgeIdx, sizeMm) =>
+  resizeSketchCorner: (sketchId, bridgeIdx, sizeMm, formula = null) =>
     set((state) => {
       const item = state.items.find((i) => i.id === sketchId);
       if (!item) return {};
@@ -1065,6 +1090,16 @@ export const createSketchSlice = (set) => ({
       if (!res) return {};
       pushSketchSnapshot(state, sketchId);
       const map = new Map(res.updates);
+      // The re-derived bridge keeps (or replaces) its formula so the label
+      // and the next edit still show what the user typed.
+      const bridge = map.get(bridgeIdx) ?? (item.shapes || [])[bridgeIdx];
+      if (bridge) {
+        const next = Object.assign({}, bridge);
+        if (formula && typeof formula === "string" && formula.trim())
+          next.distanceFormula = formula.trim();
+        else delete next.distanceFormula;
+        map.set(bridgeIdx, next);
+      }
       const updatedItems = state.items.map((it) =>
         it.id === sketchId
           ? Object.assign({}, it, {
@@ -1289,8 +1324,22 @@ export const createSketchSlice = (set) => ({
           : { ...shape, x1: mx, x2: mx };
       const inputShapes = (item.shapes || []).slice();
       inputShapes[shapeIdx] = snapped;
-      const { shapes: solved, ok } = solveConstraints(inputShapes, constraints);
-      if (!ok)
+      // Minimise movement: first try satisfying everything by moving ONLY the
+      // selected line; free the rest of the sketch only if that fails.
+      const othersFixed = new Set();
+      (item.shapes || []).forEach((sh, i) => {
+        if (i === shapeIdx) return;
+        for (const f of varFields(sh)) othersFixed.add(`${i}:${f}`);
+      });
+      let solved = null;
+      for (const opts of [{ fixed: othersFixed }, undefined]) {
+        const res = solveConstraints(inputShapes, constraints, opts);
+        if (res.ok) {
+          solved = res.shapes;
+          break;
+        }
+      }
+      if (!solved)
         return {
           notification:
             "Can't apply that constraint — it would break another constraint",
@@ -1328,10 +1377,17 @@ export const createSketchSlice = (set) => ({
   // Two-shape geometric constraint (parallel / colinear between two lines;
   // tangent between a line and an arc/circle, or two arcs/circles).  Adds the
   // constraint and re-solves the whole sketch; rejects if it can't be satisfied.
-  applySketchPairConstraint: (sketchId, idxA, idxB, type) =>
+  applySketchPairConstraint: (sketchId, idxA, idxB, type, opts = {}) =>
     set((state) => {
       const item = state.items.find((i) => i.id === sketchId);
-      if (!item || idxA === idxB) return {};
+      if (!item) return {};
+      if (idxA === idxB)
+        return type === "midpoint"
+          ? {
+              notification:
+                "Midpoint can't pin a point to its own line, arc or curve.",
+            }
+          : {};
       const shapes = item.shapes || [];
       const a = shapes[idxA],
         b = shapes[idxB];
@@ -1363,19 +1419,116 @@ export const createSketchSlice = (set) => ({
           notification:
             "Equal needs two lines (length), or two circles/arcs (radius).",
         };
+      // Midpoint: one POINT + one line/arc/bezier, order-independent.  The
+      // point is any snappable point — a standalone point shape, or a keyed
+      // point of another shape (endpoint / centre, named by opts.pointKey) —
+      // pinned to the target's geometric middle so it tracks it.
+      let midpointFields = null;
+      if (type === "midpoint") {
+        const MIDPOINT_TARGETS = ["line", "arc", "bezier"];
+        let pointIdx;
+        let pointKey = null;
+        if (opts.pointIdx != null) {
+          pointIdx = opts.pointIdx;
+          if (shapes[pointIdx]?.type !== "point")
+            pointKey = opts.pointKey ?? null;
+        } else {
+          pointIdx =
+            a?.type === "point" ? idxA : b?.type === "point" ? idxB : null;
+        }
+        const targetIdx = pointIdx === idxA ? idxB : idxA;
+        const target = shapes[targetIdx];
+        if (
+          pointIdx == null ||
+          (shapes[pointIdx]?.type !== "point" && !pointKey) ||
+          !MIDPOINT_TARGETS.includes(target?.type)
+        )
+          return {
+            notification: "Midpoint needs a point and a line, arc or curve.",
+          };
+        if (
+          (item.constraints || []).some(
+            (c) =>
+              c.type === "midpoint" &&
+              c.pointShapeIdx === pointIdx &&
+              (c.pointKey ?? null) === pointKey,
+          )
+        )
+          return {
+            notification: "That point already has a midpoint constraint.",
+          };
+        midpointFields = {
+          pointShapeIdx: pointIdx,
+          targetShapeIdx: targetIdx,
+          ...(pointKey ? { pointKey } : {}),
+        };
+      }
       const dup = (c) =>
         c.type === type &&
-        ((c.shapeAIdx === idxA && c.shapeBIdx === idxB) ||
-          (c.shapeAIdx === idxB && c.shapeBIdx === idxA));
+        (type === "midpoint"
+          ? c.pointShapeIdx === midpointFields.pointShapeIdx &&
+            (c.pointKey ?? null) === (midpointFields.pointKey ?? null) &&
+            c.targetShapeIdx === midpointFields.targetShapeIdx
+          : (c.shapeAIdx === idxA && c.shapeBIdx === idxB) ||
+            (c.shapeAIdx === idxB && c.shapeBIdx === idxA));
       const constraints = [
         ...(item.constraints || []).filter((c) => !dup(c)),
-        { type, shapeAIdx: idxA, shapeBIdx: idxB },
+        type === "midpoint"
+          ? { type, ...midpointFields }
+          : { type, shapeAIdx: idxA, shapeBIdx: idxB },
       ];
-      const { shapes: solved, ok } = solveConstraints(
-        shapes.slice(),
-        constraints,
-      );
-      if (!ok)
+      // Staged solve, minimising movement: first only the FIRST-picked shape
+      // may move, then both picked shapes, then the whole sketch (idxA/idxB
+      // arrive in pick order).
+      const stagedFixed = (freeIdxs) => {
+        const freeSet = new Set(freeIdxs);
+        const fixed = new Set();
+        shapes.forEach((sh, i) => {
+          if (freeSet.has(i)) return;
+          for (const f of varFields(sh)) fixed.add(`${i}:${f}`);
+        });
+        return fixed;
+      };
+      // Seed each stage at (or near) the solution, but only ever by moving a
+      // shape that stage lets move: the point jumps to the target's middle
+      // when it is free, otherwise the target translates its middle onto the
+      // point.  The solver converges poorly from far seeds, so this matters.
+      const seedShapes = (freeIdxs) => {
+        const input = shapes.slice();
+        if (!midpointFields) return input;
+        const pi = midpointFields.pointShapeIdx;
+        const ti = midpointFields.targetShapeIdx;
+        const freeSet = freeIdxs ? new Set(freeIdxs) : null;
+        const m = shapeMidpoint(input[ti]);
+        if (!m) return input;
+        if (!freeSet || freeSet.has(pi)) {
+          const pt = input[pi];
+          input[pi] =
+            pt.type === "point"
+              ? { ...pt, x: m.x, y: m.y }
+              : moveShapePoint(pt, midpointFields.pointKey, m);
+        } else if (freeSet.has(ti)) {
+          const p = getShapePoint(
+            input[pi],
+            midpointFields.pointKey ?? "point",
+          );
+          if (p) input[ti] = translateShape(input[ti], p.x - m.x, p.y - m.y);
+        }
+        return input;
+      };
+      let solved = null;
+      for (const free of [[idxA], [idxA, idxB], null]) {
+        const res = solveConstraints(
+          seedShapes(free),
+          constraints,
+          free ? { fixed: stagedFixed(free) } : undefined,
+        );
+        if (res.ok) {
+          solved = res.shapes;
+          break;
+        }
+      }
+      if (!solved)
         return {
           notification:
             "Can't apply that constraint — it would break another constraint",
@@ -1804,6 +1957,45 @@ export const createSketchSlice = (set) => ({
           });
         }
 
+        // Deleting a mirror / pattern constraint removes the WHOLE operation —
+        // every copy shape and its constraint — leaving only the source.  Its
+        // copies are derived and otherwise non-selectable, so deleting one
+        // constraint at a time would strand the copy geometry.  Group by the
+        // same key the Edit flow uses.
+        const groupOf = (c) => {
+          if (c.type === "mirror")
+            return (k) => k.type === "mirror" && k.lineIdx === c.lineIdx;
+          if (c.type === "circularPattern")
+            return (k) =>
+              k.type === "circularPattern" &&
+              k.centerShapeIdx === c.centerShapeIdx &&
+              k.centerPointKey === c.centerPointKey &&
+              k.count === c.count;
+          if (c.type === "rectangularPattern")
+            return (k) =>
+              k.type === "rectangularPattern" &&
+              k.dx === c.dx &&
+              k.dy === c.dy &&
+              k.countX === c.countX &&
+              k.countY === c.countY;
+          return null;
+        };
+        const inGroup = removed && groupOf(removed);
+        if (inGroup) {
+          const copyIndices = oldConstraints
+            .filter(inGroup)
+            .map((c) => c.shapeIdx);
+          const { workShapes, workConstraints } = removeCopiesForEdit(
+            oldShapes,
+            oldConstraints,
+            copyIndices,
+          );
+          return Object.assign({}, item, {
+            shapes: workShapes,
+            constraints: workConstraints,
+          });
+        }
+
         return Object.assign({}, item, {
           constraints: oldConstraints.filter((_, i) => i !== constraintIdx),
         });
@@ -2057,17 +2249,24 @@ export const createSketchSlice = (set) => ({
       const patternState = state.sketchRectangularPatternState;
       if (!item || !patternState) return {};
       const shapes = item.shapes || [];
-      const countX = Math.max(1, Math.round(patternState.countX) || 1);
-      const countY = Math.max(1, Math.round(patternState.countY) || 1);
-      const offsetX = patternState.offsetX;
-      const offsetY = patternState.offsetY;
+      // Raw params may be formulas (counts) / mm formulas (offsets); resolve
+      // against the live variables, keeping the raws for the constraints.
+      const { countX, countY, offsetX, offsetY } = resolveRectPatternParams(
+        patternState,
+        variablesToMap(state.variables),
+      );
+      const rawFormula = (v) => (typeof v === "string" ? v : null);
+      const dxFormula = rawFormula(patternState.offsetX);
+      const dyFormula = rawFormula(patternState.offsetY);
+      const countXFormula = rawFormula(patternState.countX);
+      const countYFormula = rawFormula(patternState.countY);
       const defaults = {
         activeSketchTool: null,
         sketchRectangularPatternState: null,
-        rectangularPatternDefaultCountX: countX,
-        rectangularPatternDefaultCountY: countY,
-        rectangularPatternDefaultOffsetX: offsetX,
-        rectangularPatternDefaultOffsetY: offsetY,
+        rectangularPatternDefaultCountX: countXFormula ?? countX,
+        rectangularPatternDefaultCountY: countYFormula ?? countY,
+        rectangularPatternDefaultOffsetX: dxFormula ?? patternState.offsetX,
+        rectangularPatternDefaultOffsetY: dyFormula ?? patternState.offsetY,
       };
       // Edit mode (double-clicked an existing pattern): drop the old copies
       // first, reindexing every surviving constraint, and carry the source
@@ -2125,6 +2324,10 @@ export const createSketchSlice = (set) => ({
               dy: offsetY,
               countX,
               countY,
+              ...(dxFormula ? { dxFormula } : {}),
+              ...(dyFormula ? { dyFormula } : {}),
+              ...(countXFormula ? { countXFormula } : {}),
+              ...(countYFormula ? { countYFormula } : {}),
             });
           }
         }
@@ -2208,7 +2411,8 @@ export const createSketchSlice = (set) => ({
       const updatedItems = state.items.map((item) => {
         if (item.id !== sketchId) return item;
         const constraints = (item.constraints || []).map((c, i) =>
-          i === constraintIdx && c.type === "distance"
+          i === constraintIdx &&
+          (c.type === "distance" || c.type === "pointLineDistance")
             ? Object.assign({}, c, { distance: newDistance })
             : c,
         );

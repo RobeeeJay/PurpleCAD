@@ -5,25 +5,65 @@
 // on the shape/region geometry.
 
 import * as THREE from "three";
+import { shapeMidpoint, cornerSetback } from "../sketchGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
 import { useStore } from "../../store";
 import {
-  ANGLE_LABEL_BG,
   ANGLE_LABEL_TEXT,
   CONSTRAINT_ANGLE_COLOR,
   CONSTRAINT_COINCIDENT_COLOR,
   CONSTRAINT_HORIZONTAL_COLOR,
   CONSTRAINT_ON_LINE_COLOR,
-  dimLabelBgFor,
-  dimLineColorFor,
   dimValueColorFor,
   sketchMirrorColorFor,
   sketchCircularPatternColorFor,
   sketchRectangularPatternColorFor,
   toCssHex,
 } from "../theme.js";
+
+// Whether a stored constraint value is a formula/variable (not a bare number).
+export function isFormulaValue(v) {
+  return typeof v === "string" && !/^-?\d+(\.\d+)?$/.test(v.trim());
+}
+
+// A dimension value label sprite: transparent background, value-only text.  A
+// formula/variable-derived value shows only the resolved value, prefixed with
+// the function symbol (ƒ) rather than spelling out the expression.  Returns the
+// sprite; the caller sets its position and any userData.
+export function makeDimLabelSprite(
+  text,
+  { theme, isFormula = false, baseW = 0.7, color = null },
+) {
+  const labelText = (isFormula ? "ƒ " : "") + text;
+  const labelFont = "bold 18px sans-serif";
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.font = labelFont;
+  canvas.width = Math.max(
+    160,
+    Math.ceil(ctx.measureText(labelText).width) + 24,
+  );
+  canvas.height = 32;
+  // No background fill — the label reads directly over the sketch.
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = color ?? toCssHex(dimValueColorFor(theme));
+  ctx.font = labelFont;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(labelText, canvas.width / 2, canvas.height / 2);
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(canvas),
+      depthTest: false,
+      transparent: true,
+    }),
+  );
+  sprite.scale.set(baseW * (canvas.width / 160), 0.175, 1);
+  sprite.renderOrder = 1009;
+  return sprite;
+}
 
 // Builds constraint icon THREE.js objects into `group`. All objects are tagged
 // with userData.isConstraintObj so they can be found and replaced during drag.
@@ -35,6 +75,7 @@ export function addConstraintIconsToGroup(
   res,
   showDimensions = true,
   editHidden = null,
+  showConstraints = true,
 ) {
   const R = 0.14;
   // The sketch plane's normal in world space (toWorld maps sketch-local → world,
@@ -58,6 +99,16 @@ export function addConstraintIconsToGroup(
       editHidden.has(c.shapeIdx)
     )
       return;
+    // The two visibility toggles are independent: "dimensions" owns the
+    // measured annotations (labels + their marker lines), "constraints" owns
+    // every other constraint icon.  An angle is both — its arc is an icon,
+    // its degree label a dimension (gated below).
+    const isDimensionType =
+      c.type === "distance" ||
+      c.type === "pointLineDistance" ||
+      c.type === "offset";
+    if (isDimensionType && !showDimensions) return;
+    if (!isDimensionType && !showConstraints) return;
     const tag = (obj, iconLocalPos, shapeIndices, color) => {
       obj.userData.isConstraintObj = true;
       obj.userData.isConstraint = true;
@@ -98,7 +149,7 @@ export function addConstraintIconsToGroup(
       const l = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([p0, p1]),
         new THREE.LineBasicMaterial({
-          color: dimLineColorFor(theme),
+          color: dimValueColorFor(theme),
           depthTest: false,
         }),
       );
@@ -117,7 +168,7 @@ export function addConstraintIconsToGroup(
           tip.clone().addScaledVector(perp, -TICK),
         ]),
         new THREE.LineBasicMaterial({
-          color: dimLineColorFor(theme),
+          color: dimValueColorFor(theme),
           depthTest: false,
         }),
       );
@@ -154,7 +205,6 @@ export function addConstraintIconsToGroup(
       group.add(cLine);
       markFixedSize(cLine, toWorld(pt.x, pt.y, 0.005));
     } else if (c.type === "distance") {
-      if (!showDimensions) return;
       const sA = shapes[c.shapeAIdx],
         sB = shapes[c.shapeBIdx];
       if (!sA || !sB) return;
@@ -162,9 +212,27 @@ export function addConstraintIconsToGroup(
         c.shapeAIdx === c.shapeBIdx &&
         c.pointB === "edge" &&
         sA.type === "circle";
-      const posA = getShapePoint(sA, c.pointA),
+      let posA = getShapePoint(sA, c.pointA),
         posB = getShapePoint(sB, c.pointB);
       if (!posA || !posB) return;
+      // A line-length dimension measures the SHARP corner, so its witness lines
+      // must reach the virtual (pre-chamfer/fillet) corner, not the trimmed
+      // edge — extend each end outward along the edge by its corner setback.
+      if (
+        !isRadius &&
+        c.shapeAIdx === c.shapeBIdx &&
+        sA.type === "line" &&
+        ["start", "end"].includes(c.pointA) &&
+        ["start", "end"].includes(c.pointB)
+      ) {
+        const setA = cornerSetback(shapes, c.shapeAIdx, c.pointA);
+        const setB = cornerSetback(shapes, c.shapeBIdx, c.pointB);
+        const len = Math.hypot(posB.x - posA.x, posB.y - posA.y) || 1;
+        const ux = (posB.x - posA.x) / len,
+          uy = (posB.y - posA.y) / len;
+        if (setA) posA = { x: posA.x - ux * setA, y: posA.y - uy * setA };
+        if (setB) posB = { x: posB.x + ux * setB, y: posB.y + uy * setB };
+      }
       const wA = toWorld(posA.x, posA.y, 0.006),
         wB = toWorld(posB.x, posB.y, 0.006);
       const dir = new THREE.Vector3().subVectors(wB, wA).normalize();
@@ -183,7 +251,7 @@ export function addConstraintIconsToGroup(
           leader,
           { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
           distShapes,
-          dimLineColorFor(theme),
+          dimValueColorFor(theme),
         );
         addDimTick(wB, perpU);
         labelPos = wLineTo.clone().addScaledVector(dir, 0.45);
@@ -216,7 +284,7 @@ export function addConstraintIconsToGroup(
             y: (posA.y + posB.y) / 2 + lpy * OFF,
           },
           distShapes,
-          dimLineColorFor(theme),
+          dimValueColorFor(theme),
         );
         addDimTick(A2, perpU);
         addDimTick(B2, perpU);
@@ -229,42 +297,80 @@ export function addConstraintIconsToGroup(
       // variable / expression drives the dimension.  A bare-number string
       // ("10.5") is shown as just the mm value, matching the legacy look.
       const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
-      const formulaSrc =
-        typeof c.distance === "string" &&
-        !/^-?\d+(\.\d+)?$/.test(c.distance.trim())
-          ? c.distance.trim()
-          : null;
-      const labelText =
-        (isRadius ? "R " : "") +
-        (formulaSrc ? `${formulaSrc} = ${valueMm}mm` : `${valueMm}mm`);
-      const canvas = document.createElement("canvas");
-      const tmpCtx = canvas.getContext("2d");
-      const labelFont = "bold 18px sans-serif";
-      tmpCtx.font = labelFont;
-      // Measure first so longer formula labels don't get clipped at the
-      // edges; pad each side by 12px for the rounded background.
-      const measured = tmpCtx.measureText(labelText).width;
-      canvas.width = Math.max(160, Math.ceil(measured) + 24);
-      canvas.height = 32;
-      const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = dimLabelBgFor(theme);
-      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
-      ctx2d.font = labelFont;
-      ctx2d.textAlign = "center";
-      ctx2d.textBaseline = "middle";
-      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-      const tex = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: tex, depthTest: false }),
-      );
-      // Sprite world-size scales with the canvas's aspect ratio so longer
-      // formula labels stay readable instead of being squished.
-      const baseW = isRadius ? 0.85 : 0.7;
-      const aspect = canvas.width / 160;
-      sprite.scale.set(baseW * aspect, 0.175, 1);
+      const sprite = makeDimLabelSprite(`${isRadius ? "R " : ""}${valueMm}mm`, {
+        theme,
+        isFormula: isFormulaValue(c.distance),
+      });
       sprite.position.copy(labelPos);
-      sprite.renderOrder = 1009;
+      addTagged(sprite);
+    } else if (c.type === "pointLineDistance") {
+      const lineShape = shapes[c.lineShapeIdx];
+      const ptShape = shapes[c.pointShapeIdx];
+      if (!lineShape || lineShape.type !== "line" || !ptShape) return;
+      const pt = getShapePoint(ptShape, c.pointKey ?? "point");
+      if (!pt) return;
+      const ldx = lineShape.x2 - lineShape.x1,
+        ldy = lineShape.y2 - lineShape.y1;
+      const llen2 = Math.hypot(ldx, ldy);
+      if (llen2 < 1e-10) return;
+      // Foot of the perpendicular on the INFINITE line — the dimension line
+      // runs point → foot, with a tick at each end.
+      const t =
+        ((pt.x - lineShape.x1) * ldx + (pt.y - lineShape.y1) * ldy) /
+        (llen2 * llen2);
+      const foot = {
+        x: lineShape.x1 + ldx * t,
+        y: lineShape.y1 + ldy * t,
+      };
+      const wP = toWorld(pt.x, pt.y, 0.006);
+      const wF = toWorld(foot.x, foot.y, 0.006);
+      let labelPos = new THREE.Vector3().addVectors(wP, wF).multiplyScalar(0.5);
+      if (wP.distanceTo(wF) > 1e-6) {
+        // Same technical-drawing treatment as a two-point dimension: the
+        // dimension line sits OFFSET to the side (along the measured line's
+        // direction), bounded by witness lines from the point and the foot,
+        // with a tick at each end.
+        const dimU = new THREE.Vector3().subVectors(wF, wP).normalize();
+        const perpU = sketchNormal.clone().cross(dimU).normalize();
+        const OFF = 0.55,
+          GAP = 0.06,
+          OVER = 0.14;
+        const A2 = wP.clone().addScaledVector(perpU, OFF);
+        const B2 = wF.clone().addScaledVector(perpU, OFF);
+        addDimSeg(
+          wP.clone().addScaledVector(perpU, GAP),
+          A2.clone().addScaledVector(perpU, OVER),
+        );
+        addDimSeg(
+          wF.clone().addScaledVector(perpU, GAP),
+          B2.clone().addScaledVector(perpU, OVER),
+        );
+        const dimLine = addDimSeg(A2, B2);
+        // Hotspot on the dimension line, in sketch-local (perp of point→foot).
+        const fdx = foot.x - pt.x,
+          fdy = foot.y - pt.y;
+        const flen = Math.hypot(fdx, fdy) || 1;
+        const lpx = -fdy / flen,
+          lpy = fdx / flen;
+        tag(
+          dimLine,
+          {
+            x: (pt.x + foot.x) / 2 + lpx * OFF,
+            y: (pt.y + foot.y) / 2 + lpy * OFF,
+          },
+          [c.pointShapeIdx, c.lineShapeIdx],
+          dimValueColorFor(theme),
+        );
+        addDimTick(A2, perpU);
+        addDimTick(B2, perpU);
+        labelPos = new THREE.Vector3().addVectors(A2, B2).multiplyScalar(0.5);
+      }
+      const valueMm = (resolveConstraintDistance(c) * MM_PER_UNIT).toFixed(1);
+      const sprite = makeDimLabelSprite(`${valueMm}mm`, {
+        theme,
+        isFormula: isFormulaValue(c.distance),
+      });
+      sprite.position.copy(labelPos);
       addTagged(sprite);
     } else if (c.type === "onLine") {
       const lineShape = shapes[c.lineShapeIdx];
@@ -379,6 +485,39 @@ export function addConstraintIconsToGroup(
       );
       group.add(seg);
       markFixedSize(seg, toWorld(mx, my, 0.005));
+    } else if (c.type === "midpoint") {
+      // A small diamond outline at the target's middle — the pinned point
+      // sits exactly there.
+      const m = shapeMidpoint(shapes[c.targetShapeIdx]);
+      if (m) {
+        const R = 0.09;
+        const pts = [
+          toWorld(m.x, m.y + R, 0.005),
+          toWorld(m.x + R, m.y, 0.005),
+          toWorld(m.x + R, m.y, 0.005),
+          toWorld(m.x, m.y - R, 0.005),
+          toWorld(m.x, m.y - R, 0.005),
+          toWorld(m.x - R, m.y, 0.005),
+          toWorld(m.x - R, m.y, 0.005),
+          toWorld(m.x, m.y + R, 0.005),
+        ];
+        const seg = new THREE.LineSegments(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({
+            color: CONSTRAINT_ON_LINE_COLOR,
+            depthTest: false,
+          }),
+        );
+        seg.renderOrder = 1004;
+        tag(
+          seg,
+          { x: m.x, y: m.y },
+          [c.pointShapeIdx, c.targetShapeIdx],
+          CONSTRAINT_ON_LINE_COLOR,
+        );
+        group.add(seg);
+        markFixedSize(seg, toWorld(m.x, m.y, 0.005));
+      }
     } else if (c.type === "tangent") {
       const a = shapes[c.shapeAIdx],
         b = shapes[c.shapeBIdx];
@@ -560,25 +699,12 @@ export function addConstraintIconsToGroup(
       markFixedSize(arc, toWorld(P.x, P.y, 0.005));
       if (showDimensions) {
         const deg = typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
-        const labelText = `${Math.round(deg)}°`;
-        const canvas = document.createElement("canvas");
-        canvas.width = 96;
-        canvas.height = 32;
-        const ctx2d = canvas.getContext("2d");
-        ctx2d.fillStyle = ANGLE_LABEL_BG;
-        ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-        ctx2d.fillStyle = ANGLE_LABEL_TEXT;
-        ctx2d.font = "bold 18px sans-serif";
-        ctx2d.textAlign = "center";
-        ctx2d.textBaseline = "middle";
-        ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-        const sprite = new THREE.Sprite(
-          new THREE.SpriteMaterial({
-            map: new THREE.CanvasTexture(canvas),
-            depthTest: false,
-          }),
-        );
-        sprite.scale.set(0.45, 0.15, 1);
+        // Same builder as every other dimension label so the font size matches;
+        // angle keeps its own colour and carries no formula prefix.
+        const sprite = makeDimLabelSprite(`${Math.round(deg)}°`, {
+          theme,
+          color: ANGLE_LABEL_TEXT,
+        });
         const midAng = aF + delta / 2;
         sprite.position.copy(
           toWorld(
@@ -591,7 +717,6 @@ export function addConstraintIconsToGroup(
         addTagged(sprite);
       }
     } else if (c.type === "offset") {
-      if (!showDimensions) return;
       if (c.offsetGroup != null) {
         if (seenOffsetGroups.has(c.offsetGroup)) return;
         seenOffsetGroups.add(c.offsetGroup);
@@ -625,7 +750,7 @@ export function addConstraintIconsToGroup(
           dimLine,
           labelLocal,
           [c.shapeIdx, c.origIdx],
-          dimLineColorFor(theme),
+          dimValueColorFor(theme),
         );
       };
       if (nl.type === "circle") {
@@ -660,43 +785,15 @@ export function addConstraintIconsToGroup(
       }
       // Signed value: the sign of the offset distance is meaningful (which
       // side the copy sits on), so keep it on the label.
-      const resolvedDist = resolveConstraintDistance(c);
-      const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
-      const formulaSrc =
-        typeof c.distance === "string" &&
-        !/^-?\d+(\.\d+)?$/.test(c.distance.trim())
-          ? c.distance.trim()
-          : null;
-      const labelText = formulaSrc
-        ? `${formulaSrc} = ${valueMm}mm`
-        : `${valueMm}mm`;
-      const canvas = document.createElement("canvas");
-      const tmpCtx = canvas.getContext("2d");
-      const labelFont = "bold 18px sans-serif";
-      tmpCtx.font = labelFont;
-      const measured = tmpCtx.measureText(labelText).width;
-      canvas.width = Math.max(160, Math.ceil(measured) + 24);
-      canvas.height = 32;
-      const ctx2d = canvas.getContext("2d");
-      ctx2d.fillStyle = dimLabelBgFor(theme);
-      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-      ctx2d.fillStyle = toCssHex(dimValueColorFor(theme));
-      ctx2d.font = labelFont;
-      ctx2d.textAlign = "center";
-      ctx2d.textBaseline = "middle";
-      ctx2d.fillText(labelText, canvas.width / 2, canvas.height / 2);
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: new THREE.CanvasTexture(canvas),
-          depthTest: false,
-        }),
-      );
-      sprite.scale.set(0.7 * (canvas.width / 160), 0.175, 1);
+      const valueMm = (resolveConstraintDistance(c) * MM_PER_UNIT).toFixed(1);
+      const sprite = makeDimLabelSprite(`${valueMm}mm`, {
+        theme,
+        isFormula: isFormulaValue(c.distance),
+      });
       sprite.position.copy(toWorld(labelLocal.x, labelLocal.y, 0.006));
-      sprite.renderOrder = 1009;
       // Tag with the icon's local position so the double-click hit-test can
       // find it and open the edit overlay.
-      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimLineColorFor(theme));
+      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimValueColorFor(theme));
       group.add(sprite);
     } else if (c.type === "mirror") {
       // Small fixed-size X glyph midway between the original's and the
@@ -822,6 +919,7 @@ export function rebuildConstraintIconsForDrag(
   sketchMesh,
   renderer,
   showDimensions = true,
+  showConstraints = true,
 ) {
   const toRemove = group.children.filter((c) => c.userData.isConstraintObj);
   toRemove.forEach((obj) => {
@@ -849,5 +947,7 @@ export function rebuildConstraintIconsForDrag(
     toWorld,
     res,
     showDimensions,
+    null,
+    showConstraints,
   );
 }

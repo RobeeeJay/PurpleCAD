@@ -25,6 +25,7 @@ const PCAD = {
     gridMinor: 0xd4a33f,
     gridNode: 0x6c3fd4,
     gridOrigin: 0xd4a33f,
+    grid3d: 0x6a6a75,
     rulerTick: 0xd4a33f,
     rulerLabel: 0xd4a33f,
     rulerCursor: 0x6c3fd4,
@@ -50,6 +51,7 @@ const PCAD = {
     gridMinor: 0x534ab7,
     gridNode: 0x7f77dd,
     gridOrigin: 0x854f0b,
+    grid3d: 0x9a98a5,
     rulerTick: 0x854f0b,
     rulerLabel: 0x633806,
     rulerCursor: 0x534ab7,
@@ -88,6 +90,9 @@ export const sketchConstructionColorFor = (theme) =>
 
 // --- Grid ------------------------------------------------------------------
 export const gridMajorColorFor = (theme) => pcad("gridMajor", theme);
+// The 3D ground grid is neutral grey — the tinted grid colours are for the
+// sketch plane only.
+export const grid3dColorFor = (theme) => pcad("grid3d", theme);
 export const gridMinorColorFor = (theme) => pcad("gridMinor", theme);
 export const gridNodeColorFor = (theme) => pcad("gridNode", theme);
 export const gridOriginColorFor = (theme) => pcad("gridOrigin", theme);

@@ -5,7 +5,7 @@ import {
   AXIS_Y_COLOR,
   AXIS_Z_COLOR,
   LIGHT_COLOR,
-  gridMajorColorFor,
+  grid3dColorFor,
   rulerTickColorFor,
   sceneBackgroundFor,
   toCssHex,
@@ -184,7 +184,7 @@ function makeRulerLabel(text, tier = "coarse", theme) {
 }
 
 export function createGrid(scene, theme) {
-  const gridColor = gridMajorColorFor(theme);
+  const gridColor = grid3dColorFor(theme);
   const gridMaterial = new THREE.ShaderMaterial({
     uniforms: {
       uCameraPos: { value: new THREE.Vector3() },

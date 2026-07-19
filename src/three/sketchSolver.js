@@ -9,7 +9,8 @@
 // the current one (and fixed points stay put).
 
 import { resolveConstraintDistance } from "./geometryParams.js";
-import { rederiveAllCorners } from "./sketchGeometry.js";
+import { shapeMidpoint, sharpLineExtra } from "./sketchGeometry.js";
+import { rederiveAllCorners, extractCorners } from "./sketchGeometry.js";
 
 // Which scalar fields of a shape the solver may move, in a stable order.
 export function varFields(s) {
@@ -105,7 +106,12 @@ function residuals(shapes, constraints, variables) {
       } else {
         const a = pointOf(shapes[c.shapeAIdx], c.pointA);
         const b = pointOf(shapes[c.shapeBIdx], c.pointB);
-        if (a && b) out.push(Math.hypot(a.x - b.x, a.y - b.y) - d);
+        // Sharp semantics: an edge's dimension measures the virtual corner, so
+        // add back any chamfer/fillet setback trimming its ends.
+        if (a && b)
+          out.push(
+            Math.hypot(a.x - b.x, a.y - b.y) + sharpLineExtra(shapes, c) - d,
+          );
         else out.push(0);
       }
     } else if (c.type === "horizontal") {
@@ -123,6 +129,25 @@ function residuals(shapes, constraints, variables) {
         const len = Math.hypot(dx, dy) || 1e-9;
         out.push(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len);
       } else out.push(0);
+    } else if (c.type === "pointLineDistance") {
+      // Perpendicular distance from a point (standalone or keyed) to an
+      // infinite line = the dimension value.
+      const ln = shapes[c.lineShapeIdx];
+      const p = pointOf(shapes[c.pointShapeIdx], c.pointKey ?? "point");
+      const d = resolveConstraintDistance(c, variables);
+      if (ln?.type === "line" && p && d > 0) {
+        const dx = ln.x2 - ln.x1,
+          dy = ln.y2 - ln.y1;
+        const len = Math.hypot(dx, dy) || 1e-9;
+        out.push(Math.abs(((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len) - d);
+      } else out.push(0);
+    } else if (c.type === "midpoint") {
+      // Pin a point (a standalone point shape, or a keyed point of another
+      // shape — endpoint / centre) to the middle of a line / arc / bezier.
+      const p = pointOf(shapes[c.pointShapeIdx], c.pointKey ?? "point");
+      const m = shapeMidpoint(shapes[c.targetShapeIdx]);
+      if (p && m) out.push(p.x - m.x, p.y - m.y);
+      else out.push(0, 0);
     } else if (c.type === "offset") {
       // Parametric offset of a NEW line from its ORIGINAL: keep them parallel
       // and at a fixed signed perpendicular distance.  Two residuals: the
@@ -296,6 +321,9 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
     )
       link(c.shapeAIdx, c.shapeBIdx);
     else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);
+    else if (c.type === "pointLineDistance")
+      link(c.lineShapeIdx, c.pointShapeIdx);
+    else if (c.type === "midpoint") link(c.targetShapeIdx, c.pointShapeIdx);
     else if (c.type === "offset") link(c.shapeIdx, c.origIdx);
   }
   const dist = new Array(numShapes).fill(Infinity);
@@ -338,14 +366,100 @@ function solveLinear(A, b) {
   return x;
 }
 
-// Solve the constraint system.  options:
+// Virtual-corner solve.  Chamfers and fillets are DERIVED, applied after the
+// constraints resolve: the solver never sees them.  When a sketch has corner
+// bridges, the system is solved on its SHARP polygon — each corner's legs
+// extended to their virtual intersection, the bridge removed, the two
+// bridge↔leg coincidents replaced by a single leg↔leg coincidence — and the
+// corners are re-derived (re-trimmed + rebuilt) from the solved legs after.
+// So a dimension on a chamfered edge measures the sharp corner, moves translate
+// the whole polygon, and corners simply re-apply at the destination.
+export function solveConstraints(inputShapes, constraints, options = {}) {
+  const corners = extractCorners(inputShapes);
+  if (corners.length === 0) return solveCore(inputShapes, constraints, options);
+
+  // Extend a leg's trimmed endpoint back to its sharp corner: LOCALLY, along
+  // the leg's own direction by the setback.  Both legs of a corner were trimmed
+  // that same distance from their intersection, so this lands them on the same
+  // point when the geometry is consistent — and, crucially, it doesn't read the
+  // adjacent leg, which may be stale mid-drag (the leg↔leg coincidence below
+  // reconciles the corner, propagating the move).
+  const extendEnd = (line, key, dist) => {
+    const [ex, ey, ox, oy] =
+      key === "start"
+        ? [line.x1, line.y1, line.x2, line.y2]
+        : [line.x2, line.y2, line.x1, line.y1];
+    const dx = ex - ox,
+      dy = ey - oy;
+    const len = Math.hypot(dx, dy) || 1;
+    const p = { x: ex + (dx / len) * dist, y: ey + (dy / len) * dist };
+    return key === "start"
+      ? { ...line, x1: p.x, y1: p.y }
+      : { ...line, x2: p.x, y2: p.y };
+  };
+  const sharp = inputShapes.map((s) => ({ ...s }));
+  const bridgeIdxs = new Set();
+  const legMeet = [];
+  for (const c of corners) {
+    bridgeIdxs.add(c.bi);
+    sharp[c.aIdx] = extendEnd(sharp[c.aIdx], c.aKey, c.dist);
+    sharp[c.bIdx] = extendEnd(sharp[c.bIdx], c.bKey, c.dist);
+    const b = sharp[c.bi];
+    delete b.kind;
+    delete b.bevelData;
+    delete b.chamferData;
+    legMeet.push({
+      type: "coincident",
+      shapeAIdx: c.aIdx,
+      pointA: c.aKey,
+      shapeBIdx: c.bIdx,
+      pointB: c.bKey,
+    });
+  }
+  const touchesBridge = (cn) =>
+    [
+      cn.shapeAIdx,
+      cn.shapeBIdx,
+      cn.shapeIdx,
+      cn.pointShapeIdx,
+      cn.lineShapeIdx,
+      cn.targetShapeIdx,
+    ].some((i) => i != null && bridgeIdxs.has(i));
+  const sharpConstraints = (constraints || [])
+    .filter((cn) => !touchesBridge(cn))
+    .concat(legMeet);
+
+  // The bridge shapes don't participate in the solve — pin every DOF so the
+  // stripped placeholders stay put (they're rebuilt by the re-derive).
+  const sharpFixed = new Set(options.fixed || []);
+  for (const bi of bridgeIdxs)
+    for (const f of varFields(sharp[bi])) sharpFixed.add(`${bi}:${f}`);
+
+  const res = solveCore(sharp, sharpConstraints, {
+    ...options,
+    fixed: sharpFixed,
+  });
+
+  // Re-derive corners from the solved sharp legs (restore each bridge's recipe,
+  // then re-trim + rebuild).
+  const finalArr = res.shapes.slice();
+  for (const c of corners) finalArr[c.bi] = inputShapes[c.bi];
+  return {
+    shapes: rederiveAllCorners(finalArr),
+    ok: res.ok,
+    maxResidual: res.maxResidual,
+  };
+}
+
+// Core Levenberg–Marquardt solve of the raw constraint system (no corner
+// handling — see solveConstraints).  options:
 //   variables  - variable map for formula-valued distances/angles
 //   fixed      - Set of "shapeIdx:field" coordinates to hold (e.g. a dragged point)
 //   reg        - weak regularization weight toward the start positions
 //   maxIter, successTol
 // Returns { shapes, ok, maxResidual }.  ok is false if it couldn't get every
 // constraint within successTol — the caller rejects the change in that case.
-export function solveConstraints(inputShapes, constraints, options = {}) {
+function solveCore(inputShapes, constraints, options = {}) {
   const {
     variables = null,
     fixed = new Set(),
@@ -390,7 +504,7 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
     fixedShapeIdxs.size > 0
       ? shapeHopDistance(base.length, cs, fixedShapeIdxs)
       : null;
-  const regWeight = specs.map(({ i }, j) => {
+  let regWeight = specs.map(({ i }, j) => {
     if (isFixed[j]) return fixedW;
     if (!hop) return regW;
     const d = hop[i];
@@ -420,63 +534,78 @@ export function solveConstraints(inputShapes, constraints, options = {}) {
   let r = fullRes(x);
   let c = cost(r);
   const h = 1e-6;
-  for (let iter = 0; iter < maxIter; iter++) {
-    if (c < 1e-18) break;
-    const M = r.length;
-    // Numerical Jacobian J (M×N).
-    const J = Array.from({ length: M }, () => new Array(N).fill(0));
-    for (let j = 0; j < N; j++) {
-      const xj = x.slice();
-      xj[j] += h;
-      const rj = fullRes(xj);
-      for (let m = 0; m < M; m++) J[m][j] = (rj[m] - r[m]) / h;
-    }
-    // Normal equations: (JᵀJ + λ·diag(JᵀJ))·dx = -Jᵀr.
-    const JtJ = Array.from({ length: N }, () => new Array(N).fill(0));
-    const Jtr = new Array(N).fill(0);
-    for (let a = 0; a < N; a++) {
-      for (let b = a; b < N; b++) {
-        let s = 0;
-        for (let m = 0; m < M; m++) s += J[m][a] * J[m][b];
-        JtJ[a][b] = s;
-        JtJ[b][a] = s;
+  const iterate = (iters) => {
+    for (let iter = 0; iter < iters; iter++) {
+      if (c < 1e-18) break;
+      const M = r.length;
+      // Numerical Jacobian J (M×N).
+      const J = Array.from({ length: M }, () => new Array(N).fill(0));
+      for (let j = 0; j < N; j++) {
+        const xj = x.slice();
+        xj[j] += h;
+        const rj = fullRes(xj);
+        for (let m = 0; m < M; m++) J[m][j] = (rj[m] - r[m]) / h;
       }
-      let g = 0;
-      for (let m = 0; m < M; m++) g += J[m][a] * r[m];
-      Jtr[a] = g;
+      // Normal equations: (JᵀJ + λ·diag(JᵀJ))·dx = -Jᵀr.
+      const JtJ = Array.from({ length: N }, () => new Array(N).fill(0));
+      const Jtr = new Array(N).fill(0);
+      for (let a = 0; a < N; a++) {
+        for (let b = a; b < N; b++) {
+          let s = 0;
+          for (let m = 0; m < M; m++) s += J[m][a] * J[m][b];
+          JtJ[a][b] = s;
+          JtJ[b][a] = s;
+        }
+        let g = 0;
+        for (let m = 0; m < M; m++) g += J[m][a] * r[m];
+        Jtr[a] = g;
+      }
+      const A = JtJ.map((row, a) =>
+        row.map((v, b) => (a === b ? v + lambda * (v || 1) : v)),
+      );
+      const dx = solveLinear(
+        A,
+        Jtr.map((v) => -v),
+      );
+      if (!dx) {
+        lambda *= 4;
+        if (lambda > 1e9) break;
+        continue;
+      }
+      const xNew = x.map((v, j) => v + dx[j]);
+      const rNew = fullRes(xNew);
+      const cNew = cost(rNew);
+      if (cNew < c) {
+        x = xNew;
+        r = rNew;
+        c = cNew;
+        lambda = Math.max(1e-7, lambda * 0.5);
+      } else {
+        lambda *= 3;
+        if (lambda > 1e9) break;
+      }
     }
-    const A = JtJ.map((row, a) =>
-      row.map((v, b) => (a === b ? v + lambda * (v || 1) : v)),
-    );
-    const dx = solveLinear(
-      A,
-      Jtr.map((v) => -v),
-    );
-    if (!dx) {
-      lambda *= 4;
-      if (lambda > 1e9) break;
-      continue;
-    }
-    const xNew = x.map((v, j) => v + dx[j]);
-    const rNew = fullRes(xNew);
-    const cNew = cost(rNew);
-    if (cNew < c) {
-      x = xNew;
-      r = rNew;
-      c = cNew;
-      lambda = Math.max(1e-7, lambda * 0.5);
-    } else {
-      lambda *= 3;
-      if (lambda > 1e9) break;
-    }
+  };
+  iterate(maxIter);
+  const realResidual = (xv) => {
+    const rr = residuals(shapesAt(xv), cs, variables);
+    let m = 0;
+    for (const v of rr) m = Math.max(m, Math.abs(v));
+    return m;
+  };
+  // The weak gauge-fixing reg can floor a larger system's convergence a little
+  // above successTol (the virtual-corner sharp polygon is the usual culprit).
+  // The reg pass has already chosen the LOCAL solution — its purpose is served
+  // — so a short polish from here with the reg scaled down tightens the actual
+  // constraint satisfaction without disturbing that locality.
+  if (realResidual(x) > successTol) {
+    regWeight = regWeight.map((w, j) => (isFixed[j] ? w : w * 1e-3));
+    r = fullRes(x);
+    c = cost(r);
+    lambda = 1e-3;
+    iterate(40);
   }
-  // Repair any chamfer/bevel corners: the solver only pins a bridge's endpoints
-  // to its legs, so a bevel arc's radius/centre drift free and the fillet breaks
-  // as a connected line is dragged.  Re-deriving from the legs restores the proper
-  // tangent arc (and the chamfer's exact setback) before residuals are scored.
-  const finalShapes = rederiveAllCorners(shapesAt(x), cs);
-  const finalRes = residuals(finalShapes, cs, variables);
-  let maxResidual = 0;
-  for (const v of finalRes) maxResidual = Math.max(maxResidual, Math.abs(v));
+  const finalShapes = shapesAt(x);
+  const maxResidual = realResidual(x);
   return { shapes: finalShapes, ok: maxResidual < successTol, maxResidual };
 }

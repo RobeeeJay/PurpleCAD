@@ -129,6 +129,7 @@ const Viewport = () => {
   const extrudeDepthInput = useStore((state) => state.extrudeDepthInput);
   const activeSketchTool = useStore((state) => state.activeSketchTool);
   const sketchConstraintMode = useStore((state) => state.sketchConstraintMode);
+  const sketchMidpointFirst = useStore((state) => state.sketchMidpointFirst);
   const sketchConstraintFirstPoint = useStore(
     (state) => state.sketchConstraintFirstPoint,
   );
@@ -333,6 +334,7 @@ const Viewport = () => {
         sketchDrawPhase={sketchDrawPhase}
         sketchMode={sketchMode}
         sketchConstraintMode={sketchConstraintMode}
+        sketchMidpointFirst={sketchMidpointFirst}
         sketchConstraintFirstPoint={sketchConstraintFirstPoint}
         sketchModifyMode={sketchModifyMode}
         sketchDistanceInput={sketchDistanceInput}

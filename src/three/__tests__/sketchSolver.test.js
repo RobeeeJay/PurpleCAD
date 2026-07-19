@@ -65,7 +65,9 @@ const dimensionLeg = (shapes, constraints, legIdx, d) => {
     x2: leg.x1 + (dx / cur) * d,
     y2: leg.y1 + (dy / cur) * d,
   };
-  const fixed = new Set(["x1", "y1", "x2", "y2"].map((f) => `${legIdx}:${f}`));
+  // Anchor only the start; the solver slides the far end so the SHARP length
+  // (trimmed edge + any corner setback) equals the dimension.
+  const fixed = new Set(["x1", "y1"].map((f) => `${legIdx}:${f}`));
   return solveConstraints(
     input,
     [
@@ -303,9 +305,10 @@ describe("chamfering a square corner then dragging a side", () => {
     ).toBe(true);
   });
 
-  it("can dimension a chamfered leg's length (no false constraint break)", () => {
-    // Chamfer the BR corner, then dimension the right leg (idx 1) to 0.5.  The
-    // pinned leg endpoints must NOT be overridden by the corner re-derive.
+  it("can dimension a chamfered leg's length (sharp corner)", () => {
+    // Chamfer (setback 0.2) the BR corner, then dimension the right leg (idx 1)
+    // to 0.5.  Sharp semantics: the dimension names the virtual corner, so the
+    // trimmed edge comes out 0.5 − 0.2 = 0.3 with no false constraint break.
     const { shapes, constraints } = chamfer({
       aIdx: 1,
       aKey: "end",
@@ -314,7 +317,7 @@ describe("chamfering a square corner then dragging a side", () => {
     });
     const { shapes: r, ok } = dimensionLeg(shapes, constraints, 1, 0.5);
     expect(ok).toBe(true);
-    expect(sideLen(r[1])).toBeCloseTo(0.5, 3);
+    expect(sideLen(r[1])).toBeCloseTo(0.3, 3);
   });
 
   it("holds the chamfer's size when its OWN leg (the top edge) is dragged", () => {
@@ -518,11 +521,13 @@ describe("bevel fillet survives a connected-line drag", () => {
     expect(near(bEnd, c3) || near(bEnd, c0)).toBe(true);
   });
 
-  it("can dimension a bevelled leg's length (no false constraint break)", () => {
+  it("can dimension a bevelled leg's length (sharp corner)", () => {
     const { shapes, constraints } = bevel(0.25);
-    // Dimension the top leg (idx 0, trimmed at its start by the bevel) to 0.5.
+    // Dimension the top leg (idx 0, trimmed at its start by the fillet, leg
+    // setback 0.25 at this 90° corner) to 0.5.  Sharp semantics: trimmed edge
+    // comes out 0.5 − 0.25 = 0.25.
     const { shapes: r, ok } = dimensionLeg(shapes, constraints, 0, 0.5);
     expect(ok).toBe(true);
-    expect(sideLen(r[0])).toBeCloseTo(0.5, 3);
+    expect(sideLen(r[0])).toBeCloseTo(0.25, 3);
   });
 });

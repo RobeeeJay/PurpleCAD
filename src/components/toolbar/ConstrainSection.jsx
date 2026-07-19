@@ -48,6 +48,57 @@ const ConstrainSection = ({ isSketchMode }) => {
     }
   };
 
+  // Midpoint works like Coincident: always enabled.  If a valid point +
+  // target pair is already selected it applies immediately; a single
+  // selected element seeds the guided mode's first pick; otherwise the mode
+  // asks for both picks.
+  const handleMidpointConstraint = () => {
+    if (sketchConstraintMode === "midpoint") {
+      setSketchConstraintMode(null);
+      return;
+    }
+    const sketch = items.find((i) => i.id === selectedId);
+    const shapes = sketch?.shapes || [];
+    const MIDPOINT_TARGETS = ["line", "arc", "bezier"];
+    const kindOf = (idx) =>
+      shapes[idx]?.type === "point"
+        ? "point"
+        : MIDPOINT_TARGETS.includes(shapes[idx]?.type)
+          ? "target"
+          : null;
+
+    const multi = multiSelectedIndices || [];
+    if (multi.length === 2) {
+      const kinds = multi.map(kindOf);
+      if (kinds.includes("point") && kinds.includes("target")) {
+        applySketchPairConstraint(selectedId, multi[0], multi[1], "midpoint");
+        useStore.getState()._cameraControls?.refreshSketchSelectionOverlay?.();
+        return;
+      }
+    }
+    setSketchConstraintMode("midpoint");
+    setSketchDistanceInput(null);
+    // Seed the first pick from the current selection.  A selected POINT
+    // element may be a keyed point of another shape (line endpoint, circle
+    // centre) — carry the key; a selected line/arc/bezier seeds the target.
+    const sel = selectedSketchElement;
+    let first = null;
+    if (sel?.shapeIdx != null) {
+      if (sel.type === "point")
+        first = {
+          kind: "point",
+          shapeIdx: sel.shapeIdx,
+          pointKey:
+            shapes[sel.shapeIdx]?.type === "point"
+              ? null
+              : (sel.pointKey ?? null),
+        };
+      else if (kindOf(sel.shapeIdx) === "target")
+        first = { kind: "target", shapeIdx: sel.shapeIdx };
+    }
+    useStore.getState().setSketchMidpointFirst(first);
+  };
+
   const handleDistanceConstraint = () => {
     if (sketchConstraintMode === "distance") {
       setSketchConstraintMode(null);
@@ -117,6 +168,24 @@ const ConstrainSection = ({ isSketchMode }) => {
                 x2="16"
                 y2="12"
               />
+            </svg>
+          </button>
+          <button
+            className={`toolbar-btn ${sketchConstraintMode === "midpoint" ? "active" : ""}`}
+            title="Midpoint — pin a point to the middle of a line, arc or curve (click the point, then the target)"
+            onClick={handleMidpointConstraint}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <line
+                stroke="#6C3FD4"
+                strokeWidth="1.5"
+                strokeLinecap="square"
+                x1="4"
+                y1="17"
+                x2="20"
+                y2="7"
+              />
+              <circle cx="12" cy="12" r="2.6" fill="#D4A33F" />
             </svg>
           </button>
           <button

@@ -708,6 +708,21 @@ export function attachCameraControls(ctx) {
   };
   // World position + triangle/vertex counts of a selected object's live mesh,
   // for the status line.
+  // Project a world-space point to CSS pixel coordinates in the canvas —
+  // used by the e2e suite to aim REAL mouse clicks at faces/edges (raycast
+  // targets aren't DOM-addressable any other way).
+  controls.worldToScreen = (x, y, z) => {
+    const cam = cameraRef.current;
+    if (!cam) return null;
+    const v = new THREE.Vector3(x, y, z).project(cam);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return {
+      x: rect.left + ((v.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - v.y) / 2) * rect.height,
+      inFront: v.z < 1,
+    };
+  };
+
   // Whole-scene totals for the corner stats tag: faces/points of every model
   // mesh currently displayed (sketches and reference planes excluded).
   controls.getSceneStats = () => {

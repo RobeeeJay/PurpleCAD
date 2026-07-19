@@ -230,6 +230,216 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     expect(summarize(b.geometryData)).toEqual(summarize(a.geometryData));
   }, 30000);
 
+  it("draft", async () => {
+    const c = cube(12);
+    await parity("draftItem", {
+      source: c,
+      neutral: { nx: 0, ny: 1, nz: 0, cx: 0, cy: 1, cz: 0 },
+      faces: [{ nx: 1, ny: 0, nz: 0, cx: 1, cy: 0, cz: 0 }],
+      angleDeg: 12,
+      flip: false,
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+  }, 30000);
+
+  it("split (both halves)", async () => {
+    const c = cube(13);
+    const args = {
+      target: c,
+      plane: { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } },
+      allItems: [c],
+      printPrecision: 0.1,
+    };
+    const a = await ops.splitItem(JSON.parse(JSON.stringify(args)));
+    const b = await bridge.splitItem(JSON.parse(JSON.stringify(args)));
+    expect(summarize(b.partA.geometryData)).toEqual(
+      summarize(a.partA.geometryData),
+    );
+    expect(summarize(b.partB.geometryData)).toEqual(
+      summarize(a.partB.geometryData),
+    );
+  }, 30000);
+
+  it("revolve", async () => {
+    const sketch = {
+      id: 21,
+      type: "sketch",
+      shapes: [
+        { type: "line", x1: 2, y1: 0, x2: 3, y2: 0 },
+        { type: "line", x1: 3, y1: 0, x2: 3, y2: 1 },
+        { type: "line", x1: 3, y1: 1, x2: 2, y2: 1 },
+        { type: "line", x1: 2, y1: 1, x2: 2, y2: 0 },
+        { type: "line", x1: 0, y1: 0, x2: 0, y2: 1 },
+      ],
+    };
+    const source = {
+      type: "extrude",
+      depth: 0,
+      position: O,
+      rotation: O,
+      profile: {
+        sketchId: 21,
+        profileCentroid: { x: 2.5, y: 0.5 },
+        polygon2D: [
+          { x: 2, y: 0 },
+          { x: 3, y: 0 },
+          { x: 3, y: 1 },
+          { x: 2, y: 1 },
+        ],
+        holes: [],
+        position: O,
+        rotation: O,
+        normalWorld: { x: 0, y: 0, z: 1 },
+      },
+    };
+    await parity("revolveItem", {
+      source,
+      axis: { sketchId: 21, shapeIdx: 4 },
+      angleRad: 2 * Math.PI,
+      prismSides: 0,
+      allItems: [sketch],
+      printPrecision: 0.05,
+    });
+  }, 60000);
+
+  it("pipe", async () => {
+    const profileSketch = {
+      id: 22,
+      type: "sketch",
+      position: O,
+      rotation: O,
+      shapes: [
+        { type: "line", x1: -0.3, y1: -0.3, x2: 0.3, y2: -0.3 },
+        { type: "line", x1: 0.3, y1: -0.3, x2: 0.3, y2: 0.3 },
+        { type: "line", x1: 0.3, y1: 0.3, x2: -0.3, y2: 0.3 },
+        { type: "line", x1: -0.3, y1: 0.3, x2: -0.3, y2: -0.3 },
+      ],
+    };
+    const pathSketch = {
+      id: 23,
+      type: "sketch",
+      position: O,
+      rotation: O,
+      shapes: [{ type: "line", x1: 0, y1: 0, x2: 0, y2: 5 }],
+    };
+    await parity("pipeItem", {
+      profileSource: {
+        type: "extrude",
+        depth: 0,
+        position: O,
+        rotation: O,
+        profile: {
+          sketchId: 22,
+          profileCentroid: { x: 0, y: 0 },
+          polygon2D: [
+            { x: -0.3, y: -0.3 },
+            { x: 0.3, y: -0.3 },
+            { x: 0.3, y: 0.3 },
+            { x: -0.3, y: 0.3 },
+          ],
+          holes: [],
+          position: O,
+          rotation: O,
+          normalWorld: { x: 0, y: 0, z: 1 },
+        },
+      },
+      pathRef: { sketchId: 23, shapeIdx: 0 },
+      allItems: [profileSketch, pathSketch],
+      printPrecision: 0.05,
+    });
+  }, 60000);
+
+  it("loft", async () => {
+    const sk = (id, half, z) => ({
+      id,
+      type: "sketch",
+      position: { x: 0, y: 0, z },
+      rotation: O,
+      shapes: [
+        { type: "line", x1: -half, y1: -half, x2: half, y2: -half },
+        { type: "line", x1: half, y1: -half, x2: half, y2: half },
+        { type: "line", x1: half, y1: half, x2: -half, y2: half },
+        { type: "line", x1: -half, y1: half, x2: -half, y2: -half },
+      ],
+    });
+    const src = (sketchId, half, z) => ({
+      type: "extrude",
+      depth: 0,
+      position: { x: 0, y: 0, z },
+      rotation: O,
+      profile: {
+        sketchId,
+        profileCentroid: { x: 0, y: 0 },
+        polygon2D: [
+          { x: -half, y: -half },
+          { x: half, y: -half },
+          { x: half, y: half },
+          { x: -half, y: half },
+        ],
+        holes: [],
+        position: { x: 0, y: 0, z },
+        rotation: O,
+        normalWorld: { x: 0, y: 0, z: 1 },
+      },
+    });
+    await parity("loftItem", {
+      profileSource: src(31, 1, 0),
+      secondProfileSource: src(32, 0.5, 4),
+      allItems: [sk(31, 1, 0), sk(32, 0.5, 4)],
+      printPrecision: 0.05,
+    });
+  }, 60000);
+
+  it("pattern3d circular + rectangular", async () => {
+    const c = cube(16, { position: { x: 3, y: 0, z: 0 } });
+    await parity("pattern3dItem", {
+      patternType: "circular",
+      sourceId: 16,
+      params: {
+        origin: O,
+        axis: { x: 0, y: 0, z: 1 },
+        count: 4,
+        angleRad: 2 * Math.PI,
+      },
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+    await parity("pattern3dItem", {
+      patternType: "rectangular",
+      sourceId: 16,
+      params: { countX: 3, countY: 1, dx: 5, dy: 0 },
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+  }, 60000);
+
+  it("pattern3d mirror", async () => {
+    const c = cube(14, { position: { x: 3, y: 0, z: 0 } });
+    await parity("pattern3dItem", {
+      patternType: "mirror",
+      sourceId: 14,
+      params: { origin: O, normal: { x: 1, y: 0, z: 0 } },
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+  }, 30000);
+
+  it("STEP export is identical apart from timestamps", async () => {
+    const item = cube(15, { position: { x: 0, y: 1, z: 0 } });
+    const args = { items: [item], allItems: [item], precision: 0.1 };
+    const a = await ops.exportSTEP(JSON.parse(JSON.stringify(args)));
+    const b = await bridge.exportSTEP(JSON.parse(JSON.stringify(args)));
+    const scrub = (t) =>
+      t
+        .replace(/^.*DATE_TIME.*$/gm, "")
+        .replace(/'[0-9-]+T[0-9:+]+'/g, "''")
+        // The shared addon's STEP writer numbers each in-process export
+        // ('translator 8.0 1', '... 2'); the counter isn't drift.
+        .replace(/STEP translator [\d.]+ \d+/g, "STEP translator N");
+    expect(scrub(b)).toBe(scrub(a));
+  }, 30000);
+
   it("STL export is byte-identical", async () => {
     const item = cube(10, { position: { x: 0, y: 1, z: 0 } });
     const args = { items: [item], allItems: [item], precision: 0.1 };

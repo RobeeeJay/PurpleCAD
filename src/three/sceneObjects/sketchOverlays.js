@@ -7,8 +7,14 @@ import * as THREE from "three";
 import { Line2 } from "three/addons/lines/Line2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
-import { addConstraintIconsToGroup } from "./constraintIcons.js";
+import {
+  addConstraintIconsToGroup,
+  makeDimLabelSprite,
+  isFormulaValue,
+} from "./constraintIcons.js";
 import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
+import { shapeMidpoint } from "../sketchGeometry.js";
+import { MM_PER_UNIT } from "./dimensions.js";
 import { textShapeContours } from "../sketchText.js";
 import { useStore } from "../../store";
 import {
@@ -438,6 +444,10 @@ export function buildSketchShapesGroup(
     if (isCircularPattern) line.userData.isCircularPattern = true;
     if (isRectangularPattern) line.userData.isRectangularPattern = true;
     if (isProjected) line.userData.isProjected = true;
+    // Chamfer/bevel corner bridges are derived — inert to select / drag /
+    // constraint hit-tests (their setback is edited via the value label).
+    if (shape.kind === "chamfer" || shape.kind === "bevel")
+      line.userData.isCornerBridge = true;
     group.add(line);
 
     // Collect key points for dots — not for offset/mirror/circular-pattern
@@ -464,9 +474,52 @@ export function buildSketchShapesGroup(
     group.add(dots);
   }
 
+  // ── Chamfer / bevel value labels ────────────────────────────────────────
+  // Each corner bridge shows its setback / radius like a dimension label;
+  // clicking the label re-opens the resize input (isCornerDim hit-tested in
+  // sketchInteraction's click path).
+  if (showDimensions) {
+    const theme = useStore.getState().theme;
+    shapes.forEach((shape, shapeIdx) => {
+      if (shape.kind !== "chamfer" && shape.kind !== "bevel") return;
+      const isBevel = shape.kind === "bevel";
+      const valueUnits = isBevel ? shape.r : shape.chamferData?.dist;
+      if (!Number.isFinite(valueUnits)) return;
+      const mid = shapeMidpoint(shape);
+      if (!mid) return;
+      const valueMm = (valueUnits * MM_PER_UNIT).toFixed(1);
+      const sprite = makeDimLabelSprite(`${isBevel ? "R " : ""}${valueMm}mm`, {
+        theme,
+        isFormula: isFormulaValue(shape.distanceFormula),
+      });
+      // Park the label just off the bridge: a bevel offsets radially outward
+      // from its arc centre; a chamfer along its line normal.
+      let off = { x: 0, y: 0.35 };
+      if (isBevel) {
+        const dx = mid.x - shape.cx,
+          dy = mid.y - shape.cy;
+        const len = Math.hypot(dx, dy) || 1;
+        off = { x: (dx / len) * 0.45, y: (dy / len) * 0.45 };
+      } else {
+        const dx = shape.x2 - shape.x1,
+          dy = shape.y2 - shape.y1;
+        const len = Math.hypot(dx, dy) || 1;
+        off = { x: (-dy / len) * 0.4, y: (dx / len) * 0.4 };
+      }
+      const localPos = { x: mid.x + off.x, y: mid.y + off.y };
+      sprite.position.copy(toWorld(localPos.x, localPos.y, 0.007));
+      sprite.renderOrder = 1009;
+      sprite.frustumCulled = false;
+      sprite.userData.isCornerDim = true;
+      sprite.userData.shapeIdx = shapeIdx;
+      sprite.userData.cornerDimLocalPos = localPos;
+      group.add(sprite);
+    });
+  }
+
   // ── Constraint icons ──────────────────────────────────────────────────────
   const constraints = selItem.constraints || [];
-  if (showConstraints)
+  if (showConstraints || showDimensions)
     addConstraintIconsToGroup(
       group,
       constraints,
@@ -475,6 +528,7 @@ export function buildSketchShapesGroup(
       res,
       showDimensions,
       editHidden,
+      showConstraints,
     );
 
   // ── Enclosed region fills (hole-aware, hidden until hover) ──────────────────

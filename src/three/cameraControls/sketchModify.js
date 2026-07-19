@@ -10,11 +10,25 @@ import { useStore } from "../../store";
 import { getSketchShapePoints, MM_PER_UNIT } from "../sceneObjects.js";
 import { buildChamferEdit } from "../sketchGeometry.js";
 import { SKETCH_MODIFY_HIGHLIGHT } from "../theme.js";
+import { evaluateFormula, variablesToMap } from "../../utils/formulas.js";
 
 // Setback (chamfer) / radius (bevel), in scene units, read live from the store
-// so the toolbar input drives the same value the preview and commit use.
-const modifyDist = () =>
-  (useStore.getState().sketchModifyDistMm ?? 2.5) / MM_PER_UNIT;
+// so the dialog input drives the same value the preview and commit use.  The
+// stored value is a bare mm number or a formula string over the document
+// variables ("width / 4").
+const modifyDist = () => {
+  const state = useStore.getState();
+  const raw = state.sketchModifyDistMm ?? 2.5;
+  const mm =
+    typeof raw === "string"
+      ? evaluateFormula(raw, variablesToMap(state.variables))
+      : raw;
+  // A negative fillet (bevel) radius is valid — it flips the arc.  Chamfer
+  // setbacks stay positive.  Zero / non-finite falls back to the default.
+  const allowNeg = state.sketchModifyMode === "bevel";
+  const ok = Number.isFinite(mm) && (allowNeg ? mm !== 0 : mm > 0);
+  return (ok ? mm : 2.5) / MM_PER_UNIT;
+};
 
 export function createSketchModifyHelpers(
   { scene, renderer, objectsRef, itemsRef, selectedIdRef },
@@ -85,6 +99,11 @@ export function createSketchModifyHelpers(
     if (!found) return;
     const { edit } = found;
     const updates = new Map(edit.updates);
+    // Keep the raw dialog value on the bridge so the label can show the
+    // formula and edits reopen with it (mirrors dimension constraints).
+    const rawDist = useStore.getState().sketchModifyDistMm;
+    if (typeof rawDist === "string" && rawDist.trim())
+      edit.newShape.distanceFormula = rawDist.trim();
     // Replace the old corner joins (coincident + any angle lock spanning the
     // split corner) with the bridge element and its own joins; the two trimmed
     // legs are the only existing shapes that change.

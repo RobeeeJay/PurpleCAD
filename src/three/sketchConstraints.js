@@ -1,4 +1,5 @@
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
+import { shapeMidpoint, sharpLineExtra } from "./sketchGeometry.js";
 import { resolveConstraintDistance } from "./geometryParams.js";
 // Used by the solver internals (onLine projection + bevel recompute); also
 // re-exported below for consumers that import them from this module.
@@ -31,14 +32,18 @@ export function resolveDistanceConstraints(
     const pA = getShapePoint(sA, c.pointA);
     const pB = getShapePoint(sB, c.pointB);
     if (!pA || !pB) continue;
+    // Sharp semantics: the target names the virtual-corner length, so the
+    // trimmed endpoints sit `setbacks` closer together.
+    const effTarget = target - sharpLineExtra(shapes, c);
+    if (!(effTarget > 0)) continue;
     const dx = pB.x - pA.x,
       dy = pB.y - pA.y;
     const cur = Math.hypot(dx, dy);
     if (cur < 1e-10) continue;
-    if (Math.abs(cur - target) < tol) continue;
+    if (Math.abs(cur - effTarget) < tol) continue;
     const newPt = {
-      x: pA.x + (dx / cur) * target,
-      y: pA.y + (dy / cur) * target,
+      x: pA.x + (dx / cur) * effTarget,
+      y: pA.y + (dy / cur) * effTarget,
     };
     // Same-shape (line-length / radius): slide pointB endpoint on the
     // same shape.  Two-shape: move pointB on shapeB.
@@ -83,8 +88,8 @@ export function allConstraintsSatisfied(shapes, constraints, variables = null) {
       const a = getShapePoint(shapes[c.shapeAIdx], c.pointA);
       const b = getShapePoint(shapes[c.shapeBIdx], c.pointB);
       if (!a || !b) return false;
-      if (Math.abs(Math.hypot(a.x - b.x, a.y - b.y) - target) > POS_TOL)
-        return false;
+      const meas = Math.hypot(a.x - b.x, a.y - b.y) + sharpLineExtra(shapes, c);
+      if (Math.abs(meas - target) > POS_TOL) return false;
     } else if (c.type === "horizontal") {
       const s = shapes[c.shapeIdx];
       if (!s || s.type !== "line" || Math.abs(s.y1 - s.y2) > POS_TOL)
@@ -104,6 +109,22 @@ export function allConstraintsSatisfied(shapes, constraints, variables = null) {
       // Perpendicular distance to the infinite line.
       const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
       if (d > POS_TOL) return false;
+    } else if (c.type === "pointLineDistance") {
+      const target = resolveConstraintDistance(c, variables);
+      if (!(target > 0)) continue;
+      const line = shapes[c.lineShapeIdx];
+      const p = getShapePoint(shapes[c.pointShapeIdx], c.pointKey ?? "point");
+      if (!line || line.type !== "line" || !p) return false;
+      const dx = line.x2 - line.x1,
+        dy = line.y2 - line.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) return false;
+      const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
+      if (Math.abs(d - target) > POS_TOL) return false;
+    } else if (c.type === "midpoint") {
+      const p = getShapePoint(shapes[c.pointShapeIdx], c.pointKey ?? "point");
+      const m = shapeMidpoint(shapes[c.targetShapeIdx]);
+      if (!p || !m || Math.hypot(p.x - m.x, p.y - m.y) > POS_TOL) return false;
     } else if (c.type === "angle") {
       const target =
         typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
@@ -173,6 +194,7 @@ export function applyHVEnforcement(shape, movedKey, constraints, shapeIdx) {
 export {
   norm2,
   projectOntoLine,
+  shapeMidpoint,
   computeChamfer,
   chamferConstraints,
   buildBevelArc,
@@ -867,5 +889,56 @@ export function enforceConstraints(
     if (!changed) break;
   }
 
+  // Point-line dimensions hold during the fast drag path: the point slides
+  // along the line's normal (same side preserved) to stay at the set
+  // distance when either end of the relationship moves.
+  for (const c of constraints) {
+    if (c.type !== "pointLineDistance") continue;
+    const target = resolveConstraintDistance(c);
+    if (!(target > 0)) continue;
+    const ln = updated.get(c.lineShapeIdx) ?? shapes[c.lineShapeIdx];
+    const ptShape = updated.get(c.pointShapeIdx) ?? shapes[c.pointShapeIdx];
+    if (!ln || ln.type !== "line" || !ptShape) continue;
+    const p = getShapePoint(ptShape, c.pointKey ?? "point");
+    if (!p) continue;
+    const dx = ln.x2 - ln.x1,
+      dy = ln.y2 - ln.y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) continue;
+    const signed = ((p.x - ln.x1) * dy - (p.y - ln.y1) * dx) / len;
+    if (Math.abs(Math.abs(signed) - target) <= 1e-9) continue;
+    const side = signed >= 0 ? 1 : -1;
+    const nx = dy / len,
+      ny = -dx / len; // normal with positive signed distance
+    const goal = {
+      x: p.x + nx * (side * target - signed),
+      y: p.y + ny * (side * target - signed),
+    };
+    updated.set(
+      c.pointShapeIdx,
+      ptShape.type === "point"
+        ? { ...ptShape, x: goal.x, y: goal.y }
+        : moveShapePoint(ptShape, c.pointKey, goal),
+    );
+  }
+
+  // Midpoint-constrained points ride their target's middle during the fast
+  // drag path too (the numeric solver covers the commit; this keeps the live
+  // preview honest when the target line/arc moved in this pass).
+  for (const c of constraints) {
+    if (c.type !== "midpoint") continue;
+    const target = updated.get(c.targetShapeIdx) ?? shapes[c.targetShapeIdx];
+    const m = shapeMidpoint(target);
+    const pt = updated.get(c.pointShapeIdx) ?? shapes[c.pointShapeIdx];
+    if (!m || !pt) continue;
+    const cur = getShapePoint(pt, c.pointKey ?? "point");
+    if (!cur || Math.hypot(cur.x - m.x, cur.y - m.y) <= 1e-9) continue;
+    updated.set(
+      c.pointShapeIdx,
+      pt.type === "point"
+        ? { ...pt, x: m.x, y: m.y }
+        : moveShapePoint(pt, c.pointKey, m),
+    );
+  }
   return updated;
 }

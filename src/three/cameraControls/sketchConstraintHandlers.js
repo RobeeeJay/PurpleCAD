@@ -13,7 +13,7 @@ import {
   getSnapPoints,
   moveShapePoint,
 } from "../sceneObjects.js";
-import { CONSTRAINT_PARALLEL_PERP_COLOR } from "../theme.js";
+import { SKETCH_SELECTION_GREEN } from "../theme.js";
 
 export function createSketchConstraintHandlers(
   {
@@ -34,6 +34,7 @@ export function createSketchConstraintHandlers(
     clearCoincidentFirstOverlay,
     clearSketchSelection,
     setCoincidentFirstOverlay,
+    addConstraintPickLine,
   },
 ) {
   const handleDistanceConstraintClick = (screenX, screenY) => {
@@ -69,6 +70,100 @@ export function createSketchConstraintHandlers(
       const lineIdx = hits[0].object.userData.shapeIdx;
       const shape = shapes[lineIdx];
       if (!shape || isOffsetCopy(lineIdx)) return;
+
+      // Two parallel lines → perpendicular distance between them.  The first
+      // line click opened a line-length input; clicking a SECOND line that
+      // shares a horizontal/vertical/parallel constraint with it switches to a
+      // line-to-line gap (measured from the first line, which moves first).
+      const pending = store.sketchDistanceInput;
+      const isPendingLen =
+        pending &&
+        pending.constraintIdx == null &&
+        pending.shapeAIdx != null &&
+        pending.shapeAIdx === pending.shapeBIdx &&
+        pending.pointA === "start" &&
+        pending.pointB === "end" &&
+        shapes[pending.shapeAIdx]?.type === "line";
+      const parallelConstrained = (a, b) => {
+        const hasHV = (idx, t) =>
+          constraints.some((c) => c.type === t && c.shapeIdx === idx);
+        if (hasHV(a, "horizontal") && hasHV(b, "horizontal")) return true;
+        if (hasHV(a, "vertical") && hasHV(b, "vertical")) return true;
+        return constraints.some(
+          (c) =>
+            (c.type === "parallel" || c.type === "colinear") &&
+            ((c.shapeAIdx === a && c.shapeBIdx === b) ||
+              (c.shapeAIdx === b && c.shapeBIdx === a)),
+        );
+      };
+      if (
+        isPendingLen &&
+        shape.type === "line" &&
+        lineIdx !== pending.shapeAIdx &&
+        parallelConstrained(pending.shapeAIdx, lineIdx)
+      ) {
+        const A = pending.shapeAIdx; // first-picked line — moves first
+        const p = getShapePoint(shapes[A], "start");
+        const dx = shape.x2 - shape.x1,
+          dy = shape.y2 - shape.y1;
+        const len = Math.hypot(dx, dy) || 1e-9;
+        store.setSketchDistanceInput({
+          pointLine: {
+            pointShapeIdx: A,
+            pointKey: "start",
+            lineShapeIdx: lineIdx,
+          },
+          defaultDistance: Math.abs(
+            ((p.x - shape.x1) * dy - (p.y - shape.y1) * dx) / len,
+          ),
+        });
+        store.setSketchConstraintFirstPoint(null);
+        // Highlight BOTH picked lines as selected.
+        clearCoincidentFirstOverlay();
+        addConstraintPickLine(shapes[A], sketchMesh);
+        addConstraintPickLine(shape, sketchMesh);
+        return;
+      }
+
+      // A point already picked + a line body: point-to-line perpendicular
+      // distance (a point on the line itself stays a same-line pick).
+      const firstPt0 = store.sketchConstraintFirstPoint;
+      if (firstPt0 && shape.type === "line" && firstPt0.shapeIdx !== lineIdx) {
+        const p = getShapePoint(shapes[firstPt0.shapeIdx], firstPt0.pointKey);
+        if (p) {
+          const dx = shape.x2 - shape.x1,
+            dy = shape.y2 - shape.y1;
+          const len = Math.hypot(dx, dy) || 1e-9;
+          store.setSketchDistanceInput({
+            pointLine: {
+              pointShapeIdx: firstPt0.shapeIdx,
+              pointKey: firstPt0.pointKey,
+              lineShapeIdx: lineIdx,
+            },
+            defaultDistance: Math.abs(
+              ((p.x - shape.x1) * dy - (p.y - shape.y1) * dx) / len,
+            ),
+          });
+          store.setSketchConstraintFirstPoint(null);
+          // Keep the point ring, add the line highlight (the picked pair).
+          const ptShape = shapes[firstPt0.shapeIdx];
+          const ptPos = ptShape
+            ? getShapePoint(ptShape, firstPt0.pointKey)
+            : null;
+          clearCoincidentFirstOverlay();
+          if (ptPos) {
+            const ring = makeRingOverlay(
+              ptPos,
+              sketchMesh,
+              SKETCH_SELECTION_GREEN,
+            );
+            setCoincidentFirstOverlay(ring);
+            scene.add(ring);
+          }
+          addConstraintPickLine(shape, sketchMesh);
+          return;
+        }
+      }
       store.setSketchConstraintFirstPoint(null);
       clearCoincidentFirstOverlay();
       if (shape.type === "circle") {
@@ -79,6 +174,7 @@ export function createSketchConstraintHandlers(
           pointB: "edge",
           defaultDistance: shape.r,
         });
+        addConstraintPickLine(shape, sketchMesh);
       } else if (shape.type === "line") {
         store.setSketchDistanceInput({
           shapeAIdx: lineIdx,
@@ -87,6 +183,9 @@ export function createSketchConstraintHandlers(
           pointB: "end",
           defaultDistance: Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1),
         });
+        // Highlight the picked line so the pending length dim reads clearly and
+        // the user can add a second parallel line for a gap.
+        addConstraintPickLine(shape, sketchMesh);
       }
       return;
     }
@@ -102,7 +201,7 @@ export function createSketchConstraintHandlers(
       const overlay = makeRingOverlay(
         { x: snap.x, y: snap.y },
         sketchMesh,
-        CONSTRAINT_PARALLEL_PERP_COLOR,
+        SKETCH_SELECTION_GREEN,
       );
       setCoincidentFirstOverlay(overlay);
       scene.add(overlay);
@@ -207,7 +306,7 @@ export function createSketchConstraintHandlers(
       const overlay = makeRingOverlay(
         { x: snap.x, y: snap.y },
         sketchMesh,
-        CONSTRAINT_PARALLEL_PERP_COLOR,
+        SKETCH_SELECTION_GREEN,
       );
       setCoincidentFirstOverlay(overlay);
       scene.add(overlay);
@@ -217,32 +316,36 @@ export function createSketchConstraintHandlers(
         firstPt.pointKey === snap.pointKey
       )
         return;
+      // Minimise movement: the FIRST-picked point travels to the second
+      // pick's location (the second pick and everything hanging off it stay
+      // put); coincident chains on the first point ride along via
+      // propagation.
       const firstShape = shapes[firstPt.shapeIdx];
-      const firstPos = firstShape
-        ? getShapePoint(firstShape, firstPt.pointKey)
+      const secondShape = shapes[snap.shapeIdx];
+      const firstPos = secondShape
+        ? getShapePoint(secondShape, snap.pointKey)
         : null;
       if (firstPos) {
-        const secondShape = shapes[snap.shapeIdx];
-        const newSecondShape = secondShape
-          ? moveShapePoint(secondShape, snap.pointKey, firstPos)
+        const newFirstShape = firstShape
+          ? moveShapePoint(firstShape, firstPt.pointKey, firstPos)
           : null;
         let currentShapes = shapes; // shapes after propagation, for coincident scan
-        if (newSecondShape) {
+        if (newFirstShape) {
           const propagated = propagateConstraints(
             selectedIdRef.current,
-            snap.shapeIdx,
-            newSecondShape,
-            snap.pointKey,
+            firstPt.shapeIdx,
+            newFirstShape,
+            firstPt.pointKey,
           );
           if (propagated.size > 1)
             store.updateSketchShapes(selectedIdRef.current, propagated);
           else
             store.updateSketchShape(
               selectedIdRef.current,
-              snap.shapeIdx,
-              newSecondShape,
+              firstPt.shapeIdx,
+              newFirstShape,
             );
-          // Build updated snapshot so we can detect which points landed at firstPos
+          // Build updated snapshot so we can detect which points landed at the junction
           currentShapes = shapes.slice();
           propagated.forEach((s, i) => {
             currentShapes[i] = s;
@@ -321,5 +424,96 @@ export function createSketchConstraintHandlers(
     }
   };
 
-  return { handleDistanceConstraintClick, handleCoincidentClick };
+  // Guided midpoint flow: collect a point (a standalone point shape, or any
+  // snappable point of another shape — endpoint / centre) and a
+  // line/arc/bezier target in either order (each pick ringed), then apply
+  // and leave the mode — mirrors the coincident tool's UX.
+  const MIDPOINT_TARGETS = ["line", "arc", "bezier"];
+  const handleMidpointClick = (screenX, screenY) => {
+    const selItem = itemsRef.current.find(
+      (i) => i.id === selectedIdRef.current,
+    );
+    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+    if (!selItem || !sketchMesh) return;
+    const shapes = selItem.shapes || [];
+    const store = useStore.getState();
+    const first = store.sketchMidpointFirst;
+
+    // idxA/idxB go to the store in PICK order — the staged solve moves the
+    // first-picked shape before it considers touching the second.
+    const finish = (pointIdx, pointKey, targetIdx, targetFirst) => {
+      clearCoincidentFirstOverlay();
+      store.setSketchMidpointFirst(null);
+      store.setSketchConstraintMode(null);
+      const [ia, ib] = targetFirst
+        ? [targetIdx, pointIdx]
+        : [pointIdx, targetIdx];
+      store.applySketchPairConstraint(
+        selectedIdRef.current,
+        ia,
+        ib,
+        "midpoint",
+        {
+          pointIdx,
+          pointKey,
+        },
+      );
+    };
+    const ringAt = (x, y) => {
+      clearCoincidentFirstOverlay();
+      const overlay = makeRingOverlay(
+        { x, y },
+        sketchMesh,
+        SKETCH_SELECTION_GREEN,
+      );
+      setCoincidentFirstOverlay(overlay);
+      scene.add(overlay);
+    };
+
+    // A snapped point wins over a line-body hit: a standalone point shape or
+    // any keyed point (line/arc endpoint, circle/arc centre, bezier end).
+    const snap = findSnap(screenX, screenY, shapes, sketchMesh);
+    if (snap) {
+      const pointShape = shapes[snap.shapeIdx];
+      const key = pointShape?.type === "point" ? null : (snap.pointKey ?? null);
+      if (pointShape?.type === "point" || key) {
+        if (first?.kind === "target") {
+          finish(snap.shapeIdx, key, first.shapeIdx, true);
+        } else {
+          store.setSketchMidpointFirst({
+            kind: "point",
+            shapeIdx: snap.shapeIdx,
+            pointKey: key,
+          });
+          ringAt(snap.x, snap.y);
+        }
+        return;
+      }
+    }
+
+    const sketchGroup = sketchShapesGroupRef?.current;
+    if (!sketchGroup) return;
+    const hits = hitTestSketchLines(
+      makeRay(screenX, screenY),
+      sketchGroup.children.filter((c) => c.userData.shapeIdx != null),
+    );
+    const idx = hits[0]?.object?.userData?.shapeIdx;
+    if (idx == null) return;
+    const shape = shapes[idx];
+    if (!MIDPOINT_TARGETS.includes(shape?.type)) return;
+    if (first?.kind === "point") {
+      finish(first.shapeIdx, first.pointKey ?? null, idx, false);
+    } else {
+      store.setSketchMidpointFirst({ kind: "target", shapeIdx: idx });
+      // Highlight the whole target (line/arc/bezier) as selected.
+      clearCoincidentFirstOverlay();
+      addConstraintPickLine(shape, sketchMesh);
+    }
+  };
+
+  return {
+    handleDistanceConstraintClick,
+    handleCoincidentClick,
+    handleMidpointClick,
+  };
 }

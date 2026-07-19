@@ -8,7 +8,10 @@
 // shape positions survive reload + replay.
 
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
-import { variablesToMap } from "../utils/formulas.js";
+import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
+import { resizeCorner } from "../three/sketchGeometry.js";
+import { applyRectangularPatternConstraints } from "../three/sketchRectangularPattern.js";
+import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 
 // Whether two shape arrays differ beyond floating-point noise.
 const shapesDiffer = (a, b) => {
@@ -46,19 +49,85 @@ export const createVariablesSlice = (set) => ({
       // returns.
       const newVarsMap = variablesToMap(variables);
       let anyFailed = false;
+      // Re-cut chamfer/bevel corners whose size is a formula so they track
+      // the new variable values (the bridge geometry is shape-level — the
+      // constraint solver doesn't drive it).
+      const recutCorners = (shapesIn) => {
+        let shapes = shapesIn;
+        for (let i = 0; i < shapes.length; i++) {
+          const sh = shapes[i];
+          if (
+            (sh.kind === "chamfer" || sh.kind === "bevel") &&
+            typeof sh.distanceFormula === "string"
+          ) {
+            const mm = evaluateFormula(sh.distanceFormula, newVarsMap);
+            if (!Number.isFinite(mm) || mm <= 0) continue;
+            const units = mm / MM_PER_UNIT;
+            const cur = sh.kind === "bevel" ? sh.r : sh.chamferData?.dist;
+            if (Number.isFinite(cur) && Math.abs(cur - units) < 1e-9) continue;
+            const res = resizeCorner(shapes, i, units);
+            if (!res) continue;
+            if (shapes === shapesIn) shapes = shapesIn.slice();
+            for (const [k, v] of res.updates) shapes[k] = v;
+            shapes[i] = {
+              ...shapes[i],
+              distanceFormula: sh.distanceFormula,
+            };
+          }
+        }
+        return shapes;
+      };
+      // Rectangular patterns whose offsets are formulas re-space to the new
+      // values (counts are structural and stay as committed).
+      const refreshPatternOffsets = (item, shapes) => {
+        let changed = false;
+        const constraints = (item.constraints || []).map((c) => {
+          if (c.type !== "rectangularPattern" || (!c.dxFormula && !c.dyFormula))
+            return c;
+          const dxMm = c.dxFormula
+            ? evaluateFormula(c.dxFormula, newVarsMap)
+            : null;
+          const dyMm = c.dyFormula
+            ? evaluateFormula(c.dyFormula, newVarsMap)
+            : null;
+          const dx = Number.isFinite(dxMm) ? dxMm / MM_PER_UNIT : c.dx;
+          const dy = Number.isFinite(dyMm) ? dyMm / MM_PER_UNIT : c.dy;
+          if (dx === c.dx && dy === c.dy) return c;
+          changed = true;
+          return { ...c, dx, dy };
+        });
+        if (!changed) return { shapes, constraints: item.constraints };
+        return {
+          shapes: applyRectangularPatternConstraints(shapes, constraints),
+          constraints,
+        };
+      };
       const updatedItems = state.items.map((item) => {
-        if (item.type === "sketch" && item.constraints?.length) {
+        if (
+          item.type === "sketch" &&
+          (item.constraints?.length ||
+            (item.shapes || []).some(
+              (sh) => typeof sh.distanceFormula === "string",
+            ))
+        ) {
           // Numerically re-solve the WHOLE sketch with the new variable values
           // so every constraint (angles, coincidents, …) is respected.  Leave
           // the sketch untouched if the new value can't be satisfied.
           const orig = item.shapes || [];
-          const { shapes: solved, ok } = solveConstraints(
-            orig,
-            item.constraints,
-            { variables: newVarsMap },
-          );
-          if (ok && shapesDiffer(orig, solved))
-            return { ...item, shapes: solved };
+          const { shapes: solved, ok } = item.constraints?.length
+            ? solveConstraints(orig, item.constraints, {
+                variables: newVarsMap,
+              })
+            : { shapes: orig, ok: true };
+          const recut = ok ? recutCorners(solved) : orig;
+          const { shapes: final, constraints: finalConstraints } = ok
+            ? refreshPatternOffsets(item, recut)
+            : { shapes: orig, constraints: item.constraints };
+          if (
+            ok &&
+            (shapesDiffer(orig, final) || finalConstraints !== item.constraints)
+          )
+            return { ...item, shapes: final, constraints: finalConstraints };
           if (!ok) anyFailed = true;
           return item;
         }
@@ -95,7 +164,11 @@ export const createVariablesSlice = (set) => ({
                   ...entry,
                   instruction: {
                     ...inst,
-                    item: { ...inst.item, shapes: item.shapes },
+                    item: {
+                      ...inst.item,
+                      shapes: item.shapes,
+                      constraints: item.constraints,
+                    },
                   },
                 };
               }

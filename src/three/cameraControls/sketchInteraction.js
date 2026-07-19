@@ -27,7 +27,9 @@ import {
 import {
   applyHVEnforcement,
   enforceConstraints,
+  allConstraintsSatisfied,
 } from "../sketchConstraints.js";
+import { variablesToMap } from "../../utils/formulas.js";
 import {
   translateShape,
   rotateShape,
@@ -93,6 +95,14 @@ const isRectangularPatternShapeIdx = (selItem, idx) =>
   (selItem?.constraints || []).some(
     (c) => c.type === "rectangularPattern" && c.shapeIdx === idx,
   );
+
+// Chamfer/bevel corner bridges are DERIVED geometry — not directly
+// selectable, marquee-able, or draggable (their setback is edited via the
+// value label / timeline).  Other tools may still SNAP to their endpoints.
+const isCornerBridgeIdx = (selItem, idx) => {
+  const s = selItem?.shapes?.[idx];
+  return s?.kind === "chamfer" || s?.kind === "bevel";
+};
 
 export function createSketchInteraction(
   {
@@ -255,6 +265,13 @@ export function createSketchInteraction(
   const updateHoverFills = (screenX, screenY) => {
     const g = sketchShapesGroupRef?.current;
     if (!g) return;
+    // While applying a constraint / dimension, the enclosed-region hover
+    // highlight is noise — the user is picking edges/points, not regions.
+    const st = useStore.getState();
+    if (st.sketchConstraintMode || st.sketchDistanceInput) {
+      clearHoverFills();
+      return;
+    }
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
     );
@@ -319,6 +336,7 @@ export function createSketchInteraction(
     refreshSketchSelectionOverlay,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,
+    addConstraintPickLine,
     makeRingOverlay,
     sketchSelectPoint,
     sketchSelectLine,
@@ -521,7 +539,8 @@ export function createSketchInteraction(
         !isOffsetShapeIdx(selItem, pt.shapeIdx) &&
         !isMirrorShapeIdx(selItem, pt.shapeIdx) &&
         !isCircularPatternShapeIdx(selItem, pt.shapeIdx) &&
-        !isRectangularPatternShapeIdx(selItem, pt.shapeIdx)
+        !isRectangularPatternShapeIdx(selItem, pt.shapeIdx) &&
+        !isCornerBridgeIdx(selItem, pt.shapeIdx)
       )
         inRect.add(pt.shapeIdx);
     });
@@ -662,7 +681,8 @@ export function createSketchInteraction(
       !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
       !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
       !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
-      !isRectangularPatternShapeIdx(selItem, snap.shapeIdx)
+      !isRectangularPatternShapeIdx(selItem, snap.shapeIdx) &&
+      !isCornerBridgeIdx(selItem, snap.shapeIdx)
     ) {
       // Measure tool: accumulate the snapped point as a pick (highlighted by a
       // marker, and measured between picks) rather than a normal point select.
@@ -703,7 +723,8 @@ export function createSketchInteraction(
           !c.userData.isOffset &&
           !c.userData.isMirror &&
           !c.userData.isCircularPattern &&
-          !c.userData.isRectangularPattern,
+          !c.userData.isRectangularPattern &&
+          !c.userData.isCornerBridge,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -812,11 +833,18 @@ export function createSketchInteraction(
   // a Map<idx, pointKey|null> — null pins the whole shape (a rigid translate).
   // `warm` (an array of the previous frame's solved shapes) is the starting
   // configuration: solving incrementally from it keeps each drag frame cheap.
+  // Repaired shapes computed at drag start when the sketch's saved state
+  // violates its constraints — used as the first solve's seed (see
+  // startSketchDrag).
+  let repairSeed = null;
+
   const solveDrag = (selItemId, placed, pointKeys, warm) => {
     const selItem = itemsRef.current.find((i) => i.id === selItemId);
     if (!selItem) return placed;
     const warmed = warm && warm.length > 0;
-    const input = (warmed ? warm : selItem.shapes || []).slice();
+    const input = (
+      warmed ? warm : (repairSeed ?? selItem.shapes ?? [])
+    ).slice();
     const fixed = new Set();
     for (const [idx, s] of placed) {
       const key = pointKeys.get(idx);
@@ -887,10 +915,14 @@ export function createSketchInteraction(
       clearCoincidentFirstOverlay,
       clearSketchSelection,
       setCoincidentFirstOverlay,
+      addConstraintPickLine,
     },
   );
-  const { handleDistanceConstraintClick, handleCoincidentClick } =
-    sketchConstraints;
+  const {
+    handleDistanceConstraintClick,
+    handleCoincidentClick,
+    handleMidpointClick,
+  } = sketchConstraints;
   const applySketchDragMove = (screenX, screenY, shiftKey) => {
     if (!sketchDrag) return;
     const { kind, sketchMesh, selItemId, anchorLocal } = sketchDrag;
@@ -948,6 +980,7 @@ export function createSketchInteraction(
           sketchMesh,
           renderer,
           useStore.getState().dimensionsVisible,
+          useStore.getState().constraintsVisible,
         );
         rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
         reapplyConstraintSelectionVisual();
@@ -1008,6 +1041,7 @@ export function createSketchInteraction(
           sketchMesh,
           renderer,
           useStore.getState().dimensionsVisible,
+          useStore.getState().constraintsVisible,
         );
         rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
         reapplyConstraintSelectionVisual();
@@ -1149,6 +1183,8 @@ export function createSketchInteraction(
         tempShapes,
         sketchMesh,
         renderer,
+        useStore.getState().dimensionsVisible,
+        useStore.getState().constraintsVisible,
       );
       rebuildPointDotsForDrag(sketchGroup, tempShapes, sketchMesh);
       updateSelectionForDrag(tempShapes, sketchMesh, true);
@@ -1191,6 +1227,7 @@ export function createSketchInteraction(
   const CONSTRAINT_TYPE_LABELS = {
     coincident: "Coincident",
     distance: "Distance",
+    pointLineDistance: "Distance",
     onLine: "On Line",
     horizontal: "Horizontal",
     vertical: "Vertical",
@@ -1243,7 +1280,8 @@ export function createSketchInteraction(
           !c.userData.isOffset &&
           !c.userData.isMirror &&
           !c.userData.isCircularPattern &&
-          !c.userData.isRectangularPattern,
+          !c.userData.isRectangularPattern &&
+          !c.userData.isCornerBridge,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       for (const hit of hits) {
@@ -1304,7 +1342,33 @@ export function createSketchInteraction(
     // Shift is additive-selection only — never start a drag, so a shift click /
     // marquee adds to the current selection rather than moving or replacing it.
     if (shiftKey) return false;
-    const shapes = selItem.shapes || [];
+    // A saved sketch can VIOLATE its own constraints (drift from corner ops
+    // or older builds).  Every drag solve would then start from that bad seed
+    // and fail its residual guard — the whole sketch feels nailed down.
+    // Compute a repaired configuration and use it as the drag solver's SEED
+    // only: nothing is committed until the gesture ends (a bare click leaves
+    // the document untouched, and there's no mid-gesture store write to
+    // rebuild the scene under the drag).
+    repairSeed = null;
+    {
+      const varsMap = variablesToMap(useStore.getState().variables);
+      const cs = selItem.constraints || [];
+      if (
+        cs.length > 0 &&
+        !allConstraintsSatisfied(selItem.shapes || [], cs, varsMap)
+      ) {
+        const res = solveConstraints(selItem.shapes || [], cs, {
+          maxIter: 200,
+          variables: varsMap,
+        });
+        if (res.ok) repairSeed = res.shapes;
+      }
+    }
+    // Capture drag geometry from the REPAIRED configuration: pinning a shape
+    // taken from the drifted state freezes its defects into the solve (e.g. a
+    // border whose length violates its own dimension can never satisfy it
+    // while body-pinned), failing every drag.
+    const shapes = repairSeed ?? selItem.shapes ?? [];
     clearAllSketchHover();
 
     // Rotation handle: grab the knob to rotate the whole selection about its
@@ -1394,6 +1458,7 @@ export function createSketchInteraction(
         !isMirrorShapeIdx(selItem, snap.shapeIdx) &&
         !isCircularPatternShapeIdx(selItem, snap.shapeIdx) &&
         !isRectangularPatternShapeIdx(selItem, snap.shapeIdx) &&
+        !isCornerBridgeIdx(selItem, snap.shapeIdx) &&
         // Projected geometry is immovable until its constraint is released.
         !shapes[snap.shapeIdx]?.projection
       ) {
@@ -1447,7 +1512,8 @@ export function createSketchInteraction(
           !c.userData.isOffset &&
           !c.userData.isMirror &&
           !c.userData.isCircularPattern &&
-          !c.userData.isRectangularPattern,
+          !c.userData.isRectangularPattern &&
+          !c.userData.isCornerBridge,
       );
       const hits = hitTestSketchLines(ray, lineObjs);
       if (
@@ -1672,7 +1738,8 @@ export function createSketchInteraction(
         !c.userData.isOffset &&
         !c.userData.isMirror &&
         !c.userData.isCircularPattern &&
-        !c.userData.isRectangularPattern,
+        !c.userData.isRectangularPattern &&
+        !c.userData.isCornerBridge,
     );
     const hits = hitTestSketchLines(makeRay(screenX, screenY), lineObjs);
     const hitIdx = hits[0]?.object?.userData?.shapeIdx;
@@ -1830,7 +1897,8 @@ export function createSketchInteraction(
             !c.userData.isOffset &&
             !c.userData.isMirror &&
             !c.userData.isCircularPattern &&
-            !c.userData.isRectangularPattern,
+            !c.userData.isRectangularPattern &&
+            !c.userData.isCornerBridge,
         )
       : [];
     const hits = hitTestSketchLines(makeRay(clientX, clientY), lineObjs);
@@ -1868,7 +1936,8 @@ export function createSketchInteraction(
         !c.userData.isOffset &&
         !c.userData.isMirror &&
         !c.userData.isCircularPattern &&
-        !c.userData.isRectangularPattern,
+        !c.userData.isRectangularPattern &&
+        !c.userData.isCornerBridge,
     );
   };
 
@@ -2062,6 +2131,10 @@ export function createSketchInteraction(
         handleDistanceConstraintClick(sx, sy);
         return;
       }
+      if (constraintMode === "midpoint") {
+        handleMidpointClick(sx, sy);
+        return;
+      }
 
       const now = Date.now();
       const isDblClick =
@@ -2084,6 +2157,7 @@ export function createSketchInteraction(
             if (
               !cObj.userData.isConstraint ||
               (cObj.userData.constraintType !== "distance" &&
+                cObj.userData.constraintType !== "pointLineDistance" &&
                 cObj.userData.constraintType !== "offset" &&
                 cObj.userData.constraintType !== "rectangularPattern" &&
                 cObj.userData.constraintType !== "mirror" &&
@@ -2101,7 +2175,18 @@ export function createSketchInteraction(
             const cpy = ((-ndc2.y + 1) / 2) * rect2.height + rect2.top;
             if (Math.hypot(sx - cpx, sy - cpy) < 18) {
               const c = (dblSel.constraints || [])[cObj.userData.constraintIdx];
-              if (c && c.type === "distance") {
+              if (c && c.type === "pointLineDistance") {
+                useStore.getState().setSketchDistanceInput({
+                  pointLine: {
+                    pointShapeIdx: c.pointShapeIdx,
+                    pointKey: c.pointKey,
+                    lineShapeIdx: c.lineShapeIdx,
+                  },
+                  defaultDistance: c.distance,
+                  constraintIdx: cObj.userData.constraintIdx,
+                });
+                useStore.getState().setSketchConstraintMode("distance");
+              } else if (c && c.type === "distance") {
                 useStore.getState().setSketchDistanceInput({
                   shapeAIdx: c.shapeAIdx,
                   pointA: c.pointA,
@@ -2177,7 +2262,8 @@ export function createSketchInteraction(
               !c.userData.isOffset &&
               !c.userData.isMirror &&
               !c.userData.isCircularPattern &&
-              !c.userData.isRectangularPattern,
+              !c.userData.isRectangularPattern &&
+              !c.userData.isCornerBridge,
           );
           const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
           if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
@@ -2192,7 +2278,8 @@ export function createSketchInteraction(
                   mode: hs.kind,
                 },
                 defaultDistance:
-                  hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0),
+                  hs.distanceFormula ??
+                  (hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0)),
               });
               return;
             }
@@ -2209,7 +2296,7 @@ export function createSketchInteraction(
       }
 
       if (shift) {
-        // Shift+click: toggle the hit line in/out of the multi-selection.
+        // Shift+click: toggle the hit element in/out of the multi-selection.
         // Selecting lines for a distance/length drops any measure point picks.
         if (useStore.getState().measureTool)
           useStore.getState().clearMeasurePicks();
@@ -2221,17 +2308,37 @@ export function createSketchInteraction(
             !c.userData.isOffset &&
             !c.userData.isMirror &&
             !c.userData.isCircularPattern &&
-            !c.userData.isRectangularPattern,
+            !c.userData.isRectangularPattern &&
+            !c.userData.isCornerBridge,
         );
         const hits = hitTestSketchLines(makeRay(sx, sy), lineObjs);
-        if (hits.length > 0 && hits[0].object.userData.shapeIdx != null) {
-          const hitIdx = hits[0].object.userData.shapeIdx;
-          // Seed from a current single-line selection so the natural flow —
-          // click one line, shift-click a second — yields a 2-shape multiselect
-          // (what the parallel / colinear / tangent constraints need).
+        let hitIdx =
+          hits.length > 0 && hits[0].object.userData.shapeIdx != null
+            ? hits[0].object.userData.shapeIdx
+            : null;
+        // Standalone POINT shapes aren't line objects, so the line hit-test
+        // never sees them — snap for one so a point can join the pair
+        // (midpoint's point + line/arc/curve selection).
+        if (hitIdx == null) {
+          const selItem = itemsRef.current.find(
+            (i) => i.id === selectedIdRef.current,
+          );
+          const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
+          if (selItem && sketchMesh) {
+            const shapes = selItem.shapes || [];
+            const snap = findSnap(sx, sy, shapes, sketchMesh);
+            if (snap && shapes[snap.shapeIdx]?.type === "point")
+              hitIdx = snap.shapeIdx;
+          }
+        }
+        if (hitIdx != null) {
+          // Seed from the current single-element selection so the natural
+          // flow — click one element, shift-click a second — yields a 2-shape
+          // multiselect.  Any element kind seeds: parallel/tangent want two
+          // lines, but midpoint pairs a POINT with a line/arc/curve.
           if (multiSelectedIndices.length === 0) {
             const sel = useStore.getState().selectedSketchElement;
-            if (sel?.type === "line" && sel.shapeIdx !== hitIdx)
+            if (sel?.shapeIdx != null && sel.shapeIdx !== hitIdx)
               multiSelectedIndices = [sel.shapeIdx];
           }
           multiSelectedIndices = multiSelectedIndices.includes(hitIdx)
@@ -2242,6 +2349,45 @@ export function createSketchInteraction(
             useStore.getState().setSelectedSketchElement(null);
         }
         return;
+      }
+
+      // A chamfer/bevel value label click re-opens the resize input (same
+      // flow as double-clicking the bridge itself).
+      {
+        const cg = sketchShapesGroupRef?.current;
+        const cSel = itemsRef.current.find(
+          (i) => i.id === selectedIdRef.current,
+        );
+        const cMesh = cSel ? objectsRef.current[cSel.id] : null;
+        if (cg && cMesh) {
+          const rect = renderer.domElement.getBoundingClientRect();
+          for (const obj of cg.children) {
+            if (!obj.userData.isCornerDim) continue;
+            const lp = obj.userData.cornerDimLocalPos;
+            const wp = new THREE.Vector3(lp.x, lp.y, 0.007)
+              .applyQuaternion(cMesh.quaternion)
+              .add(cMesh.position);
+            const ndc = wp.clone().project(cameraRef.current);
+            const px = ((ndc.x + 1) / 2) * rect.width + rect.left;
+            const py = ((-ndc.y + 1) / 2) * rect.height + rect.top;
+            if (Math.hypot(sx - px, sy - py) < 20) {
+              const hs = (cSel.shapes || [])[obj.userData.shapeIdx];
+              if (hs && (hs.kind === "chamfer" || hs.kind === "bevel")) {
+                useStore.getState().setSketchDistanceInput({
+                  cornerResize: {
+                    sketchId: cSel.id,
+                    shapeIdx: obj.userData.shapeIdx,
+                    mode: hs.kind,
+                  },
+                  defaultDistance:
+                    hs.distanceFormula ??
+                    (hs.kind === "bevel" ? hs.r : (hs.chamferData?.dist ?? 0)),
+                });
+                return;
+              }
+            }
+          }
+        }
       }
 
       // Check for constraint icon click before doing normal element select

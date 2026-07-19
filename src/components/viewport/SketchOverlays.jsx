@@ -16,7 +16,11 @@ import {
   getShapePoint,
   moveShapePoint,
 } from "../../three/sceneObjects.js";
-import { solveConstraints, fieldsForPoint } from "../../three/sketchSolver.js";
+import {
+  solveConstraints,
+  fieldsForPoint,
+  varFields,
+} from "../../three/sketchSolver.js";
 
 export default function SketchOverlays({
   // store-derived state
@@ -27,6 +31,7 @@ export default function SketchOverlays({
   sketchDrawPhase,
   sketchMode,
   sketchConstraintMode,
+  sketchMidpointFirst,
   sketchConstraintFirstPoint,
   sketchModifyMode,
   sketchDistanceInput,
@@ -93,6 +98,10 @@ export default function SketchOverlays({
   // The latest typed value is tracked here so the Confirm button (which has no
   // event) can read it; onChange already live-previews it via the store.
   const offsetDraftRef = React.useRef(null);
+  const sketchModifyDistMm = useStore((s) => s.sketchModifyDistMm);
+  // Live draft of the chamfer/bevel value while typing (may be an incomplete
+  // formula); the store only receives values that evaluate.
+  const [modifyDraft, setModifyDraft] = React.useState(null);
 
   const confirmOffset = () => {
     const di = useStore.getState().sketchDistanceInput;
@@ -329,11 +338,17 @@ export default function SketchOverlays({
         activeSketchTool !== "circularPattern" &&
         activeSketchTool !== "rectangularPattern" &&
         activeSketchTool !== "project" &&
+        activeSketchTool !== "trim" &&
         sketchDrawPhase !== "second" && (
           <div className="sketch-placement-hint">
             Click to set the start point
           </div>
         )}
+      {activeSketchTool === "trim" && (
+        <div className="sketch-placement-hint">
+          Click or drag over a line or a point · Esc to cancel
+        </div>
+      )}
       {activeSketchTool === "project" && (
         <div className="sketch-placement-hint">
           Click a 3D edge to project its connected edges, or drag a box to
@@ -563,11 +578,12 @@ export default function SketchOverlays({
                 <DebouncedNumberField
                   min={1}
                   step={1}
+                  variables={variables}
                   storeValue={sketchRectangularPatternState.countX}
                   validate={(v) => Number.isFinite(v) && v >= 1}
                   onValidChange={reportPatternValid("rectCountX")}
-                  commit={(v) =>
-                    useStore.getState().setRectangularPatternCountX(v)
+                  commit={(v, raw) =>
+                    useStore.getState().setRectangularPatternCountX(raw ?? v)
                   }
                   style={{
                     width: 44,
@@ -590,11 +606,12 @@ export default function SketchOverlays({
                 Offset X (mm)
                 <DebouncedNumberField
                   step="any"
+                  variables={variables}
                   storeValue={sketchRectangularPatternState.offsetX}
                   validate={(v) => Number.isFinite(v)}
                   onValidChange={reportPatternValid("rectOffsetX")}
-                  commit={(v) =>
-                    useStore.getState().setRectangularPatternOffsetX(v)
+                  commit={(v, raw) =>
+                    useStore.getState().setRectangularPatternOffsetX(raw ?? v)
                   }
                   style={{
                     width: 56,
@@ -618,11 +635,12 @@ export default function SketchOverlays({
                 <DebouncedNumberField
                   min={1}
                   step={1}
+                  variables={variables}
                   storeValue={sketchRectangularPatternState.countY}
                   validate={(v) => Number.isFinite(v) && v >= 1}
                   onValidChange={reportPatternValid("rectCountY")}
-                  commit={(v) =>
-                    useStore.getState().setRectangularPatternCountY(v)
+                  commit={(v, raw) =>
+                    useStore.getState().setRectangularPatternCountY(raw ?? v)
                   }
                   style={{
                     width: 44,
@@ -645,11 +663,12 @@ export default function SketchOverlays({
                 Offset Y (mm)
                 <DebouncedNumberField
                   step="any"
+                  variables={variables}
                   storeValue={sketchRectangularPatternState.offsetY}
                   validate={(v) => Number.isFinite(v)}
                   onValidChange={reportPatternValid("rectOffsetY")}
-                  commit={(v) =>
-                    useStore.getState().setRectangularPatternOffsetY(v)
+                  commit={(v, raw) =>
+                    useStore.getState().setRectangularPatternOffsetY(raw ?? v)
                   }
                   style={{
                     width: 56,
@@ -711,6 +730,15 @@ export default function SketchOverlays({
             </div>
           </>
         )}
+      {sketchMode && sketchConstraintMode === "midpoint" && (
+        <div className="sketch-placement-hint">
+          {sketchMidpointFirst?.kind === "point"
+            ? "Now click a line, arc or curve — the point pins to its middle · Esc to cancel"
+            : sketchMidpointFirst?.kind === "target"
+              ? "Now click a point — it pins to the middle · Esc to cancel"
+              : "Click a point, then a line, arc or curve · Esc to cancel"}
+        </div>
+      )}
       {sketchMode && sketchConstraintMode === "coincident" && (
         <div className="sketch-placement-hint">
           {sketchConstraintFirstPoint
@@ -723,8 +751,21 @@ export default function SketchOverlays({
         !sketchDistanceInput && (
           <div className="sketch-placement-hint">
             {sketchConstraintFirstPoint
-              ? "Select second point · Esc to cancel"
+              ? "Select a second point, or a line for a point-to-line distance · Esc to cancel"
               : "Click a line to set its length, or click two points · Esc to cancel"}
+          </div>
+        )}
+      {/* A line-length dimension is pending — tell the user they can instead
+          click a second parallel line for the perpendicular gap between them. */}
+      {sketchMode &&
+        sketchDistanceInput &&
+        sketchDistanceInput.constraintIdx == null &&
+        sketchDistanceInput.shapeAIdx != null &&
+        sketchDistanceInput.shapeAIdx === sketchDistanceInput.shapeBIdx &&
+        sketchDistanceInput.pointA === "start" &&
+        sketchDistanceInput.pointB === "end" && (
+          <div className="sketch-placement-hint">
+            Set the length, or click a parallel line for the gap between them
           </div>
         )}
       {sketchMode && sketchDistanceInput && (
@@ -744,6 +785,15 @@ export default function SketchOverlays({
             type="text"
             autoFocus
             variables={variables}
+            // Remount when the target changes (e.g. line-length → parallel-line
+            // gap) so the shown default reflects the new measurement.
+            key={
+              sketchDistanceInput.pointLine
+                ? `pl-${sketchDistanceInput.pointLine.pointShapeIdx}-${sketchDistanceInput.pointLine.lineShapeIdx}`
+                : sketchDistanceInput.cornerResize
+                  ? `cr-${sketchDistanceInput.cornerResize.shapeIdx}`
+                  : `d-${sketchDistanceInput.shapeAIdx}-${sketchDistanceInput.shapeBIdx}-${sketchDistanceInput.constraintIdx ?? "new"}`
+            }
             defaultValue={
               typeof sketchDistanceInput.defaultDistance === "string"
                 ? sketchDistanceInput.defaultDistance
@@ -786,16 +836,102 @@ export default function SketchOverlays({
                   confirmOffset();
                   return;
                 }
-                // Chamfer/bevel resize: apply the new setback / radius.
+                // Chamfer/bevel resize: apply the new setback / radius.  A
+                // negative bevel radius is allowed (flips the arc); a chamfer
+                // stays positive.
                 if (sketchDistanceInput.cornerResize) {
-                  if (Number.isFinite(mm) && mm > 0) {
+                  const allowNeg =
+                    sketchDistanceInput.cornerResize.mode === "bevel";
+                  if (Number.isFinite(mm) && (allowNeg ? mm !== 0 : mm > 0)) {
                     const { sketchId, shapeIdx } =
                       sketchDistanceInput.cornerResize;
                     useStore
                       .getState()
-                      .resizeSketchCorner(sketchId, shapeIdx, mm);
+                      .resizeSketchCorner(sketchId, shapeIdx, mm, raw);
                     cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
                   }
+                  useStore.getState().setSketchDistanceInput(null);
+                  useStore.getState().setSketchConstraintMode(null);
+                  return;
+                }
+                // Point-to-line perpendicular distance.  Staged solve in pick
+                // order: the point's shape moves first, then also the line,
+                // then the whole sketch.
+                if (sketchDistanceInput.pointLine) {
+                  if (Number.isFinite(mm) && mm > 0) {
+                    const { pointShapeIdx, pointKey, lineShapeIdx } =
+                      sketchDistanceInput.pointLine;
+                    const { constraintIdx } = sketchDistanceInput;
+                    const formula = raw;
+                    const store = useStore.getState();
+                    const freshItem = store.items.find(
+                      (i) => i.id === selectedId,
+                    );
+                    if (freshItem) {
+                      const newC = {
+                        type: "pointLineDistance",
+                        pointShapeIdx,
+                        pointKey,
+                        lineShapeIdx,
+                        distance: formula,
+                      };
+                      const proposed =
+                        constraintIdx != null
+                          ? (freshItem.constraints || []).map((c, i) =>
+                              i === constraintIdx &&
+                              c.type === "pointLineDistance"
+                                ? { ...c, distance: formula }
+                                : c,
+                            )
+                          : [...(freshItem.constraints || []), newC];
+                      const stagedFixed = (freeIdxs) => {
+                        const freeSet = new Set(freeIdxs);
+                        const fixed = new Set();
+                        freshItem.shapes.forEach((sh, i) => {
+                          if (freeSet.has(i)) return;
+                          for (const f of varFields(sh)) fixed.add(`${i}:${f}`);
+                        });
+                        return fixed;
+                      };
+                      let solved = null;
+                      for (const free of [
+                        [pointShapeIdx],
+                        [pointShapeIdx, lineShapeIdx],
+                        null,
+                      ]) {
+                        const res = solveConstraints(
+                          freshItem.shapes,
+                          proposed,
+                          {
+                            variables: variablesMap,
+                            ...(free ? { fixed: stagedFixed(free) } : {}),
+                          },
+                        );
+                        if (res.ok) {
+                          solved = res.shapes;
+                          break;
+                        }
+                      }
+                      if (solved) {
+                        if (constraintIdx != null)
+                          store.updateSketchConstraintDistance(
+                            selectedId,
+                            constraintIdx,
+                            formula,
+                          );
+                        else store.addSketchConstraints(selectedId, [newC]);
+                        const map = new Map();
+                        solved.forEach((sh, i) => map.set(i, sh));
+                        store.updateSketchShapes(selectedId, map);
+                        itemsRef.current = useStore.getState().items;
+                      } else {
+                        store.showNotification(
+                          "Can't apply that dimension — it would break another constraint",
+                        );
+                      }
+                    }
+                  }
+                  cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
                   useStore.getState().setSketchDistanceInput(null);
                   useStore.getState().setSketchConstraintMode(null);
                   return;
@@ -968,12 +1104,86 @@ export default function SketchOverlays({
           </div>
         )}
       {sketchMode && sketchModifyMode && (
-        <div className="sketch-placement-hint">
-          {sketchModifyMode === "chamfer"
-            ? "Click a corner between two lines to chamfer"
-            : "Click a corner between two lines to bevel"}{" "}
-          · Esc to cancel
-        </div>
+        <>
+          <div className="sketch-placement-hint">
+            {sketchModifyMode === "chamfer"
+              ? "Click a corner between two lines to chamfer"
+              : "Click a corner between two lines to bevel"}{" "}
+            · Esc to cancel
+          </div>
+          {!sketchDistanceInput && (
+            <div className="sketch-distance-input-overlay">
+              <span>
+                {sketchModifyMode === "chamfer" ? "Chamfer" : "Bevel"}
+              </span>
+              <label
+                style={{
+                  marginLeft: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                {sketchModifyMode === "chamfer"
+                  ? "Setback (mm)"
+                  : "Radius (mm)"}
+                <FormulaInput
+                  type="text"
+                  key={sketchModifyMode}
+                  variables={variables}
+                  title={
+                    sketchModifyMode === "bevel"
+                      ? "A number in mm (negative flips the arc), or a formula"
+                      : "A number in mm, or a formula over the document variables"
+                  }
+                  value={modifyDraft ?? String(sketchModifyDistMm)}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setModifyDraft(raw);
+                    const mm = evaluateFormula(
+                      raw,
+                      variablesToMap(useStore.getState().variables),
+                    );
+                    const allowNeg = sketchModifyMode === "bevel";
+                    if (Number.isFinite(mm) && (allowNeg ? mm !== 0 : mm > 0))
+                      useStore.getState().setSketchModifyDistMm(raw.trim());
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  onBlur={() => setModifyDraft(null)}
+                  style={{
+                    width: 90,
+                    fontSize: 11,
+                    padding: "2px 4px",
+                    borderRadius: 3,
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => useStore.getState().setSketchModifyMode(null)}
+                title={
+                  sketchModifyMode === "chamfer"
+                    ? "Done — leave the chamfer tool"
+                    : "Done — leave the bevel tool"
+                }
+                style={{
+                  fontSize: 11,
+                  padding: "3px 10px",
+                  marginLeft: 8,
+                  borderRadius: 3,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-tertiary)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                Done
+              </button>
+            </div>
+          )}
+        </>
       )}
       <div
         ref={dimHintRef}

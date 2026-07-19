@@ -87,11 +87,12 @@ describe("rectangular pattern edit (begin + replace on confirm)", () => {
     store.getState().beginRectangularPatternEdit(1, 0);
     const st = store.getState();
     expect(st.activeSketchTool).toBe("rectangularPattern");
+    // Tool-state offsets are mm; the constraint's dx of 10 units seeds 100.
     expect(st.sketchRectangularPatternState).toMatchObject({
       shapeIndices: [0],
       countX: 2,
       countY: 1,
-      offsetX: 10,
+      offsetX: 100,
       offsetY: 0,
       editCopyIndices: [1],
     });
