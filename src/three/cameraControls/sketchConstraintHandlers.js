@@ -69,6 +69,58 @@ export function createSketchConstraintHandlers(
       const lineIdx = hits[0].object.userData.shapeIdx;
       const shape = shapes[lineIdx];
       if (!shape || isOffsetCopy(lineIdx)) return;
+
+      // Two parallel lines → perpendicular distance between them.  The first
+      // line click opened a line-length input; clicking a SECOND line that
+      // shares a horizontal/vertical/parallel constraint with it switches to a
+      // line-to-line gap (measured from the first line, which moves first).
+      const pending = store.sketchDistanceInput;
+      const isPendingLen =
+        pending &&
+        pending.constraintIdx == null &&
+        pending.shapeAIdx != null &&
+        pending.shapeAIdx === pending.shapeBIdx &&
+        pending.pointA === "start" &&
+        pending.pointB === "end" &&
+        shapes[pending.shapeAIdx]?.type === "line";
+      const parallelConstrained = (a, b) => {
+        const hasHV = (idx, t) =>
+          constraints.some((c) => c.type === t && c.shapeIdx === idx);
+        if (hasHV(a, "horizontal") && hasHV(b, "horizontal")) return true;
+        if (hasHV(a, "vertical") && hasHV(b, "vertical")) return true;
+        return constraints.some(
+          (c) =>
+            (c.type === "parallel" || c.type === "colinear") &&
+            ((c.shapeAIdx === a && c.shapeBIdx === b) ||
+              (c.shapeAIdx === b && c.shapeBIdx === a)),
+        );
+      };
+      if (
+        isPendingLen &&
+        shape.type === "line" &&
+        lineIdx !== pending.shapeAIdx &&
+        parallelConstrained(pending.shapeAIdx, lineIdx)
+      ) {
+        const A = pending.shapeAIdx; // first-picked line — moves first
+        const p = getShapePoint(shapes[A], "start");
+        const dx = shape.x2 - shape.x1,
+          dy = shape.y2 - shape.y1;
+        const len = Math.hypot(dx, dy) || 1e-9;
+        store.setSketchDistanceInput({
+          pointLine: {
+            pointShapeIdx: A,
+            pointKey: "start",
+            lineShapeIdx: lineIdx,
+          },
+          defaultDistance: Math.abs(
+            ((p.x - shape.x1) * dy - (p.y - shape.y1) * dx) / len,
+          ),
+        });
+        store.setSketchConstraintFirstPoint(null);
+        clearCoincidentFirstOverlay();
+        return;
+      }
+
       // A point already picked + a line body: point-to-line perpendicular
       // distance (a point on the line itself stays a same-line pick).
       const firstPt0 = store.sketchConstraintFirstPoint;
