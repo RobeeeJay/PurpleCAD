@@ -231,19 +231,26 @@ const getDisplayLabel = (entry, history) => {
 // AND the length and Confirm edits the entry in place (retargetExtrude).  With
 // `groupIds` it acts on a whole multi-area group as one unit; otherwise on the
 // single `itemId`.
-function ExtrudeActions({ itemId, groupIds }) {
+function ExtrudeActions({ itemId, groupIds, fusedId }) {
   const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
   const extrudeRetargetId = useStore((s) => s.extrudeRetargetId);
   const extrudeRetargetGroup = useStore((s) => s.extrudeRetargetGroup);
+  const extrudeRetargetFusedId = useStore((s) => s.extrudeRetargetFusedId);
   const setExtrudeRetargetId = useStore((s) => s.setExtrudeRetargetId);
   const setExtrudeRetargetGroup = useStore((s) => s.setExtrudeRetargetGroup);
+  const setExtrudeRetargetFusedId = useStore(
+    (s) => s.setExtrudeRetargetFusedId,
+  );
   const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
   const isGroup = !!groupIds;
+  const isFused = fusedId != null;
   const editActive =
     extrudeSelectMode === "profile" &&
-    (isGroup
-      ? !!extrudeRetargetGroup && extrudeRetargetGroup[0] === groupIds[0]
-      : !extrudeRetargetGroup && extrudeRetargetId === itemId);
+    (isFused
+      ? extrudeRetargetFusedId === fusedId
+      : isGroup
+        ? !!extrudeRetargetGroup && extrudeRetargetGroup[0] === groupIds[0]
+        : !extrudeRetargetGroup && extrudeRetargetId === itemId);
   return (
     <button
       className={`timeline-action-btn${editActive ? " active" : ""}`}
@@ -252,11 +259,13 @@ function ExtrudeActions({ itemId, groupIds }) {
         e.stopPropagation();
         // Enter profile mode FIRST: setExtrudeSelectMode spreads
         // TOOL_RESET_PATCH when freshly entering extrude, which nulls
-        // extrudeRetargetId/Group — so arming the edit target before it would
-        // be wiped, and Confirm would build a NEW extrude instead of editing.
+        // extrudeRetargetId/Group/Fused — so arming the edit target before it
+        // would be wiped, and Confirm would build a NEW extrude instead of
+        // editing.
         setExtrudeSelectMode("profile");
         setExtrudeRetargetGroup(isGroup ? groupIds : null);
-        setExtrudeRetargetId(isGroup ? groupIds[0] : itemId);
+        setExtrudeRetargetFusedId(isFused ? fusedId : null);
+        setExtrudeRetargetId(isFused ? null : isGroup ? groupIds[0] : itemId);
       }}
     >
       <EditIcon />
@@ -574,6 +583,10 @@ const Timeline = () => {
                 entry.instruction.item?.type === "extrude" && (
                   <ExtrudeActions itemId={entry.instruction.item.id} />
                 )}
+              {entry.instruction?.type === "create" &&
+                ["extrudeUnion", "extrudeCut"].includes(
+                  entry.instruction.item?.regenerator?.kind,
+                ) && <ExtrudeActions fusedId={entry.instruction.item.id} />}
               {entry.instruction?.type === "create" &&
                 ["cube", "sphere", "cylinder", "torus", "cone"].includes(
                   entry.instruction.item?.type,

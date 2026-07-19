@@ -36,6 +36,10 @@ export const uiInitial = {
   // When retargeting a whole multi-area extrude, the ids of every prism in its
   // createGroup step (the selection is rebuilt as one unit).  null otherwise.
   extrudeRetargetGroup: null,
+  // Id of a FUSED extrude (extrudeUnion / extrudeCut csg item) being edited.
+  // Its prism recipes live in regenerator.extrudeDefs, not as store items, so it
+  // can't use extrudeRetargetGroup (which keys on a createGroup's prism ids).
+  extrudeRetargetFusedId: null,
 
   // Sub-geometry selection used by the 3D Bevel/Chamfer toolbar buttons.
   selectedSubGeometry: null,
@@ -294,6 +298,7 @@ export const TOOL_RESET_PATCH = {
   extrudeSelectMode: null,
   extrudeRetargetId: null,
   extrudeRetargetGroup: null,
+  extrudeRetargetFusedId: null,
   extrudeDepthInput: null,
   cutExtrudeInProgress: false,
   chamferSelectMode: null,
@@ -1155,6 +1160,7 @@ export const createUiSlice = (set, get) => ({
   setCutExtrudeInProgress: (v) => set({ cutExtrudeInProgress: !!v }),
   setExtrudeRetargetId: (id) => set({ extrudeRetargetId: id }),
   setExtrudeRetargetGroup: (ids) => set({ extrudeRetargetGroup: ids }),
+  setExtrudeRetargetFusedId: (id) => set({ extrudeRetargetFusedId: id }),
   // Selecting a raster render mode also leaves the path-traced view, so the
   // four modes (wireframe/shaded/transparent/path-traced) act as one radio set.
   setRenderMode: (mode) => set({ renderMode: mode, pathTraceView: false }),

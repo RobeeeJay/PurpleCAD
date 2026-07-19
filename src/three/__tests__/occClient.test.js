@@ -70,6 +70,26 @@ describe("deepResolveDepth (formula -> scene units before the IPC boundary)", ()
     };
     expect(deepResolveDepth(csg, vars).regenerator.source.depth).toBe(6);
   });
+  it("resolves a fused extrude's embedded prism depths (extrudeUnion / extrudeCut)", () => {
+    // The bridge rebuilds a fused extrude used as a HOST from these defs, so an
+    // unresolved "height" here collapses the whole body to the 1-unit fallback
+    // (the multi-hole cut on a formula-height wall bug).
+    const fused = {
+      type: "csg",
+      regenerator: {
+        kind: "extrudeCut",
+        inputIds: [1],
+        extrudeDefs: [
+          { type: "extrude", depth: "height", profile: {} },
+          { type: "extrude", depth: "width * 2", profile: {} },
+        ],
+      },
+    };
+    const out = deepResolveDepth(fused, vars);
+    // mm / 10: height 60 -> 6.0 scene units; width*2 = 10 mm -> 1.0.
+    expect(out.regenerator.extrudeDefs[0].depth).toBe(6);
+    expect(out.regenerator.extrudeDefs[1].depth).toBe(1);
+  });
 });
 
 describe("occClient (in-process fallback)", () => {

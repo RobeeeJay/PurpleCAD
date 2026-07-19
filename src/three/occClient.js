@@ -32,6 +32,17 @@ export function deepResolveDepth(item, varsMap) {
     const src = deepResolveDepth(r.source, varsMap);
     if (src !== r.source) out = { ...out, regenerator: { ...r, source: src } };
   }
+  // A fused extrude (extrudeUnion / extrudeCut) carries its prism recipes in
+  // regenerator.extrudeDefs — each an extrude with a possibly-formula depth.
+  // When such an item is a HOST/nested input the bridge rebuilds it from these
+  // defs, so they must be resolved too; otherwise "Height-WallThickness" reaches
+  // the bridge as NaN and the whole body collapses to the 1-unit fallback.
+  const rd = out.regenerator;
+  if (Array.isArray(rd?.extrudeDefs)) {
+    const defs = rd.extrudeDefs.map((d) => deepResolveDepth(d, varsMap));
+    if (defs.some((d, i) => d !== rd.extrudeDefs[i]))
+      out = { ...out, regenerator: { ...rd, extrudeDefs: defs } };
+  }
   return out;
 }
 

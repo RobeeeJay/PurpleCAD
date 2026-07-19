@@ -630,7 +630,8 @@ export function useSceneSync({
         // Retargeting an extrude: now that the region fills exist, start the
         // selection on the extrude's original profile so the user begins from
         // the existing geometry rather than an empty selection.
-        if (useStore.getState().extrudeRetargetId != null) {
+        const s = useStore.getState();
+        if (s.extrudeRetargetId != null || s.extrudeRetargetFusedId != null) {
           cameraControlsRef.current?.preselectRetargetProfile?.();
         }
       }
@@ -654,8 +655,16 @@ export function useSceneSync({
     const st = useStore.getState();
     if (st.extrudeDepthInput) return;
     const retargetId = st.extrudeRetargetId;
+    const fusedId = st.extrudeRetargetFusedId;
+    // A fused extrude seeds from its first embedded prism recipe (all prisms
+    // share depth / cut / startOffset); a single retarget from the extrude item.
+    const fusedDef =
+      fusedId != null
+        ? items.find((i) => i.id === fusedId)?.regenerator?.extrudeDefs?.[0]
+        : null;
     const retarget =
-      retargetId != null ? items.find((i) => i.id === retargetId) : null;
+      fusedDef ??
+      (retargetId != null ? items.find((i) => i.id === retargetId) : null);
     const depth = retarget ? resolveItemDepth(retarget) : 1.0;
     st.setExtrudeDepthInput({
       defaultDepth: depth,

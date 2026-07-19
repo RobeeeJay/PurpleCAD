@@ -290,6 +290,16 @@ The working mechanism (keep all three pieces in lockstep):
   `MM_PER_UNIT` after evaluation.
 - Variable changes invalidate every regenerator's `regeneratedAt` flag so
   the next regen pass rebuilds downstream CSG / chamfer items.
+- **The Electron bridge can't evaluate formula depths — resolve them BEFORE
+  the IPC boundary.** `occClient.js#deepResolveDepth` converts every formula
+  depth to a scene-unit number so the bridge only sees numbers (its
+  `resolveDepth` does `parseFloat`, so `"Height-WallThickness"` becomes NaN →
+  the 1-unit fallback and the body silently collapses). It must recurse into
+  EVERY place a depth hides: `item.depth`, `regenerator.source` (chamfer/…),
+  AND `regenerator.extrudeDefs` (the embedded prisms of `extrudeUnion` /
+  `extrudeCut`). Missing the last one built a formula-height wall used as a cut
+  HOST at 1 unit — a multi-hole cut that looked like a deep gouge on a collapsed
+  box (`occClient.test.js` pins the extrudeDefs recursion).
 
 ## Precision: prefer decimal.js
 

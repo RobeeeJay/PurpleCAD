@@ -148,4 +148,33 @@ describe("extrudeCut", () => {
     expect(hasBoreAt(csgs[0].geometryData, -1.5)).toBe(true);
     expect(hasBoreAt(csgs[0].geometryData, 1.5)).toBe(true);
   });
+
+  it("retargetFusedExtrude edits a fused cut in place — no new entry", async () => {
+    useStore.getState().newDocument();
+    useStore.getState().addItem(block());
+    await runCutExtrudes([bore(101, -1.5), bore(102, 1.5)], 1, 100);
+    const fused = useStore.getState().items.find((i) => i.type === "csg");
+    const entriesBefore = useStore.getState().history.length;
+
+    // Re-point to THREE holes at new positions, same depth/offset.
+    const p = (cx) => ({ ...circle(cx), position: O, rotation: O });
+    useStore
+      .getState()
+      .retargetFusedExtrude(fused.id, [p(-2), p(0), p(2)], "40", -2);
+
+    const after = useStore.getState();
+    // Same entry count (edited in place, not appended).
+    expect(after.history.length).toBe(entriesBefore);
+    const edited = after.items.find((i) => i.id === fused.id);
+    expect(edited.regenerator.kind).toBe("extrudeCut");
+    expect(edited.regenerator.extrudeDefs.length).toBe(3);
+    // Reused the two original prism ids, allocated one fresh.
+    expect(edited.regenerator.extrudeDefs[0].id).toBe(101);
+    expect(edited.regenerator.extrudeDefs[1].id).toBe(102);
+    // The CREATE entry carries the new recipe too (survives save/reload).
+    const createEntry = after.history.find(
+      (h) => h.instruction?.item?.id === fused.id,
+    );
+    expect(createEntry.instruction.item.regenerator.extrudeDefs.length).toBe(3);
+  });
 });

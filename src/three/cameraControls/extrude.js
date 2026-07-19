@@ -267,14 +267,23 @@ export function createExtrudeHelpers(
     const st = useStore.getState();
     const groupIds = st.extrudeRetargetGroup;
     const retargetId = st.extrudeRetargetId;
-    // Preselect every prism of the group, or just the single extrude.
-    const sourceItems = groupIds
-      ? groupIds
-          .map((id) => itemsRef.current.find((i) => i.id === id))
-          .filter(Boolean)
-      : retargetId != null
-        ? [itemsRef.current.find((i) => i.id === retargetId)].filter(Boolean)
-        : [];
+    const fusedId = st.extrudeRetargetFusedId;
+    // A fused extrude (extrudeUnion / extrudeCut) keeps its prism recipes in
+    // regenerator.extrudeDefs, not as store items — preselect from those, each
+    // an object with a `.profile` just like an extrude item.
+    const fusedItem =
+      fusedId != null ? itemsRef.current.find((i) => i.id === fusedId) : null;
+    // Preselect every prism of the group / fused body, or just the single
+    // extrude.
+    const sourceItems = fusedItem
+      ? fusedItem.regenerator?.extrudeDefs || []
+      : groupIds
+        ? groupIds
+            .map((id) => itemsRef.current.find((i) => i.id === id))
+            .filter(Boolean)
+        : retargetId != null
+          ? [itemsRef.current.find((i) => i.id === retargetId)].filter(Boolean)
+          : [];
     if (!sourceItems.length) return;
     const fills = extrudeSelectGroupRef?.current?.children ?? [];
     const picked = [];
@@ -610,7 +619,13 @@ export function createExtrudeHelpers(
     const profiles = extrudeProfileList.map(({ _fill, ...p }) => p);
 
     const retargetGroup = store.extrudeRetargetGroup;
-    if (retargetGroup) {
+    const fusedId = store.extrudeRetargetFusedId;
+    if (fusedId != null) {
+      // Edit a fused extrude (extrudeUnion / extrudeCut) in place: rebuild its
+      // embedded prism recipes from the new selection + depth, no new entry.
+      store.retargetFusedExtrude(fusedId, profiles, depthStored, startOffset);
+      store.setExtrudeRetargetFusedId(null);
+    } else if (retargetGroup) {
       // Retarget a whole multi-area group: rebuild its prisms from the new
       // selection and re-point the union — the group is edited as one unit.
       store.retargetGroup(retargetGroup, profiles, depthStored, startOffset);
@@ -770,6 +785,7 @@ export function createExtrudeHelpers(
     selectedFills.clear();
     retargetSelectionUntouched = false;
     extrudeStartSolidId = null;
+    store.setExtrudeRetargetFusedId(null);
     store.setExtrudeSelectMode(null);
     store.setExtrudeDepthInput(null);
     renderer.domElement.style.cursor = "";
@@ -906,6 +922,7 @@ export function createExtrudeHelpers(
     store.setExtrudeSelectMode(null);
     store.setExtrudeRetargetId(null);
     store.setExtrudeRetargetGroup(null);
+    store.setExtrudeRetargetFusedId(null);
     store.setExtrudeDepthInput(null);
     store.setCutExtrudeInProgress(false);
   };
