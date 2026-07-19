@@ -265,6 +265,13 @@ export function createSketchInteraction(
   const updateHoverFills = (screenX, screenY) => {
     const g = sketchShapesGroupRef?.current;
     if (!g) return;
+    // While applying a constraint / dimension, the enclosed-region hover
+    // highlight is noise — the user is picking edges/points, not regions.
+    const st = useStore.getState();
+    if (st.sketchConstraintMode || st.sketchDistanceInput) {
+      clearHoverFills();
+      return;
+    }
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
     );
@@ -329,6 +336,7 @@ export function createSketchInteraction(
     refreshSketchSelectionOverlay,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,
+    addConstraintPickLine,
     makeRingOverlay,
     sketchSelectPoint,
     sketchSelectLine,
@@ -907,6 +915,7 @@ export function createSketchInteraction(
       clearCoincidentFirstOverlay,
       clearSketchSelection,
       setCoincidentFirstOverlay,
+      addConstraintPickLine,
     },
   );
   const {

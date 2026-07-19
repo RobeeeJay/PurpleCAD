@@ -13,7 +13,7 @@ import {
   getSnapPoints,
   moveShapePoint,
 } from "../sceneObjects.js";
-import { CONSTRAINT_PARALLEL_PERP_COLOR } from "../theme.js";
+import { SKETCH_SELECTION_GREEN } from "../theme.js";
 
 export function createSketchConstraintHandlers(
   {
@@ -34,6 +34,7 @@ export function createSketchConstraintHandlers(
     clearCoincidentFirstOverlay,
     clearSketchSelection,
     setCoincidentFirstOverlay,
+    addConstraintPickLine,
   },
 ) {
   const handleDistanceConstraintClick = (screenX, screenY) => {
@@ -117,7 +118,10 @@ export function createSketchConstraintHandlers(
           ),
         });
         store.setSketchConstraintFirstPoint(null);
+        // Highlight BOTH picked lines as selected.
         clearCoincidentFirstOverlay();
+        addConstraintPickLine(shapes[A], sketchMesh);
+        addConstraintPickLine(shape, sketchMesh);
         return;
       }
 
@@ -141,7 +145,22 @@ export function createSketchConstraintHandlers(
             ),
           });
           store.setSketchConstraintFirstPoint(null);
+          // Keep the point ring, add the line highlight (the picked pair).
+          const ptShape = shapes[firstPt0.shapeIdx];
+          const ptPos = ptShape
+            ? getShapePoint(ptShape, firstPt0.pointKey)
+            : null;
           clearCoincidentFirstOverlay();
+          if (ptPos) {
+            const ring = makeRingOverlay(
+              ptPos,
+              sketchMesh,
+              SKETCH_SELECTION_GREEN,
+            );
+            setCoincidentFirstOverlay(ring);
+            scene.add(ring);
+          }
+          addConstraintPickLine(shape, sketchMesh);
           return;
         }
       }
@@ -155,6 +174,7 @@ export function createSketchConstraintHandlers(
           pointB: "edge",
           defaultDistance: shape.r,
         });
+        addConstraintPickLine(shape, sketchMesh);
       } else if (shape.type === "line") {
         store.setSketchDistanceInput({
           shapeAIdx: lineIdx,
@@ -163,6 +183,9 @@ export function createSketchConstraintHandlers(
           pointB: "end",
           defaultDistance: Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1),
         });
+        // Highlight the picked line so the pending length dim reads clearly and
+        // the user can add a second parallel line for a gap.
+        addConstraintPickLine(shape, sketchMesh);
       }
       return;
     }
@@ -178,7 +201,7 @@ export function createSketchConstraintHandlers(
       const overlay = makeRingOverlay(
         { x: snap.x, y: snap.y },
         sketchMesh,
-        CONSTRAINT_PARALLEL_PERP_COLOR,
+        SKETCH_SELECTION_GREEN,
       );
       setCoincidentFirstOverlay(overlay);
       scene.add(overlay);
@@ -283,7 +306,7 @@ export function createSketchConstraintHandlers(
       const overlay = makeRingOverlay(
         { x: snap.x, y: snap.y },
         sketchMesh,
-        CONSTRAINT_PARALLEL_PERP_COLOR,
+        SKETCH_SELECTION_GREEN,
       );
       setCoincidentFirstOverlay(overlay);
       scene.add(overlay);
@@ -441,7 +464,7 @@ export function createSketchConstraintHandlers(
       const overlay = makeRingOverlay(
         { x, y },
         sketchMesh,
-        CONSTRAINT_PARALLEL_PERP_COLOR,
+        SKETCH_SELECTION_GREEN,
       );
       setCoincidentFirstOverlay(overlay);
       scene.add(overlay);
@@ -481,12 +504,10 @@ export function createSketchConstraintHandlers(
     if (first?.kind === "point") {
       finish(first.shapeIdx, first.pointKey ?? null, idx, false);
     } else {
-      const m =
-        shape.type === "line"
-          ? { x: (shape.x1 + shape.x2) / 2, y: (shape.y1 + shape.y2) / 2 }
-          : null;
       store.setSketchMidpointFirst({ kind: "target", shapeIdx: idx });
-      if (m) ringAt(m.x, m.y);
+      // Highlight the whole target (line/arc/bezier) as selected.
+      clearCoincidentFirstOverlay();
+      addConstraintPickLine(shape, sketchMesh);
     }
   };
 

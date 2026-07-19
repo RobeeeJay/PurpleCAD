@@ -37,6 +37,32 @@ export function createSketchSelectionOverlays({
     coincidentFirstOverlay = o;
   };
 
+  // Extra highlights for the elements picked so far in a multi-pick constraint
+  // (a line's whole span, alongside the point ring in coincidentFirstOverlay).
+  // Shown in the SELECTION colours so a pending pick reads like a selection;
+  // cleared together with the point ring.
+  let constraintPickOverlays = [];
+  const addConstraintPickLine = (shape, sketchMesh) => {
+    const pts = getSketchShapePoints(shape, sketchMesh);
+    if (pts.length < 2) return;
+    const geo = new LineGeometry();
+    geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
+    const mat = new LineMaterial({
+      color: SKETCH_SELECTION_BLUE,
+      linewidth: 2.5,
+      depthTest: false,
+      dashed: !!shape.dashed,
+      dashSize: shape.dashed ? 0.1 : 0,
+      gapSize: shape.dashed ? 0.06 : 0,
+      resolution: renderer.getSize(new THREE.Vector2()),
+    });
+    const line = new Line2(geo, mat);
+    line.computeLineDistances();
+    line.renderOrder = 1005;
+    scene.add(line);
+    constraintPickOverlays.push(line);
+  };
+
   const clearBezierHandles = () => {
     bezierHandles.forEach((o) => {
       scene.remove(o);
@@ -107,6 +133,12 @@ export function createSketchSelectionOverlays({
       coincidentFirstOverlay.material.dispose();
       coincidentFirstOverlay = null;
     }
+    constraintPickOverlays.forEach((o) => {
+      scene.remove(o);
+      o.geometry?.dispose?.();
+      o.material?.dispose?.();
+    });
+    constraintPickOverlays = [];
   };
 
   const makeRingOverlay = (
@@ -279,6 +311,10 @@ export function createSketchSelectionOverlays({
   // lingers at the pre-edit position when a dimension or variable edit moves
   // the line.  No-op unless something is actually selected.
   const refreshSketchSelectionOverlay = () => {
+    // A committed dimension / constraint refreshes the selection — that ends the
+    // pick phase, so drop any pending constraint-pick highlights (the green ring
+    // and blue line spans).  Refresh isn't called mid-pick, so this is safe.
+    clearCoincidentFirstOverlay();
     const state = useStore.getState();
     // Read items from the store, not itemsRef: this runs synchronously right
     // after a store update, before React re-renders and re-syncs itemsRef.
@@ -525,6 +561,7 @@ export function createSketchSelectionOverlays({
     updateSelectionForDrag,
     clearSketchSelectionOverlay,
     clearCoincidentFirstOverlay,
+    addConstraintPickLine,
     makeRingOverlay,
     sketchSelectPoint,
     sketchSelectLine,
