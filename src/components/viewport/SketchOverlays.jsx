@@ -755,6 +755,19 @@ export default function SketchOverlays({
               : "Click a line to set its length, or click two points · Esc to cancel"}
           </div>
         )}
+      {/* A line-length dimension is pending — tell the user they can instead
+          click a second parallel line for the perpendicular gap between them. */}
+      {sketchMode &&
+        sketchDistanceInput &&
+        sketchDistanceInput.constraintIdx == null &&
+        sketchDistanceInput.shapeAIdx != null &&
+        sketchDistanceInput.shapeAIdx === sketchDistanceInput.shapeBIdx &&
+        sketchDistanceInput.pointA === "start" &&
+        sketchDistanceInput.pointB === "end" && (
+          <div className="sketch-placement-hint">
+            Set the length, or click a parallel line for the gap between them
+          </div>
+        )}
       {sketchMode && sketchDistanceInput && (
         <div className="sketch-distance-input-overlay">
           <span>
@@ -772,6 +785,15 @@ export default function SketchOverlays({
             type="text"
             autoFocus
             variables={variables}
+            // Remount when the target changes (e.g. line-length → parallel-line
+            // gap) so the shown default reflects the new measurement.
+            key={
+              sketchDistanceInput.pointLine
+                ? `pl-${sketchDistanceInput.pointLine.pointShapeIdx}-${sketchDistanceInput.pointLine.lineShapeIdx}`
+                : sketchDistanceInput.cornerResize
+                  ? `cr-${sketchDistanceInput.cornerResize.shapeIdx}`
+                  : `d-${sketchDistanceInput.shapeAIdx}-${sketchDistanceInput.shapeBIdx}-${sketchDistanceInput.constraintIdx ?? "new"}`
+            }
             defaultValue={
               typeof sketchDistanceInput.defaultDistance === "string"
                 ? sketchDistanceInput.defaultDistance

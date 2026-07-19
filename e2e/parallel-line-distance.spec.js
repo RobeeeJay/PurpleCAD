@@ -91,6 +91,10 @@ test.describe.serial("parallel-line distance", () => {
         }),
       )
       .toBe(true);
+    // A hint tells the user they can click a parallel line for the gap.
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "click a parallel line for the gap",
+    );
     // Second, parallel line (y=4): switches to the line-to-line gap.
     await page.mouse.click(toScreen(0, 4).x, toScreen(0, 4).y);
     await expect
