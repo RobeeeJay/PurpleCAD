@@ -889,10 +889,14 @@ async function regenerateBoolean(
 // separate store items, so the whole multi-area extrude is ONE timeline entry.
 // Optional `inputIds` are host solids (a boss) fused in too.  Each prism is
 // rebuilt from its live sketch polygon so the union tracks sketch edits.
+// Rebuild a multi-area extrude from its EMBEDDED prism recipes.  `isCut`
+// subtracts them from the host solids instead of fusing: the hosts lead so
+// performCsg treats them as the difference argument and the prisms as tools.
 async function regenerateExtrudeUnion(
   regenerator,
   accumulatedItems,
   printPrecision,
+  isCut = false,
 ) {
   const prisms = (regenerator.extrudeDefs || []).map((d) =>
     withLivePolygons(d, accumulatedItems, printPrecision),
@@ -901,11 +905,14 @@ async function regenerateExtrudeUnion(
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean)
     .map((i) => withLivePolygons(i, accumulatedItems, printPrecision));
-  const inputs = [...prisms, ...hosts];
+  // A cut whose target vanished would silently rebuild as the union of its
+  // prisms — leaving the holes as solid pegs.  Bail instead.
+  if (isCut && (hosts.length === 0 || prisms.length === 0)) return null;
+  const inputs = isCut ? [...hosts, ...prisms] : [...prisms, ...hosts];
   if (inputs.length < 1) return null;
   return performCsg({
     selectedItems: inputs,
-    operation: "union",
+    operation: isCut ? "difference" : "union",
     printPrecision,
     allItems: accumulatedItems,
   });
@@ -1007,6 +1014,8 @@ export async function regenerateItemsForResolution(
           return regenerateBoolean(r, out, printPrecision);
         case "extrudeUnion":
           return regenerateExtrudeUnion(r, out, printPrecision);
+        case "extrudeCut":
+          return regenerateExtrudeUnion(r, out, printPrecision, true);
         default:
           return null;
       }

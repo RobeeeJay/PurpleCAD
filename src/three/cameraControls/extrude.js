@@ -19,6 +19,7 @@ import {
 } from "./extrudeGeometry.js";
 import {
   runCutExtrusion,
+  runCutExtrudes,
   runUnionExtrudes,
   runExtrudeUnion,
 } from "./extrudeBoolean.js";
@@ -729,6 +730,27 @@ export function createExtrudeHelpers(
         );
         store.addItems(defs, "Extruded");
         store.selectItem(null);
+      } else if (isCut && profiles.length > 1) {
+        // A multi-area cut (e.g. several holes) is ONE difference in ONE
+        // timeline entry: the prism recipes ride in the result's regenerator.
+        // Creating a prism + cut per profile instead raced N concurrent
+        // differences against the same original target, so only one hole
+        // survived.
+        const defs = profiles.map((profile, i) =>
+          buildExtrudeDef(
+            profile,
+            depthStored,
+            true,
+            startOffset,
+            maxId + 2 + i,
+          ),
+        );
+        store.setCutExtrudeInProgress(true);
+        void runCutExtrudes(
+          defs,
+          profiles[0]?.sourceItemId ?? null,
+          maxId + 1,
+        ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
       } else {
         // Cut prisms each difference their target; a lone non-cut prism is a
         // standalone extrude.
