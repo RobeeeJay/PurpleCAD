@@ -2769,11 +2769,13 @@ export function createSketchInteraction(
         return;
       }
       if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
-        // Esc from the start-pick sub-mode backs out to depth (keeping the
-        // captured profiles + depth) rather than cancelling the whole extrude.
+        // Esc from the start-pick sub-mode backs out to the profile phase
+        // (keeping the captured profiles + depth) rather than cancelling the
+        // whole extrude — so geometry stays selectable.  (Returning to the
+        // legacy "depth" state left every click unhandled: selection was dead.)
         if (extrudeSelectModeRef.current === "start") {
           clearStartHighlight();
-          useStore.getState().setExtrudeSelectMode("depth");
+          useStore.getState().setExtrudeSelectMode("profile");
           return;
         }
         cancelExtrude();

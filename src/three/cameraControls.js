@@ -2027,7 +2027,13 @@ export function attachCameraControls(ctx) {
     if (!currentCamera) return;
 
     if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
-      if (extrudeSelectModeRef.current === "profile") {
+      if (extrudeSelectModeRef.current === "start")
+        handleExtrudeStartHover(e.clientX, e.clientY);
+      else {
+        // Any non-start extrude mode (the unified "profile" phase, or the legacy
+        // "depth" state reached by Esc-ing out of start-pick) still lets the user
+        // pick geometry — otherwise a click here is swallowed with no handler and
+        // the selection is dead.
         // Left button held + moved → draw the drag-select box instead of hover.
         const dragging =
           (e.buttons & 1) === 1 &&
@@ -2044,8 +2050,7 @@ export function attachCameraControls(ctx) {
             e.clientY,
           );
         else handleExtrudeHover(e.clientX, e.clientY, e.shiftKey);
-      } else if (extrudeSelectModeRef.current === "start")
-        handleExtrudeStartHover(e.clientX, e.clientY);
+      }
       controls.mouseX = e.clientX;
       controls.mouseY = e.clientY;
       return;
@@ -2086,11 +2091,10 @@ export function attachCameraControls(ctx) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5) {
-        if (extrudeSelectModeRef.current === "profile")
-          handleExtrudeProfileClick(e.clientX, e.clientY, e.shiftKey);
-        else if (extrudeSelectModeRef.current === "start")
+        if (extrudeSelectModeRef.current === "start")
           handleExtrudeStartClick(e.clientX, e.clientY);
-      } else if (extrudeSelectModeRef.current === "profile") {
+        else handleExtrudeProfileClick(e.clientX, e.clientY, e.shiftKey);
+      } else if (extrudeSelectModeRef.current !== "start") {
         // Drag-select: add the boxed regions, or remove them with Alt held.
         // Shift restricts text to the single glyph instead of the whole word.
         handleExtrudeProfileBox(
