@@ -164,7 +164,12 @@ function makeRulerLabel(text, tier = "coarse", theme) {
   ctx.fillText(text, 80, 20);
   const mat = new THREE.MeshBasicMaterial({
     map: new THREE.CanvasTexture(canvas),
-    depthTest: false,
+    // depthTest ON so 3D bodies sitting on the ground OCCLUDE the floor ruler
+    // numbers behind them instead of the labels floating in front.  depthWrite
+    // OFF (like the grid) so the flat quad — coplanar with the grid at y=0 —
+    // doesn't z-fight it or block other transparents.
+    depthTest: true,
+    depthWrite: false,
     transparent: true,
     side: THREE.DoubleSide,
   });
