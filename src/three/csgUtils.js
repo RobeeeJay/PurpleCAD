@@ -180,14 +180,28 @@ export function withLivePolygons(item, allItems, precision) {
   if (item.type === "extrude") {
     return extrudeWithLivePolygon(item, allItems, precision);
   }
-  if (item.type === "csg" && item.regenerator?.source) {
-    return {
-      ...item,
-      regenerator: {
-        ...item.regenerator,
-        source: withLivePolygons(item.regenerator.source, allItems, precision),
-      },
-    };
+  const r = item.regenerator;
+  if (item.type === "csg" && r) {
+    let next = r;
+    // Chamfer/bevel etc. carry a single nested `source`.
+    if (r.source) {
+      const src = withLivePolygons(r.source, allItems, precision);
+      if (src !== r.source) next = { ...next, source: src };
+    }
+    // A fused extrude (extrudeUnion / extrudeCut) carries its prism recipes in
+    // `extrudeDefs`.  When such a body is used as a HOST/input (e.g. an extrude
+    // cut's target), the Electron bridge rebuilds it from these defs' baked
+    // polygon2D — so they must be re-derived at the CURRENT precision too, or
+    // the host reverts to the resolution the polygons were frozen at while the
+    // same body shown standalone (whose defs ARE re-derived per-def) is finer.
+    if (Array.isArray(r.extrudeDefs)) {
+      const defs = r.extrudeDefs.map((d) =>
+        withLivePolygons(d, allItems, precision),
+      );
+      if (defs.some((d, i) => d !== r.extrudeDefs[i]))
+        next = { ...next, extrudeDefs: defs };
+    }
+    if (next !== r) return { ...item, regenerator: next };
   }
   return item;
 }

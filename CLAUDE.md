@@ -300,6 +300,16 @@ The working mechanism (keep all three pieces in lockstep):
   `extrudeCut`). Missing the last one built a formula-height wall used as a cut
   HOST at 1 unit — a multi-hole cut that looked like a deep gouge on a collapsed
   box (`occClient.test.js` pins the extrudeDefs recursion).
+- **`withLivePolygons` has the SAME recursion requirement for the SAME reason.**
+  The bridge can't re-derive an extrude's profile from its sketch, so the
+  renderer pre-bakes the live polygon2D into every item first. It must recurse
+  into `regenerator.extrudeDefs` (a fused body's embedded prisms), not only
+  `regenerator.source` — otherwise a fused body used as a cut HOST keeps its
+  polygons frozen at the resolution they were saved at, so the extrude cut
+  reverts to low-res curves while the same body shown standalone (whose defs are
+  re-derived per-def in `regenerateExtrudeUnion`) is finer. occOps hides this
+  (it re-derives in-process); only the bridge builds from the baked polygon
+  (`withLivePolygonsFusedDefs.test.js`).
 
 ## Precision: prefer decimal.js
 
