@@ -6,7 +6,12 @@
 // Returns a `stop()` that cancelAnimationFrames the next tick.
 
 import * as THREE from "three";
-import { updateRuler3D, ndcGapPx, rulerFadeOpacity } from "../sceneSetup.js";
+import {
+  updateRuler3D,
+  ndcGapPx,
+  rulerFadeOpacity,
+  pointBehindCamera,
+} from "../sceneSetup.js";
 import { useStore } from "../../store";
 import {
   CROSS_SECTION_PLANE,
@@ -18,6 +23,7 @@ import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
 const _rulerNext = new THREE.Vector3();
+const _camForward = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
 
 // On-demand rendering.  The loop keeps ticking (cheap) but only does the
@@ -356,6 +362,7 @@ export function createAnimateLoop({
         rulerGroup.updateWorldMatrix(false, true);
         const canvasWRuler = renderer.domElement.clientWidth || 1;
         const canvasHRuler = renderer.domElement.clientHeight || 1;
+        cam.getWorldDirection(_camForward);
         rulerGroup.traverse((o) => {
           if (!o.userData.isRulerLabel) return;
           const b = o.userData.baseScale;
@@ -376,6 +383,14 @@ export function createAnimateLoop({
             _rulerNext.copy(_rulerPos);
             if (axis === "x") _rulerNext.x += step;
             else _rulerNext.z += step;
+            // A "next" point behind the camera isn't actually crowding this
+            // on-screen label — skip the (invalid) projection-based check and
+            // stay fully opaque.  See pointBehindCamera's doc comment.
+            if (pointBehindCamera(_rulerNext, cam.position, _camForward)) {
+              o.material.opacity = 1;
+              o.visible = true;
+              return;
+            }
             _rulerPos.project(cam);
             _rulerNext.project(cam);
             const pxGap = ndcGapPx(

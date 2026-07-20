@@ -324,6 +324,24 @@ export function rulerFadeOpacity(
   return Math.max(0, Math.min(1, (pxGap - minGap) / fadeRange));
 }
 
+// True when `point` sits behind the camera's view plane (dot of the
+// camera->point vector with the forward direction <= 0).  `Vector3.project()`
+// doesn't clip a behind-camera point — it divides by a negative w and can
+// flip/explode the NDC coords — so a crowding check that blindly projects
+// BOTH a label and its "next step" neighbour can spike the measured gap to a
+// garbage value the instant the neighbour crosses behind the camera, snapping
+// that label's opacity discontinuously (a blink/teleport) instead of fading
+// smoothly.  Plain {x,y,z} objects (no THREE dependency) so this is
+// unit-testable without a live camera.
+export function pointBehindCamera(point, camPos, camForward) {
+  return (
+    (point.x - camPos.x) * camForward.x +
+      (point.y - camPos.y) * camForward.y +
+      (point.z - camPos.z) * camForward.z <=
+    0
+  );
+}
+
 // Recycle ruler labels around the camera target (cx, cz on the ground) so they
 // follow the view.  Labels live at absolute world multiples of each tier's step
 // and read true mm; only labels entering the range get a fresh texture, the

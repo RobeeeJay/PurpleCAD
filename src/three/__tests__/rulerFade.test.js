@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import {
   ndcGapPx,
   rulerFadeOpacity,
+  pointBehindCamera,
   RULER_FADE_MIN_GAP_PX,
   RULER_FADE_RANGE_PX,
 } from "../sceneSetup.js";
@@ -56,5 +57,35 @@ describe("rulerFadeOpacity", () => {
     expect(mid).toBeGreaterThan(0);
     expect(mid).toBeLessThan(1);
     expect(mid).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("pointBehindCamera", () => {
+  // Camera at the origin looking down +Z (forward = (0,0,1)).
+  const camPos = { x: 0, y: 0, z: 0 };
+  const forward = { x: 0, y: 0, z: 1 };
+
+  it("is false for a point in front of the camera", () => {
+    expect(pointBehindCamera({ x: 0, y: 0, z: 10 }, camPos, forward)).toBe(
+      false,
+    );
+  });
+  it("is true for a point behind the camera", () => {
+    expect(pointBehindCamera({ x: 0, y: 0, z: -10 }, camPos, forward)).toBe(
+      true,
+    );
+  });
+  it("is true exactly on the camera's view plane (dot == 0)", () => {
+    // Regression: the ruler crowding check must treat this as "behind" (skip
+    // the projection-based gap check) rather than trying to project a point
+    // sitting exactly at the w=0 singularity, which is where project() first
+    // starts producing garbage NDC coordinates.
+    expect(pointBehindCamera({ x: 5, y: 0, z: 0 }, camPos, forward)).toBe(true);
+  });
+  it("works regardless of which way the camera is rotated", () => {
+    // Camera looking down -X instead.
+    const f2 = { x: -1, y: 0, z: 0 };
+    expect(pointBehindCamera({ x: -10, y: 0, z: 0 }, camPos, f2)).toBe(false);
+    expect(pointBehindCamera({ x: 10, y: 0, z: 0 }, camPos, f2)).toBe(true);
   });
 });

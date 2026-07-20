@@ -584,3 +584,10 @@ sources are picked) that reuses the creation UI.
   step through the camera, measure the actual on-screen pixel gap, and fade
   the label out below a legibility floor — don't try to reposition anything,
   the positions are already world-stable and correct (`rulerFade.test.js`).
+- **That crowding check must not project a "next step" point that's BEHIND the
+  camera.** `Vector3.project()` doesn't clip it — it divides by a negative w
+  and can flip/explode the NDC coords — spiking the measured gap to garbage
+  and snapping a label's opacity discontinuously (a blink/teleport) instead of
+  fading smoothly. `pointBehindCamera` (`sceneSetup.js`) gates the check: skip
+  it and stay fully opaque when the neighbour is behind the camera's view
+  plane, since it isn't actually crowding the on-screen label.
