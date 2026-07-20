@@ -11,6 +11,8 @@ import { solveConstraints, varFields } from "../three/sketchSolver.js";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
 import { resizeCorner } from "../three/sketchGeometry.js";
 import { applyRectangularPatternConstraints } from "../three/sketchRectangularPattern.js";
+import { applyMirrorConstraints } from "../three/sketchMirror.js";
+import { applyCircularPatternConstraints } from "../three/sketchCircularPattern.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 
 // Whether two shape arrays differ beyond floating-point noise.
@@ -78,10 +80,12 @@ export const createVariablesSlice = (set) => ({
         return shapes;
       };
       // Rectangular patterns whose offsets are formulas re-space to the new
-      // values (counts are structural and stay as committed).
-      const refreshPatternOffsets = (item, shapes) => {
+      // values (counts are structural and stay as committed).  Returns the
+      // constraint list with dx/dy refreshed; the derived-geometry chain below
+      // then re-applies the spacing along with mirror / circular copies.
+      const refreshPatternConstraints = (constraintsIn) => {
         let changed = false;
-        const constraints = (item.constraints || []).map((c) => {
+        const next = (constraintsIn || []).map((c) => {
           if (c.type !== "rectangularPattern" || (!c.dxFormula && !c.dyFormula))
             return c;
           const dxMm = c.dxFormula
@@ -96,12 +100,23 @@ export const createVariablesSlice = (set) => ({
           changed = true;
           return { ...c, dx, dy };
         });
-        if (!changed) return { shapes, constraints: item.constraints };
-        return {
-          shapes: applyRectangularPatternConstraints(shapes, constraints),
-          constraints,
-        };
+        // Same ref when unchanged so the caller's `!== item.constraints` guard
+        // doesn't rewrite every sketch's history on an unrelated variable edit.
+        return changed ? next : constraintsIn;
       };
+      // Re-derive EVERY dependent shape (mirror / circular / rectangular copies)
+      // from the moved sources — the same chain updateSketchShapes runs on a
+      // drag.  Without this a variable change moves the sources but leaves the
+      // mirror/pattern copies at their old positions, breaking the closed loops
+      // that downstream extrudes depend on.
+      const rederiveDerived = (shapes, constraints) =>
+        applyRectangularPatternConstraints(
+          applyCircularPatternConstraints(
+            applyMirrorConstraints(shapes, constraints),
+            constraints,
+          ),
+          constraints,
+        );
       const updatedItems = state.items.map((item) => {
         if (
           item.type === "sketch" &&
@@ -120,9 +135,10 @@ export const createVariablesSlice = (set) => ({
               })
             : { shapes: orig, ok: true };
           const recut = ok ? recutCorners(solved) : orig;
-          const { shapes: final, constraints: finalConstraints } = ok
-            ? refreshPatternOffsets(item, recut)
-            : { shapes: orig, constraints: item.constraints };
+          const finalConstraints = ok
+            ? refreshPatternConstraints(item.constraints)
+            : item.constraints;
+          const final = ok ? rederiveDerived(recut, finalConstraints) : orig;
           if (
             ok &&
             (shapesDiffer(orig, final) || finalConstraints !== item.constraints)
