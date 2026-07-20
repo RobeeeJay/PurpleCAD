@@ -329,17 +329,16 @@ export function createAnimateLoop({
       } else if (rulerGroup) {
         rulerGroup.visible = true;
         const viewHeight = gizmoScale(targetRef.current) * REFERENCE_HEIGHT;
-        // Recycle the labels around the camera target, but shifted right by half
-        // the left overlay's width (same as the axis indicator) so the ruler is
-        // centred on the visible 3D area rather than the canvas centre half-
-        // hidden behind the objects/timeline panel.
-        const canvasH = renderer.domElement.clientHeight || 1;
-        const worldPerPx = (viewHeight / canvasH) * (LEFT_PANEL_PX / 2);
-        _camRight.set(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
+        // Recycle the labels around the RAW camera target.  A screen-space shift
+        // (like the compact axis indicator's) can't be done with a fixed world
+        // offset: `camRight` rotates with the view, so shifting the spread-out
+        // ruler by it swept the whole grid of numbers around the target every
+        // time the view orbited — the rows visibly jumped after a pan.  Locking
+        // to the target keeps the labels world-stable through a rotation.
         updateRuler3D(
           rulerGroup,
-          targetRef.current.x + _camRight.x * worldPerPx,
-          targetRef.current.z + _camRight.z * worldPerPx,
+          targetRef.current.x,
+          targetRef.current.z,
           viewHeight,
           useStore.getState().theme,
         );
