@@ -571,7 +571,13 @@ export const pushSketchSnapshot = (state, sketchId) => {
 export const withUndo = (state) => ({
   undoStack: [
     ...state.undoStack,
-    { history: state.history, activeHistoryId: state.activeHistoryId },
+    {
+      history: state.history,
+      activeHistoryId: state.activeHistoryId,
+      // Variables ride in the snapshot so a variable edit (and any change that
+      // recalculates against variables) is undoable as one step.
+      variables: state.variables,
+    },
   ].slice(-UNDO_LIMIT),
   redoStack: [],
 });

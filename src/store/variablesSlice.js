@@ -30,6 +30,7 @@ import {
   saveVariables,
   saveTimeline,
   withOrphanFlags,
+  withUndo,
   dirtyAllEntries,
 } from "./internals.js";
 
@@ -198,6 +199,7 @@ export const createVariablesSlice = (set) => ({
       const newHistory = dirtyAllEntries(rewritten);
       saveTimeline(newHistory, state.activeHistoryId);
       return {
+        ...withUndo(state),
         variables,
         items: updatedItems,
         history: withOrphanFlags(newHistory),

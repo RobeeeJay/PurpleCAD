@@ -6,6 +6,7 @@ import {
   withUndo,
   withOrphanFlags,
   saveTimeline,
+  saveVariables,
   markCsgDirty,
   relinkSourceChain,
   dirtyEntriesFrom,
@@ -131,16 +132,24 @@ export const createHistoryNavSlice = (set) => ({
         ),
       );
       saveTimeline(snapshot.history, snapshot.activeHistoryId);
+      // Older snapshots (pre-variable-undo) have no `variables` — keep current.
+      const variables = snapshot.variables ?? state.variables;
+      saveVariables(variables);
       return {
         history: snapshot.history,
         activeHistoryId: snapshot.activeHistoryId,
         items,
+        variables,
         selectedId: null,
         selectedIds: [],
         undoStack: state.undoStack.slice(0, -1),
         redoStack: [
           ...state.redoStack,
-          { history: state.history, activeHistoryId: state.activeHistoryId },
+          {
+            history: state.history,
+            activeHistoryId: state.activeHistoryId,
+            variables: state.variables,
+          },
         ].slice(-UNDO_LIMIT),
       };
     }),
@@ -160,16 +169,23 @@ export const createHistoryNavSlice = (set) => ({
         ),
       );
       saveTimeline(snapshot.history, snapshot.activeHistoryId);
+      const variables = snapshot.variables ?? state.variables;
+      saveVariables(variables);
       return {
         history: snapshot.history,
         activeHistoryId: snapshot.activeHistoryId,
         items,
+        variables,
         selectedId: null,
         selectedIds: [],
         redoStack: state.redoStack.slice(0, -1),
         undoStack: [
           ...state.undoStack,
-          { history: state.history, activeHistoryId: state.activeHistoryId },
+          {
+            history: state.history,
+            activeHistoryId: state.activeHistoryId,
+            variables: state.variables,
+          },
         ].slice(-UNDO_LIMIT),
       };
     }),
