@@ -565,3 +565,22 @@ sources are picked) that reuses the creation UI.
   `cameraControls/animateLoop.js` — don't scale them elsewhere or the
   per-frame pass will fight you. Each entry caches its authored scale
   on userData.baseScale on first sight.
+- **The 3D ground ruler is centred on the RAW camera target — never add a
+  screen-space shift to it.** The compact axis indicator shifts right by
+  `camRight * halfPanelWidth` to clear the left panel, but `camRight` rotates
+  with the view; applying that same shift to the spread-out ruler swept the
+  whole grid of numbers around the target on every orbit ("the ruler jumps
+  when rotating after a pan"). `updateRuler3D` takes `targetRef.current.x/z`
+  directly.
+- **A ruler row viewed edge-on garbles into overlapping text — this is
+  expected geometry, not a position bug.** Each label is scaled to render at a
+  CONSTANT on-screen size regardless of distance (`animateLoop.js`'s
+  `gizmoScale` per label), but that only fixes apparent SIZE — it can't fix
+  POSITION compression. When the camera's forward direction swings close to
+  parallel with a row's own axis (continuous during any orbit), evenly-spaced
+  world points compress toward the vanishing point and same-size neighbouring
+  labels overlap into an illegible cluster. The fix is `ndcGapPx` +
+  `rulerFadeOpacity` (`sceneSetup.js`): project the label and its next grid
+  step through the camera, measure the actual on-screen pixel gap, and fade
+  the label out below a legibility floor — don't try to reposition anything,
+  the positions are already world-stable and correct (`rulerFade.test.js`).

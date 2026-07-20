@@ -298,6 +298,32 @@ export function createGrid(scene, theme) {
 const RULER_Y = 0.05; // label height above the ground plane
 const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
 
+// Legibility fade for a ruler label whose on-screen gap to the NEXT grid step
+// has collapsed (a row viewed nearly edge-on — the camera's forward direction
+// close to parallel with the row, which happens continuously while orbiting —
+// compresses evenly-spaced world points toward the vanishing point).  Same-size
+// text there overlaps its neighbours into an illegible garbled cluster, which
+// reads as "the ruler numbers jump around" while rotating: same-size labels can
+// fix apparent SIZE, not the POSITION compression, so the fix is to fade the
+// crowded ones out instead.  Exported (rather than inlined in the render loop)
+// so the threshold math is unit-testable without a live THREE camera/canvas.
+export const RULER_FADE_MIN_GAP_PX = 26; // below this, neighbouring text overlaps
+export const RULER_FADE_RANGE_PX = 22; // fade smoothly over this band above it
+
+export function ndcGapPx(ndcA, ndcB, canvasW, canvasH) {
+  const dxPx = ((ndcB.x - ndcA.x) / 2) * canvasW;
+  const dyPx = ((ndcB.y - ndcA.y) / 2) * canvasH;
+  return Math.hypot(dxPx, dyPx);
+}
+
+export function rulerFadeOpacity(
+  pxGap,
+  minGap = RULER_FADE_MIN_GAP_PX,
+  fadeRange = RULER_FADE_RANGE_PX,
+) {
+  return Math.max(0, Math.min(1, (pxGap - minGap) / fadeRange));
+}
+
 // Recycle ruler labels around the camera target (cx, cz on the ground) so they
 // follow the view.  Labels live at absolute world multiples of each tier's step
 // and read true mm; only labels entering the range get a fresh texture, the
@@ -336,6 +362,12 @@ export function updateRuler3D(rulerGroup, cx, cz, viewHeight, theme) {
         group.add(sp);
       }
       sp.position.set(x, y, z);
+      // Which world axis this label steps along, and by how much — the
+      // per-frame legibility fade (animateLoop.js) projects one step ahead to
+      // measure the ACTUAL on-screen gap to its neighbour, so it can fade out
+      // before adjacent numbers overlap into an illegible blob.
+      sp.userData.gridAxis = axis;
+      sp.userData.gridStep = step;
     };
     const kxMin = Math.ceil((cx - span) / step);
     const kxMax = Math.floor((cx + span) / step);

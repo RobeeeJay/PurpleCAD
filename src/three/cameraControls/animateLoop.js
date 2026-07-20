@@ -6,7 +6,7 @@
 // Returns a `stop()` that cancelAnimationFrames the next tick.
 
 import * as THREE from "three";
-import { updateRuler3D } from "../sceneSetup.js";
+import { updateRuler3D, ndcGapPx, rulerFadeOpacity } from "../sceneSetup.js";
 import { useStore } from "../../store";
 import {
   CROSS_SECTION_PLANE,
@@ -17,6 +17,7 @@ import {
 import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
+const _rulerNext = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
 
 // On-demand rendering.  The loop keeps ticking (cheap) but only does the
@@ -353,12 +354,40 @@ export function createAnimateLoop({
         // (a single target-distance factor would let far labels shrink under
         // perspective).  Update the hierarchy once, then read each matrixWorld.
         rulerGroup.updateWorldMatrix(false, true);
+        const canvasWRuler = renderer.domElement.clientWidth || 1;
+        const canvasHRuler = renderer.domElement.clientHeight || 1;
         rulerGroup.traverse((o) => {
           if (!o.userData.isRulerLabel) return;
           const b = o.userData.baseScale;
           _rulerPos.setFromMatrixPosition(o.matrixWorld);
           const sp = gizmoScale(_rulerPos);
           o.scale.set(b.x * sp, b.y * sp, b.z * sp);
+          // Fade a label out once its own on-screen gap to the NEXT grid step
+          // collapses below a legible width.  A row viewed nearly edge-on (the
+          // camera's forward direction close to parallel with the row — which
+          // happens continuously while orbiting) compresses evenly-spaced
+          // world points toward the vanishing point; same-size text there
+          // overlaps its neighbours into an illegible garbled cluster — read as
+          // "the ruler numbers jump around" while rotating.  Same-size labels
+          // can't fix POSITION compression, only skipping the crowded ones can.
+          const axis = o.userData.gridAxis;
+          const step = o.userData.gridStep;
+          if (axis && step && o.material) {
+            _rulerNext.copy(_rulerPos);
+            if (axis === "x") _rulerNext.x += step;
+            else _rulerNext.z += step;
+            _rulerPos.project(cam);
+            _rulerNext.project(cam);
+            const pxGap = ndcGapPx(
+              _rulerPos,
+              _rulerNext,
+              canvasWRuler,
+              canvasHRuler,
+            );
+            const t = rulerFadeOpacity(pxGap);
+            o.material.opacity = t;
+            o.visible = t > 0.01;
+          }
         });
       }
     }
