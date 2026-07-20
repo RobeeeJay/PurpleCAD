@@ -64,10 +64,25 @@ export const createVariablesSlice = (set) => ({
             typeof sh.distanceFormula === "string"
           ) {
             const mm = evaluateFormula(sh.distanceFormula, newVarsMap);
-            if (!Number.isFinite(mm) || mm <= 0) continue;
+            // A NEGATIVE value is a valid minus (flipped) fillet — a concave
+            // scoop.  Only zero / non-finite is degenerate; a chamfer can't
+            // flip, so a negative setback there stays invalid.  (Skipping mm<0
+            // outright left minus fillets frozen while every other dimension
+            // tracked the variable.)
+            if (!Number.isFinite(mm) || mm === 0) continue;
+            if (sh.kind === "chamfer" && mm < 0) continue;
             const units = mm / MM_PER_UNIT;
-            const cur = sh.kind === "bevel" ? sh.r : sh.chamferData?.dist;
-            if (Number.isFinite(cur) && Math.abs(cur - units) < 1e-9) continue;
+            // Flipped bevels store a POSITIVE radius plus a flip flag, so
+            // compare the target against the SIGNED current size or an
+            // unchanged minus fillet would re-cut (or, worse, never settle).
+            const flipped = !!(sh.bevelData?.flip || sh.flip);
+            const curMag = sh.kind === "bevel" ? sh.r : sh.chamferData?.dist;
+            const curSigned = flipped ? -curMag : curMag;
+            if (
+              Number.isFinite(curSigned) &&
+              Math.abs(curSigned - units) < 1e-9
+            )
+              continue;
             const res = resizeCorner(shapes, i, units);
             if (!res) continue;
             if (shapes === shapesIn) shapes = shapesIn.slice();

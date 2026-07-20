@@ -4,6 +4,7 @@
 // (module cycle through geometryParams), and setVariables spans slices.
 import { describe, it, expect, beforeEach } from "vitest";
 import { useStore } from "../../store";
+import { buildBevelArc } from "../../three/sketchGeometry.js";
 
 const bridgeSketch = () => ({
   id: 77,
@@ -130,5 +131,77 @@ describe("variable-driven corner re-cut", () => {
     const b = useStore.getState().items[0].shapes[2];
     // "cs" no longer resolves — the corner keeps its current geometry.
     expect(b.chamferData.dist).toBeCloseTo(0.4, 6);
+  });
+});
+
+describe("variable-driven MINUS (flipped) fillet re-cut", () => {
+  // A 90° corner at the origin (leg along -x, leg along +y) filleted with a
+  // NEGATIVE radius: a concave scoop.  Its formula "-(fr)" resolves to a
+  // negative value — which the recut used to skip, freezing the fillet while
+  // every other dimension tracked the variable.
+  const flippedFilletSketch = () => {
+    const arc = buildBevelArc(
+      { x: 0, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: -0.9, y: 0 },
+      { x: 0, y: 0.9 },
+      true,
+    );
+    return {
+      id: 55,
+      type: "sketch",
+      name: "F",
+      children: [],
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      shapes: [
+        { type: "line", x1: -4, y1: 0, x2: -0.9, y2: 0 },
+        { type: "line", x1: 0, y1: 0.9, x2: 0, y2: 4 },
+        {
+          ...arc,
+          kind: "bevel",
+          flip: true,
+          bevelData: {
+            aIdx: 0,
+            aKey: "end",
+            bIdx: 1,
+            bKey: "start",
+            dist: 0.9,
+            flip: true,
+          },
+          distanceFormula: "-(fr)",
+        },
+      ],
+      constraints: [],
+    };
+  };
+
+  beforeEach(() => {
+    useStore.setState({
+      items: [flippedFilletSketch()],
+      history: [],
+      activeHistoryId: null,
+      variables: [{ name: "fr", formula: "9" }],
+    });
+  });
+
+  it("re-cuts a minus fillet to the new size and keeps it flipped", () => {
+    // fr 9 -> 12 mm: the concave fillet radius grows 0.9 -> 1.2 units.
+    useStore.getState().setVariables([{ name: "fr", formula: "12" }]);
+    const b = useStore.getState().items[0].shapes[2];
+    expect(b.r).toBeCloseTo(1.2, 4);
+    expect(!!(b.bevelData?.flip || b.flip)).toBe(true);
+    expect(b.distanceFormula).toBe("-(fr)");
+    // The legs were re-trimmed to the larger scoop.
+    expect(useStore.getState().items[0].shapes[0].x2).toBeCloseTo(-1.2, 4);
+  });
+
+  it("leaves the minus fillet untouched when its value is unchanged", () => {
+    useStore.getState().setVariables([{ name: "fr", formula: "9" }]);
+    const b = useStore.getState().items[0].shapes[2];
+    expect(b.r).toBeCloseTo(0.9, 6);
+    expect(!!(b.bevelData?.flip || b.flip)).toBe(true);
   });
 });
