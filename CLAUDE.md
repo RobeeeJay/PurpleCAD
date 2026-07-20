@@ -343,6 +343,17 @@ The working mechanism (keep all three pieces in lockstep):
 - Negative depths are valid (backwards extrude). `THREE.ExtrudeGeometry`
   only takes positive `depth`, so negative-depth code paths extrude by
   `abs(depth)` then `translate(0, 0, -abs(depth))`.
+- **An offset extrude CUT tracks the host face it was started from.** Its
+  `startOffset` is a frozen scene-unit distance; if the body it cuts is later
+  resized by a variable (a shorter `Height`), a fixed offset leaves the cut
+  floating above the body and it removes nothing — "the cut isn't preserved".
+  `regenerateExtrudeUnion` (the `isCut` branch) re-derives each prism's
+  `startOffset` every regen from the host's LIVE far-face extent along the cut
+  normal (`hostFaceExtentAlongNormal`) plus the authored `cutStartInset`
+  (0 = start exactly at the face; stored at commit in `runCutExtrudes`; absent
+  ⇒ 0, which is correct for old top-anchored cuts). Only prisms with a non-zero
+  `startOffset` re-anchor — a cut from the sketch plane (offset 0) stays put.
+  `cutTracksHostFace.test.js` drives the real shrink-Height repro.
 
 ## Display ↔ OCC-rebuild parity (the "reverts to an earlier state" bug class)
 
