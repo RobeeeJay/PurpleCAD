@@ -11,6 +11,7 @@ import {
   ndcGapPx,
   rulerFadeOpacity,
   pointBehindCamera,
+  stepRulerGlide,
 } from "../sceneSetup.js";
 import { useStore } from "../../store";
 import {
@@ -25,6 +26,17 @@ const _rulerPos = new THREE.Vector3();
 const _rulerNext = new THREE.Vector3();
 const _camForward = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
+
+// Persisted across frames — see stepRulerGlide's doc comment (sceneSetup.js)
+// for why the ruler's tracked centre needs to glide past an abrupt one-frame
+// target reassignment (the orbit-anchor recentre) instead of teleporting.
+let _rulerGlideState = {
+  lastRealX: null,
+  lastRealZ: null,
+  trackedX: 0,
+  trackedZ: 0,
+  glide: null,
+};
 
 // On-demand rendering.  The loop keeps ticking (cheap) but only does the
 // expensive per-frame work + render() when something actually changed, instead
@@ -342,10 +354,17 @@ export function createAnimateLoop({
         // ruler by it swept the whole grid of numbers around the target every
         // time the view orbited — the rows visibly jumped after a pan.  Locking
         // to the target keeps the labels world-stable through a rotation.
-        updateRuler3D(
-          rulerGroup,
+        _rulerGlideState = stepRulerGlide(
+          _rulerGlideState,
           targetRef.current.x,
           targetRef.current.z,
+          viewHeight,
+          performance.now(),
+        );
+        updateRuler3D(
+          rulerGroup,
+          _rulerGlideState.trackedX,
+          _rulerGlideState.trackedZ,
           viewHeight,
           useStore.getState().theme,
         );

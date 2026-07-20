@@ -591,3 +591,21 @@ sources are picked) that reuses the creation UI.
   fading smoothly. `pointBehindCamera` (`sceneSetup.js`) gates the check: skip
   it and stay fully opaque when the neighbour is behind the camera's view
   plane, since it isn't actually crowding the on-screen label.
+- **The orbit-anchor recentre (`navigation.js`'s `setOrbitAnchor`, fired on the
+  FIRST tick of a new Shift+scroll session) reassigns the camera target
+  INSTANTLY, in one frame, to wherever the screen-centre ray hits.** After
+  "Home" frames a model (centring it under the crosshair by design), this
+  fires on essentially every rotate — measured directly against
+  `test-files/bad-cut-extrude.pcad`: load → Home → first rotate tick snapped
+  target from `(0.42, -1.20, 2.56)` to `(2.62, 1.00, 4.76)` in a single frame.
+  The camera's own motion from this is small (only a fraction of its distance
+  from target changes), but the ruler — centred exactly on target — reflowed
+  its WHOLE visible window to match, reading as "the rulers instantly jump".
+  Don't try to remove the recentre (it's a deliberate, documented pivot
+  feature — a ring marks the new pivot); instead `stepRulerGlide`
+  (`sceneSetup.js`) detects a per-frame target delta bigger than a fraction of
+  the view height (continuous pan/rotate deltas never approach this) and
+  eases the ruler's tracked centre to the new target over a short tween
+  instead of teleporting with it (`rulerGlide.test.js` pins the exact measured
+  jump). Ordinary pan/rotate must still track 1:1 with NO added lag — only an
+  abrupt reassignment should glide.
