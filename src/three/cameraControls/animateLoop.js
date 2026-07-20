@@ -24,16 +24,23 @@ import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
 const _rulerNext = new THREE.Vector3();
+const _rulerGlidedPos = new THREE.Vector3();
 const _camForward = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
 
 // Persisted across frames — see stepRulerGlide's doc comment (sceneSetup.js)
-// for why the ruler's tracked centre needs to glide past an abrupt one-frame
-// target reassignment (the orbit-anchor recentre) instead of teleporting.
+// for why the tracked target needs to glide past an abrupt one-frame
+// reassignment (the orbit-anchor recentre) instead of teleporting.  viewHeight
+// (tier show/hide, span, per-label scale — everything distance-derived) is
+// computed from the GLIDED point, not the raw target, so the whole ruler
+// eases through the same tween rather than only its on-screen centre doing so
+// while the label density flips tiers in one frame underneath it.
 let _rulerGlideState = {
   lastRealX: null,
+  lastRealY: null,
   lastRealZ: null,
   trackedX: 0,
+  trackedY: 0,
   trackedZ: 0,
   glide: null,
 };
@@ -347,20 +354,31 @@ export function createAnimateLoop({
         rulerGroup.visible = false;
       } else if (rulerGroup) {
         rulerGroup.visible = true;
-        const viewHeight = gizmoScale(targetRef.current) * REFERENCE_HEIGHT;
-        // Recycle the labels around the RAW camera target.  A screen-space shift
+        // Glide the FULL 3D target through an abrupt one-frame reassignment
+        // (see stepRulerGlide's doc comment) before deriving anything from it,
+        // so viewHeight — and everything computed from it below (tier
+        // show/hide, span, per-label scale) — eases through the same tween
+        // the ruler's on-screen centre does, rather than jumping on its own.
+        _rulerGlideState = stepRulerGlide(
+          _rulerGlideState,
+          targetRef.current.x,
+          targetRef.current.y,
+          targetRef.current.z,
+          gizmoScale(targetRef.current) * REFERENCE_HEIGHT,
+          performance.now(),
+        );
+        _rulerGlidedPos.set(
+          _rulerGlideState.trackedX,
+          _rulerGlideState.trackedY,
+          _rulerGlideState.trackedZ,
+        );
+        const viewHeight = gizmoScale(_rulerGlidedPos) * REFERENCE_HEIGHT;
+        // Recycle the labels around the glided centre.  A screen-space shift
         // (like the compact axis indicator's) can't be done with a fixed world
         // offset: `camRight` rotates with the view, so shifting the spread-out
         // ruler by it swept the whole grid of numbers around the target every
         // time the view orbited — the rows visibly jumped after a pan.  Locking
         // to the target keeps the labels world-stable through a rotation.
-        _rulerGlideState = stepRulerGlide(
-          _rulerGlideState,
-          targetRef.current.x,
-          targetRef.current.z,
-          viewHeight,
-          performance.now(),
-        );
         updateRuler3D(
           rulerGroup,
           _rulerGlideState.trackedX,

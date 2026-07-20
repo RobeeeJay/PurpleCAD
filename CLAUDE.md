@@ -609,3 +609,19 @@ sources are picked) that reuses the creation UI.
   instead of teleporting with it (`rulerGlide.test.js` pins the exact measured
   jump). Ordinary pan/rotate must still track 1:1 with NO added lag — only an
   abrupt reassignment should glide.
+- **Gliding only the ruler's on-screen CENTRE wasn't enough — a position-only
+  jump threshold missed the actual trigger.** The same anchor-recentre also
+  changes `cam.position.distanceTo(target)` (viewHeight) in that one frame —
+  measured at 18.998 → 16.591 for the same repro — which straddles the fine
+  tier's hard `showBelow: 17` cliff with NO hysteresis, flipping 105 labels
+  visible in a single frame. That ~3.8-unit position delta looks "small"
+  against a ~19-unit viewHeight (a naive 25%-of-viewHeight position threshold
+  misses it entirely), so `stepRulerGlide` checks TWO independent signals: a
+  position jump past a smaller fraction of viewHeight, OR viewHeight itself
+  swinging >5% in one frame (ordinary continuous pan/rotate never does either
+  — proven bit-stable frame-to-frame during a pure orbit). Glide the FULL 3D
+  target (not just X/Z) and rederive viewHeight from the GLIDED point, so
+  every distance-derived quantity (tier visibility, span, per-label scale)
+  eases through the same tween as the centre. When adding any new
+  distance/zoom-derived ruler quantity, feed it from the glided point, not
+  `targetRef.current` directly, or it'll reintroduce this exact class of bug.

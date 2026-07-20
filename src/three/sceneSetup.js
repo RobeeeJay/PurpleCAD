@@ -312,39 +312,71 @@ export const RULER_FADE_RANGE_PX = 22; // fade smoothly over this band above it
 
 export const RULER_GLIDE_MS = 220;
 
-// The ruler's tracked ground-plane centre glides past an ABRUPT one-frame
-// target reassignment instead of teleporting with it.  Ordinary pan/rotate
-// move the camera target by a small amount each frame (or not at all, for a
-// pure orbit) and the ruler should follow that 1:1 with no added lag — but the
-// orbit-anchor recentre (navigation.js's setOrbitAnchor, fired on the FIRST
-// tick of a new Shift+scroll session) reassigns the target INSTANTLY, in one
-// frame, to wherever the screen-centre ray hits — which is the model's
-// surface once "Home" has framed it, i.e. on essentially every rotate right
-// after resetting the view. That's a real, large, single-frame target jump
-// (measured directly: ~(0.4,-1.2) -> (2.6,1.0) on the very first rotate tick
-// of test-files/bad-cut-extrude.pcad after Home), and the ruler — centred
-// exactly on target — reflowed its whole visible window to match, reading as
-// "the rulers instantly jump". A per-frame delta bigger than a fraction of
-// the current view height is treated as a jump (continuous pan/rotate deltas
-// never approach this) and glided over a short tween instead of snapped to.
+// The camera target glides past an ABRUPT one-frame reassignment instead of
+// teleporting with it.  Ordinary pan/rotate move the camera target by a small
+// amount each frame (or not at all, for a pure orbit) and the ruler — AND the
+// view-height/zoom-derived quantities (tier show/hide, span, per-label
+// scale — everything computed from `cam.position.distanceTo(target)`) —
+// should follow that 1:1 with no added lag.  But the orbit-anchor recentre
+// (navigation.js's setOrbitAnchor, fired on the FIRST tick of a new
+// Shift+scroll session) reassigns the target INSTANTLY, in one frame, to
+// wherever the screen-centre ray hits — which is the model's surface once
+// "Home" has framed it, i.e. on essentially every rotate right after
+// resetting the view. That's a real, single-frame jump in BOTH the target's
+// position AND its distance from the camera (measured directly against
+// test-files/bad-cut-extrude.pcad: target (0.4,-1.2,2.6) -> (2.6,1.0,4.8),
+// distance 30.1 -> 26.3 in one frame). Smoothing only the ruler's on-screen
+// CENTRE isn't enough — the distance jump alone flipped a whole label tier
+// from hidden to visible in that same frame (105 labels appearing at once),
+// which reads as just as sharp a "jump" as the centre snapping did. Glide the
+// full 3D target here so every distance-derived quantity computed from it
+// downstream (gizmoScale, tier visibility, span, per-label scale) eases
+// through the same short tween instead of any one of them snapping.
 //
 // Plain-object state (no THREE dependency) so this is unit-testable without a
-// live render loop: `state` is `{ lastRealX, lastRealZ, trackedX, trackedZ,
-// glide }` (glide: null | `{ fromX, fromZ, toX, toZ, startTime }`); the caller
-// owns and persists `state` across frames and reads `.trackedX/Z` afterward.
-export function stepRulerGlide(state, realX, realZ, viewHeight, now) {
+// live render loop: `state` is `{ lastRealX, lastRealY, lastRealZ,
+// lastViewHeight, trackedX, trackedY, trackedZ, glide }` (glide: null |
+// `{ fromX, fromY, fromZ, toX, toY, toZ, startTime }`); the caller owns and
+// persists `state` across frames and reads `.trackedX/Y/Z` afterward.
+//
+// Two INDEPENDENT jump signals, checked together — position delta alone
+// isn't enough: the measured real jump above is only ~3.8 units against a
+// ~19-unit viewHeight (under a naively-generous 25%-of-viewHeight position
+// threshold), yet its 12.7% viewHeight swing (18.998 -> 16.591) straddles the
+// fine tier's hard `showBelow: 17` cliff with NO hysteresis, flipping 105
+// labels visible in that one frame regardless of how "small" the position
+// move looks. A tight position threshold risks false positives during fast
+// ordinary panning (laggy rubber-banding), so catch this class via the
+// viewHeight swing instead: either a position jump bigger than a modest
+// fraction of viewHeight, OR viewHeight itself changing by more than 5% in
+// one frame (ordinary continuous zoom/pan/rotate never does — proven stable
+// to the exact same float value frame-to-frame during a pure orbit).
+export function stepRulerGlide(state, realX, realY, realZ, viewHeight, now) {
   const s = { ...state };
   if (s.lastRealX == null) {
     // First frame ever — nothing to glide from.
     s.trackedX = realX;
+    s.trackedY = realY;
     s.trackedZ = realZ;
   } else {
-    const jumpDist = Math.hypot(realX - s.lastRealX, realZ - s.lastRealZ);
-    if (jumpDist > Math.max(1, viewHeight * 0.25)) {
+    const jumpDist = Math.hypot(
+      realX - s.lastRealX,
+      realY - s.lastRealY,
+      realZ - s.lastRealZ,
+    );
+    const viewHeightFrac =
+      s.lastViewHeight > 0
+        ? Math.abs(viewHeight - s.lastViewHeight) / s.lastViewHeight
+        : 0;
+    const isJump =
+      jumpDist > Math.max(0.5, viewHeight * 0.08) || viewHeightFrac > 0.05;
+    if (isJump) {
       s.glide = {
         fromX: s.trackedX,
+        fromY: s.trackedY,
         fromZ: s.trackedZ,
         toX: realX,
+        toY: realY,
         toZ: realZ,
         startTime: now,
       };
@@ -352,18 +384,22 @@ export function stepRulerGlide(state, realX, realZ, viewHeight, now) {
       // Continuous movement arrived mid-glide (e.g. panning right after an
       // anchor snap) — retarget its endpoint instead of letting the ruler
       // snap there once the glide finishes.
-      s.glide = { ...s.glide, toX: realX, toZ: realZ };
+      s.glide = { ...s.glide, toX: realX, toY: realY, toZ: realZ };
     } else {
       s.trackedX = realX;
+      s.trackedY = realY;
       s.trackedZ = realZ;
     }
   }
   s.lastRealX = realX;
+  s.lastRealY = realY;
   s.lastRealZ = realZ;
+  s.lastViewHeight = viewHeight;
   if (s.glide) {
     const t = Math.min(1, (now - s.glide.startTime) / RULER_GLIDE_MS);
     const ease = 1 - Math.pow(1 - t, 3); // ease-out cubic
     s.trackedX = s.glide.fromX + (s.glide.toX - s.glide.fromX) * ease;
+    s.trackedY = s.glide.fromY + (s.glide.toY - s.glide.fromY) * ease;
     s.trackedZ = s.glide.fromZ + (s.glide.toZ - s.glide.fromZ) * ease;
     if (t >= 1) s.glide = null;
   }
