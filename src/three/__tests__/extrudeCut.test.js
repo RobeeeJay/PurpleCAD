@@ -149,6 +149,46 @@ describe("extrudeCut", () => {
     expect(hasBoreAt(csgs[0].geometryData, 1.5)).toBe(true);
   });
 
+  it("never cuts a HIDDEN solid", async () => {
+    useStore.getState().newDocument();
+    // Two blocks; hide the second.  A no-source cut falls back to every visible
+    // solid — the hidden one must be left alone (it was hidden deliberately).
+    useStore.getState().addItem(block());
+    useStore.getState().addItem({ ...block(), id: 2, name: "Cube 2" });
+    useStore.getState().toggleItemVisibility(2);
+    expect(useStore.getState().items.find((i) => i.id === 2)?.visible).toBe(
+      false,
+    );
+
+    await runCutExtrudes([bore(101, -1.5), bore(102, 1.5)], null, 100);
+
+    const after = useStore.getState();
+    // Block 2 stays an untouched cube — not consumed, not turned into a csg.
+    const b2 = after.items.find((i) => i.id === 2);
+    expect(b2.type).toBe("cube");
+    expect(b2.visible).toBe(false);
+    // Exactly one cut result, from the visible block only.
+    const csgs = after.items.filter((i) => i.type === "csg");
+    expect(csgs.length).toBe(1);
+    expect(csgs[0].regenerator.inputIds).toEqual([1]);
+  });
+
+  it("never cuts a hidden solid even when it's the EXPLICIT source", async () => {
+    // The face/host paths return a specific target by id; a hidden one must be
+    // rejected there too, not only in the visible-scan fallback.
+    useStore.getState().newDocument();
+    useStore.getState().addItem(block());
+    useStore.getState().toggleItemVisibility(1);
+
+    await runCutExtrudes([bore(101, -1.5)], /*sourceItemId*/ 1, 100);
+
+    const after = useStore.getState();
+    // No cut happened: block still a cube, still hidden, no csg produced.
+    const b1 = after.items.find((i) => i.id === 1);
+    expect(b1.type).toBe("cube");
+    expect(after.items.some((i) => i.type === "csg")).toBe(false);
+  });
+
   it("retargetFusedExtrude edits a fused cut in place — no new entry", async () => {
     useStore.getState().newDocument();
     useStore.getState().addItem(block());

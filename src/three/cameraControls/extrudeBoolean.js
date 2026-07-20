@@ -15,24 +15,24 @@ import { activePrecision } from "../resolution.js";
 //      into CSG items.
 //   3. Every visible non-sketch non-extrude item (last resort for sketches
 //      placed on an axis plane with no specific host).
+// A HIDDEN solid is never a cut target — the user hid it deliberately, so it
+// must not silently turn into a CSG result and reappear.  This applies to the
+// explicit source/host too, not just the scan.
 function resolveCutTargets(items, profile, sourceItemId, excludeIds = []) {
+  const cuttable = (i) => i && i.type !== "sketch" && i.visible !== false;
   if (sourceItemId != null) {
-    const src = items.find((i) => i.id === sourceItemId && i.type !== "sketch");
-    return src ? [src] : [];
+    const src = items.find((i) => i.id === sourceItemId);
+    return cuttable(src) ? [src] : [];
   }
   const sketchId = profile?.sketchId ?? null;
   const sketch = sketchId != null ? items.find((i) => i.id === sketchId) : null;
   const hostId = sketch?.hostSolidId ?? null;
   if (hostId != null) {
-    const host = items.find((i) => i.id === hostId && i.type !== "sketch");
-    return host ? [host] : [];
+    const host = items.find((i) => i.id === hostId);
+    return cuttable(host) ? [host] : [];
   }
   return items.filter(
-    (i) =>
-      i.type !== "sketch" &&
-      i.type !== "extrude" &&
-      !excludeIds.includes(i.id) &&
-      i.visible !== false,
+    (i) => cuttable(i) && i.type !== "extrude" && !excludeIds.includes(i.id),
   );
 }
 
