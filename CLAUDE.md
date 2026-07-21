@@ -3,6 +3,15 @@
 This file captures conventions and expectations established while iterating
 on this codebase. Read it before making changes.
 
+## Terminology: "centre of the 3D view"
+
+Whenever this file (or a task) refers to the centre of the 3D view, it means
+the centre of the VISIBLE viewport area EXCLUDING the left objects/timeline
+panel (`.left-panel`, `250px`, absolutely positioned over the canvas — the
+canvas itself spans the full container width). Raw canvas-centre is left of
+this point by half the panel width; camera framing, pivot placement, and the
+ground ruler must all target the panel-excluded centre, not raw canvas centre.
+
 ## Always reformat with Prettier after editing
 
 After every change to `.js` / `.jsx` files, run:
@@ -614,13 +623,36 @@ sources are picked) that reuses the creation UI.
   leaves nothing for the anchor-recentre to unsettle. Verified against the
   live repro: the fine tier (105 labels) no longer flips at all through the
   same rotate that used to flood it in one frame.
-- **The orbit-anchor ring itself had the same "wrong centre" bug.**
-  `getOrbitAnchor` raycast from raw NDC `(0,0)` — the canvas centre, not the
-  visible area's centre — so the pivot (and the ring marking it) sat left of
-  where Home actually frames the model. It now raycasts through
-  `(panel/canvasW, 0)`, matching `handleHome`'s own visible-area centring
-  (`useViewportCamera.js`) — both entry points must stay in sync if the panel
-  width ever changes.
+- **The orbit-anchor ring itself had the same "wrong centre" bug — and fixing
+  only the raycast (not the camera's actual orientation) left it half-fixed
+  AND introduced a new jerk.** `getOrbitAnchor` raycasts through
+  `(panel/canvasW, 0)` instead of raw NDC `(0,0)`, matching `handleHome`'s
+  visible-area centring. But `camera.lookAt(target)` ALWAYS puts `target` at
+  raw NDC `(0,0)` no matter which world point `target` is — a structural
+  property of a symmetric lookAt, proved by measurement (shifting which point
+  is picked only shifts the rest of the scene the wrong way once the camera
+  re-centres on it). So sampling the anchor off-centre and then `lookAt`-ing
+  onto it is a REAL camera reorientation, not a no-op: on `bad-cut-extrude.pcad`
+  after a plain pan, the first Shift+scroll tick recomputed `targetRotationY`
+  from 0.785 to a base of 0.668 (a real ~6.7° swing) purely from this
+  mismatch — "holding shift while panning jerks back to a previous spot".
+  Fix: `panelAwareLookAt` (`sceneSetup.js`) calls `camera.lookAt(target)` then
+  applies an ADDITIONAL yaw (`rotateOnWorldAxis`, sized from the camera's
+  horizontal FOV) so `target` renders at NDC `(+frac, 0)` — the visible area's
+  true centre — instead. This must be the ONLY panel-compensation mechanism,
+  applied at EVERY 3D-view (non-sketch) lookAt call site: initial camera
+  creation (`sceneSetup.js#createCamera`), every `navigation.js` pan/zoom/orbit
+  branch, the Home/orientation-change tween (`animateLoop.js`), and the
+  projection-mode-switch camera recreation (`useViewportCamera.js`) — missing
+  even one reintroduces the mismatch at that boundary. Two things that already
+  assumed the visible-area centre (`getOrbitAnchor`'s raycast and the ruler's
+  `groundRayCrossing`) were already correct and stayed unchanged; `handleHome`
+  dropped its own asymmetric `frame` parameter (would double-compensate now
+  that the tween's lookAt does it) and the axis indicator dropped its
+  `camRight`-based manual shift for the same reason. Verified empirically: the
+  pivot's projected NDC-x stayed ~0.1456 (`= panel/canvasW`, exactly the
+  expected visible-centre value) across Home, a pan, and every subsequent
+  rotate tick — where before the fix it would read ~0 (raw canvas centre).
 - **A ruler-centring fix needs to be verified with SCREENSHOTS at realistic
   frame intervals, not just a numeric log of state.** An earlier glide
   attempt's numeric trace looked "gradual enough" (tier flipping over several

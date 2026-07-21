@@ -96,6 +96,7 @@ export function useViewportInit({
       savedState,
       targetRef,
       useStore.getState().fov,
+      containerRef.current.clientWidth,
     );
     cameraRef.current = camera;
     scene.add(camera);

@@ -8,12 +8,7 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { saveCameraState } from "../../three/cameraControls.js";
 import { analyticLocalPoints, fitPointsToView } from "../../three/cameraFit.js";
-
-// Width (px) of the objects/timeline overlay that floats over the LEFT of the
-// canvas.  The 3D canvas spans the full width, but this strip is obscured, so
-// "centred" means centred in the visible region to its right.  Mirrors the
-// value the animate loop uses to place the axis indicator.
-const LEFT_PANEL_PX = 250;
+import { panelAwareLookAt } from "../../three/sceneSetup.js";
 
 export function useViewportCamera({
   containerRef,
@@ -125,16 +120,13 @@ export function useViewportCamera({
     let endZoom = null;
     const any = pts.length > 0;
     if (any) {
-      // The objects/timeline overlay hides a strip on the LEFT of the canvas;
-      // frame into the visible region to its right so the model isn't pushed
-      // half under the panel.  cx = panel/width is that region's NDC centre;
-      // its NDC half-width shrinks by the same fraction.
-      const canvasW = rendererRef.current?.domElement?.clientWidth || 1;
-      const panel = Math.min(LEFT_PANEL_PX, canvasW * 0.8);
-      const frac = panel / canvasW;
-      const frame = { cx: frac, cy: 0, halfW: 1 - frac, halfH: 1 };
+      // Fit symmetrically into the full [-1,1] NDC square — the tween's
+      // lookAt (animateLoop.js) applies panelAwareLookAt, which shifts the
+      // camera's ORIENTATION so this centre renders in the visible region to
+      // the right of the objects/timeline panel. Don't ALSO shift the fit
+      // itself, or the two compensations stack (double-shift).
       // 0.9 == frame the tightest extent to 90% of the usable view, centred.
-      const fit = fitPointsToView(pts, dir, camera, 0.9, frame);
+      const fit = fitPointsToView(pts, dir, camera, 0.9);
       center = fit.target;
       distance = fit.distance;
       endZoom = fit.endZoom;
@@ -199,7 +191,15 @@ export function useViewportCamera({
       newCamera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 1000);
       newCamera.position.copy(currentPosition);
     }
-    newCamera.lookAt(targetRef.current);
+    if (isInSketchMode) {
+      newCamera.lookAt(targetRef.current);
+    } else {
+      panelAwareLookAt(
+        newCamera,
+        targetRef.current,
+        renderer.domElement.clientWidth,
+      );
+    }
     currentCamera.children.forEach((child) => {
       if (child instanceof THREE.Light) {
         currentCamera.remove(child);

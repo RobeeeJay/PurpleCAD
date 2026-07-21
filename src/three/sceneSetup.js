@@ -23,6 +23,7 @@ export function createCamera(
   savedState,
   targetRef,
   fov = 35,
+  canvasWidthPx,
 ) {
   const frustumSize = 20;
   let camera;
@@ -43,7 +44,7 @@ export function createCamera(
     savedState.positionY,
     savedState.positionZ,
   );
-  camera.lookAt(targetRef.current);
+  panelAwareLookAt(camera, targetRef.current, canvasWidthPx);
   return camera;
 }
 
@@ -297,6 +298,52 @@ export function createGrid(scene, theme) {
 
 const RULER_Y = 0.05; // label height above the ground plane
 const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
+
+// Width (px) of the objects/timeline overlay that floats over the LEFT of the
+// canvas.  Duplicated per-file (matches the rest of the codebase's pattern —
+// see useViewportCamera.js's own copy) rather than centralised.
+const LEFT_PANEL_PX = 250;
+
+const _panelYawAxis = new THREE.Vector3(0, 1, 0);
+
+// `camera.lookAt(target)` ALWAYS puts target at NDC (0,0) — the raw canvas
+// centre — no matter which world point `target` is. That centre sits under
+// the left objects/timeline panel, so anything the camera "centres on" (the
+// orbit pivot, Home's framed model, …) renders visibly left of the panel-
+// excluded VISIBLE area's own centre — a structural property of a symmetric
+// lookAt, not something choosing a different `target` point can fix (proved
+// by measurement: shifting which point is picked only shifts the REST of the
+// scene the wrong way once the camera re-centres on it).
+//
+// Call this immediately after `camera.lookAt(target)` for every 3D-view (non-
+// sketch) navigation path — pan, zoom, orbit, Home/orientation-change tweens,
+// and the camera recreated on a projection-mode switch — to yaw the camera by
+// a small ADDITIONAL angle so target renders at NDC (+frac, 0), the visible
+// area's true centre, instead. Deliberately NOT used for the thumbnail
+// capture's `cam.lookAt(center)` (cameraControls.js), which wants the full
+// symmetric frame with no panel exclusion (see its own comment).
+//
+// This must be the ONLY panel-compensation mechanism in the live-navigation
+// path — `getOrbitAnchor` (cameraControls.js) and the ruler's
+// `groundRayCrossing` (this file) deliberately raycast from NDC (+frac, 0)
+// too, which is only correct BECAUSE this function keeps the camera's actual
+// orientation consistent with that assumption; and `handleHome`
+// (useViewportCamera.js) deliberately fits into the FULL [-1,1] frame (no
+// custom frame parameter) rather than its own asymmetric composition, relying
+// on this same yaw (applied to its tween's lookAt) to land the result in the
+// right place — doing both at once would double-compensate.
+export function panelAwareLookAt(camera, target, canvasWidthPx) {
+  camera.lookAt(target);
+  if (!camera.isPerspectiveCamera) return; // orthographic: no compensation yet
+  const canvasW = canvasWidthPx || 1;
+  const panel = Math.min(LEFT_PANEL_PX, canvasW * 0.8);
+  const frac = panel / canvasW;
+  if (frac <= 0) return;
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const angle = Math.atan(frac * Math.tan(hFov / 2));
+  camera.rotateOnWorldAxis(_panelYawAxis, angle);
+}
 
 // Legibility fade for a ruler label whose on-screen gap to the NEXT grid step
 // has collapsed (a row viewed nearly edge-on — the camera's forward direction

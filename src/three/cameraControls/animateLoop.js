@@ -12,6 +12,7 @@ import {
   rulerFadeOpacity,
   pointBehindCamera,
   groundRayCrossing,
+  panelAwareLookAt,
 } from "../sceneSetup.js";
 import { useStore } from "../../store";
 import {
@@ -27,7 +28,6 @@ const _rulerNext = new THREE.Vector3();
 const _rulerNdcPoint = new THREE.Vector3();
 const _rulerCamDir = new THREE.Vector3();
 const _camForward = new THREE.Vector3();
-const _camRight = new THREE.Vector3();
 
 // Persisted across frames — see groundRayCrossing's doc comment (sceneSetup.js)
 // for why the ruler's cross-point is rebuilt fresh from the camera's own
@@ -163,7 +163,15 @@ export function createAnimateLoop({
       cameraRef.current.up
         .lerpVectors(anim.startUp, anim.endUp, ease)
         .normalize();
-      cameraRef.current.lookAt(targetRef.current);
+      if (sketchModeRef.current) {
+        cameraRef.current.lookAt(targetRef.current);
+      } else {
+        panelAwareLookAt(
+          cameraRef.current,
+          targetRef.current,
+          renderer.domElement.clientWidth,
+        );
+      }
       // Orthographic "fit all" also tweens zoom so the bbox ends up framed.
       if (anim.endZoom != null && anim.startZoom != null) {
         cameraRef.current.zoom =
@@ -211,15 +219,10 @@ export function createAnimateLoop({
         // Pin the XYZ indicator to the view centre (the camera target) so it
         // stays on-screen as the view pans, rather than scrolling off with the
         // world origin.  The arrows still point along the true world axes.
-        // Then shift it right by half the left overlay's width so it sits in the
-        // centre of the *visible* 3D area, clear of the objects/timeline panel.
-        const canvasH = renderer.domElement.clientHeight || 1;
-        const worldPerPx =
-          (gizmoScale(targetRef.current) * REFERENCE_HEIGHT) / canvasH;
-        _camRight.set(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
-        axisGroupRef.current.position
-          .copy(targetRef.current)
-          .addScaledVector(_camRight, (LEFT_PANEL_PX / 2) * worldPerPx);
+        // panelAwareLookAt already renders the target at the centre of the
+        // *visible* 3D area (clear of the objects/timeline panel), so no
+        // extra screen-space shift is needed here.
+        axisGroupRef.current.position.copy(targetRef.current);
         // 0.5: render the XYZ indicator at half the authored on-screen size.
         const s = gizmoScale(axisGroupRef.current.position) * 0.5;
         axisGroupRef.current.scale.setScalar(s);
