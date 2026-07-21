@@ -21,6 +21,17 @@
 // even though its on-screen CENTRE was gliding correctly. stepRulerGlide now
 // also watches viewHeight's own one-frame swing, which is what actually drove
 // the tier flip.
+//
+// A second round found the glide itself was still too abrupt: it used an
+// ease-OUT cubic, which front-loads most of the transition into the first
+// ~10% of the duration (at t=0.09 it's already 24% eased) — so nearly all of
+// a ~100-label tier flip still appeared within the first couple of animation
+// frames, with the remaining time an imperceptible tail. Screenshotting a
+// live rotate confirmed it directly: almost the whole label set changed
+// between one 20ms frame and the next. Switched to smoothstep (symmetric
+// ease-IN-out, ~2% eased at t=0.09) and lengthened the glide to match the
+// Home button's own 400ms tween, so a big tier flip actually reads as a
+// gradual fade rather than a jump with a slow settle tacked on.
 import { describe, it, expect } from "vitest";
 import { stepRulerGlide, RULER_GLIDE_MS } from "../sceneSetup.js";
 
@@ -130,6 +141,24 @@ describe("stepRulerGlide", () => {
       expect(s.trackedX).toBeLessThanOrEqual(10 + 1e-9);
       prev = s.trackedX;
     }
+  });
+
+  it("eases in-out, not out — early progress stays small (no front-loaded jump)", () => {
+    // Regression for the ease-out-cubic bug: at ~9% of the glide duration,
+    // ease-out-cubic was already 24% eased (front-loading most of the visible
+    // change into the first couple of frames). Smoothstep should be much
+    // gentler at the same point — comfortably under 10%.
+    let s = stepRulerGlide(initialState(), 0, 0, 0, 6, 1000);
+    s = stepRulerGlide(s, 100, 0, 0, 6, 1016); // start the glide
+    const earlyT = Math.round(RULER_GLIDE_MS * 0.09);
+    s = stepRulerGlide(s, 100, 0, 0, 6, 1016 + earlyT);
+    expect(s.trackedX / 100).toBeLessThan(0.1);
+    // ...and by the midpoint it should be very close to half-eased (the
+    // hallmark of a symmetric ease-in-out curve).
+    let s2 = stepRulerGlide(initialState(), 0, 0, 0, 6, 1000);
+    s2 = stepRulerGlide(s2, 100, 0, 0, 6, 1016);
+    s2 = stepRulerGlide(s2, 100, 0, 0, 6, 1016 + RULER_GLIDE_MS / 2);
+    expect(s2.trackedX / 100).toBeCloseTo(0.5, 1);
   });
 
   it("does not glide for an ordinary small viewHeight change (zoom) with no position jump", () => {

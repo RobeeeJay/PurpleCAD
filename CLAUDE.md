@@ -625,3 +625,18 @@ sources are picked) that reuses the creation UI.
   eases through the same tween as the centre. When adding any new
   distance/zoom-derived ruler quantity, feed it from the glided point, not
   `targetRef.current` directly, or it'll reintroduce this exact class of bug.
+- **A position-only jump threshold was NOT the only remaining gap — the ease
+  CURVE mattered just as much.** Even after watching viewHeight, the glide
+  still looked abrupt: it used ease-OUT cubic, which front-loads most of the
+  transition into the first ~10% of the duration (at t=0.09 it's already 24%
+  eased) — so nearly all of a ~100-label tier flip still appeared within a
+  couple of animation frames, with the remaining time an imperceptible tail.
+  Caught by SCREENSHOTTING (not just logging numbers) a live rotate at 20ms
+  intervals — the numeric trace alone looked "gradual enough" but the actual
+  rendered frames showed almost the whole label set changing in one step.
+  Switched to smoothstep (symmetric ease-in-out, ~2% eased at the same t=0.09)
+  and lengthened `RULER_GLIDE_MS` to 400 (matching the Home button's own fly-to
+  tween) so a big tier flip reads as a gradual fade, not a jump with a slow
+  settle tacked on. Lesson: when verifying a "does this look smooth" fix,
+  screenshot actual frames at realistic intervals — a numeric log of state can
+  hide an ease curve that's mathematically continuous but visually front-loaded.

@@ -310,7 +310,11 @@ const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
 export const RULER_FADE_MIN_GAP_PX = 26; // below this, neighbouring text overlaps
 export const RULER_FADE_RANGE_PX = 22; // fade smoothly over this band above it
 
-export const RULER_GLIDE_MS = 220;
+// Matches the Home button's own fly-to tween duration (useViewportCamera.js)
+// so the two transitions feel consistent. 220ms proved too fast in practice
+// for a big tier flip (~100 labels) even with a smoothstep ease — nearly all
+// of them still visibly appeared within a couple of animation frames.
+export const RULER_GLIDE_MS = 400;
 
 // The camera target glides past an ABRUPT one-frame reassignment instead of
 // teleporting with it.  Ordinary pan/rotate move the camera target by a small
@@ -397,7 +401,14 @@ export function stepRulerGlide(state, realX, realY, realZ, viewHeight, now) {
   s.lastViewHeight = viewHeight;
   if (s.glide) {
     const t = Math.min(1, (now - s.glide.startTime) / RULER_GLIDE_MS);
-    const ease = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    // Smoothstep (ease-IN-out), not ease-out: ease-out cubic front-loads most
+    // of the transition into the first ~10% of the duration (at t=0.09 it's
+    // already 24% eased), so nearly all the new/vanishing labels appeared
+    // within the first 1-2 frames and the remaining ~200ms was an
+    // imperceptible tail — still read as "the rulers jump", just with a
+    // barely-visible settle tacked on. Smoothstep is ~2% eased at the same
+    // t=0.09, spreading the visible change evenly across the whole duration.
+    const ease = t * t * (3 - 2 * t);
     s.trackedX = s.glide.fromX + (s.glide.toX - s.glide.fromX) * ease;
     s.trackedY = s.glide.fromY + (s.glide.toY - s.glide.fromY) * ease;
     s.trackedZ = s.glide.fromZ + (s.glide.toZ - s.glide.fromZ) * ease;
