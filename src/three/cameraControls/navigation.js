@@ -23,16 +23,20 @@ export function createNavigationHandlers(
   const controls = cameraControlsRef.current;
 
   let shiftScrollSessionTimer = null;
-  // Whether the orbit pivot needs re-anchoring before the next Shift+scroll
-  // session starts. Only a PAN moves the pivot to a genuinely new point (so
-  // resuming rotation after one should re-centre on it, per the earlier "pan
-  // then rotate" fix) — a mere pause between rotate bursts does not, and must
-  // NOT re-anchor: the panel-shifted crosshair ray isn't the rotation axis
-  // itself, so re-sampling it while orbiting traces a cone around the true
-  // pivot and lands on a slightly different point every time, at a magnitude
-  // that scales with distance-to-surface ("holding shift, pausing half a
-  // second, then rotating again jumps the view — worse when zoomed out").
-  let targetAnchorStale = true;
+  // Fraction of the current view distance the fresh anchor raycast must
+  // differ from the EXISTING pivot by before we treat it as a real move (a
+  // pan) rather than resampling noise. The panel-shifted crosshair ray isn't
+  // the rotation axis itself, so re-sampling it while orbiting a fixed pivot
+  // traces a cone around it and lands on a slightly different point every
+  // time EVEN WITH NO PAN AT ALL — purely from the camera having rotated
+  // during the session that just ended. Gating on "did a pan branch run"
+  // isn't reliable either: real trackpad hardware can misclassify an event
+  // (momentum-scroll tail after a pan, or a modifier-key race on the first
+  // event of a new gesture), so this compares the RAYCAST RESULT against the
+  // current pivot directly — ground truth, not an event-classification
+  // proxy — and only re-anchors when the two genuinely disagree by more than
+  // resampling noise.
+  const ANCHOR_STABLE_FRACTION = 0.05;
 
   // Sketch mode has no orbit-pivot concept (it uses screen-locked HTML
   // rulers, not a 3D ground ruler/pivot ring) so it keeps plain symmetric
@@ -124,7 +128,6 @@ export function createNavigationHandlers(
         .addScaledVector(up, -e.deltaY * worldPerPx);
       currentCamera.position.add(offset);
       targetRef.current.add(offset);
-      targetAnchorStale = true;
       lookAtView(currentCamera, targetRef.current);
       setRotationState(currentCamera.quaternion.clone());
       save();
@@ -133,26 +136,29 @@ export function createNavigationHandlers(
 
     if (e.shiftKey) {
       if (shiftScrollSessionTimer === null) {
-        if (targetAnchorStale) {
+        const freshAnchor = getOrbitAnchor(
+          cameraRef,
+          targetRef,
+          raycasterRef,
+          sceneRef,
+          objectsRef,
+          itemsRef,
+          renderer,
+        );
+        const viewDist = currentCamera.position.distanceTo(targetRef.current);
+        const anchorDrift = freshAnchor.distanceTo(targetRef.current);
+        if (anchorDrift > viewDist * ANCHOR_STABLE_FRACTION) {
           setOrbitAnchor(
-            getOrbitAnchor(
-              cameraRef,
-              targetRef,
-              raycasterRef,
-              sceneRef,
-              objectsRef,
-              itemsRef,
-              renderer,
-            ),
+            freshAnchor,
             cameraRef,
             targetRef,
             cameraControlsRef,
             orbitIndicator,
           );
-          targetAnchorStale = false;
         } else {
-          // Resuming a rotate after a mere pause (no intervening pan): the
-          // pivot hasn't moved, just re-show the ring where it already is.
+          // The fresh raycast landed close to the EXISTING pivot: resampling
+          // noise (a pause, not a real pan), so don't touch target/rotation —
+          // just re-show the ring where it already is.
           orbitIndicator.position.copy(targetRef.current);
           orbitIndicator.visible = true;
         }
@@ -222,7 +228,6 @@ export function createNavigationHandlers(
         currentCamera.position.y -= e.deltaY * 0.05;
         targetRef.current.y -= e.deltaY * 0.05;
       }
-      targetAnchorStale = true;
       lookAtView(currentCamera, targetRef.current);
     }
     save();

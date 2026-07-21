@@ -662,14 +662,29 @@ sources are picked) that reuses the creation UI.
   the ring-hide timeout, ALSO reused as "should I re-anchor") lands on a
   nearby but different point than the existing `target` even with the camera
   completely stationary, at a magnitude that scales with distance-to-surface
-  — "hold shift, rotate, pause half a second, rotate again: view jumps on X,
-  worse when zoomed out". Fix: `targetAnchorStale` (`navigation.js`) — a flag
-  set true only by an actual PAN (meta-pan / plain-pan; zoom does not move
-  `target` so doesn't need to) and cleared right after `setOrbitAnchor` runs.
-  The Shift branch only re-anchors when BOTH the session lapsed AND this flag
-  is set; otherwise it just re-shows the ring at the (unchanged) existing
-  target. `orbit-anchor-session.spec.js` pins both directions: a pause alone
-  must not move `getViewTarget()` at all, a pan before rotating still must.
+  — "hold shift, rotate, pause half a second, rotate again: view jumps".
+  **First attempt (event-classification flag, insufficient) then GROUND-TRUTH
+  fix (`navigation.js`):** a boolean set by "did a pan branch run this event"
+  fixed every synthetic repro but real trackpad hardware can still deliver a
+  wheel event MISCLASSIFIED as a pan during what the user experiences as one
+  continuous rotate gesture (a momentum-scroll tail after an earlier real pan,
+  or a modifier-key race on the first event of a new gesture) — the flag
+  can't tell a genuine pan from a misclassified blip, so it can still
+  re-anchor onto a bogus point. The robust fix compares AGAINST GROUND TRUTH
+  instead of trusting event classification: every session start still
+  raycasts a fresh anchor, but only APPLIES it (`setOrbitAnchor`) when it
+  differs from the EXISTING `target` by more than `ANCHOR_STABLE_FRACTION`
+  (5%) of the current view distance — scaling with distance matches "varies
+  with zoom" directly. Below that, it's resampling noise (a pause, OR a stray
+  sub-threshold blip that nudged `target` by a hair) and is left alone,
+  keeping only the ring redrawn. A real, deliberate pan moves the visible
+  centre by far more than 5% of view distance, so it still re-anchors
+  correctly. `orbit-anchor-session.spec.js` pins both directions (pause alone
+  must not move `getViewTarget()`; a pan before rotating still must) — a
+  third case (a tiny non-shift "blip" injected mid-pause) was hand-verified
+  to no longer amplify into a full re-anchor jump, though hardware-specific
+  momentum/modifier-race timing couldn't be reproduced in Playwright's
+  synthetic wheel events, so treat real-device testing as the final word here.
 - **A ruler-centring fix needs to be verified with SCREENSHOTS at realistic
   frame intervals, not just a numeric log of state.** An earlier glide
   attempt's numeric trace looked "gradual enough" (tier flipping over several
