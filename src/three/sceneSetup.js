@@ -342,7 +342,15 @@ export function panelAwareLookAt(camera, target, canvasWidthPx) {
   const vFov = (camera.fov * Math.PI) / 180;
   const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
   const angle = Math.atan(frac * Math.tan(hFov / 2));
-  camera.rotateOnWorldAxis(_panelYawAxis, angle);
+  // rotateOnAxis treats the axis as LOCAL (object-space) — the camera's OWN
+  // up vector post-lookAt, which keeps this a pure horizontal NDC shift no
+  // matter how steeply the camera is pitched. rotateOnWorldAxis(worldY, …)
+  // looks equivalent and IS for a level camera, but as pitch moves away from
+  // 0 it stops being a simple yaw around the camera's own up — it picks up a
+  // roll-like component, so the resulting NDC-x shift varies with pitch
+  // instead of staying constant: the pivot dot visibly swings left/right as
+  // the view is rotated up/down.
+  camera.rotateOnAxis(_panelYawAxis, angle);
 }
 
 // Legibility fade for a ruler label whose on-screen gap to the NEXT grid step

@@ -645,6 +645,21 @@ sources are picked) that reuses the creation UI.
   test — it's a render-loop frame-ordering issue, not a pure-function bug,
   and a screenshot-diff test risks GPU-timing flakiness; verified only via
   instrumented reproduction (see this bullet and don't regress the ordering).
+- **`panelAwareLookAt`'s compensating yaw used the WRONG rotation axis —
+  the pivot swung left/right as the view was rotated up/down (pitch
+  changed).** It used `camera.rotateOnWorldAxis(worldY, angle)`, which is
+  only equivalent to a pure horizontal-NDC shift when the camera is looking
+  level (pitch 0) — as pitch moves away from level, rotating around the
+  WORLD Y axis instead of the camera's OWN current up vector picks up a
+  roll-like component, so the resulting NDC-x shift of the pivot varies with
+  pitch instead of staying constant. Fix: `camera.rotateOnAxis(localY,
+  angle)` — `rotateOnAxis` treats its axis as LOCAL (object-space), i.e. the
+  camera's own up post-`lookAt`, which keeps the yaw a pure horizontal shift
+  at any pitch. `panelAwareLookAt.test.js` pins this directly (a pure-camera
+  unit test, no e2e needed): project the pivot at a spread of pitch angles
+  and assert NDC-x stays constant — confirmed this test actually fails
+  against the old `rotateOnWorldAxis` code (a real ~0.09 NDC swing at pitch
+  ±1.4 rad), not a tautology.
 - **The orbit-anchor ring itself had the same "wrong centre" bug — and fixing
   only the raycast (not the camera's actual orientation) left it half-fixed
   AND introduced a new jerk.** `getOrbitAnchor` raycasts through
