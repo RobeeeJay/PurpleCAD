@@ -205,6 +205,20 @@ export function createAnimateLoop({
     // disappear into the object when it zooms out.
     const cam = cameraRef.current;
     if (cam) {
+      // renderer.render() (end of this function) is what normally refreshes
+      // the camera's matrixWorld via the scene graph — but this block reads
+      // it EARLIER in the same frame (unproject/project for the ruler and
+      // label-fade projections), so without this it's always one frame
+      // stale: the FIRST frame after any position/orientation change (a new
+      // wheel tick while rotating) computes the ruler's ground-ray crossing
+      // from the PREVIOUS frame's camera transform, then self-corrects next
+      // frame once render() catches up — visible as the ruler numbers
+      // "jiggling on the opposite axis to the one they label" while
+      // rotating (the stale-vs-correct values differ mostly in the
+      // off-axis/perpendicular coordinate, since each label's OWN-axis
+      // position is quantized to a grid step and doesn't visibly move for
+      // a one-frame swap).
+      cam.updateMatrixWorld();
       const REFERENCE_HEIGHT = 10; // arbitrary baseline; tuned visually
       const gizmoScale = (worldPos) => {
         if (cam.isOrthographicCamera) {

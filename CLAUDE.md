@@ -623,6 +623,28 @@ sources are picked) that reuses the creation UI.
   leaves nothing for the anchor-recentre to unsettle. Verified against the
   live repro: the fine tier (105 labels) no longer flips at all through the
   same rotate that used to flood it in one frame.
+- **The ruler's ground-ray crossing read the camera's transform ONE FRAME
+  STALE — every wheel tick while rotating flickered the numbers on the
+  off-axis coordinate.** `renderer.render()` (end of `animate()`) is what
+  normally refreshes `camera.matrixWorld` via the scene graph (the camera is
+  `scene.add`ed), but the ruler block reads it EARLIER in that same frame
+  (`unproject`/`project` for the ground-ray and label-fade projections).
+  Without an explicit `cam.updateMatrixWorld()` first, the FIRST rendered
+  frame after any position/orientation change (each wheel tick while
+  rotating) computed the crossing from the PREVIOUS frame's transform, then
+  self-corrected the very next frame once `render()` caught up — confirmed
+  by instrumented logging showing the SAME `camPos` producing two different
+  `(x,z)` values, the first one only ever appearing for exactly one frame.
+  Visually this read as "the ruler numbers jiggle on the opposite axis to
+  the one they label": each label's OWN-axis coordinate is quantized to a
+  grid step (invisible for a one-frame swap unless it's near a step
+  boundary), but the ROW's off-axis coordinate (`cz`/`cx` shared by the whole
+  row) is continuous and flickered directly. Fix: `cam.updateMatrixWorld()`
+  at the top of `animateLoop.js`'s per-frame UI-overlay block, before
+  anything reads the camera's world transform. Not covered by an automated
+  test — it's a render-loop frame-ordering issue, not a pure-function bug,
+  and a screenshot-diff test risks GPU-timing flakiness; verified only via
+  instrumented reproduction (see this bullet and don't regress the ordering).
 - **The orbit-anchor ring itself had the same "wrong centre" bug — and fixing
   only the raycast (not the camera's actual orientation) left it half-fixed
   AND introduced a new jerk.** `getOrbitAnchor` raycasts through
