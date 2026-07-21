@@ -1,8 +1,7 @@
 name: OCC Addon
 
 on:
-#  push:
-#  pull_request:
+  pull_request:
 
 jobs:
   build:
@@ -26,10 +25,14 @@ jobs:
         id: cache-occ
         uses: actions/cache@v4
         with:
-          path: ~/occ-arm64
+          path: ~/occ-8.0-arm64
           # Cache key includes OCC version.  Bump the version string to
-          # invalidate and rebuild (takes ~12 min on first run).
-          key: occ-7.9.0-arm64-${{ runner.os }}-${{ runner.arch }}
+          # invalidate and rebuild (takes ~12 min on first run).  Matches the
+          # primary dev target in CLAUDE.md (native/occ-addon/CMakeLists.txt
+          # looks here FIRST) — CI must build against the SAME version local
+          # dev uses, or it can never catch an 8.0-specific regression (e.g.
+          # the removed TopTools_ListIteratorOfListOfShape.hxx header).
+          key: occ-8.0.0-arm64-${{ runner.os }}-${{ runner.arch }}
 
       - name: Clone OCC source
         if: steps.cache-occ.outputs.cache-hit != 'true'
@@ -37,16 +40,19 @@ jobs:
           # Org is Open-Cascade-SAS — a wrong/nonexistent repo makes git prompt
           # for credentials (private-repo fallback), which fails headless with
           # "could not read Username ... Device not configured".
-          git clone --depth 1 --branch V7_9_0 \
+          git clone --depth 1 --branch V8_0_0 \
             https://github.com/Open-Cascade-SAS/OCCT.git /tmp/occt
 
       - name: Build and install OCC
         if: steps.cache-occ.outputs.cache-hit != 'true'
         run: |
+          # 8.0.0 folded the old DETools module into DataExchange (its
+          # TKDESTEP/TKDESTL/TKDEIGES toolkits, which the addon links) — no
+          # separate BUILD_MODULE_DETools flag exists any more here.
           cmake -S /tmp/occt -B /tmp/occt-build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=$HOME/occ-arm64 \
+            -DCMAKE_INSTALL_PREFIX=$HOME/occ-8.0-arm64 \
             -DBUILD_MODULE_FoundationClasses=ON \
             -DBUILD_MODULE_ModelingData=ON \
             -DBUILD_MODULE_ModelingAlgorithms=ON \
@@ -54,7 +60,6 @@ jobs:
             -DBUILD_MODULE_Visualization=OFF \
             -DBUILD_MODULE_Draw=OFF \
             -DBUILD_MODULE_ApplicationFramework=OFF \
-            -DBUILD_MODULE_DETools=ON \
             -DUSE_FREETYPE=OFF \
             -DUSE_TK=OFF \
             -DUSE_OPENGL=OFF
