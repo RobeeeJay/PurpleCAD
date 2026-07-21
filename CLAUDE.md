@@ -653,6 +653,23 @@ sources are picked) that reuses the creation UI.
   pivot's projected NDC-x stayed ~0.1456 (`= panel/canvasW`, exactly the
   expected visible-centre value) across Home, a pan, and every subsequent
   rotate tick — where before the fix it would read ~0 (raw canvas centre).
+- **Re-anchoring the orbit pivot on every NEW Shift+scroll session — even
+  when nothing panned in between — drifts the pivot on a mere PAUSE.**
+  `getOrbitAnchor`'s panel-shifted crosshair ray is not the rotation axis
+  itself; as the camera orbits a fixed `target`, that ray sweeps a cone
+  around it rather than tracing the same 3D point. Re-sampling it (which used
+  to happen unconditionally whenever `shiftScrollSessionTimer` had lapsed —
+  the ring-hide timeout, ALSO reused as "should I re-anchor") lands on a
+  nearby but different point than the existing `target` even with the camera
+  completely stationary, at a magnitude that scales with distance-to-surface
+  — "hold shift, rotate, pause half a second, rotate again: view jumps on X,
+  worse when zoomed out". Fix: `targetAnchorStale` (`navigation.js`) — a flag
+  set true only by an actual PAN (meta-pan / plain-pan; zoom does not move
+  `target` so doesn't need to) and cleared right after `setOrbitAnchor` runs.
+  The Shift branch only re-anchors when BOTH the session lapsed AND this flag
+  is set; otherwise it just re-shows the ring at the (unchanged) existing
+  target. `orbit-anchor-session.spec.js` pins both directions: a pause alone
+  must not move `getViewTarget()` at all, a pan before rotating still must.
 - **A ruler-centring fix needs to be verified with SCREENSHOTS at realistic
   frame intervals, not just a numeric log of state.** An earlier glide
   attempt's numeric trace looked "gradual enough" (tier flipping over several
