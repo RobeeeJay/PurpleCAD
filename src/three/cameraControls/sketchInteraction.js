@@ -12,22 +12,15 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { effectiveSketchSelTypes } from "../../store/selectionMode.js";
-import {
-  getSnapPoints,
-  getShapeLength,
-  polyArea,
-  MM_PER_UNIT,
-} from "../sceneObjects.js";
+import { getShapeLength, polyArea, MM_PER_UNIT } from "../sceneObjects.js";
 import { collectConnectedShapes } from "../sketchGeometry.js";
-import { sketchLineColorFor, SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
-import { svgCoincidentConstraints } from "../importGeometry.js";
+import { SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
 import { DEFAULT_FONT_ID as TEXT_DEFAULT_FONT_ID } from "../sketchText.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
 import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
 import { createSketchCircularPatternHelpers } from "./sketchCircularPatternTool.js";
 import { createSketchRectangularPatternHelpers } from "./sketchRectangularPatternTool.js";
-import { buildPatternPreviewObjects } from "./sketchPatternPreview.js";
 import { MIRRORABLE_TYPES } from "../sketchMirror.js";
 import { CIRCULAR_PATTERNABLE_TYPES } from "../sketchCircularPattern.js";
 import { RECTANGULAR_PATTERNABLE_TYPES } from "../sketchRectangularPattern.js";
@@ -43,6 +36,9 @@ import {
   groupMembersOf,
 } from "./sketchDragLifecycle.js";
 import { createSketchKeyboardHandler } from "./sketchKeyboard.js";
+import { createSketchSvgPlacement } from "./sketchSvgPlacement.js";
+import { createSketchTrimTool } from "./sketchTrimTool.js";
+import { createSketchMarquee } from "./sketchMarquee.js";
 
 export function createSketchInteraction(
   {
@@ -92,95 +88,12 @@ export function createSketchInteraction(
   const controls = cameraControlsRef.current;
 
   // ── SVG import placement ──────────────────────────────────────────────────
-  // After an SVG is parsed it isn't committed straight away — its shapes show as
-  // a movable/scalable preview until the user confirms.  Drag to move, the
-  // overlay sets the scale; commit appends the transformed shapes to the sketch.
-  let svgPreviewObjs = [];
-  let svgDrag = null; // { startLocal, startOffsetX, startOffsetY }
-
-  const transformSvgShapes = (shapes, scale, ox, oy) => {
-    const t = (p) => ({ x: p.x * scale + ox, y: p.y * scale + oy });
-    return shapes.map((s) =>
-      s.type === "line"
-        ? {
-            type: "line",
-            x1: s.x1 * scale + ox,
-            y1: s.y1 * scale + oy,
-            x2: s.x2 * scale + ox,
-            y2: s.y2 * scale + oy,
-          }
-        : {
-            type: "bezier",
-            p0: t(s.p0),
-            p1: t(s.p1),
-            p2: t(s.p2),
-            p3: t(s.p3),
-          },
-    );
-  };
-
-  const clearSvgPreview = () => {
-    svgPreviewObjs.forEach((o) => {
-      scene.remove(o);
-      o.geometry?.dispose();
-      o.material?.dispose();
-    });
-    svgPreviewObjs = [];
-  };
-
-  const updateSvgPreview = () => {
-    clearSvgPreview();
-    const svg = useStore.getState().svgImport;
-    if (!svg) return;
-    const sketchMesh = objectsRef.current[svg.sketchId];
-    if (!sketchMesh) return;
-    const shapes = transformSvgShapes(
-      svg.shapes,
-      svg.scale,
-      svg.offsetX,
-      svg.offsetY,
-    );
-    buildPatternPreviewObjects({
-      sketchMesh,
-      sourceShapes: shapes,
-      copyShapes: [],
-      color: 0x44aaff,
-      renderer,
-    }).forEach((o) => {
-      scene.add(o);
-      svgPreviewObjs.push(o);
-    });
-  };
-
-  controls.updateSvgPreview = updateSvgPreview;
-  controls.commitSvgPlacement = () => {
-    const store = useStore.getState();
-    const svg = store.svgImport;
-    if (svg) {
-      const placed = transformSvgShapes(
-        svg.shapes,
-        svg.scale,
-        svg.offsetX,
-        svg.offsetY,
-      );
-      const baseIdx = (
-        store.items.find((i) => i.id === svg.sketchId)?.shapes || []
-      ).length;
-      store.addSketchShapes(
-        svg.sketchId,
-        placed,
-        svgCoincidentConstraints(placed, baseIdx),
-      );
-    }
-    clearSvgPreview();
-    svgDrag = null;
-    store.clearSvgImport();
-  };
-  controls.cancelSvgPlacement = () => {
-    clearSvgPreview();
-    svgDrag = null;
-    useStore.getState().clearSvgImport();
-  };
+  const { svgDragRef, updateSvgPreview } = createSketchSvgPlacement({
+    scene,
+    renderer,
+    objectsRef,
+    controls,
+  });
 
   // ── Sketch drawing preview cleanup ────────────────────────────────────────
   const clearSketchPreview = () => {
@@ -259,10 +172,7 @@ export function createSketchInteraction(
   };
   const multiSelectedRef = { current: [] };
   const marqueeStartRef = { current: null };
-  // Selection a shift+marquee adds to (the pre-drag selection); [] replaces.
-  let marqueeBaseIndices = [];
   const marqueeActiveRef = { current: false };
-  let marqueeRectObj = null;
   let lastClickTime = 0;
   let lastClickX = 0;
   let lastClickY = 0;
@@ -377,118 +287,22 @@ export function createSketchInteraction(
     }
   };
 
-  const clearMarqueeRect = () => {
-    if (marqueeRectObj) {
-      scene.remove(marqueeRectObj);
-      marqueeRectObj.geometry.dispose();
-      marqueeRectObj.material.dispose();
-      marqueeRectObj = null;
-    }
-  };
-
-  // The Project tool's marquee box — drawn in projection teal, no shape select.
-  const drawProjectMarquee = (screenX, screenY) => {
-    clearMarqueeRect();
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!sketchMesh || !marqueeStartRef.current) return;
-    const p1 = screenToSketchLocal(
-      marqueeStartRef.current.x,
-      marqueeStartRef.current.y,
-      sketchMesh,
-    );
-    const p2 = screenToSketchLocal(screenX, screenY, sketchMesh);
-    if (!p1 || !p2) return;
-    const toW = (lx, ly) =>
-      new THREE.Vector3(lx, ly, 0.008)
-        .applyQuaternion(sketchMesh.quaternion)
-        .add(sketchMesh.position);
-    const corners = [
-      toW(p1.x, p1.y),
-      toW(p2.x, p1.y),
-      toW(p2.x, p2.y),
-      toW(p1.x, p2.y),
-      toW(p1.x, p1.y),
-    ];
-    marqueeRectObj = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(corners),
-      new THREE.LineBasicMaterial({
-        color: 0x37b8a0,
-        depthTest: false,
-        transparent: true,
-        opacity: 0.8,
-      }),
-    );
-    marqueeRectObj.renderOrder = 1010;
-    scene.add(marqueeRectObj);
-  };
-
-  const updateMarquee = (screenX, screenY) => {
-    clearMarqueeRect();
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!selItem || !sketchMesh || !marqueeStartRef.current) return;
-    const p1 = screenToSketchLocal(
-      marqueeStartRef.current.x,
-      marqueeStartRef.current.y,
-      sketchMesh,
-    );
-    const p2 = screenToSketchLocal(screenX, screenY, sketchMesh);
-    if (!p1 || !p2) return;
-    const toW = (lx, ly) => {
-      const v = new THREE.Vector3(lx, ly, 0.008);
-      v.applyQuaternion(sketchMesh.quaternion);
-      v.add(sketchMesh.position);
-      return v;
-    };
-    const corners = [
-      toW(p1.x, p1.y),
-      toW(p2.x, p1.y),
-      toW(p2.x, p2.y),
-      toW(p1.x, p2.y),
-      toW(p1.x, p1.y),
-    ];
-    const geo = new THREE.BufferGeometry().setFromPoints(corners);
-    const mat = new THREE.LineBasicMaterial({
-      color: sketchLineColorFor(useStore.getState().theme),
-      depthTest: false,
-      transparent: true,
-      opacity: 0.8,
-    });
-    marqueeRectObj = new THREE.Line(geo, mat);
-    marqueeRectObj.renderOrder = 1010;
-    scene.add(marqueeRectObj);
-    // Find shapes with any endpoint inside the marquee bounds
-    const minX = Math.min(p1.x, p2.x),
-      maxX = Math.max(p1.x, p2.x);
-    const minY = Math.min(p1.y, p2.y),
-      maxY = Math.max(p1.y, p2.y);
-    const shapes = selItem.shapes || [];
-    const inRect = new Set();
-    getSnapPoints(shapes).forEach((pt) => {
-      if (
-        pt.x >= minX &&
-        pt.x <= maxX &&
-        pt.y >= minY &&
-        pt.y <= maxY &&
-        !isOffsetShapeIdx(selItem, pt.shapeIdx) &&
-        !isMirrorShapeIdx(selItem, pt.shapeIdx) &&
-        !isCircularPatternShapeIdx(selItem, pt.shapeIdx) &&
-        !isRectangularPatternShapeIdx(selItem, pt.shapeIdx) &&
-        !isCornerBridgeIdx(selItem, pt.shapeIdx)
-      )
-        inRect.add(pt.shapeIdx);
-    });
-    // Shift-marquee adds to the pre-drag selection; otherwise it replaces.
-    const union = new Set(marqueeBaseIndices);
-    inRect.forEach((i) => union.add(i));
-    multiSelectedRef.current = [...union];
-    showMultiSelectOverlays(multiSelectedRef.current);
-  };
+  const {
+    clearMarqueeRect,
+    drawProjectMarquee,
+    updateMarquee,
+    marqueeBaseRef,
+  } = createSketchMarquee(
+    {
+      scene,
+      itemsRef,
+      selectedIdRef,
+      objectsRef,
+      marqueeStartRef,
+      multiSelectedRef,
+    },
+    { screenToSketchLocal, showMultiSelectOverlays },
+  );
 
   const clearSketchSelection = () => {
     clearSketchSelectionOverlay();
@@ -725,9 +539,19 @@ export function createSketchInteraction(
   };
   // ── Sketch element dragging ───────────────────────────────────────────────
   // Trim tool: while the button is held the tool keeps trimming any line under
-  // the cursor; the whole drag is one undo step (snapshot taken on first trim).
+  // the cursor.  `trimming` gates whether pointer-move trims or just hovers;
+  // the per-drag undo snapshot lives in the trim tool module (trimSnapshotRef).
   let trimming = false;
-  let trimSnapshotTaken = false;
+  const { tryTrimAt, trimHoverAt, trimSnapshotRef } = createSketchTrimTool(
+    { renderer, itemsRef, selectedIdRef, objectsRef, sketchShapesGroupRef },
+    {
+      hitTestSketchLines,
+      makeRay,
+      screenToSketchLocal,
+      clearHoverLineHighlight,
+      applyHoverLineHighlight,
+    },
+  );
 
   const {
     sketchDragRef,
@@ -841,7 +665,7 @@ export function createSketchInteraction(
       const local = sketchMesh
         ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
         : null;
-      svgDrag = local
+      svgDragRef.current = local
         ? {
             startLocal: local,
             startOffsetX: svg.offsetX,
@@ -878,7 +702,7 @@ export function createSketchInteraction(
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
       trimming = true;
-      trimSnapshotTaken = false;
+      trimSnapshotRef.current = false;
       tryTrimAt(e.clientX, e.clientY);
       return true;
     }
@@ -919,7 +743,9 @@ export function createSketchInteraction(
           clearMultiSelectOverlays();
           multiSelectedRef.current = [];
         }
-        marqueeBaseIndices = e.shiftKey ? [...multiSelectedRef.current] : [];
+        marqueeBaseRef.current = e.shiftKey
+          ? [...multiSelectedRef.current]
+          : [];
         marqueeStartRef.current = { x: e.clientX, y: e.clientY };
       }
     }
@@ -1002,20 +828,26 @@ export function createSketchInteraction(
     // SVG placement: drag moves the pending import's offset.
     const svgMove = useStore.getState().svgImport;
     if (svgMove) {
-      if (svgDrag) {
+      if (svgDragRef.current) {
         const sketchMesh = objectsRef.current[svgMove.sketchId];
         const cur = sketchMesh
           ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
           : null;
         if (cur) {
           useStore.getState().updateSvgImport({
-            offsetX: svgDrag.startOffsetX + (cur.x - svgDrag.startLocal.x),
-            offsetY: svgDrag.startOffsetY + (cur.y - svgDrag.startLocal.y),
+            offsetX:
+              svgDragRef.current.startOffsetX +
+              (cur.x - svgDragRef.current.startLocal.x),
+            offsetY:
+              svgDragRef.current.startOffsetY +
+              (cur.y - svgDragRef.current.startLocal.y),
           });
           updateSvgPreview();
         }
       }
-      renderer.domElement.style.cursor = svgDrag ? "grabbing" : "grab";
+      renderer.domElement.style.cursor = svgDragRef.current
+        ? "grabbing"
+        : "grab";
       controls.mouseX = e.clientX;
       controls.mouseY = e.clientY;
       return true;
@@ -1160,78 +992,10 @@ export function createSketchInteraction(
       );
   };
 
-  // The trim tool's pickable lines: original (non-copy, non-offset) shapes only.
-  const trimLineObjs = () => {
-    const group = sketchShapesGroupRef?.current;
-    if (!group) return [];
-    return group.children.filter(
-      (c) =>
-        c.userData.shapeIdx != null &&
-        !c.userData.isOffset &&
-        !c.userData.isMirror &&
-        !c.userData.isCircularPattern &&
-        !c.userData.isRectangularPattern &&
-        !c.userData.isCornerBridge,
-    );
-  };
-
-  const trimHitIdx = (clientX, clientY, selItem) => {
-    const hits = hitTestSketchLines(makeRay(clientX, clientY), trimLineObjs());
-    const idx = hits[0]?.object?.userData?.shapeIdx;
-    if (idx == null) return null;
-    return (selItem.shapes || [])[idx]?.type === "line" ? idx : null;
-  };
-
-  // Trim whatever plain line is under the cursor.  Called on click and on every
-  // move while dragging, so a drag "eats" lines continuously.
-  const tryTrimAt = (clientX, clientY) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!selItem || !sketchMesh) return;
-    const lineIdx = trimHitIdx(clientX, clientY, selItem);
-    if (lineIdx == null) return;
-    const local = screenToSketchLocal(clientX, clientY, sketchMesh);
-    if (!local) return;
-    useStore
-      .getState()
-      .trimSketchLine(
-        selItem.id,
-        lineIdx,
-        local.x,
-        local.y,
-        !trimSnapshotTaken,
-      );
-    trimSnapshotTaken = true;
-  };
-
-  // Hover feedback for the trim tool: light the line a click would trim.
-  const trimHoverAt = (clientX, clientY) => {
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
-    if (!selItem || !sketchShapesGroupRef?.current) {
-      clearHoverLineHighlight();
-      renderer.domElement.style.cursor = "";
-      return;
-    }
-    const hits = hitTestSketchLines(makeRay(clientX, clientY), trimLineObjs());
-    const obj = hits[0]?.object;
-    const idx = obj?.userData?.shapeIdx;
-    if (idx != null && (selItem.shapes || [])[idx]?.type === "line") {
-      applyHoverLineHighlight(obj);
-      renderer.domElement.style.cursor = "crosshair";
-    } else {
-      clearHoverLineHighlight();
-      renderer.domElement.style.cursor = "";
-    }
-  };
-
   const onSketchMouseUp = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
     if (useStore.getState().svgImport) {
-      svgDrag = null;
+      svgDragRef.current = null;
       renderer.domElement.style.cursor = "grab";
       return true;
     }
@@ -1321,7 +1085,7 @@ export function createSketchInteraction(
     }
     if (activeSketchToolRef.current === "trim") {
       trimming = false;
-      trimSnapshotTaken = false;
+      trimSnapshotRef.current = false;
       return true;
     }
     if (activeSketchToolRef.current) {
