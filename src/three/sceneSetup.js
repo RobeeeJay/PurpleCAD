@@ -310,110 +310,45 @@ const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
 export const RULER_FADE_MIN_GAP_PX = 26; // below this, neighbouring text overlaps
 export const RULER_FADE_RANGE_PX = 22; // fade smoothly over this band above it
 
-// Matches the Home button's own fly-to tween duration (useViewportCamera.js)
-// so the two transitions feel consistent. 220ms proved too fast in practice
-// for a big tier flip (~100 labels) even with a smoothstep ease — nearly all
-// of them still visibly appeared within a couple of animation frames.
-export const RULER_GLIDE_MS = 400;
-
-// The camera target glides past an ABRUPT one-frame reassignment instead of
-// teleporting with it.  Ordinary pan/rotate move the camera target by a small
-// amount each frame (or not at all, for a pure orbit) and the ruler — AND the
-// view-height/zoom-derived quantities (tier show/hide, span, per-label
-// scale — everything computed from `cam.position.distanceTo(target)`) —
-// should follow that 1:1 with no added lag.  But the orbit-anchor recentre
-// (navigation.js's setOrbitAnchor, fired on the FIRST tick of a new
-// Shift+scroll session) reassigns the target INSTANTLY, in one frame, to
-// wherever the screen-centre ray hits — which is the model's surface once
-// "Home" has framed it, i.e. on essentially every rotate right after
-// resetting the view. That's a real, single-frame jump in BOTH the target's
-// position AND its distance from the camera (measured directly against
-// test-files/bad-cut-extrude.pcad: target (0.4,-1.2,2.6) -> (2.6,1.0,4.8),
-// distance 30.1 -> 26.3 in one frame). Smoothing only the ruler's on-screen
-// CENTRE isn't enough — the distance jump alone flipped a whole label tier
-// from hidden to visible in that same frame (105 labels appearing at once),
-// which reads as just as sharp a "jump" as the centre snapping did. Glide the
-// full 3D target here so every distance-derived quantity computed from it
-// downstream (gizmoScale, tier visibility, span, per-label scale) eases
-// through the same short tween instead of any one of them snapping.
+// Where the ruler's two rows CROSS is the ground-plane point straight ahead
+// of the camera, through the centre of the VISIBLE 3D area (the canvas minus
+// the left objects/timeline panel).  Earlier attempts centred the ruler on
+// `targetRef.current` — the orbit pivot — and tried to smooth over the fact
+// that navigation.js's orbit-anchor recentre (setOrbitAnchor, on the first
+// tick of a new Shift+scroll session) reassigns THAT bookkeeping variable
+// instantly, to wherever the screen-centre ray hits. Chasing it with an
+// ever-more-careful glide never fully closed the gap (a coarser rotation, or
+// simply more of them, kept finding new ways to make it visible).
+//
+// The camera's ACTUAL forward direction has no such discontinuity — it
+// changes only as much as the wheel input actually rotates it, every single
+// tick, with nothing hidden re-snapping underneath. So don't reference target
+// AT ALL for centring: rebuild the ray fresh, every frame, straight from the
+// camera's own position/orientation, and use where THAT ray hits the ground.
+// Orbiting around a pivot that sits on the ground keeps this point pinned
+// almost exactly to the pivot throughout — same effective behaviour as
+// before for the common case — but with no bookkeeping variable left to
+// reassign out from under it.
 //
 // Plain-object state (no THREE dependency) so this is unit-testable without a
-// live render loop: `state` is `{ lastRealX, lastRealY, lastRealZ,
-// lastViewHeight, trackedX, trackedY, trackedZ, glide }` (glide: null |
-// `{ fromX, fromY, fromZ, toX, toY, toZ, startTime }`); the caller owns and
-// persists `state` across frames and reads `.trackedX/Y/Z` afterward.
-//
-// Two INDEPENDENT jump signals, checked together — position delta alone
-// isn't enough: the measured real jump above is only ~3.8 units against a
-// ~19-unit viewHeight (under a naively-generous 25%-of-viewHeight position
-// threshold), yet its 12.7% viewHeight swing (18.998 -> 16.591) straddles the
-// fine tier's hard `showBelow: 17` cliff with NO hysteresis, flipping 105
-// labels visible in that one frame regardless of how "small" the position
-// move looks. A tight position threshold risks false positives during fast
-// ordinary panning (laggy rubber-banding), so catch this class via the
-// viewHeight swing instead: either a position jump bigger than a modest
-// fraction of viewHeight, OR viewHeight itself changing by more than 5% in
-// one frame (ordinary continuous zoom/pan/rotate never does — proven stable
-// to the exact same float value frame-to-frame during a pure orbit).
-export function stepRulerGlide(state, realX, realY, realZ, viewHeight, now) {
+// live render loop.  `camPos`/`camDir` are plain {x,y,z} (camDir need not be
+// normalized). Returns `{ x, z, hit }`; when the camera looks away from the
+// ground (`hit: false`), `x`/`z` repeat the last-known-good point from
+// `state` (initially the origin) rather than leaving the ruler undefined.
+export function groundRayCrossing(camPos, camDir, state, groundY = 0) {
   const s = { ...state };
-  if (s.lastRealX == null) {
-    // First frame ever — nothing to glide from.
-    s.trackedX = realX;
-    s.trackedY = realY;
-    s.trackedZ = realZ;
-  } else {
-    const jumpDist = Math.hypot(
-      realX - s.lastRealX,
-      realY - s.lastRealY,
-      realZ - s.lastRealZ,
-    );
-    const viewHeightFrac =
-      s.lastViewHeight > 0
-        ? Math.abs(viewHeight - s.lastViewHeight) / s.lastViewHeight
-        : 0;
-    const isJump =
-      jumpDist > Math.max(0.5, viewHeight * 0.08) || viewHeightFrac > 0.05;
-    if (isJump) {
-      s.glide = {
-        fromX: s.trackedX,
-        fromY: s.trackedY,
-        fromZ: s.trackedZ,
-        toX: realX,
-        toY: realY,
-        toZ: realZ,
-        startTime: now,
-      };
-    } else if (s.glide) {
-      // Continuous movement arrived mid-glide (e.g. panning right after an
-      // anchor snap) — retarget its endpoint instead of letting the ruler
-      // snap there once the glide finishes.
-      s.glide = { ...s.glide, toX: realX, toY: realY, toZ: realZ };
-    } else {
-      s.trackedX = realX;
-      s.trackedY = realY;
-      s.trackedZ = realZ;
+  // Parallel to the ground, or the ground is behind the camera along this
+  // ray (looking up and away from it) — no usable intersection this frame.
+  if (Math.abs(camDir.y) > 1e-6) {
+    const t = (groundY - camPos.y) / camDir.y;
+    if (t > 0) {
+      s.x = camPos.x + camDir.x * t;
+      s.z = camPos.z + camDir.z * t;
+      s.hit = true;
+      return s;
     }
   }
-  s.lastRealX = realX;
-  s.lastRealY = realY;
-  s.lastRealZ = realZ;
-  s.lastViewHeight = viewHeight;
-  if (s.glide) {
-    const t = Math.min(1, (now - s.glide.startTime) / RULER_GLIDE_MS);
-    // Smoothstep (ease-IN-out), not ease-out: ease-out cubic front-loads most
-    // of the transition into the first ~10% of the duration (at t=0.09 it's
-    // already 24% eased), so nearly all the new/vanishing labels appeared
-    // within the first 1-2 frames and the remaining ~200ms was an
-    // imperceptible tail — still read as "the rulers jump", just with a
-    // barely-visible settle tacked on. Smoothstep is ~2% eased at the same
-    // t=0.09, spreading the visible change evenly across the whole duration.
-    const ease = t * t * (3 - 2 * t);
-    s.trackedX = s.glide.fromX + (s.glide.toX - s.glide.fromX) * ease;
-    s.trackedY = s.glide.fromY + (s.glide.toY - s.glide.fromY) * ease;
-    s.trackedZ = s.glide.fromZ + (s.glide.toZ - s.glide.fromZ) * ease;
-    if (t >= 1) s.glide = null;
-  }
+  s.hit = false;
   return s;
 }
 

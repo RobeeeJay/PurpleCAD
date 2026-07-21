@@ -11,7 +11,7 @@ import {
   ndcGapPx,
   rulerFadeOpacity,
   pointBehindCamera,
-  stepRulerGlide,
+  groundRayCrossing,
 } from "../sceneSetup.js";
 import { useStore } from "../../store";
 import {
@@ -24,26 +24,16 @@ import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
 const _rulerNext = new THREE.Vector3();
-const _rulerGlidedPos = new THREE.Vector3();
+const _rulerNdcPoint = new THREE.Vector3();
+const _rulerCamDir = new THREE.Vector3();
 const _camForward = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
 
-// Persisted across frames — see stepRulerGlide's doc comment (sceneSetup.js)
-// for why the tracked target needs to glide past an abrupt one-frame
-// reassignment (the orbit-anchor recentre) instead of teleporting.  viewHeight
-// (tier show/hide, span, per-label scale — everything distance-derived) is
-// computed from the GLIDED point, not the raw target, so the whole ruler
-// eases through the same tween rather than only its on-screen centre doing so
-// while the label density flips tiers in one frame underneath it.
-let _rulerGlideState = {
-  lastRealX: null,
-  lastRealY: null,
-  lastRealZ: null,
-  trackedX: 0,
-  trackedY: 0,
-  trackedZ: 0,
-  glide: null,
-};
+// Persisted across frames — see groundRayCrossing's doc comment (sceneSetup.js)
+// for why the ruler's cross-point is rebuilt fresh from the camera's own
+// forward ray every frame rather than tracking targetRef.current (which the
+// orbit-anchor recentre can reassign out from under it, instantly).
+let _rulerCrossState = { x: 0, z: 0, hit: true };
 
 // On-demand rendering.  The loop keeps ticking (cheap) but only does the
 // expensive per-frame work + render() when something actually changed, instead
@@ -354,35 +344,31 @@ export function createAnimateLoop({
         rulerGroup.visible = false;
       } else if (rulerGroup) {
         rulerGroup.visible = true;
-        // Glide the FULL 3D target through an abrupt one-frame reassignment
-        // (see stepRulerGlide's doc comment) before deriving anything from it,
-        // so viewHeight — and everything computed from it below (tier
-        // show/hide, span, per-label scale) — eases through the same tween
-        // the ruler's on-screen centre does, rather than jumping on its own.
-        _rulerGlideState = stepRulerGlide(
-          _rulerGlideState,
-          targetRef.current.x,
-          targetRef.current.y,
-          targetRef.current.z,
-          gizmoScale(targetRef.current) * REFERENCE_HEIGHT,
-          performance.now(),
+        // Where the ruler's two rows CROSS is rebuilt fresh, every frame, from
+        // the camera's OWN forward ray through the visible area's centre (the
+        // canvas minus the left panel) intersected with the ground — never
+        // from targetRef.current (the orbit pivot), which navigation.js's
+        // orbit-anchor recentre can reassign instantly out from under it. See
+        // groundRayCrossing's doc comment (sceneSetup.js) for why chasing that
+        // reassignment with a glide never fully closed the gap.
+        const canvasWForRuler = renderer.domElement.clientWidth || 1;
+        const panelForRuler = Math.min(LEFT_PANEL_PX, canvasWForRuler * 0.8);
+        const ndcXForRuler = panelForRuler / canvasWForRuler;
+        _rulerNdcPoint.set(ndcXForRuler, 0, 0.5).unproject(cam);
+        _rulerCamDir.subVectors(_rulerNdcPoint, cam.position);
+        _rulerCrossState = groundRayCrossing(
+          cam.position,
+          _rulerCamDir,
+          _rulerCrossState,
         );
-        _rulerGlidedPos.set(
-          _rulerGlideState.trackedX,
-          _rulerGlideState.trackedY,
-          _rulerGlideState.trackedZ,
-        );
-        const viewHeight = gizmoScale(_rulerGlidedPos) * REFERENCE_HEIGHT;
-        // Recycle the labels around the glided centre.  A screen-space shift
-        // (like the compact axis indicator's) can't be done with a fixed world
-        // offset: `camRight` rotates with the view, so shifting the spread-out
-        // ruler by it swept the whole grid of numbers around the target every
-        // time the view orbited — the rows visibly jumped after a pan.  Locking
-        // to the target keeps the labels world-stable through a rotation.
+        const viewHeight =
+          gizmoScale(
+            _rulerNdcPoint.set(_rulerCrossState.x, 0, _rulerCrossState.z),
+          ) * REFERENCE_HEIGHT;
         updateRuler3D(
           rulerGroup,
-          _rulerGlideState.trackedX,
-          _rulerGlideState.trackedZ,
+          _rulerCrossState.x,
+          _rulerCrossState.z,
           viewHeight,
           useStore.getState().theme,
         );
@@ -397,7 +383,6 @@ export function createAnimateLoop({
         // (a single target-distance factor would let far labels shrink under
         // perspective).  Update the hierarchy once, then read each matrixWorld.
         rulerGroup.updateWorldMatrix(false, true);
-        const canvasWRuler = renderer.domElement.clientWidth || 1;
         const canvasHRuler = renderer.domElement.clientHeight || 1;
         cam.getWorldDirection(_camForward);
         rulerGroup.traverse((o) => {
@@ -433,7 +418,7 @@ export function createAnimateLoop({
             const pxGap = ndcGapPx(
               _rulerPos,
               _rulerNext,
-              canvasWRuler,
+              canvasWForRuler,
               canvasHRuler,
             );
             const t = rulerFadeOpacity(pxGap);

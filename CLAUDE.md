@@ -591,52 +591,42 @@ sources are picked) that reuses the creation UI.
   fading smoothly. `pointBehindCamera` (`sceneSetup.js`) gates the check: skip
   it and stay fully opaque when the neighbour is behind the camera's view
   plane, since it isn't actually crowding the on-screen label.
-- **The orbit-anchor recentre (`navigation.js`'s `setOrbitAnchor`, fired on the
-  FIRST tick of a new Shift+scroll session) reassigns the camera target
-  INSTANTLY, in one frame, to wherever the screen-centre ray hits.** After
-  "Home" frames a model (centring it under the crosshair by design), this
-  fires on essentially every rotate — measured directly against
-  `test-files/bad-cut-extrude.pcad`: load → Home → first rotate tick snapped
-  target from `(0.42, -1.20, 2.56)` to `(2.62, 1.00, 4.76)` in a single frame.
-  The camera's own motion from this is small (only a fraction of its distance
-  from target changes), but the ruler — centred exactly on target — reflowed
-  its WHOLE visible window to match, reading as "the rulers instantly jump".
-  Don't try to remove the recentre (it's a deliberate, documented pivot
-  feature — a ring marks the new pivot); instead `stepRulerGlide`
-  (`sceneSetup.js`) detects a per-frame target delta bigger than a fraction of
-  the view height (continuous pan/rotate deltas never approach this) and
-  eases the ruler's tracked centre to the new target over a short tween
-  instead of teleporting with it (`rulerGlide.test.js` pins the exact measured
-  jump). Ordinary pan/rotate must still track 1:1 with NO added lag — only an
-  abrupt reassignment should glide.
-- **Gliding only the ruler's on-screen CENTRE wasn't enough — a position-only
-  jump threshold missed the actual trigger.** The same anchor-recentre also
-  changes `cam.position.distanceTo(target)` (viewHeight) in that one frame —
-  measured at 18.998 → 16.591 for the same repro — which straddles the fine
-  tier's hard `showBelow: 17` cliff with NO hysteresis, flipping 105 labels
-  visible in a single frame. That ~3.8-unit position delta looks "small"
-  against a ~19-unit viewHeight (a naive 25%-of-viewHeight position threshold
-  misses it entirely), so `stepRulerGlide` checks TWO independent signals: a
-  position jump past a smaller fraction of viewHeight, OR viewHeight itself
-  swinging >5% in one frame (ordinary continuous pan/rotate never does either
-  — proven bit-stable frame-to-frame during a pure orbit). Glide the FULL 3D
-  target (not just X/Z) and rederive viewHeight from the GLIDED point, so
-  every distance-derived quantity (tier visibility, span, per-label scale)
-  eases through the same tween as the centre. When adding any new
-  distance/zoom-derived ruler quantity, feed it from the glided point, not
-  `targetRef.current` directly, or it'll reintroduce this exact class of bug.
-- **A position-only jump threshold was NOT the only remaining gap — the ease
-  CURVE mattered just as much.** Even after watching viewHeight, the glide
-  still looked abrupt: it used ease-OUT cubic, which front-loads most of the
-  transition into the first ~10% of the duration (at t=0.09 it's already 24%
-  eased) — so nearly all of a ~100-label tier flip still appeared within a
-  couple of animation frames, with the remaining time an imperceptible tail.
-  Caught by SCREENSHOTTING (not just logging numbers) a live rotate at 20ms
-  intervals — the numeric trace alone looked "gradual enough" but the actual
-  rendered frames showed almost the whole label set changing in one step.
-  Switched to smoothstep (symmetric ease-in-out, ~2% eased at the same t=0.09)
-  and lengthened `RULER_GLIDE_MS` to 400 (matching the Home button's own fly-to
-  tween) so a big tier flip reads as a gradual fade, not a jump with a slow
-  settle tacked on. Lesson: when verifying a "does this look smooth" fix,
-  screenshot actual frames at realistic intervals — a numeric log of state can
-  hide an ease curve that's mathematically continuous but visually front-loaded.
+- **The 3D ground ruler's cross-point is rebuilt fresh, every frame, from the
+  CAMERA's own forward ray — never from `targetRef.current` (the orbit pivot).**
+  `navigation.js`'s `setOrbitAnchor` (fired on the FIRST tick of a new
+  Shift+scroll session) reassigns that pivot INSTANTLY, in one frame, to
+  wherever the screen-centre ray hits — the model's surface once "Home" has
+  framed it, i.e. on essentially every rotate right after resetting the view
+  (measured directly against `test-files/bad-cut-extrude.pcad`: target
+  `(0.42,-1.20,2.56)` → `(2.62,1.00,4.76)`, camera distance 30.1 → 26.3, in one
+  frame). Three rounds of gliding the tracked centre past that reassignment
+  (position-only threshold, then position+viewHeight, then a smoothstep ease)
+  each closed one gap but not the next — the deeper problem was chasing a
+  bookkeeping variable that can be arbitrarily reassigned at all. The fix:
+  `groundRayCrossing` (`sceneSetup.js`) takes the camera's position + its
+  ACTUAL forward ray through the centre of the *visible* 3D area (canvas minus
+  the left panel) and intersects it with the ground, called fresh every frame
+  with no persisted "target" reference. The camera's true orientation has no
+  discontinuity — it only ever changes by exactly how much input actually
+  rotated it — so this needs no smoothing at all. Orbiting around a
+  ground-level pivot keeps the crossing point pinned almost exactly to that
+  pivot throughout, matching the old behaviour for the common case, but
+  leaves nothing for the anchor-recentre to unsettle. Verified against the
+  live repro: the fine tier (105 labels) no longer flips at all through the
+  same rotate that used to flood it in one frame.
+- **The orbit-anchor ring itself had the same "wrong centre" bug.**
+  `getOrbitAnchor` raycast from raw NDC `(0,0)` — the canvas centre, not the
+  visible area's centre — so the pivot (and the ring marking it) sat left of
+  where Home actually frames the model. It now raycasts through
+  `(panel/canvasW, 0)`, matching `handleHome`'s own visible-area centring
+  (`useViewportCamera.js`) — both entry points must stay in sync if the panel
+  width ever changes.
+- **A ruler-centring fix needs to be verified with SCREENSHOTS at realistic
+  frame intervals, not just a numeric log of state.** An earlier glide
+  attempt's numeric trace looked "gradual enough" (tier flipping over several
+  ticks), but screenshotting the same rotate at 20ms intervals showed almost
+  the entire label set changing within the first couple of frames — an
+  ease-out cubic front-loads ~24% of its motion into the first 9% of its
+  duration, which is mathematically continuous but visually indistinguishable
+  from a snap. Keep this in mind for ANY future "is this transition smooth"
+  claim on this ruler.

@@ -78,6 +78,13 @@ export function saveCameraState(cameraRef, targetRef, cameraControlsRef) {
   }
 }
 
+// Width (px) of the objects/timeline overlay that floats over the LEFT of the
+// canvas.  Matches useViewportCamera.js's own copy (duplicated rather than
+// shared — see that file's comment) so the orbit pivot centres in the same
+// visible region Home frames into, not the canvas centre hidden behind the
+// panel.
+const LEFT_PANEL_PX = 250;
+
 export function getOrbitAnchor(
   cameraRef,
   targetRef,
@@ -85,11 +92,18 @@ export function getOrbitAnchor(
   sceneRef,
   objectsRef,
   itemsRef,
+  renderer,
 ) {
   const cam = cameraRef.current;
   if (!cam) return targetRef.current.clone();
   sceneRef.current.updateMatrixWorld();
-  raycasterRef.current.setFromCamera({ x: 0, y: 0 }, cam);
+  // Ray through the centre of the VISIBLE 3D area (the canvas minus the left
+  // panel), not the raw canvas centre — otherwise the pivot (and the ring
+  // marking it) sits left of where the model is actually framed.
+  const canvasW = renderer?.domElement?.clientWidth || 1;
+  const panel = Math.min(LEFT_PANEL_PX, canvasW * 0.8);
+  const ndcX = panel / canvasW;
+  raycasterRef.current.setFromCamera({ x: ndcX, y: 0 }, cam);
   const solidMeshes = Object.values(objectsRef.current).filter((m) => {
     if (!m.visible) return false;
     const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
@@ -2012,6 +2026,7 @@ export function attachCameraControls(ctx) {
             sceneRef,
             objectsRef,
             itemsRef,
+            renderer,
           ),
           cameraRef,
           targetRef,

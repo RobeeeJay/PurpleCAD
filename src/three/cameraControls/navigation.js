@@ -119,6 +119,7 @@ export function createNavigationHandlers(
             sceneRef,
             objectsRef,
             itemsRef,
+            renderer,
           ),
           cameraRef,
           targetRef,
