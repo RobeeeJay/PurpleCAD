@@ -13,38 +13,13 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { effectiveSketchSelTypes } from "../../store/selectionMode.js";
 import {
-  getSketchShapePoints,
   getSnapPoints,
   getShapeLength,
-  getShapePoint,
-  moveShapePoint,
-  rebuildConstraintIconsForDrag,
-  rebuildPointDotsForDrag,
   polyArea,
-  snapUnitToIntervalMm,
   MM_PER_UNIT,
 } from "../sceneObjects.js";
-import {
-  applyHVEnforcement,
-  enforceConstraints,
-  allConstraintsSatisfied,
-} from "../sketchConstraints.js";
-import { variablesToMap } from "../../utils/formulas.js";
-import {
-  translateShape,
-  rotateShape,
-  collectConnectedShapes,
-} from "../sketchGeometry.js";
-import {
-  solveConstraints,
-  fieldsForPoint,
-  varFields,
-} from "../sketchSolver.js";
+import { collectConnectedShapes } from "../sketchGeometry.js";
 import { sketchLineColorFor, SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
-import {
-  selectedSketchLineIndices,
-  offsetSelectedSketchGeometry,
-} from "../sketchModifyActions.js";
 import { svgCoincidentConstraints } from "../importGeometry.js";
 import { DEFAULT_FONT_ID as TEXT_DEFAULT_FONT_ID } from "../sketchText.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
@@ -67,6 +42,7 @@ import {
   isCornerBridgeIdx,
   groupMembersOf,
 } from "./sketchDragLifecycle.js";
+import { createSketchKeyboardHandler } from "./sketchKeyboard.js";
 
 export function createSketchInteraction(
   {
@@ -282,17 +258,16 @@ export function createSketchInteraction(
     });
   };
   const multiSelectedRef = { current: [] };
-  let marqueeStartScreen = null;
+  const marqueeStartRef = { current: null };
   // Selection a shift+marquee adds to (the pre-drag selection); [] replaces.
   let marqueeBaseIndices = [];
-  let marqueeActive = false;
+  const marqueeActiveRef = { current: false };
   let marqueeRectObj = null;
   let lastClickTime = 0;
   let lastClickX = 0;
   let lastClickY = 0;
-  let sketchClipboard = null; // { shapes: [...], constraints: [...] }
   let longPressTimer = null;
-  let longPressMenuOpen = false;
+  const longPressMenuRef = { current: false };
 
   // ── Selection / coincident-first / multi-select / drag overlay meshes ─────
   const {
@@ -418,10 +393,10 @@ export function createSketchInteraction(
       (i) => i.id === selectedIdRef.current,
     );
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!sketchMesh || !marqueeStartScreen) return;
+    if (!sketchMesh || !marqueeStartRef.current) return;
     const p1 = screenToSketchLocal(
-      marqueeStartScreen.x,
-      marqueeStartScreen.y,
+      marqueeStartRef.current.x,
+      marqueeStartRef.current.y,
       sketchMesh,
     );
     const p2 = screenToSketchLocal(screenX, screenY, sketchMesh);
@@ -456,10 +431,10 @@ export function createSketchInteraction(
       (i) => i.id === selectedIdRef.current,
     );
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
-    if (!selItem || !sketchMesh || !marqueeStartScreen) return;
+    if (!selItem || !sketchMesh || !marqueeStartRef.current) return;
     const p1 = screenToSketchLocal(
-      marqueeStartScreen.x,
-      marqueeStartScreen.y,
+      marqueeStartRef.current.x,
+      marqueeStartRef.current.y,
       sketchMesh,
     );
     const p2 = screenToSketchLocal(screenX, screenY, sketchMesh);
@@ -895,7 +870,7 @@ export function createSketchInteraction(
     if (activeSketchToolRef.current === "project") {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
-      marqueeStartScreen = { x: e.clientX, y: e.clientY };
+      marqueeStartRef.current = { x: e.clientX, y: e.clientY };
       return true;
     }
     // Trim: start trimming immediately and keep trimming on drag (no marquee).
@@ -925,12 +900,12 @@ export function createSketchInteraction(
         if (items.length > 0) {
           sketchDragRef.current = null;
           renderer.domElement.style.cursor = "";
-          longPressMenuOpen = true;
+          longPressMenuRef.current = true;
           // Cancel the pending marquee armed on mouse-down — a long press opens
           // the element list, it must not also start a selection box if the
           // cursor drifts while held.
-          marqueeStartScreen = null;
-          marqueeActive = false;
+          marqueeStartRef.current = null;
+          marqueeActiveRef.current = false;
           clearMarqueeRect();
           useStore
             .getState()
@@ -945,7 +920,7 @@ export function createSketchInteraction(
           multiSelectedRef.current = [];
         }
         marqueeBaseIndices = e.shiftKey ? [...multiSelectedRef.current] : [];
-        marqueeStartScreen = { x: e.clientX, y: e.clientY };
+        marqueeStartRef.current = { x: e.clientX, y: e.clientY };
       }
     }
     return true;
@@ -1047,15 +1022,15 @@ export function createSketchInteraction(
     }
     // While the long-press element list is open, ignore canvas motion — no
     // marquee, no hover repaint underneath it.
-    if (longPressMenuOpen) return true;
+    if (longPressMenuRef.current) return true;
     if (activeSketchToolRef.current === "project") {
       controls.mouseX = e.clientX;
       controls.mouseY = e.clientY;
-      if (marqueeStartScreen) {
-        const dx = e.clientX - marqueeStartScreen.x;
-        const dy = e.clientY - marqueeStartScreen.y;
+      if (marqueeStartRef.current) {
+        const dx = e.clientX - marqueeStartRef.current.x;
+        const dy = e.clientY - marqueeStartRef.current.y;
         if (Math.hypot(dx, dy) > 5) {
-          marqueeActive = true;
+          marqueeActiveRef.current = true;
           controls.clearProjectHover?.();
           drawProjectMarquee(e.clientX, e.clientY);
           return true;
@@ -1105,13 +1080,13 @@ export function createSketchInteraction(
       if (modifyMode) {
         clearAllSketchHover();
         showModifyPreview(e.clientX, e.clientY, modifyMode);
-      } else if (marqueeStartScreen) {
+      } else if (marqueeStartRef.current) {
         clearAllSketchHover();
         clearModifyPreview();
-        const dx = e.clientX - marqueeStartScreen.x;
-        const dy = e.clientY - marqueeStartScreen.y;
+        const dx = e.clientX - marqueeStartRef.current.x;
+        const dy = e.clientY - marqueeStartRef.current.y;
         if (Math.hypot(dx, dy) > 5) {
-          marqueeActive = true;
+          marqueeActiveRef.current = true;
           updateMarquee(e.clientX, e.clientY);
         }
       } else {
@@ -1269,10 +1244,10 @@ export function createSketchInteraction(
     if (activeSketchToolRef.current === "project") {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
-      if (Math.hypot(dx, dy) >= 5 && marqueeStartScreen) {
+      if (Math.hypot(dx, dy) >= 5 && marqueeStartRef.current) {
         controls.projectEdgesInBox({
-          x1: marqueeStartScreen.x,
-          y1: marqueeStartScreen.y,
+          x1: marqueeStartRef.current.x,
+          y1: marqueeStartRef.current.y,
           x2: e.clientX,
           y2: e.clientY,
         });
@@ -1281,8 +1256,8 @@ export function createSketchInteraction(
       }
       clearMarqueeRect();
       controls.clearProjectHover?.();
-      marqueeActive = false;
-      marqueeStartScreen = null;
+      marqueeActiveRef.current = false;
+      marqueeStartRef.current = null;
       return true;
     }
     if (activeSketchToolRef.current === "mirror") {
@@ -1358,23 +1333,23 @@ export function createSketchInteraction(
     }
     clearTimeout(longPressTimer);
     longPressTimer = null;
-    if (longPressMenuOpen) {
-      longPressMenuOpen = false;
+    if (longPressMenuRef.current) {
+      longPressMenuRef.current = false;
       useStore.getState().setSketchLongPressMenu(null);
       sketchDragRef.current = null;
       renderer.domElement.style.cursor = "";
-      marqueeStartScreen = null;
-      marqueeActive = false;
+      marqueeStartRef.current = null;
+      marqueeActiveRef.current = false;
       return true;
     }
-    if (marqueeActive) {
-      marqueeActive = false;
-      marqueeStartScreen = null;
+    if (marqueeActiveRef.current) {
+      marqueeActiveRef.current = false;
+      marqueeStartRef.current = null;
       clearMarqueeRect();
       renderer.domElement.style.cursor = "";
       return true;
     }
-    marqueeStartScreen = null;
+    marqueeStartRef.current = null;
     const constraintMode = useStore.getState().sketchConstraintMode;
     const doClick = (sx, sy, shift = false) => {
       const modifyMode = useStore.getState().sketchModifyMode;
@@ -1747,455 +1722,40 @@ export function createSketchInteraction(
       renderer.domElement.style.cursor = "";
     }
   };
-  const onKeyDown = (e) => {
-    const tag = e.target.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable)
-      return;
-
-    // Arrow keys nudge the selected sketch geometry by 1mm (one grid step in
-    // scene units).  Translates the whole selection rigidly, then solves the
-    // rest of the system around it — same path a body drag uses.
-    const nudge = {
-      ArrowUp: [0, 1],
-      ArrowDown: [0, -1],
-      ArrowLeft: [-1, 0],
-      ArrowRight: [1, 0],
-    }[e.key];
-    if (
-      nudge &&
-      sketchModeRef.current &&
-      !e.ctrlKey &&
-      !e.metaKey &&
-      !e.altKey
-    ) {
-      const sel = useStore.getState().selectedSketchElement;
-      const indices =
-        multiSelectedRef.current.length > 0
-          ? [...multiSelectedRef.current]
-          : sel?.shapeIdx != null
-            ? [sel.shapeIdx]
-            : null;
-      const selItem = itemsRef.current.find(
-        (i) => i.id === selectedIdRef.current,
-      );
-      if (indices && selItem) {
-        e.preventDefault();
-        const step = 1 / MM_PER_UNIT;
-        const dx = nudge[0] * step;
-        const dy = nudge[1] * step;
-        const placed = new Map();
-        const keys = new Map();
-        for (const idx of indices) {
-          const moved = translateShape(selItem.shapes[idx], dx, dy);
-          if (moved) {
-            placed.set(idx, moved);
-            keys.set(idx, null);
-          }
-        }
-        if (placed.size > 0) {
-          const solved = solveDrag(selItem.id, placed, keys, null);
-          useStore.getState().updateSketchShapes(selItem.id, solved);
-          refreshSketchSelectionOverlay();
-        }
-      }
-      return;
-    }
-
-    // Shift+Z / Shift+X toggle constraint / dimension visibility — the two
-    // toggles the Shift-held selection widget shows — in both 3D and sketch.
-    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      const k = e.key.toLowerCase();
-      if (k === "z") {
-        e.preventDefault();
-        useStore.getState().toggleConstraintsVisible();
-        return;
-      }
-      if (k === "x") {
-        e.preventDefault();
-        useStore.getState().toggleDimensionsVisible();
-        return;
-      }
-    }
-
-    // Z X C V B toggle the selection-type filters, in a shared widget order, for
-    // whichever selection widget is showing (object → region → edge/line → point,
-    // then constraint): 3D = object/face/edge/point (no fifth type, so B is a
-    // no-op there); sketch = object/shape/line/point/constraint.  Bare keys only —
-    // Ctrl/Cmd/Alt combos stay free for copy/undo/etc.
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-      const idx = { z: 0, x: 1, c: 2, v: 3, b: 4 }[e.key.toLowerCase()];
-      if (idx !== undefined) {
-        const store = useStore.getState();
-        if (sketchModeRef.current) {
-          e.preventDefault();
-          store.toggleSketchSelType(
-            ["object", "shape", "line", "point", "constraint"][idx],
-          );
-        } else {
-          const toggle = [
-            store.toggleSelObject,
-            store.toggleSelFace,
-            store.toggleSelEdge,
-            store.toggleSelPoint,
-          ][idx];
-          if (toggle) {
-            e.preventDefault();
-            toggle();
-          }
-        }
-        return;
-      }
-    }
-
-    // Debug export: copy the whole active sketch (shapes + constraints) to the
-    // clipboard as JSON, for sharing a reproducer.  Cmd/Ctrl+Shift+C.
-    if (
-      sketchModeRef.current &&
-      (isMac ? e.metaKey : e.ctrlKey) &&
-      e.shiftKey &&
-      e.key.toLowerCase() === "c"
-    ) {
-      const selItem = itemsRef.current.find(
-        (i) => i.id === selectedIdRef.current,
-      );
-      if (!selItem) return;
-      e.preventDefault();
-      const dump = JSON.stringify(
-        {
-          shapes: selItem.shapes || [],
-          constraints: selItem.constraints || [],
-        },
-        null,
-        2,
-      );
-      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(dump);
-      console.warn("[SKETCH DUMP]\n" + dump);
-      return;
-    }
-
-    if (
-      sketchModeRef.current &&
-      (isMac ? e.metaKey : e.ctrlKey) &&
-      !e.shiftKey &&
-      e.key === "c"
-    ) {
-      const selItem = itemsRef.current.find(
-        (i) => i.id === selectedIdRef.current,
-      );
-      if (!selItem) return;
-      const shapes = selItem.shapes || [];
-      const constraints = selItem.constraints || [];
-      const sel = useStore.getState().selectedSketchElement;
-      const indices =
-        multiSelectedRef.current.length > 0
-          ? [...multiSelectedRef.current]
-          : sel?.type === "line"
-            ? [sel.shapeIdx]
-            : [];
-      if (indices.length === 0) return;
-      e.preventDefault();
-      const indexSet = new Set(indices);
-      const idxMap = new Map(indices.map((origIdx, i) => [origIdx, i]));
-      sketchClipboard = {
-        shapes: indices.map((i) => shapes[i]).filter(Boolean),
-        constraints: constraints
-          .filter(
-            (c) =>
-              c.type === "coincident" &&
-              indexSet.has(c.shapeAIdx) &&
-              indexSet.has(c.shapeBIdx),
-          )
-          .map((c) => ({
-            ...c,
-            shapeAIdx: idxMap.get(c.shapeAIdx),
-            shapeBIdx: idxMap.get(c.shapeBIdx),
-          })),
-      };
-      return;
-    }
-
-    if (
-      sketchModeRef.current &&
-      (isMac ? e.metaKey : e.ctrlKey) &&
-      e.key === "v"
-    ) {
-      if (!sketchClipboard) return;
-      const selItem = itemsRef.current.find(
-        (i) => i.id === selectedIdRef.current,
-      );
-      if (!selItem) return;
-      e.preventDefault();
-      const baseIdx = (selItem.shapes || []).length;
-      const PASTE_OFFSET = 0.5;
-      const newShapes = sketchClipboard.shapes
-        .map((s) => translateShape(s, PASTE_OFFSET, PASTE_OFFSET))
-        .filter(Boolean)
-        // Pasted copies start ungrouped (don't inherit the source's group).
-        .map((s) => {
-          if (s.group == null) return s;
-          const { group, ...rest } = s;
-          return rest;
-        });
-      const newConstraints = sketchClipboard.constraints.map((c) => ({
-        ...c,
-        shapeAIdx: c.shapeAIdx + baseIdx,
-        shapeBIdx: c.shapeBIdx + baseIdx,
-      }));
-      useStore
-        .getState()
-        .addSketchShapes(selectedIdRef.current, newShapes, newConstraints);
-      return;
-    }
-
-    // Cmd/Ctrl+G — group the selected sketch shapes (2+) so they act as a unit.
-    if (
-      sketchModeRef.current &&
-      (isMac ? e.metaKey : e.ctrlKey) &&
-      !e.shiftKey &&
-      e.key.toLowerCase() === "g"
-    ) {
-      if (multiSelectedRef.current.length < 2) return;
-      e.preventDefault();
-      const indices = [...multiSelectedRef.current];
-      useStore.getState().groupSketchShapes(selectedIdRef.current, indices);
-      showMultiSelectOverlays(indices);
-      return;
-    }
-
-    // Cmd/Ctrl+U — ungroup the selected sketch shapes.
-    if (
-      sketchModeRef.current &&
-      (isMac ? e.metaKey : e.ctrlKey) &&
-      !e.shiftKey &&
-      e.key.toLowerCase() === "u"
-    ) {
-      const sel = useStore.getState().selectedSketchElement;
-      const indices =
-        multiSelectedRef.current.length > 0
-          ? [...multiSelectedRef.current]
-          : sel?.type === "line"
-            ? [sel.shapeIdx]
-            : [];
-      if (indices.length === 0) return;
-      e.preventDefault();
-      useStore.getState().ungroupSketchShapes(selectedIdRef.current, indices);
-      return;
-    }
-
-    if (
-      (e.key === "Delete" || e.key === "Backspace") &&
-      sketchModeRef.current
-    ) {
-      const selConstraintIdx = getSelectedConstraintIdx();
-      if (selConstraintIdx !== null) {
-        e.preventDefault();
-        useStore
-          .getState()
-          .deleteSketchConstraint(selectedIdRef.current, selConstraintIdx);
-        clearConstraintSelection();
-        return;
-      }
-      const sel = useStore.getState().selectedSketchElement;
-      const selShapes =
-        itemsRef.current.find((i) => i.id === selectedIdRef.current)?.shapes ||
-        [];
-      const toDelete =
-        multiSelectedRef.current.length > 0
-          ? [...multiSelectedRef.current]
-          : sel?.type === "line"
-            ? [sel.shapeIdx]
-            : // A selected standalone point deletes that point (a line's
-              // endpoint node, also type "point", is left alone).
-              sel?.type === "point" && selShapes[sel.shapeIdx]?.type === "point"
-              ? [sel.shapeIdx]
-              : null;
-      if (toDelete?.length > 0) {
-        e.preventDefault();
-        useStore.getState().deleteSketchShapes(selectedIdRef.current, toDelete);
-        clearMultiSelectOverlays();
-        multiSelectedRef.current = [];
-        clearSketchSelection();
-      }
-      return;
-    }
-
-    if (e.key === "Escape") {
-      if (longPressMenuOpen) {
-        longPressMenuOpen = false;
-        useStore.getState().setSketchLongPressMenu(null);
-        return;
-      }
-      if (getSelectedConstraintIdx() !== null) {
-        clearConstraintSelection();
-        return;
-      }
-      if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
-        // Esc from the start-pick sub-mode backs out to the profile phase
-        // (keeping the captured profiles + depth) rather than cancelling the
-        // whole extrude — so geometry stays selectable.  (Returning to the
-        // legacy "depth" state left every click unhandled: selection was dead.)
-        if (extrudeSelectModeRef.current === "start") {
-          clearStartHighlight();
-          useStore.getState().setExtrudeSelectMode("profile");
-          return;
-        }
-        cancelExtrude();
-        return;
-      }
-      if (useStore.getState().chamferSelectMode) {
-        cameraControlsRef.current?.clearChamferPreview?.();
-        useStore.getState().setChamferSelectMode(null);
-        useStore.getState().clearSelectedSubGeometry();
-        const editTarget = useStore.getState().chamferEditTarget;
-        if (editTarget) {
-          // Editing viewed the pre-chamfer step — put the user back on the entry.
-          useStore.getState().restoreToHistory(editTarget.entryId);
-          useStore.getState().setChamferEditTarget(null);
-        }
-        return;
-      }
-      if (sketchPlacementModeRef.current) {
-        useStore.getState().setSketchPlacementMode(false);
-        return;
-      }
-      if (sketchModeRef.current) {
-        const store = useStore.getState();
-        if (store.sketchModifyMode) {
-          store.setSketchModifyMode(null);
-          clearModifyPreview();
-          return;
-        }
-        if (store.activeSketchTool === "mirror") {
-          store.cancelMirrorTool();
-          clearMirrorPreview();
-          return;
-        }
-        if (store.activeSketchTool === "circularPattern") {
-          store.cancelCircularPatternTool();
-          clearCircularPatternPreview();
-          return;
-        }
-        if (store.activeSketchTool === "rectangularPattern") {
-          store.cancelRectangularPatternTool();
-          clearRectangularPatternPreview();
-          return;
-        }
-        if (store.sketchConstraintMode || store.sketchDistanceInput) {
-          store.setSketchConstraintMode(null);
-          store.setSketchConstraintFirstPoint(null);
-          store.setSketchDistanceInput(null);
-          clearCoincidentFirstOverlay();
-          return;
-        }
-        if (sketchDrawRef.current) {
-          cancelSketchDraw();
-        } else {
-          useStore.getState().setActiveSketchTool(null);
-          clearSketchSelection();
-          clearMarqueeRect();
-          marqueeStartScreen = null;
-          marqueeActive = false;
-        }
-        return;
-      }
-    }
-
-    // 3D-view render mode shortcuts: 1-4 switch the shaded/wireframe/etc.
-    // mode, 5-8 toggle the remaining Render-section buttons (shadows,
-    // cross-section, path tracer, curve resolution) — same left-to-right
-    // order they appear in RenderSection.jsx.
-    if (
-      !sketchModeRef.current &&
-      !e.ctrlKey &&
-      !e.metaKey &&
-      !e.altKey &&
-      !e.shiftKey
-    ) {
-      const store = useStore.getState();
-      const renderModeKeys = {
-        1: "wireframe",
-        2: "transparent",
-        3: "shaded",
-      };
-      if (renderModeKeys[e.key]) {
-        e.preventDefault();
-        store.setRenderMode(renderModeKeys[e.key]);
-        return;
-      }
-      // 4 selects the path-traced render mode (1-3 select the raster modes).
-      if (e.key === "4") {
-        e.preventDefault();
-        store.setPathTraceView(true);
-        return;
-      }
-      if (e.key === "5") {
-        e.preventDefault();
-        store.setShadowsEnabled(!store.shadowsEnabled);
-        return;
-      }
-      if (e.key === "6") {
-        e.preventDefault();
-        store.toggleCrossSectionView();
-        return;
-      }
-      if (e.key === "8") {
-        e.preventDefault();
-        store.toggleCurveResolution();
-        return;
-      }
-    }
-
-    if (sketchModeRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      const key = e.key.toLowerCase();
-      const store = useStore.getState();
-
-      // D toggles the distance-dimension constraint tool.
-      if (key === "d") {
-        e.preventDefault();
-        const isActive = store.sketchConstraintMode === "distance";
-        store.setSketchConstraintMode(isActive ? null : "distance");
-        store.setSketchConstraintFirstPoint(null);
-        store.setSketchDistanceInput(null);
-        clearCoincidentFirstOverlay();
-        return;
-      }
-      // I toggles dashed on the selected line(s); O offsets them.  Both are
-      // no-ops without a line selection, mirroring the disabled toolbar
-      // buttons.
-      if (key === "i") {
-        e.preventDefault();
-        const indices = selectedSketchLineIndices();
-        if (indices.length > 0)
-          store.toggleSketchShapesDashed(selectedIdRef.current, indices);
-        return;
-      }
-      if (key === "o") {
-        e.preventDefault();
-        offsetSelectedSketchGeometry(
-          selectedIdRef.current,
-          selectedSketchLineIndices(),
-          e.shiftKey,
-        );
-        return;
-      }
-
-      // C and B are reserved for selection-type toggles (handled above), so the
-      // circle / bezier tools have no key bind — use the toolbar.
-      const toolMap = {
-        l: "line",
-        r: "rect",
-        e: "ellipse",
-        a: "arc",
-      };
-      const tool = toolMap[key];
-      if (tool) {
-        e.preventDefault();
-        if (sketchDrawRef.current) cancelSketchDraw();
-        const current = store.activeSketchTool;
-        store.setActiveSketchTool(current === tool ? null : tool);
-      }
-    }
-  };
+  const { onKeyDown } = createSketchKeyboardHandler(
+    {
+      sketchModeRef,
+      itemsRef,
+      selectedIdRef,
+      extrudeSelectModeRef,
+      sketchPlacementModeRef,
+      cameraControlsRef,
+      sketchDrawRef,
+      multiSelectedRef,
+      longPressMenuRef,
+      marqueeStartRef,
+      marqueeActiveRef,
+    },
+    {
+      isMac,
+      solveDrag,
+      refreshSketchSelectionOverlay,
+      showMultiSelectOverlays,
+      clearMultiSelectOverlays,
+      clearCoincidentFirstOverlay,
+      clearSketchSelection,
+      cancelSketchDraw,
+      clearMarqueeRect,
+      clearModifyPreview,
+      clearMirrorPreview,
+      clearCircularPatternPreview,
+      clearRectangularPatternPreview,
+      getSelectedConstraintIdx,
+      clearConstraintSelection,
+      clearStartHighlight,
+      cancelExtrude,
+    },
+  );
 
   // Clears the lingering sketch overlays when the pointer moves in 3D view.
   const clearSketchVisualsFor3D = () => {
