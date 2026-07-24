@@ -319,6 +319,23 @@ The working mechanism (keep all three pieces in lockstep):
   re-derived per-def in `regenerateExtrudeUnion`) is finer. occOps hides this
   (it re-derives in-process); only the bridge builds from the baked polygon
   (`withLivePolygonsFusedDefs.test.js`).
+- **The bake now happens CENTRALLY at the occClient boundary — but an
+  INTERACTIVE CSG caller that skipped it still shipped a stale profile.**
+  `occClient.callOp`'s Electron branch runs `bakeArgPolygons` (live polygon)
+  alongside `resolveArgDepths` (depth) on EVERY op's args, so any caller that
+  hands raw items to `performCsg`/etc. gets the live polygon baked for free —
+  the regen path already called `withLivePolygons` by hand, but the
+  interactive extrude runners (`runExtrudeUnion`/`runCutExtrudes`/… in
+  `extrudeBoolean.js`) did not, so a boss extruded onto a sketch's HOST solid
+  reached the bridge with the host's FROZEN profile and rebuilt the host at its
+  old shape ("Extrude N extends for no reason" after the source sketch was
+  edited post-creation). Diagnosis dead-end worth remembering: the occOps
+  (vitest) path CANNOT reproduce it — it re-derives internally — so a green
+  unit run means nothing here; the divergence is bridge-vs-occOps, caught only
+  by reasoning about the stored-polygon path (occClient.test.js pins
+  `bakeArgPolygons` on `broken-extrude.pcad`, whose Extrude 2 froze a triangle
+  over a live quad). Both `bakeArgPolygons` and `resolveArgDepths` are
+  Electron-branch-only for the same reason: occOps handles both internally.
 
 ## Precision: prefer decimal.js
 
