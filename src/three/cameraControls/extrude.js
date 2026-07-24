@@ -137,13 +137,21 @@ export function createExtrudeHelpers(
   };
 
   // Collect the existing solids a fresh batch of prisms should fuse with: the
-  // start-from solid plus each profile's host.
+  // start-from solid plus each profile's host.  A HIDDEN solid is never a union
+  // target — the user hid it deliberately, so a boss must not silently fuse it
+  // into a CSG result and make it reappear (the same rule resolveCutTargets
+  // applies to cuts; the sign of the extrude depth is irrelevant to it).
   const unionTargetIdsFor = (profiles, items) => {
+    const visibleSolid = (id) => {
+      const it = items.find((i) => i.id === id);
+      return it && it.type !== "sketch" && it.visible !== false;
+    };
     const targets = new Set();
-    if (extrudeStartSolidId != null) targets.add(extrudeStartSolidId);
+    if (extrudeStartSolidId != null && visibleSolid(extrudeStartSolidId))
+      targets.add(extrudeStartSolidId);
     for (const p of profiles) {
       const h = hostSolidIdFor(p, items);
-      if (h != null) targets.add(h);
+      if (h != null && visibleSolid(h)) targets.add(h);
     }
     return [...targets];
   };

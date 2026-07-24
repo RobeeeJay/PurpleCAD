@@ -202,8 +202,15 @@ export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
     const { performCsg } = await import("../occClient.js");
     const store = useStore.getState();
     const items = store.items;
+    // A hidden host is never fused (the user hid it deliberately — fusing would
+    // resurrect it as a CSG result).  Mirrors resolveCutTargets' visibility
+    // guard and unionTargetIdsFor's.
     const hosts = hostIds
-      .map((id) => items.find((i) => i.id === id && i.type !== "sketch"))
+      .map((id) =>
+        items.find(
+          (i) => i.id === id && i.type !== "sketch" && i.visible !== false,
+        ),
+      )
       .filter(Boolean);
     const inputs = [...extrudeDefs, ...hosts];
     if (inputs.length < 1) return;
@@ -253,7 +260,11 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       .map((id) => items.find((i) => i.id === id))
       .filter(Boolean);
     const solids = solidIds
-      .map((id) => items.find((i) => i.id === id && i.type !== "sketch"))
+      .map((id) =>
+        items.find(
+          (i) => i.id === id && i.type !== "sketch" && i.visible !== false,
+        ),
+      )
       .filter(Boolean);
     const inputs = [...extrudes, ...solids];
     if (inputs.length < 2) return;
