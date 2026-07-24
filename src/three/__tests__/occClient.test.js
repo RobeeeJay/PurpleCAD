@@ -37,8 +37,13 @@ vi.mock("../../store", () => {
   return { useStore };
 });
 
+import fs from "node:fs";
 import { ensureOcc } from "../occ/init.js";
-import { chamferOrFilletItem, deepResolveDepth } from "../occClient.js";
+import {
+  chamferOrFilletItem,
+  deepResolveDepth,
+  bakeArgPolygons,
+} from "../occClient.js";
 
 beforeAll(async () => {
   await ensureOcc();
@@ -89,6 +94,40 @@ describe("deepResolveDepth (formula -> scene units before the IPC boundary)", ()
     // mm / 10: height 60 -> 6.0 scene units; width*2 = 10 mm -> 1.0.
     expect(out.regenerator.extrudeDefs[0].depth).toBe(6);
     expect(out.regenerator.extrudeDefs[1].depth).toBe(1);
+  });
+});
+
+describe("bakeArgPolygons (live polygon -> baked before the IPC boundary)", () => {
+  // The Electron bridge builds an extrude from its STORED polygon2D; if the
+  // source sketch was edited after the extrude was created, that polygon is
+  // stale and the bridge rebuilds the old profile — so an extrude used as a
+  // boss HOST (runExtrudeUnion) "extrudes for no reason".  broken-extrude.pcad
+  // is exactly this: Extrude 2's frozen profile is a 3-point triangle while its
+  // live Sketch 1 is a 4-point quad.  bakeArgPolygons must re-derive the quad
+  // for every input so the bridge builds what the renderer shows.  (occOps
+  // re-derives internally, so this only bites the Electron path.)
+  it("re-derives an extrude's live sketch profile over a stale frozen one", () => {
+    const doc = JSON.parse(
+      fs.readFileSync("test-files/broken-extrude.pcad", "utf8"),
+    );
+    const items = doc.history
+      .filter((h) => h.instruction?.type === "create")
+      .map((h) => h.instruction.item);
+    const extrude2 = items.find((i) => i.id === 2);
+    expect(extrude2.profile.polygon2D.length).toBe(3); // stale triangle
+
+    const out = bakeArgPolygons({
+      selectedItems: [extrude2],
+      allItems: items,
+      printPrecision: 0.1,
+    });
+    const baked = out.selectedItems[0].profile.polygon2D;
+    // Live Sketch 1 is a 4-point quad whose x stays well left of the stale
+    // triangle's (which reached +1.2).
+    expect(baked.length).toBe(4);
+    expect(Math.max(...baked.map((p) => p.x))).toBeLessThan(-1);
+    // Pure: the original item is untouched.
+    expect(extrude2.profile.polygon2D.length).toBe(3);
   });
 });
 

@@ -13,6 +13,7 @@
 import { useStore } from "../store";
 import { resolveValue } from "./geometryParams.js";
 import { variablesToMap } from "../utils/formulas.js";
+import { withLivePolygons } from "./csgUtils.js";
 
 const isElectron = typeof window !== "undefined" && window.electronAPI != null;
 
@@ -59,6 +60,31 @@ function resolveArgDepths(args) {
   return out;
 }
 
+// The Electron bridge can't re-derive an extrude's profile from its sketch (it
+// can't import the ESM geometry helpers), so it builds from each item's STORED
+// polygon2D.  That polygon goes stale whenever the source sketch is edited
+// after the extrude was created — the renderer re-derives it live, but a raw
+// item handed straight to performCsg (e.g. an extrude used as a boss HOST in
+// runExtrudeUnion) reaches the bridge with the frozen polygon and rebuilds at
+// the OLD profile, so the host "extrudes for no reason".  Pre-bake the live
+// polygon into every item here, mirroring resolveArgDepths — the same reason
+// depths are resolved before the boundary.  occOps (the vitest path) re-derives
+// internally, so this is only needed for the bridge, but applying it on both
+// paths is harmless and keeps the two in lockstep.
+export function bakeArgPolygons(args) {
+  if (!args || typeof args !== "object") return args;
+  const allItems = Array.isArray(args.allItems) ? args.allItems : [];
+  const precision = args.printPrecision ?? null;
+  const bake = (i) => withLivePolygons(i, allItems, precision);
+  const mapArr = (arr) => (Array.isArray(arr) ? arr.map(bake) : arr);
+  const out = { ...args };
+  if (args.source) out.source = bake(args.source);
+  if (args.allItems) out.allItems = mapArr(args.allItems);
+  if (args.selectedItems) out.selectedItems = mapArr(args.selectedItems);
+  if (args.items) out.items = mapArr(args.items);
+  return out;
+}
+
 let inProcessOps = null;
 async function getInProcessOps() {
   if (!inProcessOps) {
@@ -95,7 +121,10 @@ async function callOp(op, args) {
   console.log(`[OCC] ${op} start ${clock()}`);
   try {
     const result = isElectron
-      ? await window.electronAPI.invokeOcc(op, resolveArgDepths(args))
+      ? await window.electronAPI.invokeOcc(
+          op,
+          resolveArgDepths(bakeArgPolygons(args)),
+        )
       : await (async () => {
           const ops = await getInProcessOps();
           const fn = ops[op];
