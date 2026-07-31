@@ -454,19 +454,47 @@ export const createSketchSlice = (set) => ({
     set((state) => {
       const item = state.items.find((i) => i.id === sketchId);
       if (!item) return {};
-      const kept = (item.shapes || []).filter(
-        (s) => s.projection?.key !== projKey,
-      );
+      const old = item.shapes || [];
+      const inGroup = (s) => s.projection?.key === projKey;
+      const kept = old.filter((s) => !inGroup(s));
       const shapes = [...kept, ...newShapes];
+      // Dropping the group's old shapes and APPENDING the refit ones renumbers
+      // every shape that sat after them, so the constraints must be remapped —
+      // exactly as deleting or trimming shapes does.  Without this, refitting a
+      // projection when its source body moves silently re-binds every later
+      // constraint to the wrong shape (a "horizontal" landing on a vertical
+      // line, a 145 mm dimension on a 30 mm one), and the next drag's
+      // repair-solve then yanks unrelated geometry across the sketch.
+      const indexMap = new Map();
+      const groupOldIdxs = [];
+      let ni = 0;
+      old.forEach((s, i) => {
+        if (inGroup(s)) groupOldIdxs.push(i);
+        else indexMap.set(i, ni++);
+      });
+      // A constraint attached to the projected geometry itself follows the
+      // refit shape in the same position; if the refit produced fewer shapes
+      // there's no counterpart, so -1 drops the constraint.
+      groupOldIdxs.forEach((oldIdx, k) =>
+        indexMap.set(oldIdx, k < newShapes.length ? kept.length + k : -1),
+      );
+      const constraints = (item.constraints || [])
+        .map((c) => remapConstraintShapeIndices(c, indexMap))
+        .filter(Boolean);
       const updatedItems = state.items.map((it) =>
-        it.id === sketchId ? Object.assign({}, it, { shapes }) : it,
+        it.id === sketchId
+          ? Object.assign({}, it, { shapes, constraints })
+          : it,
       );
       const newHistory = state.history.map((entry) =>
         entry.instruction?.type === "create" &&
         entry.instruction.item?.id === sketchId
           ? Object.assign({}, entry, {
               instruction: Object.assign({}, entry.instruction, {
-                item: Object.assign({}, entry.instruction.item, { shapes }),
+                item: Object.assign({}, entry.instruction.item, {
+                  shapes,
+                  constraints,
+                }),
               }),
             })
           : entry,
