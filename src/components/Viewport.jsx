@@ -9,6 +9,7 @@ import ChamferOverlay from "./viewport/ChamferOverlay";
 import PushPullOverlay from "./viewport/PushPullOverlay";
 import SweepOverlay from "./viewport/SweepOverlay";
 import SvgPlacementOverlay from "./viewport/SvgPlacementOverlay";
+import UnderlayPlacementOverlay from "./viewport/UnderlayPlacementOverlay";
 import PlaneDialog from "./PlaneDialog";
 import MirrorDialog from "./MirrorDialog";
 import BooleanDialog from "./BooleanDialog";
@@ -375,6 +376,7 @@ const Viewport = () => {
       <SelectionWidget />
       <SketchSelectionWidget />
       <SvgPlacementOverlay />
+      <UnderlayPlacementOverlay />
       <PlanePickHint />
       {widgetVisible && (
         <RotationWidget

@@ -121,4 +121,20 @@ export const createSketchUiStateSlice = (set) => ({
       state.svgImport ? { svgImport: { ...state.svgImport, ...partial } } : {},
     ),
   clearSvgImport: () => set({ svgImport: null }),
+
+  // In-progress placement of a sketch reference underlay (a PNG/JPEG traced
+  // over).  Holds the live values the placement bar edits; Confirm writes them
+  // onto the sketch item, Cancel throws them away.  `editing` marks a re-open
+  // of an already-committed underlay, so Cancel restores rather than removes.
+  // { sketchId, dataUrl, name, imageAspect, widthMm, offsetX, offsetY,
+  //   rotationDeg, opacity, editing, original } | null
+  underlayImport: null,
+  setUnderlayImport: (v) => set({ underlayImport: v }),
+  updateUnderlayImport: (partial) =>
+    set((state) =>
+      state.underlayImport
+        ? { underlayImport: { ...state.underlayImport, ...partial } }
+        : {},
+    ),
+  clearUnderlayImport: () => set({ underlayImport: null }),
 });

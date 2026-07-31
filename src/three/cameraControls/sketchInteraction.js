@@ -95,6 +95,11 @@ export function createSketchInteraction(
     controls,
   });
 
+  // Drag state for placing a reference underlay image.  Unlike the SVG import
+  // there's no preview group to rebuild — useSceneSync redraws the plane
+  // straight from the live store values.
+  const underlayDragRef = { current: null };
+
   // ── Sketch drawing preview cleanup ────────────────────────────────────────
   const clearSketchPreview = () => {
     const draw = sketchDrawRef.current;
@@ -676,6 +681,25 @@ export function createSketchInteraction(
       controls.mouseDownY = e.clientY;
       return true;
     }
+    // Underlay placement: drag the pending image to position it under the
+    // geometry being traced.  Same gesture as the SVG placement above.
+    const under = useStore.getState().underlayImport;
+    if (under) {
+      const sketchMesh = objectsRef.current[under.sketchId];
+      const local = sketchMesh
+        ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
+        : null;
+      underlayDragRef.current = local
+        ? {
+            startLocal: local,
+            startOffsetX: under.offsetX ?? 0,
+            startOffsetY: under.offsetY ?? 0,
+          }
+        : null;
+      controls.mouseDownX = e.clientX;
+      controls.mouseDownY = e.clientY;
+      return true;
+    }
     // The mirror tool is a pick-mode, not a drawing tool: clicks are handled
     // on mouse-up by handleMirrorClick, not the draw helpers.
     if (
@@ -852,6 +876,34 @@ export function createSketchInteraction(
       controls.mouseY = e.clientY;
       return true;
     }
+    // Underlay placement: drag moves the pending image's offset.  The scene
+    // sync effect redraws the plane from the live store values, so there's no
+    // preview call to make here.
+    const underMove = useStore.getState().underlayImport;
+    if (underMove) {
+      if (underlayDragRef.current) {
+        const sketchMesh = objectsRef.current[underMove.sketchId];
+        const cur = sketchMesh
+          ? screenToSketchLocal(e.clientX, e.clientY, sketchMesh)
+          : null;
+        if (cur) {
+          useStore.getState().updateUnderlayImport({
+            offsetX:
+              underlayDragRef.current.startOffsetX +
+              (cur.x - underlayDragRef.current.startLocal.x),
+            offsetY:
+              underlayDragRef.current.startOffsetY +
+              (cur.y - underlayDragRef.current.startLocal.y),
+          });
+        }
+      }
+      renderer.domElement.style.cursor = underlayDragRef.current
+        ? "grabbing"
+        : "grab";
+      controls.mouseX = e.clientX;
+      controls.mouseY = e.clientY;
+      return true;
+    }
     // While the long-press element list is open, ignore canvas motion — no
     // marquee, no hover repaint underneath it.
     if (longPressMenuRef.current) return true;
@@ -1022,6 +1074,11 @@ export function createSketchInteraction(
     if (!sketchModeRef.current || e.button !== 0) return false;
     if (useStore.getState().svgImport) {
       svgDragRef.current = null;
+      renderer.domElement.style.cursor = "grab";
+      return true;
+    }
+    if (useStore.getState().underlayImport) {
+      underlayDragRef.current = null;
       renderer.domElement.style.cursor = "grab";
       return true;
     }

@@ -191,8 +191,44 @@ const commitSketchShapesChange = (state, sketchId, newShapes) => {
   };
 };
 
+// Commit the reference underlay (a traced-over image) on a sketch: same
+// items + CREATE-entry rewrite + persist as a shapes change, but deliberately
+// NOT markCsgDirty — the underlay is a visual guide with no geometric effect,
+// so changing it must not force every downstream CSG step to rebuild.
+const commitSketchUnderlay = (state, sketchId, underlay) => {
+  const patch = (item) => {
+    const next = Object.assign({}, item);
+    if (underlay) next.underlay = underlay;
+    else delete next.underlay;
+    return next;
+  };
+  const updatedItems = state.items.map((item) =>
+    item.id === sketchId ? patch(item) : item,
+  );
+  const newHistory = state.history.map((entry) =>
+    entry.instruction?.type === "create" &&
+    entry.instruction.item?.id === sketchId
+      ? Object.assign({}, entry, {
+          instruction: Object.assign({}, entry.instruction, {
+            item: patch(entry.instruction.item),
+          }),
+        })
+      : entry,
+  );
+  saveTimeline(newHistory, state.activeHistoryId);
+  return { items: updatedItems, history: withOrphanFlags(newHistory) };
+};
+
 export const createSketchSlice = (set) => ({
   ...createSketchUndoSlice(set),
+
+  // Set (or (with null) remove) a sketch's reference underlay image.
+  setSketchUnderlay: (sketchId, underlay) =>
+    set((state) => {
+      const item = state.items.find((i) => i.id === sketchId);
+      if (!item || item.type !== "sketch") return {};
+      return commitSketchUnderlay(state, sketchId, underlay);
+    }),
 
   // --- Interaction state (pure setters) + the text-contour backfill ---
   ...createSketchUiStateSlice(set),

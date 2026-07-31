@@ -329,6 +329,15 @@ export function createSketchKeyboardHandler(
         useStore.getState().setSketchLongPressMenu(null);
         return;
       }
+      // Placing/editing a reference underlay: Esc abandons it, restoring the
+      // committed values when this was a re-open of an existing one.
+      const under = useStore.getState().underlayImport;
+      if (under) {
+        if (under.editing && under.original)
+          useStore.getState().setSketchUnderlay(under.sketchId, under.original);
+        useStore.getState().clearUnderlayImport();
+        return;
+      }
       if (getSelectedConstraintIdx() !== null) {
         clearConstraintSelection();
         return;
