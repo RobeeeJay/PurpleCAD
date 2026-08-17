@@ -239,6 +239,31 @@ const FolderIcon = () => (
   </svg>
 );
 
+const InspectorIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24">
+    <line stroke="#c4c2b8" strokeWidth="1.5" x1="3" y1="6" x2="13" y2="6" />
+    <line stroke="#c4c2b8" strokeWidth="1.5" x1="3" y1="11" x2="10" y2="11" />
+    <line stroke="#c4c2b8" strokeWidth="1.5" x1="3" y1="16" x2="8" y2="16" />
+    <circle
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.8"
+      cx="15.5"
+      cy="15.5"
+      r="4"
+    />
+    <line
+      stroke="#6C3FD4"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      x1="18.6"
+      y1="18.6"
+      x2="21.5"
+      y2="21.5"
+    />
+  </svg>
+);
+
 const NewFolderIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24">
     <rect
@@ -623,6 +648,7 @@ const TreeView = ({ items }) => {
   const addFolder = useStore((s) => s.addFolder);
   const hideHiddenItems = useStore((s) => s.hideHiddenItems);
   const toggleHideHiddenItems = useStore((s) => s.toggleHideHiddenItems);
+  const setSceneInspectorOpen = useStore((s) => s.setSceneInspectorOpen);
   const [dragState, setDragState] = useState({
     draggingId: null,
     draggingKind: null,
@@ -735,6 +761,13 @@ const TreeView = ({ items }) => {
       <div className="tree-view-header">
         <span className="tree-view-title">Objects</span>
         <div className="tree-view-header-actions">
+          <button
+            className="tree-header-btn"
+            title="Scene inspector — detailed listing of every object (debug)"
+            onClick={() => setSceneInspectorOpen(true)}
+          >
+            <InspectorIcon />
+          </button>
           <button
             className="tree-header-btn"
             title="New folder"

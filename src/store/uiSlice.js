@@ -280,6 +280,8 @@ export const uiInitial = {
   settingsDialogOpen: false,
   aboutDialogOpen: false,
   projectsDialogOpen: false,
+  // Debug browser for every object in the scene (Objects list header).
+  sceneInspectorOpen: false,
 
   // Snap-to-grid + perspective FOV: when snap is enabled, dragged/moved objects
   // (3D gizmo translate and sketch drags) snap to snapDistanceMm in world space,
@@ -1272,4 +1274,5 @@ export const createUiSlice = (set, get) => ({
   setSettingsDialogOpen: (open) => set({ settingsDialogOpen: !!open }),
   setAboutDialogOpen: (open) => set({ aboutDialogOpen: !!open }),
   setProjectsDialogOpen: (open) => set({ projectsDialogOpen: !!open }),
+  setSceneInspectorOpen: (open) => set({ sceneInspectorOpen: !!open }),
 });
