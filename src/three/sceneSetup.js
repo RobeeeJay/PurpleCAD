@@ -23,6 +23,7 @@ export function createCamera(
   savedState,
   targetRef,
   fov = 35,
+  canvasWidthPx,
 ) {
   const frustumSize = 20;
   let camera;
@@ -43,7 +44,7 @@ export function createCamera(
     savedState.positionY,
     savedState.positionZ,
   );
-  camera.lookAt(targetRef.current);
+  panelAwareLookAt(camera, targetRef.current, canvasWidthPx);
   return camera;
 }
 
@@ -164,7 +165,12 @@ function makeRulerLabel(text, tier = "coarse", theme) {
   ctx.fillText(text, 80, 20);
   const mat = new THREE.MeshBasicMaterial({
     map: new THREE.CanvasTexture(canvas),
-    depthTest: false,
+    // depthTest ON so 3D bodies sitting on the ground OCCLUDE the floor ruler
+    // numbers behind them instead of the labels floating in front.  depthWrite
+    // OFF (like the grid) so the flat quad — coplanar with the grid at y=0 —
+    // doesn't z-fight it or block other transparents.
+    depthTest: true,
+    depthWrite: false,
     transparent: true,
     side: THREE.DoubleSide,
   });
@@ -293,6 +299,146 @@ export function createGrid(scene, theme) {
 const RULER_Y = 0.05; // label height above the ground plane
 const RULER_AXIS_OFFSET = 0.7; // nudge labels off the axis line they sit on
 
+// Width (px) of the objects/timeline overlay that floats over the LEFT of the
+// canvas.  Duplicated per-file (matches the rest of the codebase's pattern —
+// see useViewportCamera.js's own copy) rather than centralised.
+const LEFT_PANEL_PX = 250;
+
+const _panelYawAxis = new THREE.Vector3(0, 1, 0);
+
+// `camera.lookAt(target)` ALWAYS puts target at NDC (0,0) — the raw canvas
+// centre — no matter which world point `target` is. That centre sits under
+// the left objects/timeline panel, so anything the camera "centres on" (the
+// orbit pivot, Home's framed model, …) renders visibly left of the panel-
+// excluded VISIBLE area's own centre — a structural property of a symmetric
+// lookAt, not something choosing a different `target` point can fix (proved
+// by measurement: shifting which point is picked only shifts the REST of the
+// scene the wrong way once the camera re-centres on it).
+//
+// Call this immediately after `camera.lookAt(target)` for every 3D-view (non-
+// sketch) navigation path — pan, zoom, orbit, Home/orientation-change tweens,
+// and the camera recreated on a projection-mode switch — to yaw the camera by
+// a small ADDITIONAL angle so target renders at NDC (+frac, 0), the visible
+// area's true centre, instead. Deliberately NOT used for the thumbnail
+// capture's `cam.lookAt(center)` (cameraControls.js), which wants the full
+// symmetric frame with no panel exclusion (see its own comment).
+//
+// This must be the ONLY panel-compensation mechanism in the live-navigation
+// path — `getOrbitAnchor` (cameraControls.js) and the ruler's
+// `groundRayCrossing` (this file) deliberately raycast from NDC (+frac, 0)
+// too, which is only correct BECAUSE this function keeps the camera's actual
+// orientation consistent with that assumption; and `handleHome`
+// (useViewportCamera.js) deliberately fits into the FULL [-1,1] frame (no
+// custom frame parameter) rather than its own asymmetric composition, relying
+// on this same yaw (applied to its tween's lookAt) to land the result in the
+// right place — doing both at once would double-compensate.
+export function panelAwareLookAt(camera, target, canvasWidthPx) {
+  camera.lookAt(target);
+  if (!camera.isPerspectiveCamera) return; // orthographic: no compensation yet
+  const canvasW = canvasWidthPx || 1;
+  const panel = Math.min(LEFT_PANEL_PX, canvasW * 0.8);
+  const frac = panel / canvasW;
+  if (frac <= 0) return;
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const angle = Math.atan(frac * Math.tan(hFov / 2));
+  // rotateOnAxis treats the axis as LOCAL (object-space) — the camera's OWN
+  // up vector post-lookAt, which keeps this a pure horizontal NDC shift no
+  // matter how steeply the camera is pitched. rotateOnWorldAxis(worldY, …)
+  // looks equivalent and IS for a level camera, but as pitch moves away from
+  // 0 it stops being a simple yaw around the camera's own up — it picks up a
+  // roll-like component, so the resulting NDC-x shift varies with pitch
+  // instead of staying constant: the pivot dot visibly swings left/right as
+  // the view is rotated up/down.
+  camera.rotateOnAxis(_panelYawAxis, angle);
+}
+
+// Legibility fade for a ruler label whose on-screen gap to the NEXT grid step
+// has collapsed (a row viewed nearly edge-on — the camera's forward direction
+// close to parallel with the row, which happens continuously while orbiting —
+// compresses evenly-spaced world points toward the vanishing point).  Same-size
+// text there overlaps its neighbours into an illegible garbled cluster, which
+// reads as "the ruler numbers jump around" while rotating: same-size labels can
+// fix apparent SIZE, not the POSITION compression, so the fix is to fade the
+// crowded ones out instead.  Exported (rather than inlined in the render loop)
+// so the threshold math is unit-testable without a live THREE camera/canvas.
+export const RULER_FADE_MIN_GAP_PX = 26; // below this, neighbouring text overlaps
+export const RULER_FADE_RANGE_PX = 22; // fade smoothly over this band above it
+
+// Where the ruler's two rows CROSS is the ground-plane point straight ahead
+// of the camera, through the centre of the VISIBLE 3D area (the canvas minus
+// the left objects/timeline panel).  Earlier attempts centred the ruler on
+// `targetRef.current` — the orbit pivot — and tried to smooth over the fact
+// that navigation.js's orbit-anchor recentre (setOrbitAnchor, on the first
+// tick of a new Shift+scroll session) reassigns THAT bookkeeping variable
+// instantly, to wherever the screen-centre ray hits. Chasing it with an
+// ever-more-careful glide never fully closed the gap (a coarser rotation, or
+// simply more of them, kept finding new ways to make it visible).
+//
+// The camera's ACTUAL forward direction has no such discontinuity — it
+// changes only as much as the wheel input actually rotates it, every single
+// tick, with nothing hidden re-snapping underneath. So don't reference target
+// AT ALL for centring: rebuild the ray fresh, every frame, straight from the
+// camera's own position/orientation, and use where THAT ray hits the ground.
+// Orbiting around a pivot that sits on the ground keeps this point pinned
+// almost exactly to the pivot throughout — same effective behaviour as
+// before for the common case — but with no bookkeeping variable left to
+// reassign out from under it.
+//
+// Plain-object state (no THREE dependency) so this is unit-testable without a
+// live render loop.  `camPos`/`camDir` are plain {x,y,z} (camDir need not be
+// normalized). Returns `{ x, z, hit }`; when the camera looks away from the
+// ground (`hit: false`), `x`/`z` repeat the last-known-good point from
+// `state` (initially the origin) rather than leaving the ruler undefined.
+export function groundRayCrossing(camPos, camDir, state, groundY = 0) {
+  const s = { ...state };
+  // Parallel to the ground, or the ground is behind the camera along this
+  // ray (looking up and away from it) — no usable intersection this frame.
+  if (Math.abs(camDir.y) > 1e-6) {
+    const t = (groundY - camPos.y) / camDir.y;
+    if (t > 0) {
+      s.x = camPos.x + camDir.x * t;
+      s.z = camPos.z + camDir.z * t;
+      s.hit = true;
+      return s;
+    }
+  }
+  s.hit = false;
+  return s;
+}
+
+export function ndcGapPx(ndcA, ndcB, canvasW, canvasH) {
+  const dxPx = ((ndcB.x - ndcA.x) / 2) * canvasW;
+  const dyPx = ((ndcB.y - ndcA.y) / 2) * canvasH;
+  return Math.hypot(dxPx, dyPx);
+}
+
+export function rulerFadeOpacity(
+  pxGap,
+  minGap = RULER_FADE_MIN_GAP_PX,
+  fadeRange = RULER_FADE_RANGE_PX,
+) {
+  return Math.max(0, Math.min(1, (pxGap - minGap) / fadeRange));
+}
+
+// True when `point` sits behind the camera's view plane (dot of the
+// camera->point vector with the forward direction <= 0).  `Vector3.project()`
+// doesn't clip a behind-camera point — it divides by a negative w and can
+// flip/explode the NDC coords — so a crowding check that blindly projects
+// BOTH a label and its "next step" neighbour can spike the measured gap to a
+// garbage value the instant the neighbour crosses behind the camera, snapping
+// that label's opacity discontinuously (a blink/teleport) instead of fading
+// smoothly.  Plain {x,y,z} objects (no THREE dependency) so this is
+// unit-testable without a live camera.
+export function pointBehindCamera(point, camPos, camForward) {
+  return (
+    (point.x - camPos.x) * camForward.x +
+      (point.y - camPos.y) * camForward.y +
+      (point.z - camPos.z) * camForward.z <=
+    0
+  );
+}
+
 // Recycle ruler labels around the camera target (cx, cz on the ground) so they
 // follow the view.  Labels live at absolute world multiples of each tier's step
 // and read true mm; only labels entering the range get a fresh texture, the
@@ -331,6 +477,12 @@ export function updateRuler3D(rulerGroup, cx, cz, viewHeight, theme) {
         group.add(sp);
       }
       sp.position.set(x, y, z);
+      // Which world axis this label steps along, and by how much — the
+      // per-frame legibility fade (animateLoop.js) projects one step ahead to
+      // measure the ACTUAL on-screen gap to its neighbour, so it can fade out
+      // before adjacent numbers overlap into an illegible blob.
+      sp.userData.gridAxis = axis;
+      sp.userData.gridStep = step;
     };
     const kxMin = Math.ceil((cx - span) / step);
     const kxMax = Math.floor((cx + span) / step);

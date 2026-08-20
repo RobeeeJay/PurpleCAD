@@ -5,6 +5,37 @@
 
 import { useStore } from "../../store";
 import { activePrecision } from "../resolution.js";
+import { hostFaceExtentAlongNormal } from "../csgUtils.js";
+
+// Determine the solids a cut-extrusion subtracts from.  In priority order:
+//   1. sourceItemId from the extrude profile (face-profile path — the user
+//      clicked a solid face directly).
+//   2. The sketch's hostSolidId (recorded when the sketch was placed on a
+//      solid's face).  Without this, cuts on a sketch-loop fall back to every
+//      visible solid in the scene, which silently turns unrelated primitives
+//      into CSG items.
+//   3. Every visible non-sketch non-extrude item (last resort for sketches
+//      placed on an axis plane with no specific host).
+// A HIDDEN solid is never a cut target — the user hid it deliberately, so it
+// must not silently turn into a CSG result and reappear.  This applies to the
+// explicit source/host too, not just the scan.
+function resolveCutTargets(items, profile, sourceItemId, excludeIds = []) {
+  const cuttable = (i) => i && i.type !== "sketch" && i.visible !== false;
+  if (sourceItemId != null) {
+    const src = items.find((i) => i.id === sourceItemId);
+    return cuttable(src) ? [src] : [];
+  }
+  const sketchId = profile?.sketchId ?? null;
+  const sketch = sketchId != null ? items.find((i) => i.id === sketchId) : null;
+  const hostId = sketch?.hostSolidId ?? null;
+  if (hostId != null) {
+    const host = items.find((i) => i.id === hostId);
+    return cuttable(host) ? [host] : [];
+  }
+  return items.filter(
+    (i) => cuttable(i) && i.type !== "extrude" && !excludeIds.includes(i.id),
+  );
+}
 
 // Run a cut-extrusion: subtract the new extrude shape from the target solid
 // (or every visible solid when no source was captured), then hide both the
@@ -16,39 +47,9 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
     const items = freshStore.items;
     const extrude = items.find((i) => i.id === extrudeItemId);
     if (!extrude) return;
-    // Determine the targets to cut from.  In priority order:
-    //   1. sourceItemId from the extrude profile (face-profile path — the user
-    //      clicked a solid face directly).
-    //   2. The sketch's hostSolidId (recorded when the sketch was placed on a
-    //      solid's face).  Without this, cuts on a sketch-loop fall back to
-    //      every visible solid in the scene, which silently turns unrelated
-    //      primitives into CSG items.
-    //   3. Every visible non-sketch non-extrude item (last resort for sketches
-    //      placed on an axis plane with no specific host).
-    let targets;
-    if (sourceItemId != null) {
-      const src = items.find(
-        (i) => i.id === sourceItemId && i.type !== "sketch",
-      );
-      targets = src ? [src] : [];
-    } else {
-      const sketchId = extrude?.profile?.sketchId ?? null;
-      const sketch =
-        sketchId != null ? items.find((i) => i.id === sketchId) : null;
-      const hostId = sketch?.hostSolidId ?? null;
-      if (hostId != null) {
-        const host = items.find((i) => i.id === hostId && i.type !== "sketch");
-        targets = host ? [host] : [];
-      } else {
-        targets = items.filter(
-          (i) =>
-            i.type !== "sketch" &&
-            i.type !== "extrude" &&
-            i.id !== extrudeItemId &&
-            i.visible !== false,
-        );
-      }
-    }
+    const targets = resolveCutTargets(items, extrude?.profile, sourceItemId, [
+      extrudeItemId,
+    ]);
     if (targets.length === 0) {
       // Nothing to cut from — fold the standalone extrude away.  consumeItems
       // bakes `visible: false` into its CREATE entry so a replay won't
@@ -101,6 +102,86 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
   }
 }
 
+// Subtract a whole multi-area cut in ONE timeline entry.  Unlike
+// runCutExtrusion the prisms are NOT created as store items — their recipes
+// (`extrudeDefs`) are embedded in the result's `extrudeCut` regenerator, so N
+// holes are one "Cut" step.  Running them as ONE difference also fixes the
+// result: N concurrent runCutExtrusion calls each read the store and each
+// subtract a single prism from the SAME original target, so the last write won
+// and only one hole survived (as N overlapping bodies).  `cutId` is
+// pre-allocated by the caller.
+export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
+  try {
+    const { performCsg } = await import("../occClient.js");
+    const store = useStore.getState();
+    const items = store.items;
+    if (!extrudeDefs.length) return;
+    const targets = resolveCutTargets(
+      items,
+      extrudeDefs[0]?.profile,
+      sourceItemId,
+    );
+    if (targets.length === 0) return;
+    const precision = activePrecision(store);
+    // Record how far the cut's start sits BELOW the host's face along the cut
+    // normal (0 when it starts exactly at that face).  regenerateExtrudeUnion
+    // re-anchors the cut to the host's live face + this inset each regen, so a
+    // variable that resizes the body keeps the cut on the face it was started
+    // from.  Measured against the pre-cut target.
+    const ref = extrudeDefs.find((d) => (d.startOffset || 0) !== 0)?.profile;
+    let id = cutId;
+    for (const target of targets) {
+      const cutStartInset =
+        ref?.normalWorld && ref.position
+          ? (() => {
+              const top = hostFaceExtentAlongNormal(
+                [target],
+                ref.normalWorld,
+                ref.position,
+              );
+              return top == null
+                ? 0
+                : (extrudeDefs.find((d) => (d.startOffset || 0) !== 0)
+                    ?.startOffset || 0) - top;
+            })()
+          : 0;
+      // One difference with every prism as a tool — BooleanOp takes the first
+      // input as the argument and the rest as tools.
+      const result = await performCsg({
+        selectedItems: [target, ...extrudeDefs],
+        operation: "difference",
+        printPrecision: precision,
+        allItems: items,
+      });
+      if (!result) continue;
+      useStore.getState().addItem({
+        id,
+        name: `Cut ${id}`,
+        type: "csg",
+        children: [],
+        position: result.position,
+        scale: { x: 1, y: 1, z: 1 },
+        rotation: { x: 0, y: 0, z: 0 },
+        geometryData: result.geometryData,
+        // A cut replaces the target, so inherit the target's material.
+        ...(target.material && { material: target.material }),
+        regenerator: {
+          kind: "extrudeCut",
+          extrudeDefs,
+          inputIds: [target.id],
+          cutStartInset,
+          originalCenter: result.position,
+          regeneratedAt: precision,
+        },
+      });
+      id += 1;
+    }
+    useStore.getState().consumeItems(targets.map((t) => t.id));
+  } catch (err) {
+    console.error("Cut extrusion failed:", err);
+  }
+}
+
 // Fuse a batch of fresh extrude prisms into ONE solid.  The prisms already
 // exist as store items (created together in a single "createGroup" timeline
 // step) and are passed by id in `extrudeIds`; this union is its own next
@@ -121,8 +202,15 @@ export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
     const { performCsg } = await import("../occClient.js");
     const store = useStore.getState();
     const items = store.items;
+    // A hidden host is never fused (the user hid it deliberately — fusing would
+    // resurrect it as a CSG result).  Mirrors resolveCutTargets' visibility
+    // guard and unionTargetIdsFor's.
     const hosts = hostIds
-      .map((id) => items.find((i) => i.id === id && i.type !== "sketch"))
+      .map((id) =>
+        items.find(
+          (i) => i.id === id && i.type !== "sketch" && i.visible !== false,
+        ),
+      )
       .filter(Boolean);
     const inputs = [...extrudeDefs, ...hosts];
     if (inputs.length < 1) return;
@@ -172,7 +260,11 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       .map((id) => items.find((i) => i.id === id))
       .filter(Boolean);
     const solids = solidIds
-      .map((id) => items.find((i) => i.id === id && i.type !== "sketch"))
+      .map((id) =>
+        items.find(
+          (i) => i.id === id && i.type !== "sketch" && i.visible !== false,
+        ),
+      )
       .filter(Boolean);
     const inputs = [...extrudes, ...solids];
     if (inputs.length < 2) return;

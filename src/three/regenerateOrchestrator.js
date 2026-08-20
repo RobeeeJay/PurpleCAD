@@ -285,7 +285,8 @@ async function runRecalcPass(force = false) {
       // boolean/extrudeUnion source has its own re-localisation frame
       // (originalCentre) that the accumulated item state doesn't reproduce —
       // swapping it in breaks the union-source chamfer's recentring.
-      const booleanish = (k) => k === "boolean" || k === "extrudeUnion";
+      const booleanish = (k) =>
+        k === "boolean" || k === "extrudeUnion" || k === "extrudeCut";
       const refreshSource =
         singleInput &&
         inputRecomputed &&
@@ -327,7 +328,10 @@ async function runRecalcPass(force = false) {
       // rebuilds the input in (bbox-centred).  A boolean/union re-localises by
       // its originalCentre, not the bbox, so its baked mesh would misplace the
       // consumer — skip it and let the recipe rebuild.
-      const sewSafe = pkind !== "boolean" && pkind !== "extrudeUnion";
+      const sewSafe =
+        pkind !== "boolean" &&
+        pkind !== "extrudeUnion" &&
+        pkind !== "extrudeCut";
       if (sewSafe && gd?.positions?.length >= 9) {
         // A failed sew must not abort the whole recalculation (it left the
         // regen dialog stuck) — the recipe rebuild below is the correct

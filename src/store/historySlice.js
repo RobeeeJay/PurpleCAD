@@ -1307,4 +1307,76 @@ export const createHistorySlice = (set) => ({
         history: withOrphanFlags(dirtied),
       };
     }),
+
+  // Edit a FUSED extrude (extrudeUnion / extrudeCut csg item) in place: rebuild
+  // its embedded prism recipes (regenerator.extrudeDefs) from a new set of
+  // profiles + depth, keeping the same csg item and timeline entry.  Unlike
+  // retargetGroup the prisms aren't store items, so there are no createGroup /
+  // hiddenId / inputId swaps — just rewrite the defs and dirty downstream.
+  retargetFusedExtrude: (itemId, newProfiles, depth, startOffset = 0) =>
+    set((state) => {
+      const target = state.items.find((i) => i.id === itemId);
+      const oldRegen = target?.regenerator;
+      if (!oldRegen?.extrudeDefs?.length) return {};
+      const isCut = oldRegen.kind === "extrudeCut";
+      const oldDefs = oldRegen.extrudeDefs;
+      // Reuse the old defs' ids where the count matches; allocate fresh ids for
+      // any added profiles so downstream references stay stable.
+      let maxId = maxItemId(state.history);
+      const newDefs = newProfiles.map((profile, i) => {
+        const id = i < oldDefs.length ? oldDefs[i].id : ++maxId;
+        return {
+          id,
+          name: `${isCut ? "Extrude Cut" : "Extrude"} ${id}`,
+          type: "extrude",
+          children: [],
+          profile,
+          depth,
+          ...(startOffset ? { startOffset } : null),
+          ...(isCut ? { isCut: true } : null),
+          position: profile.position,
+          rotation: profile.rotation,
+          scale: { x: 1, y: 1, z: 1 },
+        };
+      });
+      const setDefs = (regen) => ({
+        ...regen,
+        extrudeDefs: newDefs,
+        regeneratedAt: "dirty",
+      });
+      const updatedItems = markCsgDirty(
+        state.items.map((item) =>
+          item.id === itemId
+            ? { ...item, regenerator: setDefs(item.regenerator) }
+            : item,
+        ),
+      );
+      const newHistory = dirtyAllEntries(
+        state.history.map((entry) => {
+          const inst = entry.instruction;
+          if (
+            inst?.type === "create" &&
+            inst.item?.id === itemId &&
+            inst.item.regenerator?.extrudeDefs
+          )
+            return {
+              ...entry,
+              instruction: {
+                ...inst,
+                item: {
+                  ...inst.item,
+                  regenerator: setDefs(inst.item.regenerator),
+                },
+              },
+            };
+          return entry;
+        }),
+      );
+      saveTimeline(newHistory, state.activeHistoryId);
+      return {
+        ...withUndo(state),
+        items: updatedItems,
+        history: withOrphanFlags(newHistory),
+      };
+    }),
 });

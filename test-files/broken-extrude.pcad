@@ -1,0 +1,563 @@
+{
+  "version": 1,
+  "history": [
+    {
+      "id": 0,
+      "label": "Scene created",
+      "itemId": null,
+      "instruction": {
+        "type": "scene_created"
+      },
+      "hiddenIds": [],
+      "_orphaned": false
+    },
+    {
+      "id": 1,
+      "label": "Added",
+      "itemId": 1,
+      "instruction": {
+        "type": "create",
+        "item": {
+          "parentId": null,
+          "material": {
+            "color": "#cccccc",
+            "metalness": 0.3,
+            "roughness": 0.5,
+            "opacity": 1,
+            "clearcoat": 0,
+            "clearcoatRoughness": 0
+          },
+          "id": 1,
+          "name": "Sketch 1",
+          "type": "sketch",
+          "children": [],
+          "position": {
+            "x": -3.039722719542592,
+            "y": 0,
+            "z": -0.27207279930224315
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          },
+          "rotation": {
+            "x": -1.5707963267948966,
+            "y": 0,
+            "z": 0
+          },
+          "hostSolidId": null,
+          "shapes": [
+            {
+              "type": "line",
+              "x1": -2.5595794935303053,
+              "y1": -186.3757013540389,
+              "x2": -2.159579493531035,
+              "y2": 9.12429099599903
+            },
+            {
+              "type": "line",
+              "x1": -1.559579493531035,
+              "y1": 9.124290995999036,
+              "x2": -1.5595794935335487,
+              "y2": -186.37570900400092
+            },
+            {
+              "type": "line",
+              "x1": -2.559579493530304,
+              "y1": -186.3757037540267,
+              "x2": -1.5595794935335525,
+              "y2": -186.37570630401393
+            },
+            {
+              "type": "line",
+              "x1": -2.159579493531035,
+              "y1": 9.124290995999031,
+              "x2": -1.559579493531035,
+              "y2": 9.124290995999035
+            }
+          ],
+          "constraints": [
+            {
+              "type": "vertical",
+              "shapeIdx": 1
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 2,
+              "pointA": "start",
+              "shapeBIdx": 0,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 2,
+              "pointA": "end",
+              "shapeBIdx": 1,
+              "pointB": "end"
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 2
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 1,
+              "pointA": "start",
+              "shapeBIdx": 1,
+              "pointB": "end",
+              "distance": "1955"
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 2,
+              "pointA": "start",
+              "shapeBIdx": 2,
+              "pointB": "end",
+              "distance": "10"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 3,
+              "pointA": "start",
+              "shapeBIdx": 0,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 3,
+              "pointA": "end",
+              "shapeBIdx": 1,
+              "pointB": "start"
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 3,
+              "pointA": "start",
+              "shapeBIdx": 3,
+              "pointB": "end",
+              "distance": "6"
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 3
+            }
+          ]
+        }
+      },
+      "hiddenIds": [],
+      "_orphaned": false
+    },
+    {
+      "id": 2,
+      "label": "Added",
+      "itemId": 2,
+      "instruction": {
+        "type": "create",
+        "item": {
+          "parentId": null,
+          "material": {
+            "color": "#cccccc",
+            "metalness": 0.3,
+            "roughness": 0.5,
+            "opacity": 1,
+            "clearcoat": 0,
+            "clearcoatRoughness": 0
+          },
+          "id": 2,
+          "name": "Extrude 2",
+          "type": "extrude",
+          "children": [],
+          "profile": {
+            "type": "sketchLoop",
+            "sketchId": 1,
+            "textShapeIdx": null,
+            "profileCentroid": {
+              "x": -0.17281488866733183,
+              "y": -120.21064743285952
+            },
+            "polygon2D": [
+              {
+                "x": -2.9112662013958133,
+                "y": -184.87726030274328
+              },
+              {
+                "x": 1.196410767696909,
+                "y": 9.122632103688936
+              },
+              {
+                "x": 1.196410767696909,
+                "y": -184.87731409952423
+              }
+            ],
+            "holes": [],
+            "position": {
+              "x": -3.039722719542592,
+              "y": 0,
+              "z": -0.27207279930224315
+            },
+            "rotation": {
+              "x": -1.5707963267948963,
+              "y": 0,
+              "z": 0
+            },
+            "normalWorld": {
+              "x": 0,
+              "y": 1,
+              "z": 2.220446049250313e-16
+            }
+          },
+          "depth": "30",
+          "position": {
+            "x": -3.039722719542592,
+            "y": 0,
+            "z": -0.27207279930224315
+          },
+          "rotation": {
+            "x": -1.5707963267948963,
+            "y": 0,
+            "z": 0
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        }
+      },
+      "hiddenIds": [],
+      "_orphaned": false
+    },
+    {
+      "id": 3,
+      "label": "Added",
+      "itemId": 3,
+      "instruction": {
+        "type": "create",
+        "item": {
+          "parentId": null,
+          "material": {
+            "color": "#cccccc",
+            "metalness": 0.3,
+            "roughness": 0.5,
+            "opacity": 1,
+            "clearcoat": 0,
+            "clearcoatRoughness": 0
+          },
+          "id": 3,
+          "name": "Sketch 3",
+          "type": "sketch",
+          "children": [],
+          "position": {
+            "x": -4.599302215061731,
+            "y": 2.4070679742909653,
+            "z": 137.98853701461795
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          },
+          "rotation": {
+            "x": 0,
+            "y": 1.5707963057214724,
+            "z": 0
+          },
+          "hostSolidId": 2,
+          "shapes": [
+            {
+              "type": "line",
+              "x1": -48.115093921131816,
+              "y1": -2.4070679742909995,
+              "x2": 147.38489844947358,
+              "y2": -2.407067974290956,
+              "projection": {
+                "sourceId": 2,
+                "edgeKey": "1784909814501_582922423",
+                "key": "2:1784909814501_582922423",
+                "localPolyline": [
+                  [
+                    0.40833333134651184,
+                    -89.60416412353516,
+                    0
+                  ],
+                  [
+                    0.40833333134651184,
+                    105.89582824707031,
+                    0
+                  ]
+                ]
+              },
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": -48.115093921131816,
+              "y1": -2.4070679742909995,
+              "x2": -48.115093921131816,
+              "y2": 0.5929320257090005,
+              "projection": {
+                "sourceId": 2,
+                "edgeKey": "1784909814501_525996025",
+                "key": "2:1784909814501_525996025",
+                "localPolyline": [
+                  [
+                    0.40833333134651184,
+                    -89.60416412353516,
+                    0
+                  ],
+                  [
+                    0.40833333134651184,
+                    -89.60416412353516,
+                    3
+                  ]
+                ]
+              },
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": 147.38489861289855,
+              "y1": -8.157067974145606,
+              "x2": 147.38489867418286,
+              "y2": 6.342932025567038,
+              "projection": {
+                "sourceId": 2,
+                "edgeKey": "1784909814501_115627098",
+                "key": "2:1784909814501_115627098",
+                "localPolyline": [
+                  [
+                    0.40833333134651184,
+                    105.89582824707031,
+                    0
+                  ],
+                  [
+                    0.40833333134651184,
+                    105.89582824707031,
+                    3
+                  ]
+                ]
+              },
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": -48.115093921131816,
+              "y1": 0.5929320257090005,
+              "x2": 147.38489844947358,
+              "y2": 0.592932025709044,
+              "projection": {
+                "sourceId": 2,
+                "edgeKey": "1784909814501_120362171",
+                "key": "2:1784909814501_120362171",
+                "localPolyline": [
+                  [
+                    0.40833333134651184,
+                    -89.60416412353516,
+                    3
+                  ],
+                  [
+                    0.40833333134651184,
+                    105.89582824707031,
+                    3
+                  ]
+                ]
+              },
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": 125.47374569652692,
+              "y1": 0.5816342036495555,
+              "x2": 132.87374569652937,
+              "y2": 0.5816342036519689
+            },
+            {
+              "type": "line",
+              "x1": 132.87374569652744,
+              "y1": 0.5816342036543825,
+              "x2": 132.87374569652718,
+              "y2": -2.4183657963585126
+            },
+            {
+              "type": "line",
+              "x1": 132.8737456965268,
+              "y1": -2.418365796357974,
+              "x2": 125.47374569652632,
+              "y2": -2.418365796356852
+            },
+            {
+              "type": "line",
+              "x1": 125.47374569652573,
+              "y1": -2.418365796355147,
+              "x2": 125.47374569652499,
+              "y2": 0.581634203647142
+            },
+            {
+              "type": "line",
+              "x1": 132.87636934443336,
+              "y1": -1.0689277988518886,
+              "x2": 147.37636934443336,
+              "y2": -1.0689277988518886,
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": -22.807227977016634,
+              "y1": -2.4058064267191708,
+              "x2": -22.807227977017373,
+              "y2": 0.5941935732831181
+            },
+            {
+              "type": "line",
+              "x1": -15.407227977015548,
+              "y1": -2.4058064267219987,
+              "x2": -22.807227977016037,
+              "y2": -2.405806426720876
+            },
+            {
+              "type": "line",
+              "x1": -22.80722797701544,
+              "y1": 0.5941935732855312,
+              "x2": -15.40722797701299,
+              "y2": 0.5941935732879453
+            },
+            {
+              "type": "line",
+              "x1": -15.407227977014923,
+              "y1": 0.5941935732903585,
+              "x2": -15.407227977015179,
+              "y2": -2.405806426722537
+            },
+            {
+              "type": "line",
+              "x1": -48.11358744359612,
+              "y1": -0.7896307461286116,
+              "x2": -22.813587443596116,
+              "y2": -0.7896307461286116,
+              "dashed": true
+            }
+          ],
+          "constraints": [
+            {
+              "type": "coincident",
+              "shapeAIdx": 4,
+              "pointA": "end",
+              "shapeBIdx": 5,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 5,
+              "pointA": "end",
+              "shapeBIdx": 6,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 6,
+              "pointA": "end",
+              "shapeBIdx": 7,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 7,
+              "pointA": "end",
+              "shapeBIdx": 4,
+              "pointB": "start"
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 4
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 5
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 6
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 7
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 6,
+              "pointA": "start",
+              "shapeBIdx": 6,
+              "pointB": "end",
+              "distance": "74"
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 7,
+              "pointA": "start",
+              "shapeBIdx": 7,
+              "pointB": "end",
+              "distance": "30"
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 8
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 8,
+              "pointA": "start",
+              "shapeBIdx": 8,
+              "pointB": "end",
+              "distance": "145"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 11,
+              "pointA": "end",
+              "shapeBIdx": 12,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 12,
+              "pointA": "end",
+              "shapeBIdx": 10,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 10,
+              "pointA": "end",
+              "shapeBIdx": 9,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 9,
+              "pointA": "end",
+              "shapeBIdx": 11,
+              "pointB": "start"
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 13
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 13,
+              "pointA": "start",
+              "shapeBIdx": 13,
+              "pointB": "end",
+              "distance": "253"
+            }
+          ]
+        }
+      },
+      "hiddenIds": [],
+      "_orphaned": false
+    }
+  ],
+  "activeHistoryId": null,
+  "variables": []
+}

@@ -4,6 +4,7 @@ import {
   withLivePolygons,
   withLiveDepth,
   remapExtrudeFaceSelections,
+  hostFaceExtentAlongNormal,
 } from "./csgUtils.js";
 // Routed through occClient → the OCC worker.  This file is no longer
 // imported from the store (the orchestrator in regenerateOrchestrator.js
@@ -889,23 +890,52 @@ async function regenerateBoolean(
 // separate store items, so the whole multi-area extrude is ONE timeline entry.
 // Optional `inputIds` are host solids (a boss) fused in too.  Each prism is
 // rebuilt from its live sketch polygon so the union tracks sketch edits.
+// Rebuild a multi-area extrude from its EMBEDDED prism recipes.  `isCut`
+// subtracts them from the host solids instead of fusing: the hosts lead so
+// performCsg treats them as the difference argument and the prisms as tools.
 async function regenerateExtrudeUnion(
   regenerator,
   accumulatedItems,
   printPrecision,
+  isCut = false,
 ) {
-  const prisms = (regenerator.extrudeDefs || []).map((d) =>
+  let prisms = (regenerator.extrudeDefs || []).map((d) =>
     withLivePolygons(d, accumulatedItems, printPrecision),
   );
   const hosts = (regenerator.inputIds || [])
     .map((id) => accumulatedItems.find((i) => i.id === id))
     .filter(Boolean)
     .map((i) => withLivePolygons(i, accumulatedItems, printPrecision));
-  const inputs = [...prisms, ...hosts];
+  // A cut whose target vanished would silently rebuild as the union of its
+  // prisms — leaving the holes as solid pegs.  Bail instead.
+  if (isCut && (hosts.length === 0 || prisms.length === 0)) return null;
+  // An offset cut tracks the host face it was started from: re-anchor each
+  // prism's startOffset to the host's CURRENT extent along the cut normal
+  // (plus the authored inset), so a variable that resizes the body keeps the
+  // cut registered to that face instead of leaving it floating in space.
+  if (isCut) {
+    const ref = prisms.find((pr) => (pr.startOffset || 0) !== 0)?.profile;
+    if (ref?.normalWorld && ref.position) {
+      const top = hostFaceExtentAlongNormal(
+        hosts,
+        ref.normalWorld,
+        ref.position,
+      );
+      if (top != null) {
+        const inset = regenerator.cutStartInset ?? 0;
+        prisms = prisms.map((pr) =>
+          (pr.startOffset || 0) !== 0
+            ? { ...pr, startOffset: top + inset }
+            : pr,
+        );
+      }
+    }
+  }
+  const inputs = isCut ? [...hosts, ...prisms] : [...prisms, ...hosts];
   if (inputs.length < 1) return null;
   return performCsg({
     selectedItems: inputs,
-    operation: "union",
+    operation: isCut ? "difference" : "union",
     printPrecision,
     allItems: accumulatedItems,
   });
@@ -1007,6 +1037,8 @@ export async function regenerateItemsForResolution(
           return regenerateBoolean(r, out, printPrecision);
         case "extrudeUnion":
           return regenerateExtrudeUnion(r, out, printPrecision);
+        case "extrudeCut":
+          return regenerateExtrudeUnion(r, out, printPrecision, true);
         default:
           return null;
       }

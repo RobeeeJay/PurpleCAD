@@ -9,6 +9,7 @@ import ChamferOverlay from "./viewport/ChamferOverlay";
 import PushPullOverlay from "./viewport/PushPullOverlay";
 import SweepOverlay from "./viewport/SweepOverlay";
 import SvgPlacementOverlay from "./viewport/SvgPlacementOverlay";
+import UnderlayPlacementOverlay from "./viewport/UnderlayPlacementOverlay";
 import PlaneDialog from "./PlaneDialog";
 import MirrorDialog from "./MirrorDialog";
 import BooleanDialog from "./BooleanDialog";
@@ -20,6 +21,7 @@ import HoleDialog from "./HoleDialog";
 import EmbossDialog from "./EmbossDialog";
 import TextureDialog from "./TextureDialog";
 import TextureLibraryDialog from "./TextureLibraryDialog";
+import SceneInspectorDialog from "./SceneInspectorDialog";
 import DraftDialog from "./DraftDialog";
 import BoxDialog from "./BoxDialog";
 import ProjectsDialog from "./ProjectsDialog";
@@ -367,6 +369,7 @@ const Viewport = () => {
       <EmbossDialog />
       <TextureDialog />
       <TextureLibraryDialog />
+      <SceneInspectorDialog />
       <DraftDialog />
       <BoxDialog />
       <ProjectsDialog />
@@ -375,6 +378,7 @@ const Viewport = () => {
       <SelectionWidget />
       <SketchSelectionWidget />
       <SvgPlacementOverlay />
+      <UnderlayPlacementOverlay />
       <PlanePickHint />
       {widgetVisible && (
         <RotationWidget

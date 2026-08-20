@@ -145,6 +145,30 @@ export function extrudeWithLivePolygon(item, allItems, precision) {
   });
 }
 
+// How far a set of host solids extends along a cut's profile normal, measured
+// from the sketch origin — i.e. the signed distance to the host's FAR (top)
+// face along the extrude direction.  An extrude cut anchored to that face
+// re-derives its startOffset from this each regen, so the cut tracks the face
+// as the body resizes instead of floating off it.  Returns null when no host
+// carries geometry.  Host rotation is assumed axis-aligned (extrudeUnion /
+// extrudeCut bodies are built axis-aligned), so only its position is applied.
+export function hostFaceExtentAlongNormal(hosts, normal, origin) {
+  let top = -Infinity;
+  for (const h of hosts || []) {
+    const p = h?.geometryData?.positions;
+    if (!p?.length) continue;
+    const pos = h.position || { x: 0, y: 0, z: 0 };
+    for (let i = 0; i < p.length; i += 3) {
+      const d =
+        (p[i] + pos.x - origin.x) * normal.x +
+        (p[i + 1] + pos.y - origin.y) * normal.y +
+        (p[i + 2] + pos.z - origin.z) * normal.z;
+      if (d > top) top = d;
+    }
+  }
+  return top === -Infinity ? null : top;
+}
+
 // Re-derive every extrude profile in an item AND, recursively, in a chamfer/
 // bevel source's nested source — so the live sketch geometry feeds the OCC
 // shape (the Electron bridge can't import this ESM helper and otherwise builds
@@ -156,14 +180,28 @@ export function withLivePolygons(item, allItems, precision) {
   if (item.type === "extrude") {
     return extrudeWithLivePolygon(item, allItems, precision);
   }
-  if (item.type === "csg" && item.regenerator?.source) {
-    return {
-      ...item,
-      regenerator: {
-        ...item.regenerator,
-        source: withLivePolygons(item.regenerator.source, allItems, precision),
-      },
-    };
+  const r = item.regenerator;
+  if (item.type === "csg" && r) {
+    let next = r;
+    // Chamfer/bevel etc. carry a single nested `source`.
+    if (r.source) {
+      const src = withLivePolygons(r.source, allItems, precision);
+      if (src !== r.source) next = { ...next, source: src };
+    }
+    // A fused extrude (extrudeUnion / extrudeCut) carries its prism recipes in
+    // `extrudeDefs`.  When such a body is used as a HOST/input (e.g. an extrude
+    // cut's target), the Electron bridge rebuilds it from these defs' baked
+    // polygon2D — so they must be re-derived at the CURRENT precision too, or
+    // the host reverts to the resolution the polygons were frozen at while the
+    // same body shown standalone (whose defs ARE re-derived per-def) is finer.
+    if (Array.isArray(r.extrudeDefs)) {
+      const defs = r.extrudeDefs.map((d) =>
+        withLivePolygons(d, allItems, precision),
+      );
+      if (defs.some((d, i) => d !== r.extrudeDefs[i]))
+        next = { ...next, extrudeDefs: defs };
+    }
+    if (next !== r) return { ...item, regenerator: next };
   }
   return item;
 }

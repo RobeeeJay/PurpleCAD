@@ -12,13 +12,14 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { resolveItemDepth, formatAsFormula } from "../geometryParams.js";
-import { polyArea } from "../sceneObjects.js";
+import { polyArea, polyCentroid } from "../sceneObjects.js";
 import {
   makeExtrudePreviewMesh,
   extractFaceProfile,
 } from "./extrudeGeometry.js";
 import {
   runCutExtrusion,
+  runCutExtrudes,
   runUnionExtrudes,
   runExtrudeUnion,
 } from "./extrudeBoolean.js";
@@ -26,6 +27,39 @@ import {
   EXTRUDE_FACE_HIGHLIGHT,
   EXTRUDE_FACE_HIGHLIGHT_ALT,
 } from "../theme.js";
+
+// Which candidate region profile is the one an extrude was built from?
+//
+// Matches on the stored profile's POLYGON — relative area, centroid, and hole
+// count — rather than "the smallest region containing the stored centroid".
+// A ring-shaped profile's centroid sits inside its own hole, so a containment
+// test skips the real region and matches a nested one instead, which made
+// editing an extrude start on the wrong geometry.  Returns the index of the
+// best candidate in `candidates`, or -1 when nothing matches the sketch.
+export function bestProfileMatchIndex(sp, candidates) {
+  if (!sp?.polygon2D) return -1;
+  const spArea = polyArea(sp.polygon2D);
+  const spC = polyCentroid(sp.polygon2D);
+  const spHoles = (sp.holes || []).length;
+  let bestIdx = -1;
+  let bestErr = Infinity;
+  candidates.forEach((fp, i) => {
+    if (!fp?.polygon2D || fp.sketchId !== sp.sketchId) return;
+    const fC = polyCentroid(fp.polygon2D);
+    // Relative area error tolerates a curve tessellated at a different
+    // resolution; the centroid term separates same-area regions; a hole-count
+    // mismatch is a strong (but not fatal) penalty.
+    const err =
+      Math.abs(polyArea(fp.polygon2D) - spArea) / Math.max(spArea, 1e-9) +
+      Math.hypot(fC.x - spC.x, fC.y - spC.y) * 0.1 +
+      ((fp.holes || []).length === spHoles ? 0 : 0.5);
+    if (err < bestErr) {
+      bestErr = err;
+      bestIdx = i;
+    }
+  });
+  return bestIdx;
+}
 
 export function createExtrudeHelpers(
   { scene, renderer, objectsRef, itemsRef, extrudeSelectGroupRef },
@@ -103,13 +137,21 @@ export function createExtrudeHelpers(
   };
 
   // Collect the existing solids a fresh batch of prisms should fuse with: the
-  // start-from solid plus each profile's host.
+  // start-from solid plus each profile's host.  A HIDDEN solid is never a union
+  // target — the user hid it deliberately, so a boss must not silently fuse it
+  // into a CSG result and make it reappear (the same rule resolveCutTargets
+  // applies to cuts; the sign of the extrude depth is irrelevant to it).
   const unionTargetIdsFor = (profiles, items) => {
+    const visibleSolid = (id) => {
+      const it = items.find((i) => i.id === id);
+      return it && it.type !== "sketch" && it.visible !== false;
+    };
     const targets = new Set();
-    if (extrudeStartSolidId != null) targets.add(extrudeStartSolidId);
+    if (extrudeStartSolidId != null && visibleSolid(extrudeStartSolidId))
+      targets.add(extrudeStartSolidId);
     for (const p of profiles) {
       const h = hostSolidIdFor(p, items);
-      if (h != null) targets.add(h);
+      if (h != null && visibleSolid(h)) targets.add(h);
     }
     return [...targets];
   };
@@ -233,39 +275,36 @@ export function createExtrudeHelpers(
     const st = useStore.getState();
     const groupIds = st.extrudeRetargetGroup;
     const retargetId = st.extrudeRetargetId;
-    // Preselect every prism of the group, or just the single extrude.
-    const sourceItems = groupIds
-      ? groupIds
-          .map((id) => itemsRef.current.find((i) => i.id === id))
-          .filter(Boolean)
-      : retargetId != null
-        ? [itemsRef.current.find((i) => i.id === retargetId)].filter(Boolean)
-        : [];
+    const fusedId = st.extrudeRetargetFusedId;
+    // A fused extrude (extrudeUnion / extrudeCut) keeps its prism recipes in
+    // regenerator.extrudeDefs, not as store items — preselect from those, each
+    // an object with a `.profile` just like an extrude item.
+    const fusedItem =
+      fusedId != null ? itemsRef.current.find((i) => i.id === fusedId) : null;
+    // Preselect every prism of the group / fused body, or just the single
+    // extrude.
+    const sourceItems = fusedItem
+      ? fusedItem.regenerator?.extrudeDefs || []
+      : groupIds
+        ? groupIds
+            .map((id) => itemsRef.current.find((i) => i.id === id))
+            .filter(Boolean)
+        : retargetId != null
+          ? [itemsRef.current.find((i) => i.id === retargetId)].filter(Boolean)
+          : [];
     if (!sourceItems.length) return;
     const fills = extrudeSelectGroupRef?.current?.children ?? [];
-    const matchFill = (pc, sketchId) => {
-      let best = null;
-      let bestArea = Infinity;
-      for (const fill of fills) {
-        const fp = fill.userData.extrudeProfile;
-        if (!fp || fp.sketchId !== sketchId) continue;
-        if (!pointInPolygon2D(pc, fp.polygon2D)) continue;
-        if ((fp.holes || []).some((h) => pointInPolygon2D(pc, h))) continue;
-        const area = polyArea(fp.polygon2D);
-        if (area < bestArea) {
-          best = fill;
-          bestArea = area;
-        }
-      }
-      return best;
-    };
     const picked = [];
     for (const item of sourceItems) {
-      const pc = item?.profile?.profileCentroid;
-      if (!pc || item.profile.sketchId == null) continue;
-      const best = matchFill(pc, item.profile.sketchId);
+      const sp = item?.profile;
+      if (!sp?.polygon2D || sp.sketchId == null) continue;
+      const i = bestProfileMatchIndex(
+        sp,
+        fills.map((f) => f.userData.extrudeProfile),
+      );
+      const best = i >= 0 ? fills[i] : null;
       if (best && !picked.some((p) => p.fill === best))
-        picked.push({ fill: best, pc });
+        picked.push({ fill: best, pc: sp.profileCentroid });
     }
     if (!picked.length) return;
     extrudeProfileList = picked.map(({ fill, pc }) => ({
@@ -588,7 +627,13 @@ export function createExtrudeHelpers(
     const profiles = extrudeProfileList.map(({ _fill, ...p }) => p);
 
     const retargetGroup = store.extrudeRetargetGroup;
-    if (retargetGroup) {
+    const fusedId = store.extrudeRetargetFusedId;
+    if (fusedId != null) {
+      // Edit a fused extrude (extrudeUnion / extrudeCut) in place: rebuild its
+      // embedded prism recipes from the new selection + depth, no new entry.
+      store.retargetFusedExtrude(fusedId, profiles, depthStored, startOffset);
+      store.setExtrudeRetargetFusedId(null);
+    } else if (retargetGroup) {
       // Retarget a whole multi-area group: rebuild its prisms from the new
       // selection and re-point the union — the group is edited as one unit.
       store.retargetGroup(retargetGroup, profiles, depthStored, startOffset);
@@ -708,6 +753,27 @@ export function createExtrudeHelpers(
         );
         store.addItems(defs, "Extruded");
         store.selectItem(null);
+      } else if (isCut && profiles.length > 1) {
+        // A multi-area cut (e.g. several holes) is ONE difference in ONE
+        // timeline entry: the prism recipes ride in the result's regenerator.
+        // Creating a prism + cut per profile instead raced N concurrent
+        // differences against the same original target, so only one hole
+        // survived.
+        const defs = profiles.map((profile, i) =>
+          buildExtrudeDef(
+            profile,
+            depthStored,
+            true,
+            startOffset,
+            maxId + 2 + i,
+          ),
+        );
+        store.setCutExtrudeInProgress(true);
+        void runCutExtrudes(
+          defs,
+          profiles[0]?.sourceItemId ?? null,
+          maxId + 1,
+        ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
       } else {
         // Cut prisms each difference their target; a lone non-cut prism is a
         // standalone extrude.
@@ -727,6 +793,7 @@ export function createExtrudeHelpers(
     selectedFills.clear();
     retargetSelectionUntouched = false;
     extrudeStartSolidId = null;
+    store.setExtrudeRetargetFusedId(null);
     store.setExtrudeSelectMode(null);
     store.setExtrudeDepthInput(null);
     renderer.domElement.style.cursor = "";
@@ -863,6 +930,7 @@ export function createExtrudeHelpers(
     store.setExtrudeSelectMode(null);
     store.setExtrudeRetargetId(null);
     store.setExtrudeRetargetGroup(null);
+    store.setExtrudeRetargetFusedId(null);
     store.setExtrudeDepthInput(null);
     store.setCutExtrudeInProgress(false);
   };

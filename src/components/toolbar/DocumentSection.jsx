@@ -11,6 +11,7 @@ import {
   parseSvgToSketchShapes,
   finalizeImportedMesh,
 } from "../../three/importGeometry.js";
+import { DEFAULT_UNDERLAY } from "../../three/sceneObjects/sketchUnderlay.js";
 
 const DocumentSection = () => {
   const history = useStore((s) => s.history);
@@ -27,6 +28,7 @@ const DocumentSection = () => {
   const selectedIds = useStore((s) => s.selectedIds);
   const addItem = useStore((s) => s.addItem);
   const setSvgImport = useStore((s) => s.setSvgImport);
+  const setUnderlayImport = useStore((s) => s.setUnderlayImport);
   const selectItem = useStore((s) => s.selectItem);
 
   const selectedItem = items.find((i) => i.id === selectedId);
@@ -267,8 +269,38 @@ const DocumentSection = () => {
     const baseName = file.name.replace(/\.[^.]+$/, "");
     try {
       if (isSketch) {
+        // A raster image becomes a reference UNDERLAY to trace over (not
+        // geometry); an SVG becomes real sketch shapes.
+        if (["png", "jpg", "jpeg"].includes(ext)) {
+          const dataUrl = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(r.result);
+            r.onerror = rej;
+            r.readAsDataURL(file);
+          });
+          // Aspect up front so the plane is right-sized on the first frame.
+          const imageAspect = await new Promise((res) => {
+            const img = new Image();
+            img.onload = () =>
+              res(
+                img.naturalWidth > 0 ? img.naturalHeight / img.naturalWidth : 1,
+              );
+            img.onerror = () => res(1);
+            img.src = dataUrl;
+          });
+          setUnderlayImport({
+            ...DEFAULT_UNDERLAY,
+            sketchId: selectedId,
+            dataUrl,
+            name: baseName,
+            imageAspect,
+          });
+          return;
+        }
         if (ext !== "svg") {
-          alert("In a sketch, import SVG geometry.");
+          alert(
+            "In a sketch, import an SVG (geometry) or a PNG/JPEG (tracing underlay).",
+          );
           return;
         }
         const shapes = parseSvgToSketchShapes(await file.text());
@@ -497,10 +529,43 @@ const DocumentSection = () => {
             </button>
             <button
               className="toolbar-dropdown-item"
-              title="Import image — coming soon"
-              disabled
+              title={
+                isSketch
+                  ? "Import SVG paths as sketch geometry"
+                  : "Select a sketch first — SVG imports into a sketch"
+              }
+              disabled={!isSketch}
+              onClick={() => handleImportKind(".svg")}
             >
-              Import image (.png)
+              Import SVG
+            </button>
+            <button
+              className="toolbar-dropdown-item"
+              title={
+                !isSketch
+                  ? "Select a sketch first — an underlay is placed in a sketch"
+                  : selectedItem?.underlay
+                    ? "Reposition, rescale or remove this sketch's tracing image"
+                    : "Place a PNG/JPEG on the sketch plane as a tracing guide"
+              }
+              disabled={!isSketch}
+              onClick={() => {
+                if (selectedItem?.underlay) {
+                  // Edit in place: seed the bar from the committed values and
+                  // remember them so Cancel/Esc can put them back.
+                  setImportMenuOpen(false);
+                  setUnderlayImport({
+                    ...selectedItem.underlay,
+                    sketchId: selectedId,
+                    editing: true,
+                    original: selectedItem.underlay,
+                  });
+                } else handleImportKind(".png,.jpg,.jpeg");
+              }}
+            >
+              {selectedItem?.underlay
+                ? "Edit image underlay…"
+                : "Import image underlay"}
             </button>
           </div>,
           document.body,

@@ -15,6 +15,8 @@ import {
   buildExtrudeSelectGroup,
   applyRenderMode,
 } from "../../three/sceneObjects.js";
+import { buildSketchUnderlayGroup } from "../../three/sceneObjects/sketchUnderlay.js";
+import { requestRender } from "../../three/cameraControls/animateLoop.js";
 import {
   updateEmissive,
   finalizeVisibility,
@@ -559,6 +561,67 @@ export function useSceneSync({
     activeSketchTool,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Sketch reference underlay (traced-over image) ─────────────────────────
+  // Its own effect (not part of the shapes group) for two reasons: the group
+  // above bails on an empty sketch — exactly when a tracing guide is needed
+  // most — and the image decodes asynchronously, so rebuilding it on every
+  // `items` change would re-decode the texture on each edit.  While placing,
+  // the live values from the placement bar win over the committed ones.
+  const sketchUnderlayGroupRef = useRef(null);
+  const selectedSketchUnderlay = items.find(
+    (i) => i.id === selectedId,
+  )?.underlay;
+  const underlayImport = useStore((s) => s.underlayImport);
+  const liveUnderlay =
+    underlayImport && underlayImport.sketchId === selectedId
+      ? underlayImport
+      : selectedSketchUnderlay;
+  // Only the fields that affect what's drawn — so unrelated store churn (or a
+  // shape edit) doesn't rebuild the plane and re-decode the image.
+  const underlaySig = liveUnderlay
+    ? JSON.stringify([
+        liveUnderlay.dataUrl?.length ?? 0,
+        liveUnderlay.dataUrl?.slice(-32) ?? "",
+        liveUnderlay.widthMm,
+        liveUnderlay.offsetX,
+        liveUnderlay.offsetY,
+        liveUnderlay.rotationDeg,
+        liveUnderlay.opacity,
+        liveUnderlay.imageAspect,
+      ])
+    : null;
+
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    const scene = sceneRef.current;
+    const dispose = () => {
+      const g = sketchUnderlayGroupRef.current;
+      if (!g) return;
+      scene.remove(g);
+      g.traverse((o) => {
+        o.geometry?.dispose();
+        o.material?.map?.dispose();
+        o.material?.dispose();
+      });
+      sketchUnderlayGroupRef.current = null;
+    };
+    dispose();
+    const sketchMesh = objectsRef.current[selectedId];
+    const group = buildSketchUnderlayGroup(
+      { underlay: liveUnderlay },
+      sketchMesh,
+      requestRender,
+    );
+    if (group) {
+      if (renderMode === "smooth") group.visible = false;
+      group.userData.isSketchOverlay = true;
+      scene.add(group);
+      sketchUnderlayGroupRef.current = group;
+      requestRender();
+    }
+    return dispose;
+  }, [selectedId, underlaySig, renderMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Object-view sketch construction lines ────────────────────────────────
 
   useEffect(() => {
@@ -630,7 +693,8 @@ export function useSceneSync({
         // Retargeting an extrude: now that the region fills exist, start the
         // selection on the extrude's original profile so the user begins from
         // the existing geometry rather than an empty selection.
-        if (useStore.getState().extrudeRetargetId != null) {
+        const s = useStore.getState();
+        if (s.extrudeRetargetId != null || s.extrudeRetargetFusedId != null) {
           cameraControlsRef.current?.preselectRetargetProfile?.();
         }
       }
@@ -654,8 +718,16 @@ export function useSceneSync({
     const st = useStore.getState();
     if (st.extrudeDepthInput) return;
     const retargetId = st.extrudeRetargetId;
+    const fusedId = st.extrudeRetargetFusedId;
+    // A fused extrude seeds from its first embedded prism recipe (all prisms
+    // share depth / cut / startOffset); a single retarget from the extrude item.
+    const fusedDef =
+      fusedId != null
+        ? items.find((i) => i.id === fusedId)?.regenerator?.extrudeDefs?.[0]
+        : null;
     const retarget =
-      retargetId != null ? items.find((i) => i.id === retargetId) : null;
+      fusedDef ??
+      (retargetId != null ? items.find((i) => i.id === retargetId) : null);
     const depth = retarget ? resolveItemDepth(retarget) : 1.0;
     st.setExtrudeDepthInput({
       defaultDepth: depth,

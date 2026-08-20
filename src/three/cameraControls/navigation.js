@@ -3,6 +3,7 @@
 // and 3D view modes.  Split out of cameraControls.js.
 
 import * as THREE from "three";
+import { panelAwareLookAt } from "../sceneSetup.js";
 
 export function createNavigationHandlers(
   {
@@ -22,6 +23,30 @@ export function createNavigationHandlers(
   const controls = cameraControlsRef.current;
 
   let shiftScrollSessionTimer = null;
+  // Fraction of the current view distance the fresh anchor raycast must
+  // differ from the EXISTING pivot by before we treat it as a real move (a
+  // pan) rather than resampling noise. The panel-shifted crosshair ray isn't
+  // the rotation axis itself, so re-sampling it while orbiting a fixed pivot
+  // traces a cone around it and lands on a slightly different point every
+  // time EVEN WITH NO PAN AT ALL — purely from the camera having rotated
+  // during the session that just ended. Gating on "did a pan branch run"
+  // isn't reliable either: real trackpad hardware can misclassify an event
+  // (momentum-scroll tail after a pan, or a modifier-key race on the first
+  // event of a new gesture), so this compares the RAYCAST RESULT against the
+  // current pivot directly — ground truth, not an event-classification
+  // proxy — and only re-anchors when the two genuinely disagree by more than
+  // resampling noise.
+  const ANCHOR_STABLE_FRACTION = 0.05;
+
+  // Sketch mode has no orbit-pivot concept (it uses screen-locked HTML
+  // rulers, not a 3D ground ruler/pivot ring) so it keeps plain symmetric
+  // lookAt; every 3D-view orbit/pan/zoom site applies the same compensating
+  // yaw so the visible-area centre (not raw canvas centre) is what actually
+  // stays fixed under the cursor/pivot.
+  const lookAtView = (cam, tgt) => {
+    if (sketchModeRef.current) cam.lookAt(tgt);
+    else panelAwareLookAt(cam, tgt, renderer.domElement.clientWidth);
+  };
 
   const onMouseWheel = (e) => {
     e.preventDefault();
@@ -72,7 +97,7 @@ export function createNavigationHandlers(
         currentCamera.position
           .copy(tgt)
           .addScaledVector(dir.normalize(), newDist);
-        currentCamera.lookAt(tgt);
+        lookAtView(currentCamera, tgt);
       }
       setRotationState(currentCamera.quaternion.clone());
       save();
@@ -103,7 +128,7 @@ export function createNavigationHandlers(
         .addScaledVector(up, -e.deltaY * worldPerPx);
       currentCamera.position.add(offset);
       targetRef.current.add(offset);
-      currentCamera.lookAt(targetRef.current);
+      lookAtView(currentCamera, targetRef.current);
       setRotationState(currentCamera.quaternion.clone());
       save();
       return;
@@ -111,20 +136,32 @@ export function createNavigationHandlers(
 
     if (e.shiftKey) {
       if (shiftScrollSessionTimer === null) {
-        setOrbitAnchor(
-          getOrbitAnchor(
-            cameraRef,
-            targetRef,
-            raycasterRef,
-            sceneRef,
-            objectsRef,
-            itemsRef,
-          ),
+        const freshAnchor = getOrbitAnchor(
           cameraRef,
           targetRef,
-          cameraControlsRef,
-          orbitIndicator,
+          raycasterRef,
+          sceneRef,
+          objectsRef,
+          itemsRef,
+          renderer,
         );
+        const viewDist = currentCamera.position.distanceTo(targetRef.current);
+        const anchorDrift = freshAnchor.distanceTo(targetRef.current);
+        if (anchorDrift > viewDist * ANCHOR_STABLE_FRACTION) {
+          setOrbitAnchor(
+            freshAnchor,
+            cameraRef,
+            targetRef,
+            cameraControlsRef,
+            orbitIndicator,
+          );
+        } else {
+          // The fresh raycast landed close to the EXISTING pivot: resampling
+          // noise (a pause, not a real pan), so don't touch target/rotation —
+          // just re-show the ring where it already is.
+          orbitIndicator.position.copy(targetRef.current);
+          orbitIndicator.visible = true;
+        }
       }
       clearTimeout(shiftScrollSessionTimer);
       shiftScrollSessionTimer = setTimeout(() => {
@@ -152,7 +189,7 @@ export function createNavigationHandlers(
         Math.cos(controls.targetRotationY) *
           Math.cos(controls.targetRotationX) *
           distance;
-      currentCamera.lookAt(targetRef.current);
+      lookAtView(currentCamera, targetRef.current);
       setRotationState(currentCamera.quaternion.clone());
     } else {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -191,7 +228,7 @@ export function createNavigationHandlers(
         currentCamera.position.y -= e.deltaY * 0.05;
         targetRef.current.y -= e.deltaY * 0.05;
       }
-      currentCamera.lookAt(targetRef.current);
+      lookAtView(currentCamera, targetRef.current);
     }
     save();
   };
@@ -222,7 +259,7 @@ export function createNavigationHandlers(
       const dir = new THREE.Vector3().subVectors(cam.position, tgt);
       const newCamDist = Math.max(0.5, Math.min(500, dir.length() / scale));
       cam.position.copy(tgt).addScaledVector(dir.normalize(), newCamDist);
-      cam.lookAt(tgt);
+      lookAtView(cam, tgt);
     }
     setRotationState(cam.quaternion.clone());
   };

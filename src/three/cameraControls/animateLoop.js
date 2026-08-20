@@ -6,7 +6,14 @@
 // Returns a `stop()` that cancelAnimationFrames the next tick.
 
 import * as THREE from "three";
-import { updateRuler3D } from "../sceneSetup.js";
+import {
+  updateRuler3D,
+  ndcGapPx,
+  rulerFadeOpacity,
+  pointBehindCamera,
+  groundRayCrossing,
+  panelAwareLookAt,
+} from "../sceneSetup.js";
 import { useStore } from "../../store";
 import {
   CROSS_SECTION_PLANE,
@@ -17,7 +24,16 @@ import {
 import { updateCaps } from "../crossSectionCaps.js";
 
 const _rulerPos = new THREE.Vector3();
-const _camRight = new THREE.Vector3();
+const _rulerNext = new THREE.Vector3();
+const _rulerNdcPoint = new THREE.Vector3();
+const _rulerCamDir = new THREE.Vector3();
+const _camForward = new THREE.Vector3();
+
+// Persisted across frames — see groundRayCrossing's doc comment (sceneSetup.js)
+// for why the ruler's cross-point is rebuilt fresh from the camera's own
+// forward ray every frame rather than tracking targetRef.current (which the
+// orbit-anchor recentre can reassign out from under it, instantly).
+let _rulerCrossState = { x: 0, z: 0, hit: true };
 
 // On-demand rendering.  The loop keeps ticking (cheap) but only does the
 // expensive per-frame work + render() when something actually changed, instead
@@ -147,7 +163,15 @@ export function createAnimateLoop({
       cameraRef.current.up
         .lerpVectors(anim.startUp, anim.endUp, ease)
         .normalize();
-      cameraRef.current.lookAt(targetRef.current);
+      if (sketchModeRef.current) {
+        cameraRef.current.lookAt(targetRef.current);
+      } else {
+        panelAwareLookAt(
+          cameraRef.current,
+          targetRef.current,
+          renderer.domElement.clientWidth,
+        );
+      }
       // Orthographic "fit all" also tweens zoom so the bbox ends up framed.
       if (anim.endZoom != null && anim.startZoom != null) {
         cameraRef.current.zoom =
@@ -181,6 +205,20 @@ export function createAnimateLoop({
     // disappear into the object when it zooms out.
     const cam = cameraRef.current;
     if (cam) {
+      // renderer.render() (end of this function) is what normally refreshes
+      // the camera's matrixWorld via the scene graph — but this block reads
+      // it EARLIER in the same frame (unproject/project for the ruler and
+      // label-fade projections), so without this it's always one frame
+      // stale: the FIRST frame after any position/orientation change (a new
+      // wheel tick while rotating) computes the ruler's ground-ray crossing
+      // from the PREVIOUS frame's camera transform, then self-corrects next
+      // frame once render() catches up — visible as the ruler numbers
+      // "jiggling on the opposite axis to the one they label" while
+      // rotating (the stale-vs-correct values differ mostly in the
+      // off-axis/perpendicular coordinate, since each label's OWN-axis
+      // position is quantized to a grid step and doesn't visibly move for
+      // a one-frame swap).
+      cam.updateMatrixWorld();
       const REFERENCE_HEIGHT = 10; // arbitrary baseline; tuned visually
       const gizmoScale = (worldPos) => {
         if (cam.isOrthographicCamera) {
@@ -195,15 +233,10 @@ export function createAnimateLoop({
         // Pin the XYZ indicator to the view centre (the camera target) so it
         // stays on-screen as the view pans, rather than scrolling off with the
         // world origin.  The arrows still point along the true world axes.
-        // Then shift it right by half the left overlay's width so it sits in the
-        // centre of the *visible* 3D area, clear of the objects/timeline panel.
-        const canvasH = renderer.domElement.clientHeight || 1;
-        const worldPerPx =
-          (gizmoScale(targetRef.current) * REFERENCE_HEIGHT) / canvasH;
-        _camRight.set(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
-        axisGroupRef.current.position
-          .copy(targetRef.current)
-          .addScaledVector(_camRight, (LEFT_PANEL_PX / 2) * worldPerPx);
+        // panelAwareLookAt already renders the target at the centre of the
+        // *visible* 3D area (clear of the objects/timeline panel), so no
+        // extra screen-space shift is needed here.
+        axisGroupRef.current.position.copy(targetRef.current);
         // 0.5: render the XYZ indicator at half the authored on-screen size.
         const s = gizmoScale(axisGroupRef.current.position) * 0.5;
         axisGroupRef.current.scale.setScalar(s);
@@ -328,18 +361,31 @@ export function createAnimateLoop({
         rulerGroup.visible = false;
       } else if (rulerGroup) {
         rulerGroup.visible = true;
-        const viewHeight = gizmoScale(targetRef.current) * REFERENCE_HEIGHT;
-        // Recycle the labels around the camera target, but shifted right by half
-        // the left overlay's width (same as the axis indicator) so the ruler is
-        // centred on the visible 3D area rather than the canvas centre half-
-        // hidden behind the objects/timeline panel.
-        const canvasH = renderer.domElement.clientHeight || 1;
-        const worldPerPx = (viewHeight / canvasH) * (LEFT_PANEL_PX / 2);
-        _camRight.set(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
+        // Where the ruler's two rows CROSS is rebuilt fresh, every frame, from
+        // the camera's OWN forward ray through the visible area's centre (the
+        // canvas minus the left panel) intersected with the ground — never
+        // from targetRef.current (the orbit pivot), which navigation.js's
+        // orbit-anchor recentre can reassign instantly out from under it. See
+        // groundRayCrossing's doc comment (sceneSetup.js) for why chasing that
+        // reassignment with a glide never fully closed the gap.
+        const canvasWForRuler = renderer.domElement.clientWidth || 1;
+        const panelForRuler = Math.min(LEFT_PANEL_PX, canvasWForRuler * 0.8);
+        const ndcXForRuler = panelForRuler / canvasWForRuler;
+        _rulerNdcPoint.set(ndcXForRuler, 0, 0.5).unproject(cam);
+        _rulerCamDir.subVectors(_rulerNdcPoint, cam.position);
+        _rulerCrossState = groundRayCrossing(
+          cam.position,
+          _rulerCamDir,
+          _rulerCrossState,
+        );
+        const viewHeight =
+          gizmoScale(
+            _rulerNdcPoint.set(_rulerCrossState.x, 0, _rulerCrossState.z),
+          ) * REFERENCE_HEIGHT;
         updateRuler3D(
           rulerGroup,
-          targetRef.current.x + _camRight.x * worldPerPx,
-          targetRef.current.z + _camRight.z * worldPerPx,
+          _rulerCrossState.x,
+          _rulerCrossState.z,
           viewHeight,
           useStore.getState().theme,
         );
@@ -354,12 +400,48 @@ export function createAnimateLoop({
         // (a single target-distance factor would let far labels shrink under
         // perspective).  Update the hierarchy once, then read each matrixWorld.
         rulerGroup.updateWorldMatrix(false, true);
+        const canvasHRuler = renderer.domElement.clientHeight || 1;
+        cam.getWorldDirection(_camForward);
         rulerGroup.traverse((o) => {
           if (!o.userData.isRulerLabel) return;
           const b = o.userData.baseScale;
           _rulerPos.setFromMatrixPosition(o.matrixWorld);
           const sp = gizmoScale(_rulerPos);
           o.scale.set(b.x * sp, b.y * sp, b.z * sp);
+          // Fade a label out once its own on-screen gap to the NEXT grid step
+          // collapses below a legible width.  A row viewed nearly edge-on (the
+          // camera's forward direction close to parallel with the row — which
+          // happens continuously while orbiting) compresses evenly-spaced
+          // world points toward the vanishing point; same-size text there
+          // overlaps its neighbours into an illegible garbled cluster — read as
+          // "the ruler numbers jump around" while rotating.  Same-size labels
+          // can't fix POSITION compression, only skipping the crowded ones can.
+          const axis = o.userData.gridAxis;
+          const step = o.userData.gridStep;
+          if (axis && step && o.material) {
+            _rulerNext.copy(_rulerPos);
+            if (axis === "x") _rulerNext.x += step;
+            else _rulerNext.z += step;
+            // A "next" point behind the camera isn't actually crowding this
+            // on-screen label — skip the (invalid) projection-based check and
+            // stay fully opaque.  See pointBehindCamera's doc comment.
+            if (pointBehindCamera(_rulerNext, cam.position, _camForward)) {
+              o.material.opacity = 1;
+              o.visible = true;
+              return;
+            }
+            _rulerPos.project(cam);
+            _rulerNext.project(cam);
+            const pxGap = ndcGapPx(
+              _rulerPos,
+              _rulerNext,
+              canvasWForRuler,
+              canvasHRuler,
+            );
+            const t = rulerFadeOpacity(pxGap);
+            o.material.opacity = t;
+            o.visible = t > 0.01;
+          }
         });
       }
     }

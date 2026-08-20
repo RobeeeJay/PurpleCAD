@@ -3,6 +3,15 @@
 This file captures conventions and expectations established while iterating
 on this codebase. Read it before making changes.
 
+## Terminology: "centre of the 3D view"
+
+Whenever this file (or a task) refers to the centre of the 3D view, it means
+the centre of the VISIBLE viewport area EXCLUDING the left objects/timeline
+panel (`.left-panel`, `250px`, absolutely positioned over the canvas — the
+canvas itself spans the full container width). Raw canvas-centre is left of
+this point by half the panel width; camera framing, pivot placement, and the
+ground ruler must all target the panel-excluded centre, not raw canvas centre.
+
 ## Always reformat with Prettier after editing
 
 After every change to `.js` / `.jsx` files, run:
@@ -290,6 +299,43 @@ The working mechanism (keep all three pieces in lockstep):
   `MM_PER_UNIT` after evaluation.
 - Variable changes invalidate every regenerator's `regeneratedAt` flag so
   the next regen pass rebuilds downstream CSG / chamfer items.
+- **The Electron bridge can't evaluate formula depths — resolve them BEFORE
+  the IPC boundary.** `occClient.js#deepResolveDepth` converts every formula
+  depth to a scene-unit number so the bridge only sees numbers (its
+  `resolveDepth` does `parseFloat`, so `"Height-WallThickness"` becomes NaN →
+  the 1-unit fallback and the body silently collapses). It must recurse into
+  EVERY place a depth hides: `item.depth`, `regenerator.source` (chamfer/…),
+  AND `regenerator.extrudeDefs` (the embedded prisms of `extrudeUnion` /
+  `extrudeCut`). Missing the last one built a formula-height wall used as a cut
+  HOST at 1 unit — a multi-hole cut that looked like a deep gouge on a collapsed
+  box (`occClient.test.js` pins the extrudeDefs recursion).
+- **`withLivePolygons` has the SAME recursion requirement for the SAME reason.**
+  The bridge can't re-derive an extrude's profile from its sketch, so the
+  renderer pre-bakes the live polygon2D into every item first. It must recurse
+  into `regenerator.extrudeDefs` (a fused body's embedded prisms), not only
+  `regenerator.source` — otherwise a fused body used as a cut HOST keeps its
+  polygons frozen at the resolution they were saved at, so the extrude cut
+  reverts to low-res curves while the same body shown standalone (whose defs are
+  re-derived per-def in `regenerateExtrudeUnion`) is finer. occOps hides this
+  (it re-derives in-process); only the bridge builds from the baked polygon
+  (`withLivePolygonsFusedDefs.test.js`).
+- **The bake now happens CENTRALLY at the occClient boundary — but an
+  INTERACTIVE CSG caller that skipped it still shipped a stale profile.**
+  `occClient.callOp`'s Electron branch runs `bakeArgPolygons` (live polygon)
+  alongside `resolveArgDepths` (depth) on EVERY op's args, so any caller that
+  hands raw items to `performCsg`/etc. gets the live polygon baked for free —
+  the regen path already called `withLivePolygons` by hand, but the
+  interactive extrude runners (`runExtrudeUnion`/`runCutExtrudes`/… in
+  `extrudeBoolean.js`) did not, so a boss extruded onto a sketch's HOST solid
+  reached the bridge with the host's FROZEN profile and rebuilt the host at its
+  old shape ("Extrude N extends for no reason" after the source sketch was
+  edited post-creation). Diagnosis dead-end worth remembering: the occOps
+  (vitest) path CANNOT reproduce it — it re-derives internally — so a green
+  unit run means nothing here; the divergence is bridge-vs-occOps, caught only
+  by reasoning about the stored-polygon path (occClient.test.js pins
+  `bakeArgPolygons` on `broken-extrude.pcad`, whose Extrude 2 froze a triangle
+  over a live quad). Both `bakeArgPolygons` and `resolveArgDepths` are
+  Electron-branch-only for the same reason: occOps handles both internally.
 
 ## Precision: prefer decimal.js
 
@@ -333,6 +379,17 @@ The working mechanism (keep all three pieces in lockstep):
 - Negative depths are valid (backwards extrude). `THREE.ExtrudeGeometry`
   only takes positive `depth`, so negative-depth code paths extrude by
   `abs(depth)` then `translate(0, 0, -abs(depth))`.
+- **An offset extrude CUT tracks the host face it was started from.** Its
+  `startOffset` is a frozen scene-unit distance; if the body it cuts is later
+  resized by a variable (a shorter `Height`), a fixed offset leaves the cut
+  floating above the body and it removes nothing — "the cut isn't preserved".
+  `regenerateExtrudeUnion` (the `isCut` branch) re-derives each prism's
+  `startOffset` every regen from the host's LIVE far-face extent along the cut
+  normal (`hostFaceExtentAlongNormal`) plus the authored `cutStartInset`
+  (0 = start exactly at the face; stored at commit in `runCutExtrudes`; absent
+  ⇒ 0, which is correct for old top-anchored cuts). Only prisms with a non-zero
+  `startOffset` re-anchor — a cut from the sketch plane (offset 0) stays put.
+  `cutTracksHostFace.test.js` drives the real shrink-Height repro.
 
 ## Display ↔ OCC-rebuild parity (the "reverts to an earlier state" bug class)
 
@@ -534,3 +591,160 @@ sources are picked) that reuses the creation UI.
   `cameraControls/animateLoop.js` — don't scale them elsewhere or the
   per-frame pass will fight you. Each entry caches its authored scale
   on userData.baseScale on first sight.
+- **The 3D ground ruler is centred on the RAW camera target — never add a
+  screen-space shift to it.** The compact axis indicator shifts right by
+  `camRight * halfPanelWidth` to clear the left panel, but `camRight` rotates
+  with the view; applying that same shift to the spread-out ruler swept the
+  whole grid of numbers around the target on every orbit ("the ruler jumps
+  when rotating after a pan"). `updateRuler3D` takes `targetRef.current.x/z`
+  directly.
+- **A ruler row viewed edge-on garbles into overlapping text — this is
+  expected geometry, not a position bug.** Each label is scaled to render at a
+  CONSTANT on-screen size regardless of distance (`animateLoop.js`'s
+  `gizmoScale` per label), but that only fixes apparent SIZE — it can't fix
+  POSITION compression. When the camera's forward direction swings close to
+  parallel with a row's own axis (continuous during any orbit), evenly-spaced
+  world points compress toward the vanishing point and same-size neighbouring
+  labels overlap into an illegible cluster. The fix is `ndcGapPx` +
+  `rulerFadeOpacity` (`sceneSetup.js`): project the label and its next grid
+  step through the camera, measure the actual on-screen pixel gap, and fade
+  the label out below a legibility floor — don't try to reposition anything,
+  the positions are already world-stable and correct (`rulerFade.test.js`).
+- **That crowding check must not project a "next step" point that's BEHIND the
+  camera.** `Vector3.project()` doesn't clip it — it divides by a negative w
+  and can flip/explode the NDC coords — spiking the measured gap to garbage
+  and snapping a label's opacity discontinuously (a blink/teleport) instead of
+  fading smoothly. `pointBehindCamera` (`sceneSetup.js`) gates the check: skip
+  it and stay fully opaque when the neighbour is behind the camera's view
+  plane, since it isn't actually crowding the on-screen label.
+- **The 3D ground ruler's cross-point is rebuilt fresh, every frame, from the
+  CAMERA's own forward ray — never from `targetRef.current` (the orbit pivot).**
+  `navigation.js`'s `setOrbitAnchor` (fired on the FIRST tick of a new
+  Shift+scroll session) reassigns that pivot INSTANTLY, in one frame, to
+  wherever the screen-centre ray hits — the model's surface once "Home" has
+  framed it, i.e. on essentially every rotate right after resetting the view
+  (measured directly against `test-files/bad-cut-extrude.pcad`: target
+  `(0.42,-1.20,2.56)` → `(2.62,1.00,4.76)`, camera distance 30.1 → 26.3, in one
+  frame). Three rounds of gliding the tracked centre past that reassignment
+  (position-only threshold, then position+viewHeight, then a smoothstep ease)
+  each closed one gap but not the next — the deeper problem was chasing a
+  bookkeeping variable that can be arbitrarily reassigned at all. The fix:
+  `groundRayCrossing` (`sceneSetup.js`) takes the camera's position + its
+  ACTUAL forward ray through the centre of the *visible* 3D area (canvas minus
+  the left panel) and intersects it with the ground, called fresh every frame
+  with no persisted "target" reference. The camera's true orientation has no
+  discontinuity — it only ever changes by exactly how much input actually
+  rotated it — so this needs no smoothing at all. Orbiting around a
+  ground-level pivot keeps the crossing point pinned almost exactly to that
+  pivot throughout, matching the old behaviour for the common case, but
+  leaves nothing for the anchor-recentre to unsettle. Verified against the
+  live repro: the fine tier (105 labels) no longer flips at all through the
+  same rotate that used to flood it in one frame.
+- **The ruler's ground-ray crossing read the camera's transform ONE FRAME
+  STALE — every wheel tick while rotating flickered the numbers on the
+  off-axis coordinate.** `renderer.render()` (end of `animate()`) is what
+  normally refreshes `camera.matrixWorld` via the scene graph (the camera is
+  `scene.add`ed), but the ruler block reads it EARLIER in that same frame
+  (`unproject`/`project` for the ground-ray and label-fade projections).
+  Without an explicit `cam.updateMatrixWorld()` first, the FIRST rendered
+  frame after any position/orientation change (each wheel tick while
+  rotating) computed the crossing from the PREVIOUS frame's transform, then
+  self-corrected the very next frame once `render()` caught up — confirmed
+  by instrumented logging showing the SAME `camPos` producing two different
+  `(x,z)` values, the first one only ever appearing for exactly one frame.
+  Visually this read as "the ruler numbers jiggle on the opposite axis to
+  the one they label": each label's OWN-axis coordinate is quantized to a
+  grid step (invisible for a one-frame swap unless it's near a step
+  boundary), but the ROW's off-axis coordinate (`cz`/`cx` shared by the whole
+  row) is continuous and flickered directly. Fix: `cam.updateMatrixWorld()`
+  at the top of `animateLoop.js`'s per-frame UI-overlay block, before
+  anything reads the camera's world transform. Not covered by an automated
+  test — it's a render-loop frame-ordering issue, not a pure-function bug,
+  and a screenshot-diff test risks GPU-timing flakiness; verified only via
+  instrumented reproduction (see this bullet and don't regress the ordering).
+- **`panelAwareLookAt`'s compensating yaw used the WRONG rotation axis —
+  the pivot swung left/right as the view was rotated up/down (pitch
+  changed).** It used `camera.rotateOnWorldAxis(worldY, angle)`, which is
+  only equivalent to a pure horizontal-NDC shift when the camera is looking
+  level (pitch 0) — as pitch moves away from level, rotating around the
+  WORLD Y axis instead of the camera's OWN current up vector picks up a
+  roll-like component, so the resulting NDC-x shift of the pivot varies with
+  pitch instead of staying constant. Fix: `camera.rotateOnAxis(localY,
+  angle)` — `rotateOnAxis` treats its axis as LOCAL (object-space), i.e. the
+  camera's own up post-`lookAt`, which keeps the yaw a pure horizontal shift
+  at any pitch. `panelAwareLookAt.test.js` pins this directly (a pure-camera
+  unit test, no e2e needed): project the pivot at a spread of pitch angles
+  and assert NDC-x stays constant — confirmed this test actually fails
+  against the old `rotateOnWorldAxis` code (a real ~0.09 NDC swing at pitch
+  ±1.4 rad), not a tautology.
+- **The orbit-anchor ring itself had the same "wrong centre" bug — and fixing
+  only the raycast (not the camera's actual orientation) left it half-fixed
+  AND introduced a new jerk.** `getOrbitAnchor` raycasts through
+  `(panel/canvasW, 0)` instead of raw NDC `(0,0)`, matching `handleHome`'s
+  visible-area centring. But `camera.lookAt(target)` ALWAYS puts `target` at
+  raw NDC `(0,0)` no matter which world point `target` is — a structural
+  property of a symmetric lookAt, proved by measurement (shifting which point
+  is picked only shifts the rest of the scene the wrong way once the camera
+  re-centres on it). So sampling the anchor off-centre and then `lookAt`-ing
+  onto it is a REAL camera reorientation, not a no-op: on `bad-cut-extrude.pcad`
+  after a plain pan, the first Shift+scroll tick recomputed `targetRotationY`
+  from 0.785 to a base of 0.668 (a real ~6.7° swing) purely from this
+  mismatch — "holding shift while panning jerks back to a previous spot".
+  Fix: `panelAwareLookAt` (`sceneSetup.js`) calls `camera.lookAt(target)` then
+  applies an ADDITIONAL yaw (`rotateOnWorldAxis`, sized from the camera's
+  horizontal FOV) so `target` renders at NDC `(+frac, 0)` — the visible area's
+  true centre — instead. This must be the ONLY panel-compensation mechanism,
+  applied at EVERY 3D-view (non-sketch) lookAt call site: initial camera
+  creation (`sceneSetup.js#createCamera`), every `navigation.js` pan/zoom/orbit
+  branch, the Home/orientation-change tween (`animateLoop.js`), and the
+  projection-mode-switch camera recreation (`useViewportCamera.js`) — missing
+  even one reintroduces the mismatch at that boundary. Two things that already
+  assumed the visible-area centre (`getOrbitAnchor`'s raycast and the ruler's
+  `groundRayCrossing`) were already correct and stayed unchanged; `handleHome`
+  dropped its own asymmetric `frame` parameter (would double-compensate now
+  that the tween's lookAt does it) and the axis indicator dropped its
+  `camRight`-based manual shift for the same reason. Verified empirically: the
+  pivot's projected NDC-x stayed ~0.1456 (`= panel/canvasW`, exactly the
+  expected visible-centre value) across Home, a pan, and every subsequent
+  rotate tick — where before the fix it would read ~0 (raw canvas centre).
+- **Re-anchoring the orbit pivot on every NEW Shift+scroll session — even
+  when nothing panned in between — drifts the pivot on a mere PAUSE.**
+  `getOrbitAnchor`'s panel-shifted crosshair ray is not the rotation axis
+  itself; as the camera orbits a fixed `target`, that ray sweeps a cone
+  around it rather than tracing the same 3D point. Re-sampling it (which used
+  to happen unconditionally whenever `shiftScrollSessionTimer` had lapsed —
+  the ring-hide timeout, ALSO reused as "should I re-anchor") lands on a
+  nearby but different point than the existing `target` even with the camera
+  completely stationary, at a magnitude that scales with distance-to-surface
+  — "hold shift, rotate, pause half a second, rotate again: view jumps".
+  **First attempt (event-classification flag, insufficient) then GROUND-TRUTH
+  fix (`navigation.js`):** a boolean set by "did a pan branch run this event"
+  fixed every synthetic repro but real trackpad hardware can still deliver a
+  wheel event MISCLASSIFIED as a pan during what the user experiences as one
+  continuous rotate gesture (a momentum-scroll tail after an earlier real pan,
+  or a modifier-key race on the first event of a new gesture) — the flag
+  can't tell a genuine pan from a misclassified blip, so it can still
+  re-anchor onto a bogus point. The robust fix compares AGAINST GROUND TRUTH
+  instead of trusting event classification: every session start still
+  raycasts a fresh anchor, but only APPLIES it (`setOrbitAnchor`) when it
+  differs from the EXISTING `target` by more than `ANCHOR_STABLE_FRACTION`
+  (5%) of the current view distance — scaling with distance matches "varies
+  with zoom" directly. Below that, it's resampling noise (a pause, OR a stray
+  sub-threshold blip that nudged `target` by a hair) and is left alone,
+  keeping only the ring redrawn. A real, deliberate pan moves the visible
+  centre by far more than 5% of view distance, so it still re-anchors
+  correctly. `orbit-anchor-session.spec.js` pins both directions (pause alone
+  must not move `getViewTarget()`; a pan before rotating still must) — a
+  third case (a tiny non-shift "blip" injected mid-pause) was hand-verified
+  to no longer amplify into a full re-anchor jump, though hardware-specific
+  momentum/modifier-race timing couldn't be reproduced in Playwright's
+  synthetic wheel events, so treat real-device testing as the final word here.
+- **A ruler-centring fix needs to be verified with SCREENSHOTS at realistic
+  frame intervals, not just a numeric log of state.** An earlier glide
+  attempt's numeric trace looked "gradual enough" (tier flipping over several
+  ticks), but screenshotting the same rotate at 20ms intervals showed almost
+  the entire label set changing within the first couple of frames — an
+  ease-out cubic front-loads ~24% of its motion into the first 9% of its
+  duration, which is mathematically continuous but visually indistinguishable
+  from a snap. Keep this in mind for ANY future "is this transition smooth"
+  claim on this ruler.

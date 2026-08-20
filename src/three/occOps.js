@@ -857,9 +857,11 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       return worldId;
     }
 
-    if (r.kind === "extrudeUnion") {
-      // A multi-area extrude fused into one body: build each embedded prism
-      // recipe (and any host solid) in world space, then union them.
+    if (r.kind === "extrudeUnion" || r.kind === "extrudeCut") {
+      // A multi-area extrude fused into (or subtracted from) one body: build
+      // each embedded prism recipe and any host solid in world space, then
+      // boolean them.  A cut puts the hosts FIRST — booleanOp takes the first
+      // shape as the argument and the rest as tools.
       const buildWorld = (inp) => {
         const localId = buildItemShapeLocal(inp, allItems, precision);
         if (localId == null) return null;
@@ -878,12 +880,12 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         else occ.releaseShape(localId);
         return worldId;
       };
-      const ids = [
-        ...(r.extrudeDefs || []),
-        ...(r.inputIds || [])
-          .map((id) => allItems.find((i) => i.id === id))
-          .filter(Boolean),
-      ]
+      const isCut = r.kind === "extrudeCut";
+      const prisms = r.extrudeDefs || [];
+      const hosts = (r.inputIds || [])
+        .map((id) => allItems.find((i) => i.id === id))
+        .filter(Boolean);
+      const ids = (isCut ? [...hosts, ...prisms] : [...prisms, ...hosts])
         .map(buildWorld)
         .filter((id) => id != null);
       if (ids.length === 0) return null;
@@ -891,7 +893,7 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       if (ids.length === 1) worldId = ids[0];
       else {
         try {
-          worldId = occ.booleanOp(ids, "union");
+          worldId = occ.booleanOp(ids, isCut ? "difference" : "union");
         } finally {
           ids.forEach((id) => occ.releaseShape(id));
         }
