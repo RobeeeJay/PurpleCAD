@@ -173,10 +173,6 @@ const buildRenderScene = (objectsRef, itemsRef) => {
   return scene;
 };
 
-export function isPathTracing() {
-  return !!pathTracer;
-}
-
 // Build the render scene + path tracer for the current objects.  Idempotent-ish:
 // rebuilds from scratch each call (cheap relative to tracing).
 export function enablePathTracer(renderer, camera, { objectsRef, itemsRef }) {

@@ -161,12 +161,6 @@ export function evaluateFormula(formula, variables = {}) {
   }
 }
 
-// Convenience: evaluate with a fallback when the result is NaN/invalid.
-export function evaluateFormulaOr(formula, variables, fallback) {
-  const v = evaluateFormula(formula, variables);
-  return Number.isFinite(v) ? v : fallback;
-}
-
 // Build a Map<name, formula> from an array of { name, formula } entries.
 // Duplicate names: later entries win.
 export function variablesToMap(variables) {

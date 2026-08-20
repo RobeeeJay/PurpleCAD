@@ -20,7 +20,6 @@ function hasLocalStorage() {
 }
 
 // ── Fallback (browser localStorage / node memory) primitives ─────────────────
-const lsGet = (k) => (hasLocalStorage() ? localStorage.getItem(k) : null);
 const lsSet = (k, v) => {
   if (hasLocalStorage()) localStorage.setItem(k, v);
   else memory.set(k, v);

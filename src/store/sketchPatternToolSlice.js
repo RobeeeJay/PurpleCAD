@@ -12,7 +12,6 @@ export const createSketchPatternToolSlice = (set) => ({
   // Mirror tool: pick a mirror line, then toggle geometry to preview/mirror
   // across it. { lineIdx: number|null, shapeIndices: number[] } | null
   sketchMirrorState: null,
-  setSketchMirrorState: (v) => set({ sketchMirrorState: v }),
 
   startMirrorTool: () =>
     set({
@@ -74,7 +73,6 @@ export const createSketchPatternToolSlice = (set) => ({
   // preview/copy as rotated repeats around it.
   // { centerShapeIdx, centerPointKey, shapeIndices: number[], count } | null
   sketchCircularPatternState: null,
-  setSketchCircularPatternState: (v) => set({ sketchCircularPatternState: v }),
 
   // Document default for the "instances per 360°" input — remembers the last
   // value entered so new circular patterns start from it.
@@ -167,8 +165,6 @@ export const createSketchPatternToolSlice = (set) => ({
   // repeats offset in X and Y.
   // { shapeIndices: number[], countX, countY, offsetX, offsetY } | null
   sketchRectangularPatternState: null,
-  setSketchRectangularPatternState: (v) =>
-    set({ sketchRectangularPatternState: v }),
 
   // Document defaults for the rectangular pattern inputs — remember the last
   // values entered so new rectangular patterns start from them.
