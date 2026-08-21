@@ -23,7 +23,29 @@ test.describe.serial("constraint-drifted sketch drags", () => {
     await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
     await page.waitForTimeout(500);
     await page.evaluate(() => window.__store.getState().selectItem(1));
-    await page.waitForTimeout(1800); // fly into the sketch
+    // Wait for the fly-in to actually SETTLE, not a fixed 1800ms. Two races
+    // to close: the tween advances per FRAME, so a wall-clock wait lands
+    // mid-flight wherever the frame rate puts it; and selectItem only
+    // SCHEDULES the tween, so polling "not animating" immediately succeeds
+    // before it has even started. Require two consecutive samples that are
+    // both idle and unmoved.
+    let prev = null;
+    let settled = false;
+    for (let i = 0; i < 150 && !settled; i++) {
+      const now = await page.evaluate(() => {
+        const cc = window.__store.getState()._cameraControls;
+        const t = cc.getViewTarget();
+        return { anim: cc.isCameraAnimating(), t: [t.x, t.y, t.z] };
+      });
+      settled =
+        !now.anim &&
+        prev !== null &&
+        !prev.anim &&
+        prev.t.every((v, k) => Math.abs(v - now.t[k]) < 1e-9);
+      prev = now;
+      if (!settled) await page.waitForTimeout(100);
+    }
+    expect(settled, "camera never settled into sketch view").toBe(true);
   });
 
   test.afterAll(async () => {

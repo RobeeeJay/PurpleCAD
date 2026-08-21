@@ -179,6 +179,12 @@ export function attachCameraControls(ctx) {
   const controls = cameraControlsRef.current;
   const isMac = /Mac|iPhone|iPad/i.test(navigator.platform);
 
+  // True while a camera tween (Home, orientation change, sketch fly-in) is
+  // still running.  e2e needs this: the tweens advance per FRAME, so a fixed
+  // wall-clock wait lands mid-flight wherever the frame rate happens to put
+  // it -- under software rendering that is a different camera pose entirely.
+  controls.isCameraAnimating = () => !!cameraAnimRef.current;
+
   const save = () => saveCameraState(cameraRef, targetRef, cameraControlsRef);
 
   // ── Sketch drawing helpers ─────────────────────────────────────────────────
