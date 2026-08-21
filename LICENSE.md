@@ -22,7 +22,7 @@ update (`node_modules/<name>/package.json` is the source of truth).
 
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
-| Open CASCADE Technology (OCCT) | 8.0.0 (7.9.0 supported) | LGPL-2.1-only, with the OCCT LGPL exception | https://github.com/Open-Cascade-SAS/OCCT |
+| Open CASCADE Technology (OCCT) | 8.0.1 (8.0.0 / 7.9.0 supported) | LGPL-2.1-only, with the OCCT LGPL exception | https://github.com/Open-Cascade-SAS/OCCT |
 | node-addon-api | ^8.3.1 | MIT | https://github.com/nodejs/node-addon-api |
 | cmake-js (build only) | ^7.3.0 | MIT | https://github.com/cmake-js/cmake-js |
 

@@ -52,7 +52,7 @@ function readDependencyVersions() {
       three: pick("three"),
       "three-gpu-pathtracer": pick("three-gpu-pathtracer"),
       electron: pick("electron"),
-      OpenCASCADE: "8.0.0",
+      OpenCASCADE: "8.0.1",
     };
   } catch {
     return {};
