@@ -9,6 +9,7 @@ import { fitPointsToView, meshFitPoints, boxCorners } from "../cameraFit.js";
 export function createMaterialAndFitHelpers({
   controls,
   scene,
+  renderer,
   cameraRef,
   targetRef,
   itemsRef,

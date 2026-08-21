@@ -572,6 +572,7 @@ export function attachCameraControls(ctx) {
   createMaterialAndFitHelpers({
     controls,
     scene,
+    renderer,
     cameraRef,
     targetRef,
     itemsRef,
