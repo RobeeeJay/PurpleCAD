@@ -1,0 +1,7 @@
+node_modules
+native/occ-addon/node_modules
+native/occ-addon/build
+dist
+test-results
+playwright-report
+.git

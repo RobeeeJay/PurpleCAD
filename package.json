@@ -25,7 +25,9 @@
     "dist:win": "npm run addon:build && vite build && electron-builder --win --publish never",
     "dist:linux": "npm run addon:build && vite build && electron-builder --linux --publish never",
     "dist:all": "npm run addon:build && vite build && electron-builder --mac --win --linux --publish never",
-    "test:coverage": "./scripts/with-display.sh vitest run --coverage"
+    "test:coverage": "./scripts/with-display.sh vitest run --coverage",
+    "e2e:image": "podman build -f Containerfile.e2e -t purple-cad-e2e .",
+    "test:e2e:podman": "podman run --rm -v \"$PWD/test-results:/app/test-results\" purple-cad-e2e"
   },
   "build": {
     "appId": "com.purplecad",

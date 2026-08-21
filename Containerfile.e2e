@@ -1,0 +1,71 @@
+# Headless Linux lane for the Electron e2e suite.
+#
+# This is an ADDITIONAL lane, not a replacement for the macOS run: the addon
+# built here links a Linux OCC, so it exercises the JS/renderer/store surface
+# rather than the exact native binary the shipped mac app uses.  Keep running
+# the macOS suite before release.
+#
+# The OCC build is its own layer on purpose -- it takes ~15 min and changes
+# only when the version does, so every later app-code rebuild reuses it.
+
+# node:24-trixie (Debian 13, gcc 14) -- NOT bookworm. gcc 12 cannot parse
+# Electron 43's V8 headers: v8config.h's deprecation attribute placement gives
+# "expected identifier before '__attribute__'", which no -std= setting fixes,
+# and Debian's clang 14 falls over separately on a missing std::source_location.
+# gcc 14 compiles better-sqlite3 against those headers cleanly.
+FROM docker.io/library/node:24-trixie
+
+# Build toolchain for OCC + the native addon.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake ninja-build git ca-certificates python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# OCC 8.0.1 from source, same flags and version as .github/workflows/addon-build.yml.
+# Installed to $HOME/occ-8.0.1-arm64 because that is the FIRST entry in the
+# addon's CMakeLists HINTS -- matching it means no CMakeLists change is needed
+# and the container builds against the same version local dev does.
+RUN git clone --depth 1 --branch V8_0_1 \
+      https://github.com/Open-Cascade-SAS/OCCT.git /tmp/occt \
+ && cmake -S /tmp/occt -B /tmp/occt-build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/root/occ-8.0.1-arm64 \
+      -DBUILD_MODULE_FoundationClasses=ON \
+      -DBUILD_MODULE_ModelingData=ON \
+      -DBUILD_MODULE_ModelingAlgorithms=ON \
+      -DBUILD_MODULE_DataExchange=ON \
+      -DBUILD_MODULE_Visualization=OFF \
+      -DBUILD_MODULE_Draw=OFF \
+      -DBUILD_MODULE_ApplicationFramework=OFF \
+      -DUSE_FREETYPE=OFF -DUSE_TK=OFF -DUSE_OPENGL=OFF \
+ && cmake --build /tmp/occt-build --parallel "$(nproc)" \
+ && cmake --install /tmp/occt-build \
+ && rm -rf /tmp/occt /tmp/occt-build
+
+# Electron's renderer needs a real X display and the GTK/NSS stack even when
+# nothing is shown; xvfb-run is what scripts/with-display.sh picks up, and it
+# shells out to xauth -- without that package it fails before starting the
+# server ("xauth command not found"), so xauth is NOT optional here.
+# Deliberately AFTER the OCC build: this list gets adjusted far more often than
+# the OCC version, and putting it first made every package tweak rebuild OCC.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xvfb xauth libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils \
+      libatspi2.0-0 libsecret-1-0 libgbm1 libasound2 libdrm2 \
+      libxkbcommon0 libxshmfence1 libcups2 libpango-1.0-0 libcairo2 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Dependency layers first so app-code edits don't reinstall node_modules.
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY native/occ-addon/package.json native/occ-addon/package-lock.json ./native/occ-addon/
+RUN npm ci --prefix native/occ-addon
+
+COPY . .
+
+# Rootless containers can't use Electron's SUID sandbox; launch.js reads this.
+ENV E2E_NO_SANDBOX=1
+# Playwright downloads no browsers here -- the suite drives Electron only.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+CMD ["bash", "scripts/e2e-container.sh"]

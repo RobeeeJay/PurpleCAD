@@ -24,9 +24,10 @@ export async function launchApp(dataDir) {
   // leave ELECTRON_START_URL unset so it loads the built renderer from dist/.
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const app = await electron.launch({
-    args: [projectRoot, `--db-path=${path.join(tmpDir, "cad.sqlite")}`],
-    env,
-  });
+  // Rootless containers can't use Electron's SUID sandbox; the Linux e2e
+  // image sets E2E_NO_SANDBOX so the macOS run keeps the sandbox on.
+  const args = [projectRoot, `--db-path=${path.join(tmpDir, "cad.sqlite")}`];
+  if (process.env.E2E_NO_SANDBOX) args.unshift("--no-sandbox");
+  const app = await electron.launch({ args, env });
   return app;
 }
