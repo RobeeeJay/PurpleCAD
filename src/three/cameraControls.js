@@ -717,7 +717,6 @@ export function attachCameraControls(ctx) {
       controls.mouseDownY = e.clientY;
     } else if (e.button === 2) {
       if (!sketchModeRef.current) {
-        controls.isRotating = true;
         setOrbitAnchor(
           getOrbitAnchor(
             cameraRef,

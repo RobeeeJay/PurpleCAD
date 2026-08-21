@@ -298,8 +298,6 @@ export function createViewInteraction(
   };
 
   const onViewMouseUp = (e) => {
-    controls.isRotating = false;
-    controls.isPanning = false;
     orbitIndicator.visible = false;
 
     // Split tool: a click picks the object to split, then the cut plane/face.

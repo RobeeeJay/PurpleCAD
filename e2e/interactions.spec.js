@@ -23,7 +23,7 @@ test.afterAll(async () => {
 });
 
 // Rotation is a Shift+scroll gesture (navigation.js), NOT a right-drag: the
-// right-button branch only sets controls.isRotating, which nothing reads.
+// right-button branch only sets the orbit anchor; it never rotates.
 // This previously right-dragged and compared JSON strings of targetRotation,
 // which passed on macOS solely because setOrbitAnchor recomputed the same
 // angle to a 1-ULP difference -- it would have kept passing if rotation were
