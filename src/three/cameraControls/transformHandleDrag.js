@@ -148,8 +148,6 @@ export function createTransformHandleDrag({
             };
             controls.mouseDownX = e.clientX;
             controls.mouseDownY = e.clientY;
-            controls.mouseX = e.clientX;
-            controls.mouseY = e.clientY;
             return true;
           }
         }
@@ -295,8 +293,6 @@ export function createTransformHandleDrag({
         placeDimLabels(bb, bboxCenter, dim);
       }
     }
-    controls.mouseX = e.clientX;
-    controls.mouseY = e.clientY;
     return true;
   };
 

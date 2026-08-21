@@ -765,26 +765,18 @@ export function attachCameraControls(ctx) {
           );
         else handleExtrudeHover(e.clientX, e.clientY, e.shiftKey);
       }
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
     }
     if (sweepSelectModeRef && sweepSelectModeRef.current) {
       handleSweepHover(e.clientX, e.clientY);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
     }
     if (useStore.getState().embossTool?.picking) {
       handleEmbossHover(e.clientX, e.clientY);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
     }
     if (useStore.getState().textureTool?.picking) {
       handleTextureHover(e.clientX, e.clientY);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
     }
     if (onSketchMouseMove(e)) return;

@@ -709,8 +709,6 @@ export function createSketchInteraction(
     ) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     // Project: arm a marquee so a drag box-selects edges, a click projects all
@@ -733,8 +731,6 @@ export function createSketchInteraction(
     if (activeSketchToolRef.current) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     controls.mouseDownX = e.clientX;
@@ -872,8 +868,6 @@ export function createSketchInteraction(
       renderer.domElement.style.cursor = svgDragRef.current
         ? "grabbing"
         : "grab";
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     // Underlay placement: drag moves the pending image's offset.  The scene
@@ -900,16 +894,12 @@ export function createSketchInteraction(
       renderer.domElement.style.cursor = underlayDragRef.current
         ? "grabbing"
         : "grab";
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     // While the long-press element list is open, ignore canvas motion — no
     // marquee, no hover repaint underneath it.
     if (longPressMenuRef.current) return true;
     if (activeSketchToolRef.current === "project") {
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       if (marqueeStartRef.current) {
         const dx = e.clientX - marqueeStartRef.current.x;
         const dy = e.clientY - marqueeStartRef.current.y;
@@ -930,23 +920,17 @@ export function createSketchInteraction(
       activeSketchToolRef.current === "rectangularPattern"
     ) {
       updateSketchToolHover(e.clientX, e.clientY, activeSketchToolRef.current);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     if (activeSketchToolRef.current === "trim") {
       clearAllSketchHover();
       if (trimming) tryTrimAt(e.clientX, e.clientY);
       else trimHoverAt(e.clientX, e.clientY);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     if (activeSketchToolRef.current) {
       clearAllSketchHover();
       updateSketchPreview(e.clientX, e.clientY, e.shiftKey);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     if (longPressTimer) {
@@ -979,8 +963,6 @@ export function createSketchInteraction(
         updateSketchHover(e.clientX, e.clientY);
       }
     }
-    controls.mouseX = e.clientX;
-    controls.mouseY = e.clientY;
     return true;
   };
 

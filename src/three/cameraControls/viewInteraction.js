@@ -223,8 +223,6 @@ export function createViewInteraction(
           holeSketchSnap = sp;
         }
       }
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
     }
 
@@ -292,9 +290,6 @@ export function createViewInteraction(
         }
       }
     }
-
-    controls.mouseX = e.clientX;
-    controls.mouseY = e.clientY;
   };
 
   const onViewMouseUp = (e) => {

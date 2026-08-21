@@ -53,8 +53,6 @@ const Viewport = () => {
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
   const cameraControlsRef = useRef({
-    mouseX: 0,
-    mouseY: 0,
     targetRotationX: 0,
     targetRotationY: 0,
   });
