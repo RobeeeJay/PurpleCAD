@@ -7,4 +7,7 @@ set -euo pipefail
 npm run addon:build
 npm run sqlite:rebuild
 VITE_E2E=1 npx vite build
-exec ./scripts/with-display.sh npx playwright test "$@"
+# NOT exec: with-display.sh execs xvfb-run, which would then be PID 1 in the
+# container.  As PID 1 it failed to reap the playwright child -- the run sat
+# with Xvfb up and no test process, producing no output and never exiting.
+./scripts/with-display.sh npx playwright test "$@"

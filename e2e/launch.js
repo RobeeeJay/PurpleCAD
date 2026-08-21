@@ -24,10 +24,21 @@ export async function launchApp(dataDir) {
   // leave ELECTRON_START_URL unset so it loads the built renderer from dist/.
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  // Rootless containers can't use Electron's SUID sandbox; the Linux e2e
-  // image sets E2E_NO_SANDBOX so the macOS run keeps the sandbox on.
+  // The Linux e2e image sets E2E_CONTAINER; macOS runs without it and keeps
+  // the sandbox and its real GPU.  In the container we need both:
+  //   --no-sandbox              rootless podman can't use the SUID sandbox
+  //   --use-angle=swiftshader   there is no GPU, and ANGLE-on-Mesa/llvmpipe
+  //   --enable-unsafe-swiftshader   fails to create a WebGL context without
+  //                             these, so three.js throws on startup and the
+  //                             app never renders (every test fails on a
+  //                             missing .toolbar rather than anything real).
   const args = [projectRoot, `--db-path=${path.join(tmpDir, "cad.sqlite")}`];
-  if (process.env.E2E_NO_SANDBOX) args.unshift("--no-sandbox");
+  if (process.env.E2E_CONTAINER)
+    args.unshift(
+      "--no-sandbox",
+      "--use-angle=swiftshader",
+      "--enable-unsafe-swiftshader",
+    );
   const app = await electron.launch({ args, env });
   return app;
 }

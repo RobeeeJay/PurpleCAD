@@ -41,6 +41,15 @@ RUN git clone --depth 1 --branch V8_0_1 \
  && cmake --install /tmp/occt-build \
  && rm -rf /tmp/occt /tmp/occt-build
 
+# Register OCC's lib dir with the dynamic loader.  The addon records
+# DT_RUNPATH pointing here, but RUNPATH -- unlike the older RPATH -- is NOT
+# inherited by transitive dependencies, so the addon resolved libTKBool while
+# libTKBool's own OCC dependencies came up "not found" (22 of them).  That
+# surfaced only as "OCC addon unavailable in worker": occ-worker.cjs catches
+# the load failure and reports its own message, so every OCC-backed e2e test
+# failed without the real reason ever appearing.
+RUN echo /root/occ-8.0.1-arm64/lib > /etc/ld.so.conf.d/occ.conf && ldconfig
+
 # Electron's renderer needs a real X display and the GTK/NSS stack even when
 # nothing is shown; xvfb-run is what scripts/with-display.sh picks up, and it
 # shells out to xauth -- without that package it fails before starting the
@@ -63,8 +72,9 @@ RUN npm ci --prefix native/occ-addon
 
 COPY . .
 
-# Rootless containers can't use Electron's SUID sandbox; launch.js reads this.
-ENV E2E_NO_SANDBOX=1
+# launch.js reads this to add --no-sandbox (rootless podman) and the
+# swiftshader flags (no GPU here).  See e2e/launch.js for why each is needed.
+ENV E2E_CONTAINER=1
 # Playwright downloads no browsers here -- the suite drives Electron only.
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
