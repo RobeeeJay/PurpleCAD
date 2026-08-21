@@ -447,4 +447,62 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     const b = await bridge.exportSTL(JSON.parse(JSON.stringify(args)));
     expect(Buffer.from(b).equals(Buffer.from(a))).toBe(true);
   }, 30000);
+
+  it("importStep round-trips an exported solid identically", async () => {
+    // No STEP fixture is needed: export one, then read it back through both
+    // implementations.  importStep returns a raw {positions, indices} rather
+    // than a geometryData wrapper, so it can't use the parity() helper.
+    const item = cube(16, { position: { x: 0, y: 1, z: 0 } });
+    const stepText = await ops.exportSTEP({
+      items: [item],
+      allItems: [item],
+      precision: 0.1,
+    });
+    const args = { stepText, printPrecision: 0.1 };
+    const a = await ops.importStep(JSON.parse(JSON.stringify(args)));
+    const b = await bridge.importStep(JSON.parse(JSON.stringify(args)));
+    expect(summarize(b)).toEqual(summarize(a));
+  }, 30000);
+
+  it("releaseShape frees a retained id and tolerates an unknown one", async () => {
+    const occ = createRequire(import.meta.url)(
+      "../../../../native/occ-addon/build/Release/occ_addon.node",
+    );
+    // A chamfered cube's baked mesh -- a raw cube tessellation won't sew.
+    const gd = (
+      await ops.chamferOrFilletItem({
+        source: cube(17),
+        subGeo: edgeYZ,
+        amount: 0.2,
+        segments: 1,
+        allItems: [cube(17)],
+        printPrecision: 0.1,
+      })
+    ).geometryData;
+    // One retained shape per implementation, each released by its own impl.
+    const a = await ops.solidFromMesh(JSON.parse(JSON.stringify(gd)));
+    const b = bridge.solidFromMesh(JSON.parse(JSON.stringify(gd)));
+    expect(await ops.releaseShape({ id: a.shapeId })).toBeNull();
+    expect(bridge.releaseShape({ id: b.shapeId })).toBeNull();
+    // The id is gone afterwards, identically on both sides.
+    expect(() => occ.tessellate(a.shapeId, 0.1)).toThrow();
+    expect(() => occ.tessellate(b.shapeId, 0.1)).toThrow();
+    // Releasing an unknown / null id is a no-op, never a throw.
+    for (const id of [987654321, null]) {
+      expect(await ops.releaseShape({ id })).toBeNull();
+      expect(bridge.releaseShape({ id })).toBeNull();
+    }
+  }, 30000);
+
+  // Guards a future split of occOps.js: if an op is dropped, renamed or added
+  // on one side only, the two surfaces diverge and every parity test above
+  // would still pass while the app lost an operation.
+  it("both implementations expose the same op surface", () => {
+    const bridgeOps = Object.keys(bridge)
+      .filter((k) => typeof bridge[k] === "function")
+      // Cancellation plumbing is native-only and has no occOps counterpart.
+      .filter((k) => k !== "setCancelBuffer")
+      .sort();
+    expect(bridgeOps).toEqual(Object.keys(ops).sort());
+  });
 });
