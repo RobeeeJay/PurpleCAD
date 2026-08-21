@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
+import { assertDocumentIntegrity } from "./integrity.js";
 import fs from "node:fs";
 
 // Load a real document and click every timeline step.  Each selection can
@@ -62,6 +63,11 @@ test("every step of a dirty document settles when selected", async () => {
   for (const i of order) {
     await page.locator(".timeline-entry").nth(i).click();
     await regenSettled();
+    // Walking the timeline re-runs the regenerators, which is where a
+    // structural mutation that renumbers a sketch's shapes without remapping
+    // its constraints would show up.  Check after EVERY step so the failure
+    // names the step that broke it, not just the end state.
+    await assertDocumentIntegrity(page, `after step ${i}`);
   }
 
   // Every geometry step settled: nothing is left permanently dirty and the
