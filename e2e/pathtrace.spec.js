@@ -21,7 +21,7 @@ test.afterAll(async () => {
   await app?.close();
 });
 
-test("path tracing renders a non-black object", async () => {
+test("path tracing renders a non-black object", async ({}, testInfo) => {
   await expect(page.locator(".toolbar")).toBeVisible();
 
   // Load the user's embossed/chamfered ring scene, then trace it.
@@ -50,8 +50,11 @@ test("path tracing renders a non-black object", async () => {
   });
   console.log("tracer state:", JSON.stringify(state));
 
-  // Read back the canvas pixels: centre region should NOT be black (the red
-  // box under studio lighting), background should be the dark blue-grey.
+  // Read back the canvas pixels: the scene is a chamfered, embossed cylinder
+  // filling the middle of the view, so the centre sample lands on its lit
+  // grey body and the lower-left corner on the dark background.  Only
+  // "centre is not black" is asserted -- this is a smoke test for the
+  // tracer's RAF loop and denoise blit, not a visual comparison.
   const px = await page.evaluate(() => {
     const canvas = document.querySelector("canvas");
     const gl =
@@ -73,7 +76,12 @@ test("path tracing renders a non-black object", async () => {
   });
   console.log("pixels:", JSON.stringify(px));
 
-  await page.screenshot({ path: "/tmp/pathtrace.png" });
+  // Into the test's own output dir (and attached to the report) rather than
+  // /tmp: a hardcoded path is not collected as a Playwright artifact, so a
+  // failing run left no image to look at.
+  const shot = testInfo.outputPath("pathtrace.png");
+  await page.screenshot({ path: shot });
+  await testInfo.attach("pathtrace", { path: shot, contentType: "image/png" });
   expect(state.active).toBe(true);
   const [r, g, b] = px.centre;
   expect(r + g + b).toBeGreaterThan(30); // not black
