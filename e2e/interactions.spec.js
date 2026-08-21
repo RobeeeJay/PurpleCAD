@@ -109,8 +109,16 @@ test("selecting a sketch enters sketch view (ortho + camera fly-in)", async () =
 test("clicking the cube selects it", async () => {
   const canvas = page.locator(".viewport canvas").first();
   const box = await canvas.boundingBox();
-  // The cube sits at world origin-ish; click centre.
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  // Click the VISIBLE-area centre, not the raw canvas centre: the camera
+  // frames the viewport excluding the 250px left panel (see CLAUDE.md), so a
+  // centred body renders half a panel-width right of the canvas midpoint.
+  // Clicking raw centre only worked because the cube happened to project wide
+  // enough to cover it -- on a shorter canvas it projects smaller and misses.
+  const LEFT_PANEL_PX = 250;
+  await page.mouse.click(
+    box.x + LEFT_PANEL_PX + (box.width - LEFT_PANEL_PX) / 2,
+    box.y + box.height / 2,
+  );
   await page.waitForTimeout(300);
   const selected = await page.evaluate(
     () => window.__store.getState().selectedId,
