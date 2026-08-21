@@ -337,8 +337,6 @@ export const TOOL_RESET_PATCH = {
 
 export const createUiSlice = (set, get) => ({
   // Cancel every in-progress tool operation (used when a new tool is selected).
-  cancelActiveTools: () => set({ ...TOOL_RESET_PATCH }),
-
   selectItem: (id) =>
     set({ selectedId: id, selectedIds: id != null ? [id] : [] }),
 
@@ -449,7 +447,6 @@ export const createUiSlice = (set, get) => ({
         selTypeSolo: saved,
       };
     }),
-  setSelectionOverride: (types) => set({ selectionOverride: types }),
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),

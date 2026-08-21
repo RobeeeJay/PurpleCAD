@@ -17,6 +17,4 @@ export const METRIC_THREADS = [
   { id: "M24", diameter: 24, pitch: 3.0 },
 ];
 
-export const DEFAULT_THREAD = "M6";
-
 export const threadById = (id) => METRIC_THREADS.find((t) => t.id === id);

@@ -9,7 +9,7 @@
 // 63 MB WASM; subsequent calls reuse the singleton.  We bump the test
 // timeout to 30 s for this reason.
 
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as THREE from "three";
 import {
   makeCube,

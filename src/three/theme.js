@@ -142,7 +142,6 @@ export const EMISSIVE_CUT = 0x992222;
 export const FACE_SELECT_COLOR = 0x3377cc;
 export const FACE_HOVER_COLOR = 0x88ccff;
 export const EDGE_SELECT_COLOR = 0xff5500;
-export const EDGE_HOVER_COLOR = 0xffdd00;
 
 // Extrude / cut profile-face highlights.
 export const EXTRUDE_FACE_HIGHLIGHT = 0x4488ff;
@@ -158,10 +157,6 @@ export const CHAMFER_PREVIEW_COLOR = 0xff44aa;
 export const SKETCH_FACE_HIGHLIGHT = 0x4488ff;
 export const SKETCH_DRAW_PREVIEW_COLOR = 0x556677;
 export const SKETCH_MODIFY_HIGHLIGHT = 0xffcc44;
-
-// Bevel sketch geometry — rendered in a distinct color and made
-// non-interactive while its driving constraint exists.
-export const BEVEL_COLOR = 0xffaa44;
 
 // Snap indicators.
 export const SNAP_POINT_COLOR = 0xcc44ff;
@@ -187,7 +182,6 @@ export const CONSTRAINT_ON_LINE_COLOR = 0x00aaff;
 export const CONSTRAINT_HORIZONTAL_COLOR = 0x00ddaa;
 export const CONSTRAINT_VERTICAL_COLOR = 0x00ddaa;
 export const CONSTRAINT_ANGLE_COLOR = 0xff66cc;
-export const CONSTRAINT_PARALLEL_PERP_COLOR = 0xff8800;
 export const CONSTRAINT_DEFAULT_COLOR = 0xffffff;
 
 // Canvas 2D contexts (axis labels, sprites) take CSS color strings rather
@@ -196,8 +190,7 @@ export function toCssHex(color) {
   return `#${color.toString(16).padStart(6, "0")}`;
 }
 
-// Canvas label backgrounds/text for angle annotations.
-export const ANGLE_LABEL_BG = "rgba(40,10,30,0.85)";
+// Canvas label text for angle annotations.
 export const ANGLE_LABEL_TEXT = "#ff99dd";
 
 export function constraintColor(type) {

@@ -6,7 +6,6 @@ import { describe, it, expect } from "vitest";
 import {
   weldMesh,
   refineMesh,
-  regionTest,
   buildMapping,
   sampleHeight,
   displaceMesh,

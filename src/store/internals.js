@@ -10,7 +10,7 @@
 // Electron, localStorage in a plain browser, in-memory under tests) rather than
 // touching localStorage here.  Everything here operates on the active project.
 import * as db from "./db.js";
-import { packHistory, unpackHistory } from "./geometryPack.js";
+import { packHistory } from "./geometryPack.js";
 import { pruneNestedSourceGeometry } from "../three/textureDisplace.js";
 
 // ---------------------------------------------------------------------------

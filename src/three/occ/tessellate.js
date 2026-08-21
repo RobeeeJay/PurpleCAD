@@ -19,14 +19,3 @@ export function tessellate(shapeId, precision = null) {
   geo.computeVertexNormals();
   return geo;
 }
-
-export function tessellateToData(shapeId, precision = null) {
-  if (!shapeId) return null;
-  const result = occ.tessellate(shapeId, precision ?? 0.5);
-  if (!result) return null;
-  return {
-    positions: Array.from(result.positions),
-    normals: null,
-    indices: Array.from(result.indices),
-  };
-}

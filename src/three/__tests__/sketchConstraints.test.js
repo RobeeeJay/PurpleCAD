@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { getShapePoint, moveShapePoint } from "../sceneObjects.js";
 import {
   enforceConstraints,
