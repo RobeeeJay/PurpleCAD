@@ -21,6 +21,10 @@
 // ── Helical thread (hole tool) ───────────────────────────────────────────
 #include <Geom_CylindricalSurface.hxx>
 #include <GCE2d_MakeSegment.hxx>
+// Needed as COMPLETE types for the handle upcast below, which gcc will not
+// form from forward declarations alone.
+#include <Geom2d_Curve.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
 #include <gp_Pnt2d.hxx>
 #include <BRepLib.hxx>
 
@@ -2006,9 +2010,16 @@ static TopoDS_Shape BuildThreadGroove(
     double vEnd = length + 2.0 * pitch;
     double uEnd = (vEnd / pitch) * TWO_PI;
     // Straight line in (u = angle, v = height) param space → a helix in 3D.
-    Handle(Geom2d_Curve) seg =
+    // Bind Value()'s Handle(Geom2d_TrimmedCurve) to its own name before the
+    // upcast: gcc rejects copy-initialising a Handle(Geom2d_Curve) directly
+    // from the returned handle ("conversion to non-scalar type requested"),
+    // though it accepts the identical upcast from a named handle.  clang
+    // accepts both, so writing it the short way builds on macOS and breaks
+    // the Linux build only.
+    Handle(Geom2d_TrimmedCurve) segTrimmed =
       GCE2d_MakeSegment(gp_Pnt2d(0.0, -pitch), gp_Pnt2d(uEnd, vEnd - pitch))
         .Value();
+    Handle(Geom2d_Curve) seg = segTrimmed;
     TopoDS_Edge helixE = BRepBuilderAPI_MakeEdge(seg, surf);
     BRepLib::BuildCurves3d(helixE);
     TopoDS_Wire helixW = BRepBuilderAPI_MakeWire(helixE);
