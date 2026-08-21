@@ -22,6 +22,14 @@ test.afterAll(async () => {
   await app?.close();
 });
 
+// This test deliberately drives a SLOW pipeline: a dense emboss document, a
+// forced full recalculation at 0.01 mm, then a second full pass at preview
+// resolution.  That final pass alone measures ~30s on a quiet machine, and the
+// poll below already allows 120s for it — but the suite-wide 60s test timeout
+// capped the whole test well below that, so it died mid-poll whenever the
+// machine was busy.  Give the test a budget that actually covers its own poll.
+test.setTimeout(180_000);
+
 test("cancelling a forced recalculation leaves the app healthy", async () => {
   const doc = JSON.parse(
     fs.readFileSync("test-files/failing-recalculate-scene.pcad", "utf8"),
