@@ -11,18 +11,12 @@ import { createTexturePreviewHelpers } from "./cameraControls/texture.js";
 import { createDraftPreviewHelpers } from "./cameraControls/draft.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
 import { meshBoolean, meshSplit } from "./meshBoolean.js";
-import { fitPointsToView, meshFitPoints, boxCorners } from "./cameraFit.js";
-import { MM_PER_UNIT } from "./sceneObjects.js";
 import { bboxCenterOf, massCentroidOf } from "./objectOrigin.js";
 import { getCamera, saveCamera } from "../store/db.js";
-import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import {
   createAnimateLoop,
   requestRender,
 } from "./cameraControls/animateLoop.js";
-import { primitiveDimensions } from "./sceneObjects/dimensions.js";
-import { createMaterial } from "./objectMaterials.js";
-import { DEFAULT_MESH_COLOR } from "./theme.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
 import { createSketchHoverHelpers } from "./cameraControls/sketchHover.js";
 import { createNavigationHandlers } from "./cameraControls/navigation.js";
@@ -31,6 +25,8 @@ import { createViewInteraction } from "./cameraControls/viewInteraction.js";
 import { createEmbossInteraction } from "./cameraControls/embossPick.js";
 import { createSketchInteraction } from "./cameraControls/sketchInteraction.js";
 import { createToolPreviews } from "./cameraControls/toolPreviews.js";
+import { createMeasureAndPrimitivePreviews } from "./cameraControls/measurePrimitivePreviews.js";
+import { createMaterialAndFitHelpers } from "./cameraControls/materialFitHelpers.js";
 
 export function loadCameraState() {
   try {
@@ -362,222 +358,18 @@ export function attachCameraControls(ctx) {
   // Clear the persistent multi-face selection highlight (on tool cancel/confirm).
   controls.clearEmbossSelectedFaces = () => highlights.clearSelectedFaces();
 
-  // Measure tool markers: a coloured sphere at each picked point and a dashed
-  // line between two picks, so the user sees what was picked and what's measured.
-  let measureGroup = null;
-  controls.clearMeasureMarkers = () => {
-    if (!measureGroup) return;
-    scene.remove(measureGroup);
-    measureGroup.traverse((o) => {
-      o.geometry?.dispose?.();
-      o.material?.dispose?.();
-    });
-    measureGroup = null;
-  };
-  controls.updateMeasureMarkers = (picks) => {
-    controls.clearMeasureMarkers();
-    const list = (picks || []).filter((p) => p && p.at);
-    if (list.length === 0) return;
-    // Size the markers off the PICKED objects, not the whole scene — the scene
-    // bbox includes the 1000-unit sketch reference plane, which made a giant
-    // sphere.  Fall back to a small fixed size if no object is under the pick.
-    let refSize = 0;
-    for (const pick of list) {
-      const mesh = objectsRef.current[pick.itemId];
-      if (!mesh || !mesh.geometry) continue;
-      mesh.geometry.computeBoundingSphere?.();
-      const br = mesh.geometry.boundingSphere?.radius || 0;
-      const ws = Math.abs(mesh.getWorldScale(new THREE.Vector3()).x) || 1;
-      refSize = Math.max(refSize, br * ws);
-    }
-    const r = Math.max(0.02, (refSize || 1) * 0.04);
-    const g = new THREE.Group();
-    const colors = [0xffaa33, 0x33ddff];
-    list.forEach((pick, i) => {
-      const color = colors[i % colors.length];
-      // Highlight the actual clicked face (translucent overlay) so it stays lit.
-      if (pick.kind === "face" && pick.pts && pick.pts.length >= 3) {
-        const flat = new Float32Array(pick.pts.length * 3);
-        pick.pts.forEach((p, k) => {
-          flat[k * 3] = p[0];
-          flat[k * 3 + 1] = p[1];
-          flat[k * 3 + 2] = p[2];
-        });
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(flat, 3));
-        const face = new THREE.Mesh(
-          geo,
-          new THREE.MeshBasicMaterial({
-            color,
-            transparent: true,
-            opacity: 0.35,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-            polygonOffset: true,
-            polygonOffsetFactor: -1,
-            polygonOffsetUnits: -1,
-          }),
-        );
-        face.renderOrder = 999;
-        g.add(face);
-      }
-      // A sphere on the exact clicked point / vertex.
-      const m = new THREE.Mesh(
-        new THREE.SphereGeometry(r, 16, 12),
-        new THREE.MeshBasicMaterial({ color, depthTest: false }),
-      );
-      m.position.set(pick.at[0], pick.at[1], pick.at[2]);
-      m.renderOrder = 1000;
-      g.add(m);
-    });
-    if (list.length >= 2) {
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(...list[0].at),
-          new THREE.Vector3(...list[1].at),
-        ]),
-        new THREE.LineDashedMaterial({
-          color: 0xffffff,
-          dashSize: r * 2.5,
-          gapSize: r * 1.5,
-          depthTest: false,
-        }),
-      );
-      line.computeLineDistances();
-      line.renderOrder = 1000;
-      g.add(line);
-    }
-    scene.add(g);
-    measureGroup = g;
-  };
-
-  // Live primitive-dimensions preview (the dialog's dimensions, WITHOUT a store
-  // rebuild, so resizing is instant).  A box (real geometry) scales in place so
-  // its edges follow; a raymarched sphere/cylinder/torus/cone updates its shader
-  // dimension uniforms and re-sizes its box hull.  The commit (modifyItem)
-  // rebuilds from the store; clearBoxPreview reverts to the stored dimensions.
-  const primHull = (type, d) => {
-    if (type === "cube")
-      return new THREE.BoxGeometry(d.width, d.height, d.depth);
-    if (type === "sphere") {
-      const r = d.radius * 2;
-      return new THREE.BoxGeometry(r, r, r);
-    }
-    if (type === "cylinder")
-      return new THREE.BoxGeometry(2 * d.radius, d.height, 2 * d.radius);
-    if (type === "torus") {
-      const o = 2 * (d.major + d.minor);
-      return new THREE.BoxGeometry(o, 2 * d.minor, o);
-    }
-    if (type === "cone") {
-      const o = 2 * Math.max(d.radiusBottom, d.radiusTop);
-      return new THREE.BoxGeometry(o, d.height, o);
-    }
-    return null;
-  };
-  // Unscaled geometry size (mm) of an item's mesh, so the transform dialog can
-  // derive per-axis lengths (localSize * item.scale) and convert an edited
-  // length back to a scale.  Independent of item.scale, so it's stable to read.
-  controls.getItemLocalSizeMm = (id) => {
-    const mesh = objectsRef.current[id];
-    if (!mesh?.geometry) return null;
-    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-    const bb = mesh.geometry.boundingBox;
-    return {
-      x: (bb.max.x - bb.min.x) * MM_PER_UNIT,
-      y: (bb.max.y - bb.min.y) * MM_PER_UNIT,
-      z: (bb.max.z - bb.min.z) * MM_PER_UNIT,
-    };
-  };
-  controls.previewBoxDimensions = (id, dims) => {
-    const mesh = objectsRef.current[id];
-    const item = itemsRef.current.find((i) => i.id === id);
-    if (!mesh || !item) return;
-    if (item.type === "cube") {
-      const st = item.dimensions || { width: 2, height: 2, depth: 2 };
-      const sc = item.scale || { x: 1, y: 1, z: 1 };
-      mesh.scale.set(
-        (sc.x ?? 1) * (dims.width / (st.width || 2)),
-        (sc.y ?? 1) * (dims.height / (st.height || 2)),
-        (sc.z ?? 1) * (dims.depth / (st.depth || 2)),
-      );
-      return;
-    }
-    const u = mesh.material?.uniforms;
-    if (u) {
-      if (u.uRadius && dims.radius != null) u.uRadius.value = dims.radius;
-      if (u.uHalfH && dims.height != null) u.uHalfH.value = dims.height / 2;
-      if (u.uMajor && dims.major != null) u.uMajor.value = dims.major;
-      if (u.uMinor && dims.minor != null) u.uMinor.value = dims.minor;
-      if (u.uRb && dims.radiusBottom != null) u.uRb.value = dims.radiusBottom;
-      if (u.uRt && dims.radiusTop != null) u.uRt.value = dims.radiusTop;
-    }
-    const hull = primHull(item.type, dims);
-    if (hull) {
-      mesh.geometry.dispose();
-      mesh.geometry = hull;
-      mesh.userData.hullGeometry = hull;
-    }
-  };
-  controls.clearBoxPreview = (id) => {
-    const item = itemsRef.current.find((i) => i.id === id);
-    if (item) controls.previewBoxDimensions(id, primitiveDimensions(item));
-  };
-
-  // Ghost preview for CREATING a primitive: a translucent copy of the actual
-  // shape (real shader, so a sphere reads as a sphere) at the spawn point, before
-  // anything is committed to the timeline.  Updated live as the dialog changes.
-  let primGhost = null;
-  controls.clearPrimitivePreview = () => {
-    if (!primGhost) return;
-    scene.remove(primGhost);
-    primGhost.geometry?.dispose();
-    primGhost.material?.dispose();
-    primGhost = null;
-  };
-  controls.showPrimitivePreview = ({ type, dimensions, position }) => {
-    const geo = primHull(type, dimensions);
-    if (!geo) return;
-    const mat = createMaterial({ type, dimensions }, DEFAULT_MESH_COLOR);
-    if (mat.uniforms?.uOpacity) {
-      mat.uniforms.uOpacity.value = 0.55;
-      mat.transparent = true;
-    } else {
-      mat.opacity = 0.55;
-      mat.transparent = true;
-    }
-    controls.clearPrimitivePreview();
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(position.x, position.y, position.z);
-    mesh.renderOrder = 5;
-    scene.add(mesh);
-    primGhost = mesh;
-  };
-
-  // Expose extrude-overlay control to the React layer:
-  //   • finalizeExtrudeWithDepth(d)         — commit at numeric depth `d`.
-  //   • finalizeExtrudeWithFormula(f, d)    — commit storing formula `f`
-  //                                           and using its resolved depth
-  //                                           `d` for the preview/profile.
-  //   • updateExtrudePreview(d)             — re-render the live preview
-  //                                           mesh at depth `d`.
-  controls.finalizeExtrudeWithDepth = (depth) => finalizeExtrude(depth);
-  controls.finalizeExtrudeWithFormula = (formula, depth) =>
-    finalizeExtrude(depth, formula);
-  controls.cancelExtrude = () => cancelExtrude();
-  controls.updateExtrudePreview = (depth) => {
-    if (!extrude.hasProfiles) return;
-    // Preserve the sign so a negative (backward) depth previews in the -Z
-    // direction; makeExtrudePreviewMesh clamps the magnitude to ≥ 0.05.
-    rebuildPreviews(depth);
-  };
-  // Enter the "pick a face / sketch plane to offset the extrude start" mode.
-  controls.beginExtrudeStartPick = () => beginExtrudeStartPick();
-  // Extrude the selected solid face directly (the React extrude button calls
-  // this when a face is selected).  Returns true if a face extrude started.
-  controls.extrudeSelectedFace = () => extrude.startFaceExtrudeFromSelection();
-  // Pre-select the original profile region when retargeting an extrude.
-  controls.preselectRetargetProfile = () => preselectRetargetProfile();
+  createMeasureAndPrimitivePreviews({
+    controls,
+    scene,
+    itemsRef,
+    objectsRef,
+    extrude,
+    beginExtrudeStartPick,
+    cancelExtrude,
+    finalizeExtrude,
+    preselectRetargetProfile,
+    rebuildPreviews,
+  });
 
   // Live preview for ChamferOverlay: re-runs the chamfer/fillet recipe
   // against the current selectedSubGeometry + distance/angle and overlays
@@ -777,253 +569,21 @@ export function attachCameraControls(ctx) {
     setRotationState,
   });
 
-  // Live preview for MaterialDialog: instantly applies in-progress
-  // color/finish edits to the live mesh(es) without a store write.
-  const materialPreview = createMaterialPreviewHelpers({
-    objectsRef,
+  createMaterialAndFitHelpers({
+    controls,
+    scene,
+    cameraRef,
+    targetRef,
     itemsRef,
+    objectsRef,
+    handlesRef,
+    boundingBoxRef,
+    axisGroupRef,
+    planeRef,
+    sketchGridGroupRef,
+    gridMaterial,
+    rulerGroup,
   });
-  controls.previewMaterial = (target, materialProps) =>
-    materialPreview.previewMaterial(target, materialProps);
-  controls.restoreMaterialPreview = (target) =>
-    materialPreview.restoreMaterialPreview(target);
-
-  // The current view centre (camera orbit target) in world coords — the
-  // toolbar reads this so a newly created primitive spawns where the user is
-  // looking instead of always at the world origin.
-  controls.getViewTarget = () => targetRef.current.clone();
-
-  // Capture the current viewport canvas as a PNG blob, for the Save menu's
-  // "Save image" option.  Relies on preserveDrawingBuffer (sceneSetup.js) so
-  // the buffer is still readable after the frame has been composited.
-  controls.captureScreenshot = () =>
-    new Promise((resolve) => renderer.domElement.toBlob(resolve, "image/png"));
-
-  // Capture a clean thumbnail of the project (a small JPEG data URL): reset-view
-  // (isometric fit-all) framing, geometry shaded, with the ground plane / ruler
-  // labels / sketches hidden.  When there are no solid objects, keep the sketch
-  // plane and frame the origin instead.  Synchronous (render → toDataURL →
-  // restore, all in one tick) so it also works during an unload/quit.
-  controls.captureThumbnailDataUrl = () => {
-    const cam = cameraRef.current;
-    if (!cam) return null;
-
-    // Solid (non-sketch, visible) meshes + the fit-point cloud (analytic
-    // silhouette for round primitives, AABB corners otherwise) so the thumbnail
-    // frames exactly like the Reset-view button.
-    let any = false;
-    const solidMeshes = [];
-    const fitPts = [];
-    for (const item of itemsRef.current) {
-      if (item.type === "sketch" || item.visible === false) continue;
-      const mesh = objectsRef.current[item.id];
-      if (!mesh) continue;
-      mesh.updateMatrixWorld(true);
-      const b = new THREE.Box3().setFromObject(mesh);
-      if (b.isEmpty()) continue;
-      any = true;
-      solidMeshes.push(mesh);
-      meshFitPoints(item, mesh, fitPts);
-    }
-
-    // Hide overlays (restored after the capture).
-    const hidden = [];
-    const hide = (o) => {
-      if (o && o.visible) {
-        o.visible = false;
-        hidden.push(o);
-      }
-    };
-    let gridMesh = null;
-    scene.traverse((o) => {
-      if (o.isMesh && o.material === gridMaterial) gridMesh = o;
-      if (o.userData?.isShadowGround) hide(o);
-      // Sketch line overlays: hide when there's a solid to show (they'd clutter
-      // an object thumbnail); kept — and framed — when the project is sketch-only.
-      if (o.userData?.isSketchOverlay) {
-        if (any) hide(o);
-        else if (o.visible) {
-          o.updateWorldMatrix(true, true);
-          const b = new THREE.Box3().setFromObject(o);
-          if (!b.isEmpty()) boxCorners(b, fitPts);
-        }
-      }
-    });
-    hide(gridMesh);
-    hide(rulerGroup);
-    hide(sketchGridGroupRef?.current);
-    hide(axisGroupRef?.current);
-    handlesRef?.current?.forEach((h) => hide(h.mesh));
-    const bb = boundingBoxRef?.current;
-    if (bb) {
-      hide(bb.boxMesh);
-      hide(bb.labelX?.sprite);
-      hide(bb.labelY?.sprite);
-      hide(bb.labelZ?.sprite);
-    }
-    // The sketch plane is the fallback subject when the project has no objects.
-    if (any) hide(planeRef?.current);
-
-    // Force each solid to its shaded (analytic) material, opaque, for the shot.
-    const matRestore = [];
-    for (const mesh of solidMeshes) {
-      const rec = { mesh, mat: mesh.material, geo: mesh.geometry };
-      if (
-        mesh.userData.hullGeometry &&
-        mesh.geometry !== mesh.userData.hullGeometry
-      )
-        mesh.geometry = mesh.userData.hullGeometry;
-      if (mesh.userData.shaderMat && mesh.material !== mesh.userData.shaderMat)
-        mesh.material = mesh.userData.shaderMat;
-      const m = mesh.material;
-      if (m && "opacity" in m) {
-        rec.opMat = m;
-        rec.op = { t: m.transparent, o: m.opacity, d: m.depthWrite };
-        m.transparent = false;
-        m.opacity = 1;
-        m.depthWrite = true;
-        m.needsUpdate = true;
-      }
-      matRestore.push(rec);
-    }
-
-    // Isometric fit-all pose — the exact same fit as the Reset-view / Home
-    // button, so a thumbnail frames identically to the default view.  The full
-    // frame (no left-panel offset) is used since the shot has no overlay.
-    const saved = {
-      pos: cam.position.clone(),
-      quat: cam.quaternion.clone(),
-      zoom: cam.zoom,
-    };
-    const rotX = Math.asin(Math.sqrt(1 / 3));
-    const rotY = Math.PI / 4;
-    const dir = new THREE.Vector3(
-      Math.sin(rotY) * Math.cos(rotX),
-      Math.sin(rotX),
-      Math.cos(rotY) * Math.cos(rotX),
-    ).normalize();
-    let center;
-    if (fitPts.length > 0) {
-      const fit = fitPointsToView(fitPts, dir, cam, 0.9);
-      center = fit.target;
-      cam.position.copy(fit.target).addScaledVector(dir, fit.distance);
-      if (fit.endZoom != null) cam.zoom = fit.endZoom;
-    } else {
-      center = new THREE.Vector3();
-      cam.position.copy(center).addScaledVector(dir, 15);
-    }
-    cam.up.set(0, 1, 0);
-    cam.lookAt(center);
-    cam.updateProjectionMatrix();
-    cam.updateMatrixWorld(true);
-
-    // Render one clean frame (no bloom composer), read it, downscale to the
-    // project card's display size, then restore camera / overlays / materials.
-    renderer.render(scene, cam);
-    const src = renderer.domElement;
-    // Match the card thumbnail (4:3, ~240 CSS px wide) at the device pixel ratio
-    // so it's crisp on hi-DPI; cap at 2× to keep the stored data URL small.
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const tw = Math.round(240 * dpr);
-    const th = Math.round(180 * dpr);
-    // Stepped halving keeps large minifications from aliasing, then a final
-    // high-quality cover-crop into the 4:3 box.
-    let cur = src;
-    let cw = src.width;
-    let ch = src.height;
-    const cap = Math.max(tw, th) * 2;
-    while (Math.min(cw, ch) > cap) {
-      const nw = Math.max(tw, Math.round(cw / 2));
-      const nh = Math.max(th, Math.round(ch / 2));
-      const half = document.createElement("canvas");
-      half.width = nw;
-      half.height = nh;
-      const hx = half.getContext("2d");
-      hx.imageSmoothingEnabled = true;
-      hx.imageSmoothingQuality = "high";
-      hx.drawImage(cur, 0, 0, nw, nh);
-      cur = half;
-      cw = nw;
-      ch = nh;
-    }
-    const thumb = document.createElement("canvas");
-    thumb.width = tw;
-    thumb.height = th;
-    const ctx = thumb.getContext("2d");
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    const cover = Math.max(tw / cw, th / ch);
-    ctx.drawImage(
-      cur,
-      (tw - cw * cover) / 2,
-      (th - ch * cover) / 2,
-      cw * cover,
-      ch * cover,
-    );
-    const dataUrl = thumb.toDataURL("image/jpeg", 0.72);
-
-    cam.position.copy(saved.pos);
-    cam.quaternion.copy(saved.quat);
-    cam.zoom = saved.zoom;
-    cam.updateProjectionMatrix();
-    cam.updateMatrixWorld(true);
-    for (const o of hidden) o.visible = true;
-    for (const r of matRestore) {
-      r.mesh.geometry = r.geo;
-      if (r.op) {
-        r.opMat.transparent = r.op.t;
-        r.opMat.opacity = r.op.o;
-        r.opMat.depthWrite = r.op.d;
-        r.opMat.needsUpdate = true;
-      }
-      r.mesh.material = r.mat;
-    }
-    return dataUrl;
-  };
-
-  // Drop the selected non-sketch objects so their lowest world-Y point
-  // sits on the ground plane (Y=0).  Computes the min Y across all
-  // selected meshes' world-space bounding boxes, then dispatches a
-  // single setItemsTransform with each item's new Y position.
-  controls.dropSelectedToGround = () => {
-    const store = useStore.getState();
-    const selected = (
-      store.selectedIds && store.selectedIds.length > 0
-        ? store.selectedIds
-        : store.selectedId != null
-          ? [store.selectedId]
-          : []
-    )
-      .map((id) => ({ id, item: store.items.find((i) => i.id === id) }))
-      .filter(({ item }) => item && item.type !== "sketch");
-    if (selected.length === 0) return;
-    let minY = Infinity;
-    const box = new THREE.Box3();
-    for (const { id } of selected) {
-      const mesh = objectsRef.current?.[id];
-      if (!mesh) continue;
-      mesh.updateMatrixWorld(true);
-      box.setFromObject(mesh);
-      if (Number.isFinite(box.min.y) && box.min.y < minY) minY = box.min.y;
-    }
-    if (!Number.isFinite(minY)) return;
-    const shift = -minY;
-    if (Math.abs(shift) < 1e-6) return;
-    const updates = selected.map(({ id, item }) => ({
-      id,
-      position: {
-        x: item.position?.x ?? 0,
-        y: (item.position?.y ?? 0) + shift,
-        z: item.position?.z ?? 0,
-      },
-    }));
-    store.setItemsTransform(updates);
-    // Persist as undoable history entries so the move survives a replay
-    // / reload (setItemsTransform alone only touches `items`).
-    for (const u of updates) {
-      useStore.getState().recordTransformHistory(u.id, "Moved");
-    }
-  };
 
   // ── Transform-handle (gizmo) drag — 3D view mode ──────────────────────────
   const { tryBeginHandleDrag, updateHandleDrag, commitHandleDrag } =
