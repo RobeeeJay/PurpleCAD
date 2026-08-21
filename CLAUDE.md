@@ -29,10 +29,27 @@ whitespace noise in the diff.
 ## Verify with tests AND build, in that order
 
 ```bash
-npm test               # all unit tests (vitest), runs in ~7s
-npx vite build         # production bundle, ~3s
-npm run test:e2e       # Electron e2e (builds VITE_E2E dist, then Playwright)
+npm test                  # all unit tests (vitest), runs in ~7s
+npx vite build            # production bundle, ~3s
+npm run test:e2e:podman   # Electron e2e, headless Linux container
 ```
+
+**Run the e2e suite through podman** (`npm run test:e2e:podman`). It builds
+the addon, rebuilds better-sqlite3, builds the VITE_E2E renderer and runs
+Playwright under xvfb inside the container, so a run doesn't depend on the
+state of the host toolchain or steal the desktop's focus. Build the image
+once with `npm run e2e:image` (~15 min the first time -- the OCC 8.0.1 source
+build is its own layer and is reused by every later app-code rebuild; app
+edits rebuild only the COPY layers, ~1 min). The podman VM needs more than
+its 2 GiB default: `podman machine set --memory 8192 --cpus 8`.
+
+The container is an ADDITIONAL lane, not a replacement. Its addon links a
+LINUX OCC, so it verifies the JS/renderer/store/IPC surface but NOT the exact
+native binary the shipped macOS app runs -- run `npm run test:e2e` on macOS
+before a release, and whenever a change touches `binding.cc` or the addon
+build. `E2E_NO_SANDBOX=1` (set in the image) makes `e2e/launch.js` pass
+`--no-sandbox`, which rootless containers require; the macOS run keeps the
+sandbox on.
 
 Run tests through the npm scripts, not `npx vitest`/`playwright` directly:
 they route through `scripts/with-display.sh`, which runs the command under
@@ -104,11 +121,27 @@ files just to make these go away.
 - Prefer editing the existing file to creating a new one. New files have
   the burden of a name that fits, a place in the tree, and an import
   graph that doesn't break the worker bundle.
-- **500-line ceiling.** As soon as a file grows past ~500 lines of code,
-  look to split cohesive functionality into sibling modules (and re-export
-  from the original if it's an import hub). Don't let modules sprawl;
-  prefer a small focused file per concern. Test files are exempt from the
-  hard ceiling but still benefit from topic-based splitting when large.
+- **900-line ceiling.** Files in the 500-900 line range are ACCEPTABLE --
+  leave them alone; splitting a file that already fits scatters related code
+  for no benefit. As soon as a file exceeds ~900 lines, look immediately at
+  options for splitting cohesive functionality into sibling modules (and
+  re-export from the original if it's an import hub). Test files are exempt
+  from the hard ceiling but still benefit from topic-based splitting when
+  large.
+- **Splitting by NAME, not by line range.** Related declarations are rarely
+  contiguous -- selection-filter toggles sit in the middle of uiSlice's tool
+  phases, and a chamfer helper sits inside sketchInteraction's drag block.
+  Cutting a line range swallows the interlopers silently. Parse out the
+  blocks you mean to move and assert their boundaries before writing; a
+  block's trailing blank line and the comment above the NEXT declaration
+  both belong to the neighbour, not to the block.
+- **`node --check` proves nothing about a split.** Every breakage these
+  splits have produced was a runtime ReferenceError with valid syntax: an
+  import left behind (`loadSnapSettings`), a shared const gone out of scope
+  (`TOOL_RESET_PATCH`, `activeSketchForProject`), or a relative dynamic
+  `await import("./x.js")` resolving at the wrong depth after a move into a
+  subdirectory. Run the unit suite AND the e2e suite after any split, and
+  grep for `await import("./` whenever a file changes directory.
 
 ## OCC execution boundary
 
@@ -152,10 +185,28 @@ files just to make these go away.
 
 ## Native OCC addon (native/occ-addon)
 
-- Built against OpenCASCADE 8.0.0 at `~/occ-8.0-arm64`. CMakeLists' `find_package`
-  HINTS list that path first, falling back to `~/occ-arm64` (7.9.0, the prior
-  install) and then system Homebrew paths — the same source builds against
-  either version.
+- Built against OpenCASCADE 8.0.1 at `~/occ-8.0.1-arm64`. CMakeLists'
+  `find_package` HINTS list that path first, falling back to `~/occ-8.0-arm64`
+  (8.0.0) then `~/occ-arm64` (7.9.0) and finally system Homebrew paths — the
+  same source builds against any of them, so an un-upgraded machine keeps
+  working. Bump the CI cache key and the Containerfile's clone tag together
+  with this path or they silently keep building the old version.
+- **Pin `-DCMAKE_OSX_ARCHITECTURES=arm64` when building OCC on macOS.** 8.0.1's
+  CMake picks x86_64 by default on an arm64 Mac (it lays the build out under
+  `mac64/clang/`), and the failure is quiet: the addon still LINKS -- ld only
+  warns "ignoring file ... found architecture 'x86_64', required architecture
+  'arm64'" -- and only blows up at require() time with `symbol not found in
+  flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
+  Check with `lipo -archs ~/occ-8.0.1-arm64/lib/libTKernel.8.0.1.dylib`.
+- **The addon must compile under BOTH clang and gcc.** macOS dev builds with
+  clang; the Linux e2e container and `dist:linux` build with gcc, and gcc is
+  the stricter of the two. The trap already hit: gcc rejects copy-initialising
+  a base handle from a factory's derived return value
+  (`Handle(Geom2d_Curve) c = GCE2d_MakeSegment(...).Value();` →
+  "conversion from 'handle<Geom2d_TrimmedCurve>' ... requested") while clang
+  accepts it, so the short spelling builds green on macOS and breaks Linux
+  only. Bind the derived handle to its own name first, then upcast. Verify a
+  gcc build (`npm run e2e:image`) after touching `binding.cc`.
 - OCC 8.0.0 removed `TopTools_ListIteratorOfListOfShape.hxx`. Iterate
   `TopTools_ListOfShape` (an `NCollection_List`) with a range-based `for` loop
   instead of that iterator. If a future OCC bump reintroduces a similar
