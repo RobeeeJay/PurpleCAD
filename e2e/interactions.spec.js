@@ -22,7 +22,13 @@ test.afterAll(async () => {
   await app?.close();
 });
 
-test("orbit drag moves the camera", async () => {
+// Rotation is a Shift+scroll gesture (navigation.js), NOT a right-drag: the
+// right-button branch only sets controls.isRotating, which nothing reads.
+// This previously right-dragged and compared JSON strings of targetRotation,
+// which passed on macOS solely because setOrbitAnchor recomputed the same
+// angle to a 1-ULP difference -- it would have kept passing if rotation were
+// removed entirely.
+test("Shift+scroll rotates the camera", async () => {
   await expect(page.locator(".toolbar")).toBeVisible();
   await page.evaluate(() => {
     window.__store.getState().newDocument?.();
@@ -43,37 +49,24 @@ test("orbit drag moves the camera", async () => {
   });
   await page.waitForTimeout(600);
 
-  const canvas = page.locator(".viewport canvas").first();
-  const box = await canvas.boundingBox();
-  const cx = box.x + box.width / 2;
-  const cy = box.y + box.height / 2;
+  const rot = () =>
+    page.evaluate(() => {
+      const cc = window.__store.getState()._cameraControls;
+      return { rx: cc.targetRotationX, ry: cc.targetRotationY };
+    });
 
-  const camBefore = await page.evaluate(() =>
-    JSON.stringify(
-      window.__store.getState()._cameraControls
-        ? {
-            rx: window.__store.getState()._cameraControls.targetRotationX,
-            ry: window.__store.getState()._cameraControls.targetRotationY,
-          }
-        : null,
-    ),
-  );
-  // Left-drag = orbit — start from EMPTY space (dragging on the object moves it).
-  const ex = box.x + box.width * 0.75;
-  const ey = box.y + box.height * 0.3;
-  await page.mouse.move(ex, ey);
-  await page.mouse.down({ button: "right" });
-  await page.mouse.move(ex + 150, ey + 80, { steps: 8 });
-  await page.mouse.up({ button: "right" });
-  await page.waitForTimeout(300);
-  const camAfter = await page.evaluate(() =>
-    JSON.stringify({
-      rx: window.__store.getState()._cameraControls.targetRotationX,
-      ry: window.__store.getState()._cameraControls.targetRotationY,
-    }),
-  );
-  console.log("cam before:", camBefore, "after:", camAfter);
-  expect(camAfter).not.toBe(camBefore);
+  const box = await page.locator(".viewport canvas").first().boundingBox();
+  const before = await rot();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down("Shift");
+  await page.mouse.wheel(120, 60);
+  await page.waitForTimeout(200);
+  await page.keyboard.up("Shift");
+  const after = await rot();
+
+  // A real rotation, not float noise: 120px * 0.004 rad/px is ~0.48 rad.
+  expect(Math.abs(after.ry - before.ry)).toBeGreaterThan(0.01);
+  expect(Math.abs(after.rx - before.rx)).toBeGreaterThan(0.01);
 });
 
 test("selecting a sketch enters sketch view (ortho + camera fly-in)", async () => {
