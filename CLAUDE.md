@@ -12,6 +12,14 @@ canvas itself spans the full container width). Raw canvas-centre is left of
 this point by half the panel width; camera framing, pivot placement, and the
 ground ruler must all target the panel-excluded centre, not raw canvas centre.
 
+## Verify Before Reporting Results
+
+Never publish results, tables, or benchmark numbers until the underlying
+pipeline has been end-to-end validated on a known-good case. If a result looks
+surprising (a test that passes for the wrong reason, a table that changes shape
+between runs), treat it as a bug in the harness first, not a finding. State
+explicitly which parts were measured vs. assumed.
+
 ## Always reformat with Prettier after editing
 
 After every change to `.js` / `.jsx` files, run:
@@ -64,6 +72,19 @@ issues vitest misses (native module leaking into the renderer bundle, etc.).
 `createRequire` usage doesn't pollute the browser bundle — verify that external
 survives any Vite upgrade (grep dist for `occ_addon`; it must be absent).
 
+## Environment setup
+
+- **Never run the container suite against a stale image.** `npm run
+  test:e2e:podman` runs whatever `purple-cad-e2e` currently is -- it does NOT
+  rebuild. Run `npm run e2e:image` after ANY change you expect the container to
+  see, including changes to `e2e/`, `src/`, and the Containerfile itself.
+  Editing the Containerfile and immediately running the suite tests the OLD
+  image and silently reports the OLD result.
+- If a `docker compose` setup is ever added here, its instructions in READMEs,
+  scripts, and terminal commands must use `docker compose up -d --build` (never
+  bare `up -d`) so code changes are actually rebuilt into the image. Verify a UI
+  change is visible in the running container before calling it done.
+
 ## Stale IDE diagnostics
 
 The IDE's bundled JS parser doesn't accept trailing commas in function
@@ -99,6 +120,39 @@ files just to make these go away.
 - Vitest runs in **node** (not jsdom), and `Worker` is unavailable. Don't
   add tests that depend on `@testing-library/react` or DOM globals — they
   won't run. Test the pure modules instead.
+
+## Debugging Protocol
+
+Before fixing, state the hypothesis and the cheapest experiment that would
+falsify it. Prefer one probe over one speculative edit. Confirm a reading is
+stable across at least two independent samples before building on it -- an
+intermittent failure that reproduces once is not diagnosed.
+
+This is written from repeated cost: "gcc rejects an incomplete type" and "the
+container needs a window manager" were both asserted before testing and both
+wrong, and each cost an image rebuild to disprove. Compiling four variants of
+the real expression, and running openbox, each took about two minutes and gave
+a definite answer. Probe first.
+
+## Version Control
+
+After each self-contained change: run the relevant test suite, then commit with
+a descriptive message. Don't batch many features into one commit. If tests are
+missing for the area being changed, add a minimal test alongside the change.
+
+Note which suite is sufficient for the change at hand. A store/geometry change
+is covered by vitest; anything touching a renderer-side closure, a React
+component, or the camera/interaction layer is NOT -- those need e2e, and a
+green unit run means nothing there (a factory extraction that dropped a
+`renderer` parameter passed 1180 unit tests and a clean bundle build, and broke
+every project switch).
+
+## Working Style
+
+When a task's stated goal is met, stop and ship it: commit/push and report.
+Don't propose additional refactors, cleanups, or enhancements unless asked. If
+you notice further improvements, list them as a short "possible follow-ups"
+bullet list after shipping, not before.
 
 ## Response style
 
