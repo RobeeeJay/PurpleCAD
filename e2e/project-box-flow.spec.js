@@ -32,11 +32,16 @@
 //     live re-derivation hands the outer entry the middle loop AS A HOLE, so
 //     the "plate" comes back as an annulus and the lid has no floor. Bounding
 //     boxes and the mate check both pass on that; only rendering it shows it.
-//   - setItemTransform + recordTransformHistory on the finished lid HANGS the
-//     renderer (page.screenshot times out at 120s; the same run screenshots
-//     fine immediately before). The lid is therefore built in place -- plate
-//     extruded up off the wall top, ridge extruded down on a negative depth --
-//     rather than moved there afterwards.
+//   - setItemTransform is POSITIONAL: (id, position, scale, rotation). Calling
+//     it with an options object silently stores that object AS the position, so
+//     item.position.x is undefined. Nothing complains until "Reset view" frames
+//     the scene from item positions, at which point the NaN reaches the camera
+//     and the renderer stops presenting frames -- JS stays responsive, so it
+//     looks like a rendering hang rather than bad data. The correct positional
+//     call goes through the identical sequence cleanly.
+//     (The lid is built in place anyway -- plate extruded up off the wall top,
+//     ridge extruded down on a negative depth -- which is simpler than moving
+//     it afterwards and avoids the question entirely.)
 
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
