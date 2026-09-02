@@ -106,6 +106,24 @@ files just to make these go away.
 - Don't write multi-paragraph docstrings. One short line of intent at the
   top of a function is plenty.
 
+## Part tests export a STEP file
+
+Any e2e test that BUILDS A SPECIFIC PART ends by calling `exportPartStep`
+(`e2e/exportPart.js`), which writes `test-results/parts/<name>.step` and
+attaches it to the Playwright report. Open it in a CAD viewer to check what the
+assertions cannot.
+
+This exists because assertions only check what someone thought to assert. The
+project-box test twice built a part that passed every dimension and mate check
+and was still wrong: a lid that was a hollow frame with no floor (bounding
+boxes and the ridge/opening mate both passed on it), and screw holes drilled at
+arbitrary points over thin air. Both were caught by LOOKING at the thing.
+
+Export while the model is COHERENT -- before any test that deliberately drives
+it into an inconsistent state. The helper fails the test if the file is not
+real STEP or is too small to hold geometry, so a broken export cannot sit there
+looking like evidence.
+
 ## Test discipline
 
 - **Don't lock in old behavior.** When fixing a bug, if a test's

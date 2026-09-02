@@ -48,6 +48,7 @@
 
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
+import { exportPartStep } from "./exportPart.js";
 
 let app;
 let page;
@@ -696,6 +697,19 @@ test.describe.serial("parametric project box", () => {
     ).toBe(4);
   });
 
+  test("the finished part exports to STEP for manual inspection", async ({}, testInfo) => {
+    // Runs while the assembly is COHERENT -- after the parameter change, but
+    // before the wall-height test deliberately desyncs the lid from the box.
+    // Writes both bodies to test-results/parts/project-box.step. Open it in any
+    // CAD viewer to check what the assertions above cannot: that the thing is
+    // actually the part someone asked for.
+    const file = await exportPartStep(page, testInfo, "project-box", [
+      boxBaseId,
+      lidId,
+    ]);
+    expect(file).toContain("project-box.step");
+  });
+
   test("raising the wall height rebuilds the box, and the lid does not follow", async () => {
     test.setTimeout(300000);
     const seatMm = P0.BoxHeight; // where the lid sketches were placed
@@ -716,4 +730,5 @@ test.describe.serial("parametric project box", () => {
     expect(lidY).toBeCloseTo(seatMm, 1);
     expect(lidY).toBeLessThan(60);
   });
+
 });
