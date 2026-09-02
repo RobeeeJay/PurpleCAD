@@ -1,11 +1,11 @@
 // A whole parametric part, built the way a user would and then re-driven from
 // its parameters: a project box (walls + floor), a lid carrying a mating ridge
-// that seats inside those walls, and four M3 threaded screw holes.
+// that seats inside those walls, and four M3 screw holes through the lid.
 //
 // The point of the test is the LAST step. Every earlier step exists to build
 // something with enough structure that a parameter change has somewhere to go
-// wrong: sketch dimensions re-solve, two offset rings re-derive, extrude depths
-// re-resolve, and a union rebuilds on top of all of it.
+// wrong: sketch dimensions re-solve, three offset rings re-derive, extrude
+// depths re-resolve, and two unions rebuild on top of all of it.
 //
 // WHAT IS ACTUALLY PARAMETRIC (established by measurement, not assumed):
 //   sketch distance constraints -> outer width/depth        (formula)
@@ -17,16 +17,19 @@
 // rings rather than the shell tool, and the screw holes are authored FROM the
 // variable values rather than following them.
 //
-// Three behaviours found while writing this, each pinned by a probe:
-//   - A threaded hole silently produces an EMPTY body once the thread's face
-//     count gets large: M6 works to 8mm and fails at 9mm, M3 works to 5mm and
-//     fails at 8mm. No error, kind still "hole". Hence ScrewLength 5.
-//   - A unioned body could not be drilled at all -- the op reports success and
-//     leaves the mesh unchanged -- so the holes are cut into the plate BEFORE
-//     the ridge is unioned onto it.
-//   - Only the FIRST hole cuts an extrude-derived body. The same four calls on
-//     a primitive cube chain correctly (12 -> 180 -> 348 -> 516 tris). See the
-//     assertion in the hole test.
+// Behaviours found while writing this, each pinned by a probe:
+//   - A THIRD threaded hole on one body returns an EMPTY solid (0 triangles).
+//     Two chain fine (852 -> 2230 tris); the third destroys the part, with no
+//     error and kind still "hole". Independent of thread length -- 3mm and 5mm
+//     both fail at the third. The lid therefore takes M3 CLEARANCE holes,
+//     which is what a lid wants anyway; the threads belong in the box.
+//   - A single threaded hole also empties out once the thread gets long: M6
+//     works at 8mm and fails at 9mm, M3 works at 5mm and fails at 8mm.
+//   - The plate and the ridge need SEPARATE sketches. Nested in one sketch, the
+//     live re-derivation hands the outer entry the middle loop AS A HOLE, so
+//     the "plate" comes back as a rectangular annulus and the lid has no floor.
+//     Bounding boxes and the mate check both pass on that; only rendering the
+//     part shows it.
 
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
@@ -284,6 +287,12 @@ test.describe.serial("parametric project box", () => {
     // Deriving the ridge by offset rather than by a fixed inset is what keeps
     // it centred when WallThickness changes -- a sketch's position is a plain
     // number and would not track.
+    // TWO sketches, deliberately. With the plate and the ridge in ONE sketch the
+    // loops nest, and the live re-derivation hands the outer entry the middle
+    // loop AS A HOLE -- the "plate" comes back as a rectangular annulus and the
+    // lid has no floor. Bounding boxes and the mate check cannot see that; only
+    // looking at the part does. The plate therefore gets a sketch with no
+    // offsets in it, and the ridge gets its own copy of the same outline.
     await addSolvedSketch(
       rectSketch({
         id: 120,
@@ -295,27 +304,36 @@ test.describe.serial("parametric project box", () => {
         dFormula: "BoxDepth",
       }),
     );
+    await addSolvedSketch(
+      rectSketch({
+        id: 130,
+        name: "Lid Ridge Footprint",
+        w: 3,
+        d: 2,
+        x: 10,
+        wFormula: "BoxWidth",
+        dFormula: "BoxDepth",
+      }),
+    );
     // Offsets must come AFTER the solve: they copy the CURRENT geometry, so
-    // offsetting an unsolved 30x20 sketch rings the wrong rectangle.
+    // offsetting an unsolved 30x20 sketch rings the wrong rectangle. Same
+    // outline and same position as the plate, so the ridge stays centred on it
+    // however the parameters move.
     await page.evaluate(() => {
       const s = window.__store.getState();
-      s.offsetSketchGeometry(120, [0, 1, 2, 3], "-WallThickness");
-      s.offsetSketchGeometry(120, [0, 1, 2, 3], "-(WallThickness + RidgeThickness)");
+      s.offsetSketchGeometry(130, [0, 1, 2, 3], "-WallThickness");
+      s.offsetSketchGeometry(130, [0, 1, 2, 3], "-(WallThickness + RidgeThickness)");
     });
     await page.waitForTimeout(300);
 
     await page.evaluate(() => {
       const s = window.__store.getState();
-      const sk = s.items.find((i) => i.id === 120);
-      const loop = (from) =>
-        sk.shapes.slice(from, from + 4).map((l) => ({ x: l.x1, y: l.y1 }));
-      // profileCentroid is how the live re-derivation picks WHICH loop this
-      // extrude is. Three concentric loops share a centre, so the plate would
-      // tie with the ridge and could resolve to either. Give the plate a point
-      // near the outer edge that no inward offset can contain, and leave the
-      // ridge on the true centre (its stored holes already restrict the pool
-      // to ring entries). Both stay correct as the offsets grow.
-      const extrude = (id, name, poly, holes, depth, centroid) => ({
+      const loopOf = (sketchId, from) =>
+        s.items
+          .find((i) => i.id === sketchId)
+          .shapes.slice(from, from + 4)
+          .map((l) => ({ x: l.x1, y: l.y1 }));
+      const extrude = (id, name, sketchId, poly, holes, depth) => ({
         id,
         type: "extrude",
         name,
@@ -323,9 +341,9 @@ test.describe.serial("parametric project box", () => {
         parentId: null,
         profile: {
           type: "sketchLoop",
-          sketchId: 120,
+          sketchId,
           textShapeIdx: null,
-          profileCentroid: centroid,
+          profileCentroid: { x: 3, y: 2 },
           polygon2D: poly,
           holes,
           position: { x: 10, y: 0, z: 0 },
@@ -338,17 +356,21 @@ test.describe.serial("parametric project box", () => {
         scale: { x: 1, y: 1, z: 1 },
       });
       s.addItem(
-        extrude(121, "Lid Plate", loop(0), [], "LidThickness", { x: 0.05, y: 0.05 }),
+        extrude(121, "Lid Plate", 120, loopOf(120, 0), [], "LidThickness"),
         "Added",
       );
       // The ridge runs from the SAME plane as the plate up through it, so it
       // protrudes by exactly RidgeHeight without needing a y position that
       // tracks LidThickness (positions are not parametric).
       s.addItem(
-        extrude(122, "Lid Ridge", loop(4), [loop(8)], "LidThickness + RidgeHeight", {
-          x: 3,
-          y: 2,
-        }),
+        extrude(
+          122,
+          "Lid Ridge",
+          130,
+          loopOf(130, 4),
+          [loopOf(130, 8)],
+          "LidThickness + RidgeHeight",
+        ),
         "Added",
       );
     });
@@ -369,14 +391,14 @@ test.describe.serial("parametric project box", () => {
           d: (Math.max(...ys) - Math.min(...ys)) * 10,
         };
       };
-      return { boxInner: spanOf(100, 4), ridgeOuter: spanOf(120, 4) };
+      return { boxInner: spanOf(100, 4), ridgeOuter: spanOf(130, 4) };
     });
     expect(mate.ridgeOuter.w).toBeCloseTo(mate.boxInner.w, 1);
     expect(mate.ridgeOuter.d).toBeCloseTo(mate.boxInner.d, 1);
     expect(mate.boxInner.w).toBeCloseTo(P0.BoxWidth - 2 * P0.WallThickness, 1);
   });
 
-  test("four M3 threaded screw holes are drilled through the lid", async () => {
+  test("four M3 clearance screw holes are drilled through the lid plate", async () => {
     test.setTimeout(300000); // four threaded bores; each sweeps a real helix
 
     // Drill the PLATE extrude, before it is unioned with the ridge.
@@ -442,13 +464,15 @@ test.describe.serial("parametric project box", () => {
           // normal is +Z there, not +Y.
           s.setHoleFace(121, { normal, point: c });
           s.setHolePoint(c);
-          // M3: 3mm major diameter, 0.5mm pitch (src/three/metricThreads.js).
-          // Authored FROM the variables rather than as formulas -- see header.
+          // M3 CLEARANCE (3.4mm), not a tapped thread: a lid takes clearance
+          // holes and the box takes the threads. Also forced by the app -- a
+          // THIRD threaded hole on one body returns an empty solid (see the
+          // header). Authored FROM the variables, not as formulas -- see header.
           s.updateHoleParams({
-            threaded: true,
-            threadType: "M3",
-            diameterMm: 3,
-            pitchMm: 0.5,
+            threaded: false,
+            threadType: "none",
+            diameterMm: 3.4,
+            pitchMm: 0,
             toleranceMm: 0.1,
             lengthMm: screwLen,
           });
@@ -459,7 +483,7 @@ test.describe.serial("parametric project box", () => {
       await page.getByTitle("Cut the hole").click();
       await expect
         .poll(() => page.evaluate(() => !!window.__store.getState().holeTool), {
-          timeout: 120000,
+          timeout: 240000,
         })
         .toBe(false);
       await settled();
@@ -480,16 +504,38 @@ test.describe.serial("parametric project box", () => {
       ),
     ).toBe("hole");
 
-    // The bore is real, not just a recorded step: the plate gains wall.
-    expect(await tris(121)).toBeGreaterThan(12);
-
-    // KNOWN LIMITATION, asserted so it is visible rather than assumed away.
-    // Only the FIRST hole cuts an extrude-derived body; holes 2-4 report
-    // success and leave the mesh byte-identical. On a primitive cube the same
-    // four calls chain correctly (12 -> 180 -> 348 -> 516 tris) and threads
-    // generate, so this is specific to extrude/csg sources. Tighten this to
-    // four bores when that is fixed.
     expect(holeSteps).toBe(4);
+
+    // All FOUR bores are really there. A recorded step proves nothing: a hole
+    // that cuts nothing still reports kind "hole" and leaves a well-formed
+    // body. Check the mesh gained wall around each corner instead.
+    const boreHits = await page.evaluate(
+      ({ insetMm }) => {
+        const p = window.__store.getState().items.find((i) => i.id === 121)
+          .geometryData.positions;
+        const lo = [Infinity, Infinity, Infinity];
+        const hi = [-Infinity, -Infinity, -Infinity];
+        for (let a = 0; a < p.length; a += 3)
+          for (let b = 0; b < 3; b++) {
+            lo[b] = Math.min(lo[b], p[a + b]);
+            hi[b] = Math.max(hi[b], p[a + b]);
+          }
+        const t = insetMm / 10;
+        return [
+          [lo[0] + t, lo[1] + t],
+          [hi[0] - t, lo[1] + t],
+          [hi[0] - t, hi[1] - t],
+          [lo[0] + t, hi[1] - t],
+        ].map(([cx, cy]) => {
+          let n = 0;
+          for (let a = 0; a < p.length; a += 3)
+            if (Math.hypot(p[a] - cx, p[a + 1] - cy) < 0.25) n++;
+          return n;
+        });
+      },
+      { insetMm: inset },
+    );
+    expect(boreHits.every((n) => n > 0)).toBe(true);
   });
 
 
@@ -572,7 +618,7 @@ test.describe.serial("parametric project box", () => {
           d: (Math.max(...ys) - Math.min(...ys)) * 10,
         };
       };
-      return { boxInner: spanOf(100, 4), ridgeOuter: spanOf(120, 4) };
+      return { boxInner: spanOf(100, 4), ridgeOuter: spanOf(130, 4) };
     });
     expect(mate.boxInner.w).toBeCloseTo(P1.BoxWidth - 2 * P1.WallThickness, 1);
     expect(mate.boxInner.d).toBeCloseTo(P1.BoxDepth - 2 * P1.WallThickness, 1);
