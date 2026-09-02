@@ -148,8 +148,11 @@ export function createMaterialAndFitHelpers({
       Math.cos(rotY) * Math.cos(rotX),
     ).normalize();
     let center;
-    if (fitPts.length > 0) {
-      const fit = fitPointsToView(fitPts, dir, cam, 0.9);
+    // fitPointsToView returns null when nothing finite survives -- treat that
+    // exactly like having no points rather than framing on NaN.
+    const fit =
+      fitPts.length > 0 ? fitPointsToView(fitPts, dir, cam, 0.9) : null;
+    if (fit) {
       center = fit.target;
       cam.position.copy(fit.target).addScaledVector(dir, fit.distance);
       if (fit.endZoom != null) cam.zoom = fit.endZoom;

@@ -127,9 +127,16 @@ export function useViewportCamera({
       // itself, or the two compensations stack (double-shift).
       // 0.9 == frame the tightest extent to 90% of the usable view, centred.
       const fit = fitPointsToView(pts, dir, camera, 0.9);
-      center = fit.target;
-      distance = fit.distance;
-      endZoom = fit.endZoom;
+      if (fit) {
+        center = fit.target;
+        distance = fit.distance;
+        endZoom = fit.endZoom;
+      } else {
+        // Nothing finite to frame -- keep the current view rather than
+        // driving the camera to NaN.
+        center = targetRef.current.clone();
+        distance = camera.position.distanceTo(targetRef.current);
+      }
     } else {
       center = targetRef.current.clone();
       distance = camera.position.distanceTo(targetRef.current);
