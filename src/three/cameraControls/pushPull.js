@@ -70,7 +70,7 @@ export async function commitPushPull({
   distanceMm,
   printPrecision,
 }) {
-  const { pushPullFaces } = await import("../occClient.js");
+  const { pushPullFaces, withCommitGuard } = await import("../occClient.js");
   const store = useStore.getState();
   const distance = distanceMm / MM_PER_UNIT;
 
@@ -103,13 +103,15 @@ export async function commitPushPull({
   }
   if (subGeo.faces.length === 0) return false;
 
-  const result = await pushPullFaces({
-    source,
-    subGeo,
-    distance,
-    allItems: items,
-    printPrecision,
-  });
+  const result = await withCommitGuard(() =>
+    pushPullFaces({
+      source,
+      subGeo,
+      distance,
+      allItems: items,
+      printPrecision,
+    }),
+  );
   if (!result) return false;
 
   const { geometryData, centerOffset } = result;

@@ -33,21 +33,23 @@ export function buildDraftRecipe(items, printPrecision) {
 }
 
 export async function commitDraft({ items, printPrecision }) {
-  const { draftItem } = await import("../occClient.js");
+  const { draftItem, withCommitGuard } = await import("../occClient.js");
   const recipe = buildDraftRecipe(items, printPrecision);
   if (!recipe) return false;
   const { item, source, neutral, faces, angleDeg, flip } = recipe;
   let result;
   try {
-    result = await draftItem({
-      source,
-      neutral,
-      faces,
-      angleDeg,
-      flip,
-      allItems: items,
-      printPrecision,
-    });
+    result = await withCommitGuard(() =>
+      draftItem({
+        source,
+        neutral,
+        faces,
+        angleDeg,
+        flip,
+        allItems: items,
+        printPrecision,
+      }),
+    );
   } catch (e) {
     useStore.getState().setToolError(e?.message || "Draft failed.");
     return false;

@@ -51,13 +51,17 @@ export function buildHoleRecipe(items, printPrecision) {
 }
 
 export async function commitHole({ items, printPrecision }) {
-  const { holeItem } = await import("../occClient.js");
+  const { holeItem, withCommitGuard } = await import("../occClient.js");
   const recipe = buildHoleRecipe(items, printPrecision);
   if (!recipe) return false;
   const { item, source, hole } = recipe;
   let result;
   try {
-    result = await holeItem({ source, hole, allItems: items, printPrecision });
+    // Guarded: the tool's own preview debounce would otherwise cancel this
+    // mid-flight and hand back an empty mesh (see withCommitGuard).
+    result = await withCommitGuard(() =>
+      holeItem({ source, hole, allItems: items, printPrecision }),
+    );
   } catch {
     result = null;
   }
@@ -171,7 +175,7 @@ export function createHolePreviewHelpers({ scene, itemsRef, objectsRef }) {
     }
     let result;
     try {
-      const { holeItem } = await import("../occClient.js");
+      const { holeItem, withCommitGuard } = await import("../occClient.js");
       result = await holeItem({
         source: recipe.source,
         hole: recipe.hole,

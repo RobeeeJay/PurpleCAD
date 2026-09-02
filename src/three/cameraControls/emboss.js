@@ -79,7 +79,7 @@ export function buildEmbossRecipe(items, printPrecision) {
 }
 
 export async function commitEmboss({ items, printPrecision }) {
-  const { embossItem } = await import("../occClient.js");
+  const { embossItem, withCommitGuard } = await import("../occClient.js");
   const recipe = buildEmbossRecipe(items, printPrecision);
   if (!recipe) return false;
   const { item, source, stamp, profiles, face, faceSet, params } = recipe;
@@ -97,12 +97,14 @@ export async function commitEmboss({ items, printPrecision }) {
     };
   } else {
     try {
-      result = await embossItem({
-        source,
-        stamp,
-        allItems: items,
-        printPrecision,
-      });
+      result = await withCommitGuard(() =>
+        embossItem({
+          source,
+          stamp,
+          allItems: items,
+          printPrecision,
+        }),
+      );
     } catch (e) {
       useStore.getState().setToolError(e?.message || "Emboss failed.");
       return false;

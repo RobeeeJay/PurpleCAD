@@ -113,7 +113,31 @@ const clock = () => {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 };
 
+// OCC calls are SERIALISED. Two ops must never be in flight at once: they
+// share the native shape store and the item-keyed solid cache, and the
+// preview-supersede path (inputs.jsx) calls cancelOcc + clearSolids, which
+// releases cached shapes out from under whatever else is running. A live
+// preview that outlives its debounce therefore used to pull the source shape
+// away from the COMMIT that followed it, and the commit came back with an
+// empty mesh -- no error, the item still recorded. It only showed up on ops
+// slow enough to still be running at Confirm: a threaded M3 hole at 8mm did
+// it every time, the same hole at 4mm never did.
+let opChain = Promise.resolve();
+
 async function callOp(op, args) {
+  const run = opChain.then(
+    () => invokeOp(op, args),
+    () => invokeOp(op, args),
+  );
+  // Keep the chain alive regardless of this call's outcome.
+  opChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+async function invokeOp(op, args) {
   // Debug timing: log every OCC op's start + end wall-clock time + duration
   // (round-trip, including IPC to the worker).  Grep the console for "[OCC]".
   const t0 = now();
@@ -194,8 +218,33 @@ export function solidFromMesh(geometryData) {
 // process/worker kill, so nothing shared is corrupted.  Electron-only; a no-op
 // elsewhere.  The op still rejects/returns null via the soft-cancel epoch, and
 // the caller clears the solid cache (a half-built shape was never stored).
+// A COMMIT must not be abortable by a preview supersede. Cancel is a shared
+// native flag: the worker clears it between ops, so a cancel fired while an op
+// is RUNNING aborts that op wherever it has got to -- and an abort during
+// meshing returns an EMPTY tessellation rather than throwing. A tool's live
+// preview debounce fires cancelOcc whenever something is in flight, so a
+// commit slower than the debounce got shot in the back by its own preview and
+// wrote an empty body, with no error and the timeline step still recorded.
+// Measured: a threaded M3 hole at 8mm (~450ms) hit this every time, the same
+// hole at 4mm (~200ms) never did.
+let commitDepth = 0;
+
+export async function withCommitGuard(fn) {
+  commitDepth += 1;
+  try {
+    return await fn();
+  } finally {
+    commitDepth -= 1;
+  }
+}
+
 export function cancelOcc() {
   if (!isElectron) return Promise.resolve(null);
+  if (commitDepth > 0) {
+    // eslint-disable-next-line no-console
+    console.log("[OCC] cancel suppressed — a commit is in flight");
+    return Promise.resolve(null);
+  }
   // eslint-disable-next-line no-console
   console.log("[OCC] requesting cancel (worker abort)");
   return window.electronAPI.invokeOcc("cancel");

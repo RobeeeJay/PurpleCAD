@@ -20,7 +20,7 @@ export async function commitShell({
   thicknessMm,
   printPrecision,
 }) {
-  const { shellItem } = await import("../occClient.js");
+  const { shellItem, withCommitGuard } = await import("../occClient.js");
   const store = useStore.getState();
   const thickness = thicknessMm / MM_PER_UNIT;
   if (!(thickness > 0)) return false;
@@ -29,12 +29,14 @@ export async function commitShell({
   // edit before confirming is baked in and the recipe can rebuild later.
   const source = withLivePolygons({ ...item }, items, printPrecision);
 
-  const result = await shellItem({
-    source,
-    thickness,
-    allItems: items,
-    printPrecision,
-  });
+  const result = await withCommitGuard(() =>
+    shellItem({
+      source,
+      thickness,
+      allItems: items,
+      printPrecision,
+    }),
+  );
   if (!result) return false;
 
   const { geometryData, centerOffset } = result;
