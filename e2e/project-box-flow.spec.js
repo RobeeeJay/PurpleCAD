@@ -21,13 +21,6 @@
 // last test pins that it does not follow BoxHeight.
 //
 // Behaviours found while writing this, each pinned by a probe:
-//   - A THIRD threaded hole on one body returns an EMPTY solid (0 triangles).
-//     Two chain fine (852 -> 2230 tris); the third destroys the part, with no
-//     error and kind still "hole". Independent of thread length. The lid takes
-//     CLEARANCE holes, which is what a lid wants anyway -- threads belong in
-//     the box -- and four of those chain cleanly (184 -> 356 -> 528 -> 700).
-//   - A single threaded hole also empties out once the thread is long enough:
-//     M6 fails at 9mm, M3 at 8mm.
 //   - The plate and the ridge need SEPARATE sketches. Nested in one sketch the
 //     live re-derivation hands the outer entry the middle loop AS A HOLE, so
 //     the "plate" comes back as an annulus and the lid has no floor. Bounding
@@ -35,13 +28,23 @@
 //   - setItemTransform is POSITIONAL: (id, position, scale, rotation). Calling
 //     it with an options object silently stores that object AS the position, so
 //     item.position.x is undefined. Nothing complains until "Reset view" frames
-//     the scene from item positions, at which point the NaN reaches the camera
-//     and the renderer stops presenting frames -- JS stays responsive, so it
-//     looks like a rendering hang rather than bad data. The correct positional
-//     call goes through the identical sequence cleanly.
+//     the scene from item positions and the NaN reaches the camera.
 //     (The lid is built in place anyway -- plate extruded up off the wall top,
 //     ridge extruded down on a negative depth -- which is simpler than moving
-//     it afterwards and avoids the question entirely.)
+//     it afterwards.)
+//
+// The threaded holes here used to come back EMPTY, and an earlier version of
+// this comment blamed a thread face-count cap, with a table of the lengths that
+// "failed". That was wrong: the lengths only correlated because they set how
+// LONG the op ran. The tool's own preview debounce was calling cancelOcc while
+// the commit was still running, and an abort during meshing returns an empty
+// tessellation rather than throwing. Fixed in occClient (commit guard); the
+// four M3 threads below are the regression cover for it.
+//
+// They are tapped LAST for a separate and still-live reason: a boolean whose
+// input already carries four helical thread surfaces fails outright with
+// "performCsg: Error". Drilling before the union failed every run; drilling
+// after it passes every run. That is also the order a real part is made in.
 
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
@@ -63,7 +66,9 @@ const P0 = {
   RidgeHeight: 5,
   RidgeThickness: 1.5,
   Clearance: 0.3,
+  // M3: 3mm major diameter, 0.5mm pitch (src/three/metricThreads.js).
   ScrewDia: 3,
+  ScrewPitch: 0.5,
 };
 const MM = 10; // MM_PER_UNIT
 // Where the lid seats. A plain number: sketch positions are not parametric.
@@ -414,117 +419,6 @@ test.describe.serial("parametric project box", () => {
     expect(mate.boxInner.w).toBeCloseTo(P0.BoxWidth - 2 * P0.WallThickness, 1);
   });
 
-  test("four M3 clearance screw holes are drilled through the lid plate", async () => {
-    test.setTimeout(300000); // four threaded bores; each sweeps a real helix
-
-    // Drill the PLATE extrude, before it is unioned with the ridge.
-    //
-    // Two things force this. An extrude has no baked mesh, so its frame cannot
-    // be measured -- but it is predictable: the profile is centred on its own
-    // centroid and the depth is centred on zero, with the depth along LOCAL Z
-    // (the sketch's -pi/2 X rotation is what turns that into world Y). And the
-    // unioned lid could not be drilled at all: the op reports success and
-    // leaves the body unchanged, so the holes have to be cut before the union.
-    // Centred on the WALL TOPS at the four corners, so a screw passes through
-    // the lid and into the wall. Anywhere else in the plate is over thin air.
-    const corner = (i) => {
-      const hx = (P0.BoxWidth / 2 - P0.WallThickness / 2) / MM;
-      const hy = (P0.BoxDepth / 2 - P0.WallThickness / 2) / MM;
-      const xy = [
-        [-hx, -hy],
-        [hx, -hy],
-        [hx, hy],
-        [-hx, hy],
-      ][i];
-      // +Z face = the plate's top; depth is centred, so it sits at +half.
-      return { x: xy[0], y: xy[1], z: P0.LidThickness / 2 / MM };
-    };
-
-    for (let i = 0; i < 4; i++) {
-      const c = corner(i);
-      await page.evaluate(
-        ({ c, dia, len }) => {
-          const s = window.__store.getState();
-          s.startHoleTool();
-          // Picks are in the target's LOCAL frame; the plate's outward face
-          // normal is +Z there, not +Y.
-          s.setHoleFace(121, { normal: { x: 0, y: 0, z: 1 }, point: c });
-          s.setHolePoint(c);
-          // M3 CLEARANCE (3.4mm), not a tapped thread: a lid takes clearance
-          // holes and the box takes the threads. Also forced by the app -- a
-          // THIRD threaded hole on one body returns an empty solid (see the
-          // header). Authored FROM the variables, not as formulas -- see header.
-          s.updateHoleParams({
-            threaded: false,
-            threadType: "none",
-            diameterMm: dia,
-            pitchMm: 0,
-            toleranceMm: 0.1,
-            lengthMm: len,
-          });
-        },
-        { c, dia: P0.ScrewDia, len: P0.LidThickness + 2 },
-      );
-      await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
-      await page.getByTitle("Cut the hole").click();
-      await expect
-        .poll(() => page.evaluate(() => !!window.__store.getState().holeTool), {
-          timeout: 240000,
-        })
-        .toBe(false);
-      await settled();
-    }
-
-    // Four separate hole steps stacked on the lid, each chained to the last.
-    const holeSteps = await page.evaluate(
-      () =>
-        window.__store.getState().history.filter((h) => h.label === "Hole")
-          .length,
-    );
-    expect(holeSteps).toBe(4);
-    expect(
-      await page.evaluate(
-        () =>
-          window.__store.getState().items.find((i) => i.id === 121).regenerator
-            .kind,
-      ),
-    ).toBe("hole");
-
-    expect(holeSteps).toBe(4);
-
-    // All FOUR bores are really there. A recorded step proves nothing: a hole
-    // that cuts nothing still reports kind "hole" and leaves a well-formed
-    // body. Check the mesh gained wall around each corner instead.
-    const boreHits = await page.evaluate(
-      ({ insetMm }) => {
-        const p = window.__store.getState().items.find((i) => i.id === 121)
-          .geometryData.positions;
-        const lo = [Infinity, Infinity, Infinity];
-        const hi = [-Infinity, -Infinity, -Infinity];
-        for (let a = 0; a < p.length; a += 3)
-          for (let b = 0; b < 3; b++) {
-            lo[b] = Math.min(lo[b], p[a + b]);
-            hi[b] = Math.max(hi[b], p[a + b]);
-          }
-        const t = insetMm / 10;
-        return [
-          [lo[0] + t, lo[1] + t],
-          [hi[0] - t, lo[1] + t],
-          [hi[0] - t, hi[1] - t],
-          [lo[0] + t, hi[1] - t],
-        ].map(([cx, cy]) => {
-          let n = 0;
-          for (let a = 0; a < p.length; a += 3)
-            if (Math.hypot(p[a] - cx, p[a + 1] - cy) < 0.25) n++;
-          return n;
-        });
-      },
-      { insetMm: P0.WallThickness / 2 },
-    );
-    expect(boreHits.every((n) => n > 0)).toBe(true);
-  });
-
-
   test("plate and ridge union into the finished lid", async () => {
     const before = await page.evaluate(
       () => window.__store.getState().items.filter((i) => i.regenerator?.kind === "boolean").length,
@@ -624,6 +518,117 @@ test.describe.serial("parametric project box", () => {
     // Clearance on BOTH sides, and the plate itself must not have shrunk.
     expect(fit.ridgeW).toBeCloseTo(opening - 2 * P0.Clearance, 1);
     expect(fit.plateW).toBeCloseTo(P0.BoxWidth, 1);
+  });
+
+  test("four M3 threaded screw holes are tapped into the finished lid", async () => {
+    test.setTimeout(300000); // four real helix sweeps
+
+    // Tapped LAST, after the union and the push/pull. Not a stylistic choice:
+    // a boolean whose input already carries four helical thread surfaces fails
+    // outright ("performCsg: Error"), so the threads have to come after every
+    // boolean -- which is also the order a real part is made in.
+    //
+    // The lid's baked frame is X width, Y thickness, Z depth, so the tap goes
+    // in through +Y. Positions are read from the CURRENT mesh: the push/pull
+    // re-centred it.
+    const tap = (i) =>
+      page.evaluate(
+        ({ id, wallMm, i }) => {
+          const p = window.__store.getState().items.find((it) => it.id === id)
+            .geometryData.positions;
+          const lo = [Infinity, Infinity, Infinity];
+          const hi = [-Infinity, -Infinity, -Infinity];
+          for (let a = 0; a < p.length; a += 3)
+            for (let b = 0; b < 3; b++) {
+              lo[b] = Math.min(lo[b], p[a + b]);
+              hi[b] = Math.max(hi[b], p[a + b]);
+            }
+          const t = wallMm / 2 / 10; // centred on the wall below
+          const xz = [
+            [lo[0] + t, lo[2] + t],
+            [hi[0] - t, lo[2] + t],
+            [hi[0] - t, hi[2] - t],
+            [lo[0] + t, hi[2] - t],
+          ][i];
+          return { x: xz[0], y: hi[1], z: xz[1] };
+        },
+        { id: lidId, wallMm: P0.WallThickness, i },
+      );
+
+    for (let i = 0; i < 4; i++) {
+      const c = await tap(i);
+      await page.evaluate(
+        ({ id, c, dia, pitch, len }) => {
+          const s = window.__store.getState();
+          s.startHoleTool();
+          s.setHoleFace(id, { normal: { x: 0, y: 1, z: 0 }, point: c });
+          s.setHolePoint(c);
+          // Authored FROM the variables rather than as formulas: buildHoleShape
+          // divides h.length by MM_PER_UNIT, so a formula string arrives NaN.
+          s.updateHoleParams({
+            threaded: true,
+            threadType: "M3",
+            diameterMm: dia,
+            pitchMm: pitch,
+            toleranceMm: 0.1,
+            lengthMm: len,
+          });
+        },
+        {
+          id: lidId,
+          c,
+          dia: P0.ScrewDia,
+          pitch: P0.ScrewPitch,
+          len: P0.LidThickness + 2,
+        },
+      );
+      await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
+      await page.getByTitle("Cut the hole").click();
+      await expect
+        .poll(() => page.evaluate(() => !!window.__store.getState().holeTool), {
+          timeout: 120000,
+        })
+        .toBe(false);
+      await settled();
+    }
+
+    const holeSteps = await page.evaluate(
+      () =>
+        window.__store.getState().history.filter((h) => h.label === "Hole")
+          .length,
+    );
+    expect(holeSteps).toBe(4);
+
+    // All FOUR are really cut. A recorded step proves nothing: a hole that cuts
+    // nothing still reports kind "hole" and leaves a well-formed body -- which
+    // is exactly what the preview-cancels-the-commit bug used to produce.
+    const boreHits = await page.evaluate(
+      ({ id, wallMm }) => {
+        const p = window.__store.getState().items.find((i) => i.id === id)
+          .geometryData.positions;
+        const lo = [Infinity, Infinity, Infinity];
+        const hi = [-Infinity, -Infinity, -Infinity];
+        for (let a = 0; a < p.length; a += 3)
+          for (let b = 0; b < 3; b++) {
+            lo[b] = Math.min(lo[b], p[a + b]);
+            hi[b] = Math.max(hi[b], p[a + b]);
+          }
+        const t = wallMm / 2 / 10;
+        return [
+          [lo[0] + t, lo[2] + t],
+          [hi[0] - t, lo[2] + t],
+          [hi[0] - t, hi[2] - t],
+          [lo[0] + t, hi[2] - t],
+        ].map(([cx, cz]) => {
+          let n = 0;
+          for (let a = 0; a < p.length; a += 3)
+            if (Math.hypot(p[a] - cx, p[a + 2] - cz) < 0.25) n++;
+          return n;
+        });
+      },
+      { id: lidId, wallMm: P0.WallThickness },
+    );
+    expect(boreHits.every((n) => n > 0)).toBe(true);
   });
 
   test("changing the parameters rebuilds the whole part", async () => {
