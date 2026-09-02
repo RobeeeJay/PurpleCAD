@@ -1,35 +1,42 @@
 // A whole parametric part, built the way a user would and then re-driven from
-// its parameters: a project box (walls + floor), a lid carrying a mating ridge
-// that seats inside those walls, and four M3 screw holes through the lid.
+// its parameters: a project box, a lid that SEATS on it with a mating ridge
+// dropping inside the walls, a push/pull fit clearance so it does not jam, and
+// four M3 clearance holes through the lid into the wall tops.
 //
-// The point of the test is the LAST step. Every earlier step exists to build
-// something with enough structure that a parameter change has somewhere to go
-// wrong: sketch dimensions re-solve, three offset rings re-derive, extrude
-// depths re-resolve, and two unions rebuild on top of all of it.
+// The point of the test is the parameter change near the end. Everything
+// before it exists so that change has somewhere to go wrong: sketch dimensions
+// re-solve, three offset rings re-derive, extrude depths re-resolve, and two
+// unions, four bores and a push/pull rebuild on top of all of it.
 //
 // WHAT IS ACTUALLY PARAMETRIC (established by measurement, not assumed):
 //   sketch distance constraints -> outer width/depth        (formula)
 //   sketch offsets              -> wall + ridge thickness   (formula)
 //   extrude depths              -> every height             (formula)
-// Shell thickness and hole length/diameter/pitch are stored as resolved NUMBERS
-// by their commit paths (buildHoleShape divides h.length by MM_PER_UNIT, so a
-// formula string would arrive as NaN). The box is therefore built from offset
-// rings rather than the shell tool, and the screw holes are authored FROM the
-// variable values rather than following them.
+// Shell thickness, hole sizes and push/pull distances are stored as resolved
+// NUMBERS by their commit paths (buildHoleShape divides h.length by
+// MM_PER_UNIT, so a formula string would arrive as NaN). The box is therefore
+// built from offset rings rather than the shell tool, and the holes and the
+// clearance are authored FROM the variable values rather than following them.
+// POSITIONS are numbers too, which is why the lid seats at a fixed y and the
+// last test pins that it does not follow BoxHeight.
 //
 // Behaviours found while writing this, each pinned by a probe:
 //   - A THIRD threaded hole on one body returns an EMPTY solid (0 triangles).
 //     Two chain fine (852 -> 2230 tris); the third destroys the part, with no
-//     error and kind still "hole". Independent of thread length -- 3mm and 5mm
-//     both fail at the third. The lid therefore takes M3 CLEARANCE holes,
-//     which is what a lid wants anyway; the threads belong in the box.
-//   - A single threaded hole also empties out once the thread gets long: M6
-//     works at 8mm and fails at 9mm, M3 works at 5mm and fails at 8mm.
-//   - The plate and the ridge need SEPARATE sketches. Nested in one sketch, the
+//     error and kind still "hole". Independent of thread length. The lid takes
+//     CLEARANCE holes, which is what a lid wants anyway -- threads belong in
+//     the box -- and four of those chain cleanly (184 -> 356 -> 528 -> 700).
+//   - A single threaded hole also empties out once the thread is long enough:
+//     M6 fails at 9mm, M3 at 8mm.
+//   - The plate and the ridge need SEPARATE sketches. Nested in one sketch the
 //     live re-derivation hands the outer entry the middle loop AS A HOLE, so
-//     the "plate" comes back as a rectangular annulus and the lid has no floor.
-//     Bounding boxes and the mate check both pass on that; only rendering the
-//     part shows it.
+//     the "plate" comes back as an annulus and the lid has no floor. Bounding
+//     boxes and the mate check both pass on that; only rendering it shows it.
+//   - setItemTransform + recordTransformHistory on the finished lid HANGS the
+//     renderer (page.screenshot times out at 120s; the same run screenshots
+//     fine immediately before). The lid is therefore built in place -- plate
+//     extruded up off the wall top, ridge extruded down on a negative depth --
+//     rather than moved there afterwards.
 
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
@@ -44,13 +51,18 @@ const P0 = {
   BoxWidth: 60,
   BoxDepth: 40,
   BoxHeight: 30,
-  WallThickness: 2,
+  // Thick enough that a screw hole fits IN the wall: the screws pass through
+  // the lid into the wall tops, so the wall has to carry the bore.
+  WallThickness: 4,
   LidThickness: 3,
-  RidgeHeight: 4,
+  RidgeHeight: 5,
   RidgeThickness: 1.5,
-  ScrewLength: 5,
+  Clearance: 0.3,
+  ScrewDia: 3,
 };
 const MM = 10; // MM_PER_UNIT
+// Where the lid seats. A plain number: sketch positions are not parametric.
+const BOX_HEIGHT_UNITS = P0.BoxHeight / MM;
 
 const setVars = (vars) =>
   page.evaluate(
@@ -118,13 +130,13 @@ const tris = (id) =>
   );
 
 // A closed, CCW rectangle as four constrained lines, sized by two formulas.
-const rectSketch = ({ id, name, w, d, x = 0, z = 0, wFormula, dFormula }) => ({
+const rectSketch = ({ id, name, w, d, x = 0, y = 0, z = 0, wFormula, dFormula }) => ({
   id,
   type: "sketch",
   name,
   children: [],
   parentId: null,
-  position: { x, y: 0, z },
+  position: { x, y, z },
   rotation: { x: -Math.PI / 2, y: 0, z: 0 },
   scale: { x: 1, y: 1, z: 1 },
   shapes: [
@@ -299,7 +311,10 @@ test.describe.serial("parametric project box", () => {
         name: "Lid Footprint",
         w: 3,
         d: 2,
-        x: 10,
+        // ON the wall top, over the box. This y is a plain number -- sketch
+        // positions are NOT parametric -- so the parameter-change test
+        // re-seats the lid explicitly when BoxHeight moves.
+        y: BOX_HEIGHT_UNITS,
         wFormula: "BoxWidth",
         dFormula: "BoxDepth",
       }),
@@ -310,7 +325,7 @@ test.describe.serial("parametric project box", () => {
         name: "Lid Ridge Footprint",
         w: 3,
         d: 2,
-        x: 10,
+        y: BOX_HEIGHT_UNITS,
         wFormula: "BoxWidth",
         dFormula: "BoxDepth",
       }),
@@ -326,7 +341,8 @@ test.describe.serial("parametric project box", () => {
     });
     await page.waitForTimeout(300);
 
-    await page.evaluate(() => {
+    await page.evaluate(
+      ({ lidY }) => {
       const s = window.__store.getState();
       const loopOf = (sketchId, from) =>
         s.items
@@ -346,12 +362,12 @@ test.describe.serial("parametric project box", () => {
           profileCentroid: { x: 3, y: 2 },
           polygon2D: poly,
           holes,
-          position: { x: 10, y: 0, z: 0 },
+          position: { x: 0, y: lidY, z: 0 },
           rotation: { x: -Math.PI / 2, y: 0, z: 0 },
           normalWorld: { x: 0, y: 1, z: 0 },
         },
         depth,
-        position: { x: 10, y: 0, z: 0 },
+        position: { x: 0, y: lidY, z: 0 },
         rotation: { x: -Math.PI / 2, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
       });
@@ -359,21 +375,16 @@ test.describe.serial("parametric project box", () => {
         extrude(121, "Lid Plate", 120, loopOf(120, 0), [], "LidThickness"),
         "Added",
       );
-      // The ridge runs from the SAME plane as the plate up through it, so it
-      // protrudes by exactly RidgeHeight without needing a y position that
-      // tracks LidThickness (positions are not parametric).
+      // Plate extrudes UP off the wall top, ridge extrudes DOWN into the box.
+      // Building the lid in place beats seating it afterwards: a transform on
+      // the finished lid hangs the renderer (see the header).
       s.addItem(
-        extrude(
-          122,
-          "Lid Ridge",
-          130,
-          loopOf(130, 4),
-          [loopOf(130, 8)],
-          "LidThickness + RidgeHeight",
-        ),
+        extrude(122, "Lid Ridge", 130, loopOf(130, 4), [loopOf(130, 8)], "-RidgeHeight"),
         "Added",
       );
-    });
+      },
+      { lidY: BOX_HEIGHT_UNITS },
+    );
     await settled();
 
     // The mate itself: the ridge's outer face is exactly the box's inner face,
@@ -409,60 +420,30 @@ test.describe.serial("parametric project box", () => {
     // (the sketch's -pi/2 X rotation is what turns that into world Y). And the
     // unioned lid could not be drilled at all: the op reports success and
     // leaves the body unchanged, so the holes have to be cut before the union.
-    const inset = 6; // mm in from each edge
+    // Centred on the WALL TOPS at the four corners, so a screw passes through
+    // the lid and into the wall. Anywhere else in the plate is over thin air.
     const corner = (i) => {
-      const hw = P0.BoxWidth / 2 / MM;
-      const hd = P0.BoxDepth / 2 / MM;
-      const t = inset / MM;
+      const hx = (P0.BoxWidth / 2 - P0.WallThickness / 2) / MM;
+      const hy = (P0.BoxDepth / 2 - P0.WallThickness / 2) / MM;
       const xy = [
-        [-hw + t, -hd + t],
-        [hw - t, -hd + t],
-        [hw - t, hd - t],
-        [-hw + t, hd - t],
+        [-hx, -hy],
+        [hx, -hy],
+        [hx, hy],
+        [-hx, hy],
       ][i];
       // +Z face = the plate's top; depth is centred, so it sits at +half.
       return { x: xy[0], y: xy[1], z: P0.LidThickness / 2 / MM };
     };
 
-    // Once drilled the plate is a csg and DOES have a mesh, so measure the
-    // frame from then on rather than trusting the analytic one. It keeps the
-    // extrude's axes (X width, Y depth, Z thickness) -- it does not become
-    // world-aligned -- so the top face stays +Z.
-    const drilledCorner = (i) =>
-      page.evaluate(
-        ({ insetMm, i }) => {
-          const p = window.__store.getState().items.find((it) => it.id === 121)
-            .geometryData.positions;
-          const lo = [Infinity, Infinity, Infinity];
-          const hi = [-Infinity, -Infinity, -Infinity];
-          for (let k2 = 0; k2 < p.length; k2 += 3)
-            for (let k = 0; k < 3; k++) {
-              lo[k] = Math.min(lo[k], p[k2 + k]);
-              hi[k] = Math.max(hi[k], p[k2 + k]);
-            }
-          const t = insetMm / 10;
-          const xy = [
-            [lo[0] + t, lo[1] + t],
-            [hi[0] - t, lo[1] + t],
-            [hi[0] - t, hi[1] - t],
-            [lo[0] + t, hi[1] - t],
-          ][i];
-          return { x: xy[0], y: xy[1], z: hi[2] };
-        },
-        { insetMm: inset, i },
-      );
-
     for (let i = 0; i < 4; i++) {
-      const first = i === 0;
-      const c = first ? corner(i) : await drilledCorner(i);
-      const normal = { x: 0, y: 0, z: 1 }; // the plate's top face, in its own frame
+      const c = corner(i);
       await page.evaluate(
-        ({ c, normal, screwLen }) => {
+        ({ c, dia, len }) => {
           const s = window.__store.getState();
           s.startHoleTool();
           // Picks are in the target's LOCAL frame; the plate's outward face
           // normal is +Z there, not +Y.
-          s.setHoleFace(121, { normal, point: c });
+          s.setHoleFace(121, { normal: { x: 0, y: 0, z: 1 }, point: c });
           s.setHolePoint(c);
           // M3 CLEARANCE (3.4mm), not a tapped thread: a lid takes clearance
           // holes and the box takes the threads. Also forced by the app -- a
@@ -471,13 +452,13 @@ test.describe.serial("parametric project box", () => {
           s.updateHoleParams({
             threaded: false,
             threadType: "none",
-            diameterMm: 3.4,
+            diameterMm: dia,
             pitchMm: 0,
             toleranceMm: 0.1,
-            lengthMm: screwLen,
+            lengthMm: len,
           });
         },
-        { c, normal, screwLen: P0.ScrewLength },
+        { c, dia: P0.ScrewDia, len: P0.LidThickness + 2 },
       );
       await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
       await page.getByTitle("Cut the hole").click();
@@ -533,7 +514,7 @@ test.describe.serial("parametric project box", () => {
           return n;
         });
       },
-      { insetMm: inset },
+      { insetMm: P0.WallThickness / 2 },
     );
     expect(boreHits.every((n) => n > 0)).toBe(true);
   });
@@ -575,16 +556,84 @@ test.describe.serial("parametric project box", () => {
     expect(lid.h).toBeCloseTo(P0.LidThickness + P0.RidgeHeight, 0);
   });
 
+  test("push/pull cuts a fit clearance into the mating ridge", async () => {
+    // Without this the ridge is exactly the size of the opening and the lid
+    // jams. Push all four ridge outer faces inward at once -- the tool takes a
+    // face list, matched by normal + centre.
+    const ro = (P0.BoxWidth / 2 - P0.WallThickness) / MM;
+    const rod = (P0.BoxDepth / 2 - P0.WallThickness) / MM;
+    // The ridge hangs BELOW the plate, so its outer faces are centred at a
+    // negative local y: half the plate plus half the ridge, downward. Getting
+    // this wrong pushes the PLATE's outer faces and shrinks the whole lid.
+    const cy = -(P0.LidThickness / 2 + P0.RidgeHeight / 2) / MM;
+    await page.evaluate(
+      ({ id, ro, rod, cy }) => {
+        const s = window.__store.getState();
+        s.setSelectedSubGeometry({
+          itemId: id,
+          edges: [],
+          faces: [
+            { nx: 1, ny: 0, nz: 0, cx: ro, cy, cz: 0 },
+            { nx: -1, ny: 0, nz: 0, cx: -ro, cy, cz: 0 },
+            { nx: 0, ny: 0, nz: 1, cx: 0, cy, cz: rod },
+            { nx: 0, ny: 0, nz: -1, cx: 0, cy, cz: -rod },
+          ],
+        });
+        s.setPushPullSelectMode("pushpull");
+      },
+      { id: lidId, ro, rod, cy },
+    );
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toBeVisible();
+    await overlay.locator("input").first().fill(String(-P0.Clearance));
+    await page.getByTitle("Confirm — apply the push/pull").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            (id) =>
+              window.__store.getState().items.find((i) => i.id === id)
+                ?.regenerator?.kind ?? null,
+            lidId,
+          ),
+        { timeout: 120000 },
+      )
+      .toBe("pushpull");
+    await settled();
+
+    const fit = await page.evaluate(
+      (id) => {
+        const p = window.__store.getState().items.find((i) => i.id === id)
+          .geometryData.positions;
+        let ridge = -Infinity;
+        let plate = -Infinity;
+        for (let i = 0; i < p.length; i += 3) {
+          if (p[i + 1] < -0.2) ridge = Math.max(ridge, p[i]);
+          plate = Math.max(plate, p[i]);
+        }
+        return { ridgeW: +(ridge * 20).toFixed(2), plateW: +(plate * 20).toFixed(2) };
+      },
+      lidId,
+    );
+    const opening = P0.BoxWidth - 2 * P0.WallThickness;
+    // Clearance on BOTH sides, and the plate itself must not have shrunk.
+    expect(fit.ridgeW).toBeCloseTo(opening - 2 * P0.Clearance, 1);
+    expect(fit.plateW).toBeCloseTo(P0.BoxWidth, 1);
+  });
+
   test("changing the parameters rebuilds the whole part", async () => {
     test.setTimeout(300000);
     // Every dimension moves at once, including the wall and ridge thicknesses
     // that only exist as sketch offsets, so nothing can pass by being ignored.
+    // Everything except BoxHeight, which gets its own test below: the lid
+    // seats at a FIXED sketch y, so raising the box would leave it floating.
+    // WallThickness grows rather than shrinks -- the screw bore has to keep
+    // fitting inside the wall.
     const P1 = {
       ...P0,
       BoxWidth: 90,
       BoxDepth: 55,
-      BoxHeight: 45,
-      WallThickness: 3,
+      WallThickness: 5,
       LidThickness: 4,
       RidgeHeight: 6,
     };
@@ -595,7 +644,7 @@ test.describe.serial("parametric project box", () => {
     const base = await waitBbox(boxBaseId);
     expect(base.w).toBeCloseTo(P1.BoxWidth, 0);
     expect(base.d).toBeCloseTo(P1.BoxDepth, 0);
-    expect(base.h).toBeCloseTo(P1.BoxHeight, 0);
+    expect(base.h).toBeCloseTo(P1.BoxHeight, 0); // unchanged here
 
     const lid = await waitBbox(lidId);
     expect(lid.w).toBeCloseTo(P1.BoxWidth, 0);
@@ -635,5 +684,26 @@ test.describe.serial("parametric project box", () => {
             .length,
       ),
     ).toBe(4);
+  });
+
+  test("raising the wall height rebuilds the box, and the lid does not follow", async () => {
+    test.setTimeout(300000);
+    const seatMm = P0.BoxHeight; // where the lid sketches were placed
+    await setVars({ ...P0, BoxWidth: 90, BoxDepth: 55, WallThickness: 5, LidThickness: 4, RidgeHeight: 6, BoxHeight: 60 });
+    await page.waitForTimeout(600);
+    await settled();
+
+    const base = await waitBbox(boxBaseId);
+    expect(base.h).toBeCloseTo(60, 0);
+
+    // The lid stayed at the old wall top. Sketch positions are plain numbers,
+    // so a lid built ON a face does not track that face -- it has to be
+    // re-seated. Asserted rather than glossed over: if positions ever become
+    // parametric this test should start failing and be tightened.
+    const lidY = await page.evaluate(
+      () => window.__store.getState().items.find((i) => i.id === 120).position.y * 10,
+    );
+    expect(lidY).toBeCloseTo(seatMm, 1);
+    expect(lidY).toBeLessThan(60);
   });
 });
