@@ -48,7 +48,7 @@
 
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
-import { exportPartStep } from "./exportPart.js";
+import { exportPartStl } from "./exportPart.js";
 
 let app;
 let page;
@@ -141,22 +141,37 @@ const tris = (id) =>
   );
 
 // A closed, CCW rectangle as four constrained lines, sized by two formulas.
-const rectSketch = ({ id, name, w, d, x = 0, y = 0, z = 0, wFormula, dFormula }) => ({
+//
+// `screwHoles` additionally puts a circle at each corner, TIED THERE BY
+// CONSTRAINTS rather than by coordinates: a horizontal leg and a vertical leg
+// run from the rect corner to the circle centre, each one WallThickness/2 long.
+// Both legs are axis-aligned on purpose -- the formula grammar is + - * / and
+// identifiers, with no sqrt, so a diagonal distance cannot be written down.
+// The legs are open chains, so they add no closed loop and the extrude profile
+// still sees exactly one outer rectangle (with the circles as its holes).
+//
+// This is what makes the screw holes survive a resize. A hole cut with the hole
+// tool could not: hole recipes store resolved NUMBERS, so a tapped hole stays
+// where it was drilled while the part grows out from under it.
+const rectSketch = ({
   id,
-  type: "sketch",
   name,
-  children: [],
-  parentId: null,
-  position: { x, y, z },
-  rotation: { x: -Math.PI / 2, y: 0, z: 0 },
-  scale: { x: 1, y: 1, z: 1 },
-  shapes: [
+  w,
+  d,
+  x = 0,
+  y = 0,
+  z = 0,
+  wFormula,
+  dFormula,
+  screwHoles = false,
+}) => {
+  const shapes = [
     { type: "line", x1: 0, y1: 0, x2: w, y2: 0 },
     { type: "line", x1: w, y1: 0, x2: w, y2: d },
     { type: "line", x1: w, y1: d, x2: 0, y2: d },
     { type: "line", x1: 0, y1: d, x2: 0, y2: 0 },
-  ],
-  constraints: [
+  ];
+  const constraints = [
     { type: "horizontal", shapeIdx: 0 },
     { type: "vertical", shapeIdx: 1 },
     { type: "horizontal", shapeIdx: 2 },
@@ -167,8 +182,74 @@ const rectSketch = ({ id, name, w, d, x = 0, y = 0, z = 0, wFormula, dFormula })
     { type: "coincident", shapeAIdx: 3, pointA: "end", shapeBIdx: 0, pointB: "start" },
     { type: "distance", shapeAIdx: 0, pointA: "start", shapeBIdx: 0, pointB: "end", distance: wFormula },
     { type: "distance", shapeAIdx: 1, pointA: "start", shapeBIdx: 1, pointB: "end", distance: dFormula },
-  ],
-});
+  ];
+
+  if (screwHoles) {
+    const t = P0.WallThickness / 2 / MM; // authored inset; the formula drives it
+    // Corner i is line i's start point. The legs are authored pointing INWARD
+    // so the solver converges on the inside solution rather than mirroring out.
+    const corners = [
+      { cx: 0, cy: 0, sx: 1, sy: 1 },
+      { cx: w, cy: 0, sx: -1, sy: 1 },
+      { cx: w, cy: d, sx: -1, sy: -1 },
+      { cx: 0, cy: d, sx: 1, sy: -1 },
+    ];
+    corners.forEach((c, i) => {
+      const h = shapes.length; // horizontal leg
+      const v = h + 1; // vertical leg
+      const circ = h + 2;
+      shapes.push(
+        { type: "line", x1: c.cx, y1: c.cy, x2: c.cx + c.sx * t, y2: c.cy },
+        { type: "line", x1: c.cx + c.sx * t, y1: c.cy, x2: c.cx + c.sx * t, y2: c.cy + c.sy * t },
+        { type: "circle", cx: c.cx + c.sx * t, cy: c.cy + c.sy * t, r: P0.ScrewDia / 2 / MM },
+      );
+      constraints.push(
+        { type: "coincident", shapeAIdx: h, pointA: "start", shapeBIdx: i, pointB: "start" },
+        { type: "horizontal", shapeIdx: h },
+        { type: "distance", shapeAIdx: h, pointA: "start", shapeBIdx: h, pointB: "end", distance: "WallThickness / 2" },
+        { type: "coincident", shapeAIdx: v, pointA: "start", shapeBIdx: h, pointB: "end" },
+        { type: "vertical", shapeIdx: v },
+        { type: "distance", shapeAIdx: v, pointA: "start", shapeBIdx: v, pointB: "end", distance: "WallThickness / 2" },
+        { type: "coincident", shapeAIdx: circ, pointA: "center", shapeBIdx: v, pointB: "end" },
+        { type: "distance", shapeAIdx: circ, pointA: "center", shapeBIdx: circ, pointB: "edge", distance: "ScrewDia / 2" },
+      );
+    });
+  }
+
+  return {
+    id,
+    type: "sketch",
+    name,
+    children: [],
+    parentId: null,
+    position: { x, y, z },
+    rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+    scale: { x: 1, y: 1, z: 1 },
+    shapes,
+    constraints,
+  };
+};
+
+// Each screw hole's centre, measured from the sketch's own min corner, in mm.
+// Relative because nothing anchors the rect in sketch space -- the solver is
+// free to translate it, and the bodies are bbox-centred anyway.
+const screwHoleOffsets = (sketchId) =>
+  page.evaluate((id) => {
+    const sk = window.__store.getState().items.find((i) => i.id === id);
+    const rect = sk.shapes.slice(0, 4);
+    const x0 = Math.min(...rect.flatMap((l) => [l.x1, l.x2]));
+    const y0 = Math.min(...rect.flatMap((l) => [l.y1, l.y2]));
+    const x1 = Math.max(...rect.flatMap((l) => [l.x1, l.x2]));
+    const y1 = Math.max(...rect.flatMap((l) => [l.y1, l.y2]));
+    return sk.shapes
+      .filter((sh) => sh.type === "circle")
+      .map((c) => ({
+        // distance to the NEAREST corner in each axis, in mm
+        dx: +(Math.min(c.cx - x0, x1 - c.cx) * 10).toFixed(2),
+        dy: +(Math.min(c.cy - y0, y1 - c.cy) * 10).toFixed(2),
+        r: +(c.r * 10).toFixed(2),
+      }));
+  }, sketchId);
 
 test.describe.serial("parametric project box", () => {
   test.beforeAll(async () => {
@@ -328,6 +409,7 @@ test.describe.serial("parametric project box", () => {
         y: BOX_HEIGHT_UNITS,
         wFormula: "BoxWidth",
         dFormula: "BoxDepth",
+        screwHoles: true,
       }),
     );
     await addSolvedSketch(
@@ -521,115 +603,17 @@ test.describe.serial("parametric project box", () => {
     expect(fit.plateW).toBeCloseTo(P0.BoxWidth, 1);
   });
 
-  test("four M3 threaded screw holes are tapped into the finished lid", async () => {
-    test.setTimeout(300000); // four real helix sweeps
-
-    // Tapped LAST, after the union and the push/pull. Not a stylistic choice:
-    // a boolean whose input already carries four helical thread surfaces fails
-    // outright ("performCsg: Error"), so the threads have to come after every
-    // boolean -- which is also the order a real part is made in.
-    //
-    // The lid's baked frame is X width, Y thickness, Z depth, so the tap goes
-    // in through +Y. Positions are read from the CURRENT mesh: the push/pull
-    // re-centred it.
-    const tap = (i) =>
-      page.evaluate(
-        ({ id, wallMm, i }) => {
-          const p = window.__store.getState().items.find((it) => it.id === id)
-            .geometryData.positions;
-          const lo = [Infinity, Infinity, Infinity];
-          const hi = [-Infinity, -Infinity, -Infinity];
-          for (let a = 0; a < p.length; a += 3)
-            for (let b = 0; b < 3; b++) {
-              lo[b] = Math.min(lo[b], p[a + b]);
-              hi[b] = Math.max(hi[b], p[a + b]);
-            }
-          const t = wallMm / 2 / 10; // centred on the wall below
-          const xz = [
-            [lo[0] + t, lo[2] + t],
-            [hi[0] - t, lo[2] + t],
-            [hi[0] - t, hi[2] - t],
-            [lo[0] + t, hi[2] - t],
-          ][i];
-          return { x: xz[0], y: hi[1], z: xz[1] };
-        },
-        { id: lidId, wallMm: P0.WallThickness, i },
-      );
-
-    for (let i = 0; i < 4; i++) {
-      const c = await tap(i);
-      await page.evaluate(
-        ({ id, c, dia, pitch, len }) => {
-          const s = window.__store.getState();
-          s.startHoleTool();
-          s.setHoleFace(id, { normal: { x: 0, y: 1, z: 0 }, point: c });
-          s.setHolePoint(c);
-          // Authored FROM the variables rather than as formulas: buildHoleShape
-          // divides h.length by MM_PER_UNIT, so a formula string arrives NaN.
-          s.updateHoleParams({
-            threaded: true,
-            threadType: "M3",
-            diameterMm: dia,
-            pitchMm: pitch,
-            toleranceMm: 0.1,
-            lengthMm: len,
-          });
-        },
-        {
-          id: lidId,
-          c,
-          dia: P0.ScrewDia,
-          pitch: P0.ScrewPitch,
-          len: P0.LidThickness + 2,
-        },
-      );
-      await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
-      await page.getByTitle("Cut the hole").click();
-      await expect
-        .poll(() => page.evaluate(() => !!window.__store.getState().holeTool), {
-          timeout: 120000,
-        })
-        .toBe(false);
-      await settled();
+  test("the lid carries four corner screw holes", async () => {
+    const holes = await screwHoleOffsets(120);
+    expect(holes).toHaveLength(4);
+    for (const h of holes) {
+      expect(h.dx).toBeCloseTo(P0.WallThickness / 2, 1);
+      expect(h.dy).toBeCloseTo(P0.WallThickness / 2, 1);
+      expect(h.r).toBeCloseTo(P0.ScrewDia / 2, 1);
     }
-
-    const holeSteps = await page.evaluate(
-      () =>
-        window.__store.getState().history.filter((h) => h.label === "Hole")
-          .length,
-    );
-    expect(holeSteps).toBe(4);
-
-    // All FOUR are really cut. A recorded step proves nothing: a hole that cuts
-    // nothing still reports kind "hole" and leaves a well-formed body -- which
-    // is exactly what the preview-cancels-the-commit bug used to produce.
-    const boreHits = await page.evaluate(
-      ({ id, wallMm }) => {
-        const p = window.__store.getState().items.find((i) => i.id === id)
-          .geometryData.positions;
-        const lo = [Infinity, Infinity, Infinity];
-        const hi = [-Infinity, -Infinity, -Infinity];
-        for (let a = 0; a < p.length; a += 3)
-          for (let b = 0; b < 3; b++) {
-            lo[b] = Math.min(lo[b], p[a + b]);
-            hi[b] = Math.max(hi[b], p[a + b]);
-          }
-        const t = wallMm / 2 / 10;
-        return [
-          [lo[0] + t, lo[2] + t],
-          [hi[0] - t, lo[2] + t],
-          [hi[0] - t, hi[2] - t],
-          [lo[0] + t, hi[2] - t],
-        ].map(([cx, cz]) => {
-          let n = 0;
-          for (let a = 0; a < p.length; a += 3)
-            if (Math.hypot(p[a] - cx, p[a + 2] - cz) < 0.25) n++;
-          return n;
-        });
-      },
-      { id: lidId, wallMm: P0.WallThickness },
-    );
-    expect(boreHits.every((n) => n > 0)).toBe(true);
+    // They are really cut through the plate, not just drawn: the lid's mesh
+    // gains wall around each bore.
+    expect(await tris(lidId)).toBeGreaterThan(48);
   });
 
   test("changing the parameters rebuilds the whole part", async () => {
@@ -647,6 +631,7 @@ test.describe.serial("parametric project box", () => {
       WallThickness: 5,
       LidThickness: 4,
       RidgeHeight: 6,
+      ScrewDia: 4,
     };
     await setVars(P1);
     await page.waitForTimeout(600);
@@ -685,29 +670,33 @@ test.describe.serial("parametric project box", () => {
     expect(mate.ridgeOuter.w).toBeCloseTo(mate.boxInner.w, 1);
     expect(mate.ridgeOuter.d).toBeCloseTo(mate.boxInner.d, 1);
 
-    // The screw holes are still there afterwards. They do NOT resize -- hole
-    // recipes store resolved numbers (see header) -- so this asserts survival
-    // of the rebuild, not parametric behaviour.
-    expect(
-      await page.evaluate(
-        () =>
-          window.__store.getState().history.filter((h) => h.label === "Hole")
-            .length,
-      ),
-    ).toBe(4);
+    // THE POINT OF TYING THEM WITH CONSTRAINTS: the screw holes are still in
+    // the corners of the NEW footprint, one new-WallThickness/2 in from each
+    // edge, and have grown to the new ScrewDia. A hole cut with the hole tool
+    // would have stayed at its old coordinates while the lid grew past it.
+    const holes = await screwHoleOffsets(120);
+    expect(holes).toHaveLength(4);
+    for (const h of holes) {
+      expect(h.dx).toBeCloseTo(P1.WallThickness / 2, 1);
+      expect(h.dy).toBeCloseTo(P1.WallThickness / 2, 1);
+      expect(h.r).toBeCloseTo(P1.ScrewDia / 2, 1);
+    }
   });
 
-  test("the finished part exports to STEP for manual inspection", async ({}, testInfo) => {
+  test("the finished part exports to STL for manual inspection", async ({}, testInfo) => {
     // Runs while the assembly is COHERENT -- after the parameter change, but
     // before the wall-height test deliberately desyncs the lid from the box.
-    // Writes both bodies to test-results/parts/project-box.step. Open it in any
-    // CAD viewer to check what the assertions above cannot: that the thing is
-    // actually the part someone asked for.
-    const file = await exportPartStep(page, testInfo, "project-box", [
+    // Writes both bodies to test-results/parts/project-box.stl -- openable in
+    // macOS Preview -- to check what the assertions above cannot: that the
+    // thing is actually the part someone asked for.
+    const { file, triCount } = await exportPartStl(page, testInfo, "project-box", [
       boxBaseId,
       lidId,
     ]);
-    expect(file).toContain("project-box.step");
+    expect(file).toContain("project-box.stl");
+    // Both bodies plus four bores: a plain box and lid with no holes come to
+    // roughly 90 triangles between them.
+    expect(triCount).toBeGreaterThan(150);
   });
 
   test("raising the wall height rebuilds the box, and the lid does not follow", async () => {

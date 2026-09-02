@@ -108,10 +108,11 @@ files just to make these go away.
 
 ## Part tests export a STEP file
 
-Any e2e test that BUILDS A SPECIFIC PART ends by calling `exportPartStep`
-(`e2e/exportPart.js`), which writes `test-results/parts/<name>.step` and
-attaches it to the Playwright report. Open it in a CAD viewer to check what the
-assertions cannot.
+Any e2e test that BUILDS A SPECIFIC PART ends by calling `exportPartStl`
+(`e2e/exportPart.js`), which writes `test-results/parts/<name>.stl` and
+attaches it to the Playwright report. STL rather than STEP so it opens in macOS
+Preview with no CAD tool -- the point is that someone actually LOOKS at it, and
+a format needing extra software gets looked at less.
 
 This exists because assertions only check what someone thought to assert. The
 project-box test twice built a part that passed every dimension and mate check
@@ -120,9 +121,18 @@ boxes and the ridge/opening mate both passed on it), and screw holes drilled at
 arbitrary points over thin air. Both were caught by LOOKING at the thing.
 
 Export while the model is COHERENT -- before any test that deliberately drives
-it into an inconsistent state. The helper fails the test if the file is not
-real STEP or is too small to hold geometry, so a broken export cannot sit there
-looking like evidence.
+it into an inconsistent state. The helper fails the test if the bytes are not a
+real binary STL (the length must match its own triangle count), so a broken
+export cannot sit there looking like evidence.
+
+A part's FEATURES should be tied to its geometry by CONSTRAINTS, not by
+coordinates, so a parameter change moves them. Holes are the trap: the hole
+tool stores resolved NUMBERS, so a tapped hole stays where it was drilled while
+the part grows out from under it. A circle in the sketch, pinned to a corner by
+a horizontal and a vertical leg (both `WallThickness / 2`), tracks correctly --
+axis-aligned legs because the formula grammar is `+ - * / ( )` and identifiers,
+with no sqrt for a diagonal. Open legs add no closed loop, so the extrude
+profile still sees one outer rectangle with the circles as its holes.
 
 ## Test discipline
 
