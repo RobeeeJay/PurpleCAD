@@ -7,6 +7,7 @@ import { MM_PER_UNIT } from "../sceneObjects.js";
 import { primitiveDimensions } from "../sceneObjects/dimensions.js";
 import { createMaterial } from "../objectMaterials.js";
 import { DEFAULT_MESH_COLOR } from "../theme.js";
+import { anchorOf } from "../measure.js";
 
 export function createMeasureAndPrimitivePreviews({
   controls,
@@ -79,20 +80,24 @@ export function createMeasureAndPrimitivePreviews({
         face.renderOrder = 999;
         g.add(face);
       }
-      // A sphere on the exact clicked point / vertex.
+      // A sphere where the measurement actually runs from: the centre of a
+      // face or a line, the vertex itself for a point.  Marking the clicked
+      // spot instead would draw a line the readout disagrees with.
+      const anchor = anchorOf(pick);
       const m = new THREE.Mesh(
         new THREE.SphereGeometry(r, 16, 12),
         new THREE.MeshBasicMaterial({ color, depthTest: false }),
       );
-      m.position.set(pick.at[0], pick.at[1], pick.at[2]);
+      if (anchor) m.position.copy(anchor);
+      else m.position.set(pick.at[0], pick.at[1], pick.at[2]);
       m.renderOrder = 1000;
       g.add(m);
     });
     if (list.length >= 2) {
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(...list[0].at),
-          new THREE.Vector3(...list[1].at),
+          anchorOf(list[0]) ?? new THREE.Vector3(...list[0].at),
+          anchorOf(list[1]) ?? new THREE.Vector3(...list[1].at),
         ]),
         new THREE.LineDashedMaterial({
           color: 0xffffff,

@@ -5,7 +5,9 @@
 // Two code paths sit behind that readout and both are covered. With a sketch
 // selected it measures the SKETCH selection (length, radius, area, gap).
 // Otherwise it measures the 3D picks -- vertex / edge / face -- where two picks
-// give the nearest distance between them.
+// give the distance between their CENTRES: a vertex is itself, a line is the
+// point half way along it, a face is the middle of its extent. Where in a face
+// you happened to click must not change the number.
 //
 // Entity points are [x,y,z] arrays in world scene units; the readout is mm
 // (MM_PER_UNIT = 10), so a 2-unit edge reads "20.00 mm".
@@ -135,17 +137,21 @@ test.describe.serial("measure tool", () => {
     expect(await readText()).toBe("Distance 50.00 mm");
   });
 
-  test("two edges report the gap between them, not between their ends", async () => {
-    // Parallel but offset along their own direction, so the nearest points are
-    // interior: an endpoint-to-endpoint reading would give 25.5mm, not 25mm.
+  test("two edges measure mid-point to mid-point", async () => {
+    // Parallel but offset along their own direction: the mid-points are 2 units
+    // apart in x as well as 2.5 across, which the nearest-approach reading
+    // (a flat 25mm) would have hidden.
     await pick(
-      { kind: "segment", a: [0, 0, 0], b: [5, 0, 0] },
-      { kind: "segment", a: [2, 2.5, 0], b: [7, 2.5, 0] },
+      { kind: "segment", a: [0, 0, 0], b: [5, 0, 0] }, // mid (2.5,0,0)
+      { kind: "segment", a: [2, 2.5, 0], b: [7, 2.5, 0] }, // mid (4.5,2.5,0)
     );
-    expect(await readText()).toBe("Distance 25.00 mm");
+    expect(num(await readText(), "Distance")).toBeCloseTo(
+      Math.hypot(2, 2.5) * MM,
+      1,
+    );
   });
 
-  test("two faces report the gap between them", async () => {
+  test("two faces measure centre to centre", async () => {
     const face = (y) => ({
       kind: "face",
       normal: [0, 1, 0],
@@ -160,7 +166,7 @@ test.describe.serial("measure tool", () => {
     expect(await readText()).toBe("Distance 30.00 mm");
   });
 
-  test("a vertex and a face report the nearest approach to the face outline", async () => {
+  test("a vertex over a face measures straight down to the face's centre", async () => {
     await pick(
       { kind: "point", p: [1, 4, 1] },
       {
@@ -172,16 +178,13 @@ test.describe.serial("measure tool", () => {
           [2, 0, 2],
           [0, 0, 2],
         ],
+        at: [1.9, 0, 1.9], // clicked near a corner: must not matter
       },
     );
-    // A face contributes its sampled corners AND its outline segments, so the
-    // reading is the nearest point on an EDGE (41.23mm), not a perpendicular
-    // drop through the interior (40mm) nor the nearest corner (42.43mm).
-    // Pinned as the tool's actual behaviour -- worth noticing if it changes.
-    expect(num(await readText(), "Distance")).toBeCloseTo(
-      Math.hypot(0, 4, 1) * MM,
-      1,
-    );
+    // The face's centre is (1,0,1), directly below the vertex, so this is the
+    // perpendicular 40mm -- not the 41.23mm to the nearest edge that the old
+    // nearest-approach reading gave.
+    expect(num(await readText(), "Distance")).toBeCloseTo(4 * MM, 1);
   });
 
   test("Escape clears the picks first, and only then closes the tool", async () => {
@@ -276,11 +279,13 @@ test.describe.serial("measure tool", () => {
     expect(num(text, "Area")).toBeCloseTo(12 * MM * MM, 1); // 4*3
   });
 
-  test("two unconnected sketch lines report the gap between them, and no area", async () => {
+  test("two unconnected sketch lines measure centre to centre, and give no area", async () => {
     await selectShapes(6, 7);
     const text = await readText();
     expect(num(text, "Length \\(2\\)")).toBeCloseTo(10 * MM, 1);
-    expect(num(text, "Distance")).toBeCloseTo(2.5 * MM, 1);
+    // Mid-points (-5.5,0) and (-3.5,2.5): 2 apart along the lines as well as
+    // 2.5 across them.
+    expect(num(text, "Distance")).toBeCloseTo(Math.hypot(2, 2.5) * MM, 1);
     expect(text).not.toContain("Area"); // they don't close a loop
   });
 

@@ -4,12 +4,12 @@
 //   { kind:"segment",  a:[x,y,z], b:[x,y,z] }          (an edge / a sketch line)
 //   { kind:"polyline", pts:[[x,y,z]…], closed?:bool }  (a chain / group of lines)
 //   { kind:"face",     pts:[[x,y,z]…], normal:[x,y,z] } (sampled face, for dims)
-//   { kind:"object",   pts:[[x,y,z]…] }                 (sampled mesh, for nearest)
+//   { kind:"object",   pts:[[x,y,z]…] }                 (sampled mesh)
 //
 // measure(entities) →
 //   1 entity:  segment/polyline → { type:"length", value }
 //              face             → { type:"faceDims", width, height }
-//   2 entities: → { type:"distance", value }   (nearest point between them)
+//   2 entities: → { type:"distance", value }   (centre to centre — see anchorOf)
 
 import * as THREE from "three";
 
@@ -20,95 +20,6 @@ function polylineLength(pts, closed) {
   for (let i = 1; i < pts.length; i++) L += pts[i].distanceTo(pts[i - 1]);
   if (closed && pts.length > 2) L += pts[pts.length - 1].distanceTo(pts[0]);
   return L;
-}
-
-function pointSegDist(p, a, b) {
-  const ab = b.clone().sub(a);
-  const len2 = ab.lengthSq() || 1;
-  const t = THREE.MathUtils.clamp(p.clone().sub(a).dot(ab) / len2, 0, 1);
-  return p.distanceTo(a.clone().addScaledVector(ab, t));
-}
-
-// Closest distance between two finite segments (Ericson, Real-Time Collision
-// Detection §5.1.9).
-function segSegDist(p1, q1, p2, q2) {
-  const d1 = q1.clone().sub(p1),
-    d2 = q2.clone().sub(p2),
-    r = p1.clone().sub(p2);
-  const a = d1.lengthSq(),
-    e = d2.lengthSq(),
-    f = d2.dot(r);
-  let s, t;
-  if (a <= 1e-12 && e <= 1e-12) return p1.distanceTo(p2);
-  if (a <= 1e-12) {
-    s = 0;
-    t = THREE.MathUtils.clamp(f / e, 0, 1);
-  } else {
-    const c = d1.dot(r);
-    if (e <= 1e-12) {
-      t = 0;
-      s = THREE.MathUtils.clamp(-c / a, 0, 1);
-    } else {
-      const b = d1.dot(d2),
-        denom = a * e - b * b;
-      s =
-        denom > 1e-12
-          ? THREE.MathUtils.clamp((b * f - c * e) / denom, 0, 1)
-          : 0;
-      t = (b * s + f) / e;
-      if (t < 0) {
-        t = 0;
-        s = THREE.MathUtils.clamp(-c / a, 0, 1);
-      } else if (t > 1) {
-        t = 1;
-        s = THREE.MathUtils.clamp((b - c) / a, 0, 1);
-      }
-    }
-  }
-  const c1 = p1.clone().addScaledVector(d1, s),
-    c2 = p2.clone().addScaledVector(d2, t);
-  return c1.distanceTo(c2);
-}
-
-// Reduce an entity to world-space points + segments for nearest-distance.
-function primitivesOf(e) {
-  if (e.kind === "point") return { points: [v3(e.p)], segments: [] };
-  if (e.kind === "segment")
-    return { points: [], segments: [[v3(e.a), v3(e.b)]] };
-  if (e.kind === "polyline") {
-    const pts = e.pts.map(v3);
-    const segs = [];
-    for (let i = 1; i < pts.length; i++) segs.push([pts[i - 1], pts[i]]);
-    if (e.closed && pts.length > 2) segs.push([pts[pts.length - 1], pts[0]]);
-    return { points: [], segments: segs };
-  }
-  // face: outline segments AND sampled points so an interior-nearest still scores;
-  // object: just its sampled mesh points.
-  if (e.kind === "face") {
-    const pts = (e.pts || []).map(v3);
-    const segs = [];
-    for (let i = 1; i < pts.length; i++) segs.push([pts[i - 1], pts[i]]);
-    return { points: pts, segments: segs };
-  }
-  return { points: (e.pts || []).map(v3), segments: [] };
-}
-
-function nearestDistance(e1, e2) {
-  const A = primitivesOf(e1),
-    B = primitivesOf(e2);
-  let best = Infinity;
-  for (const pa of A.points)
-    for (const pb of B.points) best = Math.min(best, pa.distanceTo(pb));
-  for (const pa of A.points)
-    for (const [a, b] of B.segments)
-      best = Math.min(best, pointSegDist(pa, a, b));
-  for (const pb of B.points)
-    for (const [a, b] of A.segments)
-      best = Math.min(best, pointSegDist(pb, a, b));
-  for (const [a1, b1] of A.segments)
-    for (const [a2, b2] of B.segments)
-      best = Math.min(best, segSegDist(a1, b1, a2, b2));
-  return best;
 }
 
 // Width × height of a planar face: project its points onto the plane and take the
@@ -228,11 +139,79 @@ export function loopArea(polylines, tol) {
   return Math.abs(A) / 2;
 }
 
+// The point a measurement runs FROM and TO. A vertex is itself; a line is the
+// point halfway ALONG it; a face (or a closed loop, or a sampled object) is the
+// centre of its extent.
+//
+// Not the nearest points between the two entities: that answers a different
+// question -- how close they come -- and it makes the reading depend on where
+// in a face or along an edge the user happened to click, so the same two faces
+// measure differently from one click to the next.
+//
+// The centre of an extent is taken from the bounding box rather than the mean
+// of the sampled points, because a mean is pulled towards wherever the
+// tessellation put more vertices.
+function extentCentre(pts) {
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of pts) {
+    const v = v3(p);
+    lo[0] = Math.min(lo[0], v.x);
+    hi[0] = Math.max(hi[0], v.x);
+    lo[1] = Math.min(lo[1], v.y);
+    hi[1] = Math.max(hi[1], v.y);
+    lo[2] = Math.min(lo[2], v.z);
+    hi[2] = Math.max(hi[2], v.z);
+  }
+  return new THREE.Vector3(
+    (lo[0] + hi[0]) / 2,
+    (lo[1] + hi[1]) / 2,
+    (lo[2] + hi[2]) / 2,
+  );
+}
+
+// Half way along a chain by ARC LENGTH, so a curved edge anchors on the middle
+// of the curve rather than the middle of its chord.
+function midAlong(pts) {
+  const v = pts.map(v3);
+  if (v.length === 1) return v[0].clone();
+  let total = 0;
+  for (let i = 1; i < v.length; i++) total += v[i].distanceTo(v[i - 1]);
+  let walked = 0;
+  for (let i = 1; i < v.length; i++) {
+    const step = v[i].distanceTo(v[i - 1]);
+    if (walked + step >= total / 2) {
+      const t = step > 1e-12 ? (total / 2 - walked) / step : 0;
+      return v[i - 1].clone().lerp(v[i], t);
+    }
+    walked += step;
+  }
+  return v[v.length - 1].clone();
+}
+
+export function anchorOf(e) {
+  if (!e) return null;
+  if (e.kind === "point") return v3(e.p);
+  if (e.kind === "segment") return v3(e.a).clone().lerp(v3(e.b), 0.5);
+  if (e.kind === "polyline") {
+    const pts = e.pts || [];
+    if (pts.length === 0) return null;
+    // A closed loop has no meaningful half-way point; use its centre.
+    return e.closed ? extentCentre(pts) : midAlong(pts);
+  }
+  const pts = e.pts || [];
+  return pts.length ? extentCentre(pts) : null;
+}
+
 export function measure(entities) {
   const es = (entities || []).filter(Boolean);
   if (es.length === 0) return null;
-  if (es.length >= 2)
-    return { type: "distance", value: nearestDistance(es[0], es[1]) };
+  if (es.length >= 2) {
+    const a = anchorOf(es[0]);
+    const b = anchorOf(es[1]);
+    if (!a || !b) return null;
+    return { type: "distance", value: a.distanceTo(b) };
+  }
   const e = es[0];
   if (e.kind === "segment")
     return { type: "length", value: v3(e.a).distanceTo(v3(e.b)) };

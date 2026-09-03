@@ -22,7 +22,7 @@ describe("measure", () => {
     expect(r.value).toBeCloseTo(4);
   });
 
-  it("two parallel lines report the gap between them", () => {
+  it("two parallel lines measure centre to centre", () => {
     const r = measure([
       {
         kind: "polyline",
@@ -39,7 +39,36 @@ describe("measure", () => {
         ],
       },
     ]);
+    // Both lines span the same x, so their mid-points sit directly across from
+    // each other and the reading is the 2-unit gap.
     expect(r).toEqual({ type: "distance", value: 2 });
+  });
+
+  it("a line's anchor is its mid-point, not the end nearest the other", () => {
+    // Offset along their own direction: nearest-point would say 2 (straight
+    // across the gap), centre-to-centre says the mid-points are also 3 apart
+    // in x.
+    const r = measure([
+      { kind: "segment", a: [0, 0, 0], b: [4, 0, 0] }, // mid (2,0,0)
+      { kind: "segment", a: [6, 2, 0], b: [10, 2, 0] }, // mid (8,2,0)
+    ]);
+    expect(r.value).toBeCloseTo(Math.hypot(6, 2));
+  });
+
+  it("a curved line anchors half way ALONG it, not on its chord", () => {
+    // A right-angled elbow: the mid-point by arc length is the corner itself.
+    const r = measure([
+      {
+        kind: "polyline",
+        pts: [
+          [0, 0, 0],
+          [2, 0, 0],
+          [2, 2, 0],
+        ],
+      },
+      { kind: "point", p: [2, 0, 0] },
+    ]);
+    expect(r.value).toBeCloseTo(0);
   });
 
   it("closed polyline includes the closing edge", () => {
@@ -83,15 +112,15 @@ describe("measure", () => {
     expect(r).toEqual({ type: "distance", value: 10 });
   });
 
-  it("distance from a point to a segment uses the nearest point on it", () => {
+  it("distance from a point to a segment runs to the segment's mid-point", () => {
     const r = measure([
       { kind: "point", p: [1, 5, 0] },
-      { kind: "segment", a: [0, 0, 0], b: [2, 0, 0] },
+      { kind: "segment", a: [0, 0, 0], b: [2, 0, 0] }, // mid (1,0,0)
     ]);
-    expect(r.value).toBeCloseTo(5); // foot of perpendicular at (1,0,0)
+    expect(r.value).toBeCloseTo(5);
   });
 
-  it("distance between two skew/parallel edges (segment-segment)", () => {
+  it("distance between two parallel edges (segment-segment)", () => {
     const r = measure([
       { kind: "segment", a: [0, 0, 0], b: [10, 0, 0] },
       { kind: "segment", a: [0, 3, 0], b: [10, 3, 0] },
@@ -99,7 +128,7 @@ describe("measure", () => {
     expect(r.value).toBeCloseTo(3);
   });
 
-  it("nearest distance between two objects' sampled points", () => {
+  it("an object measures from the centre of its extent", () => {
     const r = measure([
       {
         kind: "object",
@@ -117,7 +146,29 @@ describe("measure", () => {
         ],
       },
     ]);
-    expect(r.value).toBeCloseTo(4); // (1,0,0) → (5,0,0)
+    // Extent centres: (0.5,0.5,0) and (5.5,0,0).
+    expect(r.value).toBeCloseTo(Math.hypot(5, 0.5));
+  });
+
+  it("a face measures from the centre of its extent, wherever it was clicked", () => {
+    // Two plates on different levels AND offset sideways, so the nearest
+    // corners (2 apart in x) and the centres (6 apart) give different answers.
+    // Clicked near OPPOSITE corners, so a click-point reading differs from a
+    // centre reading instead of shifting both by the same amount.
+    const face = (y, x0, at) => ({
+      kind: "face",
+      normal: [0, 1, 0],
+      pts: [
+        [x0, y, 0],
+        [x0 + 4, y, 0],
+        [x0 + 4, y, 2],
+        [x0, y, 2],
+      ],
+      at,
+    });
+    const r = measure([face(0, 0, [3.9, 0, 1.9]), face(3, 6, [6.1, 3, 0.1])]);
+    // Centres (2,0,1) and (8,3,1); the nearest corners would say hypot(2,3).
+    expect(r.value).toBeCloseTo(Math.hypot(6, 3));
   });
 
   it("shapeMetrics: circle has radius and area", () => {
