@@ -146,6 +146,7 @@ const TextDialog = () => {
           }}
         >
           <label
+            title="The characters drawn into the sketch. Each line becomes its own row of outlines, which can then be extruded or embossed."
             style={{
               display: "flex",
               flexDirection: "column",
@@ -169,6 +170,7 @@ const TextDialog = () => {
           </label>
           <div style={{ display: "flex", gap: 12 }}>
             <label
+              title="Cap height of the text. The width follows to keep the letter shapes, so wider strings grow sideways as this goes up."
               style={{
                 display: "flex",
                 flexDirection: "column",
@@ -187,6 +189,7 @@ const TextDialog = () => {
               />
             </label>
             <label
+              title="Typeface the outlines are traced from. Changing it redraws the letters, so their widths and any stroke thicknesses change with it."
               style={{
                 display: "flex",
                 flexDirection: "column",

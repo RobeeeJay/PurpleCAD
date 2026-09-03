@@ -58,7 +58,10 @@ const PointToPointDialog = () => {
     <>
       <div className="sketch-placement-hint">{hint}</div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <Field label="Move">
+        <Field
+          label="Move"
+          hint="The object owning Point A is moved so that A lands exactly on B. Nothing rotates or resizes."
+        >
           <button
             type="button"
             style={pickBtn(tool.picking === "A")}

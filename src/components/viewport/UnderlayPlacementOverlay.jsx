@@ -68,8 +68,14 @@ export default function UnderlayPlacementOverlay() {
         Drag the image to move · set its real width · Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay">
-        <span style={{ ...LBL, marginLeft: 0 }}>Width (mm):</span>
+        <span
+          title="Real-world width the image represents. Set it to a known dimension in the picture so anything traced over it comes out to size."
+          style={{ ...LBL, marginLeft: 0 }}
+        >
+          Width (mm):
+        </span>
         <FormulaInput
+          title="Real-world width the image represents. Set it to a known dimension in the picture so anything traced over it comes out to size."
           variables={variables}
           autoFocus
           value={String(underlayImport.widthMm ?? "")}
@@ -83,8 +89,14 @@ export default function UnderlayPlacementOverlay() {
             border: `1px solid ${widthValid ? "var(--border-color)" : "#e87575"}`,
           }}
         />
-        <span style={LBL}>Rot°:</span>
+        <span
+          title="Turns the underlay on the sketch plane, for a photo or scan that was not taken square."
+          style={LBL}
+        >
+          Rot°:
+        </span>
         <input
+          title="Turns the underlay on the sketch plane, for a photo or scan that was not taken square."
           type="number"
           step="15"
           value={underlayImport.rotationDeg ?? 0}
@@ -94,8 +106,14 @@ export default function UnderlayPlacementOverlay() {
           onKeyDown={(e) => e.stopPropagation()}
           style={{ width: 56 }}
         />
-        <span style={LBL}>Opacity:</span>
+        <span
+          title="How strongly the underlay shows through. Lower fades it so the sketch lines drawn over it stay readable; it does not affect the geometry."
+          style={LBL}
+        >
+          Opacity:
+        </span>
         <input
+          title="How strongly the underlay shows through. Lower fades it so the sketch lines drawn over it stay readable; it does not affect the geometry."
           type="range"
           min="0.05"
           max="1"

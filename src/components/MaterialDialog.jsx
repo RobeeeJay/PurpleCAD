@@ -147,7 +147,10 @@ const MaterialDialog = () => {
               the current render mode shows color and transparency only.
             </div>
           )}
-          <div style={rowStyle}>
+          <div
+            style={rowStyle}
+            title="Base colour of the surface. Purely visual -- it changes nothing about the geometry or an export's dimensions."
+          >
             <span style={labelStyle}>Color</span>
             <input
               type="color"
@@ -163,7 +166,10 @@ const MaterialDialog = () => {
             />
           </div>
 
-          <div style={rowStyle}>
+          <div
+            style={rowStyle}
+            title="How solid the surface looks. Below 1 you can see through the body to what is behind it, which helps when checking internal features."
+          >
             <span style={labelStyle}>
               <span>Opacity</span>
               <span style={{ fontSize: 10, opacity: 0.7 }}>
@@ -196,7 +202,10 @@ const MaterialDialog = () => {
             </span>
           </div>
 
-          <div style={rowStyle}>
+          <div
+            style={rowStyle}
+            title="How metallic the surface reads. 1 gives a mirror-like metal that takes its colour from reflections; 0 a plain dielectric. Smooth render mode only."
+          >
             <span style={labelStyle}>Metalness</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input
@@ -224,7 +233,10 @@ const MaterialDialog = () => {
             </span>
           </div>
 
-          <div style={rowStyle}>
+          <div
+            style={rowStyle}
+            title="How scattered the reflections are. 0 is a polished mirror, 1 a matt finish. Smooth render mode only."
+          >
             <span style={labelStyle}>Roughness</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input
@@ -252,7 +264,10 @@ const MaterialDialog = () => {
             </span>
           </div>
 
-          <div style={rowStyle}>
+          <div
+            style={rowStyle}
+            title="Strength of a glossy lacquer layer over the base. Higher adds a wet-looking sheen without changing the underlying colour."
+          >
             <span style={labelStyle}>
               <span>Specular (clearcoat)</span>
               <span style={{ fontSize: 10, opacity: 0.7 }}>
@@ -286,7 +301,10 @@ const MaterialDialog = () => {
           </div>
 
           {draft.clearcoat > 0 && (
-            <div style={rowStyle}>
+            <div
+              style={rowStyle}
+              title="How blurred the clearcoat's sheen is. 0 gives a sharp gloss highlight, higher values a softer one."
+            >
               <span style={labelStyle}>Clearcoat roughness</span>
               <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <input

@@ -238,7 +238,7 @@ const SelectionWidget = () => {
       {chainOn && (
         <label
           className="selection-widget-angle"
-          title="Maximum bend angle (degrees) still treated as one smooth face/edge"
+          title="Largest bend between neighbouring faces/edges still followed as one surface. Raise it to carry a selection round a tighter curve; lower it to stop at a crease."
         >
           <NumberInput
             value={curveDetectionAngleDeg}

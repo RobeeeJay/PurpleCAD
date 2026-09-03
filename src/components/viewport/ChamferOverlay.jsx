@@ -220,10 +220,14 @@ export default function ChamferOverlay() {
         >
           {hasSelection ? `Geometry: ${selCount}` : "Select geometry"}
         </button>
-        <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+        <span
+          title="Size of the chamfer or fillet on each selected edge. Bigger eats further into the body; larger than the adjacent face and the operation is rejected."
+          style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+        >
           Distance (mm):
         </span>
         <FormulaInput
+          title="Size of the chamfer or fillet on each selected edge. Bigger eats further into the body; larger than the adjacent face and the operation is rejected."
           variables={variables}
           autoFocus
           value={distanceMm}
@@ -233,10 +237,14 @@ export default function ChamferOverlay() {
         />
         {isChamfer && (
           <>
-            <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+            <span
+              title="Slope of the chamfer. 45 gives an equal cut on both faces; other angles bias it towards one of them."
+              style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+            >
               Angle (°):
             </span>
             <FormulaInput
+              title="Slope of the chamfer. 45 gives an equal cut on both faces; other angles bias it towards one of them."
               variables={variables}
               value={angleDeg}
               onChange={(e) => setAngleDeg(e.target.value)}

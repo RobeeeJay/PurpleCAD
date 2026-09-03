@@ -85,13 +85,16 @@ const TransformDialog = () => {
     recordTransformHistory(selectedId, "Rotated");
   };
 
-  const row = (label, render, extra) => (
+  const row = (label, render, extra, hint) => (
     <div className="tf-row">
-      <span className="tf-label">{label}</span>
+      <span className="tf-label" title={hint}>
+        {label}
+      </span>
       <div className="tf-fields">
         {DISPLAY_AXES.map((a) => (
           <label
             key={a.label}
+            title={hint}
             className={`tf-field tf-axis-${a.label.toLowerCase()}`}
           >
             <span>{a.label}</span>
@@ -106,12 +109,17 @@ const TransformDialog = () => {
   return (
     <div className="transform-dialog">
       <div className="tf-title">{item.name || "Object"}</div>
-      {row("Position (mm)", (a) => (
-        <NumberInput
-          value={a.sign * pos[a.key] * MM_PER_UNIT}
-          onCommit={(v) => applyPos(a, v)}
-        />
-      ))}
+      {row(
+        "Position (mm)",
+        (a) => (
+          <NumberInput
+            value={a.sign * pos[a.key] * MM_PER_UNIT}
+            onCommit={(v) => applyPos(a, v)}
+          />
+        ),
+        null,
+        "Where the object sits in the world, per axis. Moving it does not resize or rotate it.",
+      )}
       {row(
         "Length (mm)",
         (a) => (
@@ -132,13 +140,19 @@ const TransformDialog = () => {
         >
           {locked ? "🔒" : "🔓"}
         </button>,
+        "Overall size of the object along each axis. It scales the existing geometry rather than rebuilding it, so features stretch with the body.",
       )}
-      {row("Rotation (°)", (a) => (
-        <NumberInput
-          value={a.sign * rot[a.key] * RAD2DEG}
-          onCommit={(v) => applyRot(a, v)}
-        />
-      ))}
+      {row(
+        "Rotation (°)",
+        (a) => (
+          <NumberInput
+            value={a.sign * rot[a.key] * RAD2DEG}
+            onCommit={(v) => applyRot(a, v)}
+          />
+        ),
+        null,
+        "Turns the object about its own centre, per axis. Single-axis edits are exact; combined ones apply in a fixed order, so large multi-axis changes are best made one at a time.",
+      )}
     </div>
   );
 };

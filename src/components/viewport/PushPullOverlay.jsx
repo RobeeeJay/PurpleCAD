@@ -110,10 +110,14 @@ export default function PushPullOverlay() {
       </div>
       {hasSelection && (
         <div className="sketch-distance-input-overlay">
-          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+          <span
+            title="How far the selected faces move along their own normal. Positive pulls material out, negative pushes it in."
+            style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+          >
             Distance (mm):
           </span>
           <FormulaInput
+            title="How far the selected faces move along their own normal. Positive pulls material out, negative pushes it in."
             variables={variables}
             autoFocus
             value={distanceMm}

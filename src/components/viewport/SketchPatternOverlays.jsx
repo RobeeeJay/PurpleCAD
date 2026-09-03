@@ -137,6 +137,7 @@ export default function SketchPatternOverlays({
                       : "s"}
                   </span>
                   <label
+                    title="How many copies fill a full turn around the picked centre. More instances sit closer together."
                     style={{
                       marginLeft: 8,
                       display: "inline-flex",
@@ -251,6 +252,7 @@ export default function SketchPatternOverlays({
                   : "s"}
               </span>
               <label
+                title="Number of copies along the sketch X axis, counting the original. 1 means no repeat in X."
                 style={{
                   marginLeft: 8,
                   display: "inline-flex",
@@ -280,6 +282,7 @@ export default function SketchPatternOverlays({
                 />
               </label>
               <label
+                title="Gap between copies along X. Negative repeats to the left; smaller than the shape makes them overlap."
                 style={{
                   marginLeft: 8,
                   display: "inline-flex",
@@ -308,6 +311,7 @@ export default function SketchPatternOverlays({
                 />
               </label>
               <label
+                title="Number of copies along the sketch Y axis, counting the original."
                 style={{
                   marginLeft: 8,
                   display: "inline-flex",
@@ -337,6 +341,7 @@ export default function SketchPatternOverlays({
                 />
               </label>
               <label
+                title="Gap between copies along Y. Negative repeats downwards."
                 style={{
                   marginLeft: 8,
                   display: "inline-flex",

@@ -195,7 +195,10 @@ const RevolveEditDialog = () => {
             </div>
           ) : (
             <>
-              <label style={rowLabel}>
+              <label
+                style={rowLabel}
+                title="Turns the profile is spun through around the axis. 1 is a full solid of revolution; 0.5 gives a half."
+              >
                 <span>Rotations</span>
                 <FormulaInput
                   variables={variables}
@@ -206,7 +209,10 @@ const RevolveEditDialog = () => {
                   style={field(rotationsValid)}
                 />
               </label>
-              <label style={rowLabel}>
+              <label
+                style={rowLabel}
+                title="Rise along the axis per full turn. Non-zero turns the revolve into a helix, which is how a thread is cut."
+              >
                 <span>Offset per rotation (mm)</span>
                 <FormulaInput
                   variables={variables}
@@ -233,7 +239,10 @@ const RevolveEditDialog = () => {
                 Prism mode (faceted sweep)
               </label>
               {params.prism && (
-                <label style={rowLabel}>
+                <label
+                  style={rowLabel}
+                  title="Number of flat sides in the faceted sweep. Higher looks rounder; 3 gives a triangular section."
+                >
                   <span>Sides</span>
                   <FormulaInput
                     variables={variables}

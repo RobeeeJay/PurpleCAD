@@ -19,10 +19,13 @@ export const LBL = { fontSize: 11, color: "#aaa", marginRight: 4 };
 // Groups a label with its input as ONE flex item so the bar (flex-wrap) never
 // breaks the line BETWEEN a label and the field it names.  `style` lets a caller
 // keep the spacing it used on the bare label (e.g. marginLeft).
-export const Field = ({ label, style, children }) =>
+// `hint` says what CHANGING the value does, and sits on the wrapper so hovering
+// either the label or the field itself shows it.
+export const Field = ({ label, style, hint, children }) =>
   React.createElement(
     "span",
     {
+      title: hint,
       style: {
         display: "inline-flex",
         alignItems: "center",

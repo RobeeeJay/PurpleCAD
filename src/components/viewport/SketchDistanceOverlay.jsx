@@ -81,8 +81,18 @@ export default function SketchDistanceOverlay({
 
   if (!sketchMode || !sketchDistanceInput) return null;
 
+  // What CHANGING this value does -- the field is reused for four different
+  // constraints, and each one moves the sketch differently.
+  const hint = sketchDistanceInput.cornerResize
+    ? sketchDistanceInput.cornerResize.mode === "bevel"
+      ? "Radius of the arc replacing the corner. Bigger rounds it more; negative curves the arc the other way."
+      : "How far back from the corner each edge is cut. Bigger takes more off both lines."
+    : sketchDistanceInput.offsetConstraintIdx != null
+      ? "Distance the offset copy sits from the original. Negative offsets inward, which shrinks a closed loop."
+      : "Distance the constraint holds. Changing it re-solves the sketch and moves the geometry to suit.";
+
   return (
-    <div className="sketch-distance-input-overlay">
+    <div className="sketch-distance-input-overlay" title={hint}>
       <span>
         {sketchDistanceInput.cornerResize
           ? sketchDistanceInput.cornerResize.mode === "bevel"
@@ -97,6 +107,7 @@ export default function SketchDistanceOverlay({
       <FormulaInput
         type="text"
         autoFocus
+        title={hint}
         variables={variables}
         // Remount when the target changes (e.g. line-length → parallel-line
         // gap) so the shown default reflects the new measurement.

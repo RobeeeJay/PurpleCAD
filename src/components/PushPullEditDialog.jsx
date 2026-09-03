@@ -98,6 +98,7 @@ const PushPullEditDialog = () => {
           }}
         >
           <label
+            title="How far the pushed/pulled faces sit from where they started, along their own normal. Editing it moves the face; the rest of the body is unchanged."
             style={{
               display: "flex",
               flexDirection: "column",

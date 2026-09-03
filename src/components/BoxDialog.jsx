@@ -33,6 +33,24 @@ const FIELDS = {
   ],
 };
 
+// What changing each dimension does.  Keyed by field, since several primitives
+// share a key (`height`, `radius`).
+const HINTS = {
+  width: "Size along the display X axis. The box grows about its own centre.",
+  height:
+    "Size along the display Z axis (up). The body grows about its centre, so it does not sit lower.",
+  depth: "Size along the display Y axis. The box grows about its own centre.",
+  radius:
+    "Distance from the axis to the outside surface. Doubling it doubles the width, not the height.",
+  major:
+    "Distance from the centre to the middle of the ring. Bigger makes a wider doughnut with the same tube.",
+  minor:
+    "Thickness of the tube itself. Larger than the major radius closes the hole in the middle.",
+  radiusBottom: "Radius of the base. Larger gives a wider, blunter cone.",
+  radiusTop:
+    "Radius of the top face. 0 makes a true point; anything larger makes a truncated cone.",
+};
+
 const DEFAULTS = {
   cube: { width: 2, height: 2, depth: 2 },
   sphere: { radius: 1.5 },
@@ -138,7 +156,7 @@ const PrimitiveDialog = () => {
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
         {fields.map(([label, key]) => (
-          <Field label={label} key={key}>
+          <Field label={label} key={key} hint={HINTS[key]}>
             <NumberInput
               min="0"
               step="1"

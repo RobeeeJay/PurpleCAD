@@ -109,7 +109,10 @@ const HoleDialog = () => {
         Set the hole options, then Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <Field label="Length(mm)">
+        <Field
+          label="Length(mm)"
+          hint="How deep the hole is cut into the body. Longer than the wall it passes through makes it a through hole."
+        >
           <NumberInput
             min="0"
             step="0.5"
@@ -121,7 +124,10 @@ const HoleDialog = () => {
             style={barInput(true)}
           />
         </Field>
-        <Field label="Thread">
+        <Field
+          label="Thread"
+          hint="Cuts a metric thread of this size instead of a plain bore. Picking one sets the diameter to that thread's tapping size."
+        >
           <select
             value={params.threadType}
             onChange={setThread}
@@ -135,7 +141,10 @@ const HoleDialog = () => {
             ))}
           </select>
         </Field>
-        <Field label={"Ø(mm)"}>
+        <Field
+          label={"Ø(mm)"}
+          hint="Diameter of the bore. Locked while a thread is selected, since the thread decides it."
+        >
           <NumberInput
             min="0"
             step="0.5"
@@ -151,7 +160,10 @@ const HoleDialog = () => {
             }
           />
         </Field>
-        <Field label="Tol(mm)">
+        <Field
+          label="Tol(mm)"
+          hint="Clearance added to the diameter, for print or machining fit. Larger means a looser hole; negative makes it tighter."
+        >
           <NumberInput
             step="0.05"
             value={params.toleranceMm}

@@ -101,7 +101,10 @@ const ShellDialog = () => {
         Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <Field label="Wall thickness (mm)">
+        <Field
+          label="Wall thickness (mm)"
+          hint="Wall left behind after the inside is hollowed out. Thicker walls leave a smaller cavity; too thick for the body and the shell fails."
+        >
           <FormulaInput
             variables={variables}
             autoFocus

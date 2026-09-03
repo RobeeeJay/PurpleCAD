@@ -192,12 +192,16 @@ export default function SketchOverlays({
             }}
             style={{ width: 64, marginRight: 8 }}
           />
-          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+          <span
+            title="How far the profile is extruded along its normal. Negative extrudes backwards through the sketch plane; the prism starts at the plane either way."
+            style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+          >
             Distance (mm):
           </span>
           <FormulaInput
             type="text"
             autoFocus
+            title="How far the profile is extruded along its normal. Negative extrudes backwards through the sketch plane; the prism starts at the plane either way."
             variables={variables}
             // Accept either a bare number or a formula like "width * 2".
             value={
@@ -363,6 +367,11 @@ export default function SketchOverlays({
                 {sketchModifyMode === "chamfer" ? "Chamfer" : "Bevel"}
               </span>
               <label
+                title={
+                  sketchModifyMode === "chamfer"
+                    ? "How far back from the corner each edge is cut. Bigger takes more off both lines; larger than a line's length is refused."
+                    : "Radius of the arc replacing the corner. Bigger rounds it more; negative curves the arc the other way."
+                }
                 style={{
                   marginLeft: 8,
                   display: "inline-flex",

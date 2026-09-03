@@ -302,7 +302,10 @@ const Pattern3dDialog = () => {
         · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <Field label="Object">
+        <Field
+          label="Object"
+          hint="Which body gets repeated. Re-picking swaps the pattern onto a different object."
+        >
           <button
             type="button"
             onClick={pickObject}
@@ -314,7 +317,10 @@ const Pattern3dDialog = () => {
         </Field>
         {circular ? (
           <>
-            <Field label="Axis">
+            <Field
+              label="Axis"
+              hint="Line or edge the copies rotate around. Picking a different axis swings the whole ring elsewhere."
+            >
               <button
                 type="button"
                 onClick={pickAxis}
@@ -328,7 +334,10 @@ const Pattern3dDialog = () => {
                     : "Pick axis"}
               </button>
             </Field>
-            <Field label="Count">
+            <Field
+              label="Count"
+              hint="Total number of copies including the original. More copies spread over the same angle, so they sit closer together."
+            >
               {inp(
                 count,
                 setCount,
@@ -336,16 +345,25 @@ const Pattern3dDialog = () => {
                 true,
               )}
             </Field>
-            <Field label="Angle°">
+            <Field
+              label="Angle°"
+              hint="Angle the copies are spread over. 360 closes the ring; less makes a partial arc."
+            >
               {inp(angle, setAngle, Number.isFinite(angleV) && angleV > 0)}
             </Field>
-            <Field label="Offset/360°(mm)">
+            <Field
+              label="Offset/360°(mm)"
+              hint="Rise along the axis per full turn. Non-zero turns the ring into a helix, like a spiral staircase."
+            >
               {inp(axialOffset, setAxialOffset, Number.isFinite(axialOffsetV))}
             </Field>
           </>
         ) : (
           <>
-            <Field label="Count X">
+            <Field
+              label="Count X"
+              hint="Number of copies along the display X axis, counting the original. 1 means no repeat in X."
+            >
               {inp(
                 countX,
                 setCountX,
@@ -353,19 +371,34 @@ const Pattern3dDialog = () => {
                 true,
               )}
             </Field>
-            <Field label="Sp X(mm)">
+            <Field
+              label="Sp X(mm)"
+              hint="Gap between copy centres along X. Negative repeats the other way; smaller than the body makes the copies overlap."
+            >
               {inp(dx, setDx, Number.isFinite(dxV))}
             </Field>
-            <Field label="Count Y">
+            <Field
+              label="Count Y"
+              hint="Number of copies along the display Y axis, counting the original."
+            >
               {inp(countY, setCountY, Number.isFinite(countYV) && countYV >= 1)}
             </Field>
-            <Field label="Sp Y(mm)">
+            <Field
+              label="Sp Y(mm)"
+              hint="Gap between copy centres along Y. Negative repeats the other way."
+            >
               {inp(dy, setDy, Number.isFinite(dyV))}
             </Field>
-            <Field label="Count Z">
+            <Field
+              label="Count Z"
+              hint="Number of copies along the display Z axis (up), counting the original."
+            >
               {inp(countZ, setCountZ, Number.isFinite(countZV) && countZV >= 1)}
             </Field>
-            <Field label="Sp Z(mm)">
+            <Field
+              label="Sp Z(mm)"
+              hint="Gap between copy centres along Z. Negative stacks them downwards."
+            >
               {inp(dz, setDz, Number.isFinite(dzV))}
             </Field>
           </>

@@ -88,7 +88,11 @@ const DraftDialog = () => {
           {`Faces (${nFaces})`}
         </button>
 
-        <Field label="Angle°" style={{ marginLeft: 10 }}>
+        <Field
+          label="Angle°"
+          style={{ marginLeft: 10 }}
+          hint="How far each picked face is tapered away from the main face. Bigger angles give more mould-release taper; use Flip to lean the other way."
+        >
           <NumberInput
             step="1"
             value={draftTool.angleDeg}
