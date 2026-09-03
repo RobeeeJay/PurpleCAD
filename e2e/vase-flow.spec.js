@@ -6,7 +6,7 @@
 // it in Preview. Dimension assertions cannot tell a vase from a bucket.
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
-import { exportPartStl } from "./exportPart.js";
+import { exportPartPcad, importPartPcad } from "./exportPart.js";
 
 // A 2x2 PNG -- enough to displace a surface without dragging an asset around.
 const PNG_2x2 =
@@ -15,6 +15,7 @@ const PNG_2x2 =
 let app;
 let page;
 let vaseId;
+let vasePcad;
 
 const MM = 10; // MM_PER_UNIT
 const V = {
@@ -429,11 +430,24 @@ test.describe.serial("vase", () => {
     expect(Math.abs(afterBoreMid - beforeBore)).toBeLessThan(1.5);
   });
 
-  test("the finished vase exports to STL for manual inspection", async ({}, testInfo) => {
-    const { file, triCount } = await exportPartStl(page, testInfo, "vase", [
-      vaseId,
-    ]);
-    expect(file).toContain("vase.stl");
-    expect(triCount).toBeGreaterThan(500);
+  test("the finished vase saves as a .pcad document", async ({}, testInfo) => {
+    const { file, steps } = await exportPartPcad(page, testInfo, "vase");
+    expect(file).toContain("vase.pcad");
+    // Profile, revolve, two chamfers and the texture, plus "Scene created".
+    expect(steps).toBeGreaterThanOrEqual(6);
+    vasePcad = file;
+  });
+
+  test("the saved document reopens in PurpleCAD", async () => {
+    // The check that matters: a document that cannot be reopened is not a
+    // deliverable. Loading replays the timeline from scratch, so this also
+    // proves the features rebuild rather than relying on the baked meshes.
+    const before = await tris(vaseId);
+    const after = await importPartPcad(page, vasePcad);
+    expect(after.solids).toBeGreaterThan(0);
+    expect(after.steps).toBeGreaterThanOrEqual(6);
+    // The rebuilt vase is the same vase: same order of triangle count, not an
+    // empty shell or a smooth body that lost its pattern.
+    expect(after.tris).toBeGreaterThan(before * 0.5);
   });
 });

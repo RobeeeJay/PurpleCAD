@@ -48,12 +48,13 @@
 
 import { test, expect } from "@playwright/test";
 import { launchApp } from "./launch.js";
-import { exportPartStl } from "./exportPart.js";
+import { exportPartPcad, importPartPcad } from "./exportPart.js";
 
 let app;
 let page;
 let boxBaseId;
 let lidId;
+let boxPcad;
 
 // mm; scene units are mm / 10.
 const P0 = {
@@ -683,20 +684,19 @@ test.describe.serial("parametric project box", () => {
     }
   });
 
-  test("the finished part exports to STL for manual inspection", async ({}, testInfo) => {
-    // Runs while the assembly is COHERENT -- after the parameter change, but
+  test("the finished part saves as a .pcad document", async ({}, testInfo) => {
+    // Saved while the assembly is COHERENT -- after the parameter change, but
     // before the wall-height test deliberately desyncs the lid from the box.
-    // Writes both bodies to test-results/parts/project-box.stl -- openable in
-    // macOS Preview -- to check what the assertions above cannot: that the
-    // thing is actually the part someone asked for.
-    const { file, triCount } = await exportPartStl(page, testInfo, "project-box", [
-      boxBaseId,
-      lidId,
-    ]);
-    expect(file).toContain("project-box.stl");
-    // Both bodies plus four bores: a plain box and lid with no holes come to
-    // roughly 90 triangles between them.
-    expect(triCount).toBeGreaterThan(150);
+    // Writes test-results/parts/project-box.pcad: open it IN PurpleCAD to check
+    // what the assertions above cannot -- that the thing is actually the part
+    // someone asked for -- and to edit it, since the file carries the timeline
+    // rather than a triangle soup.
+    const { file, steps } = await exportPartPcad(page, testInfo, "project-box");
+    expect(file).toContain("project-box.pcad");
+    // Four sketches, four extrudes, two unions and the push/pull, plus the
+    // scene-created entry.
+    expect(steps).toBeGreaterThanOrEqual(10);
+    boxPcad = file;
   });
 
   test("raising the wall height rebuilds the box, and the lid does not follow", async () => {
@@ -720,4 +720,13 @@ test.describe.serial("parametric project box", () => {
     expect(lidY).toBeLessThan(60);
   });
 
+  test("the saved document reopens in PurpleCAD", async () => {
+    // The check that matters: a document that cannot be reopened is not a
+    // deliverable. Loading replays the timeline from scratch, so this also
+    // proves every feature rebuilds -- it is not reading back baked meshes.
+    const after = await importPartPcad(page, boxPcad);
+    expect(after.solids).toBeGreaterThanOrEqual(2); // box and lid
+    expect(after.steps).toBeGreaterThanOrEqual(10);
+    expect(after.tris).toBeGreaterThan(100);
+  });
 });

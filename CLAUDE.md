@@ -106,13 +106,19 @@ files just to make these go away.
 - Don't write multi-paragraph docstrings. One short line of intent at the
   top of a function is plenty.
 
-## Part tests export a STEP file
+## Part tests save a .pcad document
 
-Any e2e test that BUILDS A SPECIFIC PART ends by calling `exportPartStl`
-(`e2e/exportPart.js`), which writes `test-results/parts/<name>.stl` and
-attaches it to the Playwright report. STL rather than STEP so it opens in macOS
-Preview with no CAD tool -- the point is that someone actually LOOKS at it, and
-a format needing extra software gets looked at less.
+Any e2e test that BUILDS A SPECIFIC PART calls `exportPartPcad`
+(`e2e/exportPart.js`), which writes `test-results/parts/<name>.pcad` and
+attaches it to the Playwright report, and then `importPartPcad` from its LAST
+test to prove the file reopens.
+
+.pcad rather than a mesh format because it carries the TIMELINE and the
+variables, not a triangle soup: reopening it in PurpleCAD gives back the
+sketches, the features, their parameters and the whole history, so the part can
+be inspected, edited and re-driven. (A 13 MB STEP export of the same box was
+180 kB as .pcad.) It goes through the app's real Save button rather than
+assembling the JSON, so the test exercises the path a user takes.
 
 This exists because assertions only check what someone thought to assert. The
 project-box test twice built a part that passed every dimension and mate check
@@ -120,10 +126,12 @@ and was still wrong: a lid that was a hollow frame with no floor (bounding
 boxes and the ridge/opening mate both passed on it), and screw holes drilled at
 arbitrary points over thin air. Both were caught by LOOKING at the thing.
 
-Export while the model is COHERENT -- before any test that deliberately drives
-it into an inconsistent state. The helper fails the test if the bytes are not a
-real binary STL (the length must match its own triangle count), so a broken
-export cannot sit there looking like evidence.
+Save while the model is COHERENT -- before any test that deliberately drives it
+into an inconsistent state -- and do the reopen check LAST, since loading
+clobbers the current document. The reopen is the check that matters: a document
+that cannot be reopened is not a deliverable, and loading replays the timeline
+from scratch, so it also proves the features rebuild rather than reading back
+baked meshes.
 
 A part's FEATURES should be tied to its geometry by CONSTRAINTS, not by
 coordinates, so a parameter change moves them. Holes are the trap: the hole
