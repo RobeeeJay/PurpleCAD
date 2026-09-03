@@ -57,7 +57,10 @@ test("create + move, undo twice, redo twice", async () => {
   expect(moved.steps).toBe(created.steps + 1);
 
   // Give the viewport focus so the app-level key handler receives the events.
-  await page.locator("canvas").first().click({ position: { x: 400, y: 200 } });
+  await page
+    .locator("canvas")
+    .first()
+    .click({ position: { x: 400, y: 200 } });
   const undoKey = process.platform === "darwin" ? "Meta+z" : "Control+z";
   const redoKey =
     process.platform === "darwin" ? "Meta+Shift+z" : "Control+Shift+z";

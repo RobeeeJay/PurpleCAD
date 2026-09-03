@@ -70,7 +70,10 @@ export async function exportPartPcad(page, testInfo, name) {
   fs.mkdirSync(PARTS_DIR, { recursive: true });
   const file = path.join(PARTS_DIR, `${name}.pcad`);
   fs.writeFileSync(file, text, "utf8");
-  await testInfo.attach(`${name}.pcad`, { path: file, contentType: "application/json" });
+  await testInfo.attach(`${name}.pcad`, {
+    path: file,
+    contentType: "application/json",
+  });
   // eslint-disable-next-line no-console
   console.log(
     `[part] ${name} -> ${file} (${doc.history.length} timeline steps, ${(text.length / 1024).toFixed(1)} kB)`,

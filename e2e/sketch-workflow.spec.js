@@ -191,9 +191,7 @@ test.describe.serial("2D sketch workflow", () => {
     // Click the corner: a chamfer bridge appears at the typed setback.
     await page.mouse.click(B.x, B.y);
     await expect
-      .poll(async () =>
-        (await shapes()).some((sh) => sh.kind === "chamfer"),
-      )
+      .poll(async () => (await shapes()).some((sh) => sh.kind === "chamfer"))
       .toBe(true);
     const bridge = (await shapes()).find((sh) => sh.kind === "chamfer");
     expect(bridge.chamferData?.dist).toBeCloseTo(0.4, 2); // 4 mm
@@ -221,18 +219,17 @@ test.describe.serial("2D sketch workflow", () => {
     await rfield.fill("6");
     await rfield.press("Enter");
     await expect
-      .poll(async () =>
-        (await shapes()).find((sh) => sh.kind === "chamfer")?.chamferData
-          ?.dist ?? null,
+      .poll(
+        async () =>
+          (await shapes()).find((sh) => sh.kind === "chamfer")?.chamferData
+            ?.dist ?? null,
       )
       .toBeCloseTo(0.6, 2);
   });
 
   test("bevel dialog accepts a variable formula for the radius", async () => {
     await page.evaluate(() =>
-      window.__store
-        .getState()
-        .setVariables([{ name: "br", formula: "5" }]),
+      window.__store.getState().setVariables([{ name: "br", formula: "5" }]),
     );
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool("line"),
@@ -258,8 +255,9 @@ test.describe.serial("2D sketch workflow", () => {
     // The formula lands in the store and drives the corner click: 5 mm.
     await page.mouse.click(B.x, B.y);
     await expect
-      .poll(async () =>
-        (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
+      .poll(
+        async () =>
+          (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
       )
       .toBeCloseTo(0.5, 2);
     await page.getByTitle("Done — leave the bevel tool").click();
@@ -282,13 +280,12 @@ test.describe.serial("2D sketch workflow", () => {
 
     // Changing the variable re-cuts the corner to the new radius.
     await page.evaluate(() =>
-      window.__store
-        .getState()
-        .setVariables([{ name: "br", formula: "8" }]),
+      window.__store.getState().setVariables([{ name: "br", formula: "8" }]),
     );
     await expect
-      .poll(async () =>
-        (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
+      .poll(
+        async () =>
+          (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
       )
       .toBeCloseTo(0.8, 2);
     // The formula survives the re-cut.
@@ -516,9 +513,7 @@ test.describe.serial("2D sketch workflow", () => {
         ),
       )
       .toBe(1);
-    await page
-      .getByTitle("Confirm — create the mirrored geometry")
-      .click();
+    await page.getByTitle("Confirm — create the mirrored geometry").click();
 
     await expect.poll(async () => (await shapes()).length).toBe(before + 1);
     const circles = (await shapes()).filter((sh) => sh.type === "circle");
@@ -596,9 +591,7 @@ test.describe.serial("2D sketch workflow", () => {
 
   test("rectangular pattern dialog takes formula offsets and tracks the variable", async () => {
     await page.evaluate(() =>
-      window.__store
-        .getState()
-        .setVariables([{ name: "gap", formula: "30" }]),
+      window.__store.getState().setVariables([{ name: "gap", formula: "30" }]),
     );
     // A circle to pattern.
     await page.evaluate(() =>
@@ -626,9 +619,7 @@ test.describe.serial("2D sketch workflow", () => {
     await inputs.nth(1).fill("gap"); // Offset X — a variable formula
     await inputs.nth(2).fill("1"); // Count Y
     await inputs.nth(3).fill("0"); // Offset Y
-    await page
-      .getByTitle("Confirm — create the patterned geometry")
-      .click();
+    await page.getByTitle("Confirm — create the patterned geometry").click();
 
     // The copy sits 30 mm (3 units) right of the source; the constraint
     // remembers the formula.
@@ -640,8 +631,7 @@ test.describe.serial("2D sketch workflow", () => {
             window.__store
               .getState()
               .items.find((i) => i.id === 300)
-              .constraints.find((c) => c.type === "rectangularPattern") ??
-            null,
+              .constraints.find((c) => c.type === "rectangularPattern") ?? null,
         ),
       )
       .toMatchObject({ dxFormula: "gap" });
@@ -650,9 +640,7 @@ test.describe.serial("2D sketch workflow", () => {
 
     // Changing the variable re-spaces the copies.
     await page.evaluate(() =>
-      window.__store
-        .getState()
-        .setVariables([{ name: "gap", formula: "50" }]),
+      window.__store.getState().setVariables([{ name: "gap", formula: "50" }]),
     );
     await expect
       .poll(async () => (await shapes())[copyIdx].cx)
@@ -760,9 +748,7 @@ test.describe.serial("2D sketch workflow", () => {
       .toBe(true);
     // The mode exits after applying, and the point sits on the middle.
     expect(
-      await page.evaluate(
-        () => window.__store.getState().sketchConstraintMode,
-      ),
+      await page.evaluate(() => window.__store.getState().sketchConstraintMode),
     ).toBe(null);
     let pt = (await shapes())[pointIdx];
     expect(pt.x).toBeCloseTo(-2, 1);
@@ -1072,9 +1058,9 @@ test.describe.serial("2D sketch workflow", () => {
       )
       .toBeTruthy();
     const extrude = await page.evaluate(() => {
-      const it = window.__store.getState().items.find(
-        (i) => i.type === "extrude",
-      );
+      const it = window.__store
+        .getState()
+        .items.find((i) => i.type === "extrude");
       return {
         depth: it.depth,
         poly: it.profile?.polygon2D?.length ?? 0,

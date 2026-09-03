@@ -48,9 +48,7 @@ test.describe.serial("variables", () => {
     await dlg.locator('input[placeholder="e.g. width * 2"]').last().fill("40");
     await dlg.getByRole("button", { name: "Save" }).click();
 
-    const vars = await page.evaluate(
-      () => window.__store.getState().variables,
-    );
+    const vars = await page.evaluate(() => window.__store.getState().variables);
     expect(vars.some((v) => v.name === "Height" && v.formula === "40")).toBe(
       true,
     );
@@ -121,29 +119,27 @@ test.describe.serial("variables", () => {
   });
 
   test("changing the variable invalidates the dependent geometry", async () => {
-    const before = await page.evaluate(
-      () =>
-        window.__store
-          .getState()
-          .items.filter((i) => i.regenerator)
-          .map((i) => i.regenerator.regeneratedAt),
+    const before = await page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.filter((i) => i.regenerator)
+        .map((i) => i.regenerator.regeneratedAt),
     );
     await page.evaluate(() => {
-      window.__store.getState().setVariables([{ name: "Height", formula: "80" }]);
+      window.__store
+        .getState()
+        .setVariables([{ name: "Height", formula: "80" }]);
     });
     await page.waitForTimeout(600);
-    const vars = await page.evaluate(
-      () => window.__store.getState().variables,
-    );
+    const vars = await page.evaluate(() => window.__store.getState().variables);
     expect(vars[0].formula).toBe("80");
     // A variable change must mark every regenerator dirty so the next pass
     // rebuilds downstream geometry (CLAUDE.md: variables invalidate regeneratedAt).
-    const after = await page.evaluate(
-      () =>
-        window.__store
-          .getState()
-          .items.filter((i) => i.regenerator)
-          .map((i) => i.regenerator.regeneratedAt),
+    const after = await page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.filter((i) => i.regenerator)
+        .map((i) => i.regenerator.regeneratedAt),
     );
     if (before.length) expect(after).not.toEqual(before);
   });

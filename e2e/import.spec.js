@@ -73,9 +73,8 @@ test.describe.serial("import", () => {
       .toBeGreaterThan(0);
     // 20 mm cube → 2-unit extent in the scene (Z-up file → Y-up scene).
     const ext = await page.evaluate(() => {
-      const p = window.__store
-        .getState()
-        .items.find((i) => i.type === "csg").geometryData.positions;
+      const p = window.__store.getState().items.find((i) => i.type === "csg")
+        .geometryData.positions;
       const mn = [1e9, 1e9, 1e9],
         mx = [-1e9, -1e9, -1e9];
       for (let i = 0; i < p.length; i += 3)
@@ -105,7 +104,8 @@ test.describe.serial("import", () => {
     });
     expect(stepText).toContain("ISO-10303-21");
     const before = await page.evaluate(
-      () => window.__store.getState().items.filter((i) => i.type === "csg").length,
+      () =>
+        window.__store.getState().items.filter((i) => i.type === "csg").length,
     );
     await importVia("Import a STEP file", {
       name: "cube.step",

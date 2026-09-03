@@ -61,7 +61,9 @@ test.describe.serial("parallel-line distance", () => {
   });
 
   const line = () =>
-    page.evaluate(() => window.__store.getState().items.find((i) => i.id === 700));
+    page.evaluate(() =>
+      window.__store.getState().items.find((i) => i.id === 700),
+    );
 
   test("two parallel lines get a perpendicular gap dimension", async () => {
     // Two exactly-horizontal lines with horizontal constraints, y=0 and y=4.
@@ -100,7 +102,8 @@ test.describe.serial("parallel-line distance", () => {
     await expect
       .poll(() =>
         page.evaluate(
-          () => window.__store.getState().sketchDistanceInput?.pointLine ?? null,
+          () =>
+            window.__store.getState().sketchDistanceInput?.pointLine ?? null,
         ),
       )
       .toMatchObject({ pointShapeIdx: 0, lineShapeIdx: 1 });
@@ -112,8 +115,9 @@ test.describe.serial("parallel-line distance", () => {
     await expect
       .poll(() =>
         page.evaluate(() =>
-          (window.__store.getState().items.find((i) => i.id === 700)
-            .constraints || []
+          (
+            window.__store.getState().items.find((i) => i.id === 700)
+              .constraints || []
           ).some((c) => c.type === "pointLineDistance"),
         ),
       )

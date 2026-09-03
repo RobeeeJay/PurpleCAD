@@ -160,9 +160,7 @@ test("the corner tag shows scene totals and memory beside the version", async ()
   });
   await expect
     .poll(() =>
-      page
-        .locator(".version-tag")
-        .evaluate((el) => getComputedStyle(el).color),
+      page.locator(".version-tag").evaluate((el) => getComputedStyle(el).color),
     )
     .toBe("rgb(0, 0, 0)");
   await page.mouse.move(400, 300);

@@ -64,7 +64,10 @@ test.describe.serial("constraint-drifted sketch drags", () => {
     await page.mouse.click(p2.x, p2.y);
     await page.keyboard.press("Escape");
     const probe = await page.evaluate(() =>
-      window.__store.getState().items.find((i) => i.id === 1).shapes.at(-1),
+      window.__store
+        .getState()
+        .items.find((i) => i.id === 1)
+        .shapes.at(-1),
     );
     const a = (p2.x - p1.x) / (probe.x2 - probe.x1);
     const b = p1.x - a * probe.x1;

@@ -91,8 +91,8 @@ test.describe.serial("scene management", () => {
     await input.press("Enter");
 
     await expect(page.locator(".tree-view-content")).toContainText("Parts");
-    const named = await page.evaluate(
-      () => window.__store.getState().folders.map((f) => f.name),
+    const named = await page.evaluate(() =>
+      window.__store.getState().folders.map((f) => f.name),
     );
     expect(named).toContain("Parts");
   });

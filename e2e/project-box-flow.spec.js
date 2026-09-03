@@ -79,14 +79,12 @@ const BOX_HEIGHT_UNITS = P0.BoxHeight / MM;
 const setVars = (vars) =>
   page.evaluate(
     (v) =>
-      window.__store
-        .getState()
-        .setVariables(
-          Object.entries(v).map(([name, mm]) => ({
-            name,
-            formula: String(mm),
-          })),
-        ),
+      window.__store.getState().setVariables(
+        Object.entries(v).map(([name, mm]) => ({
+          name,
+          formula: String(mm),
+        })),
+      ),
     vars,
   );
 
@@ -95,7 +93,10 @@ const setVars = (vars) =>
 // AFTER that solve or it is built from the authored coordinates instead of the
 // dimensions the variables ask for.
 const addSolvedSketch = async (spec) => {
-  await page.evaluate((r) => window.__store.getState().addItem(r, "Added"), spec);
+  await page.evaluate(
+    (r) => window.__store.getState().addItem(r, "Added"),
+    spec,
+  );
   await setVars(P0);
   await page.waitForTimeout(300);
 };
@@ -177,12 +178,50 @@ const rectSketch = ({
     { type: "vertical", shapeIdx: 1 },
     { type: "horizontal", shapeIdx: 2 },
     { type: "vertical", shapeIdx: 3 },
-    { type: "coincident", shapeAIdx: 0, pointA: "end", shapeBIdx: 1, pointB: "start" },
-    { type: "coincident", shapeAIdx: 1, pointA: "end", shapeBIdx: 2, pointB: "start" },
-    { type: "coincident", shapeAIdx: 2, pointA: "end", shapeBIdx: 3, pointB: "start" },
-    { type: "coincident", shapeAIdx: 3, pointA: "end", shapeBIdx: 0, pointB: "start" },
-    { type: "distance", shapeAIdx: 0, pointA: "start", shapeBIdx: 0, pointB: "end", distance: wFormula },
-    { type: "distance", shapeAIdx: 1, pointA: "start", shapeBIdx: 1, pointB: "end", distance: dFormula },
+    {
+      type: "coincident",
+      shapeAIdx: 0,
+      pointA: "end",
+      shapeBIdx: 1,
+      pointB: "start",
+    },
+    {
+      type: "coincident",
+      shapeAIdx: 1,
+      pointA: "end",
+      shapeBIdx: 2,
+      pointB: "start",
+    },
+    {
+      type: "coincident",
+      shapeAIdx: 2,
+      pointA: "end",
+      shapeBIdx: 3,
+      pointB: "start",
+    },
+    {
+      type: "coincident",
+      shapeAIdx: 3,
+      pointA: "end",
+      shapeBIdx: 0,
+      pointB: "start",
+    },
+    {
+      type: "distance",
+      shapeAIdx: 0,
+      pointA: "start",
+      shapeBIdx: 0,
+      pointB: "end",
+      distance: wFormula,
+    },
+    {
+      type: "distance",
+      shapeAIdx: 1,
+      pointA: "start",
+      shapeBIdx: 1,
+      pointB: "end",
+      distance: dFormula,
+    },
   ];
 
   if (screwHoles) {
@@ -201,18 +240,68 @@ const rectSketch = ({
       const circ = h + 2;
       shapes.push(
         { type: "line", x1: c.cx, y1: c.cy, x2: c.cx + c.sx * t, y2: c.cy },
-        { type: "line", x1: c.cx + c.sx * t, y1: c.cy, x2: c.cx + c.sx * t, y2: c.cy + c.sy * t },
-        { type: "circle", cx: c.cx + c.sx * t, cy: c.cy + c.sy * t, r: P0.ScrewDia / 2 / MM },
+        {
+          type: "line",
+          x1: c.cx + c.sx * t,
+          y1: c.cy,
+          x2: c.cx + c.sx * t,
+          y2: c.cy + c.sy * t,
+        },
+        {
+          type: "circle",
+          cx: c.cx + c.sx * t,
+          cy: c.cy + c.sy * t,
+          r: P0.ScrewDia / 2 / MM,
+        },
       );
       constraints.push(
-        { type: "coincident", shapeAIdx: h, pointA: "start", shapeBIdx: i, pointB: "start" },
+        {
+          type: "coincident",
+          shapeAIdx: h,
+          pointA: "start",
+          shapeBIdx: i,
+          pointB: "start",
+        },
         { type: "horizontal", shapeIdx: h },
-        { type: "distance", shapeAIdx: h, pointA: "start", shapeBIdx: h, pointB: "end", distance: "WallThickness / 2" },
-        { type: "coincident", shapeAIdx: v, pointA: "start", shapeBIdx: h, pointB: "end" },
+        {
+          type: "distance",
+          shapeAIdx: h,
+          pointA: "start",
+          shapeBIdx: h,
+          pointB: "end",
+          distance: "WallThickness / 2",
+        },
+        {
+          type: "coincident",
+          shapeAIdx: v,
+          pointA: "start",
+          shapeBIdx: h,
+          pointB: "end",
+        },
         { type: "vertical", shapeIdx: v },
-        { type: "distance", shapeAIdx: v, pointA: "start", shapeBIdx: v, pointB: "end", distance: "WallThickness / 2" },
-        { type: "coincident", shapeAIdx: circ, pointA: "center", shapeBIdx: v, pointB: "end" },
-        { type: "distance", shapeAIdx: circ, pointA: "center", shapeBIdx: circ, pointB: "edge", distance: "ScrewDia / 2" },
+        {
+          type: "distance",
+          shapeAIdx: v,
+          pointA: "start",
+          shapeBIdx: v,
+          pointB: "end",
+          distance: "WallThickness / 2",
+        },
+        {
+          type: "coincident",
+          shapeAIdx: circ,
+          pointA: "center",
+          shapeBIdx: v,
+          pointB: "end",
+        },
+        {
+          type: "distance",
+          shapeAIdx: circ,
+          pointA: "center",
+          shapeBIdx: circ,
+          pointB: "edge",
+          distance: "ScrewDia / 2",
+        },
       );
     });
   }
@@ -350,7 +439,14 @@ test.describe.serial("parametric project box", () => {
       });
       // Walls: the ring between the outer loop and its inward offset.
       s.addItem(
-        extrude(101, "Box Walls", 100, loopOf(100, 0), [loopOf(100, 4)], "BoxHeight"),
+        extrude(
+          101,
+          "Box Walls",
+          100,
+          loopOf(100, 0),
+          [loopOf(100, 4)],
+          "BoxHeight",
+        ),
         "Added",
       );
       // Floor: its OWN footprint sketch, one wall thickness thick.
@@ -368,13 +464,25 @@ test.describe.serial("parametric project box", () => {
     await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
     await page.getByTitle("Apply Union").click();
     await expect
-      .poll(() => page.evaluate(() => window.__store.getState().items.find((i) => i.regenerator?.kind === "boolean")?.id ?? null), { timeout: 120000 })
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              window.__store
+                .getState()
+                .items.find((i) => i.regenerator?.kind === "boolean")?.id ??
+              null,
+          ),
+        { timeout: 120000 },
+      )
       .not.toBe(null);
     await settled();
 
     boxBaseId = await page.evaluate(
       () =>
-        window.__store.getState().items.find((i) => i.regenerator?.kind === "boolean").id,
+        window.__store
+          .getState()
+          .items.find((i) => i.regenerator?.kind === "boolean").id,
     );
     const b = await waitBbox(boxBaseId);
     expect(b.w).toBeCloseTo(P0.BoxWidth, 0);
@@ -431,51 +539,62 @@ test.describe.serial("parametric project box", () => {
     await page.evaluate(() => {
       const s = window.__store.getState();
       s.offsetSketchGeometry(130, [0, 1, 2, 3], "-WallThickness");
-      s.offsetSketchGeometry(130, [0, 1, 2, 3], "-(WallThickness + RidgeThickness)");
+      s.offsetSketchGeometry(
+        130,
+        [0, 1, 2, 3],
+        "-(WallThickness + RidgeThickness)",
+      );
     });
     await page.waitForTimeout(300);
 
     await page.evaluate(
       ({ lidY }) => {
-      const s = window.__store.getState();
-      const loopOf = (sketchId, from) =>
-        s.items
-          .find((i) => i.id === sketchId)
-          .shapes.slice(from, from + 4)
-          .map((l) => ({ x: l.x1, y: l.y1 }));
-      const extrude = (id, name, sketchId, poly, holes, depth) => ({
-        id,
-        type: "extrude",
-        name,
-        children: [],
-        parentId: null,
-        profile: {
-          type: "sketchLoop",
-          sketchId,
-          textShapeIdx: null,
-          profileCentroid: { x: 3, y: 2 },
-          polygon2D: poly,
-          holes,
+        const s = window.__store.getState();
+        const loopOf = (sketchId, from) =>
+          s.items
+            .find((i) => i.id === sketchId)
+            .shapes.slice(from, from + 4)
+            .map((l) => ({ x: l.x1, y: l.y1 }));
+        const extrude = (id, name, sketchId, poly, holes, depth) => ({
+          id,
+          type: "extrude",
+          name,
+          children: [],
+          parentId: null,
+          profile: {
+            type: "sketchLoop",
+            sketchId,
+            textShapeIdx: null,
+            profileCentroid: { x: 3, y: 2 },
+            polygon2D: poly,
+            holes,
+            position: { x: 0, y: lidY, z: 0 },
+            rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+            normalWorld: { x: 0, y: 1, z: 0 },
+          },
+          depth,
           position: { x: 0, y: lidY, z: 0 },
           rotation: { x: -Math.PI / 2, y: 0, z: 0 },
-          normalWorld: { x: 0, y: 1, z: 0 },
-        },
-        depth,
-        position: { x: 0, y: lidY, z: 0 },
-        rotation: { x: -Math.PI / 2, y: 0, z: 0 },
-        scale: { x: 1, y: 1, z: 1 },
-      });
-      s.addItem(
-        extrude(121, "Lid Plate", 120, loopOf(120, 0), [], "LidThickness"),
-        "Added",
-      );
-      // Plate extrudes UP off the wall top, ridge extrudes DOWN into the box.
-      // Building the lid in place beats seating it afterwards: a transform on
-      // the finished lid hangs the renderer (see the header).
-      s.addItem(
-        extrude(122, "Lid Ridge", 130, loopOf(130, 4), [loopOf(130, 8)], "-RidgeHeight"),
-        "Added",
-      );
+          scale: { x: 1, y: 1, z: 1 },
+        });
+        s.addItem(
+          extrude(121, "Lid Plate", 120, loopOf(120, 0), [], "LidThickness"),
+          "Added",
+        );
+        // Plate extrudes UP off the wall top, ridge extrudes DOWN into the box.
+        // Building the lid in place beats seating it afterwards: a transform on
+        // the finished lid hangs the renderer (see the header).
+        s.addItem(
+          extrude(
+            122,
+            "Lid Ridge",
+            130,
+            loopOf(130, 4),
+            [loopOf(130, 8)],
+            "-RidgeHeight",
+          ),
+          "Added",
+        );
       },
       { lidY: BOX_HEIGHT_UNITS },
     );
@@ -488,7 +607,9 @@ test.describe.serial("parametric project box", () => {
     const mate = await page.evaluate(() => {
       const items = window.__store.getState().items;
       const spanOf = (sketchId, from) => {
-        const sh = items.find((i) => i.id === sketchId).shapes.slice(from, from + 4);
+        const sh = items
+          .find((i) => i.id === sketchId)
+          .shapes.slice(from, from + 4);
         const xs = sh.flatMap((l) => [l.x1, l.x2]);
         const ys = sh.flatMap((l) => [l.y1, l.y2]);
         return {
@@ -505,7 +626,10 @@ test.describe.serial("parametric project box", () => {
 
   test("plate and ridge union into the finished lid", async () => {
     const before = await page.evaluate(
-      () => window.__store.getState().items.filter((i) => i.regenerator?.kind === "boolean").length,
+      () =>
+        window.__store
+          .getState()
+          .items.filter((i) => i.regenerator?.kind === "boolean").length,
     );
     await page.evaluate(() => {
       window.__store.getState().startBooleanTool("union");
@@ -517,7 +641,10 @@ test.describe.serial("parametric project box", () => {
       .poll(
         () =>
           page.evaluate(
-            () => window.__store.getState().items.filter((i) => i.regenerator?.kind === "boolean").length,
+            () =>
+              window.__store
+                .getState()
+                .items.filter((i) => i.regenerator?.kind === "boolean").length,
           ),
         { timeout: 120000 },
       )
@@ -584,20 +711,20 @@ test.describe.serial("parametric project box", () => {
       .toBe("pushpull");
     await settled();
 
-    const fit = await page.evaluate(
-      (id) => {
-        const p = window.__store.getState().items.find((i) => i.id === id)
-          .geometryData.positions;
-        let ridge = -Infinity;
-        let plate = -Infinity;
-        for (let i = 0; i < p.length; i += 3) {
-          if (p[i + 1] < -0.2) ridge = Math.max(ridge, p[i]);
-          plate = Math.max(plate, p[i]);
-        }
-        return { ridgeW: +(ridge * 20).toFixed(2), plateW: +(plate * 20).toFixed(2) };
-      },
-      lidId,
-    );
+    const fit = await page.evaluate((id) => {
+      const p = window.__store.getState().items.find((i) => i.id === id)
+        .geometryData.positions;
+      let ridge = -Infinity;
+      let plate = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        if (p[i + 1] < -0.2) ridge = Math.max(ridge, p[i]);
+        plate = Math.max(plate, p[i]);
+      }
+      return {
+        ridgeW: +(ridge * 20).toFixed(2),
+        plateW: +(plate * 20).toFixed(2),
+      };
+    }, lidId);
     const opening = P0.BoxWidth - 2 * P0.WallThickness;
     // Clearance on BOTH sides, and the plate itself must not have shrunk.
     expect(fit.ridgeW).toBeCloseTo(opening - 2 * P0.Clearance, 1);
@@ -656,7 +783,9 @@ test.describe.serial("parametric project box", () => {
     const mate = await page.evaluate(() => {
       const items = window.__store.getState().items;
       const spanOf = (sketchId, from) => {
-        const sh = items.find((i) => i.id === sketchId).shapes.slice(from, from + 4);
+        const sh = items
+          .find((i) => i.id === sketchId)
+          .shapes.slice(from, from + 4);
         const xs = sh.flatMap((l) => [l.x1, l.x2]);
         const ys = sh.flatMap((l) => [l.y1, l.y2]);
         return {
@@ -702,7 +831,15 @@ test.describe.serial("parametric project box", () => {
   test("raising the wall height rebuilds the box, and the lid does not follow", async () => {
     test.setTimeout(300000);
     const seatMm = P0.BoxHeight; // where the lid sketches were placed
-    await setVars({ ...P0, BoxWidth: 90, BoxDepth: 55, WallThickness: 5, LidThickness: 4, RidgeHeight: 6, BoxHeight: 60 });
+    await setVars({
+      ...P0,
+      BoxWidth: 90,
+      BoxDepth: 55,
+      WallThickness: 5,
+      LidThickness: 4,
+      RidgeHeight: 6,
+      BoxHeight: 60,
+    });
     await page.waitForTimeout(600);
     await settled();
 
@@ -714,7 +851,9 @@ test.describe.serial("parametric project box", () => {
     // re-seated. Asserted rather than glossed over: if positions ever become
     // parametric this test should start failing and be tightened.
     const lidY = await page.evaluate(
-      () => window.__store.getState().items.find((i) => i.id === 120).position.y * 10,
+      () =>
+        window.__store.getState().items.find((i) => i.id === 120).position.y *
+        10,
     );
     expect(lidY).toBeCloseTo(seatMm, 1);
     expect(lidY).toBeLessThan(60);

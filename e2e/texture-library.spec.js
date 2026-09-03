@@ -24,9 +24,11 @@ test.describe.serial("texture library", () => {
   });
 
   test("defaults render in three categories; picking one arms the tool", async () => {
-    await page.getByTitle("Choose a bump map from the texture library", {
-      exact: false,
-    }).click();
+    await page
+      .getByTitle("Choose a bump map from the texture library", {
+        exact: false,
+      })
+      .click();
     const dialog = page.locator(".texture-library-dialog");
     await expect(dialog).toBeVisible();
     for (const cat of ["Animal scales", "Fabric", "Industrial", "Imported"])
@@ -50,9 +52,11 @@ test.describe.serial("texture library", () => {
     // The dialog is open from the previous test — read each rendered
     // thumbnail's dataURL straight from the DOM (the built app doesn't serve
     // source modules).
-    await page.getByTitle("Choose a bump map from the texture library", {
-      exact: false,
-    }).click();
+    await page
+      .getByTitle("Choose a bump map from the texture library", {
+        exact: false,
+      })
+      .click();
     await expect(page.locator(".texture-library-dialog")).toBeVisible();
     const seams = await page.evaluate(async () => {
       const cards = [...document.querySelectorAll(".texture-card")];
@@ -124,9 +128,11 @@ test.describe.serial("texture library", () => {
   });
 
   test("import guards size, lands in rename, persists; delete warns", async () => {
-    await page.getByTitle("Choose a bump map from the texture library", {
-      exact: false,
-    }).click();
+    await page
+      .getByTitle("Choose a bump map from the texture library", {
+        exact: false,
+      })
+      .click();
     const dialog = page.locator(".texture-library-dialog");
 
     // Stub confirm to capture the messages (size warning + delete warning).
@@ -151,13 +157,11 @@ test.describe.serial("texture library", () => {
       }
       return c.toDataURL("image/png").split(",")[1];
     });
-    await dialog
-      .locator('input[type="file"]')
-      .setInputFiles({
-        name: "big-noise.png",
-        mimeType: "image/png",
-        buffer: Buffer.from(bigPng, "base64"),
-      });
+    await dialog.locator('input[type="file"]').setInputFiles({
+      name: "big-noise.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(bigPng, "base64"),
+    });
 
     // Size warning fired; import proceeded (confirm returned true) and the
     // card dropped straight into rename.
@@ -180,9 +184,7 @@ test.describe.serial("texture library", () => {
     await dialog.getByTitle("Delete texture").click();
     const confirms = await page.evaluate(() => window.__confirms);
     expect(confirms.some((m) => /Delete "Rock face"/.test(m))).toBe(true);
-    await expect(
-      dialog.getByText("Rock face", { exact: true }),
-    ).toBeHidden();
+    await expect(dialog.getByText("Rock face", { exact: true })).toBeHidden();
     const after = await page.evaluate(() =>
       JSON.parse(window.electronAPI.settingGet("texture_library") || "[]"),
     );

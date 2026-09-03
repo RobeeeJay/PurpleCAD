@@ -27,19 +27,16 @@ const addCube = (id, x = 0) =>
   );
 
 const item = (id) =>
-  page.evaluate(
-    (id) => {
-      const it = window.__store.getState().items.find((i) => i.id === id);
-      return it
-        ? {
-            type: it.type,
-            kind: it.regenerator?.kind ?? null,
-            tris: it.geometryData ? it.geometryData.indices.length / 3 : 0,
-          }
-        : null;
-    },
-    id,
-  );
+  page.evaluate((id) => {
+    const it = window.__store.getState().items.find((i) => i.id === id);
+    return it
+      ? {
+          type: it.type,
+          kind: it.regenerator?.kind ?? null,
+          tris: it.geometryData ? it.geometryData.indices.length / 3 : 0,
+        }
+      : null;
+  }, id);
 
 test.describe.serial("modify tools through their dialogs", () => {
   test.beforeAll(async () => {
@@ -121,9 +118,9 @@ test.describe.serial("modify tools through their dialogs", () => {
     });
     await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
     await page.getByTitle("Cut the hole").click();
-    await expect.poll(() => item(12).then((i) => i.kind), { timeout: 30000 }).toBe(
-      "hole",
-    );
+    await expect
+      .poll(() => item(12).then((i) => i.kind), { timeout: 30000 })
+      .toBe("hole");
     expect((await item(12)).tris).toBeGreaterThan(20); // bore wall added
   });
 
@@ -138,9 +135,9 @@ test.describe.serial("modify tools through their dialogs", () => {
     const overlay = page.locator(".sketch-distance-input-overlay");
     await expect(overlay).toBeVisible();
     await page.getByTitle("Apply the draft").click();
-    await expect.poll(() => item(13).then((i) => i.kind), { timeout: 30000 }).toBe(
-      "draft",
-    );
+    await expect
+      .poll(() => item(13).then((i) => i.kind), { timeout: 30000 })
+      .toBe("draft");
   });
 
   test("material dialog applies a colour to the selected body", async () => {
