@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { useEscapeKey, useDebouncedPreview } from "./inputs.jsx";
 import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";
-import { performCsg } from "../three/occClient.js";
+import { performCsg, withCommitGuard } from "../three/occClient.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 
@@ -227,12 +227,19 @@ const BooleanDialog = () => {
         return;
       }
 
-      const result = await performCsg({
-        selectedItems: ordered,
-        operation,
-        printPrecision,
-        allItems: items,
-      });
+      // Guarded: this dialog previews on a debounce, and a preview that
+      // supersedes mid-commit calls cancelOcc, which aborts the REAL op and
+      // hands back an empty mesh.  A slow fuse (a swept handle onto a spun cup)
+      // landed a 0-triangle body that way, with no error anywhere -- the same
+      // failure the hole/shell/emboss commits are guarded against.
+      const result = await withCommitGuard(() =>
+        performCsg({
+          selectedItems: ordered,
+          operation,
+          printPrecision,
+          allItems: items,
+        }),
+      );
       if (!result) {
         alert(`${opLabel} produced nothing.`);
         return;
