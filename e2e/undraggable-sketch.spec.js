@@ -110,7 +110,16 @@ test.describe.serial("constraint-drifted sketch drags", () => {
     // Body-drag the top border up by ~3 units.
     const from = toScreen(0, before.y1);
     const to = toScreen(2, before.y1 + 3);
+    // Move, let the app process the pointer, then move again before pressing.
+    // This test passes ALONE and failed IN THE SUITE, and it passed in the
+    // suite as soon as work landed between the move and the press: the app
+    // resolves what is under the cursor from pointer motion, so a press in the
+    // same tick as the only move can find nothing to grab. The drag then never
+    // starts and the sketch sits exactly where it was.
     await page.mouse.move(from.x, from.y);
+    await page.waitForTimeout(150);
+    await page.mouse.move(from.x, from.y);
+    await page.waitForTimeout(50);
     await page.mouse.down();
     await page.mouse.move(to.x, to.y, { steps: 10 });
     await page.mouse.up();
