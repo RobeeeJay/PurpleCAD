@@ -62,14 +62,12 @@ const profileMaxRadius = () =>
 const setVars = (v) =>
   page.evaluate(
     (vv) =>
-      window.__store
-        .getState()
-        .setVariables(
-          Object.entries(vv).map(([name, mm]) => ({
-            name,
-            formula: String(mm),
-          })),
-        ),
+      window.__store.getState().setVariables(
+        Object.entries(vv).map(([name, mm]) => ({
+          name,
+          formula: String(mm),
+        })),
+      ),
     v,
   );
 
@@ -191,18 +189,96 @@ test.describe.serial("vase", () => {
         { type: "horizontal", shapeIdx: 4 },
         { type: "vertical", shapeIdx: 3 },
         { type: "vertical", shapeIdx: 5 },
-        { type: "coincident", shapeAIdx: 0, pointA: "end", shapeBIdx: 1, pointB: "start" },
-        { type: "coincident", shapeAIdx: 1, pointA: "end", shapeBIdx: 2, pointB: "start" },
-        { type: "coincident", shapeAIdx: 2, pointA: "end", shapeBIdx: 3, pointB: "start" },
-        { type: "coincident", shapeAIdx: 3, pointA: "end", shapeBIdx: 4, pointB: "start" },
-        { type: "coincident", shapeAIdx: 4, pointA: "end", shapeBIdx: 5, pointB: "start" },
-        { type: "coincident", shapeAIdx: 5, pointA: "end", shapeBIdx: 0, pointB: "start" },
-        { type: "distance", shapeAIdx: 0, pointA: "start", shapeBIdx: 0, pointB: "end", distance: "BaseRadius" },
-        { type: "distance", shapeAIdx: 2, pointA: "start", shapeBIdx: 2, pointB: "end", distance: "WallThickness" },
-        { type: "distance", shapeAIdx: 3, pointA: "start", shapeBIdx: 3, pointB: "end", distance: "VaseHeight - FloorThickness" },
-        { type: "distance", shapeAIdx: 4, pointA: "start", shapeBIdx: 4, pointB: "end", distance: "BaseRadius - WallThickness" },
-        { type: "distance", shapeAIdx: 5, pointA: "start", shapeBIdx: 5, pointB: "end", distance: "FloorThickness" },
-        { type: "distance", shapeAIdx: 1, pointA: "center", shapeBIdx: 1, pointB: "edge", distance: "BellyRadius" },
+        {
+          type: "coincident",
+          shapeAIdx: 0,
+          pointA: "end",
+          shapeBIdx: 1,
+          pointB: "start",
+        },
+        {
+          type: "coincident",
+          shapeAIdx: 1,
+          pointA: "end",
+          shapeBIdx: 2,
+          pointB: "start",
+        },
+        {
+          type: "coincident",
+          shapeAIdx: 2,
+          pointA: "end",
+          shapeBIdx: 3,
+          pointB: "start",
+        },
+        {
+          type: "coincident",
+          shapeAIdx: 3,
+          pointA: "end",
+          shapeBIdx: 4,
+          pointB: "start",
+        },
+        {
+          type: "coincident",
+          shapeAIdx: 4,
+          pointA: "end",
+          shapeBIdx: 5,
+          pointB: "start",
+        },
+        {
+          type: "coincident",
+          shapeAIdx: 5,
+          pointA: "end",
+          shapeBIdx: 0,
+          pointB: "start",
+        },
+        {
+          type: "distance",
+          shapeAIdx: 0,
+          pointA: "start",
+          shapeBIdx: 0,
+          pointB: "end",
+          distance: "BaseRadius",
+        },
+        {
+          type: "distance",
+          shapeAIdx: 2,
+          pointA: "start",
+          shapeBIdx: 2,
+          pointB: "end",
+          distance: "WallThickness",
+        },
+        {
+          type: "distance",
+          shapeAIdx: 3,
+          pointA: "start",
+          shapeBIdx: 3,
+          pointB: "end",
+          distance: "VaseHeight - FloorThickness",
+        },
+        {
+          type: "distance",
+          shapeAIdx: 4,
+          pointA: "start",
+          shapeBIdx: 4,
+          pointB: "end",
+          distance: "BaseRadius - WallThickness",
+        },
+        {
+          type: "distance",
+          shapeAIdx: 5,
+          pointA: "start",
+          shapeBIdx: 5,
+          pointB: "end",
+          distance: "FloorThickness",
+        },
+        {
+          type: "distance",
+          shapeAIdx: 1,
+          pointA: "center",
+          shapeBIdx: 1,
+          pointB: "edge",
+          distance: "BellyRadius",
+        },
       ];
       s.addItem(
         {
@@ -227,7 +303,8 @@ test.describe.serial("vase", () => {
     // The profile really is driven by the variables, before anything is spun.
     const seg = await page.evaluate(() => {
       const sk = window.__store.getState().items.find((i) => i.id === 800);
-      const len = (l) => +(Math.hypot(l.x2 - l.x1, l.y2 - l.y1) * 10).toFixed(1);
+      const len = (l) =>
+        +(Math.hypot(l.x2 - l.x1, l.y2 - l.y1) * 10).toFixed(1);
       return {
         bottom: len(sk.shapes[0]),
         rim: len(sk.shapes[2]),
@@ -254,7 +331,10 @@ test.describe.serial("vase", () => {
           const n = 24;
           for (let i = 0; i < n; i++) {
             const a = sh.startAngle + ((sh.endAngle - sh.startAngle) * i) / n;
-            pts.push({ x: sh.cx + Math.cos(a) * sh.r, y: sh.cy + Math.sin(a) * sh.r });
+            pts.push({
+              x: sh.cx + Math.cos(a) * sh.r,
+              y: sh.cy + Math.sin(a) * sh.r,
+            });
           }
         }
       }
@@ -282,7 +362,9 @@ test.describe.serial("vase", () => {
       () =>
         window.__store
           .getState()
-          .items.filter((i) => i.type === "csg" && i.geometryData?.positions?.length)
+          .items.filter(
+            (i) => i.type === "csg" && i.geometryData?.positions?.length,
+          )
           .pop()?.id ?? null,
     );
     expect(vaseId).not.toBeNull();
@@ -299,6 +381,7 @@ test.describe.serial("vase", () => {
   });
 
   test("a chamfer runs round the foot", async () => {
+    test.setTimeout(360_000);
     const before = await bbox(vaseId);
     const beforeTris = await tris(vaseId);
     const yBottom = before.lo[1] / MM;
@@ -352,6 +435,7 @@ test.describe.serial("vase", () => {
   });
 
   test("a bevel softens the inside of the rim only", async () => {
+    test.setTimeout(360_000);
     const beforeOuter = await radiusAt(vaseId, V0.VaseHeight, 0.6);
     const beforeBore = await boreAt(vaseId, V0.VaseHeight);
     const beforeTris = await tris(vaseId);
@@ -399,10 +483,17 @@ test.describe.serial("vase", () => {
     // would also pass if nothing had happened -- and the lip is where it was.
     const afterBore = await boreAt(vaseId, V0.VaseHeight);
     expect(afterBore).toBeCloseTo(beforeBore + 2, 0);
-    expect(await radiusAt(vaseId, V0.VaseHeight, 0.6)).toBeCloseTo(beforeOuter, 0);
+    expect(await radiusAt(vaseId, V0.VaseHeight, 0.6)).toBeCloseTo(
+      beforeOuter,
+      0,
+    );
   });
 
   test("a pattern wraps around the outside wall", async () => {
+    // The displacement rebuild is minutes-long on a software renderer, and the
+    // poll below already allows for that -- without this the 60s default test
+    // timeout kills the test while its own wait is still valid.
+    test.setTimeout(360_000);
     const beforeTris = await tris(vaseId);
     const beforeBore = await boreAt(vaseId, V0.VaseHeight / 2, 3);
     // Select the outer wall by its TRIANGLES. A cylinder faceSet matches faces
@@ -410,8 +501,9 @@ test.describe.serial("vase", () => {
     // radius, so it textured a band round the belly and left the rest smooth.
     const faceTris = await page.evaluate(
       ({ id, minR }) => {
-        const g = window.__store.getState().items.find((i) => i.id === id)
-          .geometryData;
+        const g = window.__store
+          .getState()
+          .items.find((i) => i.id === id).geometryData;
         const p = g.positions;
         const idx = g.indices;
         const out = [];
@@ -421,9 +513,14 @@ test.describe.serial("vase", () => {
           const cz = (p[v[0] + 2] + p[v[1] + 2] + p[v[2] + 2]) / 3;
           const r = Math.hypot(cx, cz);
           if (r < minR) continue; // skip the bore and the floor
-          const ax = p[v[1]] - p[v[0]], ay = p[v[1] + 1] - p[v[0] + 1], az = p[v[1] + 2] - p[v[0] + 2];
-          const bx = p[v[2]] - p[v[0]], by = p[v[2] + 1] - p[v[0] + 1], bz = p[v[2] + 2] - p[v[0] + 2];
-          const nx = ay * bz - az * by, nz = ax * by - ay * bx;
+          const ax = p[v[1]] - p[v[0]],
+            ay = p[v[1] + 1] - p[v[0] + 1],
+            az = p[v[1] + 2] - p[v[0] + 2];
+          const bx = p[v[2]] - p[v[0]],
+            by = p[v[2] + 1] - p[v[0] + 1],
+            bz = p[v[2] + 2] - p[v[0] + 2];
+          const nx = ay * bz - az * by,
+            nz = ax * by - ay * bx;
           if (nx * cx + nz * cz <= 0) continue; // outward-facing only
           for (const o of v) out.push(p[o], p[o + 1], p[o + 2]);
         }
@@ -504,7 +601,8 @@ test.describe.serial("vase", () => {
     // variable, including the arc's radius.
     const seg = await page.evaluate(() => {
       const sk = window.__store.getState().items.find((i) => i.id === 800);
-      const len = (l) => +(Math.hypot(l.x2 - l.x1, l.y2 - l.y1) * 10).toFixed(1);
+      const len = (l) =>
+        +(Math.hypot(l.x2 - l.x1, l.y2 - l.y1) * 10).toFixed(1);
       return {
         bottom: len(sk.shapes[0]),
         rim: len(sk.shapes[2]),
