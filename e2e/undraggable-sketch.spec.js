@@ -134,7 +134,35 @@ test.describe.serial("constraint-drifted sketch drags", () => {
           ),
         { timeout: 5000 },
       )
-      .toBeCloseTo(before.y1 + 3, 0);
+      .toBeCloseTo(before.y1 + 3, 0)
+      .catch(async (err) => {
+        // Diagnostics AFTER the fact only: anything between the move and the
+        // press changes the very timing this is trying to measure, and doing
+        // that once already made the failure disappear.
+        console.log(
+          "DRAG FAILED",
+          JSON.stringify({
+            viewport: size,
+            calib: { a, b, c, d },
+            from,
+            to,
+            before: { x1: before.x1, y1: before.y1 },
+            after: await page.evaluate(() => {
+              const st = window.__store.getState();
+              const sh = st.items.find((i) => i.id === 1).shapes[0];
+              return {
+                x1: sh.x1,
+                y1: sh.y1,
+                tool: st.activeSketchTool,
+                shapes: st.items.find((i) => i.id === 1).shapes.length,
+                sketchMode: !!st.sketchMode,
+                selected: st.selectedId,
+              };
+            }),
+          }),
+        );
+        throw err;
+      });
     // The bottom border followed (the whole network translated).  The exact
     // landing spot depends on the drag-start repair (the file also violates
     // its Depth dimension, which the repair corrects), so assert the
