@@ -1,0 +1,295 @@
+// The Measure tool, through its real overlay: each case seeds the picks the way
+// a click would and then reads the text the user actually sees in
+// `.measure-readout`.
+//
+// Two code paths sit behind that readout and both are covered. With a sketch
+// selected it measures the SKETCH selection (length, radius, area, gap).
+// Otherwise it measures the 3D picks -- vertex / edge / face -- where two picks
+// give the nearest distance between them.
+//
+// Entity points are [x,y,z] arrays in world scene units; the readout is mm
+// (MM_PER_UNIT = 10), so a 2-unit edge reads "20.00 mm".
+import { test, expect } from "@playwright/test";
+import { launchApp } from "./launch.js";
+
+let app;
+let page;
+
+const MM = 10;
+const SKETCH_ID = 900;
+
+const startMeasure = () =>
+  page.evaluate(() => {
+    const s = window.__store.getState();
+    s.selectItem(null); // no sketch selected -> the 3D pick path
+    s.startMeasureTool();
+  });
+
+const pick = (...entities) =>
+  page.evaluate((es) => {
+    const s = window.__store.getState();
+    s.clearMeasurePicks();
+    for (const e of es) s.addMeasurePick(e);
+  }, entities);
+
+// Select shapes of the sketch -> the sketch path.
+const selectShapes = (...idxs) =>
+  page.evaluate((ii) => {
+    const s = window.__store.getState();
+    s.clearMeasurePicks();
+    s.setSelectedSketchElement(null);
+    s.setSketchMultiSelectedIndices(ii);
+  }, idxs);
+
+const readout = () => page.locator(".measure-readout");
+
+// The overlay renders on the frame after a store write.
+const readText = async () => {
+  await page.waitForTimeout(250);
+  return (await readout().innerText()).replace(/\s+/g, " ").trim();
+};
+
+const num = (text, label) =>
+  Number(text.match(new RegExp(`${label}\\s+([\\d.]+) mm`))[1]);
+
+test.describe.serial("measure tool", () => {
+  test.beforeAll(async () => {
+    app = await launchApp();
+    page = await app.firstWindow();
+    page.on("pageerror", (e) => console.log(`[pageerror] ${e.message}`));
+    await expect(page.locator(".toolbar")).toBeVisible();
+  });
+
+  test.afterAll(async () => {
+    await app?.close();
+  });
+
+  test("the overlay opens and prompts for a pick", async () => {
+    await startMeasure();
+    await expect(readout()).toBeVisible();
+    expect(await readText()).toBe("Measure");
+  });
+
+  test("a straight edge reports its length", async () => {
+    // 3-4-5: a length that cannot come out right by accident.
+    await pick({ kind: "segment", a: [0, 0, 0], b: [3, 4, 0] });
+    expect(await readText()).toBe("Length 50.00 mm");
+  });
+
+  test("a curved edge reports its arc length, not its chord", async () => {
+    const r = 3;
+    const N = 64;
+    const pts = [];
+    for (let i = 0; i <= N; i++) {
+      const a = (Math.PI / 2) * (i / N);
+      pts.push([Math.cos(a) * r, Math.sin(a) * r, 0]);
+    }
+    await pick({ kind: "polyline", pts, closed: false });
+    const value = num(await readText(), "Length");
+
+    const arc = (Math.PI / 2) * r * MM; // 47.12 mm
+    const chord = Math.SQRT2 * r * MM; // 42.43 mm -- what a straight-line
+    // reading would give, which is the thing this test exists to rule out.
+    expect(value).toBeCloseTo(arc, 1);
+    expect(value).toBeGreaterThan(chord + 4);
+  });
+
+  test("a closed picked loop includes its closing segment", async () => {
+    const sq = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [2, 0, 2],
+      [0, 0, 2],
+    ];
+    await pick({ kind: "polyline", pts: sq, closed: false });
+    expect(num(await readText(), "Length")).toBeCloseTo(6 * MM, 1);
+    await pick({ kind: "polyline", pts: sq, closed: true });
+    expect(num(await readText(), "Length")).toBeCloseTo(8 * MM, 1);
+  });
+
+  test("a face reports its own two side lengths, not a bounding box", async () => {
+    // 4 x 2 units, deliberately NOT axis-aligned: faceDimensions runs a PCA, so
+    // a rotated rectangle must still report its own sides.
+    const c = Math.SQRT1_2;
+    await pick({
+      kind: "face",
+      normal: [0, 1, 0],
+      pts: [
+        [0, 0, 0],
+        [4 * c, 0, 4 * c],
+        [4 * c - 2 * c, 0, 4 * c + 2 * c],
+        [-2 * c, 0, 2 * c],
+      ],
+    });
+    const text = await readText();
+    const [, w, h] = text.match(/Face\s+([\d.]+) mm × ([\d.]+) mm/);
+    expect(Number(w)).toBeCloseTo(4 * MM, 1);
+    expect(Number(h)).toBeCloseTo(2 * MM, 1);
+  });
+
+  test("two vertices report the distance between them", async () => {
+    await pick(
+      { kind: "point", p: [0, 0, 0] },
+      { kind: "point", p: [3, 4, 0] },
+    );
+    expect(await readText()).toBe("Distance 50.00 mm");
+  });
+
+  test("two edges report the gap between them, not between their ends", async () => {
+    // Parallel but offset along their own direction, so the nearest points are
+    // interior: an endpoint-to-endpoint reading would give 25.5mm, not 25mm.
+    await pick(
+      { kind: "segment", a: [0, 0, 0], b: [5, 0, 0] },
+      { kind: "segment", a: [2, 2.5, 0], b: [7, 2.5, 0] },
+    );
+    expect(await readText()).toBe("Distance 25.00 mm");
+  });
+
+  test("two faces report the gap between them", async () => {
+    const face = (y) => ({
+      kind: "face",
+      normal: [0, 1, 0],
+      pts: [
+        [0, y, 0],
+        [2, y, 0],
+        [2, y, 2],
+        [0, y, 2],
+      ],
+    });
+    await pick(face(0), face(3));
+    expect(await readText()).toBe("Distance 30.00 mm");
+  });
+
+  test("a vertex and a face report the nearest approach to the face outline", async () => {
+    await pick(
+      { kind: "point", p: [1, 4, 1] },
+      {
+        kind: "face",
+        normal: [0, 1, 0],
+        pts: [
+          [0, 0, 0],
+          [2, 0, 0],
+          [2, 0, 2],
+          [0, 0, 2],
+        ],
+      },
+    );
+    // A face contributes its sampled corners AND its outline segments, so the
+    // reading is the nearest point on an EDGE (41.23mm), not a perpendicular
+    // drop through the interior (40mm) nor the nearest corner (42.43mm).
+    // Pinned as the tool's actual behaviour -- worth noticing if it changes.
+    expect(num(await readText(), "Distance")).toBeCloseTo(
+      Math.hypot(0, 4, 1) * MM,
+      1,
+    );
+  });
+
+  test("Escape clears the picks first, and only then closes the tool", async () => {
+    await pick({ kind: "point", p: [0, 0, 0] });
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+    expect(
+      await page.evaluate(
+        () => window.__store.getState().measureTool?.picks.length ?? null,
+      ),
+    ).toBe(0);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+    expect(
+      await page.evaluate(() => !!window.__store.getState().measureTool),
+    ).toBe(false);
+  });
+
+  // ---- the sketch-selection path -------------------------------------------
+
+  test("a sketch is selected and the tool switches to measuring its shapes", async () => {
+    await page.evaluate((id) => {
+      const s = window.__store.getState();
+      // A 4x3 rectangle drawn as four separate lines (0-3), a circle (4), a
+      // quarter arc (5), and two parallel lines 2.5 apart (6,7). No
+      // constraints: these are measured as authored.
+      const shapes = [
+        { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 },
+        { type: "line", x1: 4, y1: 0, x2: 4, y2: 3 },
+        { type: "line", x1: 4, y1: 3, x2: 0, y2: 3 },
+        { type: "line", x1: 0, y1: 3, x2: 0, y2: 0 },
+        { type: "circle", cx: 10, cy: 0, r: 2 },
+        {
+          type: "arc",
+          cx: 10,
+          cy: 8,
+          r: 3,
+          startAngle: 0,
+          endAngle: Math.PI / 2,
+        },
+        { type: "line", x1: -8, y1: 0, x2: -3, y2: 0 },
+        { type: "line", x1: -6, y1: 2.5, x2: -1, y2: 2.5 },
+      ];
+      s.addItem(
+        {
+          id,
+          type: "sketch",
+          name: "Measure Sketch",
+          children: [],
+          parentId: null,
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+          shapes,
+          constraints: [],
+        },
+        "Added",
+      );
+      s.selectItem(id);
+      s.startMeasureTool();
+    }, SKETCH_ID);
+    await expect(readout()).toBeVisible();
+  });
+
+  test("one sketch line reports its length", async () => {
+    await selectShapes(0);
+    expect(await readText()).toBe("Length 40.00 mm");
+  });
+
+  test("a sketch circle reports circumference, radius and area together", async () => {
+    await selectShapes(4);
+    const text = await readText();
+    // Sampled as a polyline, so the circumference is a hair under 2*pi*r.
+    expect(num(text, "Length")).toBeCloseTo(2 * Math.PI * 2 * MM, 0);
+    expect(text).toContain("Radius 20.00 mm");
+    expect(num(text, "Area")).toBeCloseTo(Math.PI * 4 * MM * MM, 0);
+  });
+
+  test("a sketch arc reports its length and radius but no area", async () => {
+    await selectShapes(5);
+    const text = await readText();
+    expect(num(text, "Length")).toBeCloseTo((Math.PI / 2) * 3 * MM, 0);
+    expect(text).toContain("Radius 30.00 mm");
+    expect(text).not.toContain("Area"); // an open arc encloses nothing
+  });
+
+  test("four lines that chain into a closed loop report perimeter and area", async () => {
+    await selectShapes(0, 1, 2, 3);
+    const text = await readText();
+    expect(text).toContain("Length (4)");
+    expect(num(text, "Length \\(4\\)")).toBeCloseTo(14 * MM, 1); // 2*(4+3)
+    expect(num(text, "Area")).toBeCloseTo(12 * MM * MM, 1); // 4*3
+  });
+
+  test("two unconnected sketch lines report the gap between them, and no area", async () => {
+    await selectShapes(6, 7);
+    const text = await readText();
+    expect(num(text, "Length \\(2\\)")).toBeCloseTo(10 * MM, 1);
+    expect(num(text, "Distance")).toBeCloseTo(2.5 * MM, 1);
+    expect(text).not.toContain("Area"); // they don't close a loop
+  });
+
+  test("three lines that do not close report no area", async () => {
+    // An open chain: the loop detector must reject it rather than closing it
+    // implicitly, which would invent a triangle that was never drawn.
+    await selectShapes(0, 1, 2);
+    const text = await readText();
+    expect(text).toContain("Length (3)");
+    expect(text).not.toContain("Area");
+  });
+});
