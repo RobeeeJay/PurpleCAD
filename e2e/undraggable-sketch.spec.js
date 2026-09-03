@@ -57,6 +57,10 @@ test.describe.serial("constraint-drifted sketch drags", () => {
     const size = page.viewportSize() || { width: 1400, height: 868 };
     const p1 = { x: size.width * 0.55, y: size.height * 0.35 };
     const p2 = { x: size.width * 0.8, y: size.height * 0.7 };
+    const shapesBefore = await page.evaluate(
+      () =>
+        window.__store.getState().items.find((i) => i.id === 1).shapes.length,
+    );
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool("line"),
     );
@@ -77,6 +81,27 @@ test.describe.serial("constraint-drifted sketch drags", () => {
     await page.evaluate(() => window.__store.getState().undoSketch(1));
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool(null),
+    );
+    // Wait for the probe line to be GONE from the store and for the renderer to
+    // have rebuilt the sketch overlay before dragging. The drag hit-tests
+    // against that overlay's line meshes, so starting it while the rebuild is
+    // still pending finds nothing under the pointer and the drag never begins
+    // -- the sketch then sits exactly where it was, which is what a failure
+    // here looks like.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store.getState().items.find((i) => i.id === 1).shapes
+              .length,
+        ),
+      )
+      .toBe(shapesBefore);
+    await page.evaluate(
+      () =>
+        new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r)),
+        ),
     );
 
     const before = await page.evaluate(
