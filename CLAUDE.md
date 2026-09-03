@@ -42,9 +42,22 @@ npx vite build            # production bundle, ~3s
 npm run test:e2e:podman   # Electron e2e, headless Linux container
 ```
 
-**Run the e2e suite through podman** (`npm run test:e2e:podman`). It builds
-the addon, rebuilds better-sqlite3, builds the VITE_E2E renderer and runs
-Playwright under xvfb inside the container, so a run doesn't depend on the
+**Run the e2e suite through podman** (`npm run test:e2e:podman`), and run the
+WHOLE suite -- never a single spec. A spec passing alone says little: the
+project-box union failed only in a full run, `undraggable-sketch` passed alone
+and failed in the suite, and Playwright wipes `test-results/` on every run, so
+a single-spec run deletes the other parts' `.pcad` files. Run one spec only
+when explicitly asked to watch a test in action, and then say that is what you
+did.
+
+The path-tracer pixel test excludes ITSELF in the container -- it needs a real
+GPU and skips on a software renderer (see `e2e/pathtrace.spec.js`), as does the
+`visual` snapshot. Both report as skipped, not failed; nothing needs excluding
+by hand, and a suite reporting failures is a real problem rather than expected
+noise.
+
+It builds the addon, rebuilds better-sqlite3, builds the VITE_E2E renderer and
+runs Playwright under xvfb inside the container, so a run doesn't depend on the
 state of the host toolchain or steal the desktop's focus. Build the image
 once with `npm run e2e:image` (~15 min the first time -- the OCC 8.0.1 source
 build is its own layer and is reused by every later app-code rebuild; app
