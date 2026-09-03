@@ -21,10 +21,10 @@ const MM = 10; // MM_PER_UNIT
 const V = {
   CupDia: 80,
   CupHeight: 60,
+  BowlRadius: 70, // curvature of the bowl wall: SMALLER is a rounder cup
   StemDia: 20,
   StemHeight: 30,
   WallThickness: 4,
-  FloorThickness: 8,
   CupDia: 80,
 };
 const PLINTH = { w: 90, h: 16, d: 90 }; // mm
@@ -236,27 +236,44 @@ test.describe.serial("trophy", () => {
       // Authored roughly; the constraints put every edge where the variables
       // say.
       //
-      // The bowl flares on STRAIGHT walls held PARALLEL to each other, rather
-      // than a curved outer wall with a straight bore. That earlier profile
-      // self-intersected: a vertical bore keeps one radius while a curved wall
-      // closes in below it, so the two crossed (24.5mm of bore against a 17.3mm
-      // wall) and the lathe spun a mangled cup. Concentric arcs fix the
-      // crossing but over-constrain the sketch -- the floor height and the cup
-      // height both pull on the arc centre, and the solver settles a few mm
-      // short of the dimension it was given. Parallel straight walls cannot
-      // cross and leave every variable a real driver.
+      // The bowl is a ROUNDED cup: the outer wall is an arc, and the inner wall
+      // is a second arc CONCENTRIC with it, one wall thickness smaller. Two
+      // concentric arcs stay the same distance apart the whole way round, so
+      // they cannot cross -- which a straight bore inside a curved wall does
+      // (it holds one radius while the wall closes in below it, and that
+      // crossing spun a mangled cup).
+      //
+      // The floor is left to land where the inner arc reaches the axis instead
+      // of being dimensioned: pinning the floor height AND the rim height both
+      // pull on the arc centre, and the solver then settles a few mm short of
+      // the rim height it was given.
       const sR = 1,
         sH = 3,
         cR = 4,
         cH = 6,
         w = 0.4,
-        fT = 0.8;
+        fT = 0.8,
+        R = 9;
       const shapes = [
         { type: "line", x1: 0, y1: 0, x2: sR, y2: 0 }, // 0 underside of stem
         { type: "line", x1: sR, y1: 0, x2: sR, y2: sH }, // 1 stem
-        { type: "line", x1: sR, y1: sH, x2: cR, y2: sH + cH }, // 2 outer wall
+        {
+          type: "arc",
+          cx: sR - R,
+          cy: sH + cH / 2,
+          r: R,
+          startAngle: -0.5,
+          endAngle: 0.2,
+        }, // 2 outer bowl wall
         { type: "line", x1: cR, y1: sH + cH, x2: cR - w, y2: sH + cH }, // 3 rim
-        { type: "line", x1: cR - w, y1: sH + cH, x2: sR, y2: sH + fT }, // 4 inner wall
+        {
+          type: "arc",
+          cx: sR - R,
+          cy: sH + cH / 2,
+          r: R - w,
+          startAngle: 0.2,
+          endAngle: -0.5,
+        }, // 4 inner bowl wall
         { type: "line", x1: sR, y1: sH + fT, x2: 0, y2: sH + fT }, // 5 floor
         { type: "line", x1: 0, y1: sH + fT, x2: 0, y2: 0 }, // 6 axis side
         { type: "line", x1: 0, y1: -1, x2: 0, y2: sH + cH + 1 }, // 7 spin axis
@@ -320,9 +337,32 @@ test.describe.serial("trophy", () => {
         // it in x, and a profile free to slide sideways spins to a different
         // radius than the variables say.
         { type: "colinear", shapeAIdx: 6, shapeBIdx: 7 },
-        // The wall that holds the cup together: inner parallel to outer, so
-        // they stay the same distance apart the whole way up.
-        { type: "parallel", shapeAIdx: 2, shapeBIdx: 4 },
+        // The wall that holds the cup together: the two arcs share a centre and
+        // differ by one wall thickness, so they stay that far apart the whole
+        // way round and cannot cross.
+        {
+          type: "coincident",
+          shapeAIdx: 2,
+          pointA: "center",
+          shapeBIdx: 4,
+          pointB: "center",
+        },
+        {
+          type: "distance",
+          shapeAIdx: 2,
+          pointA: "center",
+          shapeBIdx: 2,
+          pointB: "edge",
+          distance: "BowlRadius",
+        },
+        {
+          type: "distance",
+          shapeAIdx: 4,
+          pointA: "center",
+          shapeBIdx: 4,
+          pointB: "edge",
+          distance: "BowlRadius - WallThickness",
+        },
         {
           type: "distance",
           shapeAIdx: 0,
@@ -338,22 +378,6 @@ test.describe.serial("trophy", () => {
           shapeBIdx: 1,
           pointB: "end",
           distance: "StemHeight",
-        },
-        {
-          type: "distance",
-          shapeAIdx: 3,
-          pointA: "start",
-          shapeBIdx: 3,
-          pointB: "end",
-          distance: "WallThickness",
-        },
-        {
-          type: "distance",
-          shapeAIdx: 6,
-          pointA: "start",
-          shapeBIdx: 6,
-          pointB: "end",
-          distance: "StemHeight + FloorThickness",
         },
         // The rim, dimensioned off the foot and off the spin axis.
         {
@@ -402,14 +426,25 @@ test.describe.serial("trophy", () => {
         stem: len(sk.shapes[1]),
         rimY: +((sk.shapes[3].y1 - sk.shapes[0].y1) * 10).toFixed(1),
         rimR: +((sk.shapes[3].x1 - sk.shapes[6].x1) * 10).toFixed(1),
-        rim: len(sk.shapes[3]),
+        outerR: +(sk.shapes[2].r * 10).toFixed(1),
+        innerR: +(sk.shapes[4].r * 10).toFixed(1),
+        sameCentre: +(
+          Math.hypot(
+            sk.shapes[2].cx - sk.shapes[4].cx,
+            sk.shapes[2].cy - sk.shapes[4].cy,
+          ) * 10
+        ).toFixed(2),
       };
     });
     expect(sec.stemHalf).toBeCloseTo(V.StemDia / 2, 0);
     expect(sec.stem).toBeCloseTo(V.StemHeight, 0);
     expect(sec.rimY).toBeCloseTo(V.StemHeight + V.CupHeight, 0);
     expect(sec.rimR).toBeCloseTo(V.CupDia / 2, 0);
-    expect(sec.rim).toBeCloseTo(V.WallThickness, 0);
+    // The bowl is CURVED, and its two walls are concentric a wall thickness
+    // apart -- which is what stops them crossing.
+    expect(sec.outerR).toBeCloseTo(V.BowlRadius, 0);
+    expect(sec.outerR - sec.innerR).toBeCloseTo(V.WallThickness, 0);
+    expect(sec.sameCentre).toBeCloseTo(0, 1);
 
     await page.evaluate(() => {
       const s = window.__store.getState();
