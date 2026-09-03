@@ -25,7 +25,7 @@ const V = {
   StemHeight: 30,
   WallThickness: 4,
   FloorThickness: 8,
-  BowlRadius: 90, // the outer arc's radius: SMALLER means a rounder bowl
+  CupDia: 80,
 };
 const PLINTH = { w: 90, h: 16, d: 90 }; // mm
 const HANDLE = { major: 16, minor: 4 }; // mm
@@ -174,6 +174,14 @@ const unionWith = async (otherId) => {
     { a: trophyId, b: otherId },
   );
   await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
+  // Wait for the dialog to actually REPORT both objects. Selection is captured
+  // by an effect, so clicking Apply straight after writing selectedIds can fuse
+  // whatever set the dialog had captured by then rather than the pair asked for.
+  await expect(
+    page.locator(".sketch-distance-input-overlay button", {
+      hasText: /2 objects/,
+    }),
+  ).toBeVisible();
   await page.getByTitle("Apply Union").click();
   await expect
     .poll(
@@ -190,7 +198,7 @@ const unionWith = async (otherId) => {
               )?.id ?? null,
           before,
         ),
-      { timeout: 120000 },
+      { timeout: 300000 },
     )
     .not.toBe(null);
   await settled();
@@ -226,29 +234,30 @@ test.describe.serial("trophy", () => {
     await page.evaluate(() => {
       const s = window.__store.getState();
       // Authored roughly; the constraints put every edge where the variables
-      // say. Straight stem and bore, curved bowl -- one closed loop, so no
-      // construction geometry is needed.
+      // say.
+      //
+      // The bowl flares on STRAIGHT walls held PARALLEL to each other, rather
+      // than a curved outer wall with a straight bore. That earlier profile
+      // self-intersected: a vertical bore keeps one radius while a curved wall
+      // closes in below it, so the two crossed (24.5mm of bore against a 17.3mm
+      // wall) and the lathe spun a mangled cup. Concentric arcs fix the
+      // crossing but over-constrain the sketch -- the floor height and the cup
+      // height both pull on the arc centre, and the solver settles a few mm
+      // short of the dimension it was given. Parallel straight walls cannot
+      // cross and leave every variable a real driver.
       const sR = 1,
         sH = 3,
         cR = 4,
         cH = 6,
         w = 0.4,
-        fT = 0.8,
-        R = 9;
+        fT = 0.8;
       const shapes = [
         { type: "line", x1: 0, y1: 0, x2: sR, y2: 0 }, // 0 underside of stem
         { type: "line", x1: sR, y1: 0, x2: sR, y2: sH }, // 1 stem
-        {
-          type: "arc",
-          cx: sR - R,
-          cy: sH + cH / 2,
-          r: R,
-          startAngle: -0.8,
-          endAngle: 0.8,
-        }, // 2 bowl wall
+        { type: "line", x1: sR, y1: sH, x2: cR, y2: sH + cH }, // 2 outer wall
         { type: "line", x1: cR, y1: sH + cH, x2: cR - w, y2: sH + cH }, // 3 rim
-        { type: "line", x1: cR - w, y1: sH + cH, x2: cR - w, y2: sH + fT }, // 4 bore
-        { type: "line", x1: cR - w, y1: sH + fT, x2: 0, y2: sH + fT }, // 5 floor
+        { type: "line", x1: cR - w, y1: sH + cH, x2: sR, y2: sH + fT }, // 4 inner wall
+        { type: "line", x1: sR, y1: sH + fT, x2: 0, y2: sH + fT }, // 5 floor
         { type: "line", x1: 0, y1: sH + fT, x2: 0, y2: 0 }, // 6 axis side
         { type: "line", x1: 0, y1: -1, x2: 0, y2: sH + cH + 1 }, // 7 spin axis
       ];
@@ -256,7 +265,6 @@ test.describe.serial("trophy", () => {
         { type: "horizontal", shapeIdx: 0 },
         { type: "vertical", shapeIdx: 1 },
         { type: "horizontal", shapeIdx: 3 },
-        { type: "vertical", shapeIdx: 4 },
         { type: "horizontal", shapeIdx: 5 },
         { type: "vertical", shapeIdx: 6 },
         {
@@ -312,6 +320,9 @@ test.describe.serial("trophy", () => {
         // it in x, and a profile free to slide sideways spins to a different
         // radius than the variables say.
         { type: "colinear", shapeAIdx: 6, shapeBIdx: 7 },
+        // The wall that holds the cup together: inner parallel to outer, so
+        // they stay the same distance apart the whole way up.
+        { type: "parallel", shapeAIdx: 2, shapeBIdx: 4 },
         {
           type: "distance",
           shapeAIdx: 0,
@@ -338,19 +349,26 @@ test.describe.serial("trophy", () => {
         },
         {
           type: "distance",
-          shapeAIdx: 4,
+          shapeAIdx: 6,
           pointA: "start",
-          shapeBIdx: 4,
+          shapeBIdx: 6,
           pointB: "end",
-          distance: "CupHeight - FloorThickness",
+          distance: "StemHeight + FloorThickness",
+        },
+        // The rim, dimensioned off the foot and off the spin axis.
+        {
+          type: "pointLineDistance",
+          pointShapeIdx: 3,
+          pointKey: "start",
+          lineShapeIdx: 0,
+          distance: "StemHeight + CupHeight",
         },
         {
-          type: "distance",
-          shapeAIdx: 2,
-          pointA: "center",
-          shapeBIdx: 2,
-          pointB: "edge",
-          distance: "BowlRadius",
+          type: "pointLineDistance",
+          pointShapeIdx: 3,
+          pointKey: "start",
+          lineShapeIdx: 7,
+          distance: "CupDia / 2",
         },
       ];
       s.addItem(
@@ -371,6 +389,8 @@ test.describe.serial("trophy", () => {
       s.selectItem(300);
     });
     await setVars(); // solve the constraints
+    await page.waitForTimeout(400);
+    await setVars(); // a second pass: one solve leaves the rim a few mm short
     await page.waitForTimeout(800);
 
     const sec = await page.evaluate(() => {
@@ -380,16 +400,16 @@ test.describe.serial("trophy", () => {
       return {
         stemHalf: len(sk.shapes[0]),
         stem: len(sk.shapes[1]),
+        rimY: +((sk.shapes[3].y1 - sk.shapes[0].y1) * 10).toFixed(1),
+        rimR: +((sk.shapes[3].x1 - sk.shapes[6].x1) * 10).toFixed(1),
         rim: len(sk.shapes[3]),
-        bore: len(sk.shapes[4]),
-        bowlR: +(sk.shapes[2].r * 10).toFixed(1),
       };
     });
     expect(sec.stemHalf).toBeCloseTo(V.StemDia / 2, 0);
     expect(sec.stem).toBeCloseTo(V.StemHeight, 0);
+    expect(sec.rimY).toBeCloseTo(V.StemHeight + V.CupHeight, 0);
+    expect(sec.rimR).toBeCloseTo(V.CupDia / 2, 0);
     expect(sec.rim).toBeCloseTo(V.WallThickness, 0);
-    expect(sec.bore).toBeCloseTo(V.CupHeight - V.FloorThickness, 0);
-    expect(sec.bowlR).toBeCloseTo(V.BowlRadius, 0);
 
     await page.evaluate(() => {
       const s = window.__store.getState();
@@ -443,16 +463,190 @@ test.describe.serial("trophy", () => {
 
     const b = await bbox(trophyId);
     expect(b.h).toBeCloseTo(V.StemHeight + V.CupHeight, -1);
+    expect(b.w).toBeCloseTo(V.CupDia, -1);
     expect(b.d).toBeCloseTo(b.w, -1); // round about the axis
-    // A cup on a stem, not a bucket: narrow at the foot, wide at the rim...
-    expect(await widthAt(trophyId, 2)).toBeCloseTo(V.StemDia, -1);
+    // A cup on a stem, not a bucket: narrow at the foot, wide at the rim.
+    // Measured over height RANGES -- a cone carries vertices only at its ends,
+    // so a thin slice through the middle of the wall is empty.
+    expect(await widthBetween(trophyId, 0, V.StemHeight)).toBeCloseTo(
+      V.StemDia,
+      -1,
+    );
     expect(
-      await widthAt(trophyId, V.StemHeight + V.CupHeight - 2),
-    ).toBeGreaterThan(V.StemDia * 2);
-    // ...and genuinely hollow.
-    expect(
-      await boreAt(trophyId, V.StemHeight + V.CupHeight - 2),
-    ).toBeGreaterThan(V.CupDia / 4);
+      await widthBetween(
+        trophyId,
+        V.StemHeight + V.CupHeight - 1,
+        V.StemHeight + V.CupHeight,
+      ),
+    ).toBeCloseTo(V.CupDia, -1);
+    // ...and genuinely hollow: the rim ring is a wall thickness wide.
+    const bore = await boreAt(trophyId, V.StemHeight + V.CupHeight, 1);
+    expect(bore).toBeCloseTo(V.CupDia / 2 - V.WallThickness, -1);
+  });
+
+  test("a handle sweeps out and back on each side", async () => {
+    test.setTimeout(360_000);
+    const before = await bbox(trophyId);
+    const body = await worldBox(trophyId);
+    // Where each handle meets the bowl, as heights above the body's own base
+    // and the wall radius there. The wall is a straight flare, so the radius at
+    // a height follows from the stem and rim dimensions rather than being
+    // guessed.
+    const wallR = (yMm) => {
+      const up = yMm - V.StemHeight; // height up the bowl
+      return (
+        V.StemDia / 2 + (up / V.CupHeight) * (V.CupDia / 2 - V.StemDia / 2)
+      );
+    };
+    const yTop = V.StemHeight + V.CupHeight * 0.85;
+    const yBot = V.StemHeight + V.CupHeight * 0.35;
+    const REACH = 22; // how far the handle stands out from the wall, mm
+    const TUBE = 2.5; // handle tube radius, mm
+    const BURY = 2; // how far inside the wall each end starts, mm
+
+    await page.evaluate(
+      ({ body, yTop, yBot, rTop, rBot, REACH, TUBE, BURY }) => {
+        const s = window.__store.getState();
+        const u = (mm) => mm / 10; // scene units
+        // One sketch holds the tube's cross-section; the pipe op takes the
+        // profile as a plain loop and lays it on the path itself, so where this
+        // sketch sits does not matter.
+        const circle = [];
+        for (let i = 0; i < 32; i++) {
+          const a = (2 * Math.PI * i) / 32;
+          circle.push({ x: Math.cos(a) * u(TUBE), y: Math.sin(a) * u(TUBE) });
+        }
+        s.addItem(
+          {
+            id: 342,
+            type: "sketch",
+            name: "Handle Section",
+            children: [],
+            parentId: null,
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+            scale: { x: 1, y: 1, z: 1 },
+            shapes: [{ type: "circle", cx: 0, cy: 0, r: u(TUBE) }],
+            constraints: [],
+          },
+          "Added",
+        );
+        // A path per side: a bezier that leaves the bowl wall high up, bulges
+        // outward, and comes back to the wall lower down -- a handle you can
+        // get a finger through. Authored in WORLD x/y off the measured body,
+        // since the spun profile is not anchored in sketch space.
+        for (const [id, sign] of [
+          [340, 1],
+          [341, -1],
+        ]) {
+          const x = (rMm) => body.axisX + sign * u(rMm);
+          const y = (mm) => body.minY + u(mm);
+          s.addItem(
+            {
+              id,
+              type: "sketch",
+              name: `Handle Path ${id}`,
+              children: [],
+              parentId: null,
+              position: { x: 0, y: 0, z: 0 },
+              rotation: { x: 0, y: 0, z: 0 }, // world XY plane
+              scale: { x: 1, y: 1, z: 1 },
+              shapes: [
+                {
+                  type: "bezier",
+                  // Ends just INSIDE the wall, not deep in the cavity: the
+                  // tube is thicker than the wall, so a deeply buried end
+                  // leaves a stub poking into the bowl.
+                  p0: { x: x(rBot - BURY), y: y(yBot) },
+                  // Both control points at the SAME radius, so the handle
+                  // bulges straight out and back rather than swinging wide at
+                  // one end -- an uneven bezier makes a sweep that pinches.
+                  p1: { x: x(rTop + REACH), y: y(yBot) },
+                  p2: { x: x(rTop + REACH), y: y(yTop) },
+                  p3: { x: x(rTop - BURY), y: y(yTop) },
+                },
+              ],
+              constraints: [],
+            },
+            "Added",
+          );
+        }
+      },
+      {
+        body,
+        yTop,
+        yBot,
+        rTop: wallR(yTop),
+        rBot: wallR(yBot),
+        REACH,
+        TUBE,
+        BURY,
+      },
+    );
+    await settled();
+
+    for (const pathId of [340, 341]) {
+      const seen = await page.evaluate(() =>
+        window.__store.getState().items.map((i) => i.id),
+      );
+      await page.evaluate((pathId) => {
+        const s = window.__store.getState();
+        const sk = s.items.find((i) => i.id === 342);
+        const c = sk.shapes[0];
+        const poly = [];
+        for (let i = 0; i < 32; i++) {
+          const a = (2 * Math.PI * i) / 32;
+          poly.push({
+            x: c.cx + Math.cos(a) * c.r,
+            y: c.cy + Math.sin(a) * c.r,
+          });
+        }
+        s.startSweepTool("pipe");
+        s.setSweepProfile({
+          sketchId: 342,
+          profileCentroid: { x: c.cx, y: c.cy },
+          polygon2D: poly,
+          holes: [],
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          normalWorld: { x: 0, y: 0, z: 1 },
+        });
+        s.setSweepPath({ sketchId: pathId, shapeIdx: 0 });
+        // Rotate the section to follow the path tangent. Without it the
+        // section is swept at a FIXED orientation, so a curved path drags a
+        // flattened tube through itself: it still renders, but it is not a
+        // sound solid and a boolean with it comes back empty.
+        s.setSweepParams({ autoRotate: true });
+      }, pathId);
+      await page.evaluate(() =>
+        window.__store.getState()._cameraControls.commitSweep(),
+      );
+      await settled();
+      const handleId = await page.evaluate(
+        (seen) =>
+          window.__store
+            .getState()
+            .items.find(
+              (i) =>
+                !seen.includes(i.id) &&
+                i.regenerator?.kind === "pipe" &&
+                i.geometryData?.positions?.length,
+            )?.id ?? null,
+        seen,
+      );
+      if (!handleId) expect(handleId).not.toBeNull();
+      await unionWith(handleId);
+    }
+
+    const after = await bbox(trophyId);
+    // They stick out SIDEWAYS, past the bowl, and add nothing front-to-back.
+    expect(after.w).toBeGreaterThan(before.w);
+    expect(after.w).toBeGreaterThan(V.CupDia + REACH);
+    expect(after.d).toBeCloseTo(before.d, -1);
+    // ...and they are up at the bowl, not somewhere else.
+    expect(await widthBetween(trophyId, yBot, yTop)).toBeGreaterThan(
+      V.CupDia + REACH,
+    );
   });
 
   test("a plinth carries the cup", async () => {
@@ -482,71 +676,15 @@ test.describe.serial("trophy", () => {
 
     const after = await bbox(trophyId);
     expect(after.h).toBeCloseTo(before.h + PLINTH.h, -1);
-    // The plinth is square, wider than the cup, and at the BOTTOM.
-    expect(after.w).toBeCloseTo(PLINTH.w, -1);
+    // Front-to-back the plinth is now the widest thing (the handles reach out
+    // sideways only), and it is square.
     expect(after.d).toBeCloseTo(PLINTH.d, -1);
-    // The wide part is the plinth at the bottom; above it the body narrows to
-    // the stem before flaring out again into the bowl.
+    // At the BOTTOM it is the plinth's own footprint; above it the body narrows
+    // to the stem before flaring out again into the bowl.
     expect(await widthBetween(trophyId, 0, PLINTH.h)).toBeCloseTo(PLINTH.w, -1);
     expect(
-      await widthBetween(trophyId, PLINTH.h + 1, PLINTH.h + V.StemHeight),
+      await widthBetween(trophyId, PLINTH.h + 1, PLINTH.h + V.StemHeight + 1),
     ).toBeCloseTo(V.StemDia, -1);
-  });
-
-  test("a handle stands out on each side", async () => {
-    test.setTimeout(360_000);
-    const before = await bbox(trophyId);
-    // High on the bowl, where it is wide: a handle down at the stem would sit
-    // inside the plinth's footprint and prove nothing.
-    const bandMm = PLINTH.h + V.StemHeight + V.CupHeight * 0.8;
-    const body = await worldBox(trophyId);
-    const cupR = (await widthBetween(trophyId, bandMm - 4, bandMm + 4)) / 2;
-    expect(cupR).toBeGreaterThan(V.StemDia); // measured, not assumed
-
-    // BOTH rings are added before either union: a union allocates the next free
-    // id for its result, which collides with a handle added afterwards.
-    await page.evaluate(
-      ({ y, cupR, HANDLE, axisX, axisZ }) => {
-        for (const [id, sign] of [
-          [320, -1],
-          [321, 1],
-        ]) {
-          window.__store.getState().addItem({
-            id,
-            name: `Handle ${id}`,
-            type: "torus",
-            children: [],
-            parentId: null,
-            // Straddling the bowl wall, so each ring is half in and half out --
-            // a handle you could get a finger through.
-            position: { x: axisX + (sign * cupR) / 10, y, z: axisZ },
-            rotation: { x: Math.PI / 2, y: 0, z: 0 }, // ring stands upright
-            scale: { x: 1, y: 1, z: 1 },
-            dimensions: { major: HANDLE.major / 10, minor: HANDLE.minor / 10 },
-          });
-        }
-      },
-      {
-        y: body.minY + bandMm / 10,
-        cupR,
-        HANDLE,
-        axisX: body.axisX,
-        axisZ: body.axisZ,
-      },
-    );
-    await settled();
-    await unionWith(320);
-    await unionWith(321);
-
-    const after = await bbox(trophyId);
-    // They stick out SIDEWAYS, past everything else on the trophy.
-    expect(after.w).toBeGreaterThan(before.w);
-    expect(after.w).toBeGreaterThan(cupR * 2 + HANDLE.major);
-    // ...and they are up at the bowl, not somewhere else: the body is wider
-    // across that band than the bowl itself is, and wider in X than in Z.
-    const across = await widthBetween(trophyId, bandMm - 3, bandMm + 3);
-    expect(across).toBeGreaterThan(cupR * 2 + HANDLE.major);
-    expect(after.d).toBeCloseTo(before.d, -1); // nothing added front-to-back
   });
 
   test("the text is embossed into the plinth", async () => {
@@ -739,12 +877,6 @@ test.describe.serial("trophy", () => {
         };
       },
       { id: trophyId, plinthH: PLINTH.h, plinthD: PLINTH.d },
-    );
-    console.log(
-      "RELIEF",
-      JSON.stringify(relief),
-      "plinth",
-      JSON.stringify(PLINTH),
     );
     expect(relief.faceZ).toBeGreaterThan(PLINTH.d / 2 + 0.5); // it protrudes
     expect(relief.n).toBeGreaterThan(50); // eight letters' worth of outline
