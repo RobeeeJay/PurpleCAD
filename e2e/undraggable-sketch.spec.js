@@ -14,6 +14,10 @@ let toScreen; // (lx,ly) -> screen {x,y}, set by the first test's calibration
 
 test.describe.serial("constraint-drifted sketch drags", () => {
   test.beforeAll(async () => {
+    // Recording makes the app take far longer to start on a software renderer
+    // -- past the 60s default, which fails the hook before the test it is meant
+    // to be filming even begins.
+    if (process.env.E2E_VIDEO) test.setTimeout(240_000);
     app = await launchApp();
     page = await app.firstWindow();
     await expect(page.locator(".toolbar")).toBeVisible();
