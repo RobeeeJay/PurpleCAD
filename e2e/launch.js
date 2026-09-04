@@ -17,21 +17,38 @@ const projectRoot = path.resolve(
 export const makeDataDir = () =>
   fs.mkdtempSync(path.join(os.tmpdir(), "purple-cad-e2e-"));
 
-// Set E2E_VIDEO=1 to record the app window. Videos land in
-// test-results/videos, which the container mounts, so a failure that only
-// happens in the container can be watched on the host afterwards. Playwright
-// only flushes the file when the app is CLOSED, which every spec does in its
-// afterAll.
-// One directory per spec, because Playwright names the file after a hash and a
-// whole-suite run produces dozens of them.
-const videoDir = () => {
-  let spec = "unknown";
+// E2E_VIDEO records the app window into test-results/videos, one directory per
+// spec (Playwright names the files after a hash, and a whole run makes dozens).
+// test-results is mounted by the container, so a failure that only happens in
+// there can be watched on the host afterwards.
+//
+// Its value is a spec-name filter, because recording EVERYTHING is not viable
+// in the container: the screencast on a software renderer slowed app startup
+// past the 60s beforeAll timeout and took the suite from 9 minutes to 47, with
+// nearly every spec failing before it began. E2E_VIDEO=undraggable-sketch
+// records that spec alone and leaves the rest at full speed; E2E_VIDEO=all
+// records everything, which is only sensible on a machine with a real GPU.
+const currentSpec = () => {
   try {
-    spec = path.basename(test.info().file || "unknown").replace(/\.[^.]+$/, "");
+    return path.basename(test.info().file || "").replace(/\.[^.]+$/, "");
   } catch {
-    // Outside a test (or a Playwright version that won't hand it over here).
+    return ""; // outside a test, or a version that won't hand it over here
   }
-  return path.join(projectRoot, "test-results", "videos", spec);
+};
+
+const videoOptions = () => {
+  const want = process.env.E2E_VIDEO;
+  if (!want) return null;
+  const spec = currentSpec();
+  if (want !== "all" && want !== "1" && !spec.includes(want)) return null;
+  return {
+    recordVideo: {
+      dir: path.join(projectRoot, "test-results", "videos", spec || "unknown"),
+      // Smaller than the window on purpose: the encode is the expensive part,
+      // and this is for watching what happened, not for pixel comparison.
+      size: { width: 1000, height: 640 },
+    },
+  };
 };
 
 export async function launchApp(dataDir) {
@@ -59,9 +76,7 @@ export async function launchApp(dataDir) {
   const app = await electron.launch({
     args,
     env,
-    ...(process.env.E2E_VIDEO
-      ? { recordVideo: { dir: videoDir(), size: { width: 1400, height: 900 } } }
-      : null),
+    ...videoOptions(),
   });
   return app;
 }
