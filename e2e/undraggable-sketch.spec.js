@@ -56,7 +56,7 @@ test.describe.serial("constraint-drifted sketch drags", () => {
     await app?.close();
   });
 
-  test("body-dragging a border line translates the sketch", async () => {
+  test("body-dragging a border line translates the sketch", async ({}, testInfo) => {
     // Calibrate screen↔local with a probe line.
     const size = page.viewportSize() || { width: 1400, height: 868 };
     const p1 = { x: size.width * 0.55, y: size.height * 0.35 };
@@ -114,6 +114,13 @@ test.describe.serial("constraint-drifted sketch drags", () => {
     // Body-drag the top border up by ~3 units.
     const from = toScreen(0, before.y1);
     const to = toScreen(2, before.y1 + 3);
+    // A still of the sketch as the drag is about to start. Taken BEFORE the
+    // pointer moves: anything between the move and the press changes the timing
+    // this test is trying to measure. Video would be better, but the screencast
+    // stops the app starting at all on the container's software renderer, and
+    // the container is the only place this fails.
+    const beforeShot = await page.screenshot();
+
     // Move, let the app process the pointer, then move again before pressing.
     // This test passes ALONE and failed IN THE SUITE, and it passed in the
     // suite as soon as work landed between the move and the press: the app
@@ -143,6 +150,14 @@ test.describe.serial("constraint-drifted sketch drags", () => {
         // Diagnostics AFTER the fact only: anything between the move and the
         // press changes the very timing this is trying to measure, and doing
         // that once already made the failure disappear.
+        await testInfo.attach("drag-before.png", {
+          body: beforeShot,
+          contentType: "image/png",
+        });
+        await testInfo.attach("drag-after.png", {
+          body: await page.screenshot(),
+          contentType: "image/png",
+        });
         console.log(
           "DRAG FAILED",
           JSON.stringify({
