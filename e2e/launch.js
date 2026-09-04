@@ -1,7 +1,7 @@
 // Shared Electron launcher for the e2e suite.  Every launch gets a brand-new
 // SQLite database in a per-run temp directory (via --db-path) so tests start
 // from a consistent empty state and never touch the user's real database.
-import { _electron as electron } from "@playwright/test";
+import { _electron as electron, test } from "@playwright/test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +16,23 @@ const projectRoot = path.resolve(
 // relaunch persistence against the same database.
 export const makeDataDir = () =>
   fs.mkdtempSync(path.join(os.tmpdir(), "purple-cad-e2e-"));
+
+// Set E2E_VIDEO=1 to record the app window. Videos land in
+// test-results/videos, which the container mounts, so a failure that only
+// happens in the container can be watched on the host afterwards. Playwright
+// only flushes the file when the app is CLOSED, which every spec does in its
+// afterAll.
+// One directory per spec, because Playwright names the file after a hash and a
+// whole-suite run produces dozens of them.
+const videoDir = () => {
+  let spec = "unknown";
+  try {
+    spec = path.basename(test.info().file || "unknown").replace(/\.[^.]+$/, "");
+  } catch {
+    // Outside a test (or a Playwright version that won't hand it over here).
+  }
+  return path.join(projectRoot, "test-results", "videos", spec);
+};
 
 export async function launchApp(dataDir) {
   const tmpDir = dataDir || makeDataDir();
@@ -39,6 +56,12 @@ export async function launchApp(dataDir) {
       "--use-angle=swiftshader",
       "--enable-unsafe-swiftshader",
     );
-  const app = await electron.launch({ args, env });
+  const app = await electron.launch({
+    args,
+    env,
+    ...(process.env.E2E_VIDEO
+      ? { recordVideo: { dir: videoDir(), size: { width: 1400, height: 900 } } }
+      : null),
+  });
   return app;
 }
