@@ -51,6 +51,48 @@ const videoOptions = () => {
   };
 };
 
+// E2E_TRACE takes the same spec-name filter and records a Playwright trace: the
+// action timeline with a DOM snapshot (and, unless told otherwise, a screenshot)
+// per step, which the trace viewer replays. Cheaper than video, which cannot run
+// in the container at all -- the screencast stops the app starting.
+//
+// E2E_TRACE_NO_SHOTS=1 drops the screenshots, leaving snapshots and timings.
+// Trace screenshots also come from a screencast, so that is the fallback if
+// tracing turns out to cost as much as video does.
+const tracing = new WeakSet();
+
+export async function startTrace(app) {
+  const want = process.env.E2E_TRACE;
+  if (!want) return;
+  const spec = currentSpec();
+  if (want !== "all" && want !== "1" && !spec.includes(want)) return;
+  await app.context().tracing.start({
+    screenshots: !process.env.E2E_TRACE_NO_SHOTS,
+    snapshots: true,
+    sources: true,
+  });
+  tracing.add(app);
+}
+
+// Stop tracing and attach the zip to the report. Must run BEFORE the app is
+// closed. Safe to call when nothing is being traced.
+export async function saveTrace(app, testInfo, name = "trace") {
+  if (!app || !tracing.has(app)) return null;
+  tracing.delete(app);
+  const file = testInfo.outputPath(`${name}.zip`);
+  await app.context().tracing.stop({ path: file });
+  await testInfo.attach(name, { path: file, contentType: "application/zip" });
+  return file;
+}
+
+// Drop a trace that was started but is not wanted (a passing test), so closing
+// the app does not leave one running.
+export async function discardTrace(app) {
+  if (!app || !tracing.has(app)) return;
+  tracing.delete(app);
+  await app.context().tracing.stop();
+}
+
 export async function launchApp(dataDir) {
   const tmpDir = dataDir || makeDataDir();
   // Strip ELECTRON_RUN_AS_NODE (the test runner's node sets it, which would
@@ -78,5 +120,6 @@ export async function launchApp(dataDir) {
     env,
     ...videoOptions(),
   });
+  await startTrace(app);
   return app;
 }

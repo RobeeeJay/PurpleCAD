@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { test, expect } from "@playwright/test";
-import { launchApp } from "./launch.js";
+import { launchApp, saveTrace, discardTrace } from "./launch.js";
 
 // Regression: this document's sketch is saved in a state that VIOLATES its
 // own midpoint constraints, which used to freeze every drag (the drag solve
@@ -53,67 +53,73 @@ test.describe.serial("constraint-drifted sketch drags", () => {
   });
 
   test.afterAll(async () => {
+    // A trace that was started for a passing run is dropped rather than saved.
+    await discardTrace(app);
     await app?.close();
   });
 
   test("body-dragging a border line translates the sketch", async ({}, testInfo) => {
-    // Calibrate screen↔local with a probe line.
+    // Map sketch-local to screen with the app's OWN projection, rather than
+    // inferring an affine fit from a probe line drawn at two screen points.
+    //
+    // The probe fit assumed the camera ends up square-on to the sketch. When it
+    // settles at an angle instead the fit comes out anisotropic -- measured
+    // 25.98 px per unit across and 111.98 down, a 4.3x difference -- and the
+    // drag target computed from it landed at y = -136, off the top of the
+    // window. The drag then went nowhere and the sketch sat exactly where it
+    // was, which is what every one of this test's intermittent container
+    // failures looked like.
+    //
+    // worldToScreen is what the app itself uses to place things, so it is right
+    // at any camera angle.
     const size = page.viewportSize() || { width: 1400, height: 868 };
-    const p1 = { x: size.width * 0.55, y: size.height * 0.35 };
-    const p2 = { x: size.width * 0.8, y: size.height * 0.7 };
-    const shapesBefore = await page.evaluate(
-      () =>
-        window.__store.getState().items.find((i) => i.id === 1).shapes.length,
-    );
-    await page.evaluate(() =>
-      window.__store.getState().setActiveSketchTool("line"),
-    );
-    await page.mouse.click(p1.x, p1.y);
-    await page.mouse.click(p2.x, p2.y);
-    await page.keyboard.press("Escape");
-    const probe = await page.evaluate(() =>
-      window.__store
-        .getState()
-        .items.find((i) => i.id === 1)
-        .shapes.at(-1),
-    );
-    const a = (p2.x - p1.x) / (probe.x2 - probe.x1);
-    const b = p1.x - a * probe.x1;
-    const c = (p2.y - p1.y) / (probe.y2 - probe.y1);
-    const d = p1.y - c * probe.y1;
-    toScreen = (lx, ly) => ({ x: a * lx + b, y: c * ly + d });
-    await page.evaluate(() => window.__store.getState().undoSketch(1));
-    await page.evaluate(() =>
-      window.__store.getState().setActiveSketchTool(null),
-    );
-    // Wait for the probe line to be GONE from the store and for the renderer to
-    // have rebuilt the sketch overlay before dragging. The drag hit-tests
-    // against that overlay's line meshes, so starting it while the rebuild is
-    // still pending finds nothing under the pointer and the drag never begins
-    // -- the sketch then sits exactly where it was, which is what a failure
-    // here looks like.
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            window.__store.getState().items.find((i) => i.id === 1).shapes
-              .length,
-        ),
-      )
-      .toBe(shapesBefore);
-    await page.evaluate(
-      () =>
-        new Promise((r) =>
-          requestAnimationFrame(() => requestAnimationFrame(r)),
-        ),
-    );
+    toScreen = (lx, ly) =>
+      page.evaluate(
+        ({ lx, ly }) => {
+          const s = window.__store.getState();
+          const sk = s.items.find((i) => i.id === 1);
+          const r = sk.rotation || { x: 0, y: 0, z: 0 };
+          // The sketch plane's own axes in world space (Euler XYZ, matching
+          // the app's convention).
+          const rot = (x, y, z) => {
+            const cx = Math.cos(r.x || 0),
+              sx = Math.sin(r.x || 0);
+            const cy = Math.cos(r.y || 0),
+              sy = Math.sin(r.y || 0);
+            const cz = Math.cos(r.z || 0),
+              sz = Math.sin(r.z || 0);
+            let X = x,
+              Y = y * cx - z * sx,
+              Z = y * sx + z * cx;
+            let X2 = X * cy + Z * sy,
+              Y2 = Y,
+              Z2 = -X * sy + Z * cy;
+            return [X2 * cz - Y2 * sz, X2 * sz + Y2 * cz, Z2];
+          };
+          const [wx, wy, wz] = rot(lx, ly, 0);
+          const p = sk.position || { x: 0, y: 0, z: 0 };
+          return s._cameraControls.worldToScreen(p.x + wx, p.y + wy, p.z + wz);
+        },
+        { lx, ly },
+      );
 
     const before = await page.evaluate(
       () => window.__store.getState().items.find((i) => i.id === 1).shapes[0],
     );
     // Body-drag the top border up by ~3 units.
-    const from = toScreen(0, before.y1);
-    const to = toScreen(2, before.y1 + 3);
+    const from = await toScreen(0, before.y1);
+    const to = await toScreen(2, before.y1 + 3);
+    // Both ends of the drag have to be ON the canvas. When the view has not
+    // settled square-on they are not, and a mouse move to a point outside the
+    // window drags nothing at all -- the failure this test kept hitting.
+    for (const [name, pt] of [
+      ["start", from],
+      ["end", to],
+    ])
+      expect(
+        pt.x > 0 && pt.x < size.width && pt.y > 0 && pt.y < size.height,
+        `drag ${name} ${JSON.stringify(pt)} is off-screen (${size.width}x${size.height})`,
+      ).toBe(true);
     // A still of the sketch as the drag is about to start. Taken BEFORE the
     // pointer moves: anything between the move and the press changes the timing
     // this test is trying to measure. Video would be better, but the screencast
@@ -150,6 +156,10 @@ test.describe.serial("constraint-drifted sketch drags", () => {
         // Diagnostics AFTER the fact only: anything between the move and the
         // press changes the very timing this is trying to measure, and doing
         // that once already made the failure disappear.
+        // The trace replays every action with its timing, which is the thing
+        // stills cannot show: whether the press and the drag were dispatched at
+        // all, and how long each step actually took.
+        await saveTrace(app, testInfo, "drag-trace");
         await testInfo.attach("drag-before.png", {
           body: beforeShot,
           contentType: "image/png",
@@ -229,7 +239,7 @@ test.describe.serial("constraint-drifted sketch drags", () => {
         window.__store.getState().items.find((i) => i.id === 1).shapes,
       ),
     );
-    const p = toScreen(onArc.x, onArc.y);
+    const p = await toScreen(onArc.x, onArc.y);
     await page.mouse.click(p.x, p.y);
     // Nothing got selected (the bridge is inert).
     expect(
@@ -242,7 +252,7 @@ test.describe.serial("constraint-drifted sketch drags", () => {
       }),
     ).toBe(true);
     // Dragging from the arc leaves the geometry untouched.
-    const q = toScreen(onArc.x + 2, onArc.y + 2);
+    const q = await toScreen(onArc.x + 2, onArc.y + 2);
     await page.mouse.move(p.x, p.y);
     await page.mouse.down();
     await page.mouse.move(q.x, q.y, { steps: 8 });
