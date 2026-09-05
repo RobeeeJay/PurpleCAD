@@ -32,16 +32,19 @@ const V = {
   NeckDia: 12,
 };
 const BALL_DIA = 18; // the finial, a primitive rather than a dimension
-const NOTCHES = 8;
-const NOTCH_DIA = 10;
-// The coronet is cut into the crown's TAPER, not its widest point -- notches at
-// the widest point read as holes in the underside of the crown. Height and
-// radius both come from the dimensions, so the ring follows the crown.
-const notchY = (v) => v.CrownY + (v.TotalHeight - v.CrownY) * 0.55;
-const notchR = (v) =>
-  v.CrownDia / 2 +
-  ((notchY(v) - v.CrownY) / (v.TotalHeight - v.CrownY)) *
-    (v.NeckDia / 2 - v.CrownDia / 2);
+const SPIKES = 8;
+const SPIKE_BASE_DIA = 5; // the cone at the bottom of each spike
+const SPIKE_LEN = 14;
+const SPIKE_BALL_DIA = 6;
+// The spikes stand on the crown's TAPER, on a ring partway out from the neck.
+// Their radius and the height of the crown surface under them both come from
+// the crown dimensions, so the coronet follows the crown rather than floating
+// at a number that happens to look right.
+const spikeR = (v) => v.CrownDia / 2 - (v.CrownDia / 2 - v.NeckDia / 2) * 0.45;
+const crownSurfaceY = (v, r) =>
+  v.CrownY +
+  ((v.CrownDia / 2 - r) / (v.CrownDia / 2 - v.NeckDia / 2)) *
+    (v.TotalHeight - v.CrownY);
 
 const setVars = () =>
   page.evaluate(
@@ -134,6 +137,44 @@ const widthBetween = (id, yLoMm, yHiMm) =>
     },
     { n: id, yLoMm, yHiMm },
   );
+
+// Fuse two bodies and return the result. The wait is for an id that did not
+// exist before the call: a consumed input stays in the item list, so "some
+// boolean-kind item" would match immediately and the union would not be awaited
+// at all.
+const unionOf = async (...ids) => {
+  const seen = await page.evaluate(() =>
+    window.__store.getState().items.map((i) => i.id),
+  );
+  await page.evaluate((sel) => {
+    window.__store.getState().startBooleanTool("union");
+    window.__store.setState({ selectedIds: sel });
+  }, ids);
+  const bar = page.locator(".sketch-distance-input-overlay");
+  await expect(bar).toBeVisible();
+  // Selection is captured by an effect, so confirming before the dialog reports
+  // every object would fuse whatever set it had by then.
+  await expect(
+    bar.locator("button", { hasText: new RegExp(`${ids.length} objects`) }),
+  ).toBeVisible();
+  await page.getByTitle("Apply Union").click();
+  const found = () =>
+    page.evaluate(
+      (s) =>
+        window.__store
+          .getState()
+          .items.find(
+            (i) =>
+              !s.includes(i.id) &&
+              i.type === "csg" &&
+              i.geometryData?.positions?.length,
+          )?.id ?? null,
+      seen,
+    );
+  await expect.poll(found, { timeout: 300000 }).not.toBe(null);
+  await settled();
+  return await found();
+};
 
 test.describe.serial("queen", () => {
   test.beforeAll(async () => {
@@ -394,52 +435,7 @@ test.describe.serial("queen", () => {
     );
     await settled();
 
-    const seen = await page.evaluate(() =>
-      window.__store.getState().items.map((i) => i.id),
-    );
-    await page.evaluate((id) => {
-      const s = window.__store.getState();
-      s.startBooleanTool("union");
-      window.__store.setState({ selectedIds: [id, 410] });
-    }, queenId);
-    await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
-    await expect(
-      page.locator(".sketch-distance-input-overlay button", {
-        hasText: /2 objects/,
-      }),
-    ).toBeVisible();
-    await page.getByTitle("Apply Union").click();
-    await expect
-      .poll(
-        () =>
-          page.evaluate(
-            (s) =>
-              window.__store
-                .getState()
-                .items.find(
-                  (i) =>
-                    !s.includes(i.id) &&
-                    i.type === "csg" &&
-                    i.geometryData?.positions?.length,
-                )?.id ?? null,
-            seen,
-          ),
-        { timeout: 300000 },
-      )
-      .not.toBe(null);
-    await settled();
-    queenId = await page.evaluate(
-      (s) =>
-        window.__store
-          .getState()
-          .items.find(
-            (i) =>
-              !s.includes(i.id) &&
-              i.type === "csg" &&
-              i.geometryData?.positions?.length,
-          ).id,
-      seen,
-    );
+    queenId = await unionOf(queenId, 410);
 
     const after = await bbox(queenId);
     // The ball stands proud of the neck, and the piece is no wider for it.
@@ -452,79 +448,91 @@ test.describe.serial("queen", () => {
     ).toBeGreaterThan(V.NeckDia);
   });
 
-  test("a scalloped coronet is cut round the crown", async () => {
+  test("a ring of spikes with balls crowns the piece", async () => {
     test.setTimeout(360_000);
-    const beforeTris = await tris(queenId);
-    const beforeCrown = await widthBetween(queenId, V.CrownY - 2, V.CrownY + 2);
+    const before = await bbox(queenId);
     const body = await worldBox(queenId);
-    const cutterIds = [];
-    for (let i = 0; i < NOTCHES; i++) cutterIds.push(500 + i);
+    const r = spikeR(V);
+    const baseY = crownSurfaceY(V, r) - 1.5; // sunk in, so it fuses cleanly
+
+    // ONE spike -- a cone with a ball on its point -- built and fused first,
+    // because a circular pattern repeats a single object.
     await page.evaluate(
-      ({ body, ids, crownR, crownY, notchDia }) => {
+      ({ body, r, baseY, len, baseDia, ballDia }) => {
         const s = window.__store.getState();
-        // A ring of spheres biting into the crown -- the queen's coronet. A
-        // sphere needs no orientation, so there is nothing to get wrong about
-        // which way each notch faces.
-        ids.forEach((id, i) => {
-          const a = (2 * Math.PI * i) / ids.length;
-          s.addItem({
-            id,
-            name: `Notch ${id}`,
-            type: "sphere",
-            children: [],
-            parentId: null,
-            position: {
-              x: body.axisX + (Math.cos(a) * crownR) / 10,
-              y: body.minY + crownY / 10,
-              z: body.axisZ + (Math.sin(a) * crownR) / 10,
-            },
-            rotation: { x: 0, y: 0, z: 0 },
-            scale: { x: 1, y: 1, z: 1 },
-            dimensions: { radius: notchDia / 20 },
-          });
+        const at = (mm) => body.minY + mm / 10;
+        s.addItem({
+          id: 520,
+          name: "Spike",
+          type: "cone",
+          children: [],
+          parentId: null,
+          // A cone is centred on its own height, so its middle sits half a
+          // length above the crown surface.
+          position: {
+            x: body.axisX + r / 10,
+            y: at(baseY + len / 2),
+            z: body.axisZ,
+          },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+          dimensions: {
+            radiusBottom: baseDia / 20,
+            radiusTop: 0,
+            height: len / 10,
+          },
+        });
+        s.addItem({
+          id: 521,
+          name: "Spike Ball",
+          type: "sphere",
+          children: [],
+          parentId: null,
+          position: {
+            x: body.axisX + r / 10,
+            y: at(baseY + len),
+            z: body.axisZ,
+          },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+          dimensions: { radius: ballDia / 20 },
         });
       },
       {
         body,
-        ids: cutterIds,
-        crownR: notchR(V),
-        crownY: notchY(V),
-        notchDia: NOTCH_DIA,
+        r,
+        baseY,
+        len: SPIKE_LEN,
+        baseDia: SPIKE_BASE_DIA,
+        ballDia: SPIKE_BALL_DIA,
       },
     );
     await settled();
 
+    const spikeId = await unionOf(520, 521);
+
+    // Repeat it round the axis with the circular pattern tool -- one object,
+    // rotated, not eight objects placed by hand.
     const seen = await page.evaluate(() =>
       window.__store.getState().items.map((i) => i.id),
     );
-    // One difference with the whole ring as cutters, not eight in a row. Cut is
-    // a two-set pick -- the object to cut, THEN the cutters -- and choosing the
-    // object clears the selection ready for the second set, so the cutters have
-    // to be picked after that rather than all in one go.
-    await page.evaluate((id) => {
-      const s = window.__store.getState();
-      s.startBooleanTool("difference");
-      window.__store.setState({ selectedIds: [id] });
-    }, queenId);
-    await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
-    await expect(
-      page.locator(".sketch-distance-input-overlay button", {
-        hasText: /Object to cut: /,
-      }),
-    ).toBeVisible();
     await page.evaluate(
-      (ids) => window.__store.setState({ selectedIds: ids }),
-      cutterIds,
+      ({ spikeId, body }) => {
+        const s = window.__store.getState();
+        s.startPattern3d({ patternType: "circular", sourceId: spikeId });
+        s.updatePattern3d({
+          axis: {
+            origin: { x: body.axisX, y: body.minY, z: body.axisZ },
+            dir: { x: 0, y: 1, z: 0 },
+          },
+        });
+      },
+      { spikeId, body },
     );
-    // Wait for the dialog to report the whole ring before confirming: the
-    // selection is captured by an effect, so confirming early would cut with
-    // whatever set it had by then.
-    await expect(
-      page.locator(".sketch-distance-input-overlay button", {
-        hasText: new RegExp(`Cutting objects: ${NOTCHES} objects`),
-      }),
-    ).toBeVisible();
-    await page.getByTitle("Apply Cut").click();
+    const bar = page.locator(".sketch-distance-input-overlay");
+    await expect(bar).toBeVisible();
+    await bar.locator("input").first().fill(String(SPIKES));
+    await page.getByTitle("Create the pattern").click();
     await expect
       .poll(
         () =>
@@ -535,7 +543,7 @@ test.describe.serial("queen", () => {
                 .items.find(
                   (i) =>
                     !s.includes(i.id) &&
-                    i.type === "csg" &&
+                    i.regenerator?.kind === "pattern3d" &&
                     i.geometryData?.positions?.length,
                 )?.id ?? null,
             seen,
@@ -544,32 +552,105 @@ test.describe.serial("queen", () => {
       )
       .not.toBe(null);
     await settled();
-    queenId = await page.evaluate(
+    const ringId = await page.evaluate(
       (s) =>
         window.__store
           .getState()
           .items.find(
-            (i) =>
-              !s.includes(i.id) &&
-              i.type === "csg" &&
-              i.geometryData?.positions?.length,
+            (i) => !s.includes(i.id) && i.regenerator?.kind === "pattern3d",
           ).id,
       seen,
     );
+    const ring = await page.evaluate(
+      (id) => window.__store.getState().items.find((i) => i.id === id),
+      ringId,
+    );
+    expect(ring.regenerator.patternType).toBe("circular");
+    expect(ring.regenerator.count).toBe(SPIKES);
 
-    expect(await tris(queenId)).toBeGreaterThan(beforeTris); // the scallops
-    // The crown is bitten into: its widest point pulls in, but the piece keeps
-    // its base, so this is a notch and not a shrink.
-    const afterCrown = await widthBetween(
-      queenId,
-      notchY(V) - 2,
-      notchY(V) + 2,
+    // The pattern holds the COPIES; the object it was made from stays a
+    // separate body, so the coronet is the ring plus the original spike.
+    queenId = await unionOf(queenId, spikeId, ringId);
+
+    const after = await bbox(queenId);
+    // The spikes stand above the crown, and the finial still tops the piece.
+    expect(after.h).toBeGreaterThan(before.h - 0.5);
+    // EIGHT of them, evenly spaced. Rather than counting clusters of vertices
+    // -- which fragments or merges depending on how the cones happen to be
+    // tessellated -- ask the direct question at each angle: is there material
+    // standing proud of the crown where a spike belongs, and none in the gaps
+    // between them? Measured partway up the CONES, where they are separate;
+    // at the balls they are wide enough to touch.
+    const coronet = await page.evaluate(
+      ({ id, yMm, crown, spikes }) => {
+        const it = window.__store.getState().items.find((i) => i.id === id);
+        const p = it.geometryData.positions;
+        let base = Infinity;
+        for (let i = 1; i < p.length; i += 3) base = Math.min(base, p[i]);
+        let loX = 1e9,
+          hiX = -1e9,
+          loZ = 1e9,
+          hiZ = -1e9;
+        for (let i = 0; i < p.length; i += 3) {
+          loX = Math.min(loX, p[i]);
+          hiX = Math.max(hiX, p[i]);
+          loZ = Math.min(loZ, p[i + 2]);
+          hiZ = Math.max(hiZ, p[i + 2]);
+        }
+        const cx = (loX + hiX) / 2,
+          cz = (loZ + hiZ) / 2;
+        const step = 360 / spikes;
+        const proud = (deg, halfWidth) => {
+          let n = 0;
+          for (let i = 0; i < p.length; i += 3) {
+            const y = (p[i + 1] - base) * 10;
+            if (Math.abs(y - yMm) > 2.5) continue;
+            const rad = Math.hypot(p[i] - cx, p[i + 2] - cz) * 10;
+            // The crown's own radius at THIS vertex's height, not at the middle
+            // of the band: the crown is wider lower down, and using one radius
+            // for the whole band counts crown surface as spike material.
+            const crownHere =
+              crown.dia / 2 -
+              ((y - crown.y) / (crown.top - crown.y)) *
+                (crown.dia / 2 - crown.neck / 2);
+            if (rad < crownHere + 0.7) continue;
+            let d =
+              ((Math.atan2(p[i + 2] - cz, p[i] - cx) * 180) / Math.PI - deg) %
+              360;
+            if (d > 180) d -= 360;
+            if (d < -180) d += 360;
+            if (Math.abs(d) <= halfWidth) n++;
+          }
+          return n;
+        };
+        const at = [];
+        const between = [];
+        for (let k = 0; k < spikes; k++) {
+          at.push(proud(k * step, step / 4));
+          between.push(proud(k * step + step / 2, step / 4));
+        }
+        return { at, between };
+      },
+      {
+        id: queenId,
+        yMm: baseY + SPIKE_LEN * 0.45,
+        crown: {
+          dia: V.CrownDia,
+          neck: V.NeckDia,
+          y: V.CrownY,
+          top: V.TotalHeight,
+        },
+        spikes: SPIKES,
+      },
     );
-    expect(afterCrown).toBeLessThan(beforeCrown);
-    expect(await widthBetween(queenId, 0, V.BaseHeight)).toBeCloseTo(
-      V.BaseDia,
-      -1,
-    );
+    expect(
+      coronet.at.filter((n) => n > 0).length,
+      `spikes found at ${JSON.stringify(coronet.at)}`,
+    ).toBe(SPIKES);
+    expect(
+      coronet.between.filter((n) => n === 0).length,
+      `gaps between spikes: ${JSON.stringify(coronet.between)}`,
+    ).toBe(SPIKES);
   });
 
   test("changing the dimensions re-cuts the piece", async () => {
