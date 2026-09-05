@@ -10,7 +10,7 @@
 // Vulkan device gives up, and CONTEXT_LOST_WEBGL blanks the whole canvas —
 // background included.  That is a hardware limit, not a defect, so the pixel
 // assertion skips there rather than reporting a failure every run.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import fs from "node:fs";
 let app;

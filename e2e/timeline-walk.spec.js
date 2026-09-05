@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import { assertDocumentIntegrity } from "./integrity.js";
 import fs from "node:fs";

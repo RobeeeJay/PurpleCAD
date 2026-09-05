@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 // Distance constraint between two PARALLEL lines (sharing a horizontal /

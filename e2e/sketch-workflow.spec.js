@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 // The 2D sketch workflow with REAL mouse input: enter sketch mode, draw a

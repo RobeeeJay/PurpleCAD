@@ -4,7 +4,7 @@
 // Ends by saving test-results/parts/trophy.pcad and reopening it (see
 // e2e/exportPart.js) -- open it in PurpleCAD. Dimension assertions cannot tell
 // a trophy from a lamp.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import { exportPartPcad, importPartPcad } from "./exportPart.js";
 

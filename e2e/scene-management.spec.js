@@ -3,7 +3,7 @@
 // mostly store-level behaviours with a visible consequence in the tree or the
 // viewport, so each check pairs the state change with what the user sees.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 let app;

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 // Undo/redo through the real keyboard wiring (App.jsx's Ctrl/Cmd+Z handler),

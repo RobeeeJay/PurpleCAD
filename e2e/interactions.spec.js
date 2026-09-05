@@ -4,7 +4,7 @@
 // upgrade would silently break input).  NOTE: the canvas spans the full window
 // with the panels floating above it, so interaction points must be in the
 // clear region (right of ~40% width).
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 let app;
 let page;

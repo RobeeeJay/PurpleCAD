@@ -2,7 +2,7 @@
 // This is a UI-only surface, so nothing else in the suite would notice a hint
 // that stopped reaching the DOM -- e.g. a `hint` prop the shared Field no
 // longer forwards, which is silent in the app and invisible to a unit test.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 let app;

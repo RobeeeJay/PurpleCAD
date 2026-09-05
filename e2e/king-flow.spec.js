@@ -14,7 +14,7 @@
 // Ends by saving test-results/parts/king.pcad and reopening it (see
 // e2e/exportPart.js) -- open it in PurpleCAD. Dimension assertions cannot tell
 // a king from a fence post.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import { exportPartPcad, importPartPcad } from "./exportPart.js";
 

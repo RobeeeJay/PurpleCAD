@@ -7,7 +7,7 @@
 // true pivot (the ray isn't the rotation axis) and lands on a slightly
 // different point every time, at a magnitude that scales with distance —
 // "rotate, pause half a second, rotate again jumps the view".
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import fs from "node:fs";
 

@@ -3,7 +3,7 @@
 // had no test of any kind — this drives the real store phase machine and the
 // real OCC revolve through the bridge.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 let app;

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 // Full push/pull lifecycle against the real app: create → push/pull (overlay
 // Confirm) → edit distance (Timeline + dialog) → retarget (Timeline + overlay).

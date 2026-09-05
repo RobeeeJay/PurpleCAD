@@ -9,7 +9,7 @@
 // sketch's constraints pointing at the old indices, silently re-binding every
 // later constraint to the wrong shape.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import { assertDocumentIntegrity } from "./integrity.js";
 

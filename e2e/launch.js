@@ -93,6 +93,10 @@ export async function discardTrace(app) {
   await app.context().tracing.stop();
 }
 
+// Every launched app, so a failing test can be photographed without each spec
+// having to wire that up. Entries drop out when the app closes.
+export const liveApps = new Set();
+
 export async function launchApp(dataDir) {
   const tmpDir = dataDir || makeDataDir();
   // Strip ELECTRON_RUN_AS_NODE (the test runner's node sets it, which would
@@ -121,5 +125,7 @@ export async function launchApp(dataDir) {
     ...videoOptions(),
   });
   await startTrace(app);
+  liveApps.add(app);
+  app.on("close", () => liveApps.delete(app));
   return app;
 }

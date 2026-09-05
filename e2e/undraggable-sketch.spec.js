@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp, saveTrace, discardTrace } from "./launch.js";
 
 // Regression: this document's sketch is saved in a state that VIOLATES its

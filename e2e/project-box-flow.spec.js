@@ -46,7 +46,7 @@
 // "performCsg: Error". Drilling before the union failed every run; drilling
 // after it passes every run. That is also the order a real part is made in.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import { exportPartPcad, importPartPcad } from "./exportPart.js";
 

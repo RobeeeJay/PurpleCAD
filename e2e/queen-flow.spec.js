@@ -9,7 +9,7 @@
 // Ends by saving test-results/parts/queen.pcad and reopening it (see
 // e2e/exportPart.js) -- open it in PurpleCAD. Dimension assertions cannot tell
 // a queen from a bollard.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import { exportPartPcad, importPartPcad } from "./exportPart.js";
 

@@ -11,7 +11,7 @@
 //
 // Entity points are [x,y,z] arrays in world scene units; the readout is mm
 // (MM_PER_UNIT = 10), so a 2-unit edge reads "20.00 mm".
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 let app;

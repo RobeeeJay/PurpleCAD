@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 // Visual regression on the WebGL viewport.  WebGL output varies by GPU/driver/
 // OS, so the committed baseline is environment-specific: regenerate with

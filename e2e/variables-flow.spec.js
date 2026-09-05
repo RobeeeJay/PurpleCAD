@@ -3,7 +3,7 @@
 // of variables and it crosses the store → regen → OCC boundary, so a unit test
 // can't stand in for it.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 let app;
