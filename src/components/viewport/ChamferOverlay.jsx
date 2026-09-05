@@ -12,7 +12,7 @@
 import React, { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
-import { chamferOrFilletItem } from "../../three/occClient.js";
+import { chamferOrFilletItem, withCommitGuard } from "../../three/occClient.js";
 import { activePrecision } from "../../three/resolution.js";
 import {
   buildChamferSourceAndSubGeo,
@@ -148,17 +148,24 @@ export default function ChamferOverlay() {
         segments,
         printPrecision,
       });
+      // Guarded: this overlay previews on a debounce, and a preview that
+      // supersedes mid-commit calls cancelOcc, which aborts the REAL op. The
+      // chamfer then comes back empty and the dialog just sits there -- the
+      // medal's bevel timed out that way in the container, dialog still open
+      // and no chamfer step in the timeline.
       const result =
         takeChamferPreview(key) ??
-        (await chamferOrFilletItem({
-          source,
-          subGeo,
-          amount,
-          angleRad,
-          segments,
-          allItems: items,
-          printPrecision,
-        }));
+        (await withCommitGuard(() =>
+          chamferOrFilletItem({
+            source,
+            subGeo,
+            amount,
+            angleRad,
+            segments,
+            allItems: items,
+            printPrecision,
+          }),
+        ));
       if (!result) {
         // A null result from a user-cancelled op isn't a failure — stay quiet.
         if (!useStore.getState().operationCancelled)

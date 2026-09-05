@@ -9,7 +9,7 @@ import {
   barBtn,
   pickBtn,
 } from "./viewport/overlayBar.js";
-import { pattern3dItem } from "../three/occClient.js";
+import { pattern3dItem, withCommitGuard } from "../three/occClient.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
@@ -241,13 +241,17 @@ const Pattern3dDialog = () => {
     if (!args) return;
     let result;
     try {
-      result = await pattern3dItem({
-        patternType: tool.patternType,
-        sourceId: tool.sourceId,
-        params: args.params,
-        allItems: items,
-        printPrecision,
-      });
+      // Guarded like the other previewing tools: a superseding preview calls
+      // cancelOcc, which would abort this commit and hand back nothing.
+      result = await withCommitGuard(() =>
+        pattern3dItem({
+          patternType: tool.patternType,
+          sourceId: tool.sourceId,
+          params: args.params,
+          allItems: items,
+          printPrecision,
+        }),
+      );
     } catch (err) {
       alert("Pattern failed: " + err.message);
       return;

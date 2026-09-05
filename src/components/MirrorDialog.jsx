@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { useStore } from "../store";
 import { useDebouncedPreview, useEscapeKey } from "./inputs.jsx";
 import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";
-import { pattern3dItem } from "../three/occClient.js";
+import { pattern3dItem, withCommitGuard } from "../three/occClient.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 
@@ -77,16 +77,20 @@ const MirrorDialog = () => {
     );
     const out = [];
     for (const sourceId of objectIds) {
-      const result = await pattern3dItem({
-        patternType: "mirror",
-        sourceId,
-        params: {
-          origin: plane.position,
-          normal: { x: nv.x, y: nv.y, z: nv.z },
-        },
-        allItems: items,
-        printPrecision,
-      });
+      // Guarded like the other previewing tools: a superseding preview calls
+      // cancelOcc, which would abort this commit and hand back nothing.
+      const result = await withCommitGuard(() =>
+        pattern3dItem({
+          patternType: "mirror",
+          sourceId,
+          params: {
+            origin: plane.position,
+            normal: { x: nv.x, y: nv.y, z: nv.z },
+          },
+          allItems: items,
+          printPrecision,
+        }),
+      );
       if (result) out.push({ sourceId, result });
     }
     return out;
