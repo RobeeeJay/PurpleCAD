@@ -134,6 +134,25 @@ const waitBbox = async (id) => {
   return bbox(id);
 };
 
+// Wait for a body to actually REACH a size, in mm, on the named axis.
+//
+// A variable change kicks off a DEBOUNCED recalc, so a fixed pause followed by
+// settled() proves nothing: if the rebuild has not started yet, the
+// "Recalculating" indicator was never shown, settled() returns at once, and the
+// next read gets the OLD geometry -- which is a bbox like any other, so waiting
+// for one to merely EXIST cannot tell the difference. Under container load that
+// read the box at its previous 60mm and failed the rebuild assertion.
+//
+// If the rebuild never happens this still fails, with the stale measurement.
+const waitBboxAxis = async (id, axis, wantMm) => {
+  await expect
+    .poll(() => bbox(id).then((b) => (b ? Math.round(b[axis]) : null)), {
+      timeout: 120000,
+    })
+    .toBe(Math.round(wantMm));
+  return bbox(id);
+};
+
 const tris = (id) =>
   page.evaluate(
     (n) =>
@@ -765,7 +784,7 @@ test.describe.serial("parametric project box", () => {
     await page.waitForTimeout(600);
     await settled();
 
-    const base = await waitBbox(boxBaseId);
+    const base = await waitBboxAxis(boxBaseId, "w", P1.BoxWidth);
     expect(base.w).toBeCloseTo(P1.BoxWidth, 0);
     expect(base.d).toBeCloseTo(P1.BoxDepth, 0);
     expect(base.h).toBeCloseTo(P1.BoxHeight, 0); // unchanged here
@@ -843,7 +862,7 @@ test.describe.serial("parametric project box", () => {
     await page.waitForTimeout(600);
     await settled();
 
-    const base = await waitBbox(boxBaseId);
+    const base = await waitBboxAxis(boxBaseId, "h", 60);
     expect(base.h).toBeCloseTo(60, 0);
 
     // The lid stayed at the old wall top. Sketch positions are plain numbers,
