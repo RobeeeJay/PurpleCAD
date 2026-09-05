@@ -474,6 +474,7 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
 
   // An imported solid is a csg item carrying only its mesh (no recipe).  Sew a
   // solid from that mesh so it can take part in booleans/chamfers.
+  //
   if (item.type === "csg" && !item.regenerator && item.geometryData) {
     const g = item.geometryData;
     if (!g.positions || g.positions.length < 9) return null;
@@ -485,6 +486,73 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
 
   if (item.type === "csg" && item.regenerator) {
     const r = item.regenerator;
+
+    // A 3D PATTERN rebuilds its copies in OCC when its source can be rebuilt.
+    // Sewing the baked mesh instead (the fallback below) produces a shell whose
+    // face count is its TRIANGLE count -- a ring of eight spikes came to 8.4k
+    // faces and the fuse onto the body had not finished after five minutes.
+    // Replicating the source SOLID keeps a handful of faces per copy.
+    //
+    // patternInstances returns the COPIES only: the object the pattern was made
+    // from stays its own item, so the recipe's geometry is the copies alone and
+    // the rebuild must match it.
+    if (r.kind === "pattern3d") {
+      const src = (allItems || []).find((i) => i.id === r.sourceId);
+      const params =
+        r.patternType === "circular"
+          ? {
+              origin: r.axisOrigin,
+              axis: r.axisDir,
+              count: r.count,
+              angleRad: r.angleRad,
+              axialOffset: r.axialOffset,
+            }
+          : r;
+      const srcWorld = src ? buildWorldSolid(src, allItems, precision) : null;
+      if (srcWorld) {
+        let ids;
+        try {
+          ids = patternInstances(srcWorld, r.patternType, params);
+        } finally {
+          occ.releaseShape(srcWorld);
+        }
+        if (ids && ids.length) {
+          let worldId;
+          if (ids.length === 1) worldId = ids[0];
+          else {
+            try {
+              worldId = occ.booleanOp(ids, "union");
+            } finally {
+              ids.forEach((id) => occ.releaseShape(id));
+            }
+          }
+          if (worldId) {
+            // The stored mesh is centred on the pattern's own centre, so the
+            // rebuild has to be shifted the same way. centerOffset is {cx,cy,cz};
+            // a position is {x,y,z}.
+            const c = r.centerOffset;
+            const ox = c ? (c.cx ?? 0) : (item.position?.x ?? 0);
+            const oy = c ? (c.cy ?? 0) : (item.position?.y ?? 0);
+            const oz = c ? (c.cz ?? 0) : (item.position?.z ?? 0);
+            const localId = occ.transformShape(worldId, -ox, -oy, -oz, 0, 0, 0);
+            occ.releaseShape(worldId);
+            return localId;
+          }
+        }
+      }
+      // No rebuildable source (an imported mesh, say): sew the baked mesh
+      // instead. That shell's face count is its triangle count, so a dense
+      // pattern can exceed the boolean caps and be refused -- which is why the
+      // rebuild above is tried first.
+      const g = item.geometryData;
+      if (g && g.positions && g.positions.length >= 9) {
+        const positions = new Float64Array(g.positions);
+        const indices =
+          g.indices && g.indices.length ? new Uint32Array(g.indices) : null;
+        return occ.makeSolidFromMesh(positions, indices);
+      }
+      return null;
+    }
 
     if (r.kind === "chamfer") {
       const sourceId = buildItemShapeLocal(r.source, allItems, precision);
