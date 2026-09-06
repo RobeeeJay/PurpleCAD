@@ -170,3 +170,10 @@ export function variablesToMap(variables) {
   }
   return m;
 }
+
+// Whether a stored dimension value is a formula / variable reference rather
+// than a bare number.  A bare-number STRING ("10.5") is not a formula -- it is
+// how the older documents stored plain values.
+export function isFormulaValue(v) {
+  return typeof v === "string" && !/^-?\d+(\.\d+)?$/.test(v.trim());
+}

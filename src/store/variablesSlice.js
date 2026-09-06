@@ -14,6 +14,7 @@ import { applyRectangularPatternConstraints } from "../three/sketchRectangularPa
 import { applyMirrorConstraints } from "../three/sketchMirror.js";
 import { applyCircularPatternConstraints } from "../three/sketchCircularPattern.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
+import { conflictingDimensions } from "../three/sketchDimensionConflicts.js";
 
 // Whether two shape arrays differ beyond floating-point noise.
 const shapesDiffer = (a, b) => {
@@ -37,6 +38,12 @@ import {
 export const variablesInitial = {
   variables: loadVariables(),
   variablesDialogOpen: false,
+  // Constraint OBJECTS (not indices) whose variable-driven value the geometry
+  // refused to take on the last variable change, so the sketch view can show
+  // them in red.  Identity rather than an index because editing a constraint
+  // replaces the object, which clears the flag by itself -- an index would
+  // survive an insert or delete and point at some other dimension.
+  dimensionConflicts: new Set(),
 };
 
 export const createVariablesSlice = (set) => ({
@@ -52,6 +59,9 @@ export const createVariablesSlice = (set) => ({
       // returns.
       const newVarsMap = variablesToMap(variables);
       let anyFailed = false;
+      // Rebuilt from scratch on every variable change, so a dimension that now
+      // solves stops being flagged without any separate clearing pass.
+      const dimensionConflicts = new Set();
       // Re-cut chamfer/bevel corners whose size is a formula so they track
       // the new variable values (the bridge geometry is shape-level — the
       // constraint solver doesn't drive it).
@@ -160,7 +170,18 @@ export const createVariablesSlice = (set) => ({
             (shapesDiffer(orig, final) || finalConstraints !== item.constraints)
           )
             return { ...item, shapes: final, constraints: finalConstraints };
-          if (!ok) anyFailed = true;
+          if (!ok) {
+            anyFailed = true;
+            // Attribute the failure: the sketch keeps its OLD shapes, so the
+            // dimensions to highlight are the variable-driven ones that those
+            // shapes don't satisfy under the NEW values.
+            for (const c of conflictingDimensions(
+              orig,
+              item.constraints,
+              newVarsMap,
+            ))
+              dimensionConflicts.add(c);
+          }
           return item;
         }
         // Booleans and chamfers cache their tessellated `geometryData`
@@ -216,12 +237,13 @@ export const createVariablesSlice = (set) => ({
       return {
         ...withUndo(state),
         variables,
+        dimensionConflicts,
         items: updatedItems,
         history: withOrphanFlags(newHistory),
         ...(anyFailed
           ? {
               notification:
-                "Some sketch dimensions couldn't update to the new value without breaking a constraint",
+                "Some sketch dimensions couldn't update to the new value without breaking a constraint - they are highlighted in red",
             }
           : {}),
       };

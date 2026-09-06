@@ -10,12 +10,15 @@ import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
 import { useStore } from "../../store";
+import { isFormulaValue, variablesToMap } from "../../utils/formulas.js";
+import { conflictingDimensions } from "../sketchDimensionConflicts.js";
 import {
   ANGLE_LABEL_TEXT,
   CONSTRAINT_ANGLE_COLOR,
   CONSTRAINT_COINCIDENT_COLOR,
   CONSTRAINT_HORIZONTAL_COLOR,
   CONSTRAINT_ON_LINE_COLOR,
+  dimConflictColorFor,
   dimValueColorFor,
   sketchMirrorColorFor,
   sketchCircularPatternColorFor,
@@ -23,10 +26,10 @@ import {
   toCssHex,
 } from "../theme.js";
 
-// Whether a stored constraint value is a formula/variable (not a bare number).
-export function isFormulaValue(v) {
-  return typeof v === "string" && !/^-?\d+(\.\d+)?$/.test(v.trim());
-}
+// Re-exported so the sketch-overlay modules keep importing it from here; it
+// lives in utils/formulas.js because the store needs it too and must not pull
+// in a THREE module.
+export { isFormulaValue };
 
 // A dimension value label sprite: transparent background, value-only text.  A
 // formula/variable-derived value shows only the resolved value, prefixed with
@@ -87,6 +90,20 @@ export function addConstraintIconsToGroup(
     .sub(toWorld(0, 0, 0))
     .normalize();
   const theme = useStore.getState().theme;
+  // Dimensions a variable change could not apply are drawn in red.  The flag
+  // says which ones were refused; the residual is re-checked here against the
+  // LIVE shapes, so a dimension that has since been satisfied (by a drag, or a
+  // later variable edit) stops being red with nothing having to clear it.
+  const flagged = useStore.getState().dimensionConflicts;
+  const conflicting = flagged?.size
+    ? new Set(
+        conflictingDimensions(
+          shapes,
+          constraints.filter((c) => flagged.has(c)),
+          variablesToMap(useStore.getState().variables),
+        ),
+      )
+    : null;
   // Offset constraints created together share an offsetGroup; render only one
   // editable dimension label per group (they all carry the same distance).
   const seenOffsetGroups = new Set();
@@ -108,6 +125,12 @@ export function addConstraintIconsToGroup(
       c.type === "pointLineDistance" ||
       c.type === "offset";
     if (isDimensionType && !showDimensions) return;
+    // Every annotation of a conflicting dimension turns red together -- label,
+    // dimension line and its ticks -- so the whole measurement reads as wrong
+    // rather than just its number.
+    const dimColor = conflicting?.has(c)
+      ? dimConflictColorFor(theme)
+      : dimValueColorFor(theme);
     if (!isDimensionType && !showConstraints) return;
     const tag = (obj, iconLocalPos, shapeIndices, color) => {
       obj.userData.isConstraintObj = true;
@@ -149,7 +172,7 @@ export function addConstraintIconsToGroup(
       const l = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([p0, p1]),
         new THREE.LineBasicMaterial({
-          color: dimValueColorFor(theme),
+          color: dimColor,
           depthTest: false,
         }),
       );
@@ -168,7 +191,7 @@ export function addConstraintIconsToGroup(
           tip.clone().addScaledVector(perp, -TICK),
         ]),
         new THREE.LineBasicMaterial({
-          color: dimValueColorFor(theme),
+          color: dimColor,
           depthTest: false,
         }),
       );
@@ -251,7 +274,7 @@ export function addConstraintIconsToGroup(
           leader,
           { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
           distShapes,
-          dimValueColorFor(theme),
+          dimColor,
         );
         addDimTick(wB, perpU);
         labelPos = wLineTo.clone().addScaledVector(dir, 0.45);
@@ -284,7 +307,7 @@ export function addConstraintIconsToGroup(
             y: (posA.y + posB.y) / 2 + lpy * OFF,
           },
           distShapes,
-          dimValueColorFor(theme),
+          dimColor,
         );
         addDimTick(A2, perpU);
         addDimTick(B2, perpU);
@@ -300,6 +323,7 @@ export function addConstraintIconsToGroup(
       const sprite = makeDimLabelSprite(`${isRadius ? "R " : ""}${valueMm}mm`, {
         theme,
         isFormula: isFormulaValue(c.distance),
+        color: toCssHex(dimColor),
       });
       sprite.position.copy(labelPos);
       addTagged(sprite);
@@ -359,7 +383,7 @@ export function addConstraintIconsToGroup(
             y: (pt.y + foot.y) / 2 + lpy * OFF,
           },
           [c.pointShapeIdx, c.lineShapeIdx],
-          dimValueColorFor(theme),
+          dimColor,
         );
         addDimTick(A2, perpU);
         addDimTick(B2, perpU);
@@ -369,6 +393,7 @@ export function addConstraintIconsToGroup(
       const sprite = makeDimLabelSprite(`${valueMm}mm`, {
         theme,
         isFormula: isFormulaValue(c.distance),
+        color: toCssHex(dimColor),
       });
       sprite.position.copy(labelPos);
       addTagged(sprite);
@@ -746,12 +771,7 @@ export function addConstraintIconsToGroup(
           y: (aLocal.y + bLocal.y) / 2,
         };
         // The dimension line is a double-click hotspot too.
-        tag(
-          dimLine,
-          labelLocal,
-          [c.shapeIdx, c.origIdx],
-          dimValueColorFor(theme),
-        );
+        tag(dimLine, labelLocal, [c.shapeIdx, c.origIdx], dimColor);
       };
       if (nl.type === "circle") {
         // Concentric offset: a radial dimension from the original circle's edge
@@ -789,11 +809,12 @@ export function addConstraintIconsToGroup(
       const sprite = makeDimLabelSprite(`${valueMm}mm`, {
         theme,
         isFormula: isFormulaValue(c.distance),
+        color: toCssHex(dimColor),
       });
       sprite.position.copy(toWorld(labelLocal.x, labelLocal.y, 0.006));
       // Tag with the icon's local position so the double-click hit-test can
       // find it and open the edit overlay.
-      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimValueColorFor(theme));
+      tag(sprite, labelLocal, [c.shapeIdx, c.origIdx], dimColor);
       group.add(sprite);
     } else if (c.type === "mirror") {
       // Small fixed-size X glyph midway between the original's and the

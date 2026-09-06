@@ -511,6 +511,21 @@ export function attachCameraControls(ctx) {
   };
   // World position + triangle/vertex counts of a selected object's live mesh,
   // for the status line.
+  // The colours the open sketch's constraint annotations are currently drawn
+  // in, as { [constraintIdx]: ["#rrggbb", ...] } — used by the e2e suite to
+  // see that a dimension is highlighted.  Nothing else can: the annotations
+  // live in the three.js scene, and a label's text is baked into a canvas
+  // texture rather than sitting in the DOM.
+  controls.sketchAnnotationColors = () => {
+    const out = {};
+    sketchShapesGroupRef.current?.traverse((o) => {
+      const idx = o.userData?.constraintIdx;
+      if (idx == null || !o.material?.color) return;
+      (out[idx] ??= []).push("#" + o.material.color.getHexString());
+    });
+    return out;
+  };
+
   // Project a world-space point to CSS pixel coordinates in the canvas —
   // used by the e2e suite to aim REAL mouse clicks at faces/edges (raycast
   // targets aren't DOM-addressable any other way).

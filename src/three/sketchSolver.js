@@ -366,6 +366,17 @@ function solveLinear(A, b) {
   return x;
 }
 
+// How far a configuration is from satisfying ONE constraint, in scene units.
+// Evaluating a constraint on its own is what lets a failed solve be attributed
+// to the individual dimensions that could not be met -- the solver's own
+// residual vector is a flat list whose entries-per-constraint vary by type.
+export function constraintResidual(shapes, constraint, variables = null) {
+  let m = 0;
+  for (const v of residuals(shapes, [constraint], variables))
+    m = Math.max(m, Math.abs(v));
+  return m;
+}
+
 // Virtual-corner solve.  Chamfers and fillets are DERIVED, applied after the
 // constraints resolve: the solver never sees them.  When a sketch has corner
 // bridges, the system is solved on its SHARP polygon — each corner's legs

@@ -33,6 +33,7 @@ const PCAD = {
     dimExtension: 0xc4c2b8,
     dimValue: 0xd4a33f,
     dimDriven: 0xba7517,
+    dimConflict: 0xff5566,
   },
   light: {
     bg: 0xf5f3ff,
@@ -59,6 +60,7 @@ const PCAD = {
     dimExtension: 0xafa9ec,
     dimValue: 0x633806,
     dimDriven: 0x854f0b,
+    dimConflict: 0xcc2233,
   },
 };
 
@@ -107,6 +109,9 @@ export const dimLineColorFor = (theme) => pcad("dimLine", theme);
 export const dimExtensionColorFor = (theme) => pcad("dimExtension", theme);
 export const dimValueColorFor = (theme) => pcad("dimValue", theme);
 export const dimDrivenColorFor = (theme) => pcad("dimDriven", theme);
+// A dimension whose variable resolves to a value the geometry cannot take --
+// red, so it stands apart from every other annotation colour in the sketch.
+export const dimConflictColorFor = (theme) => pcad("dimConflict", theme);
 
 // Canvas label background for dimension/constraint annotations — the
 // surface color from the same palette, semi-transparent.
