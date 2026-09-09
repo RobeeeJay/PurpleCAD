@@ -5,9 +5,9 @@
 // the top of the scale means "at or past yield".
 //
 // The peak is quoted separately, and deliberately not used to scale anything:
-// the largest value in the model sits at a fixed edge, where a fully held
-// re-entrant corner is a stress singularity whose computed value climbs
-// without limit as the mesh is refined.
+// it sits at the fixture, which is where a coarse grid resolves stress worst,
+// so a scale built on it would move with the Detail setting rather than with
+// the part.
 
 import React from "react";
 import { useStore } from "../../store";

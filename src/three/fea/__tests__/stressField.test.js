@@ -257,35 +257,49 @@ describe("stress on a cantilever, through the mesh path", () => {
   );
 
   it(
-    "keeps climbing at the built-in corner however fine the mesh",
+    "converges on beam theory at the built-in end as the mesh is refined",
     () => {
-      // NOT a defect to fix: a fully fixed re-entrant edge is a stress
-      // singularity, infinite in the continuum, so the computed value rises
-      // without limit as the elements shrink (measured 0.68, 1.14, 1.86, 3.40
-      // of beam theory at four resolutions).  Pinned here so the peak reading
-      // near a fixture is never quoted as the part's real stress.
+      // CORRECTION: this test previously asserted the opposite -- that the
+      // value here climbs without limit, a fixed re-entrant edge being a
+      // stress singularity. That was an artefact of a bug, not a property of
+      // the model: loads and fixtures were being placed half a voxel off, and
+      // the reading really did run away (196, 328, 535, 979 MPa against beam
+      // theory's 288 at four resolutions). With the boundary conditions
+      // applied where they belong it converges from below -- 170, 221, 236,
+      // 242, 255 -- approaching the surface value that the element-centre
+      // sampling depth keeps it just under.
       const rootStress = (solved) => {
         const g = solved.grid;
         let peak = 0;
         for (let e = 0; e < solved.field.length; e++) {
           const x = g.origin[0] + ((e % g.nx) + 0.5) * g.h;
-          if (x > g.h * 1.5 && x < g.h * 3.5)
-            peak = Math.max(peak, solved.field[e]);
+          if (x > 0 && x < g.h * 2) peak = Math.max(peak, solved.field[e]);
         }
         return peak;
       };
-      const finer = solveStressField({
-        positions,
-        indices,
-        mmPerUnit: MM_PER_UNIT,
-        material: STEEL,
-        fixtures: groups.xMin,
-        loads: [{ soup: groups.xMax, force: [0, -P, 0] }],
-        resolution: 56,
-      });
-      expect(rootStress(finer)).toBeGreaterThan(rootStress(solved) * 1.2);
+      const run = (resolution) =>
+        solveStressField({
+          positions,
+          indices,
+          mmPerUnit: MM_PER_UNIT,
+          material: STEEL,
+          fixtures: groups.xMin,
+          loads: [
+            { triangles: groups.xMax, soup: groups.xMax, force: [0, -P, 0] },
+          ],
+          resolution,
+        });
+      const beamTheory = (P * L * (b / 2)) / ((t * b ** 3) / 12);
+      const coarse = rootStress(run(28));
+      const fine = rootStress(run(56));
+      expect(coarse).toBeLessThan(fine);
+      expect(fine).toBeLessThan(beamTheory * 1.1);
+      expect(
+        fine / beamTheory,
+        `refined root read ${fine.toFixed(1)} MPa against beam theory's ${beamTheory.toFixed(1)}`,
+      ).toBeGreaterThan(0.75);
     },
-    SOLVE_TIMEOUT,
+    SOLVE_TIMEOUT * 2,
   );
 
   it("gives every surface vertex a number", () => {

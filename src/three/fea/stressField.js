@@ -19,7 +19,14 @@ import { solveDisplacements, vonMises } from "./hexSolver.js";
 // to say so.
 function surroundingNodes(p, grid, supported = null) {
   const { origin, h, nx, ny, nz } = grid;
-  const g = [0, 1, 2].map((c) => (p[c] - origin[c]) / h - 0.5);
+  // Nodes sit at the voxel CORNERS -- origin + i*h -- so the index is the raw
+  // offset in voxels.  Subtracting the half that voxel-CENTRE indexing needs
+  // put every load and fixture half a voxel out, and asymmetrically: a point
+  // on one face of a symmetric body straddled a supported node and an empty
+  // one, so its whole share landed on a single node, while its mirror split
+  // evenly between two. Measured on a symmetric box, the two edges of one
+  // loaded face took -68.75N and -6.25N.
+  const g = [0, 1, 2].map((c) => (p[c] - origin[c]) / h);
   const i0 = Math.floor(g[0]),
     j0 = Math.floor(g[1]),
     k0 = Math.floor(g[2]);
@@ -63,6 +70,72 @@ const soupTriangles = function* (soup, scale) {
     ]);
 };
 
+// Points spread evenly over a triangle, for handing its share of the load to
+// the grid.
+//
+// Lumping at the three CORNERS instead makes the transfer depend on how a face
+// was triangulated: a quad splits along one diagonal, so the two corners on it
+// collect double, and mirroring the model flips the diagonal. Measured on a
+// symmetric box, that put 50N of a 400N load on the wrong side and left a node
+// held whose mirror was free -- so a symmetric problem could not produce a
+// symmetric answer however careful everything downstream was.
+//
+// Sub-triangle centroids converge on the true integral of the shape functions
+// over the face, which does not know about the triangulation.
+// Sub-triangle centroids integrate a LINEAR function exactly; the shape
+// functions over a face are bilinear, so a residual remains and shrinks with
+// the order. Measured on a symmetric box, the worst mirrored force difference
+// went 2.08N at order 4 to well under a tenth of that at order 12, on a 400N
+// load -- and loads cover few triangles, so the points are cheap.
+const QUADRATURE_ORDER = 12;
+function* trianglePoints([a, b, c], order = QUADRATURE_ORDER) {
+  for (let i = 0; i < order; i++)
+    for (let j = 0; j < order - i; j++) {
+      // Each row of the subdivision holds upward sub-triangles and, except at
+      // its end, downward ones between them.
+      const up = [
+        [i + 1 / 3, j + 1 / 3],
+        [i + 2 / 3, j + 2 / 3],
+      ];
+      for (let k = 0; k < (j < order - i - 1 ? 2 : 1); k++) {
+        const [x, y] = up[k];
+        const u = x / order,
+          v = y / order,
+          w = 1 - u - v;
+        yield [
+          [0, 1, 2].map((d) => w * a[d] + u * b[d] + v * c[d]),
+          1 / (order * order),
+        ];
+      }
+    }
+}
+
+// The node plane nearest a point on each axis (both, on an exact tie).
+//
+// Fixtures are a yes/no, so the trilinear weights are the wrong tool for them:
+// a point landing exactly ON a node plane has zero weight toward the cell on
+// one side, and its mirror lands on the other side of the tie, leaving a node
+// held whose mirror is free. Taking the whole neighbourhood is symmetric
+// however the point falls.
+function nodesNear(p, grid, supported) {
+  const { origin, h, nx, ny, nz } = grid;
+  const g = [0, 1, 2].map((c) => (p[c] - origin[c]) / h);
+  // The NEAREST node plane on each axis, both of them on an exact tie.  A full
+  // voxel of reach instead holds a whole layer of elements inside the body,
+  // whose strain -- and so whose stress -- then reads zero, and the beam it
+  // leaves is shorter and stiffer than the one that was modelled.
+  const lo = g.map((v) => Math.ceil(v - 0.5 - 1e-9));
+  const hi = g.map((v) => Math.floor(v + 0.5 + 1e-9));
+  const out = [];
+  for (let i = Math.max(0, lo[0]); i <= Math.min(nx, hi[0]); i++)
+    for (let j = Math.max(0, lo[1]); j <= Math.min(ny, hi[1]); j++)
+      for (let k = Math.max(0, lo[2]); k <= Math.min(nz, hi[2]); k++) {
+        const n = i + (nx + 1) * (j + (ny + 1) * k);
+        if (!supported || supported[n]) out.push(n);
+      }
+  return out;
+}
+
 const triangleArea = ([a, b, c]) => {
   const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   const w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -92,10 +165,12 @@ const triangleArea = ([a, b, c]) => {
 //     half a voxel inside the surface, so in bending a vertex reads roughly
 //     (c - h/2)/c of the true surface stress -- about 8% at 12 voxels through
 //     a section, and worse on a coarse grid.
-//   - The peak near a FIXTURE is meaningless. A fully fixed edge is a stress
-//     singularity: its computed value climbs without limit as the grid is
-//     refined (see stressField.test.js), so it must never be quoted as the
-//     part's stress or used to scale the colour ramp.
+//   - The peak sits AT the fixture, and is only as good as the mesh there.
+//     It converges from below on the beam-theory value as the grid is refined
+//     (170, 221, 236, 242, 255 MPa against 288 for the test bar), so it is a
+//     real reading rather than a runaway -- but a coarse grid understates it
+//     badly, which is why the colour ramp is scaled to the material's yield
+//     rather than to whatever the peak happens to be.
 // The discretisation and boundary conditions for a load case: the grid, which
 // voxels are inside the body, which degrees of freedom are held, and where the
 // force goes.  Shared with the topology optimiser, which needs exactly this
@@ -134,8 +209,8 @@ export function buildLoadCase({
   for (let n = 0; n < nNodes; n++)
     if (!supported[n]) for (let c = 0; c < 3; c++) fixed[n * 3 + c] = 1;
   for (const tri of soupTriangles(fixtures, mmPerUnit))
-    for (const p of tri)
-      for (const [n] of surroundingNodes(p, grid, supported))
+    for (const [p] of trianglePoints(tri))
+      for (const n of nodesNear(p, grid, supported))
         for (let c = 0; c < 3; c++) fixed[n * 3 + c] = 1;
 
   const forces = new Float64Array(3 * nNodes);
@@ -150,15 +225,16 @@ export function buildLoadCase({
       // handed to the grid by the same trilinear weights that interpolate
       // displacement -- consistent load transfer, so a flat face really does
       // come out uniformly stressed.
-      const share = areas[ti] / total / 3;
-      for (const p of tri) {
+      const share = areas[ti] / total;
+      for (const [p, weight] of trianglePoints(tri)) {
         const nodes = surroundingNodes(p, grid, supported);
         if (!nodes.length) {
-          unsupportedLoad += share;
+          unsupportedLoad += share * weight;
           continue;
         }
         for (const [n, w] of nodes)
-          for (let c = 0; c < 3; c++) forces[n * 3 + c] += force[c] * share * w;
+          for (let c = 0; c < 3; c++)
+            forces[n * 3 + c] += force[c] * share * weight * w;
       }
     });
   }

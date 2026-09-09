@@ -408,11 +408,10 @@ export const createStressSlice = (set, get) => ({
       // of the stress the part can actually take, and the top of the scale
       // means "at or past yield" -- the question an engineer is asking.
       //
-      // Scaling to the field instead makes the plot mesh-dependent: the peak
-      // is the singular element at the fixture (measured 1522 MPa against beam
-      // theory's 288 for the same bar), and even the 98th percentile came out
-      // at 351, above the true root stress, which flattened the whole part
-      // onto the bottom of the ramp.
+      // Scaling to the field instead makes the plot depend on the Detail
+      // setting: the peak sits at the fixture, which is exactly where a coarse
+      // grid resolves it worst -- the same bar reads 170 MPa at one detail and
+      // 255 at another, against beam theory's 288.
       if (r.converged === false)
         throw new Error(
           "The load case could not be solved: check that the held faces really hold the part.",
@@ -421,6 +420,13 @@ export const createStressSlice = (set, get) => ({
       // Reported next to it, so the peak is visible without being allowed to
       // set the scale.
       const robustPeak = rampCeiling(display.stress);
+      // Both read off the field that is actually DRAWN, so the peak and the
+      // high-percentile figure beside it describe the same population. Taking
+      // the peak from the body's own sparse vertices instead let it come out
+      // BELOW the percentile, which is impossible for one set of numbers and
+      // was hidden while a runaway value inflated the other.
+      let displayMax = 0;
+      for (const v of display.stress) displayMax = Math.max(displayMax, v);
       set({
         stressSolving: false,
         stressResult: {
@@ -436,7 +442,7 @@ export const createStressSlice = (set, get) => ({
           },
           ceiling,
           robustPeak,
-          max: r.max,
+          max: displayMax,
           material,
           iterations: r.iterations,
           elements: r.elements,

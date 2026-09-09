@@ -67,10 +67,9 @@ export function sampleRamp(theme, t) {
 
 // The value the ramp's top should mean.
 //
-// NOT the maximum: a fixed edge is a stress singularity whose computed value
-// climbs without limit as the grid is refined (see stressField.test.js), so
-// scaling to the max lets one meaningless element wash the whole part out to
-// the bottom of the ramp. A high percentile keeps the scale on the part.
+// NOT the maximum: the peak sits at the fixture, where a coarse grid resolves
+// it worst, so scaling to it makes the whole plot depend on the Detail setting
+// rather than on the part. A high percentile keeps the scale on the part.
 export function rampCeiling(vertexStress, percentile = 0.98) {
   const live = [];
   for (const v of vertexStress) if (v > 0) live.push(v);
