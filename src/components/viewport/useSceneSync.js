@@ -15,6 +15,7 @@ import {
   buildExtrudeSelectGroup,
   applyRenderMode,
 } from "../../three/sceneObjects.js";
+import { applyStressDisplay } from "../../three/sceneObjects/stressDisplay.js";
 import { buildSketchUnderlayGroup } from "../../three/sceneObjects/sketchUnderlay.js";
 import { requestRender } from "../../three/cameraControls/animateLoop.js";
 import {
@@ -97,6 +98,7 @@ export function useSceneSync({
   const defaultMaterial = useStore((s) => s.defaultMaterial);
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
   const soloItemId = useStore((s) => s.soloItemId);
+  const stressResult = useStore((s) => s.stressResult);
   const booleanTool = useStore((s) => s.booleanTool);
   const booleanCutIds = useStore((s) => s.booleanCutIds);
   const pattern3dTool = useStore((s) => s.pattern3dTool);
@@ -352,6 +354,15 @@ export function useSceneSync({
     // applyRenderMode reapplies materials, then finalizeVisibility applies or
     // releases the solo override.
   }, [items, printPrecision, variables, defaultMaterial, soloItemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stress field: painted over the built meshes rather than built into them,
+  // and dropped the moment the body it was solved for is rebuilt -- the
+  // colours are per-vertex and would otherwise land on different vertices.
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    const ok = applyStressDisplay(objectsRef, stressResult, items);
+    if (stressResult && !ok) useStore.getState().clearStressResult();
+  }, [stressResult, items, renderMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // End solo if the soloed item is gone (deleted, or the timeline moved past
   // it), restoring the saved view so the user isn't left staring at a blank

@@ -4,6 +4,12 @@
 import { describe, it, expect } from "vitest";
 import { solveDisplacements, vonMises } from "../hexSolver.js";
 
+// The solves here take a good fraction of a second each, against vitest's 5s
+// default, and the whole unit suite runs them in parallel with 160 other
+// files. An explicit ceiling keeps a loaded machine from failing them on time
+// rather than on arithmetic.
+const SOLVE_TIMEOUT = 30_000;
+
 const E = 200000; // MPa, steel
 const NU = 0.3;
 
@@ -50,23 +56,27 @@ describe("cantilever deflection against Euler-Bernoulli", () => {
     return -end.reduce((s, n) => s + u[n * 3 + 1], 0) / end.length;
   };
 
-  it("converges on the analytic deflection as the mesh is refined", () => {
-    const coarse = tipDeflection(2);
-    const mid = tipDeflection(4);
-    const fine = tipDeflection(8);
-    // Trilinear hexes are too STIFF in bending, so each refinement must move
-    // the deflection UP toward the analytic value, never past it and back.
-    expect(coarse).toBeLessThan(mid);
-    expect(mid).toBeLessThan(fine);
-    expect(
-      fine / analytic,
-      `8 elements through thickness gave ${fine.toFixed(4)}mm against ${analytic.toFixed(4)}mm`,
-    ).toBeCloseTo(1, 1);
-    // The coarse mesh is visibly stiff -- worth knowing, since the tool will
-    // default to something nearer this than to the fine mesh.
-    expect(coarse / analytic).toBeGreaterThan(0.8);
-    expect(coarse / analytic).toBeLessThan(0.95);
-  });
+  it(
+    "converges on the analytic deflection as the mesh is refined",
+    () => {
+      const coarse = tipDeflection(2);
+      const mid = tipDeflection(4);
+      const fine = tipDeflection(8);
+      // Trilinear hexes are too STIFF in bending, so each refinement must move
+      // the deflection UP toward the analytic value, never past it and back.
+      expect(coarse).toBeLessThan(mid);
+      expect(mid).toBeLessThan(fine);
+      expect(
+        fine / analytic,
+        `8 elements through thickness gave ${fine.toFixed(4)}mm against ${analytic.toFixed(4)}mm`,
+      ).toBeCloseTo(1, 1);
+      // The coarse mesh is visibly stiff -- worth knowing, since the tool will
+      // default to something nearer this than to the fine mesh.
+      expect(coarse / analytic).toBeGreaterThan(0.8);
+      expect(coarse / analytic).toBeLessThan(0.95);
+    },
+    SOLVE_TIMEOUT,
+  );
 });
 
 // A bar on symmetry planes rather than a built-in end: fully fixing a face

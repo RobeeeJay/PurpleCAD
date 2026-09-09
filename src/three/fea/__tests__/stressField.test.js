@@ -5,6 +5,12 @@
 import { describe, it, expect } from "vitest";
 import { solveStressField } from "../stressField.js";
 
+// The solves here take a good fraction of a second each, against vitest's 5s
+// default, and the whole unit suite runs them in parallel with 160 other
+// files. An explicit ceiling keeps a loaded machine from failing them on time
+// rather than on arithmetic.
+const SOLVE_TIMEOUT = 30_000;
+
 const MM_PER_UNIT = 10;
 const STEEL = { E: 200000, nu: 0.3 };
 
@@ -133,61 +139,73 @@ describe("stress on a cantilever, through the mesh path", () => {
     return peak;
   };
 
-  it("matches what the voxel model should read at mid-span", () => {
-    const want = midspanPrediction(solved, (P * L) / 2);
-    const got = midspanStress(solved);
-    expect(
-      got / want,
-      `read ${got.toFixed(1)} MPa where this discretisation predicts ${want.toFixed(1)} MPa`,
-    ).toBeCloseTo(1, 1);
-  });
+  it(
+    "matches what the voxel model should read at mid-span",
+    () => {
+      const want = midspanPrediction(solved, (P * L) / 2);
+      const got = midspanStress(solved);
+      expect(
+        got / want,
+        `read ${got.toFixed(1)} MPa where this discretisation predicts ${want.toFixed(1)} MPa`,
+      ).toBeCloseTo(1, 1);
+    },
+    SOLVE_TIMEOUT,
+  );
 
-  it("holds that agreement when the mesh is refined", () => {
-    // The check has to be resolution-stable, or it is only pinning whichever
-    // resolution happened to be chosen.
-    const finer = solveStressField({
-      positions,
-      indices,
-      mmPerUnit: MM_PER_UNIT,
-      material: STEEL,
-      fixtures: groups.xMin,
-      loads: [{ soup: groups.xMax, force: [0, -P, 0] }],
-      resolution: 48,
-    });
-    const got = midspanStress(finer) / midspanPrediction(finer, (P * L) / 2);
-    expect(got, `refined run read ${got.toFixed(3)} of prediction`).toBeCloseTo(
-      1,
-      1,
-    );
-  });
+  it(
+    "holds that agreement when the mesh is refined",
+    () => {
+      // The check has to be resolution-stable, or it is only pinning whichever
+      // resolution happened to be chosen.
+      const finer = solveStressField({
+        positions,
+        indices,
+        mmPerUnit: MM_PER_UNIT,
+        material: STEEL,
+        fixtures: groups.xMin,
+        loads: [{ soup: groups.xMax, force: [0, -P, 0] }],
+        resolution: 48,
+      });
+      const got = midspanStress(finer) / midspanPrediction(finer, (P * L) / 2);
+      expect(
+        got,
+        `refined run read ${got.toFixed(3)} of prediction`,
+      ).toBeCloseTo(1, 1);
+    },
+    SOLVE_TIMEOUT,
+  );
 
-  it("keeps climbing at the built-in corner however fine the mesh", () => {
-    // NOT a defect to fix: a fully fixed re-entrant edge is a stress
-    // singularity, infinite in the continuum, so the computed value rises
-    // without limit as the elements shrink (measured 0.68, 1.14, 1.86, 3.40
-    // of beam theory at four resolutions).  Pinned here so the peak reading
-    // near a fixture is never quoted as the part's real stress.
-    const rootStress = (solved) => {
-      const g = solved.grid;
-      let peak = 0;
-      for (let e = 0; e < solved.field.length; e++) {
-        const x = g.origin[0] + ((e % g.nx) + 0.5) * g.h;
-        if (x > g.h * 1.5 && x < g.h * 3.5)
-          peak = Math.max(peak, solved.field[e]);
-      }
-      return peak;
-    };
-    const finer = solveStressField({
-      positions,
-      indices,
-      mmPerUnit: MM_PER_UNIT,
-      material: STEEL,
-      fixtures: groups.xMin,
-      loads: [{ soup: groups.xMax, force: [0, -P, 0] }],
-      resolution: 56,
-    });
-    expect(rootStress(finer)).toBeGreaterThan(rootStress(solved) * 1.2);
-  });
+  it(
+    "keeps climbing at the built-in corner however fine the mesh",
+    () => {
+      // NOT a defect to fix: a fully fixed re-entrant edge is a stress
+      // singularity, infinite in the continuum, so the computed value rises
+      // without limit as the elements shrink (measured 0.68, 1.14, 1.86, 3.40
+      // of beam theory at four resolutions).  Pinned here so the peak reading
+      // near a fixture is never quoted as the part's real stress.
+      const rootStress = (solved) => {
+        const g = solved.grid;
+        let peak = 0;
+        for (let e = 0; e < solved.field.length; e++) {
+          const x = g.origin[0] + ((e % g.nx) + 0.5) * g.h;
+          if (x > g.h * 1.5 && x < g.h * 3.5)
+            peak = Math.max(peak, solved.field[e]);
+        }
+        return peak;
+      };
+      const finer = solveStressField({
+        positions,
+        indices,
+        mmPerUnit: MM_PER_UNIT,
+        material: STEEL,
+        fixtures: groups.xMin,
+        loads: [{ soup: groups.xMax, force: [0, -P, 0] }],
+        resolution: 56,
+      });
+      expect(rootStress(finer)).toBeGreaterThan(rootStress(solved) * 1.2);
+    },
+    SOLVE_TIMEOUT,
+  );
 
   it("gives every surface vertex a number", () => {
     expect(solved.vertexStress.length).toBe(positions.length / 3);
@@ -197,16 +215,20 @@ describe("stress on a cantilever, through the mesh path", () => {
     expect(solved.max).toBeGreaterThan(0);
   });
 
-  it("scales linearly with the load, as a linear solve must", () => {
-    const half = solveStressField({
-      positions,
-      indices,
-      mmPerUnit: MM_PER_UNIT,
-      material: STEEL,
-      fixtures: groups.xMin,
-      loads: [{ soup: groups.xMax, force: [0, -P / 2, 0] }],
-      resolution: 36,
-    });
-    expect(half.max / solved.max).toBeCloseTo(0.5, 3);
-  });
+  it(
+    "scales linearly with the load, as a linear solve must",
+    () => {
+      const half = solveStressField({
+        positions,
+        indices,
+        mmPerUnit: MM_PER_UNIT,
+        material: STEEL,
+        fixtures: groups.xMin,
+        loads: [{ soup: groups.xMax, force: [0, -P / 2, 0] }],
+        resolution: 36,
+      });
+      expect(half.max / solved.max).toBeCloseTo(0.5, 3);
+    },
+    SOLVE_TIMEOUT,
+  );
 });

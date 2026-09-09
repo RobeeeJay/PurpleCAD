@@ -28,6 +28,7 @@ import {
   variablesInitial,
 } from "./store/variablesSlice.js";
 import { createUiSlice, uiInitial } from "./store/uiSlice.js";
+import { createStressSlice, stressInitial } from "./store/stressSlice.js";
 import { createMaterialSlice, materialInitial } from "./store/materialSlice.js";
 import { createFolderSlice, folderInitial } from "./store/folderSlice.js";
 import { createProjectSlice, projectInitial } from "./store/projectSlice.js";
@@ -40,6 +41,7 @@ export const useStore = create((set, get) => ({
   undoStack: [],
   redoStack: [],
   ...uiInitial,
+  ...stressInitial,
   ...variablesInitial,
   ...materialInitial,
   ...folderInitial,
@@ -47,6 +49,7 @@ export const useStore = create((set, get) => ({
 
   // ---- Actions, composed from slices ----
   ...createUiSlice(set, get),
+  ...createStressSlice(set, get),
   ...createDocumentSlice(set, get),
   ...createHistorySlice(set, get),
   ...createSketchSlice(set, get),

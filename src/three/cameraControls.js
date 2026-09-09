@@ -511,6 +511,27 @@ export function attachCameraControls(ctx) {
   };
   // World position + triangle/vertex counts of a selected object's live mesh,
   // for the status line.
+  // What a body's mesh is currently WEARING: whether a per-vertex field is on
+  // it and how varied it is.  The e2e suite's only way to see a stress plot --
+  // the colours live in a BufferAttribute in the three.js scene, and no part
+  // of that reaches the DOM.
+  controls.meshDisplayInfo = (itemId) => {
+    const mesh = objectsRef.current[itemId];
+    if (!mesh?.isMesh) return null;
+    const attr = mesh.geometry?.attributes?.color;
+    const seen = new Set();
+    if (attr)
+      for (let i = 0; i < attr.count; i++)
+        seen.add(
+          [0, 1, 2].map((c) => attr.array[i * 3 + c].toFixed(3)).join(","),
+        );
+    return {
+      hasVertexColors: !!attr && !!mesh.material?.vertexColors,
+      colorCount: attr?.count ?? 0,
+      distinctColors: seen.size,
+    };
+  };
+
   // The colours the open sketch's constraint annotations are currently drawn
   // in, as { [constraintIdx]: ["#rrggbb", ...] } — used by the e2e suite to
   // see that a dimension is highlighted.  Nothing else can: the annotations
