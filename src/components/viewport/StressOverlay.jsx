@@ -22,6 +22,7 @@ export default function StressOverlay() {
   const setStressPhase = useStore((s) => s.setStressPhase);
   const setStressParams = useStore((s) => s.setStressParams);
   const cancelStressTool = useStore((s) => s.cancelStressTool);
+  const clearStressFaces = useStore((s) => s.clearStressFaces);
   const theme = useStore((s) => s.theme);
   const [busy, setBusy] = useState(false);
 
@@ -146,6 +147,20 @@ export default function StressOverlay() {
           : stressResult
             ? "Re-solve"
             : "Solve"}
+      </button>
+      <button
+        title="Clear both face picks and start the load case again"
+        style={barBtn(false, held === 0 && loaded === 0)}
+        disabled={held === 0 && loaded === 0}
+        onClick={() => {
+          clearStressFaces();
+          // The picked faces stay lit in the viewport otherwise: the highlight
+          // is scene state, not a view of the store.
+          useStore.getState()._cameraControls?.clearEmbossSelectedFaces?.();
+          setStressPhase("fixtures");
+        }}
+      >
+        Reset picks
       </button>
       <button
         title="Close the stress tool and take the colours off"

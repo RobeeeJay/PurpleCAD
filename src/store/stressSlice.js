@@ -18,6 +18,10 @@ import { geometrySignature } from "../three/sceneObjects/stressDisplay.js";
 
 // Mechanical properties, which the render materials do not carry: those are
 // PBR appearance only.  Yield is what a reading is judged against.
+//
+// Nominal BULK figures.  A printed part is weaker than its material and
+// anisotropic with it -- layer adhesion governs, so a load pulling across the
+// layers can fail well under these numbers.  Treat them as the optimistic end.
 export const STRUCTURAL_MATERIALS = [
   { name: "Steel", E: 200000, nu: 0.3, yield: 250 },
   { name: "Stainless", E: 193000, nu: 0.3, yield: 215 },
@@ -26,7 +30,11 @@ export const STRUCTURAL_MATERIALS = [
   { name: "ABS", E: 2300, nu: 0.35, yield: 40 },
   { name: "PLA", E: 3500, nu: 0.36, yield: 55 },
   { name: "Nylon", E: 2000, nu: 0.39, yield: 45 },
+  { name: "PETG", E: 2100, nu: 0.38, yield: 50 },
 ];
+
+// What the tool opens on.
+export const DEFAULT_STRUCTURAL_MATERIAL = "PETG";
 
 export const stressInitial = {
   // { phase, itemId, fixtures, loadFaces, params } while the tool is open.
@@ -45,7 +53,7 @@ export const createStressSlice = (set, get) => ({
         fixtures: [],
         loadFaces: [],
         params: {
-          material: "Steel",
+          material: DEFAULT_STRUCTURAL_MATERIAL,
           forceN: 500,
           // Straight down in the USER frame, where Z is up (axisDisplay.js).
           direction: [0, 0, -1],
@@ -86,6 +94,17 @@ export const createStressSlice = (set, get) => ({
       };
     }),
 
+  // Start the picks over without closing the tool: the force, material and
+  // detail the user has already set are theirs to keep.
+  clearStressFaces: () =>
+    set((st) =>
+      st.stressTool
+        ? {
+            stressTool: { ...st.stressTool, fixtures: [], loadFaces: [] },
+          }
+        : {},
+    ),
+
   cancelStressTool: () => {
     cancelStressWork();
     set({ stressTool: null, stressSolving: false });
@@ -97,7 +116,7 @@ export const createStressSlice = (set, get) => ({
     itemId,
     fixtures,
     loads,
-    materialName = "Steel",
+    materialName = DEFAULT_STRUCTURAL_MATERIAL,
     resolution = 40,
     theme,
   }) => {

@@ -326,6 +326,24 @@ test.describe.serial("stress view", () => {
     expect(planes.loaded.hi[0] - planes.loaded.lo[0]).toBeLessThan(0.01);
     expect(planes.loaded.lo[0]).toBeCloseTo(30, 0);
 
+    // Reset clears BOTH picks and returns to the held phase, so a load case
+    // that went wrong can be started over without losing the force or the
+    // material already set.
+    const reset = bar.getByTitle(/Clear both face picks/);
+    await reset.click();
+    await expect(held).toContainText("none");
+    await expect(loaded).toContainText("none");
+    await expect(reset).toBeDisabled();
+    await expect(
+      bar.getByTitle(/Total force over the loaded faces/).locator("input"),
+    ).toHaveValue("500");
+    // Pick them again to carry on.
+    await page.mouse.click(faces.min.x, faces.min.y);
+    await bar.getByTitle(/force is applied to/).click();
+    await page.mouse.click(faces.max.x, faces.max.y);
+    await expect(held).not.toContainText("none");
+    await expect(loaded).not.toContainText("none");
+
     // The title sits on the label+field wrapper, so the input is inside it.
     await bar
       .getByTitle(/Total force over the loaded faces/)
@@ -345,7 +363,9 @@ test.describe.serial("stress view", () => {
     await expect(legend).toBeVisible();
     const panel = legend.locator("..");
     await expect(panel).toContainText("yield");
-    await expect(panel).toContainText("Steel");
+    // The tool opens on PETG, so that is what the legend must name -- the
+    // yield the colours are scaled against comes from it.
+    await expect(panel).toContainText("PETG");
     await expect(panel).toContainText(/Peak \d+ MPa/);
 
     const shot = testInfo.outputPath("stress-tool.png");
