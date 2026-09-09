@@ -93,6 +93,17 @@ survives any Vite upgrade (grep dist for `occ_addon`; it must be absent).
   see, including changes to `e2e/`, `src/`, and the Containerfile itself.
   Editing the Containerfile and immediately running the suite tests the OLD
   image and silently reports the OLD result.
+- **A hung container run does NOT clean itself up, and they stack.** `--rm`
+  only fires when the container EXITS, so a run that hangs -- or whose client
+  is killed -- leaves the container alive in the VM burning CPU, and the next
+  run starts another beside it. Three of them once accumulated (one for three
+  days, ~190 hours of CPU) and took the VM to a load average of 14.6 on 8
+  CPUs, which is almost certainly what was behind a spell of unreproducible
+  input-timing failures in `interactions.spec.js` -- a starved renderer drops
+  wheel events and reloads. `test:e2e:podman` now passes
+  `--name purple-cad-e2e-run`, so a second run is REFUSED rather than stacked,
+  and `npm run e2e:podman:stop` clears a stray and lists anything still
+  running. Check `podman ps` before blaming a flaky test on the code.
 - If a `docker compose` setup is ever added here, its instructions in READMEs,
   scripts, and terminal commands must use `docker compose up -d --build` (never
   bare `up -d`) so code changes are actually rebuilt into the image. Verify a UI
