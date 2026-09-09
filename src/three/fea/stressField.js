@@ -2,7 +2,7 @@
 //
 // Ties voxelise.js and hexSolver.js to what the app actually has: an item's
 // baked geometryData in SCENE units, and face picks expressed as triangle
-// indices (the same currency the emboss face-set tools already deal in).
+// soups (the same currency the emboss face-set tools already deal in).
 //
 // Everything inside is mm / N / MPa.  Scene units are mm / MM_PER_UNIT, and
 // the conversion happens here so neither the solver nor the caller has to
@@ -39,16 +39,16 @@ function surroundingNodes(p, grid) {
   return out;
 }
 
-const triangleOf = (positions, indices, t, scale) => {
-  const v = (c) => {
-    const i = (indices ? indices[t * 3 + c] : t * 3 + c) * 3;
-    return [
-      positions[i] * scale,
-      positions[i + 1] * scale,
-      positions[i + 2] * scale,
-    ];
-  };
-  return [v(0), v(1), v(2)];
+// Face picks arrive as a flat soup of triangle corner positions -- what the
+// face-picking tools already produce (embossPick's `faceTris`) -- rather than
+// indices into the body's mesh.
+const soupTriangles = function* (soup, scale) {
+  for (let t = 0; t + 8 < soup.length; t += 9)
+    yield [0, 3, 6].map((o) => [
+      soup[t + o] * scale,
+      soup[t + o + 1] * scale,
+      soup[t + o + 2] * scale,
+    ]);
 };
 
 const triangleArea = ([a, b, c]) => {
@@ -67,9 +67,9 @@ const triangleArea = ([a, b, c]) => {
 // A stress field for one body.
 //
 //   positions / indices : the item's baked surface mesh, scene units
-//   fixtures            : triangle indices held rigid
-//   loads               : [{ triangles, force: [fx, fy, fz] }] in newtons,
-//                         spread over the picked area
+//   fixtures            : a triangle soup held rigid
+//   loads               : [{ soup, force: [fx, fy, fz] }] in newtons, spread
+//                         over the picked area by triangle area
 //
 // Returns per-vertex von Mises in MPa plus the raw field, so a caller can
 // colour the mesh and quote real numbers in a legend.
@@ -104,25 +104,24 @@ export function solveStressField({
   for (let e = 0; e < occ.length; e++) stiff[e] = occ[e] ? material.E : 0;
 
   const fixed = new Uint8Array(3 * nNodes);
-  for (const t of fixtures)
-    for (const p of triangleOf(positions, indices, t, mmPerUnit))
+  for (const tri of soupTriangles(fixtures, mmPerUnit))
+    for (const p of tri)
       for (const [n] of surroundingNodes(p, grid))
         for (let c = 0; c < 3; c++) fixed[n * 3 + c] = 1;
 
   const forces = new Float64Array(3 * nNodes);
-  for (const { triangles, force } of loads) {
-    const areas = triangles.map((t) =>
-      triangleArea(triangleOf(positions, indices, t, mmPerUnit)),
-    );
+  for (const { soup, force } of loads) {
+    const tris = [...soupTriangles(soup, mmPerUnit)];
+    const areas = tris.map(triangleArea);
     const total = areas.reduce((s, a) => s + a, 0);
     if (!(total > 0)) continue;
-    triangles.forEach((t, ti) => {
+    tris.forEach((tri, ti) => {
       // The triangle's share of the load, split between its corners and then
       // handed to the grid by the same trilinear weights that interpolate
       // displacement -- consistent load transfer, so a flat face really does
       // come out uniformly stressed.
       const share = areas[ti] / total / 3;
-      for (const p of triangleOf(positions, indices, t, mmPerUnit))
+      for (const p of tri)
         for (const [n, w] of surroundingNodes(p, grid))
           for (let c = 0; c < 3; c++) forces[n * 3 + c] += force[c] * share * w;
     });

@@ -53,12 +53,14 @@ const barMesh = (Lmm, bmm, tmm) => {
   };
   const positions = c.flat();
   const indices = [];
+  // Face picks are soups of corner positions, so the groups are built the same
+  // way the app's face picking hands them over.
   const groups = {};
   for (const [name, tris] of Object.entries(faces)) {
     groups[name] = [];
     for (const f of tris) {
-      groups[name].push(indices.length / 3);
       indices.push(...f);
+      for (const v of f) groups[name].push(...c[v]);
     }
   }
   return { positions, indices, groups };
@@ -76,7 +78,7 @@ describe("stress on a cantilever, through the mesh path", () => {
     mmPerUnit: MM_PER_UNIT,
     material: STEEL,
     fixtures: groups.xMin,
-    loads: [{ triangles: groups.xMax, force: [0, -P, 0] }],
+    loads: [{ soup: groups.xMax, force: [0, -P, 0] }],
     resolution: 36,
   });
 
@@ -149,7 +151,7 @@ describe("stress on a cantilever, through the mesh path", () => {
       mmPerUnit: MM_PER_UNIT,
       material: STEEL,
       fixtures: groups.xMin,
-      loads: [{ triangles: groups.xMax, force: [0, -P, 0] }],
+      loads: [{ soup: groups.xMax, force: [0, -P, 0] }],
       resolution: 48,
     });
     const got = midspanStress(finer) / midspanPrediction(finer, (P * L) / 2);
@@ -181,7 +183,7 @@ describe("stress on a cantilever, through the mesh path", () => {
       mmPerUnit: MM_PER_UNIT,
       material: STEEL,
       fixtures: groups.xMin,
-      loads: [{ triangles: groups.xMax, force: [0, -P, 0] }],
+      loads: [{ soup: groups.xMax, force: [0, -P, 0] }],
       resolution: 56,
     });
     expect(rootStress(finer)).toBeGreaterThan(rootStress(solved) * 1.2);
@@ -202,7 +204,7 @@ describe("stress on a cantilever, through the mesh path", () => {
       mmPerUnit: MM_PER_UNIT,
       material: STEEL,
       fixtures: groups.xMin,
-      loads: [{ triangles: groups.xMax, force: [0, -P / 2, 0] }],
+      loads: [{ soup: groups.xMax, force: [0, -P / 2, 0] }],
       resolution: 36,
     });
     expect(half.max / solved.max).toBeCloseTo(0.5, 3);
