@@ -15,7 +15,10 @@ import {
   buildExtrudeSelectGroup,
   applyRenderMode,
 } from "../../three/sceneObjects.js";
-import { applyStressDisplay } from "../../three/sceneObjects/stressDisplay.js";
+import {
+  applyOptimisePreview,
+  applyStressDisplay,
+} from "../../three/sceneObjects/stressDisplay.js";
 import { buildSketchUnderlayGroup } from "../../three/sceneObjects/sketchUnderlay.js";
 import { requestRender } from "../../three/cameraControls/animateLoop.js";
 import {
@@ -99,6 +102,8 @@ export function useSceneSync({
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
   const soloItemId = useStore((s) => s.soloItemId);
   const stressResult = useStore((s) => s.stressResult);
+  const optimiseResult = useStore((s) => s.optimiseResult);
+  const optimiseTool = useStore((s) => s.optimiseTool);
   const booleanTool = useStore((s) => s.booleanTool);
   const booleanCutIds = useStore((s) => s.booleanCutIds);
   const pattern3dTool = useStore((s) => s.pattern3dTool);
@@ -362,7 +367,14 @@ export function useSceneSync({
     if (!sceneRef.current) return;
     const ok = applyStressDisplay(objectsRef, stressResult, items);
     if (stressResult && !ok) useStore.getState().clearStressResult();
-  }, [stressResult, items, renderMode]); // eslint-disable-line react-hooks/exhaustive-deps
+    // An optimisation result previews on the body it came from, until it is
+    // applied as one of its own or the tool is closed.
+    if (!stressResult && optimiseResult?.positions?.length && optimiseTool)
+      applyOptimisePreview(objectsRef, {
+        itemId: optimiseTool.itemId,
+        positions: optimiseResult.positions,
+      });
+  }, [stressResult, optimiseResult, optimiseTool, items, renderMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // End solo if the soloed item is gone (deleted, or the timeline moved past
   // it), restoring the saved view so the user isn't left staring at a blank

@@ -552,6 +552,10 @@ export function attachCameraControls(ctx) {
       hasVertexColors: !!attr && !!mesh.material?.vertexColors,
       colorCount: attr?.count ?? 0,
       distinctColors: seen.size,
+      // Whether the mesh currently on screen is the body's own or something
+      // swapped in over it (a stress field, an optimisation preview).
+      vertexCount: mesh.geometry?.attributes?.position?.count ?? 0,
+      swapped: !!mesh.userData?.stressGeometry,
     };
   };
 
@@ -844,7 +848,7 @@ export function attachCameraControls(ctx) {
       handleTextureHover(e.clientX, e.clientY);
       return;
     }
-    if (useStore.getState().stressTool) {
+    if (useStore.getState().stressTool || useStore.getState().optimiseTool) {
       if (handleStressHover(e.clientX, e.clientY)) return;
     }
     if (onSketchMouseMove(e)) return;
@@ -904,7 +908,10 @@ export function attachCameraControls(ctx) {
       if (Math.hypot(dx, dy) < 5) handleTextureClick(e.clientX, e.clientY);
       return;
     }
-    if (useStore.getState().stressTool && e.button === 0) {
+    if (
+      (useStore.getState().stressTool || useStore.getState().optimiseTool) &&
+      e.button === 0
+    ) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5 && handleStressClick(e.clientX, e.clientY))

@@ -96,15 +96,18 @@ const triangleArea = ([a, b, c]) => {
 //     singularity: its computed value climbs without limit as the grid is
 //     refined (see stressField.test.js), so it must never be quoted as the
 //     part's stress or used to scale the colour ramp.
-export function solveStressField({
+// The discretisation and boundary conditions for a load case: the grid, which
+// voxels are inside the body, which degrees of freedom are held, and where the
+// force goes.  Shared with the topology optimiser, which needs exactly this
+// and must not re-derive it -- the handling of load that lands on nodes with
+// no material behind them is subtle and was got wrong once already.
+export function buildLoadCase({
   positions,
   indices,
   mmPerUnit = 10,
-  material,
   fixtures = [],
   loads = [],
   resolution = 40,
-  tol,
 }) {
   const scaled = new Float64Array(positions.length);
   for (let i = 0; i < positions.length; i++)
@@ -113,9 +116,6 @@ export function solveStressField({
   const occ = voxelise(scaled, indices, grid);
   const { nx, ny, nz, h } = grid;
   const nNodes = (nx + 1) * (ny + 1) * (nz + 1);
-  const stiff = new Float64Array(nx * ny * nz);
-  for (let e = 0; e < occ.length; e++) stiff[e] = occ[e] ? material.E : 0;
-
   // Which nodes actually have material around them.  Everything else is
   // outside the body: it must take no load, and it must be held, or its
   // free-floating degrees of freedom leave the system singular.
@@ -163,6 +163,42 @@ export function solveStressField({
     });
   }
 
+  return {
+    grid,
+    occ,
+    fixed,
+    forces,
+    supported,
+    unsupportedLoad,
+    nNodes,
+    nx,
+    ny,
+    nz,
+    h,
+  };
+}
+
+export function solveStressField({
+  positions,
+  indices,
+  mmPerUnit = 10,
+  material,
+  fixtures = [],
+  loads = [],
+  resolution = 40,
+  tol,
+}) {
+  const { grid, occ, fixed, forces, unsupportedLoad, nx, ny, nz, h } =
+    buildLoadCase({
+      positions,
+      indices,
+      mmPerUnit,
+      fixtures,
+      loads,
+      resolution,
+    });
+  const stiff = new Float64Array(nx * ny * nz);
+  for (let e = 0; e < occ.length; e++) stiff[e] = occ[e] ? material.E : 0;
   const nu = material.nu;
   const { u, iterations, residual, converged } = solveDisplacements({
     nx,

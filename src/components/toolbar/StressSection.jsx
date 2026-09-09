@@ -1,6 +1,7 @@
 import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import { isAnalysableBody } from "../../store/stressSlice.js";
 
 // Stress — hold some faces, load others, and colour the body by how hard it is
 // working.  One toggle button; StressOverlay's bottom bar owns the rest.
@@ -16,13 +17,7 @@ const StressSection = ({ bare = false }) => {
   const cancelStressTool = useStore((s) => s.cancelStressTool);
 
   const selected = items.find((i) => i.id === selectedId);
-  // Not reactive, but it does not need to be: what matters is whether the
-  // selected body has a surface, and this re-runs whenever the selection or
-  // the item list changes.
-  const ready =
-    !!selected &&
-    (!!selected.geometryData?.positions?.length ||
-      !!useStore.getState()._cameraControls?.hasSurfaceMesh?.(selectedId));
+  const ready = isAnalysableBody(selected);
 
   const toggle = () => {
     if (stressTool) cancelStressTool();

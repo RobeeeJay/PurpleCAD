@@ -677,8 +677,19 @@ export function createEmbossInteraction({
   // ever needs the triangle soup.  Nor the 45-degree connectivity gate --
   // holding two opposite lugs, or loading faces that meet at a corner, is a
   // perfectly ordinary load case, where for an emboss it would be nonsense.
+  // Stress and the optimiser pick faces identically -- held here, loaded
+  // there -- so one handler serves whichever of the two is open.
+  const activePickTool = () => {
+    const s = useStore.getState();
+    if (s.stressTool)
+      return { tool: s.stressTool, set: s.setStressFaceSelection };
+    if (s.optimiseTool)
+      return { tool: s.optimiseTool, set: s.setOptimiseFaceSelection };
+    return null;
+  };
+
   const handleStressHover = (x, y) => {
-    const st = useStore.getState().stressTool;
+    const st = activePickTool()?.tool;
     if (!st || st.phase === "params") return false;
     highlights.clearFaceHighlight();
     const hit = pickFaceHit(x, y);
@@ -692,8 +703,8 @@ export function createEmbossInteraction({
   };
 
   const handleStressClick = (x, y) => {
-    const store = useStore.getState();
-    const st = store.stressTool;
+    const active = activePickTool();
+    const st = active?.tool;
     if (!st || st.phase === "params") return false;
     const hit = pickFaceHit(x, y);
     if (!hit) return true;
@@ -706,7 +717,7 @@ export function createEmbossInteraction({
     const key = st.phase === "loads" ? "loadFaces" : "fixtures";
     const prev = startedNewBody ? [] : (st[key] ?? []);
     const combined = toggleRegion(prev, soup);
-    store.setStressFaceSelection({ itemId: a.id, faceTris: combined });
+    active.set({ itemId: a.id, faceTris: combined });
     if (combined.length)
       highlights.highlightSelectedFaces?.(a.mesh, combined, FACE_HOVER_COLOR);
     else highlights.clearSelectedFaces?.();

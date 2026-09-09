@@ -14,6 +14,7 @@ import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
 import TextureSection from "./toolbar/TextureSection";
 import StressSection from "./toolbar/StressSection";
+import OptimiseSection from "./toolbar/OptimiseSection";
 import MaterialSection from "./toolbar/MaterialSection";
 import OptionsSection from "./toolbar/OptionsSection";
 import ToolbarSection from "./toolbar/ToolbarSection";
@@ -40,6 +41,7 @@ const Toolbar = () => {
           <ModifySection bare />
           <TextureSection bare />
           <StressSection bare />
+          <OptimiseSection bare />
           <MaterialSection bare />
         </ToolbarSection>
       )}

@@ -81,3 +81,34 @@ export function applyStressDisplay(objectsRef, result, items) {
   }
   return applied;
 }
+
+// A preview of an optimised shape on the body it came from: the same geometry
+// swap, so the original mesh is put back when the preview is dropped.  Shown
+// before anything is committed, because applying a generative result you have
+// not looked at is how a two-minute run gets thrown away.
+export function applyOptimisePreview(objectsRef, preview) {
+  let applied = false;
+  for (const [id, mesh] of Object.entries(objectsRef.current ?? {})) {
+    if (!mesh?.isMesh) continue;
+    if (!preview || Number(id) !== preview.itemId) continue;
+    if (!mesh.userData.stressGeometry) {
+      mesh.userData.stressGeometry = mesh.geometry;
+      mesh.userData.stressMaterial = mesh.material;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute(
+      "position",
+      new THREE.BufferAttribute(preview.positions, 3),
+    );
+    geom.computeVertexNormals();
+    if (mesh.geometry !== mesh.userData.stressGeometry) mesh.geometry.dispose();
+    mesh.geometry = geom;
+    mesh.material = new THREE.MeshStandardMaterial({
+      color: 0x6c8fd4,
+      roughness: 0.75,
+      metalness: 0,
+    });
+    applied = true;
+  }
+  return applied;
+}

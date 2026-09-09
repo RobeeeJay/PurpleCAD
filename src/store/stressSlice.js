@@ -14,6 +14,12 @@ import {
 } from "../three/fea/stressWorkerClient.js";
 import { rampCeiling, stressVertexColors } from "../three/fea/stressColors.js";
 import { buildStressMesh } from "../three/fea/stressMesh.js";
+import { buildLoadCase } from "../three/fea/stressField.js";
+import {
+  cancelOptimisation,
+  optimiseAsync,
+} from "../three/fea/topologyWorkerClient.js";
+import { maxItemId } from "./internals.js";
 import { geometrySignature } from "../three/sceneObjects/stressDisplay.js";
 
 // Mechanical properties, which the render materials do not carry: those are
@@ -36,12 +42,37 @@ export const STRUCTURAL_MATERIALS = [
 // What the tool opens on.
 export const DEFAULT_STRUCTURAL_MATERIAL = "PETG";
 
+// Whether a body can be analysed at all.
+//
+// Derived from the ITEM, deliberately, so it is reactive: asking the scene
+// whether a mesh exists answers "not yet" on the render a selection triggers
+// -- the mesh is built by an effect that runs after it -- and nothing renders
+// again afterwards, so the button stays dead on a body that is perfectly
+// analysable.
+//
+// Booleans and the modify ops leave a baked mesh; extrudes are built
+// analytically but get real triangles in the scene. Primitives are raymarched
+// on a box hull, so they have no triangles to pick faces from and are excluded
+// rather than offered and then unable to take a pick.
+export const isAnalysableBody = (item) =>
+  !!item &&
+  (!!item.geometryData?.positions?.length ||
+    item.type === "extrude" ||
+    item.type === "csg");
+
 export const stressInitial = {
   // { phase, itemId, fixtures, loadFaces, params } while the tool is open.
   stressTool: null,
   // { itemId, vertexStress, display, ceiling, max, material, iterations } or null.
   stressResult: null,
   stressSolving: false,
+
+  // Generative design: the same picks as a stress case, plus a volume budget.
+  // { phase, itemId, fixtures, loadFaces, params } while the tool is open.
+  optimiseTool: null,
+  // { positions, keptElements, designElements, history } once it has run.
+  optimiseResult: null,
+  optimiseProgress: null,
 };
 
 export const createStressSlice = (set, get) => ({
@@ -111,6 +142,173 @@ export const createStressSlice = (set, get) => ({
   },
 
   clearStressResult: () => set({ stressResult: null }),
+
+  startOptimiseTool: (itemId) =>
+    set({
+      optimiseTool: {
+        phase: "fixtures",
+        itemId,
+        fixtures: [],
+        loadFaces: [],
+        params: {
+          material: DEFAULT_STRUCTURAL_MATERIAL,
+          forceN: 500,
+          direction: [0, 0, -1],
+          resolution: 28,
+          volumeFraction: 0.4,
+          iterations: 25,
+        },
+      },
+      optimiseResult: null,
+      optimiseProgress: null,
+    }),
+
+  setOptimisePhase: (phase) =>
+    set((s) =>
+      s.optimiseTool ? { optimiseTool: { ...s.optimiseTool, phase } } : {},
+    ),
+
+  setOptimiseParams: (partial) =>
+    set((s) =>
+      s.optimiseTool
+        ? {
+            optimiseTool: {
+              ...s.optimiseTool,
+              params: { ...s.optimiseTool.params, ...partial },
+            },
+          }
+        : {},
+    ),
+
+  setOptimiseFaceSelection: ({ itemId, faceTris }) =>
+    set((s) => {
+      if (!s.optimiseTool) return {};
+      const key = s.optimiseTool.phase === "loads" ? "loadFaces" : "fixtures";
+      return {
+        optimiseTool: {
+          ...s.optimiseTool,
+          itemId: itemId ?? s.optimiseTool.itemId,
+          [key]: faceTris ?? [],
+        },
+      };
+    }),
+
+  clearOptimiseFaces: () =>
+    set((s) =>
+      s.optimiseTool
+        ? { optimiseTool: { ...s.optimiseTool, fixtures: [], loadFaces: [] } }
+        : {},
+    ),
+
+  cancelOptimiseTool: () => {
+    cancelOptimisation();
+    set({ optimiseTool: null, optimiseResult: null, optimiseProgress: null });
+  },
+
+  // Run SIMP over the picked load case.  The design space is the body itself,
+  // so the same voxelisation and boundary conditions the stress view uses
+  // drive it -- including how load that lands on nodes with no material is
+  // handled, which must not be re-derived.
+  runOptimisation: async () => {
+    const state = get();
+    const tool = state.optimiseTool;
+    if (!tool) return null;
+    const item = state.items.find((i) => i.id === tool.itemId);
+    const surface = item?.geometryData?.positions?.length
+      ? item.geometryData
+      : state._cameraControls?.meshSurface?.(tool.itemId);
+    if (!surface?.positions?.length) return null;
+    const material =
+      STRUCTURAL_MATERIALS.find((m) => m.name === tool.params.material) ??
+      STRUCTURAL_MATERIALS[0];
+    const [dx, dy, dz] = tool.params.direction;
+    const force = [dx, dz, -dy].map((c) => c * tool.params.forceN);
+    const load = buildLoadCase({
+      positions: Array.from(surface.positions),
+      indices: surface.indices ? Array.from(surface.indices) : null,
+      fixtures: tool.fixtures,
+      loads: [{ soup: tool.loadFaces, force }],
+      resolution: tool.params.resolution,
+    });
+    // Held voxels seed the connectivity check: material that ends up joined to
+    // nothing that is held would print as a loose lump.
+    const seeds = [];
+    const { grid, occ } = load;
+    for (let e = 0; e < occ.length; e++) {
+      if (!occ[e]) continue;
+      const i = e % grid.nx,
+        j = Math.floor(e / grid.nx) % grid.ny,
+        k = Math.floor(e / (grid.nx * grid.ny));
+      const n = i + (grid.nx + 1) * (j + (grid.ny + 1) * k);
+      if (load.fixed[n * 3]) seeds.push(e);
+    }
+    set({ optimiseProgress: { iteration: 0, of: tool.params.iterations } });
+    try {
+      const r = await optimiseAsync(
+        {
+          grid,
+          occ,
+          fixed: load.fixed,
+          forces: load.forces,
+          material: { E: material.E, nu: material.nu },
+          seeds,
+          mmPerUnit: 10,
+          options: {
+            volumeFraction: tool.params.volumeFraction,
+            iterations: tool.params.iterations,
+          },
+        },
+        (p) =>
+          set({
+            optimiseProgress: {
+              iteration: p.iteration + 1,
+              of: tool.params.iterations,
+              compliance: p.compliance,
+            },
+          }),
+      );
+      set({ optimiseResult: r, optimiseProgress: null });
+      return r;
+    } catch (e) {
+      set({ optimiseProgress: null, toolError: e.message });
+      return null;
+    }
+  },
+
+  // Commit the optimised shape as a new body beside the original, rather than
+  // replacing it: the input is a design SPACE, and keeping it means the run
+  // can be repeated with a different budget.
+  applyOptimisation: () =>
+    set((state) => {
+      const r = state.optimiseResult;
+      const tool = state.optimiseTool;
+      if (!r?.positions?.length || !tool) return {};
+      const source = state.items.find((i) => i.id === tool.itemId);
+      const id = maxItemId(state.history) + 1;
+      const item = {
+        id,
+        name: `${source?.name ?? "Body"} optimised`,
+        type: "csg",
+        children: [],
+        parentId: null,
+        position: source?.position ?? { x: 0, y: 0, z: 0 },
+        rotation: source?.rotation ?? { x: 0, y: 0, z: 0 },
+        scale: source?.scale ?? { x: 1, y: 1, z: 1 },
+        material: source?.material,
+        geometryData: {
+          positions: Array.from(r.positions),
+          normals: null,
+          indices: null,
+        },
+      };
+      get().addItem(item, "Optimised");
+      // Hide the blank rather than delete it: the two occupy the same space,
+      // so leaving both visible shows the block you started from and none of
+      // the result. It stays in the tree to be un-hidden, or re-run against a
+      // different budget.
+      if (source) get().toggleItemVisibility(source.id);
+      return { optimiseResult: null, optimiseTool: null };
+    }),
 
   runStressAnalysis: async ({
     itemId,
