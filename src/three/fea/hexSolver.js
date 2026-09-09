@@ -144,6 +144,9 @@ function multiply(v, out, ctx) {
 }
 
 // Solve K u = f by Jacobi-preconditioned conjugate gradient.
+//
+// Returns `converged`: false means the answer is not usable, which callers
+// must check rather than colouring whatever came back.
 export function solveDisplacements({
   nx,
   ny,
@@ -153,7 +156,10 @@ export function solveDisplacements({
   stiff,
   fixed,
   forces,
-  tol = 1e-8,
+  // Measured on a 58k-element model: tightening past this changes neither the
+  // mean nor the peak stress by so much as 0.01%, and costs 20% more time
+  // (886 iterations at 1e-8 against 749 here).
+  tol = 1e-5,
   maxIter = 4000,
 }) {
   const Ke = elementStiffness(h, nu);
@@ -189,8 +195,19 @@ export function solveDisplacements({
   const f0 = Math.sqrt(rz) || 1;
   let iterations = 0;
   let residual = Math.sqrt(rz);
+  let converged = rz === 0;
+  // Conjugate gradient cannot diverge on a well-posed system, so growth by
+  // orders of magnitude means the system is not one -- a load with nothing to
+  // push against, most often.  Without this the run grinds out every iteration
+  // and returns garbage: measured residuals of 1e+61 after 4000 iterations and
+  // 49 seconds, where a well-posed model of the same size converged in 590.
+  const DIVERGED = 1e6;
   for (; iterations < maxIter; iterations++) {
-    if (Math.sqrt(rz) / f0 < tol) break;
+    if (Math.sqrt(rz) / f0 < tol) {
+      converged = true;
+      break;
+    }
+    if (Math.sqrt(Math.abs(rz)) / f0 > DIVERGED || !Number.isFinite(rz)) break;
     multiply(p, Ap, ctx);
     let pAp = 0;
     for (let d = 0; d < ndof; d++) pAp += p[d] * Ap[d];
@@ -208,7 +225,7 @@ export function solveDisplacements({
     rz = rzNew;
     residual = Math.sqrt(Math.abs(rz));
   }
-  return { u, iterations, residual: residual / f0 };
+  return { u, iterations, residual: residual / f0, converged };
 }
 
 // Von Mises stress at each element's centre, in MPa.

@@ -17,7 +17,7 @@ import { solveDisplacements, vonMises } from "./hexSolver.js";
 // both load transfer and fixing, so a load spread over a flat face comes out
 // weighted 1:2:4 across corner / edge / interior nodes without anyone having
 // to say so.
-function surroundingNodes(p, grid) {
+function surroundingNodes(p, grid, supported = null) {
   const { origin, h, nx, ny, nz } = grid;
   const g = [0, 1, 2].map((c) => (p[c] - origin[c]) / h - 0.5);
   const i0 = Math.floor(g[0]),
@@ -25,6 +25,7 @@ function surroundingNodes(p, grid) {
     k0 = Math.floor(g[2]);
   const f = [g[0] - i0, g[1] - j0, g[2] - k0];
   const out = [];
+  let wsum = 0;
   for (let a = 0; a < 2; a++)
     for (let b = 0; b < 2; b++)
       for (let c = 0; c < 2; c++) {
@@ -32,16 +33,27 @@ function surroundingNodes(p, grid) {
           j = j0 + b,
           k = k0 + c;
         if (i < 0 || j < 0 || k < 0 || i > nx || j > ny || k > nz) continue;
+        const n = i + (nx + 1) * (j + (ny + 1) * k);
+        if (supported && !supported[n]) continue;
         const w =
           (a ? f[0] : 1 - f[0]) * (b ? f[1] : 1 - f[1]) * (c ? f[2] : 1 - f[2]);
-        if (w > 0) out.push([i + (nx + 1) * (j + (ny + 1) * k), w]);
+        if (w > 0) {
+          out.push([n, w]);
+          wsum += w;
+        }
       }
+  // Renormalise over the nodes that survived.  A surface point sits ON the
+  // boundary, so some of its eight neighbours are outside the body and carry
+  // no stiffness at all; force handed to one of those can never be balanced,
+  // which makes the system inconsistent and the conjugate gradient DIVERGE --
+  // measured residuals of 1e+61 after grinding out all 4000 iterations, where
+  // the same model at a resolution that happened to produce no orphans
+  // converged in 590. Dropping them instead of renormalising would quietly
+  // lose part of the load.
+  if (supported && wsum > 0) for (const pair of out) pair[1] /= wsum;
   return out;
 }
 
-// Face picks arrive as a flat soup of triangle corner positions -- what the
-// face-picking tools already produce (embossPick's `faceTris`) -- rather than
-// indices into the body's mesh.
 const soupTriangles = function* (soup, scale) {
   for (let t = 0; t + 8 < soup.length; t += 9)
     yield [0, 3, 6].map((o) => [
@@ -92,6 +104,7 @@ export function solveStressField({
   fixtures = [],
   loads = [],
   resolution = 40,
+  tol,
 }) {
   const scaled = new Float64Array(positions.length);
   for (let i = 0; i < positions.length; i++)
@@ -103,13 +116,30 @@ export function solveStressField({
   const stiff = new Float64Array(nx * ny * nz);
   for (let e = 0; e < occ.length; e++) stiff[e] = occ[e] ? material.E : 0;
 
+  // Which nodes actually have material around them.  Everything else is
+  // outside the body: it must take no load, and it must be held, or its
+  // free-floating degrees of freedom leave the system singular.
+  const supported = new Uint8Array(nNodes);
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        if (!occ[i + nx * (j + ny * k)]) continue;
+        for (let a = 0; a < 2; a++)
+          for (let b = 0; b < 2; b++)
+            for (let c = 0; c < 2; c++)
+              supported[i + a + (nx + 1) * (j + b + (ny + 1) * (k + c))] = 1;
+      }
+
   const fixed = new Uint8Array(3 * nNodes);
+  for (let n = 0; n < nNodes; n++)
+    if (!supported[n]) for (let c = 0; c < 3; c++) fixed[n * 3 + c] = 1;
   for (const tri of soupTriangles(fixtures, mmPerUnit))
     for (const p of tri)
-      for (const [n] of surroundingNodes(p, grid))
+      for (const [n] of surroundingNodes(p, grid, supported))
         for (let c = 0; c < 3; c++) fixed[n * 3 + c] = 1;
 
   const forces = new Float64Array(3 * nNodes);
+  let unsupportedLoad = 0;
   for (const { soup, force } of loads) {
     const tris = [...soupTriangles(soup, mmPerUnit)];
     const areas = tris.map(triangleArea);
@@ -121,14 +151,20 @@ export function solveStressField({
       // displacement -- consistent load transfer, so a flat face really does
       // come out uniformly stressed.
       const share = areas[ti] / total / 3;
-      for (const p of tri)
-        for (const [n, w] of surroundingNodes(p, grid))
+      for (const p of tri) {
+        const nodes = surroundingNodes(p, grid, supported);
+        if (!nodes.length) {
+          unsupportedLoad += share;
+          continue;
+        }
+        for (const [n, w] of nodes)
           for (let c = 0; c < 3; c++) forces[n * 3 + c] += force[c] * share * w;
+      }
     });
   }
 
   const nu = material.nu;
-  const { u, iterations, residual } = solveDisplacements({
+  const { u, iterations, residual, converged } = solveDisplacements({
     nx,
     ny,
     nz,
@@ -137,6 +173,7 @@ export function solveStressField({
     stiff,
     fixed,
     forces,
+    ...(tol ? { tol } : {}),
   });
   const field = vonMises({ nx, ny, nz, h, nu, E: material.E, stiff, u });
 
@@ -183,5 +220,10 @@ export function solveStressField({
     displacement: u,
     iterations,
     residual,
+    converged,
+    elements: stiff.reduce((n, v) => n + (v > 0 ? 1 : 0), 0),
+    // What share of the requested load found no material to act on.  Non-zero
+    // means the picked faces are finer than the grid can see.
+    unsupportedLoad,
   };
 }

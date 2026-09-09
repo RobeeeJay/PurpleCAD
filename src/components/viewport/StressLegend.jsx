@@ -73,6 +73,16 @@ export default function StressLegend() {
           {over ? " — over yield" : ""}
         </div>
         <div>Indicative: a voxel model, coarse at fillets</div>
+        <div>
+          {result.elements.toLocaleString()} voxels ·{" "}
+          {result.seconds.toFixed(1)}s
+        </div>
+        {result.unsupportedLoad > 0.01 && (
+          <div style={{ color: "#e87575" }}>
+            {(result.unsupportedLoad * 100).toFixed(0)}% of the load fell
+            outside the voxels — raise Detail
+          </div>
+        )}
       </div>
     </div>
   );

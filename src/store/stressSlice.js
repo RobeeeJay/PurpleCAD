@@ -128,6 +128,7 @@ export const createStressSlice = (set, get) => ({
       STRUCTURAL_MATERIALS[0];
     set({ stressSolving: true, toolError: null });
     try {
+      const startedAt = Date.now();
       const r = await solveStressAsync({
         positions: Array.from(item.geometryData.positions),
         indices: item.geometryData.indices
@@ -157,6 +158,10 @@ export const createStressSlice = (set, get) => ({
       // theory's 288 for the same bar), and even the 98th percentile came out
       // at 351, above the true root stress, which flattened the whole part
       // onto the bottom of the ramp.
+      if (r.converged === false)
+        throw new Error(
+          "The load case could not be solved: check that the held faces really hold the part.",
+        );
       const ceiling = material.yield;
       // Reported next to it, so the peak is visible without being allowed to
       // set the scale.
@@ -179,6 +184,9 @@ export const createStressSlice = (set, get) => ({
           max: r.max,
           material,
           iterations: r.iterations,
+          elements: r.elements,
+          seconds: (Date.now() - startedAt) / 1000,
+          unsupportedLoad: r.unsupportedLoad,
           signature: geometrySignature(item.geometryData.positions),
         },
       });

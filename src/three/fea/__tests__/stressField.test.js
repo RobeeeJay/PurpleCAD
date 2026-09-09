@@ -72,6 +72,87 @@ const barMesh = (Lmm, bmm, tmm) => {
   return { positions, indices, groups };
 };
 
+// A curved body, where the picked faces do NOT line up with the grid.
+const ball = (rMm, seg = 20) => {
+  const r = rMm / MM_PER_UNIT;
+  const positions = [];
+  const indices = [];
+  for (let i = 0; i <= seg; i++) {
+    const phi = (i / seg) * Math.PI;
+    for (let j = 0; j <= seg; j++) {
+      const th = (j / seg) * 2 * Math.PI;
+      positions.push(
+        r * Math.sin(phi) * Math.cos(th),
+        r * Math.cos(phi),
+        r * Math.sin(phi) * Math.sin(th),
+      );
+    }
+  }
+  const at = (i, j) => i * (seg + 1) + j;
+  for (let i = 0; i < seg; i++)
+    for (let j = 0; j < seg; j++)
+      indices.push(
+        at(i, j),
+        at(i + 1, j),
+        at(i + 1, j + 1),
+        at(i, j),
+        at(i + 1, j + 1),
+        at(i, j + 1),
+      );
+  const cap = (want) => {
+    const soup = [];
+    for (let t = 0; t < indices.length / 3; t++) {
+      const vs = [0, 1, 2].map((c) => indices[t * 3 + c] * 3);
+      if (!vs.every((v) => want(positions[v + 1]))) continue;
+      for (const v of vs)
+        soup.push(positions[v], positions[v + 1], positions[v + 2]);
+    }
+    return soup;
+  };
+  return {
+    positions,
+    indices,
+    bottom: cap((y) => y < -0.85 * r),
+    top: cap((y) => y > 0.85 * r),
+  };
+};
+
+describe("a load whose faces do not line up with the grid", () => {
+  // A surface point sits ON the boundary, so some of its eight surrounding
+  // grid nodes are outside the body and carry no stiffness.  Force handed to
+  // one of those can never be balanced: the system is inconsistent and the
+  // conjugate gradient DIVERGES.  Measured on a sphere before the fix -- at
+  // resolutions with orphaned nodes it ran every one of its 4000 iterations to
+  // a residual of 1e+61 and 5.7e+61, taking 49 seconds to return NaN, while
+  // the one resolution that happened to orphan nothing converged in 590.
+  const b = ball(50);
+  for (const resolution of [24, 32, 40]) {
+    it(
+      `converges at detail ${resolution}`,
+      () => {
+        const r = solveStressField({
+          positions: b.positions,
+          indices: b.indices,
+          mmPerUnit: MM_PER_UNIT,
+          material: STEEL,
+          fixtures: b.bottom,
+          loads: [{ soup: b.top, force: [80, -100, 0] }],
+          resolution,
+        });
+        expect(
+          r.converged,
+          `residual ${r.residual.toExponential(1)} after ${r.iterations} iterations`,
+        ).toBe(true);
+        expect([...r.vertexStress].every((v) => Number.isFinite(v))).toBe(true);
+        // And the load was not quietly lost on the way: the weights of the
+        // surviving nodes are renormalised, so nothing is dropped.
+        expect(r.unsupportedLoad).toBe(0);
+      },
+      SOLVE_TIMEOUT,
+    );
+  }
+});
+
 describe("stress on a cantilever, through the mesh path", () => {
   const L = 60,
     b = 10,
