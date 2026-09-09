@@ -4,6 +4,7 @@
 // The numbers themselves are pinned against closed-form beam theory in the
 // unit tests (src/three/fea/__tests__).  What this covers is the part those
 // cannot: the worker, the store, and the field actually reaching the mesh.
+import fs from "node:fs";
 import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
@@ -237,6 +238,119 @@ test.describe.serial("stress view", () => {
     const shot = testInfo.outputPath("stress-view.png");
     await page.screenshot({ path: shot });
     await testInfo.attach("stress-view", {
+      path: shot,
+      contentType: "image/png",
+    });
+  });
+
+  test("runs the same load case through the tool's own UI", async ({}, testInfo) => {
+    test.setTimeout(300_000);
+    // The store path is covered above; this is the part only the real UI can
+    // show -- the toolbar button, the two pick phases, and Solve.
+    await page.evaluate(() => {
+      window.__store.getState().clearStressResult();
+      window.__store.getState().selectItem(null);
+    });
+    const button = page.getByTitle(/^Stress —/);
+    await expect(button).toBeVisible();
+    // No body selected: there is nothing to analyse, and the tool says so
+    // rather than opening onto an empty pick.
+    await expect(button).toBeDisabled();
+
+    await page.evaluate(
+      (id) => window.__store.getState().selectItem(id),
+      bodyId,
+    );
+    await expect(button).toBeEnabled();
+    await button.click();
+
+    const bar = page.locator(".sketch-distance-input-overlay");
+    await expect(bar).toBeVisible();
+    const held = bar.getByTitle(/faces that are HELD/);
+    const loaded = bar.getByTitle(/force is applied to/);
+    await expect(held).toContainText("none");
+    await expect(loaded).toContainText("none");
+
+    // Picking is a real click on the body, so the faces are chosen the way a
+    // user chooses them.  Held phase is the one the tool opens on.
+    const faces = await page.evaluate((id) => {
+      const s = window.__store.getState();
+      const g = s.items.find((i) => i.id === id).geometryData;
+      const p = g.positions;
+      let lo = Infinity,
+        hi = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        lo = Math.min(lo, p[i]);
+        hi = Math.max(hi, p[i]);
+      }
+      const it = s.items.find((i) => i.id === id);
+      const at = (x) =>
+        s._cameraControls.worldToScreen(
+          it.position.x + x,
+          it.position.y,
+          it.position.z,
+        );
+      return { min: at(lo + 0.001), max: at(hi - 0.001) };
+    }, bodyId);
+
+    await page.mouse.click(faces.min.x, faces.min.y);
+    await expect(held).not.toContainText("none");
+    await bar.getByTitle(/force is applied to/).click();
+    await page.mouse.click(faces.max.x, faces.max.y);
+    await expect(loaded).not.toContainText("none");
+
+    // WHICH faces got picked, not merely that something did.  Aiming at the
+    // far end's centre picks the long side face instead -- that end points
+    // away from the default camera -- so this test was quietly solving a bar
+    // held along its whole top rather than at its end, and every other
+    // assertion still passed.  The load case here is the one the picks
+    // actually make: hung from a side face, pulled down at one end.
+    const planes = await page.evaluate(() => {
+      const t = window.__store.getState().stressTool;
+      const box = (soup) => {
+        const lo = [Infinity, Infinity, Infinity];
+        const hi = [-Infinity, -Infinity, -Infinity];
+        for (let i = 0; i < soup.length; i += 3)
+          for (let k = 0; k < 3; k++) {
+            lo[k] = Math.min(lo[k], soup[i + k] * 10);
+            hi[k] = Math.max(hi[k], soup[i + k] * 10);
+          }
+        return { lo, hi };
+      };
+      return { held: box(t.fixtures), loaded: box(t.loadFaces) };
+    });
+    // The held face is flat in Z and runs the length of the bar.
+    expect(planes.held.hi[2] - planes.held.lo[2]).toBeLessThan(0.01);
+    expect(planes.held.hi[0] - planes.held.lo[0]).toBeCloseTo(60, 0);
+    // The loaded face is the end cap: flat in X, at the far end.
+    expect(planes.loaded.hi[0] - planes.loaded.lo[0]).toBeLessThan(0.01);
+    expect(planes.loaded.lo[0]).toBeCloseTo(30, 0);
+
+    // The title sits on the label+field wrapper, so the input is inside it.
+    await bar
+      .getByTitle(/Total force over the loaded faces/)
+      .locator("input")
+      .fill("800");
+    await page.getByTitle(/^Solve the load case/).click();
+    await expect
+      .poll(
+        () => page.evaluate(() => !!window.__store.getState().stressResult),
+        { timeout: 300000 },
+      )
+      .toBe(true);
+
+    // The legend is what makes the colours mean anything: it must quote the
+    // scale in real units, not just show a strip.
+    const legend = page.getByText("Von Mises stress (MPa)");
+    await expect(legend).toBeVisible();
+    const panel = legend.locator("..");
+    await expect(panel).toContainText("yield");
+    await expect(panel).toContainText("Steel");
+    await expect(panel).toContainText(/Peak \d+ MPa/);
+
+    const shot = testInfo.outputPath("stress-tool.png");
+    await page.screenshot({ path: shot });
+    await testInfo.attach("stress-tool", {
       path: shot,
       contentType: "image/png",
     });

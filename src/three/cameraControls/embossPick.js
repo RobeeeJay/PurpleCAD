@@ -672,11 +672,55 @@ export function createEmbossInteraction({
     return true;
   };
 
+  // ── Stress tool face picking ──────────────────────────────────────────────
+  // The same hit test and toggle, but none of the fitting: a stress pick only
+  // ever needs the triangle soup.  Nor the 45-degree connectivity gate --
+  // holding two opposite lugs, or loading faces that meet at a corner, is a
+  // perfectly ordinary load case, where for an emboss it would be nonsense.
+  const handleStressHover = (x, y) => {
+    const st = useStore.getState().stressTool;
+    if (!st || st.phase === "params") return false;
+    highlights.clearFaceHighlight();
+    const hit = pickFaceHit(x, y);
+    if (hit) {
+      const a = analyzeFace(hit);
+      const soup = a.setPositions || a.surfaceSoup;
+      if (soup) highlights.highlightFaceSet(a.mesh, soup, FACE_HOVER_COLOR);
+      else highlights.applyFaceHighlight(hit, FACE_HOVER_COLOR);
+    }
+    return true;
+  };
+
+  const handleStressClick = (x, y) => {
+    const store = useStore.getState();
+    const st = store.stressTool;
+    if (!st || st.phase === "params") return false;
+    const hit = pickFaceHit(x, y);
+    if (!hit) return true;
+    const a = analyzeFace(hit);
+    const soup = a.setPositions || a.surfaceSoup;
+    if (!soup) return true;
+    // A body is analysed on its own: picking a face of a different one starts
+    // the load case over rather than silently mixing two sets of coordinates.
+    const startedNewBody = st.itemId != null && st.itemId !== a.id;
+    const key = st.phase === "loads" ? "loadFaces" : "fixtures";
+    const prev = startedNewBody ? [] : (st[key] ?? []);
+    const combined = toggleRegion(prev, soup);
+    store.setStressFaceSelection({ itemId: a.id, faceTris: combined });
+    if (combined.length)
+      highlights.highlightSelectedFaces?.(a.mesh, combined, FACE_HOVER_COLOR);
+    else highlights.clearSelectedFaces?.();
+    highlights.clearFaceHighlight();
+    return true;
+  };
+
   return {
     handleEmbossHover,
     handleEmbossClick,
     syncEmbossFills,
     handleTextureHover,
     handleTextureClick,
+    handleStressHover,
+    handleStressClick,
   };
 }

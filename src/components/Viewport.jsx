@@ -8,6 +8,8 @@ import SketchOverlays from "./viewport/SketchOverlays";
 import ChamferOverlay from "./viewport/ChamferOverlay";
 import PushPullOverlay from "./viewport/PushPullOverlay";
 import SweepOverlay from "./viewport/SweepOverlay";
+import StressOverlay from "./viewport/StressOverlay";
+import StressLegend from "./viewport/StressLegend";
 import SvgPlacementOverlay from "./viewport/SvgPlacementOverlay";
 import UnderlayPlacementOverlay from "./viewport/UnderlayPlacementOverlay";
 import PlaneDialog from "./PlaneDialog";
@@ -354,6 +356,8 @@ const Viewport = () => {
       <ChamferOverlay />
       <PushPullOverlay />
       <SweepOverlay />
+      <StressOverlay />
+      <StressLegend />
       <PlaneDialog />
       <MirrorDialog />
       <BooleanDialog />

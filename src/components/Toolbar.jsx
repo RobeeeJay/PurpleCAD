@@ -13,6 +13,7 @@ import ModifySection from "./toolbar/ModifySection";
 import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
 import TextureSection from "./toolbar/TextureSection";
+import StressSection from "./toolbar/StressSection";
 import MaterialSection from "./toolbar/MaterialSection";
 import OptionsSection from "./toolbar/OptionsSection";
 import ToolbarSection from "./toolbar/ToolbarSection";
@@ -38,6 +39,7 @@ const Toolbar = () => {
           <SplitSection bare />
           <ModifySection bare />
           <TextureSection bare />
+          <StressSection bare />
           <MaterialSection bare />
         </ToolbarSection>
       )}

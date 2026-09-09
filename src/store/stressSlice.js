@@ -47,7 +47,8 @@ export const createStressSlice = (set, get) => ({
         params: {
           material: "Steel",
           forceN: 500,
-          direction: [0, -1, 0],
+          // Straight down in the USER frame, where Z is up (axisDisplay.js).
+          direction: [0, 0, -1],
           resolution: 40,
         },
       },

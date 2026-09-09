@@ -348,6 +348,8 @@ export function attachCameraControls(ctx) {
     syncEmbossFills,
     handleTextureHover,
     handleTextureClick,
+    handleStressHover,
+    handleStressClick,
   } = createEmbossInteraction({
     renderer,
     raycasterRef,
@@ -821,6 +823,9 @@ export function attachCameraControls(ctx) {
       handleTextureHover(e.clientX, e.clientY);
       return;
     }
+    if (useStore.getState().stressTool) {
+      if (handleStressHover(e.clientX, e.clientY)) return;
+    }
     if (onSketchMouseMove(e)) return;
 
     clearSketchVisualsFor3D();
@@ -877,6 +882,12 @@ export function attachCameraControls(ctx) {
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5) handleTextureClick(e.clientX, e.clientY);
       return;
+    }
+    if (useStore.getState().stressTool && e.button === 0) {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5 && handleStressClick(e.clientX, e.clientY))
+        return;
     }
 
     if (onSketchMouseUp(e)) return;
