@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitHole } from "../three/cameraControls/hole.js";

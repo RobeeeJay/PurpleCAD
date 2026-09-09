@@ -6,7 +6,7 @@
 // like the chamfer/push-pull overlays.  Pipe shows Rotations (twist) + an
 // Auto-rotate toggle; Loft has no parameters (just Confirm/Cancel).
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
 import FormulaInput from "../FormulaInput";
 import { evalValue } from "../inputs.jsx";

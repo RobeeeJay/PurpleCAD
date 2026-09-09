@@ -6,7 +6,6 @@
 
 import {
   getSystemTheme,
-  loadSnapSettings,
   saveSnapSettings,
   dirtyAllEntries,
   SNAP_DEFAULTS,

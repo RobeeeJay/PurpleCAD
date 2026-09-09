@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import TooltipLayer from "./components/TooltipLayer";
 import Toolbar from "./components/Toolbar";
 import Viewport from "./components/Viewport";

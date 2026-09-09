@@ -8,7 +8,7 @@
 // The distance accepts variable formulas, may be cleared to blank while typing,
 // and gates the live preview + Confirm on a valid (non-zero) value.
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { commitPushPull } from "../../three/cameraControls/pushPull.js";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";

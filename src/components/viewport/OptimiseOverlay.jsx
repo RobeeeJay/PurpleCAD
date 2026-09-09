@@ -12,7 +12,6 @@
 // committed when Apply is pressed: a run takes long enough that applying one
 // you have not looked at is a real loss.
 
-import React from "react";
 import { useStore } from "../../store";
 import { STRUCTURAL_MATERIALS } from "../../store/stressSlice.js";
 import { DISPLAY_AXES } from "../../utils/axisDisplay.js";

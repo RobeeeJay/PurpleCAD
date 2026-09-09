@@ -17,8 +17,6 @@ let page;
 let rookId;
 let rookPcad;
 
-const MM = 10;
-
 const V = {
   TotalHeight: 66,
   BaseDia: 42,

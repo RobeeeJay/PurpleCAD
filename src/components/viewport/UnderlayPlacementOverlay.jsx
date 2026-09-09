@@ -4,7 +4,6 @@
 // Re-opened from the same bar for an existing underlay, where Cancel restores
 // the previous values and Remove drops the image entirely.
 
-import React from "react";
 import { useStore } from "../../store";
 import FormulaInput from "../FormulaInput";
 import { evalValue } from "../inputs.jsx";

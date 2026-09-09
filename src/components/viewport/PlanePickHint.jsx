@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useStore } from "../../store";
 
 // Hint shown while picking the 3 points that define a new Plane.  Esc cancels.

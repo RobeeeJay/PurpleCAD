@@ -13,7 +13,6 @@ let page;
 let trophyId;
 let trophyPcad;
 
-const MM = 10; // MM_PER_UNIT
 
 // The spun body is variable-driven. The plinth and the handles are primitives,
 // which take resolved numbers rather than formulas -- so they are sized from
@@ -28,7 +27,6 @@ const V = {
   CupDia: 80,
 };
 const PLINTH = { w: 90, h: 16, d: 90 }; // mm
-const HANDLE = { major: 16, minor: 4 }; // mm
 const TEXT_HEIGHT_MM = 9;
 
 const setVars = () =>
@@ -93,26 +91,6 @@ const tris = (id) =>
       (window.__store.getState().items.find((i) => i.id === n)?.geometryData
         ?.indices.length ?? 0) / 3,
     id,
-  );
-
-// Widest vertex in a thin horizontal slice, in mm above the body's own base --
-// how the tests tell WHERE a feature landed. A triangle count only says that
-// something changed somewhere.
-const widthAt = (id, yMm, tolMm = 2) =>
-  page.evaluate(
-    ({ n, yMm, tolMm }) => {
-      const p = window.__store.getState().items.find((i) => i.id === n)
-        .geometryData.positions;
-      let base = Infinity;
-      for (let i = 1; i < p.length; i += 3) base = Math.min(base, p[i]);
-      let best = 0;
-      for (let i = 0; i < p.length; i += 3) {
-        if (Math.abs((p[i + 1] - base) * 10 - yMm) > tolMm) continue;
-        best = Math.max(best, Math.abs(p[i]) * 10);
-      }
-      return +(best * 2).toFixed(2); // full width across the axis
-    },
-    { n: id, yMm, tolMm },
   );
 
 // Widest vertex in a HEIGHT RANGE, in mm. A thin slice is no good on a box or a

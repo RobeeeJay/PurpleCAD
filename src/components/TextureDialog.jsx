@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitTexture } from "../three/cameraControls/texture.js";

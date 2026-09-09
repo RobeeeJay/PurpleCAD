@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../store";
 import { effectiveSelectionTypes } from "../store/selectionMode.js";
 import VisibilityToggles, { useShiftHeld } from "./VisibilityToggles";

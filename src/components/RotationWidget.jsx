@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import "../styles/RotationWidget.css";
 

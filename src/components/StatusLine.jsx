@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
 import { DISPLAY_AXES, toDisplay } from "../utils/axisDisplay.js";

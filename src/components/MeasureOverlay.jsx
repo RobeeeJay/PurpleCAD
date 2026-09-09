@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import * as THREE from "three";
 import { useStore } from "../store";
 import { measure, shapeMetrics, loopArea } from "../three/measure.js";

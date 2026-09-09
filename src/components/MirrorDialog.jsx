@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import * as THREE from "three";
 import { useStore } from "../store";
 import { useDebouncedPreview, useEscapeKey } from "./inputs.jsx";

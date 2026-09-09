@@ -3,7 +3,6 @@
 // corresponding element; clicking selects it.  Driven by the store's
 // sketchLongPressMenu state and the highlight/select hooks on cameraControlsRef.
 
-import React from "react";
 import { useStore } from "../../store";
 
 const KIND_COLORS = {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
 import { evalValue } from "./inputs.jsx";

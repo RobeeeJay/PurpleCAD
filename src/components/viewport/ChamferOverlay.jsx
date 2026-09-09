@@ -9,7 +9,7 @@
 // Inputs accept variable formulas, may be cleared to blank while typing, and
 // gate the live preview + Confirm on a valid value (see ../inputs.js).
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 import { chamferOrFilletItem, withCommitGuard } from "../../three/occClient.js";

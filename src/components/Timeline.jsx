@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
 import { beginChamferEdit } from "../three/cameraControls/chamferCommit.js";
 import { anyToolActive } from "../store/selectionMode.js";

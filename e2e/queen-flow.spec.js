@@ -18,19 +18,6 @@ let page;
 let queenId;
 let queenPcad;
 
-const MM = 10; // MM_PER_UNIT
-
-const V = {
-  TotalHeight: 88, // foot to the top of the neck, before the ball
-  BaseDia: 40,
-  BaseHeight: 12,
-  TaperHeight: 14, // base to the bottom of the stem
-  StemDia: 14,
-  StemHeight: 34,
-  CrownDia: 34,
-  CrownY: 74, // height of the widest point of the crown
-  NeckDia: 12,
-};
 const BALL_DIA = 18; // the finial, a primitive rather than a dimension
 const SPIKES = 8;
 const SPIKE_BASE_DIA = 5; // the cone at the bottom of each spike

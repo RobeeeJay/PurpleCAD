@@ -5,7 +5,6 @@
 // shape rather than a spinner -- an optimisation that gives no sign of life
 // for two minutes is indistinguishable from a hang.
 
-import { voxelise } from "./voxelise.js";
 import { optimiseTopology } from "./topology.js";
 import { keptVoxels } from "./voxelMesh.js";
 import { surfaceNets } from "./surfaceNets.js";

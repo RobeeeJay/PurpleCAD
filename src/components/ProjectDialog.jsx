@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useStore } from "../store";
 import { dedupProjectedShapes } from "../three/sketchProjection.js";
 import "../styles/VariablesDialog.css";

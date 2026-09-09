@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { offsetSelectedSketchGeometry } from "../../three/sketchModifyActions.js";

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { useEscapeKey, useDebouncedPreview } from "./inputs.jsx";
 import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";

@@ -4,7 +4,6 @@
 // The numbers themselves are pinned against closed-form beam theory in the
 // unit tests (src/three/fea/__tests__).  What this covers is the part those
 // cannot: the worker, the store, and the field actually reaching the mesh.
-import fs from "node:fs";
 import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 

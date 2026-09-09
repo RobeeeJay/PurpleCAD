@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 
 // The "Show constraints / Show dimensions" toggle pair shown in place of the

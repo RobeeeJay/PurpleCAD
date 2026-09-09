@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { maxItemId } from "../store/internals.js";
 import { NumberInput, useEscapeKey } from "./inputs.jsx";

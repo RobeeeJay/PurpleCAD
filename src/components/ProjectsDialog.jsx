@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../store";
 import "../styles/ProjectsDialog.css";

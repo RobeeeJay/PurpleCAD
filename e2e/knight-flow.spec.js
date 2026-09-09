@@ -19,17 +19,6 @@ let page;
 let knightId;
 let knightPcad;
 
-const MM = 10; // MM_PER_UNIT
-
-const V = {
-  BaseDia: 42,
-  BaseHeight: 10,
-  CollarDia: 26,
-  CollarTop: 34, // where the head starts
-  HeadWidth: 18, // across the piece: the extrude depth
-  TotalHeight: 86,
-};
-
 const setVars = () =>
   page.evaluate(
     (vv) =>

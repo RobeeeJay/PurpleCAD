@@ -6,7 +6,7 @@
 // user's Z-up frame (see utils/axisDisplay.js), so what is typed matches what
 // the transform panel shows.
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { useStore } from "../../store";
 import { STRUCTURAL_MATERIALS } from "../../store/stressSlice.js";
 import { DISPLAY_AXES } from "../../utils/axisDisplay.js";

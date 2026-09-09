@@ -9,20 +9,6 @@ import { launchApp } from "./launch.js";
 let app;
 let page;
 
-const heightOf = (id) =>
-  page.evaluate((n) => {
-    const it = window.__store.getState().items.find((i) => i.id === n);
-    const p = it?.geometryData?.positions;
-    if (!p?.length) return null;
-    let lo = Infinity,
-      hi = -Infinity;
-    for (let i = 1; i < p.length; i += 3) {
-      lo = Math.min(lo, p[i]);
-      hi = Math.max(hi, p[i]);
-    }
-    return hi - lo;
-  }, id);
-
 const settled = async () =>
   await expect(page.getByText(/Recalculating/)).toBeHidden({ timeout: 60000 });
 

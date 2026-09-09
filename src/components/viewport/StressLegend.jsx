@@ -9,7 +9,6 @@
 // so a scale built on it would move with the Detail setting rather than with
 // the part.
 
-import React from "react";
 import { useStore } from "../../store";
 import { legendScale } from "../../three/fea/stressColors.js";
 

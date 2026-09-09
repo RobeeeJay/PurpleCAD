@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { isAnalysableBody } from "../../store/stressSlice.js";

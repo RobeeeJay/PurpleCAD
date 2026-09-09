@@ -2,7 +2,6 @@
 // C++ addon's export pipeline produces valid output.
 
 import { describe, it, expect, vi } from "vitest";
-import * as THREE from "three";
 import { makeCube, makeSphere } from "../primitives.js";
 import { tessellate } from "../tessellate.js";
 

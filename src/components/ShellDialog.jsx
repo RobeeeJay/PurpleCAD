@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { MM_PER_UNIT } from "../three/sceneObjects.js";
 import { activePrecision } from "../three/resolution.js";

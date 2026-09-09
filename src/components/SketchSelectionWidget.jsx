@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../store";
 import { effectiveSketchSelTypes } from "../store/selectionMode.js";
 import VisibilityToggles, { useShiftHeld } from "./VisibilityToggles";

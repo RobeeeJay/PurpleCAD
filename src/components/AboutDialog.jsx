@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../store";
 import "../styles/VariablesDialog.css";
 import "../styles/AboutDialog.css";
