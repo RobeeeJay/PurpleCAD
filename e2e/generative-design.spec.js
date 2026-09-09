@@ -68,8 +68,28 @@ test.describe.serial("generative design", () => {
     await app?.close();
   });
 
+  test("says on its face that it is experimental", async () => {
+    // The maths is checked against closed-form answers, but a result is a
+    // voxel model at whatever detail was affordable, carries no factor of
+    // safety, and has never been next to a physical test. That has to be
+    // visible where the tool is used, not only in a commit message.
+    await page.evaluate(
+      (id) => window.__store.getState().selectItem(id),
+      bodyId,
+    );
+    await expect(
+      page.getByTitle(/Generative design \(experimental\)/),
+    ).toBeVisible();
+    await page.getByTitle(/Generative design \(experimental\)/).click();
+    const bar = page.locator(".sketch-distance-input-overlay");
+    await expect(bar).toBeVisible();
+    await expect(bar.getByText("Experimental")).toBeVisible();
+    await expect(bar.getByTitle(/no factor of safety/)).toBeVisible();
+    await page.evaluate(() => window.__store.getState().cancelOptimiseTool());
+  });
+
   test("the toolbar offers it for a selected body", async () => {
-    const button = page.getByTitle(/^Generative design —/);
+    const button = page.getByTitle(/^Generative design \(experimental\)/);
     await expect(button).toBeVisible();
     await expect(button).toBeEnabled();
     await page.evaluate(() => window.__store.getState().selectItem(null));
@@ -83,7 +103,7 @@ test.describe.serial("generative design", () => {
 
   test("carves the body down to a load path and keeps it as a new body", async () => {
     test.setTimeout(600_000);
-    await page.getByTitle(/^Generative design —/).click();
+    await page.getByTitle(/^Generative design \(experimental\)/).click();
     const bar = page.locator(".sketch-distance-input-overlay");
     await expect(bar).toBeVisible();
 

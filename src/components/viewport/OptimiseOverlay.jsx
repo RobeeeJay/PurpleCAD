@@ -1,6 +1,11 @@
 // Generative design: hold some faces, load others, say how much material may
 // stay, and let SIMP decide where it goes.
 //
+// Badged EXPERIMENTAL, and meant literally: the maths is checked against
+// closed-form answers, but a result is a voxel model at whatever detail was
+// affordable, carries no factor of safety, and has never been put next to a
+// physical test.
+//
 // The picks are the same as a stress case -- it is the same load case, asked a
 // different question -- so the bar mirrors StressOverlay, plus a volume budget
 // and a live iteration count. The result previews on the body and is only
@@ -53,6 +58,23 @@ export default function OptimiseOverlay() {
 
   return (
     <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
+      <span
+        title="Experimental: the result is a voxel model at whatever detail was affordable, it carries no factor of safety, and none of it has been checked against a physical test. Treat the shape as a starting point to model properly, not as a part to make."
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          color: "#D4A33F",
+          border: "1px solid #D4A33F",
+          borderRadius: 3,
+          padding: "2px 6px",
+          marginRight: 4,
+          alignSelf: "center",
+        }}
+      >
+        Experimental
+      </span>
       <button
         title="Pick the faces that are HELD — these anchor the part, and material is only kept where it connects back to them"
         style={pickBtn(phase === "fixtures")}
