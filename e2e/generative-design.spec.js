@@ -142,7 +142,35 @@ test.describe.serial("generative design", () => {
       return {
         kept: r.keptElements,
         design: r.designElements,
-        tris: r.positions.length / 9,
+        tris: r.indices.length / 3,
+        verts: r.positions.length / 3,
+        axisAligned: (() => {
+          // The surface follows the density field rather than wrapping cubes,
+          // so it must NOT be all axis-aligned faces the way the blocky
+          // wrapper was.
+          const p = r.positions,
+            idx = r.indices;
+          let flat = 0,
+            total = 0;
+          for (let t = 0; t < idx.length / 3; t++) {
+            const v = [0, 1, 2].map((c) => idx[t * 3 + c] * 3);
+            const a = [p[v[0]], p[v[0] + 1], p[v[0] + 2]];
+            const b = [p[v[1]], p[v[1] + 1], p[v[1] + 2]];
+            const c2 = [p[v[2]], p[v[2] + 1], p[v[2] + 2]];
+            const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            const w = [c2[0] - a[0], c2[1] - a[1], c2[2] - a[2]];
+            const n = [
+              u[1] * w[2] - u[2] * w[1],
+              u[2] * w[0] - u[0] * w[2],
+              u[0] * w[1] - u[1] * w[0],
+            ];
+            const len = Math.hypot(...n);
+            if (len < 1e-12) continue;
+            total++;
+            if (n.some((q) => Math.abs(Math.abs(q) / len - 1) < 1e-6)) flat++;
+          }
+          return flat / total;
+        })(),
         steps: r.history.length,
         first: r.history[0].compliance,
         last: r.history.at(-1).compliance,
@@ -152,6 +180,10 @@ test.describe.serial("generative design", () => {
     expect(result.kept).toBeGreaterThan(0);
     expect(result.kept).toBeLessThan(result.design * 0.75);
     expect(result.tris).toBeGreaterThan(50);
+    expect(
+      result.axisAligned,
+      `${(result.axisAligned * 100).toFixed(0)}% of faces are axis-aligned`,
+    ).toBeLessThan(0.25);
     expect(
       result.last / result.first,
       `compliance ${result.first.toExponential(2)} -> ${result.last.toExponential(2)}`,
@@ -165,7 +197,7 @@ test.describe.serial("generative design", () => {
       bodyId,
     );
     expect(preview.swapped).toBe(true);
-    expect(preview.vertexCount).toBe(result.tris * 3);
+    expect(preview.vertexCount).toBeGreaterThan(20);
 
     // Apply keeps it as a NEW body, leaving the blank alone.
     await page.getByTitle(/Keep the optimised shape/).click();

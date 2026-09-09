@@ -6,9 +6,12 @@
 // invented between samples, and watertight by construction, which is what the
 // mesh-to-solid path needs.
 //
-// The result is blocky at the voxel scale, and honestly so: it is the shape
-// the optimiser actually computed. Smoothing it is a separate decision, not
-// something to slip in while converting.
+// `voxelSurface` wraps whole cubes and is therefore blocky at the voxel scale.
+// It is NOT what ships any more -- surfaceNets.js follows the continuous
+// density instead, which is smooth and just as faithful to what was computed
+// (see its header). This stays as the baseline the smoothness test measures
+// against: a cube wrapper emits nothing but axis-aligned faces, which is
+// exactly the property an isosurface has to beat.
 //
 // Pure arrays -- no THREE, no DOM.
 

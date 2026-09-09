@@ -100,6 +100,8 @@ export function applyOptimisePreview(objectsRef, preview) {
       "position",
       new THREE.BufferAttribute(preview.positions, 3),
     );
+    if (preview.indices)
+      geom.setIndex(new THREE.BufferAttribute(preview.indices, 1));
     geom.computeVertexNormals();
     if (mesh.geometry !== mesh.userData.stressGeometry) mesh.geometry.dispose();
     mesh.geometry = geom;

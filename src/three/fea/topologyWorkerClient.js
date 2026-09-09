@@ -46,12 +46,16 @@ export async function optimiseAsync(args, onProgress) {
       threshold: args.options?.threshold ?? 0.5,
       seeds: args.seeds,
     });
+    const masked = Float64Array.from(r.density, (d, e) => (solid[e] ? d : 0));
+    const net = surfaceNets({
+      density: masked,
+      grid: args.grid,
+      iso: args.options?.threshold ?? 0.5,
+      mmPerUnit: args.mmPerUnit,
+    });
     return {
-      positions: voxelSurface({
-        solid,
-        grid: args.grid,
-        mmPerUnit: args.mmPerUnit,
-      }),
+      positions: net.positions,
+      indices: net.indices,
       history: r.history,
       designElements: r.designElements,
       keptElements: solid.reduce((n, v) => n + v, 0),

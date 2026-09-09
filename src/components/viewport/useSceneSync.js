@@ -373,6 +373,7 @@ export function useSceneSync({
       applyOptimisePreview(objectsRef, {
         itemId: optimiseTool.itemId,
         positions: optimiseResult.positions,
+        indices: optimiseResult.indices,
       });
   }, [stressResult, optimiseResult, optimiseTool, items, renderMode]); // eslint-disable-line react-hooks/exhaustive-deps
 

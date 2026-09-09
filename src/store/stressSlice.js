@@ -298,7 +298,7 @@ export const createStressSlice = (set, get) => ({
         geometryData: {
           positions: Array.from(r.positions),
           normals: null,
-          indices: null,
+          indices: r.indices ? Array.from(r.indices) : null,
         },
       };
       get().addItem(item, "Optimised");

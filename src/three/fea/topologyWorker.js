@@ -7,7 +7,8 @@
 
 import { voxelise } from "./voxelise.js";
 import { optimiseTopology } from "./topology.js";
-import { keptVoxels, voxelSurface } from "./voxelMesh.js";
+import { keptVoxels } from "./voxelMesh.js";
+import { surfaceNets } from "./surfaceNets.js";
 
 self.onmessage = (e) => {
   const { id, args } = e.data;
@@ -29,18 +30,28 @@ self.onmessage = (e) => {
       threshold: options?.threshold ?? 0.5,
       seeds: args.seeds,
     });
-    const positions = voxelSurface({ solid, grid, mmPerUnit });
+    // The surface follows the CONTINUOUS density, not the thresholded blocks:
+    // the connectivity filter only decides which regions survive, so its
+    // verdict is applied by zeroing the density of what it dropped.
+    const masked = Float64Array.from(r.density, (d, e) => (solid[e] ? d : 0));
+    const { positions, indices } = surfaceNets({
+      density: masked,
+      grid,
+      iso: options?.threshold ?? 0.5,
+      mmPerUnit,
+    });
     self.postMessage(
       {
         id,
         result: {
           positions,
+          indices,
           history: r.history,
           designElements: r.designElements,
           keptElements: solid.reduce((n, v) => n + v, 0),
         },
       },
-      [positions.buffer],
+      [positions.buffer, indices.buffer],
     );
   } catch (err) {
     self.postMessage({ id, error: err.message });
