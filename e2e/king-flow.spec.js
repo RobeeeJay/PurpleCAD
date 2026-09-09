@@ -23,6 +23,17 @@ let page;
 let kingId;
 let kingPcad;
 
+const V = {
+  TotalHeight: 88, // foot to the top of the head, before the cross
+  BaseDia: 44,
+  BaseHeight: 10,
+  StemDia: 16,
+  StemHeight: 24,
+  CrownDia: 32,
+  CollarHeight: 8,
+  NeckDia: 14,
+};
+
 // The cross: bars rather than dimensions on the sketch, since it is not part of
 // the spun profile.
 const CROSS = { thick: 6, height: 22, arm: 20, armY: 13 };

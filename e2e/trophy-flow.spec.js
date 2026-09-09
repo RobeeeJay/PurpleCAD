@@ -13,7 +13,6 @@ let page;
 let trophyId;
 let trophyPcad;
 
-
 // The spun body is variable-driven. The plinth and the handles are primitives,
 // which take resolved numbers rather than formulas -- so they are sized from
 // these same values at build time but do not re-derive.
