@@ -35,11 +35,19 @@ export function applyStressDisplay(objectsRef, result, items) {
       strip(mesh);
       continue;
     }
+    // Was this field solved for the mesh the body still has?  The source is
+    // the baked mesh when there is one and the drawn surface otherwise (an
+    // extrude has no baked mesh), so the signature has to be taken from
+    // whichever one it came from.
     const item = items?.find((i) => i.id === result.itemId);
-    if (
-      result.signature &&
-      geometrySignature(item?.geometryData?.positions) !== result.signature
-    ) {
+    const live = item?.geometryData?.positions?.length
+      ? geometrySignature(item.geometryData.positions)
+      : geometrySignature(
+          mesh.userData.stressGeometry
+            ? mesh.userData.stressGeometry.attributes.position.array
+            : mesh.geometry?.attributes?.position?.array,
+        );
+    if (result.signature && live !== result.signature) {
       strip(mesh);
       continue;
     }

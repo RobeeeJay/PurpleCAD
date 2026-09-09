@@ -122,7 +122,13 @@ export const createStressSlice = (set, get) => ({
   }) => {
     const state = get();
     const item = state.items.find((i) => i.id === itemId);
-    if (!item?.geometryData?.positions?.length) return null;
+    if (!item) return null;
+    // A baked mesh when there is one; otherwise the surface the renderer is
+    // drawing, which is what an extrude or a primitive has instead.
+    const surface = item.geometryData?.positions?.length
+      ? item.geometryData
+      : state._cameraControls?.meshSurface?.(itemId);
+    if (!surface?.positions?.length) return null;
     const material =
       STRUCTURAL_MATERIALS.find((m) => m.name === materialName) ??
       STRUCTURAL_MATERIALS[0];
@@ -130,10 +136,8 @@ export const createStressSlice = (set, get) => ({
     try {
       const startedAt = Date.now();
       const r = await solveStressAsync({
-        positions: Array.from(item.geometryData.positions),
-        indices: item.geometryData.indices
-          ? Array.from(item.geometryData.indices)
-          : null,
+        positions: Array.from(surface.positions),
+        indices: surface.indices ? Array.from(surface.indices) : null,
         material: { E: material.E, nu: material.nu },
         fixtures,
         loads,
@@ -145,8 +149,8 @@ export const createStressSlice = (set, get) => ({
       // per-vertex plot on it showed eight distinct colours for the whole
       // part.
       const display = buildStressMesh({
-        positions: item.geometryData.positions,
-        indices: item.geometryData.indices,
+        positions: surface.positions,
+        indices: surface.indices,
         solution: { grid: r.grid, field: r.field, occ: r.occ },
       });
       // The ramp's top is the material's YIELD, so a colour means a fraction
@@ -187,7 +191,7 @@ export const createStressSlice = (set, get) => ({
           elements: r.elements,
           seconds: (Date.now() - startedAt) / 1000,
           unsupportedLoad: r.unsupportedLoad,
-          signature: geometrySignature(item.geometryData.positions),
+          signature: geometrySignature(surface.positions),
         },
       });
       return get().stressResult;

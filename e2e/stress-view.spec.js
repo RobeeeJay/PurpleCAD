@@ -376,6 +376,110 @@ test.describe.serial("stress view", () => {
     });
   });
 
+  test("works on an extrude, which carries no baked mesh", async () => {
+    test.setTimeout(300_000);
+    // The bug this covers: the tool read item.geometryData, which an extrude
+    // does not have -- it is built analytically in the renderer -- so the
+    // button stayed dead on one however it was selected. What is DRAWN is a
+    // perfectly good watertight surface, in the same local frame the face
+    // picks come back in.
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.clearStressResult();
+      const pts = [
+        { x: -3, y: -0.5 },
+        { x: 3, y: -0.5 },
+        { x: 3, y: 0.5 },
+        { x: -3, y: 0.5 },
+      ];
+      s.addItem(
+        {
+          id: 730,
+          type: "extrude",
+          name: "Plate",
+          children: [],
+          parentId: null,
+          profile: {
+            type: "sketchLoop",
+            sketchId: null,
+            textShapeIdx: null,
+            profileCentroid: { x: 0, y: 0 },
+            polygon2D: pts,
+            holes: [],
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+            normalWorld: { x: 0, y: 0, z: 1 },
+          },
+          depth: 1,
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+        },
+        "Added",
+      );
+      s.selectItem(730);
+    });
+    await settled();
+    await page.waitForTimeout(600);
+
+    // The extrude really has no baked mesh, and the tool is offered anyway.
+    const shape = await page.evaluate(() => {
+      const s = window.__store.getState();
+      const it = s.items.find((i) => i.id === 730);
+      const surf = s._cameraControls.meshSurface(730);
+      return {
+        baked: it.geometryData?.positions?.length ?? 0,
+        drawnVerts: surf ? surf.positions.length / 3 : 0,
+      };
+    });
+    expect(shape.baked).toBe(0);
+    expect(shape.drawnVerts).toBeGreaterThan(8);
+    await expect(page.getByTitle(/^Stress —/)).toBeEnabled();
+
+    // And it solves: held at one end along X, pulled down at the other.
+    const summary = await page.evaluate(async () => {
+      const s = window.__store.getState();
+      const surf = s._cameraControls.meshSurface(730);
+      const p = surf.positions;
+      let lo = Infinity,
+        hi = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        lo = Math.min(lo, p[i]);
+        hi = Math.max(hi, p[i]);
+      }
+      const cap = (want) => {
+        const soup = [];
+        const tris = surf.indices ? surf.indices.length / 3 : p.length / 9;
+        for (let t = 0; t < tris; t++) {
+          const vs = [0, 1, 2].map((c) =>
+            surf.indices ? surf.indices[t * 3 + c] * 3 : (t * 3 + c) * 3,
+          );
+          if (!vs.every((v) => Math.abs(p[v] - want) < 1e-6)) continue;
+          for (const v of vs) soup.push(p[v], p[v + 1], p[v + 2]);
+        }
+        return soup;
+      };
+      const r = await s.runStressAnalysis({
+        itemId: 730,
+        fixtures: cap(lo),
+        loads: [{ soup: cap(hi), force: [0, -400, 0] }],
+        resolution: 28,
+      });
+      return r
+        ? { max: r.max, verts: r.display.positions.length / 3 }
+        : { error: window.__store.getState().toolError };
+    });
+    expect(summary.error).toBeUndefined();
+    expect(summary.max).toBeGreaterThan(0);
+    expect(summary.verts).toBeGreaterThan(100);
+
+    const painted = await page.evaluate(() =>
+      window.__store.getState()._cameraControls.meshDisplayInfo(730),
+    );
+    expect(painted.hasVertexColors).toBe(true);
+    expect(painted.distinctColors).toBeGreaterThan(8);
+  });
+
   test("takes the field off when the result is cleared", async () => {
     await page.evaluate(() => window.__store.getState().clearStressResult());
     await page.waitForTimeout(500);

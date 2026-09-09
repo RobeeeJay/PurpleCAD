@@ -5,9 +5,9 @@ import ToolbarSection from "./ToolbarSection";
 // Stress — hold some faces, load others, and colour the body by how hard it is
 // working.  One toggle button; StressOverlay's bottom bar owns the rest.
 //
-// Needs a body with a baked mesh: the analysis reads geometryData, which
-// primitives and extrudes do not carry (they are built analytically in the
-// renderer).
+// Works on anything with a surface in the scene, not only bodies carrying a
+// baked mesh: an extrude is built analytically in the renderer and has no
+// geometryData at all, and reading that alone left the button dead on one.
 const StressSection = ({ bare = false }) => {
   const stressTool = useStore((s) => s.stressTool);
   const selectedId = useStore((s) => s.selectedId);
@@ -16,7 +16,13 @@ const StressSection = ({ bare = false }) => {
   const cancelStressTool = useStore((s) => s.cancelStressTool);
 
   const selected = items.find((i) => i.id === selectedId);
-  const ready = !!selected?.geometryData?.positions?.length;
+  // Not reactive, but it does not need to be: what matters is whether the
+  // selected body has a surface, and this re-runs whenever the selection or
+  // the item list changes.
+  const ready =
+    !!selected &&
+    (!!selected.geometryData?.positions?.length ||
+      !!useStore.getState()._cameraControls?.hasSurfaceMesh?.(selectedId));
 
   const toggle = () => {
     if (stressTool) cancelStressTool();
@@ -29,7 +35,7 @@ const StressSection = ({ bare = false }) => {
       title={
         ready || stressTool
           ? "Stress — hold faces, load others, and colour the body by von Mises stress"
-          : "Stress — select a solid body first (a boolean, chamfer or other built result)"
+          : "Stress — select a body first"
       }
       disabled={!ready && !stressTool}
       onClick={toggle}

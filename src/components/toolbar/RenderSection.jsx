@@ -1,6 +1,334 @@
 import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import ToolbarDropdown from "./ToolbarDropdown";
+
+const WireframeIcon = () => (
+  <svg viewBox="0 0 24 24" width="20" height="20">
+    <rect
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      x="3"
+      y="7"
+      width="14"
+      height="14"
+    />
+    <polyline
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      points="3,7 7,3 21,3 21,17 17,21"
+    />
+    <line
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="17"
+      y1="7"
+      x2="17"
+      y2="21"
+    />
+    <line
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="3"
+      y1="7"
+      x2="17"
+      y2="7"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="7"
+      y1="3"
+      x2="7"
+      y2="17"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeDasharray="2 1.5"
+      x1="21"
+      y1="3"
+      x2="7"
+      y2="17"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeDasharray="2 1.5"
+      x1="3"
+      y1="21"
+      x2="7"
+      y2="17"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeDasharray="2 1.5"
+      x1="7"
+      y1="17"
+      x2="17"
+      y2="17"
+    />
+  </svg>
+);
+
+const TransparentIcon = () => (
+  <svg viewBox="0 0 24 24" width="20" height="20">
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1"
+      strokeDasharray="2 1.5"
+      x1="3"
+      y1="21"
+      x2="3"
+      y2="8"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1"
+      strokeDasharray="2 1.5"
+      x1="3"
+      y1="8"
+      x2="17"
+      y2="8"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1"
+      strokeDasharray="2 1.5"
+      x1="7"
+      y1="4"
+      x2="3"
+      y2="8"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1"
+      strokeDasharray="2 1.5"
+      x1="7"
+      y1="17"
+      x2="3"
+      y2="21"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1"
+      strokeDasharray="2 1.5"
+      x1="7"
+      y1="17"
+      x2="17"
+      y2="17"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1"
+      strokeDasharray="2 1.5"
+      x1="7"
+      y1="17"
+      x2="7"
+      y2="4"
+    />
+    <polygon
+      stroke="#6C3FD4"
+      fill="rgba(108,63,212,0.07)"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      points="3,8 17,8 17,21 3,21"
+    />
+    <polyline
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      points="3,8 7,4 21,4 21,17 17,21"
+    />
+    <line
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="17"
+      y1="8"
+      x2="17"
+      y2="21"
+    />
+    <line
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="3"
+      y1="8"
+      x2="17"
+      y2="8"
+    />
+    <line
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="7"
+      y1="4"
+      x2="21"
+      y2="4"
+    />
+  </svg>
+);
+
+const ShadedIcon = () => (
+  <svg viewBox="0 0 24 24" width="20" height="20">
+    <polygon
+      stroke="#6C3FD4"
+      fill="rgba(108,63,212,0.55)"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      points="3,8 17,8 17,21 3,21"
+    />
+    <polygon
+      stroke="#6C3FD4"
+      fill="rgba(108,63,212,0.25)"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      points="3,8 7,4 21,4 17,8"
+    />
+    <polygon
+      stroke="#6C3FD4"
+      fill="rgba(108,63,212,0.38)"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      points="17,8 21,4 21,17 17,21"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="7"
+      y1="4"
+      x2="7"
+      y2="17"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeDasharray="2 1.5"
+      x1="21"
+      y1="4"
+      x2="7"
+      y2="17"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeDasharray="2 1.5"
+      x1="7"
+      y1="17"
+      x2="17"
+      y2="17"
+    />
+  </svg>
+);
+
+const PathTraceIcon = () => (
+  <svg viewBox="0 0 24 24" width="20" height="20">
+    <circle
+      stroke="#6C3FD4"
+      fill="rgba(108,63,212,0.55)"
+      strokeWidth="1.5"
+      cx="12"
+      cy="12"
+      r="9"
+    />
+    <circle
+      stroke="#6C3FD4"
+      fill="rgba(30,10,80,0.25)"
+      strokeWidth="0"
+      cx="12"
+      cy="12"
+      r="9"
+    />
+    <circle
+      stroke="none"
+      fill="rgba(108,63,212,0.3)"
+      strokeWidth="0"
+      cx="12"
+      cy="13"
+      r="7"
+    />
+    <ellipse
+      stroke="none"
+      fill="rgba(212,163,63,0.9)"
+      cx="8.5"
+      cy="8"
+      rx="2.5"
+      ry="1.8"
+      transform="rotate(-25 8.5 8)"
+    />
+    <ellipse
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="0.75"
+      strokeDasharray="2 2"
+      cx="12"
+      cy="12"
+      rx="9"
+      ry="3"
+    />
+  </svg>
+);
+
+// The four ways of DRAWING the scene, as one mutually-exclusive choice.  They
+// were four buttons; a dropdown showing the active one costs a single slot in
+// a toolbar that has to hold every tool the app has.
+const VIEWS = [
+  {
+    key: "wireframe",
+    label: "Wireframe",
+    title: "Wireframe (1)",
+    Icon: WireframeIcon,
+  },
+  {
+    key: "transparent",
+    label: "Transparent",
+    title: "Transparent (50%) (2)",
+    Icon: TransparentIcon,
+  },
+  { key: "shaded", label: "Shaded", title: "Shaded (3)", Icon: ShadedIcon },
+  {
+    key: "pathtrace",
+    label: "Path traced",
+    title: "Path-traced render (prototype) — progressive GPU ray tracing (4)",
+    Icon: PathTraceIcon,
+  },
+];
 
 const RenderSection = () => {
   const renderMode = useStore((s) => s.renderMode);
@@ -18,323 +346,31 @@ const RenderSection = () => {
   // The raster modes read as selected only when the path-traced view is off, so
   // all four behave as one mutually-exclusive radio group.
   const rasterMode = (m) => renderMode === m && !pathTraceView;
+  // The trigger wears the icon of whichever view is live, so the toolbar still
+  // says which one you are in without spending four slots to do it.
+  const active =
+    VIEWS.find((v) =>
+      v.key === "pathtrace" ? pathTraceView : rasterMode(v.key),
+    ) ?? VIEWS[2];
+  const ActiveViewIcon = active.Icon;
 
   return (
     <ToolbarSection label="Render">
-      <button
-        className={`toolbar-btn ${rasterMode("wireframe") ? "active" : ""}`}
-        title="Wireframe (1)"
-        onClick={() => setRenderMode("wireframe")}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            x="3"
-            y="7"
-            width="14"
-            height="14"
-          />
-          <polyline
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="3,7 7,3 21,3 21,17 17,21"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="17"
-            y1="7"
-            x2="17"
-            y2="21"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="3"
-            y1="7"
-            x2="17"
-            y2="7"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="7"
-            y1="3"
-            x2="7"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="21"
-            y1="3"
-            x2="7"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="3"
-            y1="21"
-            x2="7"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="7"
-            y1="17"
-            x2="17"
-            y2="17"
-          />
-        </svg>
-      </button>
-      <button
-        className={`toolbar-btn ${rasterMode("transparent") ? "active" : ""}`}
-        title="Transparent (50%) (2)"
-        onClick={() => setRenderMode("transparent")}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 1.5"
-            x1="3"
-            y1="21"
-            x2="3"
-            y2="8"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 1.5"
-            x1="3"
-            y1="8"
-            x2="17"
-            y2="8"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 1.5"
-            x1="7"
-            y1="4"
-            x2="3"
-            y2="8"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 1.5"
-            x1="7"
-            y1="17"
-            x2="3"
-            y2="21"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 1.5"
-            x1="7"
-            y1="17"
-            x2="17"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 1.5"
-            x1="7"
-            y1="17"
-            x2="7"
-            y2="4"
-          />
-          <polygon
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.07)"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="3,8 17,8 17,21 3,21"
-          />
-          <polyline
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="3,8 7,4 21,4 21,17 17,21"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="17"
-            y1="8"
-            x2="17"
-            y2="21"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="3"
-            y1="8"
-            x2="17"
-            y2="8"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="7"
-            y1="4"
-            x2="21"
-            y2="4"
-          />
-        </svg>
-      </button>
-      <button
-        className={`toolbar-btn ${rasterMode("shaded") ? "active" : ""}`}
-        title="Shaded (3)"
-        onClick={() => setRenderMode("shaded")}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <polygon
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.55)"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="3,8 17,8 17,21 3,21"
-          />
-          <polygon
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.25)"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="3,8 7,4 21,4 17,8"
-          />
-          <polygon
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.38)"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="17,8 21,4 21,17 17,21"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="7"
-            y1="4"
-            x2="7"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="21"
-            y1="4"
-            x2="7"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="7"
-            y1="17"
-            x2="17"
-            y2="17"
-          />
-        </svg>
-      </button>
-      <button
-        className={`toolbar-btn ${pathTraceView ? "active" : ""}`}
-        title="Path-traced render (prototype) — progressive GPU ray tracing (4)"
-        onClick={() => setPathTraceView(true)}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <circle
-            stroke="#6C3FD4"
-            fill="rgba(108,63,212,0.55)"
-            strokeWidth="1.5"
-            cx="12"
-            cy="12"
-            r="9"
-          />
-          <circle
-            stroke="#6C3FD4"
-            fill="rgba(30,10,80,0.25)"
-            strokeWidth="0"
-            cx="12"
-            cy="12"
-            r="9"
-          />
-          <circle
-            stroke="none"
-            fill="rgba(108,63,212,0.3)"
-            strokeWidth="0"
-            cx="12"
-            cy="13"
-            r="7"
-          />
-          <ellipse
-            stroke="none"
-            fill="rgba(212,163,63,0.9)"
-            cx="8.5"
-            cy="8"
-            rx="2.5"
-            ry="1.8"
-            transform="rotate(-25 8.5 8)"
-          />
-          <ellipse
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="0.75"
-            strokeDasharray="2 2"
-            cx="12"
-            cy="12"
-            rx="9"
-            ry="3"
-          />
-        </svg>
-      </button>
+      <ToolbarDropdown
+        trigger={<ActiveViewIcon />}
+        title={`View: ${active.label} — wireframe, transparent, shaded or path traced`}
+        items={VIEWS.map((v) => ({
+          key: v.key,
+          label: v.label,
+          title: v.title,
+          icon: <v.Icon />,
+          active: v.key === active.key,
+          onClick: () =>
+            v.key === "pathtrace"
+              ? setPathTraceView(true)
+              : setRenderMode(v.key),
+        }))}
+      />
       <button
         className={`toolbar-btn ${shadowsEnabled ? "active" : ""}`}
         title={

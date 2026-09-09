@@ -513,6 +513,27 @@ export function attachCameraControls(ctx) {
   };
   // World position + triangle/vertex counts of a selected object's live mesh,
   // for the status line.
+  // The surface of a body that has no BAKED mesh.
+  //
+  // Extrudes and primitives are built analytically in the renderer, so
+  // geometryData is empty for them and anything reading it alone sees no body
+  // at all -- which is why Stress refused to open on an extrude. What is drawn
+  // is a perfectly good watertight surface, in the same local frame the face
+  // picks come back in, so the analysis can read it straight off the scene.
+  controls.hasSurfaceMesh = (itemId) => {
+    const p = objectsRef.current[itemId]?.geometry?.attributes?.position;
+    return !!p && p.count >= 12;
+  };
+  controls.meshSurface = (itemId) => {
+    const geom = objectsRef.current[itemId]?.geometry;
+    const pos = geom?.attributes?.position;
+    if (!pos) return null;
+    return {
+      positions: Array.from(pos.array),
+      indices: geom.index ? Array.from(geom.index.array) : null,
+    };
+  };
+
   // What a body's mesh is currently WEARING: whether a per-vertex field is on
   // it and how varied it is.  The e2e suite's only way to see a stress plot --
   // the colours live in a BufferAttribute in the three.js scene, and no part
