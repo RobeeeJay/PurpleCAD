@@ -73,6 +73,9 @@ export const stressInitial = {
   // { positions, keptElements, designElements, history } once it has run.
   optimiseResult: null,
   optimiseProgress: null,
+  // The surface as it stands part-way through a run, so the shape can be
+  // watched rather than waited for.
+  optimisePreview: null,
 };
 
 export const createStressSlice = (set, get) => ({
@@ -161,6 +164,7 @@ export const createStressSlice = (set, get) => ({
       },
       optimiseResult: null,
       optimiseProgress: null,
+      optimisePreview: null,
     }),
 
   setOptimisePhase: (phase) =>
@@ -202,7 +206,12 @@ export const createStressSlice = (set, get) => ({
 
   cancelOptimiseTool: () => {
     cancelOptimisation();
-    set({ optimiseTool: null, optimiseResult: null, optimiseProgress: null });
+    set({
+      optimiseTool: null,
+      optimiseResult: null,
+      optimiseProgress: null,
+      optimisePreview: null,
+    });
   },
 
   // Run SIMP over the picked load case.  The design space is the body itself,
@@ -242,7 +251,12 @@ export const createStressSlice = (set, get) => ({
       const n = i + (grid.nx + 1) * (j + (grid.ny + 1) * k);
       if (load.fixed[n * 3]) seeds.push(e);
     }
-    set({ optimiseProgress: { iteration: 0, of: tool.params.iterations } });
+    let designCount = 0;
+    for (let e = 0; e < load.occ.length; e++) designCount += load.occ[e];
+    set({
+      optimiseProgress: { iteration: 0, of: tool.params.iterations },
+      optimisePreview: null,
+    });
     try {
       const r = await optimiseAsync(
         {
@@ -264,16 +278,55 @@ export const createStressSlice = (set, get) => ({
               iteration: p.iteration + 1,
               of: tool.params.iterations,
               compliance: p.compliance,
+              change: p.change,
+              kept: p.kept,
+              designElements: designCount,
             },
+            // Each step's shape, so the preview follows the run.
+            ...(p.positions
+              ? {
+                  optimisePreview: {
+                    positions: p.positions,
+                    indices: p.indices,
+                  },
+                }
+              : {}),
           }),
       );
-      set({ optimiseResult: r, optimiseProgress: null });
+      set({
+        optimiseResult: r,
+        optimiseProgress: null,
+        optimisePreview: { positions: r.positions, indices: r.indices },
+      });
       return r;
     } catch (e) {
       set({ optimiseProgress: null, toolError: e.message });
       return null;
     }
   },
+
+  // Stop early and KEEP what is on screen.  A run is minutes, and a shape is
+  // usually recognisable long before the last step; throwing that away because
+  // the loop had not finished counting would be the wrong default.
+  stopOptimisation: () =>
+    set((state) => {
+      cancelOptimisation();
+      const preview = state.optimisePreview;
+      if (!preview?.positions?.length)
+        return { optimiseProgress: null, optimisePreview: null };
+      const p = state.optimiseProgress;
+      return {
+        optimiseProgress: null,
+        optimiseResult: {
+          positions: preview.positions,
+          indices: preview.indices,
+          keptElements: p?.kept ?? 0,
+          designElements: p?.designElements ?? 0,
+          history: [],
+          stoppedEarly: true,
+        },
+      };
+    }),
 
   // Commit the optimised shape as a new body beside the original, rather than
   // replacing it: the input is a design SPACE, and keeping it means the run

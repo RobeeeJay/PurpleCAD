@@ -14,6 +14,17 @@ self.onmessage = (e) => {
   const { id, args } = e.data;
   try {
     const { grid, occ, fixed, forces, material, options, mmPerUnit } = args;
+    const iso = options?.threshold ?? 0.5;
+    // The surface of whatever the densities currently say, extracted in the
+    // worker and transferred out: a run is minutes, and watching the shape
+    // find itself is what tells you the load case was set up right. A step
+    // counter alone cannot -- a wrong answer counts up just as steadily.
+    const frame = (density) => {
+      const net = surfaceNets({ density, grid, iso, mmPerUnit });
+      let kept = 0;
+      for (let e = 0; e < density.length; e++) if (density[e] >= iso) kept++;
+      return { net, kept };
+    };
     const r = optimiseTopology({
       grid,
       occ,
@@ -21,8 +32,23 @@ self.onmessage = (e) => {
       forces,
       material,
       ...options,
-      onIteration: ({ iteration, compliance, change }) =>
-        self.postMessage({ id, progress: { iteration, compliance, change } }),
+      onIteration: ({ iteration, compliance, change, density }) => {
+        const { net, kept } = frame(density);
+        self.postMessage(
+          {
+            id,
+            progress: {
+              iteration,
+              compliance,
+              change,
+              kept,
+              positions: net.positions,
+              indices: net.indices,
+            },
+          },
+          [net.positions.buffer, net.indices.buffer],
+        );
+      },
     });
     const solid = keptVoxels({
       density: r.density,

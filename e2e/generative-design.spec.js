@@ -224,6 +224,95 @@ test.describe.serial("generative design", () => {
     expect(made.toolClosed).toBe(true);
   });
 
+  test("shows the shape after every step, and can stop on one", async () => {
+    test.setTimeout(600_000);
+    // A run is minutes at any useful detail, so the shape has to be visible
+    // while it works: a step counter alone cannot tell a good load case from a
+    // bad one, since a wrong answer counts up just as steadily.
+    await page.evaluate((id) => {
+      const s = window.__store.getState();
+      s.selectItem(id);
+      s.startOptimiseTool(id);
+      const surf = s._cameraControls.meshSurface(id);
+      const p = surf.positions;
+      let lo = Infinity,
+        hi = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        lo = Math.min(lo, p[i]);
+        hi = Math.max(hi, p[i]);
+      }
+      const cap = (want) => {
+        const soup = [];
+        const tris = surf.indices ? surf.indices.length / 3 : p.length / 9;
+        for (let t = 0; t < tris; t++) {
+          const vs = [0, 1, 2].map((c) =>
+            surf.indices ? surf.indices[t * 3 + c] * 3 : (t * 3 + c) * 3,
+          );
+          if (!vs.every((v) => Math.abs(p[v] - want) < 1e-6)) continue;
+          for (const v of vs) soup.push(p[v], p[v + 1], p[v + 2]);
+        }
+        return soup;
+      };
+      s.setOptimisePhase("fixtures");
+      s.setOptimiseFaceSelection({ itemId: id, faceTris: cap(lo) });
+      s.setOptimisePhase("loads");
+      s.setOptimiseFaceSelection({ itemId: id, faceTris: cap(hi) });
+      s.setOptimiseParams({ resolution: 20, iterations: 40, forceN: 400 });
+      // Watch every frame the run publishes.
+      window.__frames = [];
+      window.__unwatch = window.__store.subscribe((st) => {
+        const p2 = st.optimisePreview;
+        if (p2?.positions?.length)
+          window.__frames.push({
+            verts: p2.positions.length / 3,
+            step: st.optimiseProgress?.iteration ?? null,
+            checksum: p2.positions[0] + p2.positions[p2.positions.length - 1],
+          });
+      });
+    }, bodyId);
+
+    await page.getByTitle(/^Run the optimisation/).click();
+    // Several distinct shapes arrive before the run is anywhere near done.
+    await expect
+      .poll(() => page.evaluate(() => window.__frames.length), {
+        timeout: 300000,
+      })
+      .toBeGreaterThan(3);
+    const midRun = await page.evaluate(() => ({
+      frames: window.__frames.length,
+      distinct: new Set(window.__frames.map((f) => f.checksum)).size,
+      steps: window.__frames.map((f) => f.step).filter((v) => v != null),
+      running: !!window.__store.getState().optimiseProgress,
+    }));
+    // The shape really CHANGES between frames rather than being republished.
+    expect(midRun.distinct).toBeGreaterThan(1);
+    expect(midRun.steps[midRun.steps.length - 1]).toBeGreaterThan(
+      midRun.steps[0],
+    );
+    expect(midRun.running).toBe(true);
+
+    // Stop keeps what is on screen rather than throwing the run away.
+    await page.getByTitle(/Stop here and keep/).click();
+    const stopped = await page.evaluate(() => {
+      window.__unwatch?.();
+      const st = window.__store.getState();
+      return {
+        running: !!st.optimiseProgress,
+        result: st.optimiseResult
+          ? {
+              verts: st.optimiseResult.positions.length / 3,
+              early: st.optimiseResult.stoppedEarly,
+            }
+          : null,
+      };
+    });
+    expect(stopped.running).toBe(false);
+    expect(stopped.result).not.toBeNull();
+    expect(stopped.result.early).toBe(true);
+    expect(stopped.result.verts).toBeGreaterThan(20);
+    await page.evaluate(() => window.__store.getState().cancelOptimiseTool());
+  });
+
   test("the optimised body survives a reload", async ({}, testInfo) => {
     test.setTimeout(300_000);
     await page.evaluate(() => window.__store.getState().selectItem(null));

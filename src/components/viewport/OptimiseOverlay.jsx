@@ -25,6 +25,7 @@ export default function OptimiseOverlay() {
   const clearFaces = useStore((s) => s.clearOptimiseFaces);
   const cancel = useStore((s) => s.cancelOptimiseTool);
   const run = useStore((s) => s.runOptimisation);
+  const stop = useStore((s) => s.stopOptimisation);
   const apply = useStore((s) => s.applyOptimisation);
 
   useEscapeKey(!!tool, () => cancel());
@@ -149,7 +150,7 @@ export default function OptimiseOverlay() {
         />
       </Field>
       <button
-        title="Run the optimisation and preview the result on the body"
+        title="Run the optimisation; the shape updates on the body after every step"
         style={barBtn(true, !ready || running)}
         disabled={!ready || running}
         onClick={run}
@@ -160,6 +161,29 @@ export default function OptimiseOverlay() {
             ? "Re-run"
             : "Optimise"}
       </button>
+      {running && (
+        <>
+          <span
+            style={{ fontSize: 11, color: "#aaa", marginLeft: 4 }}
+            title="Compliance is the work the load does: lower is stiffer. Movement is how far the densities shifted this step -- it settles toward zero."
+          >
+            {progress.compliance != null &&
+              `stiffness ${(1 / progress.compliance).toExponential(2)}`}
+            {progress.change != null &&
+              ` · movement ${progress.change.toFixed(3)}`}
+            {progress.kept != null &&
+              progress.designElements > 0 &&
+              ` · ${Math.round((progress.kept / progress.designElements) * 100)}% kept`}
+          </span>
+          <button
+            title="Stop here and keep the shape currently on screen"
+            style={barBtn(false)}
+            onClick={stop}
+          >
+            Stop
+          </button>
+        </>
+      )}
       {result && !running && (
         <button
           title="Keep the optimised shape as a new body, leaving the original as it was"

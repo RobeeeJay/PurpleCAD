@@ -102,7 +102,7 @@ export function useSceneSync({
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
   const soloItemId = useStore((s) => s.soloItemId);
   const stressResult = useStore((s) => s.stressResult);
-  const optimiseResult = useStore((s) => s.optimiseResult);
+  const optimisePreview = useStore((s) => s.optimisePreview);
   const optimiseTool = useStore((s) => s.optimiseTool);
   const booleanTool = useStore((s) => s.booleanTool);
   const booleanCutIds = useStore((s) => s.booleanCutIds);
@@ -369,13 +369,13 @@ export function useSceneSync({
     if (stressResult && !ok) useStore.getState().clearStressResult();
     // An optimisation result previews on the body it came from, until it is
     // applied as one of its own or the tool is closed.
-    if (!stressResult && optimiseResult?.positions?.length && optimiseTool)
+    if (!stressResult && optimisePreview?.positions?.length && optimiseTool)
       applyOptimisePreview(objectsRef, {
         itemId: optimiseTool.itemId,
-        positions: optimiseResult.positions,
-        indices: optimiseResult.indices,
+        positions: optimisePreview.positions,
+        indices: optimisePreview.indices,
       });
-  }, [stressResult, optimiseResult, optimiseTool, items, renderMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stressResult, optimisePreview, optimiseTool, items, renderMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // End solo if the soloed item is gone (deleted, or the timeline moved past
   // it), restoring the saved view so the user isn't left staring at a blank
