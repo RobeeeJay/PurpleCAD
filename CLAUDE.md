@@ -50,6 +50,22 @@ a single-spec run deletes the other parts' `.pcad` files. Run one spec only
 when explicitly asked to watch a test in action, and then say that is what you
 did.
 
+`timeline-walk.spec.js` is the slowest test and its cost genuinely swings:
+measured per step, everything settles in 0.4s except two chamfers on an
+embossed body at 28.1s and 19.9s, and the same spec on the same code has taken
+28.8s, 52.7s and 15.5 minutes on an unloaded machine. Its waits are 240s for
+that reason, well clear of a legitimate chamfer -- so a failure THERE is a
+genuine wedge worth chasing, not a slow machine. The variance predates the
+budget change (it fails the same way at 3e4ea95) and is unexplained; it is a
+question about the recalc path, not about the test.
+
+The failure-screenshot fixture (`e2e/fixtures.js`) takes its screenshot with a
+TIMEOUT. A test that fails because a recalculation never settled leaves the
+renderer busy in a native call, and `page.screenshot()` then never returns --
+which does not merely lose the picture, it hangs the whole run. One container
+sat like that for six and a half hours, long after the test timeout had fired.
+Keep that timeout.
+
 The path-tracer pixel test excludes ITSELF in the container -- it needs a real
 GPU and skips on a software renderer (see `e2e/pathtrace.spec.js`), as does the
 `visual` snapshot. Both report as skipped, not failed; nothing needs excluding
@@ -88,7 +104,7 @@ survives any Vite upgrade (grep dist for `occ_addon`; it must be absent).
 ## Environment setup
 
 - **Never run the container suite against a stale image.** `npm run
-  test:e2e:podman` runs whatever `purple-cad-e2e` currently is -- it does NOT
+test:e2e:podman` runs whatever `purple-cad-e2e` currently is -- it does NOT
   rebuild. Run `npm run e2e:image` after ANY change you expect the container to
   see, including changes to `e2e/`, `src/`, and the Containerfile itself.
   Editing the Containerfile and immediately running the suite tests the OLD
@@ -181,6 +197,26 @@ profile still sees one outer rectangle with the circles as its holes.
   add tests that depend on `@testing-library/react` or DOM globals — they
   won't run. Test the pure modules instead.
 
+## Editing code with a script
+
+Scripted edits (a python `str.replace`, a sed) fail SILENTLY and have cost real
+time more than once:
+
+- **Assert that every replacement applied**, and read the diff back. Prettier
+  reformats as soon as you save, so a pattern copied from an earlier version of
+  the file no longer matches -- the edit vanishes and the run tests the old
+  code. Several "fixes" in one session were never applied at all.
+- **Never cut a range by searching for a boundary token.** Removing a
+  declaration by deleting from its name to the next `;` at the start of a line
+  swallowed the following statement, because the line being removed ended in a
+  comment rather than a semicolon -- three e2e specs lost their whole dimension
+  table. A multi-line arrow function has the same trap in the other direction.
+- **`node --check` does not notice.** Both accidents left valid JavaScript with
+  a missing binding, and only showed when the test RAN.
+- **Run the specs you EDITED, not the ones you were working on.** The suite
+  caught the missing tables because the local run beforehand covered the feature
+  under development instead of the files the edit had touched.
+
 ## Debugging Protocol
 
 Before fixing, state the hypothesis and the cheapest experiment that would
@@ -265,7 +301,7 @@ bullet list after shipping, not before.
 - Operation bodies live in `occOps.js`. Any new op:
   1. Add a function to `occOps.js`'s `ops` map.
   2. Add an `export` wrapper in `occClient.js` that calls `runOp("name",
-     args)`.
+args)`.
   3. Call from React via `await occClient.theOp(args)`. The busy
      counter / spinner auto-attaches.
 - **`occOps.js` must never be statically imported** from the renderer
@@ -291,10 +327,10 @@ bullet list after shipping, not before.
   `booleanInputLocal`, `buildItemShapeLocal`, `performCsg`, `splitItem`,
   the export builder, or any op body: **edit BOTH files in the same commit**,
   and grep the bridge for the same landmine (`git grep -n "scaleShape\|t.scale\|buildBrushTransform" electron/occ-bridge.cjs`).
-  `bridgeParity.test.js` (src/three/occ/__tests__) machine-checks the core
+  `bridgeParity.test.js` (src/three/occ/**tests**) machine-checks the core
   ops by running BOTH implementations and diffing the geometry — extend it
   when adding an op — and `e2e/bridge-parity.spec.js` covers the real IPC
-  path.  Those catch result drift; a bridge-only crash or an op the suites
+  path. Those catch result drift; a bridge-only crash or an op the suites
   don't cover still needs this rule + an Electron smoke check.
 
 ## Native OCC addon (native/occ-addon)
@@ -310,7 +346,7 @@ bullet list after shipping, not before.
   `mac64/clang/`), and the failure is quiet: the addon still LINKS -- ld only
   warns "ignoring file ... found architecture 'x86_64', required architecture
   'arm64'" -- and only blows up at require() time with `symbol not found in
-  flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
+flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
   Check with `lipo -archs ~/occ-8.0.1-arm64/lib/libTKernel.8.0.1.dylib`.
 - **The addon must compile under BOTH clang and gcc.** macOS dev builds with
   clang; the Linux e2e container and `dist:linux` build with gcc, and gcc is
@@ -375,7 +411,7 @@ The working mechanism (keep all three pieces in lockstep):
 **Landmines (each was a real, painful bug):**
 
 - **`BRepBuilderAPI_Sewing` ignores `UserBreak`.** Threading a `Message_Progress-
-  Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
+Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   emboss bottleneck. Do not assume passing a range makes a stage cancellable —
   only some algorithms honor it (booleans/meshing do; sewing does not).
 - **`MakeSolidFromMesh` has TWO independent knobs — don't conflate them.**
@@ -399,7 +435,7 @@ The working mechanism (keep all three pieces in lockstep):
     ON a dense emboss relief was rejected and the throw escaped the recalc
     (stuck regen dialog; the sew is now also try/caught → recipe-rebuild
     fallback, `recalcSewInput.test.js`). The **conform emboss STAMP** is
-    the exception: `(true,true)` — cutting-ON *hangs* resolving the wrapped
+    the exception: `(true,true)` — cutting-ON _hangs_ resolving the wrapped
     prism's near-touching bent triangles, so it sews cutting-OFF and relies on
     per-shell `OrientClosedSolid` + `ShapeFix_Shell` (in `MakeSolidFromMesh`) to
     fix face orientation instead. Keep cutting ON for any OTHER booleaned solid.
@@ -445,7 +481,7 @@ The working mechanism (keep all three pieces in lockstep):
   6-face solid, but downstream `chamfer`/`fillet` reject it ("no suitable edges")
   — the manual faces lack the pcurves/edge-sharing that sewing produces, and
   `ShapeFix_Shape` didn't fully repair it. Sewing is load-bearing for downstream
-  op compatibility; the fast path is *cutting-off sewing*, not *no sewing*.
+  op compatibility; the fast path is _cutting-off sewing_, not _no sewing_.
 - **This is native-only — no `occOps.js` / `occ-bridge.cjs` op-body change.**
   The cancel range + fast-sew live entirely in `binding.cc` (shared by both JS
   impls), so the lockstep rule is satisfied by rebuilding the addon
@@ -453,6 +489,20 @@ The working mechanism (keep all three pieces in lockstep):
   plumbing (`main.cjs` / `occ-worker.cjs` / `occClient.cancelOcc`) and the
   `setCancelBuffer` re-export in `occ-bridge.cjs`. vitest can't exercise cancel
   (no worker) — validate abort behavior in the Electron app.
+
+## Stress analysis and generative design
+
+Lives in `src/three/fea/` and is documented in **`src/three/fea/README.md`** --
+read that before touching any of it. It is a voxel FEA (stress colouring) and a
+SIMP topology optimiser (generative design) over one shared load case, checked
+against closed-form answers, with a dozen landmines recorded from the bugs that
+produced them: node indexing, load transfer onto material that exists, grid
+symmetry, ramp scaling, and why the stress material must be unlit.
+
+Two things that reach outside that directory. Its workers CAN be terminated
+mid-solve, unlike the OCC worker -- pure JS, no shared native state. And a
+solved field is never stored on the item: it is mesh-sized, and items are
+frozen into every downstream op's `regenerator.source`.
 
 ## Variables / formulas
 
@@ -613,15 +663,15 @@ Established landmines (each was a real bug — extend this list, never shrink it
   and relink binds the snapshot from the PRE-recalc accumulation, so its
   transform can be stale. Consequences (each was a real bug, both directions of
   the same reorder):
-  1. *Emboss anchors are authored-frame absolutes.* The face point and
+  1. _Emboss anchors are authored-frame absolutes._ The face point and
      developable `aMin/aMax` don't survive a frame swap — the relief jumped by
      half the body height. `commitEmboss` records `sourceCenterOffset` (the
      authoring frame) and `regenerateItems.js#shiftEmbossFrame` translates the
      anchors by (authored − current) each regen; `backfillEmbossFrames` derives
      the record for pre-existing documents at EVERY load path (it must run at
      load, while the frozen source is still the authored one).
-  2. *`resolveChainedPosition`'s brush delta is only valid for the SAME source
-     moving.* After a swap, (new brush − stored base) is a frame difference,
+  2. _`resolveChainedPosition`'s brush delta is only valid for the SAME source
+     moving._ After a swap, (new brush − stored base) is a frame difference,
      not a movement — it double-counted and the whole object jumped. The
      orchestrator tracks items RECOMPUTED this pass; a later same-item op then
      refreshes `regenerator.source` from the accumulated pre-entry state (the
@@ -631,9 +681,9 @@ Established landmines (each was a real bug — extend this list, never shrink it
      `originalCentre` re-localisation frame isn't reproducible from the
      accumulated item (refreshing broke the union-source chamfer recentring —
      `chamferRetargetPosition.test.js` is the guard).
-  `reorderPosition.test.js` drives BOTH reorder directions of the real scene
-  through the full store + recalc pipeline and asserts the world bbox never
-  moves — extend it when touching relink/anchor code.
+     `reorderPosition.test.js` drives BOTH reorder directions of the real scene
+     through the full store + recalc pipeline and asserts the world bbox never
+     moves — extend it when touching relink/anchor code.
 - **Not every op builds on the previous step's result — check `sourceDescribesPrev`.**
   An APPENDED chamfer merges the prior chamfer's selection and re-runs on the
   PRE-chamfer source; feeding it the previous entry's result (JIT cached solid /
@@ -681,17 +731,17 @@ Established landmines (each was a real bug — extend this list, never shrink it
   `regenerator.source` snapshot contains the prior item INCLUDING its
   `geometryData` and ITS nested source… stacking ops on one body stores
   O(k²) mesh copies (three 90k-tri displacement maps OOM'd the renderer at
-  1.4 GB when the path tracer allocated on top).  `pruneNestedSourceGeometry`
+  1.4 GB when the path tracer allocated on top). `pruneNestedSourceGeometry`
   (`textureDisplace.js`) keeps the level-1 baked mesh (the rebuild base) and
   strips `geometryData` from everything deeper — recipes/frames/params stay.
   Apply it when committing any op whose results are mesh-dense, and guard
   unbounded density up front (`assertTriBudget` — both the tool AND regen
-  paths; the regen path missing it OOM'd vitest before the guard).  Density
+  paths; the regen path missing it OOM'd vitest before the guard). Density
   guards are TWO-layer: the pre-flight estimate carries a measured slop
   factor (bisection refinement of pathological OCC wall tessellations ran
   3–10× the equilateral estimate — a 9.4M-tri mesh where 0.6M was expected),
   and `refineMesh` enforces the `HARD_MAX_TRIS` ceiling DURING refinement as
-  ground truth.  Estimates alone cannot see sliver cascades.
+  ground truth. Estimates alone cannot see sliver cascades.
 
 **Checklist when adding/altering any op or feature that touches existing bodies:**
 
@@ -795,7 +845,7 @@ sources are picked) that reuses the creation UI.
   each closed one gap but not the next — the deeper problem was chasing a
   bookkeeping variable that can be arbitrarily reassigned at all. The fix:
   `groundRayCrossing` (`sceneSetup.js`) takes the camera's position + its
-  ACTUAL forward ray through the centre of the *visible* 3D area (canvas minus
+  ACTUAL forward ray through the centre of the _visible_ 3D area (canvas minus
   the left panel) and intersects it with the ground, called fresh every frame
   with no persisted "target" reference. The camera's true orientation has no
   discontinuity — it only ever changes by exactly how much input actually
@@ -835,7 +885,7 @@ sources are picked) that reuses the creation UI.
   WORLD Y axis instead of the camera's OWN current up vector picks up a
   roll-like component, so the resulting NDC-x shift of the pivot varies with
   pitch instead of staying constant. Fix: `camera.rotateOnAxis(localY,
-  angle)` — `rotateOnAxis` treats its axis as LOCAL (object-space), i.e. the
+angle)` — `rotateOnAxis` treats its axis as LOCAL (object-space), i.e. the
   camera's own up post-`lookAt`, which keeps the yaw a pure horizontal shift
   at any pitch. `panelAwareLookAt.test.js` pins this directly (a pure-camera
   unit test, no e2e needed): project the pivot at a spread of pitch angles
