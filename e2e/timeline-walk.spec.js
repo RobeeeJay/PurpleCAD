@@ -30,7 +30,7 @@ const regenSettled = async () => {
   // Recalc may start after a debounce — give it a moment to appear, then
   // require it gone.  A wedged dialog fails the "hidden" wait at 60s.
   await page.waitForTimeout(400);
-  await expect(page.getByText(/Recalculating/)).toBeHidden({ timeout: 60000 });
+  await expect(page.getByText(/Recalculating/)).toBeHidden({ timeout: 240000 });
   await expect
     .poll(
       () =>
@@ -38,12 +38,23 @@ const regenSettled = async () => {
           const s = window.__store.getState();
           return { busy: s.regenProgress != null && s.regenProgress.total > 0 };
         }),
-      { timeout: 60000 },
+      { timeout: 240000 },
     )
     .toEqual({ busy: false });
 };
 
 test("every step of a dirty document settles when selected", async () => {
+  // This walk costs real OCC time and the suite-wide 60s budget is not enough
+  // for it.  Measured per step on a Mac: every step settles in 0.4s except the
+  // two chamfers on the embossed body, which take 28.1s and 19.9s -- 52.7s in
+  // total, against a limit of 60. It passed at 36.0s in the container and then
+  // failed at 59.6s, which was the machine varying rather than the invariant
+  // breaking: the recalculation still settled, just not inside the budget.
+  //
+  // The invariant here is that a recalculation ALWAYS settles, so the timeout
+  // has to be far enough clear of how long settling legitimately takes that it
+  // only ever fires on a genuine wedge.
+  test.setTimeout(300_000);
   const doc = JSON.parse(
     fs.readFileSync("test-files/failing-recalculate-scene.pcad", "utf8"),
   );

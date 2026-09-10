@@ -24,7 +24,13 @@ export const test = base.extend({
           // shows up in the HTML report but leaves nothing on disk, and the
           // container mounts test-results to get artefacts back to the host.
           const file = testInfo.outputPath(`failed-state-${++n}.png`);
-          await page.screenshot({ path: file });
+          // With a TIMEOUT, because photographing a wedged app hangs forever.
+          // A test that fails because a recalculation never settles leaves the
+          // renderer busy in a native call, and page.screenshot() then never
+          // returns -- which does not merely lose the picture, it hangs the
+          // whole RUN: one container sat for six and a half hours on this,
+          // long after the 60s test timeout had fired.
+          await page.screenshot({ path: file, timeout: 15_000 });
           await testInfo.attach(`failed-state-${n}`, {
             path: file,
             contentType: "image/png",
