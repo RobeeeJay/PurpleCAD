@@ -172,6 +172,63 @@ for (const [channel, fn] of Object.entries(syncHandlers)) {
     e.returnValue = fn(arg);
   });
 }
+// ── Agent API transport ─────────────────────────────────────────────────────
+// Requests arriving on the API socket (apiServer.cjs) are forwarded to the
+// renderer, where the commands run against the live store and scene, and the
+// reply comes back on "api:reply" with the same id.
+const { startApiServer } = require("./apiServer.cjs");
+let apiServer = null;
+let apiSeq = 0;
+const apiPending = new Map();
+// webContents that have registered their API handler.  A request that arrives
+// while the page is still loading -- or reloading -- would otherwise be sent
+// to nobody and wait out the whole timeout.
+const apiReady = new Set();
+
+// Commands can legitimately take minutes (a boolean on a dense body, a solve),
+// so this is a backstop against a page that died, not a performance budget.
+const API_REPLY_TIMEOUT_MS = 15 * 60 * 1000;
+
+const apiFailure = (code, message) =>
+  Object.assign(new Error(message), { code });
+
+function invokeRenderer(method, params) {
+  const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+  if (!win || !apiReady.has(win.webContents.id))
+    return Promise.reject(
+      apiFailure(
+        "APP_NOT_READY",
+        "PurpleCAD is still starting; try again in a moment.",
+      ),
+    );
+  const id = ++apiSeq;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      apiPending.delete(id);
+      reject(apiFailure("APP_TIMEOUT", "PurpleCAD did not reply."));
+    }, API_REPLY_TIMEOUT_MS);
+    apiPending.set(id, { resolve, reject, timer });
+    win.webContents.send("api:request", { id, method, params });
+  });
+}
+
+ipcMain.on("api:ready", (e) => {
+  const wc = e.sender;
+  apiReady.add(wc.id);
+  wc.once("did-start-loading", () => apiReady.delete(wc.id));
+  wc.once("destroyed", () => apiReady.delete(wc.id));
+});
+
+ipcMain.on("api:reply", (_e, { id, reply }) => {
+  const pending = apiPending.get(id);
+  if (!pending) return;
+  apiPending.delete(id);
+  clearTimeout(pending.timer);
+  if (reply?.error)
+    pending.reject(apiFailure(reply.error.code, reply.error.message));
+  else pending.resolve(reply?.result);
+});
+
 // Async timeline save (invoke): the hot path — a mouseup commit on a big
 // document must not block the renderer on the IPC round-trip + SQLite write.
 ipcMain.handle("db:saveTimelineAsync", (_e, a) => {
@@ -344,9 +401,37 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // --api-socket=<path> moves the agent API socket.  The e2e suite gives every
+  // launch its own, so a test never collides with a PurpleCAD the user has
+  // open -- which, sharing userData, would otherwise own the default one.
+  const apiSocket =
+    app.commandLine.getSwitchValue("api-socket") ||
+    path.join(app.getPath("userData"), "purplecad-api.sock");
+  if (process.platform === "win32") {
+    console.warn("[api] the agent API socket is not available on Windows yet");
+  } else {
+    startApiServer({ socketPath: apiSocket, invoke: invokeRenderer })
+      .then((server) => {
+        apiServer = server;
+        if (server) console.log(`[api] listening on ${server.socketPath}`);
+        else
+          console.warn(
+            `[api] ${apiSocket} belongs to another running PurpleCAD`,
+          );
+      })
+      .catch((err) => console.warn("[api] could not start:", err.message));
+  }
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// The socket file is removed on the way out, so the next launch finds it free
+// rather than having to probe a stale one.
+app.on("will-quit", () => {
+  void apiServer?.close();
 });
 
 app.on("window-all-closed", () => {

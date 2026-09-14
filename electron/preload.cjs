@@ -34,6 +34,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
   dbGetCamera: (pid) => sync("db:getCamera", pid),
   dbSaveCamera: (pid, state) => sync("db:saveCamera", { pid, state }),
   dbClearCamera: (pid) => sync("db:clearCamera", pid),
+  // Agent API: the main process forwards socket requests here, the renderer
+  // runs them (src/api) and replies with the same id.  Re-registering replaces
+  // the previous handler rather than stacking a second one.
+  onApiRequest: (handler) => {
+    ipcRenderer.removeAllListeners("api:request");
+    ipcRenderer.on("api:request", async (_e, { id, method, params }) => {
+      let reply;
+      try {
+        reply = await handler(method, params);
+      } catch (err) {
+        reply = {
+          error: {
+            code: "RENDERER_ERROR",
+            message: String(err?.message ?? err),
+          },
+        };
+      }
+      ipcRenderer.send("api:reply", { id, reply });
+    });
+    ipcRenderer.send("api:ready");
+  },
   // Menu → renderer: the native "About PurpleCAD" item opens the in-app dialog.
   // Replaces any prior listener so a re-register can't stack duplicates.
   onMenuAbout: (cb) => {

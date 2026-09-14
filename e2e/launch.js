@@ -97,6 +97,10 @@ export async function discardTrace(app) {
 // having to wire that up. Entries drop out when the app closes.
 export const liveApps = new Set();
 
+// The agent API socket for an app launched on `dataDir` -- per launch, so a
+// test never collides with a PurpleCAD the user has open.
+export const apiSocketFor = (dataDir) => path.join(dataDir, "api.sock");
+
 export async function launchApp(dataDir) {
   const tmpDir = dataDir || makeDataDir();
   // Strip ELECTRON_RUN_AS_NODE (the test runner's node sets it, which would
@@ -112,7 +116,11 @@ export async function launchApp(dataDir) {
   //                             these, so three.js throws on startup and the
   //                             app never renders (every test fails on a
   //                             missing .toolbar rather than anything real).
-  const args = [projectRoot, `--db-path=${path.join(tmpDir, "cad.sqlite")}`];
+  const args = [
+    projectRoot,
+    `--db-path=${path.join(tmpDir, "cad.sqlite")}`,
+    `--api-socket=${apiSocketFor(tmpDir)}`,
+  ];
   if (process.env.E2E_CONTAINER)
     args.unshift(
       "--no-sandbox",
