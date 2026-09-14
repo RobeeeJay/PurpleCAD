@@ -120,6 +120,15 @@ test:e2e:podman` runs whatever `purple-cad-e2e` currently is -- it does NOT
   `--name purple-cad-e2e-run`, so a second run is REFUSED rather than stacked,
   and `npm run e2e:podman:stop` clears a stray and lists anything still
   running. Check `podman ps` before blaming a flaky test on the code.
+- **Never run Playwright on the host while the container suite runs.** The
+  container bind-mounts `test-results/`, and a host run deletes and recreates
+  that directory as it starts -- leaving the container holding a DELETED
+  directory. Every write into it then fails (`touch` gives "No such file or
+  directory"), and the run does not fail, it HANGS: the worker blocks in the
+  file system (`/proc/<pid>/wchan` reads `request_wait_answer`) and the 60s
+  test timeout never fires. A two-spec check on the host wedged a full container
+  run this way at test 191, on the trophy's `.pcad` save. Check `podman ps`
+  before any local e2e run.
 - If a `docker compose` setup is ever added here, its instructions in READMEs,
   scripts, and terminal commands must use `docker compose up -d --build` (never
   bare `up -d`) so code changes are actually rebuilt into the image. Verify a UI
