@@ -534,6 +534,25 @@ export function attachCameraControls(ctx) {
     };
   };
 
+  // A body's own surface for the agent API to measure: local positions and
+  // indices plus the world matrix.  A mesh wearing a stress field or an
+  // optimisation preview has had its geometry swapped, so it is the geometry
+  // kept aside in userData that describes the body, not what is on screen.
+  controls.meshWorldData = (itemId) => {
+    const mesh = objectsRef.current[itemId];
+    if (!mesh?.isMesh) return null;
+    const geom = mesh.userData?.stressGeometry ?? mesh.geometry;
+    const pos = geom?.attributes?.position;
+    if (!pos) return null;
+    mesh.updateMatrixWorld(true);
+    return {
+      positions: pos.array,
+      indices: geom.index ? geom.index.array : null,
+      matrix: Array.from(mesh.matrixWorld.elements),
+      hull: !!mesh.userData?.hullGeometry,
+    };
+  };
+
   // What a body's mesh is currently WEARING: whether a per-vertex field is on
   // it and how varied it is.  The e2e suite's only way to see a stress plot --
   // the colours live in a BufferAttribute in the three.js scene, and no part

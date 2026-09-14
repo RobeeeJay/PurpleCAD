@@ -44,12 +44,20 @@ export function createMaterialAndFitHelpers({
   controls.captureScreenshot = () =>
     new Promise((resolve) => renderer.domElement.toBlob(resolve, "image/png"));
 
-  // Capture a clean thumbnail of the project (a small JPEG data URL): reset-view
-  // (isometric fit-all) framing, geometry shaded, with the ground plane / ruler
-  // labels / sketches hidden.  When there are no solid objects, keep the sketch
-  // plane and frame the origin instead.  Synchronous (render → toDataURL →
-  // restore, all in one tick) so it also works during an unload/quit.
-  controls.captureThumbnailDataUrl = () => {
+  // A clean render of the scene: fit-all framing along (rotX, rotY), geometry
+  // shaded, with the ground plane / ruler labels / sketches hidden.  When there
+  // are no solid objects, keep the sketch plane and frame the origin instead.
+  // Synchronous (render → toDataURL → restore, all in one tick) so it also
+  // works during an unload/quit.
+  const captureFramed = ({
+    rotX,
+    rotY,
+    width,
+    height,
+    mime,
+    quality,
+    framing,
+  }) => {
     const cam = cameraRef.current;
     if (!cam) return null;
 
@@ -139,9 +147,8 @@ export function createMaterialAndFitHelpers({
       pos: cam.position.clone(),
       quat: cam.quaternion.clone(),
       zoom: cam.zoom,
+      up: cam.up.clone(),
     };
-    const rotX = Math.asin(Math.sqrt(1 / 3));
-    const rotY = Math.PI / 4;
     const dir = new THREE.Vector3(
       Math.sin(rotY) * Math.cos(rotX),
       Math.sin(rotX),
@@ -160,7 +167,10 @@ export function createMaterialAndFitHelpers({
       center = new THREE.Vector3();
       cam.position.copy(center).addScaledVector(dir, 15);
     }
-    cam.up.set(0, 1, 0);
+    // Looking straight along world Y, lookAt has no roll to go on: hold the
+    // user's +Y (internal -Z) at the top of the frame, as the view cube does.
+    if (Math.abs(dir.y) > 0.999) cam.up.set(0, 0, -1);
+    else cam.up.set(0, 1, 0);
     cam.lookAt(center);
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld(true);
@@ -169,11 +179,8 @@ export function createMaterialAndFitHelpers({
     // project card's display size, then restore camera / overlays / materials.
     renderer.render(scene, cam);
     const src = renderer.domElement;
-    // Match the card thumbnail (4:3, ~240 CSS px wide) at the device pixel ratio
-    // so it's crisp on hi-DPI; cap at 2× to keep the stored data URL small.
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const tw = Math.round(240 * dpr);
-    const th = Math.round(180 * dpr);
+    const tw = width;
+    const th = height;
     // Stepped halving keeps large minifications from aliasing, then a final
     // high-quality cover-crop into the 4:3 box.
     let cur = src;
@@ -200,7 +207,16 @@ export function createMaterialAndFitHelpers({
     const ctx = thumb.getContext("2d");
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    const cover = Math.max(tw / cw, th / ch);
+    // "cover" fills the box, as a card thumbnail wants; "contain" letterboxes,
+    // so a render someone is judging never has the part cropped off an edge.
+    const cover =
+      framing === "contain"
+        ? Math.min(tw / cw, th / ch)
+        : Math.max(tw / cw, th / ch);
+    if (framing === "contain" && scene.background?.isColor) {
+      ctx.fillStyle = `#${scene.background.getHexString()}`;
+      ctx.fillRect(0, 0, tw, th);
+    }
     ctx.drawImage(
       cur,
       (tw - cw * cover) / 2,
@@ -208,11 +224,12 @@ export function createMaterialAndFitHelpers({
       cw * cover,
       ch * cover,
     );
-    const dataUrl = thumb.toDataURL("image/jpeg", 0.72);
+    const dataUrl = thumb.toDataURL(mime, quality);
 
     cam.position.copy(saved.pos);
     cam.quaternion.copy(saved.quat);
     cam.zoom = saved.zoom;
+    cam.up.copy(saved.up);
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld(true);
     for (const o of hidden) o.visible = true;
@@ -228,6 +245,34 @@ export function createMaterialAndFitHelpers({
     }
     return dataUrl;
   };
+
+  // The project card's thumbnail: the Reset-view isometric fit, a small JPEG,
+  // at the device pixel ratio so it is crisp on hi-DPI but capped at 2x to
+  // keep the stored data URL small.
+  controls.captureThumbnailDataUrl = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    return captureFramed({
+      rotX: Math.asin(Math.sqrt(1 / 3)),
+      rotY: Math.PI / 4,
+      width: Math.round(240 * dpr),
+      height: Math.round(180 * dpr),
+      mime: "image/jpeg",
+      quality: 0.72,
+      framing: "cover",
+    });
+  };
+
+  // The same clean render from any direction, as a PNG, for the agent API.
+  // (rotX, rotY) follow the view cube's convention.
+  controls.captureView = ({ rotX, rotY, width, height }) =>
+    captureFramed({
+      rotX,
+      rotY,
+      width,
+      height,
+      mime: "image/png",
+      framing: "contain",
+    });
 
   // Drop the selected non-sketch objects so their lowest world-Y point
   // sits on the ground plane (Y=0).  Computes the min Y across all

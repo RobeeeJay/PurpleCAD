@@ -61,6 +61,34 @@ export function bestProfileMatchIndex(sp, candidates) {
   return bestIdx;
 }
 
+// The extrude item a profile commits to.  Module-level and exported because
+// the agent API commits extrudes too, and has to write exactly the item this
+// tool writes -- two hand-kept copies of this shape would drift.
+export const buildExtrudeDef = (
+  profile,
+  depthStored,
+  isCut,
+  startOffset,
+  id,
+) => ({
+  id,
+  name: `${isCut ? "Extrude Cut" : "Extrude"} ${id}`,
+  type: "extrude",
+  children: [],
+  profile,
+  depth: depthStored,
+  // Slides the prism's base along the profile normal so the extrude can begin
+  // from a picked face/plane instead of the sketch plane.  Omit when zero to
+  // keep item diffs clean.
+  ...(startOffset ? { startOffset } : null),
+  // `isCut` flips the prism direction in resolveItemDepth so the OCC shape +
+  // rendered mesh extend INTO the source regardless of the sign on `depth`.
+  ...(isCut ? { isCut: true } : null),
+  position: profile.position,
+  rotation: profile.rotation,
+  scale: { x: 1, y: 1, z: 1 },
+});
+
 export function createExtrudeHelpers(
   { scene, renderer, objectsRef, itemsRef, extrudeSelectGroupRef },
   {
@@ -552,25 +580,6 @@ export function createExtrudeHelpers(
   // The extrude item definition for a profile.  Used both for items added to the
   // store and as the EMBEDDED prism recipes inside a multi-area union (so the
   // whole multi-area extrude is one timeline entry, not N prisms + a union).
-  const buildExtrudeDef = (profile, depthStored, isCut, startOffset, id) => ({
-    id,
-    name: `${isCut ? "Extrude Cut" : "Extrude"} ${id}`,
-    type: "extrude",
-    children: [],
-    profile,
-    depth: depthStored,
-    // Slides the prism's base along the profile normal so the extrude can begin
-    // from a picked face/plane instead of the sketch plane.  Omit when zero to
-    // keep item diffs clean.
-    ...(startOffset ? { startOffset } : null),
-    // `isCut` flips the prism direction in resolveItemDepth so the OCC shape +
-    // rendered mesh extend INTO the source regardless of the sign on `depth`.
-    ...(isCut ? { isCut: true } : null),
-    position: profile.position,
-    rotation: profile.rotation,
-    scale: { x: 1, y: 1, z: 1 },
-  });
-
   // Create one extrude item from a profile and, for a cut, run its per-target
   // difference.  (Multi-area non-cut prisms are created together via addItems
   // and fused by a separate union; this path handles cuts and lone extrudes.)
