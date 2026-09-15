@@ -364,18 +364,23 @@ function buildAppMenu() {
 
 app.whenReady().then(() => {
   buildAppMenu();
-  // BrowserWindow's `icon` option doesn't reach the Dock on macOS; packaged
-  // builds get their Dock icon from the .icns electron-builder makes out of
-  // `build.icon`, but dev runs (launched as a bare Electron binary) still show
-  // Electron's default unless set here. Hence dev only -- replacing a packaged
-  // build's proper icon set with this one padded PNG would be a downgrade.
-  // It used to run when packaged too, and app-icons/ was not in `build.files`
-  // then, so the load threw. A throw here rejects the whenReady handler, which
-  // skips everything below it INCLUDING createWindow(): the packaged app ran
-  // with no window and said nothing about why. Keep anything that can throw
-  // out of this handler's top, or behind its own try.
-  if (process.platform === "darwin" && app.dock && !app.isPackaged) {
-    app.dock.setIcon(APP_ICON);
+  // BrowserWindow's `icon` option doesn't reach the Dock on macOS, so the
+  // Dock icon is set here -- in packaged builds too. A packaged build does
+  // carry its own icon.icns, but recent macOS shrinks a bundle icon that
+  // wasn't made with Apple's newer icon tooling into a grey rounded square in
+  // the Dock; an icon set at runtime is shown as it is. (Making this dev-only,
+  // on the untested assumption that the bundle's icon would look better, was
+  // a visible regression.)
+  // Behind its own try: this runs at the top of the whenReady handler, and a
+  // throw here rejects that handler and skips everything below it INCLUDING
+  // createWindow(). That happened once, when app-icons/ was missing from
+  // `build.files` -- the packaged app ran with no window and said nothing.
+  if (process.platform === "darwin" && app.dock) {
+    try {
+      app.dock.setIcon(APP_ICON);
+    } catch (err) {
+      console.warn("[main] could not set the Dock icon:", err.message);
+    }
   }
 
   // Open the database before the window loads so the renderer's first
