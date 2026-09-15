@@ -1,0 +1,651 @@
+{
+  "version": 1,
+  "history": [
+    {
+      "id": 0,
+      "label": "Scene created",
+      "itemId": null,
+      "instruction": {
+        "type": "scene_created"
+      },
+      "hiddenIds": [],
+      "_orphaned": false,
+      "dirty": true
+    },
+    {
+      "id": 1,
+      "label": "Added",
+      "itemId": 1,
+      "instruction": {
+        "type": "create",
+        "item": {
+          "parentId": null,
+          "material": {
+            "color": "#cccccc",
+            "metalness": 0.3,
+            "roughness": 0.5,
+            "opacity": 1,
+            "clearcoat": 0,
+            "clearcoatRoughness": 0
+          },
+          "id": 1,
+          "name": "Sketch 1",
+          "type": "sketch",
+          "children": [],
+          "position": {
+            "x": -3.730614003349851,
+            "y": 0,
+            "z": 0.7871042497216504
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          },
+          "rotation": {
+            "x": -1.5707963267948966,
+            "y": 0,
+            "z": 0
+          },
+          "hostSolidId": null,
+          "shapes": [
+            {
+              "type": "line",
+              "x1": -2.0046610439120305,
+              "y1": 2.84067154036512,
+              "x2": -0.7546610439120306,
+              "y2": 2.84067154036512
+            },
+            {
+              "type": "line",
+              "x1": -0.7546610439120306,
+              "y1": 2.84067154036512,
+              "x2": -0.7546610439120306,
+              "y2": 1.59067154036512
+            },
+            {
+              "type": "line",
+              "x1": -0.7546610439120306,
+              "y1": 1.59067154036512,
+              "x2": -2.0046610439120305,
+              "y2": 1.59067154036512
+            },
+            {
+              "type": "line",
+              "x1": -2.0046610439120305,
+              "y1": 1.59067154036512,
+              "x2": -2.0046610439120305,
+              "y2": 2.84067154036512
+            },
+            {
+              "type": "line",
+              "x1": -1.8346610439120306,
+              "y1": 2.68567154036512,
+              "x2": -0.9246610439120305,
+              "y2": 2.68567154036512
+            },
+            {
+              "type": "line",
+              "x1": -0.9246610439120305,
+              "y1": 2.68567154036512,
+              "x2": -0.9246610439120305,
+              "y2": 1.74567154036512
+            },
+            {
+              "type": "line",
+              "x1": -0.9246610439120305,
+              "y1": 1.74567154036512,
+              "x2": -1.8346610439120306,
+              "y2": 1.74567154036512
+            },
+            {
+              "type": "line",
+              "x1": -1.8346610439120306,
+              "y1": 1.74567154036512,
+              "x2": -1.8346610439120306,
+              "y2": 2.68567154036512
+            },
+            {
+              "type": "line",
+              "x1": -1.8346610439120306,
+              "y1": 2.68567154036512,
+              "x2": -2.0046610439120305,
+              "y2": 2.84067154036512,
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": -0.9246610439120305,
+              "y1": 1.74567154036512,
+              "x2": -0.7546610439120306,
+              "y2": 1.59067154036512,
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": -0.9246610439120305,
+              "y1": 2.68567154036512,
+              "x2": -0.7546610439120306,
+              "y2": 2.84067154036512,
+              "dashed": true
+            },
+            {
+              "type": "line",
+              "x1": -2.0046610439120305,
+              "y1": 1.59067154036512,
+              "x2": -1.8346610439120306,
+              "y2": 1.74567154036512,
+              "dashed": true
+            },
+            {
+              "type": "point",
+              "x": -2.0046610439120305,
+              "y": 2.21567154036512
+            },
+            {
+              "type": "point",
+              "x": -0.7546610439120306,
+              "y": 2.21567154036512
+            },
+            {
+              "type": "line",
+              "x1": -2.0046610439120305,
+              "y1": 2.21567154036512,
+              "x2": -0.7546610439120306,
+              "y2": 2.21567154036512,
+              "dashed": true
+            },
+            {
+              "type": "point",
+              "x": -1.3796610439120305,
+              "y": 2.21567154036512
+            },
+            {
+              "type": "circle",
+              "cx": -1.3796610439120334,
+              "cy": 2.2156715601355197,
+              "r": 0.44233563011584626
+            },
+            {
+              "type": "line",
+              "x1": -2.6248184290410017,
+              "y1": 2.1400797635397684,
+              "x2": -2.2748184290409426,
+              "y2": 2.1400797729329115
+            },
+            {
+              "type": "line",
+              "x1": -2.2748184290408036,
+              "y1": 2.140079777629513,
+              "x2": -2.2748184290405926,
+              "y2": 1.5900797776295654
+            },
+            {
+              "type": "line",
+              "x1": -2.2748184290405207,
+              "y1": 1.5900797807606333,
+              "x2": -2.6248184290414054,
+              "y2": 1.590079790153779
+            },
+            {
+              "type": "line",
+              "x1": -2.6248184290412984,
+              "y1": 1.5900797948503558,
+              "x2": -2.624818429041092,
+              "y2": 2.1400797604087187
+            },
+            {
+              "type": "line",
+              "x1": -2.6248184290408907,
+              "y1": 2.140079752581148,
+              "x2": -2.2748184290403968,
+              "y2": 1.5900797698020008,
+              "dashed": true
+            },
+            {
+              "type": "point",
+              "x": -2.4498184203982385,
+              "y": 1.865079728531427
+            }
+          ],
+          "constraints": [
+            {
+              "type": "coincident",
+              "shapeAIdx": 0,
+              "pointA": "end",
+              "shapeBIdx": 1,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 1,
+              "pointA": "end",
+              "shapeBIdx": 2,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 2,
+              "pointA": "end",
+              "shapeBIdx": 3,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 3,
+              "pointA": "end",
+              "shapeBIdx": 0,
+              "pointB": "start"
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 0
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 1
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 2
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 3
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 0,
+              "pointA": "start",
+              "shapeBIdx": 0,
+              "pointB": "end",
+              "distance": "BaseWidth"
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 1,
+              "pointA": "start",
+              "shapeBIdx": 1,
+              "pointB": "end",
+              "distance": "BaseWidth"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 4,
+              "pointA": "end",
+              "shapeBIdx": 5,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 5,
+              "pointA": "end",
+              "shapeBIdx": 6,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 6,
+              "pointA": "end",
+              "shapeBIdx": 7,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 7,
+              "pointA": "end",
+              "shapeBIdx": 4,
+              "pointB": "start"
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 4
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 5
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 6
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 7
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 4,
+              "pointA": "start",
+              "shapeBIdx": 4,
+              "pointB": "end",
+              "distance": "CaseWidth"
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 5,
+              "pointA": "start",
+              "shapeBIdx": 5,
+              "pointB": "end",
+              "distance": "CaseHeight"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 8,
+              "pointA": "start",
+              "shapeBIdx": 7,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 8,
+              "pointA": "start",
+              "shapeBIdx": 4,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 8,
+              "pointA": "end",
+              "shapeBIdx": 0,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 8,
+              "pointA": "end",
+              "shapeBIdx": 3,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 9,
+              "pointA": "start",
+              "shapeBIdx": 5,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 9,
+              "pointA": "start",
+              "shapeBIdx": 6,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 9,
+              "pointA": "end",
+              "shapeBIdx": 1,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 9,
+              "pointA": "end",
+              "shapeBIdx": 2,
+              "pointB": "start"
+            },
+            {
+              "type": "parallel",
+              "shapeAIdx": 8,
+              "shapeBIdx": 9
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 10,
+              "pointA": "start",
+              "shapeBIdx": 4,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 10,
+              "pointA": "start",
+              "shapeBIdx": 5,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 10,
+              "pointA": "end",
+              "shapeBIdx": 1,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 10,
+              "pointA": "end",
+              "shapeBIdx": 0,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 11,
+              "pointA": "start",
+              "shapeBIdx": 3,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 11,
+              "pointA": "start",
+              "shapeBIdx": 2,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 11,
+              "pointA": "end",
+              "shapeBIdx": 6,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 11,
+              "pointA": "end",
+              "shapeBIdx": 7,
+              "pointB": "start"
+            },
+            {
+              "type": "parallel",
+              "shapeAIdx": 10,
+              "shapeBIdx": 11
+            },
+            {
+              "type": "onLine",
+              "pointShapeIdx": 12,
+              "pointKey": "p",
+              "lineShapeIdx": 3
+            },
+            {
+              "type": "onLine",
+              "pointShapeIdx": 13,
+              "pointKey": "p",
+              "lineShapeIdx": 1
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 14,
+              "pointA": "start",
+              "shapeBIdx": 12,
+              "pointB": "p"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 14,
+              "pointA": "end",
+              "shapeBIdx": 13,
+              "pointB": "p"
+            },
+            {
+              "type": "midpoint",
+              "pointShapeIdx": 13,
+              "targetShapeIdx": 1
+            },
+            {
+              "type": "midpoint",
+              "pointShapeIdx": 14,
+              "targetShapeIdx": 3,
+              "pointKey": "start"
+            },
+            {
+              "type": "onLine",
+              "pointShapeIdx": 15,
+              "pointKey": "p",
+              "lineShapeIdx": 14
+            },
+            {
+              "type": "midpoint",
+              "pointShapeIdx": 15,
+              "targetShapeIdx": 14
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 16,
+              "pointA": "start",
+              "shapeBIdx": 15,
+              "pointB": "p"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 17,
+              "pointA": "end",
+              "shapeBIdx": 18,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 18,
+              "pointA": "end",
+              "shapeBIdx": 19,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 19,
+              "pointA": "end",
+              "shapeBIdx": 20,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 20,
+              "pointA": "end",
+              "shapeBIdx": 17,
+              "pointB": "start"
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 17
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 18
+            },
+            {
+              "type": "horizontal",
+              "shapeIdx": 19
+            },
+            {
+              "type": "vertical",
+              "shapeIdx": 20
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 17,
+              "pointA": "start",
+              "shapeBIdx": 17,
+              "pointB": "end",
+              "distance": "CableWidth"
+            },
+            {
+              "type": "distance",
+              "shapeAIdx": 18,
+              "pointA": "start",
+              "shapeBIdx": 18,
+              "pointB": "end",
+              "distance": "CableDepth"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 21,
+              "pointA": "start",
+              "shapeBIdx": 17,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 21,
+              "pointA": "start",
+              "shapeBIdx": 20,
+              "pointB": "end"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 21,
+              "pointA": "end",
+              "shapeBIdx": 19,
+              "pointB": "start"
+            },
+            {
+              "type": "coincident",
+              "shapeAIdx": 21,
+              "pointA": "end",
+              "shapeBIdx": 18,
+              "pointB": "end"
+            },
+            {
+              "type": "onLine",
+              "pointShapeIdx": 22,
+              "pointKey": "p",
+              "lineShapeIdx": 21
+            },
+            {
+              "type": "midpoint",
+              "pointShapeIdx": 22,
+              "targetShapeIdx": 21
+            }
+          ]
+        }
+      },
+      "hiddenIds": [],
+      "_orphaned": false,
+      "dirty": true
+    }
+  ],
+  "activeHistoryId": null,
+  "variables": [
+    {
+      "name": "BaseWidth",
+      "formula": "12.5"
+    },
+    {
+      "name": "BaseDepth",
+      "formula": "4.6"
+    },
+    {
+      "name": "CaseGap",
+      "formula": "2"
+    },
+    {
+      "name": "CaseWidth",
+      "formula": "9.1"
+    },
+    {
+      "name": "CaseHeight",
+      "formula": "9.4"
+    },
+    {
+      "name": "CableWidth",
+      "formula": "3.5"
+    },
+    {
+      "name": "CableDepth",
+      "formula": "5.5"
+    },
+    {
+      "name": "TaperWidth",
+      "formula": "7.9"
+    }
+  ]
+}

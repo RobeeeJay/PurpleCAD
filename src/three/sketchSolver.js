@@ -9,6 +9,7 @@
 // the current one (and fixed points stay put).
 
 import { resolveConstraintDistance } from "./geometryParams.js";
+import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
 import { shapeMidpoint, sharpLineExtra } from "./sketchGeometry.js";
 import { rederiveAllCorners, extractCorners } from "./sketchGeometry.js";
 
@@ -619,4 +620,58 @@ function solveCore(inputShapes, constraints, options = {}) {
   const finalShapes = shapesAt(x);
   const maxResidual = realResidual(x);
   return { shapes: finalShapes, ok: maxResidual < successTol, maxResidual };
+}
+
+// Join two points with a coincident constraint by SOLVING the whole sketch.
+//
+// The coincident tool normally moves the first-picked point with the fast
+// propagation rules, which walk coincident chains. A point that is pinned to
+// its OWN shape -- the midpoint of a line, say -- cannot move that way: the
+// rules put it straight back on its line, and writing the moved point anyway
+// tore the point off the shape it belongs to and left the sketch breaking its
+// own midpoint constraint. The shape has to travel WITH the point, which only
+// the solver can work out.
+//
+// Both points are pinned -- the first pick at the second pick's position, the
+// second where it already is, so the second pick and everything hanging off it
+// stay put -- and the solver moves whatever else it must to keep the rest of
+// the constraints true. Returns a Map<idx, shape> of what changed, or null if
+// the join cannot be satisfied (the caller then leaves the sketch alone).
+export function solveJoinPoints(shapes, constraints, a, b, options = {}) {
+  const shapeA = shapes[a.shapeIdx];
+  const shapeB = shapes[b.shapeIdx];
+  if (!shapeA || !shapeB) return null;
+  const target = getShapePoint(shapeB, b.pointKey);
+  if (!target) return null;
+
+  const input = shapes.slice();
+  input[a.shapeIdx] = moveShapePoint(shapeA, a.pointKey, target) ?? shapeA;
+  const fixed = new Set();
+  for (const f of fieldsForPoint(input[a.shapeIdx], a.pointKey))
+    fixed.add(`${a.shapeIdx}:${f}`);
+  for (const f of fieldsForPoint(shapeB, b.pointKey))
+    fixed.add(`${b.shapeIdx}:${f}`);
+
+  const res = solveConstraints(
+    input,
+    constraints.concat([
+      {
+        type: "coincident",
+        shapeAIdx: a.shapeIdx,
+        pointA: a.pointKey,
+        shapeBIdx: b.shapeIdx,
+        pointB: b.pointKey,
+      },
+    ]),
+    { ...options, fixed },
+  );
+  if (!res.ok) return null;
+
+  const changed = new Map();
+  res.shapes.forEach((shape, i) => {
+    const before = shapes[i];
+    if (varFields(shape).some((f) => shape[f] !== before[f]))
+      changed.set(i, shape);
+  });
+  return changed;
 }
