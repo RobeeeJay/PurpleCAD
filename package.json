@@ -22,6 +22,7 @@
     "addon:test": "npm --prefix native/occ-addon test",
     "sqlite:rebuild": "electron-rebuild -w better-sqlite3",
     "electron:build": "npm run sqlite:rebuild && vite build && electron-builder --config.mac.target=dmg",
+    "app": "./scripts/open-app.sh",
     "dist": "npm run addon:build && vite build && electron-builder --publish never",
     "dist:mac": "npm run addon:build && vite build && electron-builder --mac --publish never",
     "dist:mac-arm64": "npm run addon:build && vite build && electron-builder --mac --arm64 --publish never",
