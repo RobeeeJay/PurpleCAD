@@ -365,12 +365,15 @@ function buildAppMenu() {
 app.whenReady().then(() => {
   buildAppMenu();
   // BrowserWindow's `icon` option doesn't reach the Dock on macOS; packaged
-  // builds get their Dock icon from `build.icon`, but dev runs (launched as
-  // a bare Electron binary) still show Electron's default unless set here.
-  // NEVER in a packaged build: app-icons/ is not in `build.files`, so the load
-  // throws, and a throw here rejects the whenReady handler -- which skips
-  // everything below it, including createWindow(). The packaged app then
-  // started with no window at all and said nothing about why.
+  // builds get their Dock icon from the .icns electron-builder makes out of
+  // `build.icon`, but dev runs (launched as a bare Electron binary) still show
+  // Electron's default unless set here. Hence dev only -- replacing a packaged
+  // build's proper icon set with this one padded PNG would be a downgrade.
+  // It used to run when packaged too, and app-icons/ was not in `build.files`
+  // then, so the load threw. A throw here rejects the whenReady handler, which
+  // skips everything below it INCLUDING createWindow(): the packaged app ran
+  // with no window and said nothing about why. Keep anything that can throw
+  // out of this handler's top, or behind its own try.
   if (process.platform === "darwin" && app.dock && !app.isPackaged) {
     app.dock.setIcon(APP_ICON);
   }

@@ -50,6 +50,13 @@
         "filter": [
           "occ_addon.node"
         ]
+      },
+      {
+        "from": "app-icons/padded",
+        "to": "app-icons/padded",
+        "filter": [
+          "icon-512.png"
+        ]
       }
     ],
     "asarUnpack": [
