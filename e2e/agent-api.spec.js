@@ -98,7 +98,10 @@ test.describe.serial("agent API", () => {
     ])
       expect(names).toContain(name);
     for (const c of list) {
-      expect(c.description.length, `${c.name} needs a description`).toBeGreaterThan(20);
+      expect(
+        c.description.length,
+        `${c.name} needs a description`,
+      ).toBeGreaterThan(20);
       expect(c.inputSchema.type).toBe("object");
     }
   });
