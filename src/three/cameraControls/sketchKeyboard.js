@@ -472,7 +472,7 @@ export function createSketchKeyboardHandler(
         clearCoincidentFirstOverlay();
         return;
       }
-      // I toggles dashed on the selected line(s); O offsets them.  Both are
+      // I toggles construction on the selected line(s); O offsets them.  Both are
       // no-ops without a line selection, mirroring the disabled toolbar
       // buttons.
       if (key === "i") {

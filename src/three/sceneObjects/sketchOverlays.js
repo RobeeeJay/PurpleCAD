@@ -14,6 +14,7 @@ import {
 } from "./constraintIcons.js";
 import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
 import { shapeMidpoint } from "../sketchGeometry.js";
+import { trackScreenDash } from "../screenDash.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { textShapeContours } from "../sketchText.js";
 import { useStore } from "../../store";
@@ -161,9 +162,9 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
         depthTest: false,
         resolution: res,
         dashed: !!shape.dashed,
-        dashSize: shape.dashed ? 0.1 : 0,
-        gapSize: shape.dashed ? 0.06 : 0,
       });
+      // Construction lines: the dash size is set per frame, in screen pixels.
+      if (shape.dashed) trackScreenDash(mat);
       const line = new Line2(geo, mat);
       line.computeLineDistances();
       line.renderOrder = 1001;
@@ -429,9 +430,8 @@ export function buildSketchShapesGroup(
       transparent: isDashed,
       opacity: isDashed ? 0.75 : 1.0,
       dashed: isDashed,
-      dashSize: isDashed ? 0.1 : 0,
-      gapSize: isDashed ? 0.06 : 0,
     });
+    if (isDashed) trackScreenDash(mat);
     const line = new Line2(geo, mat);
     line.computeLineDistances();
     line.renderOrder = 1001;

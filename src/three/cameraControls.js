@@ -593,6 +593,22 @@ export function attachCameraControls(ctx) {
     return out;
   };
 
+  // Dash sizes of every construction line on screen -- the sketch being edited
+  // and sketches drawn in the 3D view alike. They are world lengths that the
+  // render loop re-sizes every frame to hold a constant size on screen, which
+  // is what the e2e suite reads them to check.
+  controls.constructionDashSizes = () => {
+    const out = [];
+    scene.traverse((o) => {
+      if (o.material?.userData?.screenDash)
+        out.push({
+          dashSize: o.material.dashSize,
+          gapSize: o.material.gapSize,
+        });
+    });
+    return out;
+  };
+
   // Project a world-space point to CSS pixel coordinates in the canvas —
   // used by the e2e suite to aim REAL mouse clicks at faces/edges (raycast
   // targets aren't DOM-addressable any other way).

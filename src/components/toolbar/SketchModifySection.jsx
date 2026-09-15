@@ -65,7 +65,9 @@ const SketchModifySection = () => {
         ? [selectedSketchElement.shapeIdx]
         : [];
 
-  const handleToggleDashed = () => {
+  // "Construction" in the UI; the stored flag stays `dashed`, which is what
+  // every saved .pcad already carries.
+  const handleToggleConstruction = () => {
     if (selectedIndices.length > 0)
       toggleSketchShapesDashed(selectedId, selectedIndices);
   };
@@ -286,12 +288,12 @@ const SketchModifySection = () => {
       </button>
       <button
         className="toolbar-btn"
-        title="Toggle Dashed — dashed lines constrain geometry but don't form closed regions or extrusions"
+        title="Toggle Construction — construction lines constrain geometry but don't form closed regions or extrusions"
         disabled={
           sketchMultiSelectedIndices.length === 0 &&
           selectedSketchElement?.type !== "line"
         }
-        onClick={handleToggleDashed}
+        onClick={handleToggleConstruction}
       >
         <svg viewBox="0 0 24 24" width="20" height="20">
           <line

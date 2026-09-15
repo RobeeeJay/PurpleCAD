@@ -16,6 +16,9 @@ vi.mock("three/addons/lines/Line2.js", () => ({
 vi.mock("three/addons/lines/LineMaterial.js", () => ({
   LineMaterial: class {
     constructor(o) {
+      // Every real three material carries userData; the screen-space dash
+      // sizing keeps its settings there.
+      this.userData = {};
       Object.assign(this, o);
     }
   },
@@ -59,6 +62,9 @@ describe("buildPatternPreviewObjects", () => {
     expect(copies.every((o) => o.material.dashed === true)).toBe(true);
     expect(copies.every((o) => o.material.color === 0xff8844)).toBe(true);
     expect(copies.every((o) => o.material.opacity < 1)).toBe(true);
+    // Their dashes are sized in screen pixels, refreshed per frame, so the
+    // copies keep reading as dashed at any zoom rather than going solid.
+    expect(copies.every((o) => o.material.userData.screenDash)).toBe(true);
   });
 
   it("renders highlights even when there are no copies yet", () => {

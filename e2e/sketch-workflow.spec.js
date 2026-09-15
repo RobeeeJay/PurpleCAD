@@ -1026,6 +1026,178 @@ test.describe.serial("2D sketch workflow", () => {
     await expect(tag).toContainText("faces");
   });
 
+  test("coincident carries a midpoint-bound point's SHAPE with it", async () => {
+    // The bug this pins: with a point held at a line's midpoint, making that
+    // point coincident with another point moved the POINT alone. It tore off
+    // the line it belonged to, and the sketch was left breaking its own
+    // midpoint constraint. The line has to travel with its midpoint.
+    const drawLineWithMidpoint = async (x1, y1, x2, y2, px, py) => {
+      await page.evaluate(() =>
+        window.__store.getState().setActiveSketchTool("line"),
+      );
+      const a = toScreen(x1, y1);
+      const b = toScreen(x2, y2);
+      await page.mouse.click(a.x, a.y);
+      await page.mouse.click(b.x, b.y);
+      await page.keyboard.press("Escape");
+      await page.evaluate(() =>
+        window.__store.getState().setActiveSketchTool("point"),
+      );
+      const p = toScreen(px, py);
+      await page.mouse.click(p.x, p.y);
+      await page.evaluate(() => {
+        window.__store.getState().setActiveSketchTool(null);
+        window.__store.getState().setSelectedSketchElement(null);
+      });
+      const idxLine = (await shapes()).length - 2;
+      const idxPoint = idxLine + 1;
+      await page
+        .getByTitle("Midpoint — pin a point to the middle", { exact: false })
+        .click();
+      await page.mouse.click(p.x, p.y);
+      const onLine = toScreen((x1 + x2) / 2, (y1 + y2) / 2);
+      await page.mouse.click(onLine.x, onLine.y);
+      await expect
+        .poll(async () => {
+          const all = await shapes();
+          const ln = all[idxLine];
+          const pt = all[idxPoint];
+          return Math.hypot(
+            pt.x - (ln.x1 + ln.x2) / 2,
+            pt.y - (ln.y1 + ln.y2) / 2,
+          );
+        })
+        .toBeLessThan(0.05);
+      return { idxLine, idxPoint };
+    };
+
+    // An empty corner of this shared sketch: by now it is crowded, and a pick
+    // that lands on earlier geometry picks the wrong thing.
+    const first = await drawLineWithMidpoint(-8, -2.5, -5, -2.5, -6.5, -3.4);
+    const second = await drawLineWithMidpoint(-8, -6.5, -5, -6.5, -6.5, -7.4);
+
+    const before = await shapes();
+    const firstLineBefore = before[first.idxLine];
+    const secondLineBefore = before[second.idxLine];
+    const target = before[second.idxPoint];
+
+    // Coincident, first pick then second: the FIRST travels to the second.
+    await page
+      .getByTitle("Coincident — make two points share the same position", {
+        exact: false,
+      })
+      .click();
+    const pick = (pt) => toScreen(pt.x, pt.y);
+    let p1 = pick(before[first.idxPoint]);
+    await page.mouse.click(p1.x, p1.y);
+    const p2 = pick(target);
+    await page.mouse.click(p2.x, p2.y);
+
+    await expect
+      .poll(async () => {
+        const all = await shapes();
+        const pt = all[first.idxPoint];
+        return Math.hypot(pt.x - target.x, pt.y - target.y);
+      })
+      .toBeLessThan(0.05);
+
+    const after = await shapes();
+    // The line came too: its own midpoint is where the point now is, so the
+    // point never left the line it is pinned to.
+    const line = after[first.idxLine];
+    expect((line.x1 + line.x2) / 2).toBeCloseTo(target.x, 1);
+    expect((line.y1 + line.y2) / 2).toBeCloseTo(target.y, 1);
+    // It moved as one piece, keeping its length.
+    expect(Math.hypot(line.x2 - line.x1, line.y2 - line.y1)).toBeCloseTo(
+      Math.hypot(
+        firstLineBefore.x2 - firstLineBefore.x1,
+        firstLineBefore.y2 - firstLineBefore.y1,
+      ),
+      2,
+    );
+    // The second pick, and the line it belongs to, stayed put.
+    expect(after[second.idxLine].x1).toBeCloseTo(secondLineBefore.x1, 3);
+    expect(after[second.idxLine].x2).toBeCloseTo(secondLineBefore.x2, 3);
+    expect(after[second.idxPoint].x).toBeCloseTo(target.x, 3);
+  });
+
+  test("a construction line's dashes hold their size on screen", async () => {
+    // Dash sizes are WORLD lengths. Left fixed, a construction line stops
+    // reading as dashed as the view changes -- zoomed in, one dash swallows
+    // the whole line and it looks like ordinary geometry. The render loop
+    // re-sizes them every frame from the world-per-pixel measure, so a dash
+    // covers the same number of PIXELS however the view is set up. Resizing
+    // the window moves that measure directly (sketch-mode wheel zoom is
+    // macOS-only, so it is no use inside the Linux container).
+    const lineIdx = await page.evaluate(() => {
+      const sketch = window.__store.getState().items.find((i) => i.id === 300);
+      const idx = sketch.shapes.findIndex((sh) => sh.type === "line");
+      window.__store.getState().toggleSketchShapesDashed(300, [idx]);
+      return idx;
+    });
+    expect(lineIdx).toBeGreaterThanOrEqual(0);
+
+    // dashSize x canvas height is the dash's size in pixels, up to the
+    // constant world height the camera shows.
+    const reading = () =>
+      page.evaluate(() => {
+        const dashes = window.__store
+          .getState()
+          ._cameraControls.constructionDashSizes();
+        return {
+          dashes,
+          heightPx: document.querySelector("canvas").clientHeight,
+        };
+      });
+    await expect
+      .poll(async () => (await reading()).dashes.length)
+      .toBeGreaterThan(0);
+
+    const before = await reading();
+    expect(before.dashes[0].dashSize).toBeGreaterThan(0);
+    expect(before.dashes[0].gapSize).toBeGreaterThan(0);
+
+    const [w, h] = await app.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      const [width, height] = win.getSize();
+      win.setSize(width, Math.round(height * 0.6));
+      return [width, height];
+    });
+    await expect
+      .poll(async () => (await reading()).heightPx)
+      .toBeLessThan(before.heightPx);
+    await page.waitForTimeout(400);
+    const after = await reading();
+
+    // Fewer pixels of canvas for the same world height: each pixel now covers
+    // MORE of the model, so a dash that holds its size on screen must measure
+    // larger in the model. Before this was fixed the size never moved.
+    expect(after.dashes[0].dashSize).toBeGreaterThan(
+      before.dashes[0].dashSize * 1.1,
+    );
+    // The dash is the same number of pixels either way -- that is the point.
+    const px = (r) => r.dashes[0].dashSize * r.heightPx;
+    expect(px(after)).toBeCloseTo(px(before), 1);
+    // Still a dash and a gap in the same rhythm, so it reads as construction
+    // geometry rather than a solid line.
+    expect(after.dashes[0].dashSize / after.dashes[0].gapSize).toBeCloseTo(
+      before.dashes[0].dashSize / before.dashes[0].gapSize,
+      6,
+    );
+
+    await app.evaluate(
+      async ({ BrowserWindow }, size) =>
+        BrowserWindow.getAllWindows()[0].setSize(size[0], size[1]),
+      [w, h],
+    );
+    // Put it back, so the extrude below still sees a closed region.
+    await page.evaluate(
+      (idx) => window.__store.getState().toggleSketchShapesDashed(300, [idx]),
+      lineIdx,
+    );
+    await page.waitForTimeout(300);
+  });
+
   test("extrude the drawn rectangle through the profile-pick flow", async () => {
     // Leave the drawing tool, then start the extrude profile pick.
     await page.evaluate(() => {

@@ -15,6 +15,7 @@ import {
   panelAwareLookAt,
 } from "../sceneSetup.js";
 import { useStore } from "../../store";
+import { applyScreenDashes } from "../screenDash.js";
 import {
   CROSS_SECTION_PLANE,
   updateCrossSectionPlane,
@@ -229,6 +230,15 @@ export function createAnimateLoop({
         const d = cam.position.distanceTo(worldPos);
         return (2 * d * Math.tan((cam.fov * Math.PI) / 360)) / REFERENCE_HEIGHT;
       };
+      // Construction-line dashes are world lengths, so a fixed dash reads as a
+      // solid line once the view zooms in. Size them per frame from the same
+      // measure the gizmos use, in pixels of canvas height, so a construction
+      // line looks equally dashed at every zoom. The camera target stands in
+      // for depth under perspective; sketch work sits on or near it.
+      applyScreenDashes(
+        (gizmoScale(targetRef.current) * REFERENCE_HEIGHT) /
+          (renderer.domElement.clientHeight || 1),
+      );
       if (axisGroupRef?.current && axisGroupRef.current.visible) {
         // Pin the XYZ indicator to the view centre (the camera target) so it
         // stays on-screen as the view pans, rather than scrolling off with the

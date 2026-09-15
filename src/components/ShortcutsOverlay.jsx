@@ -38,7 +38,7 @@ const SKETCH = [
   { keys: ["E"], label: "Ellipse" },
   { keys: ["A"], label: "Arc" },
   { keys: ["D"], label: "Distance dimension" },
-  { keys: ["I"], label: "Toggle construction (dashed)" },
+  { keys: ["I"], label: "Toggle construction line" },
   { keys: ["O"], label: "Offset (Shift: other side)" },
   { keys: ["Z"], label: "Select objects" },
   { keys: ["X"], label: "Select shapes (regions)" },
