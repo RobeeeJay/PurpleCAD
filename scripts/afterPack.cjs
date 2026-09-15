@@ -10,13 +10,34 @@ const fs = require("fs");
 const { execSync } = require("child_process");
 
 // OCC dylib dir per target arch.  electron-builder's Arch enum: 1 = x64,
-// 3 = arm64.  Each mac arch links against its own OCC build (~/occ-arm64,
-// ~/occ-x64); override with OCC_LIB_DIR if installed elsewhere.
+// 3 = arm64.  The candidates are in the SAME order as the addon's CMakeLists
+// HINTS, so the app bundles the build the addon was actually compiled against
+// -- taking ~/occ-<arch> unconditionally shipped OCC 7.9 dylibs beside an
+// addon linked to 8.0.1, which resolved only on the machine that built it.
+// Override with OCC_LIB_DIR if OCC lives somewhere else.
 const occLibDirForArch = (arch) => {
   if (process.env.OCC_LIB_DIR) return process.env.OCC_LIB_DIR;
   const name = { 1: "x64", 3: "arm64" }[arch] ?? "arm64";
-  return path.join(process.env.HOME, `occ-${name}`, "lib");
+  const candidates = [
+    `occ-8.0.1-${name}`,
+    `occ-8.0-${name}`,
+    `occ-${name}`,
+  ].map((dir) => path.join(process.env.HOME, dir, "lib"));
+  return candidates.find((dir) => fs.existsSync(dir)) ?? candidates.at(-1);
 };
+
+// The @rpath/libTK*.dylib names the addon asks dyld for.
+const requiredDylibs = (nodeFile) =>
+  execSync(`otool -L "${nodeFile}"`, { encoding: "utf8" })
+    .split("\n")
+    .map((line) => line.trim().match(/^@rpath\/(libTK[^\s]*\.dylib)/)?.[1])
+    .filter(Boolean);
+
+const rpathsOf = (file) =>
+  execSync(`otool -l "${file}"`, { encoding: "utf8" })
+    .split("\n")
+    .map((line) => line.trim().match(/^path (.+) \(offset \d+\)$/)?.[1])
+    .filter(Boolean);
 
 module.exports = async function afterPack({ appOutDir, packager, arch }) {
   if (packager.platform.name !== "mac") return;
@@ -63,22 +84,48 @@ module.exports = async function afterPack({ appOutDir, packager, arch }) {
     if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
   }
 
-  // The .node file's LC_RPATH currently points to the developer's local OCC
-  // build.  Replace it with the path to the bundled occ-libs inside the app.
+  // Each bundled dylib asks dyld for its siblings by @rpath as well, and dyld
+  // resolves those against the DYLIB's own rpaths, not the addon's -- so
+  // without this they only load while some other rpath happens to point at a
+  // full OCC install.
+  for (const dylib of fs.readdirSync(occLibsDir)) {
+    const file = path.join(occLibsDir, dylib);
+    if (!rpathsOf(file).includes("@loader_path"))
+      execSync(`install_name_tool -add_rpath "@loader_path" "${file}"`, {
+        stdio: "pipe",
+      });
+  }
+
+  // The .node file's LC_RPATH points at the developer's local OCC build.  Add
+  // the bundled occ-libs and REMOVE every absolute path: an absolute rpath
+  // resolves on the build machine and nowhere else, which is exactly how a
+  // broken bundle passes a local smoke test.
   // Relative from Release/ up to Resources/: 5 levels (Release→build→occ-addon
   // →native→app.asar.unpacked→Resources), then into occ-libs.
   const newRpath = "@loader_path/../../../../../occ-libs";
-  const oldRpath = OCC_SRC;
-  try {
-    execSync(
-      `install_name_tool -rpath "${oldRpath}" "${newRpath}" "${nodeFile}"`,
-      { stdio: "pipe" },
-    );
-  } catch {
-    // Rpath may already be absent or differ; add unconditionally.
+  if (!rpathsOf(nodeFile).includes(newRpath))
     execSync(`install_name_tool -add_rpath "${newRpath}" "${nodeFile}"`, {
       stdio: "pipe",
     });
-  }
-  console.log("[afterPack] OCC dylibs bundled and RPATH patched");
+  for (const rpath of rpathsOf(nodeFile))
+    if (rpath.startsWith("/"))
+      execSync(`install_name_tool -delete_rpath "${rpath}" "${nodeFile}"`, {
+        stdio: "pipe",
+      });
+
+  // Fail the BUILD rather than ship an app that cannot load its kernel. The
+  // bundle is now the only place these can come from, so a missing one is a
+  // crash on every machine but this one.
+  const missing = requiredDylibs(nodeFile).filter(
+    (lib) => !fs.existsSync(path.join(occLibsDir, lib)),
+  );
+  if (missing.length)
+    throw new Error(
+      `[afterPack] ${OCC_SRC} has no ${missing.join(", ")} -- the addon is ` +
+        "linked against a different OpenCASCADE than the one being bundled.",
+    );
+
+  console.log(
+    `[afterPack] bundled ${dylibs.length} OCC dylibs from ${OCC_SRC}, RPATH patched`,
+  );
 };

@@ -129,6 +129,17 @@ test:e2e:podman` runs whatever `purple-cad-e2e` currently is -- it does NOT
   test timeout never fires. A two-spec check on the host wedged a full container
   run this way at test 191, on the trophy's `.pcad` save. Check `podman ps`
   before any local e2e run.
+- **`ELECTRON_RUN_AS_NODE` makes the packaged app exit silently.** VS Code's
+  integrated terminal (and any shell running under Electron) exports it, and
+  `open` hands the caller's environment straight to the app -- so launching the
+  built app from such a terminal runs the Electron binary as plain Node: it
+  quits after about a second with no window and NO output. main.cjs's guard
+  cannot help, because packaged Electron-as-Node never loads the app's main
+  script at all; the guard only fires for `electron .`. `npm run app`
+  (`scripts/open-app.sh`) strips the variable and opens the built app, and
+  `e2e/launch.js` deletes it for the same reason. Suspect this before
+  suspecting the app: it cost a session's worth of probes once, including a
+  wrong turn through code signing.
 - If a `docker compose` setup is ever added here, its instructions in READMEs,
   scripts, and terminal commands must use `docker compose up -d --build` (never
   bare `up -d`) so code changes are actually rebuilt into the image. Verify a UI
@@ -498,6 +509,33 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   plumbing (`main.cjs` / `occ-worker.cjs` / `occClient.cancelOcc`) and the
   `setCancelBuffer` re-export in `occ-bridge.cjs`. vitest can't exercise cancel
   (no worker) — validate abort behavior in the Electron app.
+
+## Packaging the mac app (scripts/afterPack.cjs)
+
+The addon links OpenCASCADE by `@rpath`, so the hook copies the dylibs into
+`Contents/Resources/occ-libs` and patches paths. Three rules, each from a real
+break:
+
+- **Bundle the OCC the addon was COMPILED against.** The candidate list mirrors
+  CMakeLists' HINTS (8.0.1, then 8.0, then `occ-<arch>`). It used to take
+  `~/occ-<arch>` unconditionally, which shipped 7.9 dylibs beside an addon
+  linked to 8.0.1.
+- **Leave no absolute rpath in the .node, and give each copied dylib
+  `@loader_path`.** An absolute rpath resolves on the build machine and nowhere
+  else, so the bundle passes every local test and fails everywhere else; the
+  dylibs need their own rpath because dyld resolves a dylib's `@rpath` siblings
+  against THAT dylib's rpaths, not the addon's.
+- **The hook throws if a required dylib is missing from the bundle**, so this
+  fails the build instead of shipping an app that cannot load its kernel.
+
+To check a build is self-contained, load the addon with the app's own binary
+from an unrelated directory -- it then has only the bundled path to resolve
+through:
+
+```bash
+ELECTRON_RUN_AS_NODE=1 release/mac-arm64/PurpleCAD.app/Contents/MacOS/PurpleCAD \
+  -e "require('<abs path>/occ_addon.node'); console.log('ok')"
+```
 
 ## Stress analysis and generative design
 
