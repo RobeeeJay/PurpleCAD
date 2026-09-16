@@ -8,19 +8,23 @@
   box-sizing: border-box;
 }
 
+/* Rendered into document.body and placed by FormulaInput from the input's
+   on-screen rectangle, so it can never be clipped by, or stacked under, the
+   dialog the input lives in. */
 .formula-suggestions {
-  position: absolute;
-  top: calc(100% + 4px);
+  position: fixed;
+  top: 0;
   left: 0;
-  min-width: 100%;
-  max-width: 280px;
+  width: max-content;
   background-color: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   box-shadow: 0 6px 24px rgba(var(--black-rgb), 0.35);
-  z-index: 10001;
-  overflow: hidden;
+  /* Foremost: above every dialog, bar and overlay in the app. */
+  z-index: 2147483000;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: var(--font-mono);
   font-size: var(--font-size-base);
 }
