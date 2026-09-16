@@ -13,6 +13,7 @@ import {
 } from "./internals.js";
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { createSketchPatternToolSlice } from "./sketchPatternToolSlice.js";
+import { createSketchCentreSlice } from "./sketchCentreSlice.js";
 import { createSketchOffsetSlice } from "./sketchOffsetSlice.js";
 import { createSketchUiStateSlice } from "./sketchUiStateSlice.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
@@ -63,6 +64,10 @@ const SHAPE_INDEX_FIELDS = [
   "centerShapeIdx",
 ];
 
+// Fields holding a LIST of shape indices: a centre constraint names each of
+// its two shapes as every piece of connected geometry that makes it up.
+export const SHAPE_INDEX_LIST_FIELDS = ["shapesA", "shapesB"];
+
 // Remap a constraint's shape-index fields through `indexMap` (old index → new
 // index, or -1 for a removed shape).  Returns null when the constraint
 // references any removed shape, so the caller can drop it.  Used when deleting
@@ -77,12 +82,24 @@ export const remapConstraintShapeIndices = (constraint, indexMap) => {
       out[f] = next;
     }
   }
+  // A list names a whole shape, so losing one of its pieces leaves the rest of
+  // the shape -- still worth keeping.  Only a list emptied entirely takes the
+  // constraint with it.
+  for (const f of SHAPE_INDEX_LIST_FIELDS) {
+    if (!Array.isArray(constraint[f])) continue;
+    const kept = constraint[f]
+      .map((i) => indexMap.get(i))
+      .filter((i) => i != null && i !== -1);
+    if (kept.length === 0) return null;
+    out[f] = kept;
+  }
   return out;
 };
 
 // Does a constraint reference shape index `idx` in any of its index fields?
 const constraintRefsShape = (c, idx) =>
-  SHAPE_INDEX_FIELDS.some((f) => c[f] === idx);
+  SHAPE_INDEX_FIELDS.some((f) => c[f] === idx) ||
+  SHAPE_INDEX_LIST_FIELDS.some((f) => c[f]?.includes?.(idx));
 
 // Does a constraint attach to a specific endpoint of shape `idx`?
 const constraintTouchesPoint = (c, idx, pt) =>
@@ -125,6 +142,14 @@ const trimSplitConstraints = (constraints, lineIdx, segBIdx) => {
     if (c.type === "horizontal" || c.type === "vertical") {
       out.push(c);
       if (c.shapeIdx === lineIdx) out.push({ ...c, shapeIdx: segBIdx });
+      continue;
+    }
+    // Both halves still belong to the shape the centre constraint names.
+    if (c.type === "centre") {
+      const nc = { ...c };
+      for (const f of SHAPE_INDEX_LIST_FIELDS)
+        if (c[f]?.includes(lineIdx)) nc[f] = [...c[f], segBIdx];
+      out.push(nc);
       continue;
     }
     if (c.type === "coincident" || c.type === "angle") {
@@ -293,6 +318,7 @@ export const createSketchSlice = (set) => ({
     }),
 
   ...createSketchPatternToolSlice(set),
+  ...createSketchCentreSlice(set),
 
   // --- Shape + constraint mutations ---
   addSketchConstraints: (sketchId, newConstraints) =>

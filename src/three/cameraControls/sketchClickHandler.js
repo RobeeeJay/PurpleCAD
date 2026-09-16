@@ -90,6 +90,7 @@ export function createSketchClickHandler(
               cObj.userData.constraintType !== "rectangularPattern" &&
               cObj.userData.constraintType !== "mirror" &&
               cObj.userData.constraintType !== "circularPattern" &&
+              cObj.userData.constraintType !== "centre" &&
               cObj.userData.constraintType !== "text")
           )
             continue;
@@ -146,6 +147,14 @@ export function createSketchClickHandler(
               useStore
                 .getState()
                 .beginMirrorEdit(
+                  selectedIdRef.current,
+                  cObj.userData.constraintIdx,
+                );
+            } else if (c && c.type === "centre") {
+              // Re-open the Centre dialog on this constraint to edit it.
+              useStore
+                .getState()
+                .beginCentreEdit(
                   selectedIdRef.current,
                   cObj.userData.constraintIdx,
                 );

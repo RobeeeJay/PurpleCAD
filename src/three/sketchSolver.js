@@ -8,9 +8,13 @@
 // rigid-motion gauge freedom so the result is the valid configuration nearest
 // the current one (and fixed points stay put).
 
-import { resolveConstraintDistance } from "./geometryParams.js";
+import { resolveConstraintDistance, resolveValue } from "./geometryParams.js";
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
-import { shapeMidpoint, sharpLineExtra } from "./sketchGeometry.js";
+import {
+  shapeMidpoint,
+  shapeSetCentre,
+  sharpLineExtra,
+} from "./sketchGeometry.js";
 import { rederiveAllCorners, extractCorners } from "./sketchGeometry.js";
 
 // Which scalar fields of a shape the solver may move, in a stable order.
@@ -148,6 +152,17 @@ function residuals(shapes, constraints, variables) {
       const p = pointOf(shapes[c.pointShapeIdx], c.pointKey ?? "point");
       const m = shapeMidpoint(shapes[c.targetShapeIdx]);
       if (p && m) out.push(p.x - m.x, p.y - m.y);
+      else out.push(0, 0);
+    } else if (c.type === "centre") {
+      // The centre of one connected shape held on the centre of another, plus
+      // an offset.  Offsets are mm formulas, like every other dimension.
+      const a = shapeSetCentre(shapes, c.shapesA);
+      const b = shapeSetCentre(shapes, c.shapesB);
+      if (a && b)
+        out.push(
+          a.x - b.x - resolveValue(c.offsetX, 0, variables),
+          a.y - b.y - resolveValue(c.offsetY, 0, variables),
+        );
       else out.push(0, 0);
     } else if (c.type === "offset") {
       // Parametric offset of a NEW line from its ORIGINAL: keep them parallel
@@ -325,6 +340,9 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
     else if (c.type === "pointLineDistance")
       link(c.lineShapeIdx, c.pointShapeIdx);
     else if (c.type === "midpoint") link(c.targetShapeIdx, c.pointShapeIdx);
+    else if (c.type === "centre")
+      for (const a of c.shapesA || [])
+        for (const b of c.shapesB || []) link(a, b);
     else if (c.type === "offset") link(c.shapeIdx, c.origIdx);
   }
   const dist = new Array(numShapes).fill(Infinity);

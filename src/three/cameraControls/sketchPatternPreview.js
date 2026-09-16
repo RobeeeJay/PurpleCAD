@@ -21,7 +21,7 @@ const resolutionOf = (renderer) =>
     ? renderer.getSize(new THREE.Vector2())
     : new THREE.Vector2(window.innerWidth, window.innerHeight);
 
-function makeLine(pts, opts) {
+export function makeLine(pts, opts) {
   const {
     color,
     linewidth,

@@ -1,5 +1,6 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import CentreConstraintButton from "./CentreConstraintButton";
 
 // In sketch mode this is the "Constrain" group (coincident / distance / H / V);
 // in 3D it's the "Move" group (drop-to-ground, point-to-point).  Snap is shared.
@@ -187,6 +188,7 @@ const ConstrainSection = ({ isSketchMode }) => {
               <circle cx="12" cy="12" r="2.6" fill="#D4A33F" />
             </svg>
           </button>
+          <CentreConstraintButton />
           <button
             className={`toolbar-btn ${sketchConstraintMode === "distance" ? "active" : ""}`}
             title="Distance — set a fixed distance between two points"

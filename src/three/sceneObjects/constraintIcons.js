@@ -5,6 +5,7 @@
 // on the shape/region geometry.
 
 import * as THREE from "three";
+import { addCentreConstraintIcon } from "./centreConstraintIcon.js";
 import { shapeMidpoint, cornerSetback } from "../sketchGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
@@ -510,6 +511,16 @@ export function addConstraintIconsToGroup(
       );
       group.add(seg);
       markFixedSize(seg, toWorld(mx, my, 0.005));
+    } else if (c.type === "centre") {
+      addCentreConstraintIcon({
+        c,
+        shapes,
+        toWorld,
+        tag,
+        group,
+        markFixedSize,
+        color: CONSTRAINT_ON_LINE_COLOR,
+      });
     } else if (c.type === "midpoint") {
       // A small diamond outline at the target's middle — the pinned point
       // sits exactly there.

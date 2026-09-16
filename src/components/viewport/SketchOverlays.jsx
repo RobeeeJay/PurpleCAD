@@ -10,6 +10,7 @@ import SketchRulers from "./SketchRulers";
 import SketchLongPressMenu from "./SketchLongPressMenu";
 import SketchDistanceOverlay from "./SketchDistanceOverlay";
 import SketchPatternOverlays from "./SketchPatternOverlays";
+import SketchCentreOverlay from "./SketchCentreOverlay";
 import { useStore } from "../../store";
 import { evaluateFormula, variablesToMap } from "../../utils/formulas.js";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
@@ -265,6 +266,7 @@ export default function SketchOverlays({
         activeSketchTool !== "rectangularPattern" &&
         activeSketchTool !== "project" &&
         activeSketchTool !== "trim" &&
+        activeSketchTool !== "centre" &&
         sketchDrawPhase !== "second" && (
           <div className="sketch-placement-hint">
             Click to set the start point
@@ -287,6 +289,11 @@ export default function SketchOverlays({
         sketchMirrorState={sketchMirrorState}
         sketchCircularPatternState={sketchCircularPatternState}
         sketchRectangularPatternState={sketchRectangularPatternState}
+        selectedId={selectedId}
+        variables={variables}
+      />
+      <SketchCentreOverlay
+        sketchMode={sketchMode}
         selectedId={selectedId}
         variables={variables}
       />

@@ -20,6 +20,7 @@ import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
 import { createSketchCircularPatternHelpers } from "./sketchCircularPatternTool.js";
 import { createSketchRectangularPatternHelpers } from "./sketchRectangularPatternTool.js";
+import { createSketchCentreHelpers } from "./sketchCentreTool.js";
 import { MIRRORABLE_TYPES } from "../sketchMirror.js";
 import { CIRCULAR_PATTERNABLE_TYPES } from "../sketchCircularPattern.js";
 import { RECTANGULAR_PATTERNABLE_TYPES } from "../sketchRectangularPattern.js";
@@ -358,6 +359,35 @@ export function createSketchInteraction(
     updateRectangularPatternPreview,
     handleRectangularPatternClick,
   } = sketchRectangularPattern;
+
+  // ── Centre tool ────────────────────────────────────────────────────────────
+  const {
+    clearCentrePreview,
+    updateCentrePreview,
+    centreHoverAt,
+    handleCentreClick,
+    resetCentreHover,
+  } = createSketchCentreHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    sketchShapesGroupRef,
+    renderer,
+  });
+  const unsubCentre = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchCentreState === prev.sketchCentreState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "centre") updateCentrePreview();
+    else {
+      resetCentreHover();
+      clearCentrePreview();
+    }
+  });
 
   // Whenever sketch shapes are mutated (any store items change while in sketch
   // mode), the selection overlay drawn at the old position becomes a ghost.
@@ -705,7 +735,8 @@ export function createSketchInteraction(
     if (
       activeSketchToolRef.current === "mirror" ||
       activeSketchToolRef.current === "circularPattern" ||
-      activeSketchToolRef.current === "rectangularPattern"
+      activeSketchToolRef.current === "rectangularPattern" ||
+      activeSketchToolRef.current === "centre"
     ) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
@@ -922,6 +953,17 @@ export function createSketchInteraction(
       updateSketchToolHover(e.clientX, e.clientY, activeSketchToolRef.current);
       return true;
     }
+    if (activeSketchToolRef.current === "centre") {
+      clearAllSketchHover();
+      centreHoverAt(
+        e.clientX,
+        e.clientY,
+        hitTestSketchLines,
+        makeRay,
+        findSnap,
+      );
+      return true;
+    }
     if (activeSketchToolRef.current === "trim") {
       clearAllSketchHover();
       if (trimming) tryTrimAt(e.clientX, e.clientY);
@@ -1094,6 +1136,19 @@ export function createSketchInteraction(
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5)
         handleMirrorClick(e.clientX, e.clientY, hitTestSketchLines, makeRay);
+      return true;
+    }
+    if (activeSketchToolRef.current === "centre") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleCentreClick(
+          e.clientX,
+          e.clientY,
+          hitTestSketchLines,
+          makeRay,
+          findSnap,
+        );
       return true;
     }
     if (activeSketchToolRef.current === "circularPattern") {
@@ -1294,5 +1349,6 @@ export function createSketchInteraction(
     unsubMirror,
     unsubCircularPattern,
     unsubRectangularPattern,
+    unsubCentre,
   };
 }

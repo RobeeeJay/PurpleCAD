@@ -141,6 +141,10 @@ export function sketchConstraintRows(item) {
     const refs = [];
     for (const f of CONSTRAINT_INDEX_FIELDS)
       if (typeof c[f] === "number") refs.push({ field: f, idx: c[f] });
+    // A centre constraint names each shape as a list of indices.
+    for (const f of ["shapesA", "shapesB"])
+      for (const i of Array.isArray(c[f]) ? c[f] : [])
+        refs.push({ field: f, idx: i });
     const dangling = refs.filter((r) => r.idx < 0 || r.idx >= shapes.length);
     // A H/V constraint whose line isn't actually H/V, or a self-distance whose
     // measured length disagrees, is the visible symptom of a mis-bound index.

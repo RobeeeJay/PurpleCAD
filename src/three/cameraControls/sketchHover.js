@@ -280,6 +280,7 @@ export function createSketchHoverHelpers(
               horizontal: "Horizontal",
               vertical: "Vertical",
               angle: "Angle",
+              centre: "Centre (double-click to edit)",
             };
             const tipRect = renderer.domElement.getBoundingClientRect();
             dimHintRef.current.textContent =

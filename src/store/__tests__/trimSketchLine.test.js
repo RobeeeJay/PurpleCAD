@@ -67,6 +67,27 @@ describe("trimSketchLine", () => {
     expect(shapes[3]).toMatchObject({ x1: 7, x2: 10 });
   });
 
+  it("a split line's second half stays in the shape a centre constraint names", () => {
+    // Line 0 belongs to Shape A. Splitting it leaves two pieces of that same
+    // shape; the constraint must keep both, not lose the new one (or drop the
+    // whole constraint because the line it named changed).
+    const centre = {
+      type: "centre",
+      shapesA: [0],
+      shapesB: [1],
+      offsetX: "0",
+      offsetY: "0",
+    };
+    const store = makeStore([
+      sketch([L(0, 0, 10, 0), vAt(3), vAt(7)], [centre]),
+    ]);
+    store.getState().trimSketchLine(1, 0, 5, 0);
+    expect(shapesOf(store)).toHaveLength(4); // segA, vAt3, vAt7, segB
+    expect(consOf(store)).toEqual([
+      { ...centre, shapesA: [0, 3], shapesB: [1] },
+    ]);
+  });
+
   it("never trims an offset line", () => {
     const store = makeStore([
       sketch([L(0, 0, 10, 0)], [{ type: "offset", shapeIdx: 0, origIdx: 1 }]),

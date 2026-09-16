@@ -749,6 +749,7 @@ export function attachCameraControls(ctx) {
     unsubMirror,
     unsubCircularPattern,
     unsubRectangularPattern,
+    unsubCentre,
   } = createSketchInteraction(
     {
       scene,
@@ -1067,6 +1068,7 @@ export function attachCameraControls(ctx) {
     document.removeEventListener("keydown", onKeyDown);
     unsubItems();
     unsubMirror();
+    unsubCentre();
     unsubCircularPattern();
     unsubRectangularPattern();
   };

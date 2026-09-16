@@ -678,3 +678,93 @@ export function shapeMidpoint(s) {
   }
   return null;
 }
+
+// Points that together span a shape's drawn extent, in sketch-local
+// coordinates.  Curves are sampled, so the extent of an arc or a bezier is the
+// curve's, not its control polygon's.
+const EXTENT_SAMPLES = 32;
+function shapeExtentPoints(s) {
+  switch (s?.type) {
+    case "line":
+    case "rect":
+      return [
+        { x: s.x1, y: s.y1 },
+        { x: s.x2, y: s.y2 },
+      ];
+    case "point":
+    case "text":
+      return [{ x: s.x, y: s.y }];
+    case "circle":
+      return [
+        { x: s.cx - s.r, y: s.cy },
+        { x: s.cx + s.r, y: s.cy },
+        { x: s.cx, y: s.cy - s.r },
+        { x: s.cx, y: s.cy + s.r },
+      ];
+    case "ellipse": {
+      const cos = Math.cos(s.rotation ?? 0);
+      const sin = Math.sin(s.rotation ?? 0);
+      const out = [];
+      for (let i = 0; i < EXTENT_SAMPLES; i++) {
+        const t = (i / EXTENT_SAMPLES) * Math.PI * 2;
+        const ex = s.rx * Math.cos(t);
+        const ey = s.ry * Math.sin(t);
+        out.push({
+          x: s.cx + ex * cos - ey * sin,
+          y: s.cy + ex * sin + ey * cos,
+        });
+      }
+      return out;
+    }
+    case "arc": {
+      const out = [];
+      for (let i = 0; i <= EXTENT_SAMPLES; i++) {
+        const a =
+          s.startAngle + ((s.endAngle - s.startAngle) * i) / EXTENT_SAMPLES;
+        out.push({ x: s.cx + Math.cos(a) * s.r, y: s.cy + Math.sin(a) * s.r });
+      }
+      return out;
+    }
+    case "bezier": {
+      const out = [];
+      for (let i = 0; i <= EXTENT_SAMPLES; i++) {
+        const t = i / EXTENT_SAMPLES;
+        const mt = 1 - t;
+        const b = (a, c1, c2, d) =>
+          mt * mt * mt * a +
+          3 * mt * mt * t * c1 +
+          3 * mt * t * t * c2 +
+          t * t * t * d;
+        out.push({
+          x: b(s.p0.x, s.p1.x, s.p2.x, s.p3.x),
+          y: b(s.p0.y, s.p1.y, s.p2.y, s.p3.y),
+        });
+      }
+      return out;
+    }
+    default:
+      return [];
+  }
+}
+
+// The centre of a set of shapes -- the middle of their combined bounding box,
+// which is what "the centre" of a drawn outline means to someone looking at
+// it: the middle of a rectangle, the centre of a circle, the middle of a slot.
+// (A centroid of the points would be dragged towards wherever a curve happens
+// to be sampled densely.)  Null when the set has no drawable extent.
+export function shapeSetCentre(shapes, indices) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const i of indices || []) {
+    for (const p of shapeExtentPoints(shapes[i])) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+}
