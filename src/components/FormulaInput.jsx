@@ -239,12 +239,24 @@ const FormulaInput = React.forwardRef(function FormulaInput(
 
   const handleSelect = () => recompute();
   const handleClick = () => recompute();
-  const handleFocus = () => recompute();
+  // Closing on blur waits a tick (below).  Coming back to the field inside
+  // that tick used to let the stale close fire on the FOCUSED field: its list
+  // opened, then vanished and did not come back until the next keystroke.
+  const blurTimer = useRef(null);
+  useEffect(() => () => clearTimeout(blurTimer.current), []);
+
+  const handleFocus = () => {
+    clearTimeout(blurTimer.current);
+    recompute();
+  };
 
   const handleBlur = (e) => {
     // Allow mousedown on a suggestion to fire (it preventDefaults the
-    // blur).  Then close the popup after a tick.
-    setTimeout(() => setSuggestions([]), 100);
+    // blur).  Then close the popup after a tick -- unless focus is back.
+    clearTimeout(blurTimer.current);
+    blurTimer.current = setTimeout(() => {
+      if (document.activeElement !== innerRef.current) setSuggestions([]);
+    }, 100);
     if (onBlur) onBlur(e);
   };
 

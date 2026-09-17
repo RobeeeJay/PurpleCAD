@@ -130,6 +130,26 @@ test.describe.serial("formula field suggestions", () => {
     await expect(page.locator(".sketch-centre-overlay")).toBeVisible();
   });
 
+  test("leaving the field and coming straight back keeps the list", async () => {
+    // Closing on blur waits 100 ms. Returning inside that window used to let
+    // the stale close fire on the focused field: the list vanished and stayed
+    // gone. (Found as a load-dependent failure of the resize test below.)
+    const x = page
+      .locator(".sketch-centre-overlay")
+      .getByLabel("Offset X (mm)");
+    // Not the value the next test types: re-filling an unchanged value only
+    // selects the text, which (rightly) closes the list.
+    await x.fill("Wal");
+    await expect.poll(async () => (await listState())?.names).toEqual(["Wall"]);
+    await page.evaluate(() => {
+      const bar = document.querySelector(".sketch-centre-overlay");
+      bar.querySelector('input[aria-label="Offset Y (mm)"]').focus();
+      bar.querySelector('input[aria-label="Offset X (mm)"]').focus();
+    });
+    await page.waitForTimeout(300); // well past the close-on-blur delay
+    expect((await listState())?.names).toEqual(["Wall"]);
+  });
+
   test("the same field near the top of the window opens its list below", async () => {
     // Park the bar at the top of the viewport: now there is room beneath.
     await page.evaluate(() => {
