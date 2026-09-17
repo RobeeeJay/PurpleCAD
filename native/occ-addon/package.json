@@ -5,8 +5,8 @@
   "description": "N-API addon wrapping Open CASCADE Technology for PurpleCAD",
   "main": "build/Release/occ_addon.node",
   "scripts": {
-    "build": "cmake-js compile --CDCMAKE_BUILD_TYPE=Release",
-    "build:debug": "cmake-js compile --CDCMAKE_BUILD_TYPE=Debug",
+    "build": "./build.sh --CDCMAKE_BUILD_TYPE=Release",
+    "build:debug": "./build.sh --CDCMAKE_BUILD_TYPE=Debug",
     "clean": "cmake-js clean",
     "test": "node test/ping.mjs"
   },

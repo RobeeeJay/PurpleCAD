@@ -368,6 +368,14 @@ args)`.
   'arm64'" -- and only blows up at require() time with `symbol not found in
 flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
   Check with `lipo -archs ~/occ-8.0.1-arm64/lib/libTKernel.8.0.1.dylib`.
+- **`npm run build` goes through `native/occ-addon/build.sh`, not bare
+  cmake-js.** macOS 27 removed Rosetta, and this machine's Intel Homebrew
+  (`/usr/local/bin/cmake`, `ninja`, `pkg-config`) sits first on PATH, so
+  cmake-js died with `spawn Unknown system error -86` (EBADARCH) and
+  `electron:start` failed at its first step. The script uses the first cmake
+  whose `--version` runs, and passes `--prefer-make` when the PATH ninja
+  cannot run (cmake-js picks ninja whenever one exists). An arm64
+  `/opt/homebrew/bin/brew install cmake` is the durable fix for the machine.
 - **The addon must compile under BOTH clang and gcc.** macOS dev builds with
   clang; the Linux e2e container and `dist:linux` build with gcc, and gcc is
   the stricter of the two. The trap already hit: gcc rejects copy-initialising
