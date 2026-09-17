@@ -17,7 +17,10 @@ import {
   ICON_UP_RIGHT,
   makeConstraintIconSprite,
 } from "../sceneObjects/constraintIconSprites.js";
-import { addConstraintIconsToGroup } from "../sceneObjects/constraintIcons.js";
+import {
+  addConstraintIconsToGroup,
+  lengthDimensionSides,
+} from "../sceneObjects/constraintIcons.js";
 
 const S = CONSTRAINT_ICON_SIZE_PX;
 const OFF = CONSTRAINT_ICON_OFFSET_PX;
@@ -143,5 +146,46 @@ describe("which marker each constraint gets", () => {
         o.geometry.attributes.position.count === 5,
     );
     expect(diamonds).toEqual([]);
+  });
+});
+
+describe("which side of a line its own dimension is drawn", () => {
+  // A horizontal / vertical marker moves to the other side of its line when
+  // the line's length dimension is drawn where the marker would go (the e2e
+  // spec checks the move itself; the labels need a canvas).
+  const line = (x1, y1, x2, y2) => ({ type: "line", x1, y1, x2, y2 });
+  const length = (idx, pointA = "start", pointB = "end") => ({
+    type: "distance",
+    shapeAIdx: idx,
+    pointA,
+    shapeBIdx: idx,
+    pointB,
+    distance: "10",
+  });
+
+  it("left-to-right line: above it", () => {
+    const sides = lengthDimensionSides([length(0)], [line(0, 0, 4, 0)]);
+    expect(sides.get(0)).toEqual({ x: -0, y: 1 });
+  });
+
+  it("the same line measured end-to-start: below it", () => {
+    const sides = lengthDimensionSides(
+      [length(0, "end", "start")],
+      [line(0, 0, 4, 0)],
+    );
+    expect(sides.get(0).y).toBe(-1);
+  });
+
+  it("downward line: to its right", () => {
+    const sides = lengthDimensionSides([length(0)], [line(4, 2, 4, 0)]);
+    expect(sides.get(0).x).toBe(1);
+  });
+
+  it("only a line's OWN length counts", () => {
+    const between = { ...length(0), shapeBIdx: 1 };
+    expect(
+      lengthDimensionSides([between], [line(0, 0, 4, 0), line(0, 2, 4, 2)])
+        .size,
+    ).toBe(0);
   });
 });

@@ -10,10 +10,32 @@ import { addCentreConstraintIcon } from "./centreConstraintIcon.js";
 import {
   besideLabel,
   ICON_ABOVE,
+  ICON_BELOW,
+  ICON_LEFT,
   ICON_RIGHT,
   ICON_UP_RIGHT,
   makeConstraintIconSprite,
 } from "./constraintIconSprites.js";
+
+// For each line whose own length dimension is drawn, which side of the line
+// the dimension sits on (sketch-local unit perpendicular).  A line-length
+// dimension is offset along the perpendicular of its measured direction, the
+// same rule the distance branch below draws it by.
+export function lengthDimensionSides(constraints, shapes) {
+  const sides = new Map();
+  for (const c of constraints) {
+    if (c.type !== "distance" || c.shapeAIdx !== c.shapeBIdx) continue;
+    const line = shapes[c.shapeAIdx];
+    if (line?.type !== "line") continue;
+    const a = getShapePoint(line, c.pointA);
+    const b = getShapePoint(line, c.pointB);
+    if (!a || !b) continue;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-9) continue;
+    sides.set(c.shapeAIdx, { x: -(b.y - a.y) / len, y: (b.x - a.x) / len });
+  }
+  return sides;
+}
 import { shapeMidpoint, cornerSetback } from "../sketchGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
@@ -117,6 +139,11 @@ export function addConstraintIconsToGroup(
         ),
       )
     : null;
+  // Where each line's own dimension sits, so a horizontal / vertical marker can
+  // keep off it.  Only when dimensions are drawn at all.
+  const dimensionSides = showDimensions
+    ? lengthDimensionSides(constraints, shapes)
+    : new Map();
   // Offset constraints created together share an offsetGroup; render only one
   // editable dimension label per group (they all carry the same distance).
   const seenOffsetGroups = new Set();
@@ -474,10 +501,21 @@ export function addConstraintIconsToGroup(
     } else if (c.type === "horizontal" || c.type === "vertical") {
       const shape = shapes[c.shapeIdx];
       if (!shape || shape.type !== "line") return;
-      // Horizontal sits above the line's middle, vertical to its right.
+      // Horizontal sits above the line's middle, vertical to its right --
+      // unless the line's own dimension is drawn on that side, where the
+      // marker would sit on the value; then it takes the other side.
+      const dim = dimensionSides.get(c.shapeIdx);
+      const dir =
+        c.type === "horizontal"
+          ? dim && dim.y > 0.5
+            ? ICON_BELOW
+            : ICON_ABOVE
+          : dim && dim.x > 0.5
+            ? ICON_LEFT
+            : ICON_RIGHT;
       placeIcon(
         { x: (shape.x1 + shape.x2) / 2, y: (shape.y1 + shape.y2) / 2 },
-        c.type === "horizontal" ? ICON_ABOVE : ICON_RIGHT,
+        dir,
         [c.shapeIdx],
         CONSTRAINT_HORIZONTAL_COLOR,
       );

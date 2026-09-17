@@ -32,6 +32,8 @@ const RASTER_PX = 72;
 export const ICON_UP_RIGHT = { x: 1, y: 1 };
 export const ICON_RIGHT = { x: 1, y: 0 };
 export const ICON_ABOVE = { x: 0, y: 1 };
+export const ICON_BELOW = { x: 0, y: -1 };
+export const ICON_LEFT = { x: -1, y: 0 };
 
 // Where the marker's CENTRE sits relative to its anchor, in screen pixels with
 // y pointing down (the hit tests work in client coordinates).

@@ -51,6 +51,12 @@ const EXPECTED_OFFSET = {
   horizontal: { x: 0, y: -REACH },
   vertical: { x: REACH, y: 0 },
 };
+// ...except where a line's own dimension is drawn on the marker's usual side:
+// the bottom edge (constraint #4) runs left to right, so its 40 mm dimension
+// is drawn ABOVE it, inside the square -- its horizontal marker goes below.
+// The right edge's dimension is drawn to its LEFT, so its vertical marker
+// (#5) keeps its usual side.
+const MOVED_OFFSET = { 4: { x: 0, y: REACH } };
 
 const markers = () =>
   page.evaluate(() =>
@@ -71,7 +77,7 @@ const expectPlacedAndSized = (list) => {
       expect(m.middle.y, "level with label").toBeCloseTo(m.label.y, 0);
       continue;
     }
-    const want = EXPECTED_OFFSET[m.type];
+    const want = MOVED_OFFSET[m.constraintIdx] ?? EXPECTED_OFFSET[m.type];
     expect(want, `unexpected marker type ${m.type}`).toBeTruthy();
     expect(m.middle.x - m.anchor.x, `${m.type} x offset`).toBeCloseTo(
       want.x,
@@ -98,6 +104,22 @@ const expectNoMarkerOverlaps = (list) => {
         `${list[i].type} #${list[i].constraintIdx} overlaps ${list[j].type} #${list[j].constraintIdx}`,
       ).toBe(true);
     }
+};
+
+// No marker may cover a dimension's value label.
+const expectNoMarkerOverLabels = (list) => {
+  const labels = list.filter((m) => m.label).map((m) => m.label);
+  for (const m of list) {
+    for (const l of labels) {
+      const clear =
+        Math.abs(m.middle.x - l.x) >= SIZE_PX / 2 + l.halfWidthPx - 0.5 ||
+        Math.abs(m.middle.y - l.y) >= SIZE_PX / 2 + l.halfHeightPx - 0.5;
+      expect(
+        clear,
+        `${m.type} #${m.constraintIdx} covers the label at ${Math.round(l.x)},${Math.round(l.y)}`,
+      ).toBe(true);
+    }
+  }
 };
 
 const snap = async (testInfo, name) => {
@@ -150,6 +172,7 @@ test.describe.serial("sketch constraint markers", () => {
     ]).toEqual([4, 2, 2, 2]);
     expectPlacedAndSized(list);
     expectNoMarkerOverlaps(list);
+    expectNoMarkerOverLabels(list);
     await snap(testInfo, "constraint-markers");
   });
 
