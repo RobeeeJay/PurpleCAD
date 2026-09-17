@@ -114,7 +114,9 @@ describe("which marker each constraint gets", () => {
     expect(gapPx(m)).toEqual({ x: OFF, y: 0 });
   });
 
-  it("distance: up and to the right of the middle of what it measures", () => {
+  // With its dimension drawn, a distance's marker sits beside the value label
+  // instead; that needs a canvas, so the e2e spec checks it.
+  it("distance, dimension hidden: up and to the right of what it measures", () => {
     const m = markers().distance;
     expect(m.userData.screenIcon.type).toBe("distance");
     expect([m.position.x, m.position.y]).toEqual([2, 0]);

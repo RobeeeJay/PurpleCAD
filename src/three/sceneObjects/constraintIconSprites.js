@@ -147,6 +147,23 @@ export function makeConstraintIconSprite(type, dir, theme) {
   return sprite;
 }
 
+// Tie a marker to a value label: it then sits OFFSET pixels beside the label's
+// text -- to its right (side 1) or left (side -1) -- instead of on its own
+// anchor, which is the label's centre.  The text's width on screen changes with
+// the view, so the render loop re-places it every frame (placeBesideLabel).
+export function besideLabel(sprite, label, side = 1) {
+  sprite.userData.screenIcon.label = label;
+  sprite.userData.screenIcon.side = side;
+}
+
+export function placeBesideLabel(sprite, labelHalfWidthPx) {
+  const icon = sprite.userData.screenIcon;
+  const S = CONSTRAINT_ICON_SIZE_PX;
+  const reach = labelHalfWidthPx + CONSTRAINT_ICON_OFFSET_PX;
+  sprite.center.set(icon.side < 0 ? 1 + reach / S : -reach / S, 0.5);
+  icon.offsetPx = { x: icon.side * (reach + S / 2), y: 0 };
+}
+
 // Show a marker as selected (or not): a plate filled with the selection colour.
 export function setConstraintIconSelected(sprite, selected) {
   const icon = sprite.userData.screenIcon;

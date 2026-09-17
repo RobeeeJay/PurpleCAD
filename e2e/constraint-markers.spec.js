@@ -44,10 +44,10 @@ const CONSTRAINTS = [
   })),
 ];
 
-// Which way each marker sits from its anchor, in client pixels (y down).
+// Which way each marker sits from its anchor, in client pixels (y down).  A
+// distance marker sits beside its value label instead (checked separately).
 const EXPECTED_OFFSET = {
   coincident: { x: REACH, y: -REACH },
-  distance: { x: REACH, y: -REACH },
   horizontal: { x: 0, y: -REACH },
   vertical: { x: REACH, y: 0 },
 };
@@ -59,6 +59,18 @@ const markers = () =>
 
 const expectPlacedAndSized = (list) => {
   for (const m of list) {
+    expect(Math.abs(m.sizePx - SIZE_PX), `${m.type} size`).toBeLessThan(0.5);
+    if (m.type === "distance") {
+      // Beside the label's TEXT, OFFSET pixels clear of it, level with it.
+      expect(m.label, "distance marker has its label").toBeTruthy();
+      const gap =
+        m.middle.x > m.label.x
+          ? m.middle.x - SIZE_PX / 2 - (m.label.x + m.label.halfWidthPx)
+          : m.label.x - m.label.halfWidthPx - (m.middle.x + SIZE_PX / 2);
+      expect(gap, "gap to label").toBeCloseTo(OFFSET_PX, 0);
+      expect(m.middle.y, "level with label").toBeCloseTo(m.label.y, 0);
+      continue;
+    }
     const want = EXPECTED_OFFSET[m.type];
     expect(want, `unexpected marker type ${m.type}`).toBeTruthy();
     expect(m.middle.x - m.anchor.x, `${m.type} x offset`).toBeCloseTo(
@@ -69,8 +81,23 @@ const expectPlacedAndSized = (list) => {
       want.y,
       0,
     );
-    expect(Math.abs(m.sizePx - SIZE_PX), `${m.type} size`).toBeLessThan(0.5);
   }
+};
+
+// No marker may hide another: their on-screen squares must not overlap.
+const expectNoMarkerOverlaps = (list) => {
+  for (let i = 0; i < list.length; i++)
+    for (let j = i + 1; j < list.length; j++) {
+      const a = list[i].middle;
+      const b = list[j].middle;
+      const apart =
+        Math.abs(a.x - b.x) >= SIZE_PX - 0.5 ||
+        Math.abs(a.y - b.y) >= SIZE_PX - 0.5;
+      expect(
+        apart,
+        `${list[i].type} #${list[i].constraintIdx} overlaps ${list[j].type} #${list[j].constraintIdx}`,
+      ).toBe(true);
+    }
 };
 
 const snap = async (testInfo, name) => {
@@ -122,6 +149,7 @@ test.describe.serial("sketch constraint markers", () => {
       count("distance"),
     ]).toEqual([4, 2, 2, 2]);
     expectPlacedAndSized(list);
+    expectNoMarkerOverlaps(list);
     await snap(testInfo, "constraint-markers");
   });
 

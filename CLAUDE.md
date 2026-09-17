@@ -866,7 +866,10 @@ sources are picked) that reuses the creation UI.
   anchor in screen pixels** (`sceneObjects/constraintIconSprites.js`:
   `CONSTRAINT_ICON_OFFSET_PX`, `CONSTRAINT_ICON_SIZE_PX`). Each is a sprite whose
   `center` is moved off the quad, so the anchor stays on the geometry while the
-  picture sits beside it; the render loop sizes it in pixels every frame. The
+  picture sits beside it; the render loop sizes it in pixels every frame. A
+  distance's marker is tied to its value label instead (`besideLabel`) and is
+  re-placed every frame beside the label's TEXT, whose on-screen width changes
+  with the view. The
   artwork is the same component the toolbar renders
   (`components/icons/constraintIconArt.jsx`) -- change an icon there, not in
   two places. Anything that hit-tests a constraint must go through

@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { addCentreConstraintIcon } from "./centreConstraintIcon.js";
 import {
+  besideLabel,
   ICON_ABOVE,
   ICON_RIGHT,
   ICON_UP_RIGHT,
@@ -73,6 +74,10 @@ export function makeDimLabelSprite(
   );
   sprite.scale.set(baseW * (canvas.width / 160), 0.175, 1);
   sprite.renderOrder = 1009;
+  // The canvas is padded well past the text; a marker placed beside the label
+  // goes beside the TEXT.
+  sprite.userData.textWidthFraction =
+    ctx.measureText(labelText).width / canvas.width;
   return sprite;
 }
 
@@ -239,16 +244,22 @@ export function addConstraintIconsToGroup(
       let posA = getShapePoint(sA, c.pointA),
         posB = getShapePoint(sB, c.pointB);
       if (!posA || !posB) return;
-      if (showConstraints)
-        placeIcon(
-          { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
-          ICON_UP_RIGHT,
-          c.shapeAIdx === c.shapeBIdx
-            ? [c.shapeAIdx]
-            : [c.shapeAIdx, c.shapeBIdx],
-          dimColor,
-        );
-      if (!showDimensions) return;
+      const distShapeIdxs =
+        c.shapeAIdx === c.shapeBIdx
+          ? [c.shapeAIdx]
+          : [c.shapeAIdx, c.shapeBIdx];
+      // With its dimension drawn, the marker goes beside the value label
+      // (placed after the label, below).  Without one, beside what it measures.
+      if (!showDimensions) {
+        if (showConstraints)
+          placeIcon(
+            { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
+            ICON_UP_RIGHT,
+            distShapeIdxs,
+            dimColor,
+          );
+        return;
+      }
       // A line-length dimension measures the SHARP corner, so its witness lines
       // must reach the virtual (pre-chamfer/fillet) corner, not the trimmed
       // edge — extend each end outward along the edge by its corner setback.
@@ -277,6 +288,11 @@ export function addConstraintIconsToGroup(
           ? [c.shapeAIdx]
           : [c.shapeAIdx, c.shapeBIdx];
       let labelPos;
+      let labelLocal;
+      // Which side of its label the marker goes: AWAY from the measured
+      // geometry.  A label pushed sideways off a vertical line would otherwise
+      // put the marker back over the line, on top of that line's own markers.
+      let markerSide = 1;
       if (isRadius) {
         // Radius: leader from the centre out past the arc, tick at the arc.
         const wLineTo = wB.clone().addScaledVector(dir, 0.35);
@@ -289,6 +305,12 @@ export function addConstraintIconsToGroup(
         );
         addDimTick(wB, perpU);
         labelPos = wLineTo.clone().addScaledVector(dir, 0.45);
+        const rlen = Math.hypot(posB.x - posA.x, posB.y - posA.y) || 1;
+        labelLocal = {
+          x: posB.x + ((posB.x - posA.x) / rlen) * 0.8,
+          y: posB.y + ((posB.y - posA.y) / rlen) * 0.8,
+        };
+        if (posB.x < posA.x) markerSide = -1;
       } else {
         // Linear: a dimension line offset from the geometry, bounded by two
         // extension (witness) lines, with a tick mark at each end — the value
@@ -323,6 +345,12 @@ export function addConstraintIconsToGroup(
         addDimTick(A2, perpU);
         addDimTick(B2, perpU);
         labelPos = new THREE.Vector3().addVectors(A2, B2).multiplyScalar(0.5);
+        labelLocal = {
+          x: (posA.x + posB.x) / 2 + lpx * OFF,
+          y: (posA.y + posB.y) / 2 + lpy * OFF,
+        };
+        // Pushed mostly sideways (a steep line): continue in that direction.
+        if (Math.abs(lpx) > Math.SQRT1_2 && lpx < 0) markerSide = -1;
       }
       // c.distance may be a number or a formula string; evaluate before display.
       const resolvedDist = resolveConstraintDistance(c);
@@ -338,6 +366,10 @@ export function addConstraintIconsToGroup(
       });
       sprite.position.copy(labelPos);
       addTagged(sprite);
+      if (showConstraints) {
+        placeIcon(labelLocal, ICON_RIGHT, distShapeIdxs, dimColor);
+        besideLabel(group.children.at(-1), sprite, markerSide);
+      }
     } else if (c.type === "pointLineDistance") {
       const lineShape = shapes[c.lineShapeIdx];
       const ptShape = shapes[c.pointShapeIdx];

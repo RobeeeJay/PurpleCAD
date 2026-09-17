@@ -17,6 +17,7 @@ import {
 import { useStore } from "../../store";
 import { applyScreenDashes } from "../screenDash.js";
 import { requestRender, takeRenderRequest } from "../renderRequest.js";
+import { placeBesideLabel } from "../sceneObjects/constraintIconSprites.js";
 import {
   CROSS_SECTION_PLANE,
   updateCrossSectionPlane,
@@ -345,6 +346,21 @@ export function createAnimateLoop({
             const worldPerPixel =
               (gizmoScale(_rulerPos) * REFERENCE_HEIGHT) / canvasHeightPx;
             o.scale.setScalar(worldPerPixel * icon.sizePx);
+            if (icon.label) {
+              // The label's scale as THIS frame sets it, whichever of the two
+              // this traversal reaches first: its authored scale times the
+              // same factor the label branch below applies.
+              const label = icon.label;
+              const base = label.userData.baseScale?.x ?? label.scale.x;
+              const labelWidth =
+                base * gizmoScale(_rulerPos) * CONSTRAINT_LABEL_SCALE;
+              placeBesideLabel(
+                o,
+                (labelWidth * (label.userData.textWidthFraction ?? 1)) /
+                  2 /
+                  worldPerPixel,
+              );
+            }
             return;
           }
           const isLabel =

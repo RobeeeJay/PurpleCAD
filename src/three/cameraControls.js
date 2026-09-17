@@ -646,6 +646,24 @@ export function attachCameraControls(ctx) {
         middle: constraintIconScreenPos(o, mesh, cam, rect),
         sizePx: (o.scale.x * rect.height) / visibleHeight,
         selected: !!icon.selected,
+        // For a marker tied to a value label: where that label's TEXT is.
+        label: icon.label
+          ? (() => {
+              const at = icon.label
+                .getWorldPosition(new THREE.Vector3())
+                .project(cam);
+              return {
+                x: rect.left + ((at.x + 1) / 2) * rect.width,
+                y: rect.top + ((1 - at.y) / 2) * rect.height,
+                halfWidthPx:
+                  (icon.label.scale.x *
+                    (icon.label.userData.textWidthFraction ?? 1) *
+                    rect.height) /
+                  visibleHeight /
+                  2,
+              };
+            })()
+          : null,
       });
     });
     return out;
