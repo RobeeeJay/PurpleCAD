@@ -1,11 +1,11 @@
-// Marker for a sketch "centre" constraint: the toolbar's Centre icon beside
+// Marker for a sketch "centre" constraint: the toolbar's Centre icon ON
 // Shape A's centre -- where the constraint holds it -- and, when there is an
 // offset, a thin leader back to Shape B's centre so the offset reads as a
 // distance.
 
 import * as THREE from "three";
 import { shapeSetCentre } from "../sketchGeometry.js";
-import { ICON_UP_RIGHT } from "./constraintIconSprites.js";
+import { ICON_ON } from "./constraintIconSprites.js";
 
 export function addCentreConstraintIcon({
   c,
@@ -18,7 +18,7 @@ export function addCentreConstraintIcon({
   const a = shapeSetCentre(shapes, c.shapesA);
   const b = shapeSetCentre(shapes, c.shapesB);
   if (!a || !b) return;
-  placeIcon(a, ICON_UP_RIGHT, [...c.shapesA, ...c.shapesB], color);
+  placeIcon(a, ICON_ON, [...c.shapesA, ...c.shapesB], color);
 
   // The leader spans real geometry, so it scales with the view like a
   // dimension line rather than staying a fixed size.

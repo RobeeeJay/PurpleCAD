@@ -112,6 +112,33 @@ describe("which marker each constraint gets", () => {
     expect(gapPx(m)).toEqual({ x: 0, y: OFF });
   });
 
+  // A centre constraint's anchor is a point in open space, not on a line or a
+  // vertex, so its marker has nothing to clear and sits ON the anchor.
+  it("centre: on the centre it holds, with no gap at all", () => {
+    const square = [
+      { type: "line", x1: 0, y1: 0, x2: 2, y2: 0 },
+      { type: "line", x1: 2, y1: 0, x2: 2, y2: 2 },
+      { type: "line", x1: 2, y1: 2, x2: 0, y2: 2 },
+      { type: "line", x1: 0, y1: 2, x2: 0, y2: 0 },
+      { type: "circle", cx: 8, cy: 8, r: 1 },
+    ];
+    const group = new THREE.Group();
+    addConstraintIconsToGroup(
+      group,
+      [{ type: "centre", shapesA: [0, 1, 2, 3], shapesB: [4] }],
+      square,
+      (x, y, z = 0) => new THREE.Vector3(x, y, z),
+      new THREE.Vector2(1000, 800),
+      false,
+      null,
+      true,
+    );
+    const m = group.children.find((o) => o.userData.screenIcon);
+    expect([m.position.x, m.position.y]).toEqual([1, 1]);
+    expect(gapPx(m)).toEqual({ x: 0, y: 0 });
+    expect(m.userData.screenIcon.offsetPx).toEqual({ x: 0, y: 0 });
+  });
+
   it("vertical: to the right of the middle of its line", () => {
     const m = markers().vertical;
     expect([m.position.x, m.position.y]).toEqual([4, 1]);

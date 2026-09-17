@@ -214,12 +214,21 @@ test.describe.serial("sketch Centre constraint", () => {
   test("double-clicking the constraint's icon re-opens it and edits it in place", async () => {
     const { shapes, constraints } = await sketch();
     const count = constraints.length;
-    // The constraint's marker sits beside A's centre; aim at where it is drawn.
-    const icon = (
+    // The marker is drawn ON the centre it holds -- no offset, unlike the
+    // markers whose anchor lies on a line or a vertex.
+    const marker = (
       await page.evaluate(() =>
         window.__store.getState()._cameraControls.constraintMarkers(),
       )
-    ).find((m) => m.type === "centre").middle;
+    ).find((m) => m.type === "centre");
+    const icon = marker.middle;
+    const centre = centreOf(shapes, A);
+    const at = await toScreen(centre.x, centre.y);
+    expect(
+      Math.hypot(icon.x - at.x, icon.y - at.y),
+      "marker on A's centre",
+    ).toBeLessThan(1);
+    expect(icon).toEqual(marker.anchor);
     await page.mouse.dblclick(icon.x, icon.y);
     const dialog = page.locator(".sketch-centre-overlay");
     await expect(dialog).toBeVisible();
