@@ -21,6 +21,7 @@ import {
   WIREFRAME_DISPLAY_COLOR,
   sceneBackgroundFor,
 } from "../theme.js";
+import { shadedMaterial } from "../objectMaterials.js";
 
 export function applyRenderMode(renderMode, ctx) {
   const {
@@ -328,22 +329,9 @@ export function applyRenderMode(renderMode, ctx) {
         ? orig.color.clone()
         : new THREE.Color(DEFAULT_MESH_COLOR);
       const opacity = isTransparent ? sketchOpacity : (orig?.opacity ?? 1);
-      const transparent = isTransparent || opacity < 1;
       if (mesh.material) mesh.material.dispose();
-      // Without scene.environment (set only in "smooth" mode) metalness and
-      // clearcoat have no reflection source to sample, but they still darken
-      // the direct-light response — so force them off here rather than
-      // carrying over orig's values.
-      mesh.material = new THREE.MeshPhysicalMaterial({
-        color: col,
-        metalness: 0,
-        roughness: orig?.roughness ?? 0.5,
-        clearcoat: 0,
-        clearcoatRoughness: 0,
-        transparent,
-        opacity,
-        depthWrite: !transparent,
-      });
+      // Colour and opacity only -- see shadedMaterial.
+      mesh.material = shadedMaterial(col, opacity);
       mesh.material.wireframe = renderMode === "wireframe";
       mesh.children.forEach((child) => {
         child.visible = true;

@@ -576,6 +576,24 @@ export function attachCameraControls(ctx) {
       // swapped in over it (a stress field, an optimisation preview).
       vertexCount: mesh.geometry?.attributes?.position?.count ?? 0,
       swapped: !!mesh.userData?.stressGeometry,
+      // What the view draws the body WITH.  `finish` lists any metalness /
+      // roughness / clearcoat / specular settings the material carries; the
+      // raster views should carry none.
+      material: mesh.material
+        ? {
+            type: mesh.material.type,
+            color: mesh.material.color?.getHexString() ?? null,
+            opacity: mesh.material.opacity,
+            transparent: mesh.material.transparent,
+            finish: [
+              "metalness",
+              "roughness",
+              "clearcoat",
+              "specularIntensity",
+              "shininess",
+            ].filter((k) => k in mesh.material),
+          }
+        : null,
     };
   };
 

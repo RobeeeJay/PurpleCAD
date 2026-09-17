@@ -33,8 +33,8 @@ const numStyle = {
 };
 
 // Object/Default material editor — color, transparency, and the standard PBR
-// finish knobs the smooth renderer (renderMode.js's MeshPhysicalMaterial
-// path) understands. Edits preview instantly via _cameraControls.previewMaterial
+// finish knobs the path-traced render understands (the raster views draw
+// colour and transparency only; objectMaterials.js#shadedMaterial). Edits preview instantly via _cameraControls.previewMaterial
 // (mutates live mesh materials, no store write); Apply commits to either
 // item.material (per-object, undoable via modifyItem) or the persisted
 // defaultMaterial used by future objects.
@@ -51,7 +51,7 @@ const MaterialDialog = () => {
 
   const item = target !== "default" ? items.find((i) => i.id === target) : null;
   const isDefault = target === "default";
-  const renderMode = useStore((s) => s.renderMode);
+  const pathTraceView = useStore((s) => s.pathTraceView);
 
   const [draft, setDraft] = useState(DEFAULT_MATERIAL);
   const [presetName, setPresetName] = useState("");
@@ -132,7 +132,7 @@ const MaterialDialog = () => {
           </button>
         </div>
         <div style={{ padding: 16 }}>
-          {renderMode !== "smooth" && (
+          {!pathTraceView && (
             <div
               style={{
                 fontSize: 11,
@@ -143,8 +143,8 @@ const MaterialDialog = () => {
                 marginBottom: 8,
               }}
             >
-              Metalness and specular reflections only render in Smooth mode —
-              the current render mode shows color and transparency only.
+              Metalness, roughness and clearcoat only show in the Path traced
+              view — the current view shows color and transparency only.
             </div>
           )}
           <div
@@ -204,7 +204,7 @@ const MaterialDialog = () => {
 
           <div
             style={rowStyle}
-            title="How metallic the surface reads. 1 gives a mirror-like metal that takes its colour from reflections; 0 a plain dielectric. Smooth render mode only."
+            title="How metallic the surface reads. 1 gives a mirror-like metal that takes its colour from reflections; 0 a plain dielectric. Shown in the Path traced view only."
           >
             <span style={labelStyle}>Metalness</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -235,7 +235,7 @@ const MaterialDialog = () => {
 
           <div
             style={rowStyle}
-            title="How scattered the reflections are. 0 is a polished mirror, 1 a matt finish. Smooth render mode only."
+            title="How scattered the reflections are. 0 is a polished mirror, 1 a matt finish. Shown in the Path traced view only."
           >
             <span style={labelStyle}>Roughness</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -266,7 +266,7 @@ const MaterialDialog = () => {
 
           <div
             style={rowStyle}
-            title="Strength of a glossy lacquer layer over the base. Higher adds a wet-looking sheen without changing the underlying colour."
+            title="Strength of a glossy lacquer layer over the base. Higher adds a wet-looking sheen without changing the underlying colour. Shown in the Path traced view only."
           >
             <span style={labelStyle}>
               <span>Specular (clearcoat)</span>
@@ -303,7 +303,7 @@ const MaterialDialog = () => {
           {draft.clearcoat > 0 && (
             <div
               style={rowStyle}
-              title="How blurred the clearcoat's sheen is. 0 gives a sharp gloss highlight, higher values a softer one."
+              title="How blurred the clearcoat's sheen is. 0 gives a sharp gloss highlight, higher values a softer one. Shown in the Path traced view only."
             >
               <span style={labelStyle}>Clearcoat roughness</span>
               <span style={{ display: "flex", alignItems: "center", gap: 8 }}>

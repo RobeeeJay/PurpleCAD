@@ -112,8 +112,7 @@ export const SPHERE_FRAGMENT_SHADER = `
     vec3 V  = normalize(ro - hit);
     float d1 = max(dot(n, L1), 0.0);
     float d2 = max(dot(n, L2), 0.0) * 0.4;
-    float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
-    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
+    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + uEmissive;
     vec4 cp = projectionMatrix * vec4(hit, 1.0);
     gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
     gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
@@ -247,8 +246,7 @@ export const CYLINDER_FRAGMENT_SHADER = `
     vec3 V  = normalize(ro - hit);
     float d1 = max(dot(n, L1), 0.0);
     float d2 = max(dot(n, L2), 0.0) * 0.4;
-    float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
-    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
+    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + uEmissive;
     vec4 cp = projectionMatrix * vec4(hit, 1.0);
     gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
     gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
@@ -364,8 +362,7 @@ export const TORUS_FRAGMENT_SHADER = `
     vec3 V  = normalize(ro - hitPos);
     float d1 = max(dot(n, L1), 0.0);
     float d2 = max(dot(n, L2), 0.0) * 0.4;
-    float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
-    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
+    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + uEmissive;
     vec4 cp = projectionMatrix * vec4(hitPos, 1.0);
     gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
     gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
@@ -490,8 +487,7 @@ export const CONE_FRAGMENT_SHADER = `
     vec3 V  = normalize(ro - hitPos);
     float d1 = max(dot(n, L1), 0.0);
     float d2 = max(dot(n, L2), 0.0) * 0.4;
-    float sp = pow(max(dot(V, reflect(-L1, n)), 0.0), 12.0) * 0.06;
-    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + vec3(sp) + uEmissive;
+    vec3 col = uColor * (0.25 + d1 * 0.75 + d2) + uEmissive;
     vec4 cp = projectionMatrix * vec4(hitPos, 1.0);
     gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
     gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity);
@@ -572,14 +568,22 @@ export function createMaterial(item, color, materialProps = DEFAULT_MATERIAL) {
       transparent,
     });
   }
-  return new THREE.MeshPhysicalMaterial({
+  return shadedMaterial(color, opacity);
+}
+
+// The raster views (shaded, transparent, wireframe) draw a body from its COLOUR
+// and OPACITY only: plain diffuse shading, no metalness, roughness, clearcoat or
+// specular highlight.  Those belong to the path-traced render, which builds its
+// own materials from item.material (pathTrace.js).  Keeping them out of the
+// working views means two bodies of one colour always look alike there, however
+// different their finishes.
+export function shadedMaterial(color, opacity = 1) {
+  const transparent = opacity < 1;
+  return new THREE.MeshLambertMaterial({
     color,
-    metalness: materialProps.metalness ?? 0.3,
-    roughness: materialProps.roughness ?? 0.5,
     opacity,
     transparent,
-    clearcoat: materialProps.clearcoat ?? 0,
-    clearcoatRoughness: materialProps.clearcoatRoughness ?? 0,
+    depthWrite: !transparent,
   });
 }
 
@@ -604,6 +608,8 @@ export function applyMaterialToMesh(mesh, item, materialProps) {
     return;
   }
   mat.color.set(materialProps.color ?? DEFAULT_MESH_COLOR);
+  // Only a material that HAS these takes them: the raster views' shaded
+  // material doesn't, so a live preview there shows colour and opacity alone.
   if ("metalness" in mat) mat.metalness = materialProps.metalness ?? 0.3;
   if ("roughness" in mat) mat.roughness = materialProps.roughness ?? 0.5;
   if ("clearcoat" in mat) mat.clearcoat = materialProps.clearcoat ?? 0;
