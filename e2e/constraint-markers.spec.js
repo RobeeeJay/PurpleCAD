@@ -173,6 +173,8 @@ test.describe.serial("sketch constraint markers", () => {
     expectPlacedAndSized(list);
     expectNoMarkerOverlaps(list);
     expectNoMarkerOverLabels(list);
+    // The artwork sits on a transparent background.
+    expect(list.map((m) => m.backgroundAlpha)).toEqual(list.map(() => 0));
     await snap(testInfo, "constraint-markers");
   });
 
@@ -221,6 +223,11 @@ test.describe.serial("sketch constraint markers", () => {
     expect(now.filter((m) => m.selected).map((m) => m.constraintIdx)).toEqual([
       horizontal.constraintIdx,
     ]);
+    // Selected shows as an outline; the background stays clear.
+    expect(
+      now.find((m) => m.constraintIdx === horizontal.constraintIdx)
+        .backgroundAlpha,
+    ).toBe(0);
     await snap(testInfo, "constraint-marker-selected");
     // Clicking it again -- after a pause, or it is a double-click -- clears
     // the selection.

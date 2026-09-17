@@ -9,8 +9,8 @@
 // sprite-size units, the offset stays a constant number of pixels too.
 //
 // The artwork is the same React component the toolbar button renders
-// (components/icons/constraintIconArt.jsx), drawn once per look onto a canvas
-// over a small backing plate so it reads against any sketch.
+// (components/icons/constraintIconArt.jsx), drawn once per look onto a
+// transparent canvas, so the sketch shows through around it.
 
 import * as THREE from "three";
 import React from "react";
@@ -56,32 +56,22 @@ const centerFor = (d) =>
 // must never free the picture another marker is still showing.
 const looks = new Map();
 
-const PLATES = {
-  light: { fill: "rgba(255,255,255,0.92)", stroke: "rgba(40,30,70,0.25)" },
-  dark: { fill: "rgba(34,32,40,0.92)", stroke: "rgba(255,255,255,0.25)" },
-};
-
+// The artwork on a transparent background.  With nothing behind it, a
+// SELECTED marker is shown by an outline in the selection colour -- an outline
+// only, so the background stays clear.
 function paint(look) {
   const { canvas, image, theme, selected } = look;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, RASTER_PX, RASTER_PX);
-  const plate = PLATES[theme === "light" ? "light" : "dark"];
-  const selectColor = toCssHex(sketchSelectedColorFor(theme));
-  const inset = RASTER_PX * 0.04;
-  const size = RASTER_PX - 2 * inset;
-  ctx.beginPath();
-  ctx.roundRect(inset, inset, size, size, RASTER_PX * 0.2);
-  ctx.fillStyle = plate.fill;
-  ctx.fill();
   if (selected) {
-    ctx.globalAlpha = 0.35;
-    ctx.fillStyle = selectColor;
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    const inset = RASTER_PX * 0.04;
+    const size = RASTER_PX - 2 * inset;
+    ctx.beginPath();
+    ctx.roundRect(inset, inset, size, size, RASTER_PX * 0.2);
+    ctx.lineWidth = RASTER_PX * 0.07;
+    ctx.strokeStyle = toCssHex(sketchSelectedColorFor(theme));
+    ctx.stroke();
   }
-  ctx.lineWidth = RASTER_PX * (selected ? 0.07 : 0.03);
-  ctx.strokeStyle = selected ? selectColor : plate.stroke;
-  ctx.stroke();
   if (image) {
     const pad = RASTER_PX * 0.12;
     ctx.drawImage(image, pad, pad, RASTER_PX - 2 * pad, RASTER_PX - 2 * pad);
@@ -166,7 +156,7 @@ export function placeBesideLabel(sprite, labelHalfWidthPx) {
   icon.offsetPx = { x: icon.side * (reach + S / 2), y: 0 };
 }
 
-// Show a marker as selected (or not): a plate filled with the selection colour.
+// Show a marker as selected (or not): an outline in the selection colour.
 export function setConstraintIconSelected(sprite, selected) {
   const icon = sprite.userData.screenIcon;
   const { type, theme } = icon;

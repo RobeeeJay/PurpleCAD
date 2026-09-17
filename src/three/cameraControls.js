@@ -664,6 +664,16 @@ export function attachCameraControls(ctx) {
         middle: constraintIconScreenPos(o, mesh, cam, rect),
         sizePx: (o.scale.x * rect.height) / visibleHeight,
         selected: !!icon.selected,
+        // Opacity of the marker's picture at a point that is background, not
+        // artwork: just inside its left edge, half-way down.
+        backgroundAlpha: (() => {
+          const img = o.material.map?.image;
+          const ctx = img?.getContext?.("2d");
+          if (!ctx) return null;
+          const x = Math.round(img.width * 0.08);
+          const y = Math.round(img.height * 0.5);
+          return ctx.getImageData(x, y, 1, 1).data[3] / 255;
+        })(),
         // For a marker tied to a value label: where that label's TEXT is.
         label: icon.label
           ? (() => {
