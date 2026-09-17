@@ -13,6 +13,10 @@ import {
   sketchLineColorFor,
   sketchSelectedColorFor,
 } from "../theme.js";
+import {
+  constraintIconScreenPos,
+  setConstraintIconSelected,
+} from "../sceneObjects/constraintIconSprites.js";
 
 export function createSketchHoverHelpers(
   {
@@ -58,8 +62,9 @@ export function createSketchHoverHelpers(
     // Restore each recolored icon to the EXACT colour it had when selected —
     // recomputing from the type loses the mirror / pattern colours (and the
     // grey dimension-line colour), which made deselected pattern icons vanish.
-    selectedConstraintIconRefs.forEach(({ obj, origColor }) => {
-      if (obj.material?.color) obj.material.color.setHex(origColor);
+    selectedConstraintIconRefs.forEach(({ obj, origColor, icon }) => {
+      if (icon) setConstraintIconSelected(obj, false);
+      else if (obj.material?.color) obj.material.color.setHex(origColor);
     });
     selectedConstraintIconRefs = [];
     selectedConstraintIdx = null;
@@ -71,6 +76,16 @@ export function createSketchHoverHelpers(
     const g = sketchShapesGroupRef?.current;
     if (!g) return;
     for (const o of g.children) {
+      // A toolbar-icon marker shows selection on its backing plate; tinting
+      // the sprite would muddy the artwork.
+      if (
+        o.userData.screenIcon &&
+        o.userData.constraintIdx === selectedConstraintIdx
+      ) {
+        selectedConstraintIconRefs.push({ obj: o, icon: true });
+        setConstraintIconSelected(o, true);
+        continue;
+      }
       if (
         o.userData.isConstraintObj &&
         o.userData.constraintIdx === selectedConstraintIdx &&
@@ -258,15 +273,14 @@ export function createSketchHoverHelpers(
       const rect = renderer.domElement.getBoundingClientRect();
       for (const cObj of sketchGroup.children) {
         if (!cObj.userData.isConstraint) continue;
-        const lp = cObj.userData.constraintIconLocalPos;
-        if (!lp) continue;
-        const worldPt = new THREE.Vector3(lp.x, lp.y, 0.005)
-          .applyQuaternion(sketchMesh.quaternion)
-          .add(sketchMesh.position);
-        const ndc = worldPt.clone().project(cameraRef.current);
-        const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
-        const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
-        if (Math.hypot(screenX - sx, screenY - sy) < CONSTRAINT_HIT_PX) {
+        const at = constraintIconScreenPos(
+          cObj,
+          sketchMesh,
+          cameraRef.current,
+          rect,
+        );
+        if (!at) continue;
+        if (Math.hypot(screenX - at.x, screenY - at.y) < CONSTRAINT_HIT_PX) {
           applyConstraintHoverHighlight(
             cObj.userData.constraintShapeIndices,
             cObj.userData.constraintColor,

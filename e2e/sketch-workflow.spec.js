@@ -1009,10 +1009,22 @@ test.describe.serial("2D sketch workflow", () => {
     await page.keyboard.up("Shift");
     await expect(tag).toContainText("1 pts · 1 lines selected");
 
-    // Click the midpoint icon from the earlier pair test: constraint counts.
+    // Click the midpoint marker from the earlier pair test: constraint counts.
     // (The LINE was picked first there, so it travelled to the point — the
-    // icon sits at the line's middle = the point's position.)
-    const icon = toScreen(-7, -9.5);
+    // marker's anchor is the line's middle = the point's position, and the
+    // marker itself sits beside it, clear of the point.)
+    const anchor = toScreen(-7, -9.5);
+    const icon = (
+      await page.evaluate(() =>
+        window.__store.getState()._cameraControls.constraintMarkers(),
+      )
+    )
+      .filter((m) => m.type === "midpoint")
+      .sort(
+        (a, b) =>
+          Math.hypot(a.anchor.x - anchor.x, a.anchor.y - anchor.y) -
+          Math.hypot(b.anchor.x - anchor.x, b.anchor.y - anchor.y),
+      )[0].middle;
     await page.mouse.click(icon.x, icon.y);
     await expect(tag).toContainText("1 constraints selected");
 

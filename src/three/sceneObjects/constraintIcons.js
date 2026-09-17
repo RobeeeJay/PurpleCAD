@@ -1,11 +1,18 @@
-// Constraint icon overlays: builds the little THREE.js glyphs (coincident
-// diamonds, distance dimension lines + labels, on-line ticks, H/V diamonds,
-// angle arcs + degree labels) shown for each sketch constraint, plus the
-// drag-time rebuild.  Split out of sketchOverlays.js to keep that file focused
+// Constraint icon overlays: builds what the sketch shows for each constraint --
+// the toolbar's own icon beside a constrained point or line (coincident,
+// horizontal, vertical, distance, midpoint, parallel, ... see
+// constraintIconSprites.js), distance dimension lines + labels, on-line ticks,
+// angle arcs + degree labels -- plus the drag-time rebuild.  Split out of sketchOverlays.js to keep that file focused
 // on the shape/region geometry.
 
 import * as THREE from "three";
 import { addCentreConstraintIcon } from "./centreConstraintIcon.js";
+import {
+  ICON_ABOVE,
+  ICON_RIGHT,
+  ICON_UP_RIGHT,
+  makeConstraintIconSprite,
+} from "./constraintIconSprites.js";
 import { shapeMidpoint, cornerSetback } from "../sketchGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
@@ -125,7 +132,7 @@ export function addConstraintIconsToGroup(
       c.type === "distance" ||
       c.type === "pointLineDistance" ||
       c.type === "offset";
-    if (isDimensionType && !showDimensions) return;
+    if (isDimensionType && !showDimensions && c.type !== "distance") return;
     // Every annotation of a conflicting dimension turns red together -- label,
     // dimension line and its ticks -- so the whole measurement reads as wrong
     // rather than just its number.
@@ -145,6 +152,15 @@ export function addConstraintIconsToGroup(
       // dimension whose line/arrows sit outside a tight settled view gets the
       // whole object dropped and the dimension vanishes.
       obj.frustumCulled = false;
+    };
+    // The toolbar icon for this constraint, `dir` of the anchor `at`
+    // (sketch-local), a fixed number of screen pixels away.  `color` is what
+    // hovering the icon paints the constrained geometry.
+    const placeIcon = (at, dir, shapeIndices, color, type = c.type) => {
+      const sprite = makeConstraintIconSprite(type, dir, theme);
+      sprite.position.copy(toWorld(at.x, at.y, 0.007));
+      tag(sprite, { x: at.x, y: at.y }, shapeIndices, color);
+      group.add(sprite);
     };
     const addTagged = (obj) => {
       obj.userData.isConstraintObj = true;
@@ -206,28 +222,12 @@ export function addConstraintIconsToGroup(
       if (!shapeA) return;
       const pt = getShapePoint(shapeA, c.pointA);
       if (!pt) return;
-      const cLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([
-          toWorld(pt.x, pt.y + R, 0.005),
-          toWorld(pt.x + R, pt.y, 0.005),
-          toWorld(pt.x, pt.y - R, 0.005),
-          toWorld(pt.x - R, pt.y, 0.005),
-          toWorld(pt.x, pt.y + R, 0.005),
-        ]),
-        new THREE.LineBasicMaterial({
-          color: CONSTRAINT_COINCIDENT_COLOR,
-          depthTest: false,
-        }),
-      );
-      cLine.renderOrder = 1004;
-      tag(
-        cLine,
-        { x: pt.x, y: pt.y },
+      placeIcon(
+        pt,
+        ICON_UP_RIGHT,
         [c.shapeAIdx, c.shapeBIdx],
         CONSTRAINT_COINCIDENT_COLOR,
       );
-      group.add(cLine);
-      markFixedSize(cLine, toWorld(pt.x, pt.y, 0.005));
     } else if (c.type === "distance") {
       const sA = shapes[c.shapeAIdx],
         sB = shapes[c.shapeBIdx];
@@ -239,6 +239,16 @@ export function addConstraintIconsToGroup(
       let posA = getShapePoint(sA, c.pointA),
         posB = getShapePoint(sB, c.pointB);
       if (!posA || !posB) return;
+      if (showConstraints)
+        placeIcon(
+          { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
+          ICON_UP_RIGHT,
+          c.shapeAIdx === c.shapeBIdx
+            ? [c.shapeAIdx]
+            : [c.shapeAIdx, c.shapeBIdx],
+          dimColor,
+        );
+      if (!showDimensions) return;
       // A line-length dimension measures the SHARP corner, so its witness lines
       // must reach the virtual (pre-chamfer/fillet) corner, not the trimmed
       // edge — extend each end outward along the edge by its corner setback.
@@ -432,128 +442,41 @@ export function addConstraintIconsToGroup(
     } else if (c.type === "horizontal" || c.type === "vertical") {
       const shape = shapes[c.shapeIdx];
       if (!shape || shape.type !== "line") return;
-      const mx = (shape.x1 + shape.x2) / 2,
-        my = (shape.y1 + shape.y2) / 2;
-      const cLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([
-          toWorld(mx, my + R, 0.005),
-          toWorld(mx + R, my, 0.005),
-          toWorld(mx, my - R, 0.005),
-          toWorld(mx - R, my, 0.005),
-          toWorld(mx, my + R, 0.005),
-        ]),
-        new THREE.LineBasicMaterial({
-          color: CONSTRAINT_HORIZONTAL_COLOR,
-          depthTest: false,
-        }),
+      // Horizontal sits above the line's middle, vertical to its right.
+      placeIcon(
+        { x: (shape.x1 + shape.x2) / 2, y: (shape.y1 + shape.y2) / 2 },
+        c.type === "horizontal" ? ICON_ABOVE : ICON_RIGHT,
+        [c.shapeIdx],
+        CONSTRAINT_HORIZONTAL_COLOR,
       );
-      cLine.renderOrder = 1004;
-      tag(cLine, { x: mx, y: my }, [c.shapeIdx], CONSTRAINT_HORIZONTAL_COLOR);
-      group.add(cLine);
-      markFixedSize(cLine, toWorld(mx, my, 0.005));
     } else if (c.type === "parallel" || c.type === "colinear") {
       const a = shapes[c.shapeAIdx];
       if (!a || a.type !== "line") return;
-      const mx = (a.x1 + a.x2) / 2,
-        my = (a.y1 + a.y2) / 2;
-      const ddx = a.x2 - a.x1,
-        ddy = a.y2 - a.y1,
-        len = Math.hypot(ddx, ddy) || 1;
-      const ux = ddx / len,
-        uy = ddy / len,
-        px = -uy,
-        py = ux;
-      const pts = [];
-      if (c.type === "parallel") {
-        // Two short segments parallel to the line ("=" along it).
-        const L = R * 0.8,
-          off = R * 0.45;
-        for (const s of [-1, 1])
-          pts.push(
-            toWorld(
-              mx + px * off * s - ux * L,
-              my + py * off * s - uy * L,
-              0.005,
-            ),
-            toWorld(
-              mx + px * off * s + ux * L,
-              my + py * off * s + uy * L,
-              0.005,
-            ),
-          );
-      } else {
-        // A segment along the line with a tick at each end (collinear marker).
-        const L = R,
-          t = R * 0.4;
-        pts.push(
-          toWorld(mx - ux * L, my - uy * L, 0.005),
-          toWorld(mx + ux * L, my + uy * L, 0.005),
-        );
-        for (const s of [-1, 1])
-          pts.push(
-            toWorld(mx + ux * L * s + px * t, my + uy * L * s + py * t, 0.005),
-            toWorld(mx + ux * L * s - px * t, my + uy * L * s - py * t, 0.005),
-          );
-      }
-      const seg = new THREE.LineSegments(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({
-          color: CONSTRAINT_ON_LINE_COLOR,
-          depthTest: false,
-        }),
-      );
-      seg.renderOrder = 1004;
-      tag(
-        seg,
-        { x: mx, y: my },
+      placeIcon(
+        { x: (a.x1 + a.x2) / 2, y: (a.y1 + a.y2) / 2 },
+        ICON_UP_RIGHT,
         [c.shapeAIdx, c.shapeBIdx],
         CONSTRAINT_ON_LINE_COLOR,
       );
-      group.add(seg);
-      markFixedSize(seg, toWorld(mx, my, 0.005));
     } else if (c.type === "centre") {
       addCentreConstraintIcon({
         c,
         shapes,
         toWorld,
-        tag,
         group,
-        markFixedSize,
+        placeIcon,
         color: CONSTRAINT_ON_LINE_COLOR,
       });
     } else if (c.type === "midpoint") {
-      // A small diamond outline at the target's middle — the pinned point
-      // sits exactly there.
+      // Beside the target's middle -- the pinned point sits exactly there.
       const m = shapeMidpoint(shapes[c.targetShapeIdx]);
-      if (m) {
-        const R = 0.09;
-        const pts = [
-          toWorld(m.x, m.y + R, 0.005),
-          toWorld(m.x + R, m.y, 0.005),
-          toWorld(m.x + R, m.y, 0.005),
-          toWorld(m.x, m.y - R, 0.005),
-          toWorld(m.x, m.y - R, 0.005),
-          toWorld(m.x - R, m.y, 0.005),
-          toWorld(m.x - R, m.y, 0.005),
-          toWorld(m.x, m.y + R, 0.005),
-        ];
-        const seg = new THREE.LineSegments(
-          new THREE.BufferGeometry().setFromPoints(pts),
-          new THREE.LineBasicMaterial({
-            color: CONSTRAINT_ON_LINE_COLOR,
-            depthTest: false,
-          }),
-        );
-        seg.renderOrder = 1004;
-        tag(
-          seg,
-          { x: m.x, y: m.y },
+      if (m)
+        placeIcon(
+          m,
+          ICON_UP_RIGHT,
           [c.pointShapeIdx, c.targetShapeIdx],
           CONSTRAINT_ON_LINE_COLOR,
         );
-        group.add(seg);
-        markFixedSize(seg, toWorld(m.x, m.y, 0.005));
-      }
     } else if (c.type === "tangent") {
       const a = shapes[c.shapeAIdx],
         b = shapes[c.shapeBIdx];
@@ -581,103 +504,29 @@ export function addConstraintIconsToGroup(
         ax = a.cx + (dx / d) * (a.r || 0);
         ay = a.cy + (dy / d) * (a.r || 0);
       } else return;
-      // A small circle resting on a tangent line.
-      const r = R * 0.55;
-      const pts = [];
-      const N = 16;
-      for (let i = 0; i < N; i++) {
-        const t0 = (i / N) * 2 * Math.PI,
-          t1 = ((i + 1) / N) * 2 * Math.PI;
-        pts.push(
-          toWorld(ax + Math.cos(t0) * r, ay + r + Math.sin(t0) * r, 0.005),
-          toWorld(ax + Math.cos(t1) * r, ay + r + Math.sin(t1) * r, 0.005),
-        );
-      }
-      pts.push(
-        toWorld(ax - r * 1.4, ay, 0.005),
-        toWorld(ax + r * 1.4, ay, 0.005),
-      );
-      const seg = new THREE.LineSegments(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({
-          color: CONSTRAINT_ON_LINE_COLOR,
-          depthTest: false,
-        }),
-      );
-      seg.renderOrder = 1004;
-      tag(
-        seg,
+      placeIcon(
         { x: ax, y: ay },
+        ICON_UP_RIGHT,
         [c.shapeAIdx, c.shapeBIdx],
         CONSTRAINT_ON_LINE_COLOR,
       );
-      group.add(seg);
-      markFixedSize(seg, toWorld(ax, ay, 0.005));
     } else if (c.type === "equal") {
-      // A matching double-tick marker on each equal entity: across the line
-      // (equal length), or a small "=" by the ring (equal radius).
-      const buildEq = (pts, cx, cy) => {
-        const seg = new THREE.LineSegments(
-          new THREE.BufferGeometry().setFromPoints(pts),
-          new THREE.LineBasicMaterial({
-            color: CONSTRAINT_ON_LINE_COLOR,
-            depthTest: false,
-          }),
-        );
-        seg.renderOrder = 1004;
-        tag(
-          seg,
-          { x: cx, y: cy },
-          [c.shapeAIdx, c.shapeBIdx],
-          CONSTRAINT_ON_LINE_COLOR,
-        );
-        group.add(seg);
-        markFixedSize(seg, toWorld(cx, cy, 0.005));
-      };
-      const mkEq = (s) => {
-        if (!s) return;
-        const pts = [];
-        if (s.type === "line") {
-          const cx = (s.x1 + s.x2) / 2,
-            cy = (s.y1 + s.y2) / 2;
-          const dx = s.x2 - s.x1,
-            dy = s.y2 - s.y1,
-            len = Math.hypot(dx, dy) || 1;
-          const ux = dx / len,
-            uy = dy / len,
-            px = -uy,
-            py = ux;
-          const T = R * 0.7,
-            gap = R * 0.3;
-          for (const sgn of [-1, 1])
-            pts.push(
-              toWorld(
-                cx + ux * gap * sgn - px * T,
-                cy + uy * gap * sgn - py * T,
-                0.005,
-              ),
-              toWorld(
-                cx + ux * gap * sgn + px * T,
-                cy + uy * gap * sgn + py * T,
-                0.005,
-              ),
-            );
-          buildEq(pts, cx, cy);
-        } else if (s.type === "circle" || s.type === "arc") {
-          const cx = s.cx,
-            cy = s.cy + (s.r || 0) + R * 0.7;
-          const L = R * 0.7,
-            off = R * 0.3;
-          for (const sgn of [-1, 1])
-            pts.push(
-              toWorld(cx - L, cy + off * sgn, 0.005),
-              toWorld(cx + L, cy + off * sgn, 0.005),
-            );
-          buildEq(pts, cx, cy);
-        }
-      };
-      mkEq(shapes[c.shapeAIdx]);
-      mkEq(shapes[c.shapeBIdx]);
+      // One on each equal entity: beside a line's middle, or a ring's top.
+      for (const e of [shapes[c.shapeAIdx], shapes[c.shapeBIdx]]) {
+        const at =
+          e?.type === "line"
+            ? { x: (e.x1 + e.x2) / 2, y: (e.y1 + e.y2) / 2 }
+            : e?.type === "circle" || e?.type === "arc"
+              ? { x: e.cx, y: e.cy + (e.r || 0) }
+              : null;
+        if (at)
+          placeIcon(
+            at,
+            ICON_UP_RIGHT,
+            [c.shapeAIdx, c.shapeBIdx],
+            CONSTRAINT_ON_LINE_COLOR,
+          );
+      }
     } else if (c.type === "text") {
       // A small "T" mark at the text's top-left anchor — double-click to edit.
       const shape = shapes[c.shapeIdx];
@@ -880,28 +729,12 @@ export function addConstraintIconsToGroup(
             : "center";
       const pB = getShapePoint(copy, key);
       if (!pB) return;
-      const diamond = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([
-          toWorld(pB.x, pB.y + R, 0.005),
-          toWorld(pB.x + R, pB.y, 0.005),
-          toWorld(pB.x, pB.y - R, 0.005),
-          toWorld(pB.x - R, pB.y, 0.005),
-          toWorld(pB.x, pB.y + R, 0.005),
-        ]),
-        new THREE.LineBasicMaterial({
-          color: sketchCircularPatternColorFor(theme),
-          depthTest: false,
-        }),
-      );
-      diamond.renderOrder = 1004;
-      tag(
-        diamond,
+      placeIcon(
         pB,
+        ICON_UP_RIGHT,
         [c.shapeIdx, c.origIdx, c.centerShapeIdx],
         sketchCircularPatternColorFor(theme),
       );
-      group.add(diamond);
-      markFixedSize(diamond, toWorld(pB.x, pB.y, 0.005));
     } else if (c.type === "rectangularPattern") {
       // Small fixed-size square at the copy's reference point — click-select
       // to enable Delete, which breaks this copy's link via the generic

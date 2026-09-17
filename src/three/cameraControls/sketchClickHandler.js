@@ -13,6 +13,7 @@ import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { collectConnectedShapes } from "../sketchGeometry.js";
 import { effectiveSketchSelTypes } from "../../store/selectionMode.js";
+import { constraintIconScreenPos } from "../sceneObjects/constraintIconSprites.js";
 
 export function createSketchClickHandler(
   {
@@ -94,15 +95,14 @@ export function createSketchClickHandler(
               cObj.userData.constraintType !== "text")
           )
             continue;
-          const lp = cObj.userData.constraintIconLocalPos;
-          if (!lp) continue;
-          const wp = new THREE.Vector3(lp.x, lp.y, 0.005)
-            .applyQuaternion(dblMesh.quaternion)
-            .add(dblMesh.position);
-          const ndc2 = wp.clone().project(cameraRef.current);
-          const cpx = ((ndc2.x + 1) / 2) * rect2.width + rect2.left;
-          const cpy = ((-ndc2.y + 1) / 2) * rect2.height + rect2.top;
-          if (Math.hypot(sx - cpx, sy - cpy) < 18) {
+          const at = constraintIconScreenPos(
+            cObj,
+            dblMesh,
+            cameraRef.current,
+            rect2,
+          );
+          if (!at) continue;
+          if (Math.hypot(sx - at.x, sy - at.y) < 18) {
             const c = (dblSel.constraints || [])[cObj.userData.constraintIdx];
             if (c && c.type === "pointLineDistance") {
               useStore.getState().setSketchDistanceInput({
@@ -337,15 +337,14 @@ export function createSketchClickHandler(
         const cRect = renderer.domElement.getBoundingClientRect();
         for (const cObj of cg.children) {
           if (!cObj.userData.isConstraint) continue;
-          const lp = cObj.userData.constraintIconLocalPos;
-          if (!lp) continue;
-          const wp = new THREE.Vector3(lp.x, lp.y, 0.005)
-            .applyQuaternion(cMesh.quaternion)
-            .add(cMesh.position);
-          const ndc = wp.clone().project(cameraRef.current);
-          const cpx = ((ndc.x + 1) / 2) * cRect.width + cRect.left;
-          const cpy = ((-ndc.y + 1) / 2) * cRect.height + cRect.top;
-          if (Math.hypot(sx - cpx, sy - cpy) < 14) {
+          const at = constraintIconScreenPos(
+            cObj,
+            cMesh,
+            cameraRef.current,
+            cRect,
+          );
+          if (!at) continue;
+          if (Math.hypot(sx - at.x, sy - at.y) < 14) {
             clearMultiSelectOverlays();
             multiSelectedRef.current = [];
             selectConstraint(cObj.userData.constraintIdx);

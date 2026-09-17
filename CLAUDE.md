@@ -862,6 +862,17 @@ sources are picked) that reuses the creation UI.
   `cameraControls/animateLoop.js` — don't scale them elsewhere or the
   per-frame pass will fight you. Each entry caches its authored scale
   on userData.baseScale on first sight.
+- **Sketch constraint markers are the toolbar's icons, OFFSET from their
+  anchor in screen pixels** (`sceneObjects/constraintIconSprites.js`:
+  `CONSTRAINT_ICON_OFFSET_PX`, `CONSTRAINT_ICON_SIZE_PX`). Each is a sprite whose
+  `center` is moved off the quad, so the anchor stays on the geometry while the
+  picture sits beside it; the render loop sizes it in pixels every frame. The
+  artwork is the same component the toolbar renders
+  (`components/icons/constraintIconArt.jsx`) -- change an icon there, not in
+  two places. Anything that hit-tests a constraint must go through
+  `constraintIconScreenPos`, which adds the offset; projecting
+  `constraintIconLocalPos` alone aims at the anchor, where the marker no longer
+  is (an e2e click that did that silently selected the point underneath).
 - **The 3D ground ruler is centred on the RAW camera target — never add a
   screen-space shift to it.** The compact axis indicator shifts right by
   `camRight * halfPanelWidth` to clear the left panel, but `camRight` rotates

@@ -29,6 +29,7 @@ import {
   fieldsForPoint,
   varFields,
 } from "../sketchSolver.js";
+import { constraintIconScreenPos } from "../sceneObjects/constraintIconSprites.js";
 
 // An offset copy is inert while its offset constraint exists — driven by its
 // original, it must not be selectable/draggable on its own.
@@ -586,15 +587,14 @@ export function createSketchDragLifecycle(
         if (!cObj.userData.isConstraint) continue;
         const ci = cObj.userData.constraintIdx;
         if (seenConstraints.has(ci)) continue;
-        const lp = cObj.userData.constraintIconLocalPos;
-        if (!lp) continue;
-        const worldPt = new THREE.Vector3(lp.x, lp.y, 0.005)
-          .applyQuaternion(sketchMesh.quaternion)
-          .add(sketchMesh.position);
-        const ndc = worldPt.clone().project(cameraRef.current);
-        const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
-        const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
-        if (Math.hypot(screenX - sx, screenY - sy) < 20) {
+        const at = constraintIconScreenPos(
+          cObj,
+          sketchMesh,
+          cameraRef.current,
+          rect,
+        );
+        if (!at) continue;
+        if (Math.hypot(screenX - at.x, screenY - at.y) < 20) {
           seenConstraints.add(ci);
           result.push({
             kind: "constraint",

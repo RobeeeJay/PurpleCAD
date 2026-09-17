@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { useStore } from "../store";
+import { constraintIconScreenPos } from "./sceneObjects/constraintIconSprites.js";
 import { createHighlightHelpers } from "./cameraControls/highlights.js";
 import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
@@ -605,6 +606,47 @@ export function attachCameraControls(ctx) {
           dashSize: o.material.dashSize,
           gapSize: o.material.gapSize,
         });
+    });
+    return out;
+  };
+
+  // Every toolbar-icon constraint marker in the sketch being edited: where its
+  // anchor and its middle are on screen, and how big it is drawn.  The size is
+  // measured independently of the render loop that set it (world scale over
+  // world-per-pixel), so the e2e suite can check the loop got it right.
+  controls.constraintMarkers = () => {
+    const mesh = objectsRef.current[selectedIdRef.current];
+    const cam = cameraRef.current;
+    const group = sketchShapesGroupRef.current;
+    if (!mesh || !cam || !group) return [];
+    const rect = renderer.domElement.getBoundingClientRect();
+    const out = [];
+    group.traverse((o) => {
+      const icon = o.userData.screenIcon;
+      if (!icon) return;
+      const anchor = constraintIconScreenPos(
+        {
+          userData: {
+            constraintIconLocalPos: o.userData.constraintIconLocalPos,
+          },
+        },
+        mesh,
+        cam,
+        rect,
+      );
+      const visibleHeight = cam.isOrthographicCamera
+        ? (cam.top - cam.bottom) / cam.zoom
+        : 2 *
+          cam.position.distanceTo(o.getWorldPosition(new THREE.Vector3())) *
+          Math.tan((cam.fov * Math.PI) / 360);
+      out.push({
+        type: o.userData.constraintType,
+        constraintIdx: o.userData.constraintIdx,
+        anchor,
+        middle: constraintIconScreenPos(o, mesh, cam, rect),
+        sizePx: (o.scale.x * rect.height) / visibleHeight,
+        selected: !!icon.selected,
+      });
     });
     return out;
   };

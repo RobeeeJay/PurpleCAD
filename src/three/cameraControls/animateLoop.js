@@ -16,6 +16,7 @@ import {
 } from "../sceneSetup.js";
 import { useStore } from "../../store";
 import { applyScreenDashes } from "../screenDash.js";
+import { requestRender, takeRenderRequest } from "../renderRequest.js";
 import {
   CROSS_SECTION_PLANE,
   updateCrossSectionPlane,
@@ -45,10 +46,8 @@ let _rulerCrossState = { x: 0, z: 0, hit: true };
 // pointer/wheel/key press opens (so interaction never stutters even if an update
 // lands a frame late).  Conservative on purpose — over-rendering a little beats a
 // stale view.
-let _needsRender = true;
-export function requestRender() {
-  _needsRender = true;
-}
+// Re-exported: existing callers import it from here.
+export { requestRender };
 
 // Width of the left objects/timeline overlay (`.left-panel` in App.css). The
 // axis indicator is nudged right by half this so it reads centred in the 3D
@@ -148,12 +147,12 @@ export function createAnimateLoop({
     // Skip the whole per-frame body + render when nothing changed.  cameraMoved()
     // is called for its side effect (updating lastCam) only when we might skip,
     // so an active frame doesn't wastefully re-latch it.
-    if (!_needsRender && !continuous && performance.now() >= activeUntil) {
+    const requested = takeRenderRequest();
+    if (!requested && !continuous && performance.now() >= activeUntil) {
       if (!cameraMoved()) return; // truly idle — don't touch the GPU
     } else {
       cameraMoved(); // keep lastCam current so the next idle check is correct
     }
-    _needsRender = false;
 
     if (cameraAnimRef.current) {
       const anim = cameraAnimRef.current;
@@ -335,7 +334,19 @@ export function createAnimateLoop({
         const CONSTRAINT_LABEL_SCALE = 1.5;
         const g = sketchShapesGroupRef.current;
         g.updateWorldMatrix(false, true);
+        const canvasHeightPx = renderer.domElement.clientHeight || 1;
         g.traverse((o) => {
+          // Toolbar-icon markers are sized in PIXELS; their offset from the
+          // anchor is part of the sprite, so it scales with them and stays a
+          // fixed number of pixels too (constraintIconSprites.js).
+          const icon = o.userData.screenIcon;
+          if (icon) {
+            _rulerPos.setFromMatrixPosition(o.matrixWorld);
+            const worldPerPixel =
+              (gizmoScale(_rulerPos) * REFERENCE_HEIGHT) / canvasHeightPx;
+            o.scale.setScalar(worldPerPixel * icon.sizePx);
+            return;
+          }
           const isLabel =
             o.isSprite &&
             (o.userData.isConstraintObj || o.userData.isCornerDim);

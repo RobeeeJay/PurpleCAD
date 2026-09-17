@@ -1,6 +1,7 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { offsetSelectedSketchGeometry } from "../../three/sketchModifyActions.js";
+import { CircularPatternArt } from "../icons/constraintIconArt.jsx";
 
 const SketchModifySection = () => {
   const selectedId = useStore((s) => s.selectedId);
@@ -405,21 +406,7 @@ const SketchModifySection = () => {
         title="Circular Pattern — pick a centre point, then click geometry to repeat it around it"
         onClick={handleCircularPattern}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <circle
-            cx="12"
-            cy="12"
-            r="8"
-            stroke="#D4A33F"
-            strokeDasharray="2 2"
-            fill="none"
-            strokeWidth="1.5"
-          />
-          <circle cx="12" cy="12" r="1" fill="#D4A33F" />
-          <rect x="10.5" y="2.5" width="3" height="3" fill="#6C3FD4" />
-          <rect x="17.5" y="9.5" width="3" height="3" fill="#c4c2b8" />
-          <rect x="3.5" y="9.5" width="3" height="3" fill="#c4c2b8" />
-        </svg>
+        <CircularPatternArt />
       </button>
       <button
         className={`toolbar-btn ${activeSketchTool === "rectangularPattern" ? "active" : ""}`}
