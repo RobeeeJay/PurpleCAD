@@ -12,3 +12,4 @@ coverage/
 test-files/oom-crash.pcad
 test-files/slow-updates-after-move.pcad
 .claude/.last-relaunch
+release/
