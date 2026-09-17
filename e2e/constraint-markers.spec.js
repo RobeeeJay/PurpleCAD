@@ -12,7 +12,7 @@ let app;
 let page;
 
 // The offset and size constants in src/three/sceneObjects/constraintIconSprites.js.
-const OFFSET_PX = 10;
+const OFFSET_PX = 5;
 const SIZE_PX = 22;
 const REACH = OFFSET_PX + SIZE_PX / 2; // anchor to the marker's middle
 

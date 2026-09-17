@@ -14,7 +14,7 @@ import {
   sketchSelectedColorFor,
 } from "../theme.js";
 import {
-  constraintIconScreenPos,
+  nearestConstraintMarker,
   setConstraintIconSelected,
 } from "../sceneObjects/constraintIconSprites.js";
 
@@ -271,41 +271,40 @@ export function createSketchHoverHelpers(
     const CONSTRAINT_HIT_PX = 14;
     if (sketchGroup) {
       const rect = renderer.domElement.getBoundingClientRect();
-      for (const cObj of sketchGroup.children) {
-        if (!cObj.userData.isConstraint) continue;
-        const at = constraintIconScreenPos(
-          cObj,
-          sketchMesh,
-          cameraRef.current,
-          rect,
+      const cObj = nearestConstraintMarker(
+        sketchGroup.children,
+        sketchMesh,
+        cameraRef.current,
+        rect,
+        screenX,
+        screenY,
+        CONSTRAINT_HIT_PX,
+      );
+      if (cObj) {
+        applyConstraintHoverHighlight(
+          cObj.userData.constraintShapeIndices,
+          cObj.userData.constraintColor,
         );
-        if (!at) continue;
-        if (Math.hypot(screenX - at.x, screenY - at.y) < CONSTRAINT_HIT_PX) {
-          applyConstraintHoverHighlight(
-            cObj.userData.constraintShapeIndices,
-            cObj.userData.constraintColor,
-          );
-          renderer.domElement.style.cursor = "default";
-          if (dimHintRef.current) {
-            const CONSTRAINT_LABELS = {
-              coincident: "Coincident",
-              distance: "Distance",
-              onLine: "On Line",
-              horizontal: "Horizontal",
-              vertical: "Vertical",
-              angle: "Angle",
-              centre: "Centre (double-click to edit)",
-            };
-            const tipRect = renderer.domElement.getBoundingClientRect();
-            dimHintRef.current.textContent =
-              CONSTRAINT_LABELS[cObj.userData.constraintType] ??
-              cObj.userData.constraintType;
-            dimHintRef.current.style.display = "block";
-            dimHintRef.current.style.left = `${screenX - tipRect.left + 16}px`;
-            dimHintRef.current.style.top = `${screenY - tipRect.top - 10}px`;
-          }
-          return;
+        renderer.domElement.style.cursor = "default";
+        if (dimHintRef.current) {
+          const CONSTRAINT_LABELS = {
+            coincident: "Coincident",
+            distance: "Distance",
+            onLine: "On Line",
+            horizontal: "Horizontal",
+            vertical: "Vertical",
+            angle: "Angle",
+            centre: "Centre (double-click to edit)",
+          };
+          const tipRect = renderer.domElement.getBoundingClientRect();
+          dimHintRef.current.textContent =
+            CONSTRAINT_LABELS[cObj.userData.constraintType] ??
+            cObj.userData.constraintType;
+          dimHintRef.current.style.display = "block";
+          dimHintRef.current.style.left = `${screenX - tipRect.left + 16}px`;
+          dimHintRef.current.style.top = `${screenY - tipRect.top - 10}px`;
         }
+        return;
       }
     }
     clearConstraintHoverHighlight();

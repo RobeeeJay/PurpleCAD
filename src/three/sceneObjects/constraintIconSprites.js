@@ -20,7 +20,7 @@ import { requestRender } from "../renderRequest.js";
 import { sketchSelectedColorFor, toCssHex } from "../theme.js";
 
 // How far a marker sits from the point or line it belongs to, in screen pixels.
-export const CONSTRAINT_ICON_OFFSET_PX = 10;
+export const CONSTRAINT_ICON_OFFSET_PX = 5;
 // A marker's size on screen, in pixels.  The artwork fills about three
 // quarters of it, so 22 draws it close to its 20 px size on the toolbar.
 export const CONSTRAINT_ICON_SIZE_PX = 22;
@@ -182,4 +182,32 @@ export function constraintIconScreenPos(obj, sketchMesh, camera, rect) {
     x: ((_p.x + 1) / 2) * rect.width + rect.left + (off?.x ?? 0),
     y: ((-_p.y + 1) / 2) * rect.height + rect.top + (off?.y ?? 0),
   };
+}
+
+// The constraint marker closest to (sx, sy) within maxPx, or null.  Markers
+// sit close together, so the first one within reach may not be the one under
+// the cursor; hover, click and double-click must all agree on the nearest.
+export function nearestConstraintMarker(
+  objects,
+  sketchMesh,
+  camera,
+  rect,
+  sx,
+  sy,
+  maxPx,
+  accept = () => true,
+) {
+  let best = null;
+  let bestDist = maxPx;
+  for (const obj of objects) {
+    if (!obj.userData.isConstraint || !accept(obj)) continue;
+    const at = constraintIconScreenPos(obj, sketchMesh, camera, rect);
+    if (!at) continue;
+    const d = Math.hypot(sx - at.x, sy - at.y);
+    if (d < bestDist) {
+      best = obj;
+      bestDist = d;
+    }
+  }
+  return best;
 }

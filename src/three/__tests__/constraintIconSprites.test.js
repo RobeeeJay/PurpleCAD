@@ -16,6 +16,7 @@ import {
   ICON_RIGHT,
   ICON_UP_RIGHT,
   makeConstraintIconSprite,
+  nearestConstraintMarker,
 } from "../sceneObjects/constraintIconSprites.js";
 import {
   addConstraintIconsToGroup,
@@ -35,7 +36,7 @@ const gapPx = (sprite) => ({
 
 describe("where a marker sits", () => {
   it("starts OFFSET pixels from its anchor, whatever the constants are", () => {
-    expect(OFF).toBe(10);
+    expect(OFF).toBe(5);
     const up = makeConstraintIconSprite("coincident", ICON_UP_RIGHT, "dark");
     expect(gapPx(up)).toEqual({ x: OFF, y: OFF });
     const right = makeConstraintIconSprite("vertical", ICON_RIGHT, "dark");
@@ -187,5 +188,53 @@ describe("which side of a line its own dimension is drawn", () => {
       lengthDimensionSides([between], [line(0, 0, 4, 0), line(0, 2, 4, 2)])
         .size,
     ).toBe(0);
+  });
+});
+
+describe("which marker the pointer is on", () => {
+  // Markers sit close together (a centre's icon beside a distance's label);
+  // hover, click and double-click must all pick the one under the pointer,
+  // not whichever was drawn first within reach.
+  const camera = new THREE.OrthographicCamera(-50, 50, 50, -50, 0.1, 100);
+  camera.position.set(0, 0, 10);
+  camera.updateMatrixWorld();
+  const sketchMesh = new THREE.Object3D();
+  const rect = { left: 0, top: 0, width: 100, height: 100 };
+  const marker = (type, x, y) => {
+    const o = new THREE.Object3D();
+    o.userData = {
+      isConstraint: true,
+      constraintType: type,
+      constraintIconLocalPos: { x, y },
+    };
+    return o;
+  };
+  // World (x, y) maps to client (50 + x, 50 - y) through this camera.
+  const far = marker("distance", 10, 0); // 10px from the pointer
+  const near = marker("centre", 3, 0); // 3px from the pointer
+  const at = (objs, maxPx, accept) =>
+    nearestConstraintMarker(
+      objs,
+      sketchMesh,
+      camera,
+      rect,
+      50,
+      50,
+      maxPx,
+      accept,
+    );
+
+  it("is the nearest one, whatever order they were drawn in", () => {
+    expect(at([far, near], 18)?.userData.constraintType).toBe("centre");
+    expect(at([near, far], 18)?.userData.constraintType).toBe("centre");
+  });
+
+  it("is none when nothing is within reach", () => {
+    expect(at([far], 8)).toBeNull();
+  });
+
+  it("skips markers the caller does not accept", () => {
+    const onlyDistance = (o) => o.userData.constraintType === "distance";
+    expect(at([far, near], 18, onlyDistance)).toBe(far);
   });
 });
