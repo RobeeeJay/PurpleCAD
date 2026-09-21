@@ -511,6 +511,16 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   checked "some triangles came back" passed on the broken result
   (`hollowChamferRepro`); check the mesh is closed -- every welded edge shared
   by exactly two triangles -- as `cogBevel.test.js` does.
+  BRepCheck is not enough on its own: at 0.4 mm the cog passes it yet its top
+  face meshes with a patch missing on every tooth (240 open edges, identical
+  at every mesher setting tried), and the stricter `BRepAlgoAPI_Check` flags
+  GOOD results too, so it can't discriminate. Each attempt therefore also
+  meshes its result (`MeshesClosed`) and refuses one with any OPEN edge -- an
+  edge used by three triangles is tolerated, because a good embossed ring
+  chamfer has one (a degenerate sliver) and draws fine.
+  The live preview must SAY when a bevel fails (`chamferPreviewError`, shown
+  in the dialog): it used to swallow the error and keep its last good preview,
+  so a too-big distance on the cog meant 30 s of nothing and a 4 s toast.
 - **A sewn triangle shell can come out INSIDE-OUT despite `OrientClosedSolid`.**
   Its point classification silently fails on sewn tessellations; an inside-out
   tool vanishes from a union and inverts a difference. `MakeSolidFromMesh`

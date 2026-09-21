@@ -107,6 +107,7 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
     ghostItemId,
   }) => {
     let result;
+    let failure = null;
     try {
       const { chamferOrFilletItem } = await import("../occClient.js");
       result = await chamferOrFilletItem({
@@ -118,29 +119,39 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
         allItems: items,
         printPrecision,
       });
-    } catch {
+    } catch (err) {
       result = null;
+      failure = err?.message || "The chamfer couldn't be built at this size.";
     }
     // A newer request superseded this one (params changed again while we were
     // awaiting OCC) — drop this result.
     if (myRequest !== requestId) return;
-    // Leave whatever preview is currently shown when the geometry is
-    // unworkable (eg distance too large) — better than flickering it away.
+    const key = chamferPreviewKey({
+      source,
+      subGeo,
+      amount,
+      angleRad,
+      segments,
+      printPrecision,
+    });
+    if (failure) {
+      // Say so now, in the dialog, and stop showing a preview of some OTHER
+      // size as if it were this one.  The failure is stashed like a result so
+      // Confirm on these same values reports it at once instead of spending
+      // the same long OCC run to fail again.
+      removePreview();
+      unghostSource();
+      stashChamferPreview(key, { error: failure });
+      useStore.getState().setChamferPreviewError(failure);
+      return;
+    }
+    // Cancelled (no result, no error): leave the current preview alone.
     if (!result) return;
+    useStore.getState().setChamferPreviewError(null);
 
     // Remember this result so Confirm can commit it directly — it will build
     // the identical recipe, so re-running the OCC op there is pure waste.
-    stashChamferPreview(
-      chamferPreviewKey({
-        source,
-        subGeo,
-        amount,
-        angleRad,
-        segments,
-        printPrecision,
-      }),
-      result,
-    );
+    stashChamferPreview(key, result);
 
     const { positions, normals, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();

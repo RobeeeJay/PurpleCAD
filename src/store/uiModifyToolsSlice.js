@@ -9,12 +9,18 @@ import { TOOL_RESET_PATCH } from "./uiToolReset.js";
 
 export const createUiModifyToolsSlice = (set, get) => ({
   setChamferEditTarget: (target) => set({ chamferEditTarget: target }),
+  // Why the live chamfer/fillet preview couldn't be built at the current
+  // values -- shown in the dialog, so a too-big distance says so at once
+  // instead of only after Confirm.
+  chamferPreviewError: null,
+  setChamferPreviewError: (message) => set({ chamferPreviewError: message }),
   // Setting either face-select mode clears the other — only one pick/confirm
   // overlay can be active at a time.
   setChamferSelectMode: (mode) =>
     set((s) => {
       const own = {
         chamferSelectMode: mode,
+        chamferPreviewError: null,
         pushPullSelectMode: null,
         // Chamfer/fillet pick edges and faces; nothing else.
         selectionOverride: mode ? ["edge", "face"] : null,

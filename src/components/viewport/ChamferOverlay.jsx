@@ -39,6 +39,8 @@ export default function ChamferOverlay() {
   const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
   const showNotification = useStore((s) => s.showNotification);
+  const previewError = useStore((s) => s.chamferPreviewError);
+  const setPreviewError = useStore((s) => s.setChamferPreviewError);
   const chamferEditTarget = useStore((s) => s.chamferEditTarget);
   const setChamferEditTarget = useStore((s) => s.setChamferEditTarget);
 
@@ -153,8 +155,15 @@ export default function ChamferOverlay() {
       // chamfer then comes back empty and the dialog just sits there -- the
       // medal's bevel timed out that way in the container, dialog still open
       // and no chamfer step in the timeline.
+      // The preview already tried these exact values and OCC refused them:
+      // report that now rather than spending the same run to fail again.
+      const stashed = takeChamferPreview(key);
+      if (stashed?.error) {
+        showNotification(stashed.error);
+        return;
+      }
       const result =
-        takeChamferPreview(key) ??
+        stashed ??
         (await withCommitGuard(() =>
           chamferOrFilletItem({
             source,
@@ -218,7 +227,10 @@ export default function ChamferOverlay() {
           ? "Set the distance below, then Confirm · Esc to cancel"
           : "Alt+click faces (chained) or Ctrl+click edges to select geometry to chamfer/fillet · Esc to cancel"}
       </div>
-      <div className="sketch-distance-input-overlay">
+      <div
+        className="sketch-distance-input-overlay"
+        style={{ flexWrap: "wrap", rowGap: 6, maxWidth: "min(92vw, 780px)" }}
+      >
         <button
           type="button"
           onClick={() => clearSelectedSubGeometry()}
@@ -238,7 +250,10 @@ export default function ChamferOverlay() {
           variables={variables}
           autoFocus
           value={distanceMm}
-          onChange={(e) => setDistanceMm(e.target.value)}
+          onChange={(e) => {
+            setDistanceMm(e.target.value);
+            setPreviewError(null);
+          }}
           onKeyDown={handleKeyDown}
           style={fieldStyle(distValid)}
         />
@@ -254,7 +269,10 @@ export default function ChamferOverlay() {
               title="Slope of the chamfer. 45 gives an equal cut on both faces; other angles bias it towards one of them."
               variables={variables}
               value={angleDeg}
-              onChange={(e) => setAngleDeg(e.target.value)}
+              onChange={(e) => {
+                setAngleDeg(e.target.value);
+                setPreviewError(null);
+              }}
               onKeyDown={handleKeyDown}
               style={fieldStyle(angValid)}
             />
@@ -302,6 +320,20 @@ export default function ChamferOverlay() {
         >
           Confirm
         </button>
+        {previewError && (
+          <div
+            className="chamfer-preview-error"
+            role="alert"
+            style={{
+              flexBasis: "100%",
+              fontSize: 11,
+              color: "#e87575",
+              lineHeight: 1.4,
+            }}
+          >
+            {previewError}
+          </div>
+        )}
       </div>
     </>
   );

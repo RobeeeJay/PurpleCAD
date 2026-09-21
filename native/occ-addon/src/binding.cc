@@ -53,6 +53,7 @@
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepTools.hxx>
 #include <ChFi3d_FilletShape.hxx>
 
 // ── Cooperative cancel (long-op abort) ───────────────────────────────────
@@ -122,6 +123,7 @@
 #include <sstream>
 #include <string>
 #include <map>
+#include <tuple>
 #include <unordered_map>
 #include <BRepTools.hxx>
 #include <vector>
@@ -769,9 +771,47 @@ static TopoDS_Edge ResolveNamedEdge(
 struct InvalidBevel : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
+
+// Does the solid tessellate without gaps -- no edge, after welding coincident
+// vertices, used by only one triangle?  BRepCheck passes a
+// cog bevelled 0.4 mm whose top face then meshes with a patch missing on every
+// tooth (240 open edges, the same at every mesher setting tried), and the
+// stricter BRepAlgoAPI_Check flags the good 0.3 mm result as well, so neither
+// tells the two apart.  Gaps are what the user actually sees.  An edge used by
+// THREE triangles is not counted: a good embossed ring's chamfer has one (a
+// degenerate sliver in the mesh, measured: 0 open edges, 1 over-shared) and
+// draws correctly, while every broken cog bevel had hundreds of open edges.
+// The triangulation is cleared afterwards so the display meshing starts fresh.
+static bool MeshesClosed(const TopoDS_Shape& shape, double deflection) {
+  std::vector<float> pos;
+  std::vector<uint32_t> idx;
+  TessellateInto(shape, deflection, pos, idx);
+  BRepTools::Clean(shape);
+  if (idx.empty()) return false;
+  // Weld: one id per distinct position, at a grid far below any feature.
+  std::map<std::tuple<long long, long long, long long>, uint32_t> ids;
+  std::vector<uint32_t> weld(pos.size() / 3);
+  for (size_t i = 0; i < weld.size(); i++) {
+    auto k = std::make_tuple(std::llround(pos[i * 3] * 1e5),
+                             std::llround(pos[i * 3 + 1] * 1e5),
+                             std::llround(pos[i * 3 + 2] * 1e5));
+    auto it = ids.emplace(k, static_cast<uint32_t>(ids.size())).first;
+    weld[i] = it->second;
+  }
+  std::map<std::pair<uint32_t, uint32_t>, int> uses;
+  for (size_t t = 0; t + 2 < idx.size(); t += 3)
+    for (int j = 0; j < 3; j++) {
+      uint32_t a = weld[idx[t + j]], b = weld[idx[t + (j + 1) % 3]];
+      if (a == b) continue;
+      uses[{std::min(a, b), std::max(a, b)}]++;
+    }
+  for (const auto& kv : uses)
+    if (kv.second == 1) return false;
+  return true;
+}
 static const TopoDS_Shape& RequireValidBevel(const TopoDS_Shape& result,
                                              const char* what) {
-  if (!BRepCheck_Analyzer(result).IsValid())
+  if (!BRepCheck_Analyzer(result).IsValid() || !MeshesClosed(result, 0.01))
     throw InvalidBevel(std::string(what) +
                        " produced an invalid solid (the distance is larger "
                        "than the geometry it runs along allows)");
@@ -1736,7 +1776,9 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       mk.Build(CancelRange());
       if (!mk.IsDone()) return TopoDS_Shape();
       // An invalid rim bevel is no better a fallback than none.
-      if (!BRepCheck_Analyzer(mk.Shape()).IsValid()) return TopoDS_Shape();
+      if (!BRepCheck_Analyzer(mk.Shape()).IsValid() ||
+          !MeshesClosed(mk.Shape(), 0.01))
+        return TopoDS_Shape();
       resultFaces = s.IsSame(shape)
                         ? PropagateFaceNames(mk, mk.Shape(), rec.faces)
                         : std::map<std::string, TopoDS_Shape>{};

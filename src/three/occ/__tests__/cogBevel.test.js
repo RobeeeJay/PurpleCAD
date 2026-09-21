@@ -58,11 +58,23 @@ describe("bevelling the top of an extruded cog", () => {
     await expect(run(3, 0.1)).rejects.toThrow(/invalid solid/);
   }, 120000);
 
+  // At 0.4 mm BRepCheck passes the solid, yet its top face meshes with a patch
+  // missing on every tooth (240 open edges) -- "gaps in the top layer".  The
+  // mesh must be closed for the bevel to count as done.
+  it("a 0.4 mm chamfer that would leave gaps in the top face is refused", async () => {
+    await expect(run(1, 0.04)).rejects.toThrow(/invalid solid/);
+  }, 120000);
+
   it("a chamfer and a fillet that fit still work, as closed solids", async () => {
-    for (const segments of [1, 3]) {
-      const res = await run(segments, 0.02);
-      expect(res?.geometryData, `segments ${segments}`).toBeTruthy();
-      expect(unsharedEdges(res.geometryData), `segments ${segments}`).toBe(0);
+    for (const [segments, amount] of [
+      [1, 0.02],
+      [3, 0.02],
+      [1, 0.03],
+    ]) {
+      const res = await run(segments, amount);
+      const what = `segments ${segments}, ${amount * 10} mm`;
+      expect(res?.geometryData, what).toBeTruthy();
+      expect(unsharedEdges(res.geometryData), what).toBe(0);
     }
   }, 120000);
 });

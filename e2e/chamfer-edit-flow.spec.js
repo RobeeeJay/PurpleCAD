@@ -126,4 +126,68 @@ test.describe.serial("chamfer edit lifecycle", () => {
     expect(after.editArmed).toBe(false);
     expect(after.onEntry).toBe(true);
   });
+
+  // A distance too big to build used to fail silently: the live preview
+  // swallowed the error and kept showing its last good result, and Confirm
+  // re-ran the whole op before a 4-second toast -- on an extruded cog, 30 s
+  // of nothing.  The dialog must say why as soon as the preview fails, and
+  // Confirm on the same values must report it at once, committing nothing.
+  test("a distance too big to build says why in the dialog, and Confirm reports it at once", async () => {
+    const OTHER = 502;
+    await page.evaluate((id) => {
+      const s = window.__store.getState();
+      s.setChamferSelectMode(null);
+      s.addItem({
+        id,
+        name: `Cube ${id}`,
+        type: "cube",
+        children: [],
+        position: { x: 6, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      s.setSelectedSubGeometry({
+        itemId: id,
+        edges: [{ ax: -1, ay: 1, az: 1, bx: 1, by: 1, bz: 1 }],
+        faces: [],
+      });
+      s.setChamferSelectMode("chamfer");
+    }, OTHER);
+    const entriesBefore = await page.evaluate(
+      () => window.__store.getState().history.length,
+    );
+    const notes = [];
+    await page.exposeFunction("__chamferNote", (n) => notes.push(n));
+    await page.evaluate(() =>
+      window.__store.subscribe((st, prev) => {
+        if (st.notification && st.notification !== prev.notification)
+          window.__chamferNote(st.notification);
+      }),
+    );
+
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toBeVisible();
+    // The cube is 20 mm across: a 30 mm chamfer can't fit its faces.
+    await overlay.locator("input").first().fill("30");
+    const inline = overlay.locator(".chamfer-preview-error");
+    await expect(inline).toBeVisible({ timeout: 30000 });
+    await expect(inline).toContainText("Try a smaller distance");
+    // The user-facing text, not Electron's IPC wrapper around it.
+    await expect(inline).not.toContainText("invoking remote method");
+
+    const t0 = Date.now();
+    await page.getByTitle("Confirm — apply the chamfer").click();
+    await expect.poll(() => notes.length).toBeGreaterThan(0);
+    expect(Date.now() - t0).toBeLessThan(2000); // no second OCC run
+    expect(notes[0]).toContain("Try a smaller distance");
+    expect(
+      await page.evaluate(() => window.__store.getState().history.length),
+    ).toBe(entriesBefore);
+
+    // Changing the value clears the complaint.
+    await overlay.locator("input").first().fill("2");
+    await expect(inline).toBeHidden();
+    await page.evaluate(() =>
+      window.__store.getState().setChamferSelectMode(null),
+    );
+  });
 });

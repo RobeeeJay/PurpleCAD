@@ -137,6 +137,12 @@ async function callOp(op, args) {
   return run;
 }
 
+export const ipcErrorMessage = (message) =>
+  String(message ?? "").replace(
+    /^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/,
+    "",
+  );
+
 async function invokeOp(op, args) {
   // Debug timing: log every OCC op's start + end wall-clock time + duration
   // (round-trip, including IPC to the worker).  Grep the console for "[OCC]".
@@ -161,6 +167,10 @@ async function invokeOp(op, args) {
     console.log(
       `[OCC] ${op} FAILED ${clock()} (${(now() - t0).toFixed(1)}ms): ${e.message}`,
     );
+    // Electron wraps a worker error as "Error invoking remote method
+    // 'occ:<op>': Error: <message>" -- the user needs only the message.
+    const clean = ipcErrorMessage(e.message);
+    if (clean !== e.message) throw new Error(clean);
     throw e;
   }
   /* eslint-enable no-console */
