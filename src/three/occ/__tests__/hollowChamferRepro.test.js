@@ -87,7 +87,7 @@ describe("hollow cylinder rim chamfer", () => {
         { edges: [], faces: [{ nx: 0, ny: 0, nz: 1, cx: 2.5, cy: 0, cz: 2 }] },
         0.6,
       ),
-    ).toThrow(/invalid solid/);
+    ).toThrow(/doesn't fit/);
   });
 
   it("rejects an outer-ring chamfer wider than the wall (a clear error)", () => {

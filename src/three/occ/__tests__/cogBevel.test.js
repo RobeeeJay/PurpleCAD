@@ -51,18 +51,18 @@ function unsharedEdges({ positions: P, indices: I }) {
 
 describe("bevelling the top of an extruded cog", () => {
   it("a 1 mm chamfer is refused rather than drawn broken", async () => {
-    await expect(run(1, 0.1)).rejects.toThrow(/invalid solid/);
+    await expect(run(1, 0.1)).rejects.toThrow(/doesn't fit/);
   }, 120000);
 
   it("a 1 mm fillet is refused rather than drawn broken", async () => {
-    await expect(run(3, 0.1)).rejects.toThrow(/invalid solid/);
+    await expect(run(3, 0.1)).rejects.toThrow(/doesn't fit/);
   }, 120000);
 
   // At 0.4 mm BRepCheck passes the solid, yet its top face meshes with a patch
   // missing on every tooth (240 open edges) -- "gaps in the top layer".  The
   // mesh must be closed for the bevel to count as done.
   it("a 0.4 mm chamfer that would leave gaps in the top face is refused", async () => {
-    await expect(run(1, 0.04)).rejects.toThrow(/invalid solid/);
+    await expect(run(1, 0.04)).rejects.toThrow(/doesn't fit/);
   }, 120000);
 
   it("a chamfer and a fillet that fit still work, as closed solids", async () => {

@@ -518,9 +518,17 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   meshes its result (`MeshesClosed`) and refuses one with any OPEN edge -- an
   edge used by three triangles is tolerated, because a good embossed ring
   chamfer has one (a degenerate sliver) and draws fine.
-  The live preview must SAY when a bevel fails (`chamferPreviewError`, shown
-  in the dialog): it used to swallow the error and keep its last good preview,
-  so a too-big distance on the cog meant 30 s of nothing and a 4 s toast.
+  The live preview must SAY when a bevel fails -- on the shared tool error
+  line (`toolError` / `ToolErrorLine`, as emboss and draft do), in one short
+  sentence: it used to swallow the error and keep its last good preview, so a
+  too-big distance on the cog meant 30 s of nothing and a 4 s toast. The status
+  line hides while a tool error shows -- it sits in the same place and covered
+  the error's second line.
+- **A hook placed after a component's early `return null` blanks the whole
+  app.** The chamfer dialog's bevel-limit `useMemo` went below its "tool
+  closed" return; opening the tool added a hook, React threw, and six e2e
+  specs saw an empty white window. Vitest renders no components, so only the
+  e2e suite catches this.
 - **A sewn triangle shell can come out INSIDE-OUT despite `OrientClosedSolid`.**
   Its point classification silently fails on sewn tessellations; an inside-out
   tool vanishes from a union and inverts a difference. `MakeSolidFromMesh`

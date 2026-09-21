@@ -8,6 +8,8 @@ import { DISPLAY_AXES, toDisplay } from "../utils/axisDisplay.js";
 // _cameraControls after the frame paints, so it reflects the current geometry.
 const StatusLine = () => {
   const selectedId = useStore((s) => s.selectedId);
+  // A tool's error line sits where this does; the error is the one to read.
+  const toolError = useStore((s) => s.toolError);
   const items = useStore((s) => s.items);
   const [stats, setStats] = useState(null);
 
@@ -26,7 +28,7 @@ const StatusLine = () => {
     return () => cancelAnimationFrame(raf);
   }, [selectedId, items, showable]);
 
-  if (!showable || !stats) return null;
+  if (!showable || !stats || toolError) return null;
 
   const mm = (v) => (v * MM_PER_UNIT).toFixed(1);
   const p = stats.worldPosition;

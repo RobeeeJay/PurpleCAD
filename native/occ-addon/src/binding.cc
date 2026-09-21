@@ -812,9 +812,12 @@ static bool MeshesClosed(const TopoDS_Shape& shape, double deflection) {
 static const TopoDS_Shape& RequireValidBevel(const TopoDS_Shape& result,
                                              const char* what) {
   if (!BRepCheck_Analyzer(result).IsValid() || !MeshesClosed(result, 0.01))
-    throw InvalidBevel(std::string(what) +
-                       " produced an invalid solid (the distance is larger "
-                       "than the geometry it runs along allows)");
+  {
+    const std::string size =
+        std::string(what) == "fillet" ? "radius" : "distance";
+    throw InvalidBevel("The " + std::string(what) + " doesn't fit here — try "
+                       "a smaller " + size + ".");
+  }
   return result;
 }
 
@@ -1822,16 +1825,21 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       // 0 = sentinel "no edges matched" — the bridge throws a descriptive error.
       if (result.IsNull()) return Napi::Number::New(env, 0);
       return Napi::Number::New(env, StoreNamedSolid(result, resultFaces));
+    } catch (const InvalidBevel& e) {
+      // The cause is known and already says what to do -- no wrapper.
+      throw std::runtime_error(e.what());
     } catch (const std::exception& e) {
       // Two common causes, and the distance being small rules out neither:
       //  - the distance exceeds the material the chamfer runs into (e.g. wider
       //    than a hollow body's wall), or
       //  - the selected edges meet in a way OCC can't bevel together (adjacent
       //    edges around a tight ring, a seam, or a near-tangent join).
+      // The user sees one short line under the dialog; OCC's own reason goes
+      // to the log for whoever debugs it.
+      fprintf(stderr, "[occ] chamfer failed: %s\n", e.what());
       throw std::runtime_error(
-        std::string("Chamfer failed — OCC rejected this combination of edges "
-                    "and distance. Try a smaller distance, select fewer edges, "
-                    "or select the whole face/rim instead. (") + e.what() + ")");
+          "Chamfer failed — try a smaller distance, fewer edges, or the whole "
+          "face.");
     }
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }
@@ -1886,14 +1894,16 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
       }
       if (result.IsNull()) return Napi::Number::New(env, 0);
       return Napi::Number::New(env, StoreShape(result));
+    } catch (const InvalidBevel& e) {
+      throw std::runtime_error(e.what());
     } catch (const std::exception& e) {
       // Same two causes as chamfer (see ChamferShape): too-large radius for the
       // material, or a set of edges OCC can't roll together — a small radius
       // rules out neither.
+      fprintf(stderr, "[occ] fillet failed: %s\n", e.what());
       throw std::runtime_error(
-        std::string("Fillet failed — OCC rejected this combination of edges "
-                    "and radius. Try a smaller radius, select fewer edges, or "
-                    "select the whole face/rim instead. (") + e.what() + ")");
+          "Fillet failed — try a smaller radius, fewer edges, or the whole "
+          "face.");
     }
   } catch (const std::exception& e) { throw Napi::Error::New(env, e.what()); }
 }

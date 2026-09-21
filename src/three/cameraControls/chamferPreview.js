@@ -142,12 +142,12 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
       removePreview();
       unghostSource();
       stashChamferPreview(key, { error: failure });
-      useStore.getState().setChamferPreviewError(failure);
+      useStore.getState().setToolError(failure);
       return;
     }
     // Cancelled (no result, no error): leave the current preview alone.
     if (!result) return;
-    useStore.getState().setChamferPreviewError(null);
+    useStore.getState().setToolError(null);
 
     // Remember this result so Confirm can commit it directly — it will build
     // the identical recipe, so re-running the OCC op there is pure waste.
