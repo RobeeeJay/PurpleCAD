@@ -112,6 +112,38 @@ describe("which marker each constraint gets", () => {
     expect(gapPx(m)).toEqual({ x: 0, y: OFF });
   });
 
+  // A cog's centre is a real point (a snap target and drag handle), so its
+  // marker sits up and to the right of it like any point's, not on it -- on
+  // it, hover and click would find the point underneath instead.
+  it("cog: up and to the right of its centre point", async () => {
+    const { makeCogShape } = await import("../cogGeometry.js");
+    const group = new THREE.Group();
+    addConstraintIconsToGroup(
+      group,
+      [{ type: "cog", shapeIdx: 0 }],
+      [
+        makeCogShape({
+          x: 3,
+          y: 2,
+          pitchDiameter: 4,
+          teeth: 20,
+          backlash: 0,
+          rootFillet: 0.05,
+          holeDiameter: 1,
+        }),
+      ],
+      (x, y, z = 0) => new THREE.Vector3(x, y, z),
+      new THREE.Vector2(1000, 800),
+      false,
+      null,
+      true,
+    );
+    const m = group.children.find((o) => o.userData.screenIcon);
+    expect(m.userData.screenIcon.type).toBe("cog");
+    expect([m.position.x, m.position.y]).toEqual([3, 2]);
+    expect(gapPx(m)).toEqual({ x: OFF, y: OFF });
+  });
+
   // A centre constraint's anchor is a point in open space, not on a line or a
   // vertex, so its marker has nothing to clear and sits ON the anchor.
   it("centre: on the centre it holds, with no gap at all", () => {

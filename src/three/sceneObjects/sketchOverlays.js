@@ -17,6 +17,14 @@ import { shapeMidpoint } from "../sketchGeometry.js";
 import { trackScreenDash } from "../screenDash.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { textShapeContours } from "../sketchText.js";
+import { cogShapeContours } from "../cogGeometry.js";
+
+// Text and cogs are drawn from their cached outline contours -- several closed
+// loops per shape (glyph counters, a cog's centre hole) -- not from one
+// polyline like the other shapes.
+const contourShape = (s) => s.type === "text" || s.type === "cog";
+const shapeContours = (s) =>
+  s.type === "cog" ? cogShapeContours(s) : textShapeContours(s);
 import { useStore } from "../../store";
 import {
   findClosedLoopsWithShapes,
@@ -117,12 +125,12 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     const circularPatternIdxs = circularPatternShapeIdxSet(item);
     const rectangularPatternIdxs = rectangularPatternShapeIdxSet(item);
     item.shapes.forEach((shape, shapeIdx) => {
-      if (shape.type === "text") {
+      if (contourShape(shape)) {
         const toW = (lx, ly) =>
           new THREE.Vector3(lx, ly, 0.003)
             .applyQuaternion(sketchMesh.quaternion)
             .add(sketchMesh.position);
-        for (const contour of textShapeContours(shape)) {
+        for (const contour of shapeContours(shape)) {
           if (contour.length < 2) continue;
           const wpts = [...contour, contour[0]].map((p) => toW(p.x, p.y));
           const tgeo = new LineGeometry();
@@ -200,7 +208,7 @@ export function buildExtrudeSelectGroup(
     // in "o") stay holes of the glyph rather than separately-selectable regions.
     const textIdxs = new Set();
     (item.shapes || []).forEach((s, i) => {
-      if (s.type === "text") textIdxs.add(i);
+      if (contourShape(s)) textIdxs.add(i);
     });
     const isTextPoly = new Map();
     const polyShapeIndices = new Map();
@@ -356,10 +364,10 @@ export function buildSketchShapesGroup(
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
     if (editHidden.has(shapeIdx)) return;
-    if (shape.type === "text") {
-      // Locked text: draw each glyph contour as its own loop, all tagged with
-      // the same shapeIdx so a click selects (and whole-shape drags) the text.
-      for (const contour of textShapeContours(shape)) {
+    if (contourShape(shape)) {
+      // Locked text / a cog: draw each contour as its own loop, all tagged with
+      // the same shapeIdx so a click selects (and whole-shape drags) the shape.
+      for (const contour of shapeContours(shape)) {
         if (contour.length < 2) continue;
         const wpts = [...contour, contour[0]].map((p) =>
           toWorld(p.x, p.y, 0.003),
@@ -378,7 +386,7 @@ export function buildSketchShapesGroup(
         tline.computeLineDistances();
         tline.renderOrder = 1001;
         tline.userData.shapeIdx = shapeIdx;
-        tline.userData.isText = true;
+        tline.userData.isText = shape.type === "text";
         group.add(tline);
       }
       return;

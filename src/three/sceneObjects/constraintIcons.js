@@ -8,6 +8,10 @@
 import * as THREE from "three";
 import { addCentreConstraintIcon } from "./centreConstraintIcon.js";
 import {
+  addCogConstraintIcon,
+  addTextConstraintIcon,
+} from "./primitiveConstraintIcons.js";
+import {
   besideLabel,
   ICON_ABOVE,
   ICON_BELOW,
@@ -605,24 +609,18 @@ export function addConstraintIconsToGroup(
           );
       }
     } else if (c.type === "text") {
-      // A small "T" mark at the text's top-left anchor — double-click to edit.
-      const shape = shapes[c.shapeIdx];
-      if (!shape || shape.type !== "text") return;
-      const ax = shape.x,
-        ay = shape.y;
-      const tIcon = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([
-          toWorld(ax - R, ay, 0.005),
-          toWorld(ax + R, ay, 0.005),
-          toWorld(ax, ay, 0.005),
-          toWorld(ax, ay - 2 * R, 0.005),
-        ]),
-        new THREE.LineBasicMaterial({ color: 0x6c3fd4, depthTest: false }),
-      );
-      tIcon.renderOrder = 1004;
-      tag(tIcon, { x: ax, y: ay }, [c.shapeIdx], 0x6c3fd4);
-      group.add(tIcon);
-      markFixedSize(tIcon, toWorld(ax, ay, 0.005));
+      // Double-click either marker to re-open the primitive's dialog.
+      addTextConstraintIcon({
+        c,
+        shapes,
+        toWorld,
+        group,
+        tag,
+        markFixedSize,
+        R,
+      });
+    } else if (c.type === "cog") {
+      addCogConstraintIcon({ c, shapes, placeIcon });
     } else if (c.type === "angle") {
       const sA = shapes[c.shapeAIdx],
         sB = shapes[c.shapeBIdx];

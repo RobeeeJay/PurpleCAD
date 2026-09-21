@@ -3,6 +3,8 @@
 // dependencies — kept apart from the solver in sketchConstraints.js so each
 // file stays focused.
 
+import { cogRadii } from "./cogGeometry.js";
+
 // Project a 2D point onto the line segment defined by a line shape.
 // t is clamped to [0,1] so the result always lies between the two endpoints.
 export function projectOntoLine(pt, lineShape) {
@@ -463,6 +465,7 @@ export function translateShape(shape, dx, dy) {
         p3: { x: shape.p3.x + dx, y: shape.p3.y + dy },
       };
     case "text":
+    case "cog":
       return { ...shape, x: shape.x + dx, y: shape.y + dy };
     default:
       return null;
@@ -550,6 +553,16 @@ export function rotateShape(shape, cx, cy, angle) {
         p2: rot(shape.p2.x, shape.p2.y),
         p3: rot(shape.p3.x, shape.p3.y),
       };
+    case "cog": {
+      // The teeth turn with it: its outline is drawn rotated by `rotation`.
+      const c = rot(shape.x, shape.y);
+      return {
+        ...shape,
+        x: c.x,
+        y: c.y,
+        rotation: (shape.rotation || 0) + angle,
+      };
+    }
     default:
       return { ...shape };
   }
@@ -694,6 +707,14 @@ function shapeExtentPoints(s) {
     case "point":
     case "text":
       return [{ x: s.x, y: s.y }];
+    case "cog": {
+      // The tip circle bounds the teeth at any rotation.
+      const r = cogRadii(s).tip;
+      return [
+        { x: s.x - r, y: s.y - r },
+        { x: s.x + r, y: s.y + r },
+      ];
+    }
     case "circle":
       return [
         { x: s.cx - s.r, y: s.cy },

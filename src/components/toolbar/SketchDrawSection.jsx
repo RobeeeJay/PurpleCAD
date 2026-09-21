@@ -1,6 +1,7 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { enumerateSystemFonts } from "../../three/sketchText.js";
+import { CogArt } from "../icons/constraintIconArt.jsx";
 
 const SKETCH_TOOLS = [
   {
@@ -296,11 +297,18 @@ const SKETCH_TOOLS = [
       </svg>
     ),
   },
+  {
+    id: "cog",
+    label: "Cog — pick a centre point, then set the gear in the dialog",
+    icon: <CogArt />,
+  },
 ];
 
 const SketchDrawSection = () => {
   const activeSketchTool = useStore((s) => s.activeSketchTool);
   const setActiveSketchTool = useStore((s) => s.setActiveSketchTool);
+  const startCogTool = useStore((s) => s.startCogTool);
+  const cancelCogTool = useStore((s) => s.cancelCogTool);
 
   return (
     <ToolbarSection label="Draw">
@@ -315,6 +323,12 @@ const SketchDrawSection = () => {
             // and the (slow) first query is likely done before the dialog opens.
             if (tool.id === "text" && activeSketchTool !== "text")
               enumerateSystemFonts();
+            // The cog opens its dialog straight away, Centre button live.
+            if (tool.id === "cog") {
+              if (activeSketchTool === "cog") cancelCogTool();
+              else startCogTool();
+              return;
+            }
             setActiveSketchTool(activeSketchTool === tool.id ? null : tool.id);
           }}
         >

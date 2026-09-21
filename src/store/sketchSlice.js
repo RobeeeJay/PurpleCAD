@@ -14,6 +14,7 @@ import {
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { createSketchPatternToolSlice } from "./sketchPatternToolSlice.js";
 import { createSketchCentreSlice } from "./sketchCentreSlice.js";
+import { createSketchCogSlice } from "./sketchCogSlice.js";
 import { createSketchOffsetSlice } from "./sketchOffsetSlice.js";
 import { createSketchUiStateSlice } from "./sketchUiStateSlice.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
@@ -41,60 +42,21 @@ import {
 } from "../three/sketchRectangularPattern.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import { explodeContours, resizeCorner } from "../three/sketchGeometry.js";
+import { cogShapeContours } from "../three/cogGeometry.js";
 import {
   textShapeContours,
   makeTextShape,
   isFontAvailable,
 } from "../three/sketchText.js";
 import { computeLineTrim } from "../three/sketchTrim.js";
+import {
+  SHAPE_INDEX_FIELDS,
+  SHAPE_INDEX_LIST_FIELDS,
+  remapConstraintShapeIndices,
+} from "./internals.js";
 
-// Every field on a constraint that references a shape by index, across all
-// constraint types (coincident/distance/angle use A/B; onLine uses
-// point/line; H/V and the copy ops use shapeIdx; mirror/offset/pattern carry
-// a source origIdx; mirror adds lineIdx; circularPattern adds centerShapeIdx).
-// `i`, `j`, `index`, `count`, `offsetGroup` are NOT shape indices.
-const SHAPE_INDEX_FIELDS = [
-  "shapeAIdx",
-  "shapeBIdx",
-  "shapeIdx",
-  "origIdx",
-  "pointShapeIdx",
-  "lineShapeIdx",
-  "lineIdx",
-  "centerShapeIdx",
-];
-
-// Fields holding a LIST of shape indices: a centre constraint names each of
-// its two shapes as every piece of connected geometry that makes it up.
-export const SHAPE_INDEX_LIST_FIELDS = ["shapesA", "shapesB"];
-
-// Remap a constraint's shape-index fields through `indexMap` (old index → new
-// index, or -1 for a removed shape).  Returns null when the constraint
-// references any removed shape, so the caller can drop it.  Used when deleting
-// shapes (e.g. replacing a rectangular pattern's copies) so every surviving
-// constraint keeps pointing at the right geometry.
-export const remapConstraintShapeIndices = (constraint, indexMap) => {
-  const out = { ...constraint };
-  for (const f of SHAPE_INDEX_FIELDS) {
-    if (typeof constraint[f] === "number") {
-      const next = indexMap.get(constraint[f]);
-      if (next == null || next === -1) return null;
-      out[f] = next;
-    }
-  }
-  // A list names a whole shape, so losing one of its pieces leaves the rest of
-  // the shape -- still worth keeping.  Only a list emptied entirely takes the
-  // constraint with it.
-  for (const f of SHAPE_INDEX_LIST_FIELDS) {
-    if (!Array.isArray(constraint[f])) continue;
-    const kept = constraint[f]
-      .map((i) => indexMap.get(i))
-      .filter((i) => i != null && i !== -1);
-    if (kept.length === 0) return null;
-    out[f] = kept;
-  }
-  return out;
-};
+// Re-exported: the remap lived here before the cog tool needed it too.
+export { SHAPE_INDEX_LIST_FIELDS, remapConstraintShapeIndices };
 
 // Does a constraint reference shape index `idx` in any of its index fields?
 const constraintRefsShape = (c, idx) =>
@@ -319,6 +281,7 @@ export const createSketchSlice = (set) => ({
 
   ...createSketchPatternToolSlice(set),
   ...createSketchCentreSlice(set),
+  ...createSketchCogSlice(set),
 
   // --- Shape + constraint mutations ---
   addSketchConstraints: (sketchId, newConstraints) =>
@@ -1171,19 +1134,22 @@ export const createSketchSlice = (set) => ({
         const oldConstraints = item.constraints || [];
         const removed = oldConstraints[constraintIdx];
 
-        // Deleting a `text` constraint unlocks the text: explode its glyph
+        // Deleting a `text` or `cog` constraint unlocks the shape: explode its
         // contours into ordinary editable line segments in place of the (now
-        // unconstrained) text shape.
+        // unconstrained) primitive.
         if (
           removed &&
-          removed.type === "text" &&
+          (removed.type === "text" || removed.type === "cog") &&
           typeof removed.shapeIdx === "number" &&
-          oldShapes[removed.shapeIdx]?.type === "text"
+          oldShapes[removed.shapeIdx]?.type === removed.type
         ) {
           const textIdx = removed.shapeIdx;
-          // Absolute glyph contours — regenerated from the font when the shape
-          // predates contour caching, so the text is never silently lost.
-          const absContours = textShapeContours(oldShapes[textIdx]);
+          // Absolute contours — for text, regenerated from the font when the
+          // shape predates contour caching, so the text is never silently lost.
+          const absContours =
+            removed.type === "cog"
+              ? cogShapeContours(oldShapes[textIdx])
+              : textShapeContours(oldShapes[textIdx]);
           const keptShapes = oldShapes.filter((_, i) => i !== textIdx);
           const { shapes: lineShapes, constraints: lineCons } = explodeContours(
             absContours,

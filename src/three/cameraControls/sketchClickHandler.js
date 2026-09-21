@@ -25,6 +25,7 @@ const EDITABLE_CONSTRAINTS = new Set([
   "circularPattern",
   "centre",
   "text",
+  "cog",
 ]);
 
 export function createSketchClickHandler(
@@ -152,6 +153,11 @@ export function createSketchClickHandler(
                 selectedIdRef.current,
                 cObj.userData.constraintIdx,
               );
+          } else if (c && c.type === "cog") {
+            // Re-open the Cog dialog on this cog to edit it in place.
+            useStore
+              .getState()
+              .beginCogEdit(selectedIdRef.current, cObj.userData.constraintIdx);
           } else if (c && c.type === "centre") {
             // Re-open the Centre dialog on this constraint to edit it.
             useStore

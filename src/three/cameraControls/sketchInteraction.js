@@ -21,6 +21,7 @@ import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
 import { createSketchCircularPatternHelpers } from "./sketchCircularPatternTool.js";
 import { createSketchRectangularPatternHelpers } from "./sketchRectangularPatternTool.js";
 import { createSketchCentreHelpers } from "./sketchCentreTool.js";
+import { createSketchCogHelpers } from "./sketchCogTool.js";
 import { MIRRORABLE_TYPES } from "../sketchMirror.js";
 import { CIRCULAR_PATTERNABLE_TYPES } from "../sketchCircularPattern.js";
 import { RECTANGULAR_PATTERNABLE_TYPES } from "../sketchRectangularPattern.js";
@@ -389,6 +390,34 @@ export function createSketchInteraction(
     }
   });
 
+  // ── Cog tool ───────────────────────────────────────────────────────────────
+  const {
+    clearCogPreview,
+    updateCogPreview,
+    cogHoverAt,
+    handleCogClick,
+    resetCogHover,
+  } = createSketchCogHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    renderer,
+  });
+  const unsubCog = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchCogState === prev.sketchCogState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "cog") updateCogPreview();
+    else {
+      resetCogHover();
+      clearCogPreview();
+    }
+  });
+
   // Whenever sketch shapes are mutated (any store items change while in sketch
   // mode), the selection overlay drawn at the old position becomes a ghost.
   // Clear it so the user sees the updated geometry without stale highlights.
@@ -736,7 +765,8 @@ export function createSketchInteraction(
       activeSketchToolRef.current === "mirror" ||
       activeSketchToolRef.current === "circularPattern" ||
       activeSketchToolRef.current === "rectangularPattern" ||
-      activeSketchToolRef.current === "centre"
+      activeSketchToolRef.current === "centre" ||
+      activeSketchToolRef.current === "cog"
     ) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
@@ -953,6 +983,11 @@ export function createSketchInteraction(
       updateSketchToolHover(e.clientX, e.clientY, activeSketchToolRef.current);
       return true;
     }
+    if (activeSketchToolRef.current === "cog") {
+      clearAllSketchHover();
+      cogHoverAt(e.clientX, e.clientY, findSnap, screenToSketchLocal);
+      return true;
+    }
     if (activeSketchToolRef.current === "centre") {
       clearAllSketchHover();
       centreHoverAt(
@@ -1136,6 +1171,13 @@ export function createSketchInteraction(
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5)
         handleMirrorClick(e.clientX, e.clientY, hitTestSketchLines, makeRay);
+      return true;
+    }
+    if (activeSketchToolRef.current === "cog") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleCogClick(e.clientX, e.clientY, findSnap, screenToSketchLocal);
       return true;
     }
     if (activeSketchToolRef.current === "centre") {
@@ -1350,5 +1392,6 @@ export function createSketchInteraction(
     unsubCircularPattern,
     unsubRectangularPattern,
     unsubCentre,
+    unsubCog,
   };
 }

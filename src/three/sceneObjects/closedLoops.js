@@ -15,6 +15,7 @@ import {
   sampleShapeForPoly,
 } from "./loopIntersect.js";
 import { polyContainsPoint, polyCentroid, polyArea } from "./polygonUtil.js";
+import { cogShapeContours } from "../cogGeometry.js";
 
 export {
   signedPolyAreaXY,
@@ -42,16 +43,22 @@ export function findClosedLoopsWithShapes(
     // trimmed legs, so a filleted corner only closes if the arc participates.
     // Construction (dashed) geometry is excluded; text is handled separately
     // below (its stored glyph contours are already closed loops).
-    if (!s.dashed && s.type !== "text")
+    if (!s.dashed && s.type !== "text" && s.type !== "cog")
       solidEntries.push({ shape: s, origIdx: i });
   });
 
-  // Text: each stored glyph contour is already a closed loop positioned at the
-  // shape's anchor.  Feed them in directly — NOT through the pairwise-intersect
-  // + cycle DFS, which dense glyph geometry would choke — so filled/extruded
-  // text works.  groupLoopsWithHoles nests the counters (e.g. the hole in "o").
+  // Text and cogs: each stored contour is already a closed loop positioned at
+  // the shape's anchor.  Feed them in directly — NOT through the pairwise-
+  // intersect + cycle DFS, which dense glyph or tooth geometry would choke — so
+  // filled/extruded text and cogs work.  groupLoopsWithHoles nests the counters
+  // (the hole in "o", a cog's centre hole).
   const textLoops = [];
   shapes.forEach((s, i) => {
+    if (s.type === "cog") {
+      for (const polygon of cogShapeContours(s))
+        if (polygon.length >= 3) textLoops.push({ polygon, shapeIndices: [i] });
+      return;
+    }
     if (s.type !== "text" || !Array.isArray(s.contours)) return;
     for (const c of s.contours) {
       // Drop a duplicated closing point (font glyph contours repeat the start

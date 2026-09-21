@@ -884,6 +884,16 @@ sources are picked) that reuses the creation UI.
   `constraintIconScreenPos`, which adds the offset; projecting
   `constraintIconLocalPos` alone aims at the anchor, where the marker no longer
   is (an e2e click that did that silently selected the point underneath).
+- **Text and the cog are "contour primitives": one shape, several cached closed
+  outlines relative to its `x, y`, locked by a same-named constraint.** Their
+  outlines bypass the pairwise-intersect loop finder (`closedLoops.js` feeds
+  them in directly) and are drawn contour by contour (`sketchOverlays.js`
+  `contourShape`); deleting the constraint explodes them into lines. A new
+  primitive of this kind has to be added to BOTH of those, to `translateShape`
+  / `rotateShape` / the extent points in `sketchGeometry.js`, to `sketchTrim`'s
+  skip list, and to the double-click editor list in `sketchClickHandler.js`.
+  An outline must have no zero-length segment: OCC's wire builder rejects the
+  whole profile (the cog's first cut had a duplicated base-circle point).
 - **The 3D ground ruler is centred on the RAW camera target — never add a
   screen-space shift to it.** The compact axis indicator shifts right by
   `camRight * halfPanelWidth` to clear the left panel, but `camRight` rotates

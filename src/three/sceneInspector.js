@@ -106,6 +106,17 @@ export function sketchShapeRows(item) {
       case "point":
         row.geometry = { at: { x: num(s.x), y: num(s.y) } };
         break;
+      case "cog":
+        row.geometry = {
+          centre: { x: num(s.x), y: num(s.y) },
+          pitchDiameterMm: num(s.pitchDiameter * MM_PER_UNIT, 3),
+          holeDiameterMm: num(s.holeDiameter * MM_PER_UNIT, 3),
+          teeth: s.teeth,
+          backlashMm: num(s.backlash * MM_PER_UNIT, 3),
+          rootFilletMm: num(s.rootFillet * MM_PER_UNIT, 3),
+          contours: (s.contours || []).length,
+        };
+        break;
       case "text":
         row.geometry = {
           text: s.text,

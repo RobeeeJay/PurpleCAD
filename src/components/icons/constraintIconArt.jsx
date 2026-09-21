@@ -5,6 +5,7 @@
 // looks like the button that made it.
 
 import React from "react";
+import { cogOutline } from "../../three/cogGeometry.js";
 
 const Art = ({ size, children }) => (
   <svg
@@ -374,6 +375,47 @@ export const CircularPatternArt = ({ size = 20 }) => (
   </Art>
 );
 
+// The cog icon is drawn by the cog tool's own geometry: an 8-tooth gear whose
+// tip circle fills the 24-unit box, flipped to SVG's y-down.
+const COG_ICON_PATH = (() => {
+  const [outline] = cogOutline({
+    pitchDiameter: 16,
+    teeth: 8,
+    backlash: 0,
+    rootFillet: 0.4,
+    holeDiameter: 0,
+  }).contours;
+  return (
+    outline
+      .map(
+        (q, i) =>
+          `${i ? "L" : "M"}${(12 + q.x).toFixed(2)} ${(12 - q.y).toFixed(2)}`,
+      )
+      .join(" ") + " Z"
+  );
+})();
+
+export const CogArt = ({ size = 20 }) => (
+  <Art size={size}>
+    <path
+      d={COG_ICON_PATH}
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+    <circle
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.3"
+      cx="12"
+      cy="12"
+      r="2.6"
+    />
+    <circle fill="#D4A33F" stroke="#D4A33F" r="1.2" cx="12" cy="12" />
+  </Art>
+);
+
 // Constraint type -> its toolbar artwork.  A type missing here keeps its own
 // line-drawn marker in the sketch view.
 export const CONSTRAINT_ICON_ART = {
@@ -388,4 +430,5 @@ export const CONSTRAINT_ICON_ART = {
   equal: EqualArt,
   centre: CentreArt,
   circularPattern: CircularPatternArt,
+  cog: CogArt,
 };

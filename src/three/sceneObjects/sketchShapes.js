@@ -7,6 +7,7 @@
 
 import * as THREE from "three";
 import { MM_PER_UNIT } from "./dimensions.js";
+import { cogShapeContours } from "../cogGeometry.js";
 
 export function buildSketchShape(tool, start, current) {
   const dx = current.x - start.x;
@@ -106,6 +107,12 @@ export function getSketchShapePoints(shape, sketchMesh) {
       );
       return curve.getPoints(48).map(({ x, y }) => toWorld(x, y));
     }
+    case "cog": {
+      // The outline (tooth tips and roots), for selection highlight,
+      // hit-testing and extent; the centre hole is drawn with the outline.
+      const [outline] = cogShapeContours(shape);
+      return [...outline, outline[0]].map(({ x, y }) => toWorld(x, y));
+    }
     case "text": {
       // The actual glyph outlines are drawn separately (they need the font);
       // here return the cached ink bounding box (anchor = top-left), used for
@@ -203,6 +210,10 @@ export function moveShapePoint(shape, pointKey, newPos) {
     }
     case "point":
       return { ...shape, x, y };
+    case "cog":
+      // Its one point is its centre; the outline is relative to it.
+      if (pointKey === "center") return { ...shape, x, y };
+      break;
     default:
       break;
   }
@@ -253,6 +264,9 @@ export function getSnapPoints(shapes) {
       case "point":
         pts.push({ x: shape.x, y: shape.y, shapeIdx, pointKey: "p" });
         break;
+      case "cog":
+        pts.push({ x: shape.x, y: shape.y, shapeIdx, pointKey: "center" });
+        break;
       default:
         break;
     }
@@ -294,6 +308,8 @@ export function getShapePoint(shape, pointKey) {
       return shape[pointKey] ?? null;
     case "point":
       return { x: shape.x, y: shape.y };
+    case "cog":
+      return pointKey === "center" ? { x: shape.x, y: shape.y } : null;
     default:
       return null;
   }

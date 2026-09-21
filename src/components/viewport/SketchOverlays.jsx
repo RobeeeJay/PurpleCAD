@@ -11,6 +11,7 @@ import SketchLongPressMenu from "./SketchLongPressMenu";
 import SketchDistanceOverlay from "./SketchDistanceOverlay";
 import SketchPatternOverlays from "./SketchPatternOverlays";
 import SketchCentreOverlay from "./SketchCentreOverlay";
+import SketchCogOverlay from "./SketchCogOverlay";
 import { useStore } from "../../store";
 import { evaluateFormula, variablesToMap } from "../../utils/formulas.js";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
@@ -267,6 +268,7 @@ export default function SketchOverlays({
         activeSketchTool !== "project" &&
         activeSketchTool !== "trim" &&
         activeSketchTool !== "centre" &&
+        activeSketchTool !== "cog" &&
         sketchDrawPhase !== "second" && (
           <div className="sketch-placement-hint">
             Click to set the start point
@@ -297,6 +299,7 @@ export default function SketchOverlays({
         selectedId={selectedId}
         variables={variables}
       />
+      <SketchCogOverlay sketchMode={sketchMode} selectedId={selectedId} />
       {sketchMode && sketchConstraintMode === "midpoint" && (
         <div className="sketch-placement-hint">
           {sketchMidpointFirst?.kind === "point"

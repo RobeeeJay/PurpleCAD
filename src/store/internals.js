@@ -612,3 +612,51 @@ export const getInitialItems = () => {
     targetIdx !== -1 ? targetIdx : persisted.history.length - 1,
   );
 };
+
+// Every field on a constraint that references a shape by index, across all
+// constraint types (coincident/distance/angle use A/B; onLine uses
+// point/line; H/V and the copy ops use shapeIdx; mirror/offset/pattern carry
+// a source origIdx; mirror adds lineIdx; circularPattern adds centerShapeIdx).
+// `i`, `j`, `index`, `count`, `offsetGroup` are NOT shape indices.
+export const SHAPE_INDEX_FIELDS = [
+  "shapeAIdx",
+  "shapeBIdx",
+  "shapeIdx",
+  "origIdx",
+  "pointShapeIdx",
+  "lineShapeIdx",
+  "lineIdx",
+  "centerShapeIdx",
+];
+
+// Fields holding a LIST of shape indices: a centre constraint names each of
+// its two shapes as every piece of connected geometry that makes it up.
+export const SHAPE_INDEX_LIST_FIELDS = ["shapesA", "shapesB"];
+
+// Remap a constraint's shape-index fields through `indexMap` (old index → new
+// index, or -1 for a removed shape).  Returns null when the constraint
+// references any removed shape, so the caller can drop it.  Used when deleting
+// shapes (e.g. replacing a rectangular pattern's copies) so every surviving
+// constraint keeps pointing at the right geometry.
+export const remapConstraintShapeIndices = (constraint, indexMap) => {
+  const out = { ...constraint };
+  for (const f of SHAPE_INDEX_FIELDS) {
+    if (typeof constraint[f] === "number") {
+      const next = indexMap.get(constraint[f]);
+      if (next == null || next === -1) return null;
+      out[f] = next;
+    }
+  }
+  // A list names a whole shape, so losing one of its pieces leaves the rest of
+  // the shape -- still worth keeping.  Only a list emptied entirely takes the
+  // constraint with it.
+  for (const f of SHAPE_INDEX_LIST_FIELDS) {
+    if (!Array.isArray(constraint[f])) continue;
+    const kept = constraint[f]
+      .map((i) => indexMap.get(i))
+      .filter((i) => i != null && i !== -1);
+    if (kept.length === 0) return null;
+    out[f] = kept;
+  }
+  return out;
+};

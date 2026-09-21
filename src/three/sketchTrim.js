@@ -149,7 +149,8 @@ export function computeLineTrim(
   for (let j = 0; j < shapes.length; j++) {
     if (j === lineIdx) continue;
     const s = shapes[j];
-    if (!s || s.type === "text") continue;
+    // Text and cogs are locked outlines, not edges a line can be cut against.
+    if (!s || s.type === "text" || s.type === "cog") continue;
     if (s.type === "point") {
       const pr = projectParam(ax, ay, bx, by, s.x, s.y);
       if (pr.dist <= boundaryTol && pr.t > MERGE_EPS && pr.t < 1 - MERGE_EPS)

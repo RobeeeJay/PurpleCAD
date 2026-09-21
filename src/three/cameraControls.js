@@ -842,6 +842,7 @@ export function attachCameraControls(ctx) {
     unsubCircularPattern,
     unsubRectangularPattern,
     unsubCentre,
+    unsubCog,
   } = createSketchInteraction(
     {
       scene,
@@ -1161,6 +1162,7 @@ export function attachCameraControls(ctx) {
     unsubItems();
     unsubMirror();
     unsubCentre();
+    unsubCog();
     unsubCircularPattern();
     unsubRectangularPattern();
   };

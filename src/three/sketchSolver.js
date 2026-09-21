@@ -30,6 +30,7 @@ export function varFields(s) {
     case "arc":
       return ["cx", "cy", "r", "startAngle", "endAngle"];
     case "point":
+    case "cog": // its centre; the outline follows it
       return ["x", "y"];
     default:
       return []; // bezier & unknowns: treated as fixed
@@ -55,6 +56,7 @@ export function fieldsForPoint(shape, key) {
   )
     return key === "center" ? ["cx", "cy"] : [];
   if (shape.type === "point") return ["x", "y"];
+  if (shape.type === "cog") return key === "center" ? ["x", "y"] : [];
   return [];
 }
 
@@ -89,6 +91,8 @@ function pointOf(s, key) {
     if (key === "p3") return { x: s.p3.x, y: s.p3.y };
   } else if (s.type === "point") {
     return { x: s.x, y: s.y };
+  } else if (s.type === "cog") {
+    if (key === "center") return { x: s.x, y: s.y };
   }
   return null;
 }
