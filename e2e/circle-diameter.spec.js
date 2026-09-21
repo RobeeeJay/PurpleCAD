@@ -27,8 +27,21 @@ const marker = async () =>
 const overlay = () => page.locator(".sketch-distance-input-overlay");
 
 // Re-open the committed dimension the way a user does: double-click its marker.
+// The marker is re-placed every frame beside its label's TEXT, so a label that
+// just changed width ("Ø 30.0mm" -> "ƒ Ø 24.0mm") moves it a frame later: wait
+// until two readings agree before aiming at it.
 const reopen = async () => {
-  const m = await marker();
+  let m = await marker();
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(100);
+    const next = await marker();
+    const moved = Math.hypot(
+      next.middle.x - m.middle.x,
+      next.middle.y - m.middle.y,
+    );
+    m = next;
+    if (moved < 0.5) break;
+  }
   await page.mouse.dblclick(m.middle.x, m.middle.y);
   await expect(overlay()).toBeVisible();
 };

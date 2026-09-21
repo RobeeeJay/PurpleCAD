@@ -499,6 +499,18 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   the two-argument way returns just the body — "missing letters", no error.
   `BooleanOp` explodes compound args/tools into a `TopTools_ListOfShape` and uses
   `SetArguments`/`SetTools` for all three ops. Don't revert to the two-shape ctor.
+- **`MakeChamfer` / `MakeFillet` can say `IsDone()` and hand back a broken
+  solid.** A bevel wider than the material it runs along -- 1 mm off both
+  sides of a cog's 1.4 mm tooth tips, 0.6 mm off both rims of a 1.0 mm wall --
+  comes back with overlapping faces and an open surface, drawn as triangles
+  spanning the air. `ChamferShape` / `FilletShape` now run
+  `BRepCheck_Analyzer` on every attempt (`RequireValidBevel`) and throw
+  `InvalidBevel`, which skips the unify / face-rim retries: those fix slivers,
+  not an oversize distance, and on an 860-edge rim each one is another full
+  bevel (the refusal took 48 s with them, 12 s without). A test that only
+  checked "some triangles came back" passed on the broken result
+  (`hollowChamferRepro`); check the mesh is closed -- every welded edge shared
+  by exactly two triangles -- as `cogBevel.test.js` does.
 - **A sewn triangle shell can come out INSIDE-OUT despite `OrientClosedSolid`.**
   Its point classification silently fails on sewn tessellations; an inside-out
   tool vanishes from a union and inverts a difference. `MakeSolidFromMesh`

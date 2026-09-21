@@ -52,6 +52,7 @@
 // ── Chamfer / fillet ────────────────────────────────────────────────────
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <ChFi3d_FilletShape.hxx>
 
 // ── Cooperative cancel (long-op abort) ───────────────────────────────────
@@ -753,6 +754,30 @@ static TopoDS_Edge ResolveNamedEdge(
 // individual rim edges OCC won't bevel together (a thin ring at coarse
 // tessellation) often succeed as that whole face's boundary, and the result is
 // a clean solid (far faster for a downstream op than a mesh-sewn one).
+// A chamfer or fillet bigger than the material it runs into -- two bevels
+// meeting across a tooth tip narrower than twice the distance, say -- can come
+// back from MakeChamfer / MakeFillet as IsDone() with a solid whose faces
+// overlap and whose surface isn't closed.  Tessellated, that shows as
+// triangles spanning the air between features.  Treat it as the failure it is,
+// so the next attempt runs and, failing all, the user gets the "try a smaller
+// distance" error instead of a broken solid.
+//
+// Its own type so the retries below are skipped: they exist for sliver faces
+// and hairline seams that make OCC refuse, and cannot shrink a distance that
+// is simply too big -- on a many-edged rim each retry is another full bevel,
+// and the refusal took 48 s with them.
+struct InvalidBevel : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+static const TopoDS_Shape& RequireValidBevel(const TopoDS_Shape& result,
+                                             const char* what) {
+  if (!BRepCheck_Analyzer(result).IsValid())
+    throw InvalidBevel(std::string(what) +
+                       " produced an invalid solid (the distance is larger "
+                       "than the geometry it runs along allows)");
+  return result;
+}
+
 static TopoDS_Face MostCommonAdjacentFace(
     const TopoDS_Shape& shape, const std::vector<SelectedEdge>& edges) {
   TopTools_IndexedDataMapOfShapeListOfShape efMap;
@@ -1663,6 +1688,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       if (!mk.IsDone())
         throw std::runtime_error(
           "chamfer computation failed (geometry rejected the operation)");
+      RequireValidBevel(mk.Shape(), "chamfer");
       // Carry names forward from the original faces — only valid on the primary
       // attempt (chamfering `shape` itself).  A unified-copy retry loses subshape
       // identity, so names don't propagate there and the result falls back to
@@ -1709,6 +1735,8 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       if (n == 0) return TopoDS_Shape();
       mk.Build(CancelRange());
       if (!mk.IsDone()) return TopoDS_Shape();
+      // An invalid rim bevel is no better a fallback than none.
+      if (!BRepCheck_Analyzer(mk.Shape()).IsValid()) return TopoDS_Shape();
       resultFaces = s.IsSame(shape)
                         ? PropagateFaceNames(mk, mk.Shape(), rec.faces)
                         : std::map<std::string, TopoDS_Shape>{};
@@ -1719,6 +1747,8 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       TopoDS_Shape result;
       try {
         result = attempt(shape);
+      } catch (const InvalidBevel&) {
+        throw;
       } catch (const std::exception&) {
         // Retry on a same-domain-unified copy.  Booleans / shell / timeline
         // regeneration can leave sliver coplanar faces and hairline seams that
@@ -1735,6 +1765,8 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
         } catch (...) { /* keep the original if unify throws */ }
         try {
           result = attempt(unified);
+        } catch (const InvalidBevel&) {
+          throw;
         } catch (const std::exception&) {
           // Last resort: the face-rim fallback (see above).  Null → the outer
           // catch reports the original rejection.
@@ -1788,13 +1820,15 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
       if (!mk.IsDone())
         throw std::runtime_error(
           "fillet computation failed (geometry rejected the operation)");
-      return mk.Shape();
+      return RequireValidBevel(mk.Shape(), "fillet");
     };
 
     try {
       TopoDS_Shape result;
       try {
         result = attempt(shape);
+      } catch (const InvalidBevel&) {
+        throw;
       } catch (const std::exception&) {
         // Retry on a same-domain-unified copy — see ChamferShape.  Sliver
         // coplanar faces / hairline seams left by booleans, shell or timeline
