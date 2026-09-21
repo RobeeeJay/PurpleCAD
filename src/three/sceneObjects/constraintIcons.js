@@ -100,6 +100,7 @@ export function makeDimLabelSprite(
   // goes beside the TEXT.
   sprite.userData.textWidthFraction =
     ctx.measureText(labelText).width / canvas.width;
+  sprite.userData.labelText = labelText;
   return sprite;
 }
 
@@ -321,9 +322,12 @@ export function addConstraintIconsToGroup(
       // put the marker back over the line, on top of that line's own markers.
       let markerSide = 1;
       if (isRadius) {
-        // Radius: leader from the centre out past the arc, tick at the arc.
+        // Stored as a radius, drawn as a diameter: a line across the whole
+        // circle through its centre, ticked where it meets the arc on both
+        // sides, running on past the arc to the label.
         const wLineTo = wB.clone().addScaledVector(dir, 0.35);
-        const leader = addDimSeg(wA, wLineTo);
+        const wFar = wA.clone().sub(wB).add(wA);
+        const leader = addDimSeg(wFar, wLineTo);
         tag(
           leader,
           { x: (posA.x + posB.x) / 2, y: (posA.y + posB.y) / 2 },
@@ -331,6 +335,7 @@ export function addConstraintIconsToGroup(
           dimColor,
         );
         addDimTick(wB, perpU);
+        addDimTick(wFar, perpU);
         labelPos = wLineTo.clone().addScaledVector(dir, 0.45);
         const rlen = Math.hypot(posB.x - posA.x, posB.y - posA.y) || 1;
         labelLocal = {
@@ -385,8 +390,10 @@ export function addConstraintIconsToGroup(
       // bare number), surface it on the label so the user can see which
       // variable / expression drives the dimension.  A bare-number string
       // ("10.5") is shown as just the mm value, matching the legacy look.
-      const valueMm = (resolvedDist * MM_PER_UNIT).toFixed(1);
-      const sprite = makeDimLabelSprite(`${isRadius ? "R " : ""}${valueMm}mm`, {
+      const valueMm = (resolvedDist * MM_PER_UNIT * (isRadius ? 2 : 1)).toFixed(
+        1,
+      );
+      const sprite = makeDimLabelSprite(`${isRadius ? "Ø " : ""}${valueMm}mm`, {
         theme,
         isFormula: isFormulaValue(c.distance),
         color: toCssHex(dimColor),

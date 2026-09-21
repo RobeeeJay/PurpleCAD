@@ -6,7 +6,12 @@
 import React from "react";
 import FormulaInput from "../FormulaInput";
 import { useStore } from "../../store";
-import { evaluateFormula, variablesToMap } from "../../utils/formulas.js";
+import {
+  diameterToRadiusFormula,
+  evaluateFormula,
+  radiusToDiameterFormula,
+  variablesToMap,
+} from "../../utils/formulas.js";
 import {
   MM_PER_UNIT,
   getShapePoint,
@@ -81,6 +86,18 @@ export default function SketchDistanceOverlay({
 
   if (!sketchMode || !sketchDistanceInput) return null;
 
+  // A circle's dimension is STORED as its radius (centre to edge) but shown
+  // and typed as its diameter; the field converts at both ends, so the stored
+  // constraint and every file format keep the radius.
+  const di0 = sketchDistanceInput;
+  const isDiameter =
+    !di0.cornerResize &&
+    di0.offsetConstraintIdx == null &&
+    !di0.pointLine &&
+    di0.shapeAIdx === di0.shapeBIdx &&
+    di0.pointA === "center" &&
+    di0.pointB === "edge";
+
   // What CHANGING this value does -- the field is reused for four different
   // constraints, and each one moves the sketch differently.
   const hint = sketchDistanceInput.cornerResize
@@ -89,7 +106,9 @@ export default function SketchDistanceOverlay({
       : "How far back from the corner each edge is cut. Bigger takes more off both lines."
     : sketchDistanceInput.offsetConstraintIdx != null
       ? "Distance the offset copy sits from the original. Negative offsets inward, which shrinks a closed loop."
-      : "Distance the constraint holds. Changing it re-solves the sketch and moves the geometry to suit.";
+      : isDiameter
+        ? "Diameter of the circle. Changing it re-solves the sketch and resizes the circle about its centre."
+        : "Distance the constraint holds. Changing it re-solves the sketch and moves the geometry to suit.";
 
   return (
     <div className="sketch-distance-input-overlay" title={hint}>
@@ -100,9 +119,13 @@ export default function SketchDistanceOverlay({
             : "Setback (mm):"
           : sketchDistanceInput.offsetConstraintIdx != null
             ? "Offset (mm):"
-            : sketchDistanceInput.constraintIdx != null
-              ? "Edit distance (mm):"
-              : "Distance (mm):"}
+            : isDiameter
+              ? sketchDistanceInput.constraintIdx != null
+                ? "Edit diameter (mm):"
+                : "Diameter (mm):"
+              : sketchDistanceInput.constraintIdx != null
+                ? "Edit distance (mm):"
+                : "Distance (mm):"}
       </span>
       <FormulaInput
         type="text"
@@ -120,8 +143,14 @@ export default function SketchDistanceOverlay({
         }
         defaultValue={
           typeof sketchDistanceInput.defaultDistance === "string"
-            ? sketchDistanceInput.defaultDistance
-            : (sketchDistanceInput.defaultDistance * MM_PER_UNIT).toFixed(2)
+            ? isDiameter
+              ? radiusToDiameterFormula(sketchDistanceInput.defaultDistance)
+              : sketchDistanceInput.defaultDistance
+            : (
+                sketchDistanceInput.defaultDistance *
+                MM_PER_UNIT *
+                (isDiameter ? 2 : 1)
+              ).toFixed(2)
         }
         onChange={(e) => {
           // Offset edits update live as you type: re-solve the copies (no
@@ -146,7 +175,10 @@ export default function SketchDistanceOverlay({
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === "Enter") {
-            const raw = e.target.value.trim();
+            // From here on everything works in the STORED unit: a typed
+            // diameter becomes the radius formula it is kept as.
+            const typed = e.target.value.trim();
+            const raw = isDiameter ? diameterToRadiusFormula(typed) : typed;
             // Quick validation: evaluate the formula against the current
             // variable map to ensure it produces a positive number; if not,
             // bail without committing so the user can fix their input.

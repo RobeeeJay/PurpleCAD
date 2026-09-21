@@ -692,6 +692,7 @@ export function attachCameraControls(ctx) {
                 // The whole label sprite's height (the text sits inside it).
                 halfHeightPx:
                   (icon.label.scale.y * rect.height) / visibleHeight / 2,
+                text: icon.label.userData.labelText,
               };
             })()
           : null,
