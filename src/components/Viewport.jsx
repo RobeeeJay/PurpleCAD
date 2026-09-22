@@ -6,6 +6,7 @@ import MeasureOverlay from "./MeasureOverlay";
 import PathTraceProgress from "./PathTraceProgress";
 import SketchOverlays from "./viewport/SketchOverlays";
 import ChamferOverlay from "./viewport/ChamferOverlay";
+import ComponentMotionOverlay from "./viewport/ComponentMotionOverlay";
 import PushPullOverlay from "./viewport/PushPullOverlay";
 import SweepOverlay from "./viewport/SweepOverlay";
 import StressOverlay from "./viewport/StressOverlay";
@@ -355,6 +356,7 @@ const Viewport = () => {
         selectItem={selectItem}
       />
       <ChamferOverlay />
+      <ComponentMotionOverlay />
       <PushPullOverlay />
       <SweepOverlay />
       <StressOverlay />

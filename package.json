@@ -127,6 +127,7 @@
     "three": "^0.185.1",
     "three-bvh-csg": "^0.0.18",
     "three-gpu-pathtracer": "^0.0.24",
+    "three-mesh-bvh": "^0.9.10",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

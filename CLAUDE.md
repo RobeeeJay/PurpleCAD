@@ -914,6 +914,18 @@ sources are picked) that reuses the creation UI.
   `constraintIconScreenPos`, which adds the offset; projecting
   `constraintIconLocalPos` alone aims at the anchor, where the marker no longer
   is (an e2e click that did that silently selected the point underneath).
+- **Components are the tree's folders.** The UI says "Component"; the data
+  model is still `folders` / `folder-N` ids. A component can carry a
+  `motion` (rotation about, or a slide along, a picked axis) -- saved on the
+  folder, and folders are now written into the .pcad (they used to be lost on
+  a file round trip). Playing a motion is DISPLAY ONLY
+  (`componentMotionTool.js` moves meshes from a captured rest pose and puts
+  them back); it never touches items or the timeline. Collision detection
+  (`componentCollision.js`, three-mesh-bvh) counts only surfaces that CROSS:
+  coplanar faces and faces meeting along a shared edge are contact, and pairs
+  already crossing at rest (a pin in its hole) are ignored for that run. The
+  BVH is built `indirect` -- by default it reorders the rendered geometry's
+  index in place, which picking reads.
 - **Text and the cog are "contour primitives": one shape, several cached closed
   outlines relative to its `x, y`, locked by a same-named constraint.** Their
   outlines bypass the pairwise-intersect loop finder (`closedLoops.js` feeds

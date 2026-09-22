@@ -40,6 +40,7 @@ export const TOOL_RESET_PATCH = {
   originDialogItemId: null,
   originVertexPick: null,
   pointToPointTool: null,
+  motionTool: null,
   selectionOverride: null,
   toolError: null,
 };

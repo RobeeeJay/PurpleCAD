@@ -4,6 +4,7 @@ import { constraintIconScreenPos } from "./sceneObjects/constraintIconSprites.js
 import { createHighlightHelpers } from "./cameraControls/highlights.js";
 import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
+import { createComponentMotionHelpers } from "./cameraControls/componentMotionTool.js";
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createShellPreviewHelpers } from "./cameraControls/shell.js";
 import { createHolePreviewHelpers } from "./cameraControls/hole.js";
@@ -391,6 +392,16 @@ export function attachCameraControls(ctx) {
   controls.updateChamferPreview = (distanceMm, angleDeg) =>
     chamferPreview.updateChamferPreview(distanceMm, angleDeg);
   controls.clearChamferPreview = () => chamferPreview.clearChamferPreview();
+
+  // Component motion: the dialog's reference pick and axis, and playing a
+  // component's motion with collision checks.
+  const componentMotion = createComponentMotionHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    cameraRef,
+  });
+  controls.componentMotionState = () => componentMotion.inspect();
 
   // Live preview for PushPullOverlay: re-runs the push/pull recipe against the
   // current selectedSubGeometry faces + distance and overlays the result.
@@ -1163,6 +1174,7 @@ export function attachCameraControls(ctx) {
     unsubMirror();
     unsubCentre();
     unsubCog();
+    componentMotion.dispose();
     unsubCircularPattern();
     unsubRectangularPattern();
   };

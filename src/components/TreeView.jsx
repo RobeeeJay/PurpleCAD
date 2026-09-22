@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
 import { getDescendantFolderIds, nextFolderId } from "../store/folderSlice.js";
 import { ComponentIcon, NewComponentIcon } from "./icons/componentIcons.jsx";
+import ComponentMotionButtons from "./ComponentMotionButtons.jsx";
 import "../styles/TreeView.css";
 
 const SketchObjectIcon = () => (
@@ -483,6 +484,7 @@ const TreeViewItem = ({
 
         {!editing && (
           <>
+            {isFolder && <ComponentMotionButtons folder={node} />}
             {!isFolder && (
               <button
                 className={`tree-action-btn visibility-btn ${isHidden ? "always-visible" : ""}`}
