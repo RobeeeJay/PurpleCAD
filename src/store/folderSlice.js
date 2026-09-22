@@ -1,4 +1,5 @@
-// Tree-view folders: purely organizational groupings for the Objects list.
+// Tree-view folders -- shown in the UI as Components: groupings of parts for
+// the Objects list, which can also carry a motion (see motionSlice.js).
 // Folders have no geometry and aren't part of the undo/redo timeline —
 // they're persisted to the kv store on their own. Folder ids are
 // "folder-N" strings so they never collide with numeric item ids when
@@ -30,7 +31,7 @@ export const createFolderSlice = (set) => ({
     set((state) => {
       const folder = {
         id: nextFolderId(state.folders),
-        name: "New Folder",
+        name: "New Component",
         parentId: parentId ?? null,
         expanded: true,
       };
