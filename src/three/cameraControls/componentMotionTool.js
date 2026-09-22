@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import {
   componentMembers,
+  faceCentreLocal,
   motionMatrix,
   motionValueAt,
   referenceFromPick,
@@ -37,7 +38,21 @@ export function createComponentMotionHelpers({
     const mesh = objectsRef.current[sel.itemId];
     if (!mesh) return;
     mesh.updateMatrixWorld(true);
-    const ref = referenceFromPick(sel, mesh.matrixWorld.elements);
+    // A rotation about a face turns about the perpendicular through the
+    // MIDDLE of that face, so the pick's own point on the face (for a
+    // primitive, wherever the click landed) is replaced by the face's centre
+    // -- or, for a primitive drawn on a box hull, by the body's own centre,
+    // which its faces are centred on anyway.
+    const face = sel.faces?.[0];
+    let centre = null;
+    if (face && face.cx != null)
+      centre =
+        faceCentreLocal(
+          mesh.geometry,
+          { x: face.nx, y: face.ny, z: face.nz },
+          { x: face.cx, y: face.cy, z: face.cz },
+        ) ?? (mesh.userData.hullGeometry ? { x: 0, y: 0, z: 0 } : null);
+    const ref = referenceFromPick(sel, mesh.matrixWorld.elements, centre);
     const store = useStore.getState();
     if (ref) store.setMotionReference(ref);
     else

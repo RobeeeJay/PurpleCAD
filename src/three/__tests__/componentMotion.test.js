@@ -10,6 +10,7 @@ vi.mock("../../store", () => ({
 
 import {
   componentMembers,
+  faceCentreLocal,
   motionMatrix,
   motionValueAt,
   referenceFromPick,
@@ -69,6 +70,62 @@ describe("the axis a picked piece of geometry defines", () => {
     expect(ref.kind).toBe("circle");
     close(ref.origin, { x: 5, y: 1, z: -3 });
     expect(Math.abs(ref.dir.y)).toBeCloseTo(1, 9);
+  });
+
+  // A rotation about a face turns about the perpendicular through the MIDDLE
+  // of the face; the pick itself only records a point somewhere ON it.
+  it("a face's centre is its middle, wherever on it the click landed", () => {
+    const box = new THREE.BoxGeometry(4, 2, 6);
+    const centre = faceCentreLocal(
+      box,
+      { x: 0, y: 1, z: 0 },
+      { x: 1.7, y: 1, z: -2.4 }, // clicked near a corner of the top face
+    );
+    close(centre, { x: 0, y: 1, z: 0 }, 6);
+  });
+
+  it("weighs the face's triangles by area, not by how it is cut up", () => {
+    // A 4 x 2 strip in the z = 0 plane, split at x = 3: the left piece is one
+    // big triangle pair, the right is chopped into many small ones.  Their
+    // vertices average well right of centre; the face's middle is x = 0.
+    const verts = [];
+    const quad = (x0, x1) => {
+      verts.push(x0, -1, 0, x1, -1, 0, x1, 1, 0);
+      verts.push(x0, -1, 0, x1, 1, 0, x0, 1, 0);
+    };
+    quad(-2, 1);
+    for (let i = 0; i < 8; i++) quad(1 + i * 0.125, 1 + (i + 1) * 0.125);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(verts), 3),
+    );
+    const centre = faceCentreLocal(
+      geo,
+      { x: 0, y: 0, z: 1 },
+      { x: 0, y: 0, z: 0 },
+    );
+    // The strip runs x -2..2, so its middle is 0 -- a vertex average would
+    // sit around x 1.2, pulled by the finely cut end.
+    expect(centre.x).toBeCloseTo(0, 6);
+    expect(centre.y).toBeCloseTo(0, 6);
+  });
+
+  it("has no centre on geometry that isn't in that plane (a primitive's hull)", () => {
+    const box = new THREE.BoxGeometry(2, 2, 2);
+    expect(
+      faceCentreLocal(box, { x: 0, y: 1, z: 0 }, { x: 0, y: 5, z: 0 }),
+    ).toBeNull();
+  });
+
+  it("the face's centre is used for the axis when one is given", () => {
+    const ref = referenceFromPick(
+      { faces: [{ nx: 0, ny: 1, nz: 0, cx: 1.7, cy: 1, cz: -2.4 }] },
+      IDENTITY,
+      { x: 0, y: 1, z: 0 },
+    );
+    close(ref.origin, { x: 0, y: 1, z: 0 });
+    close(ref.dir, { x: 0, y: 1, z: 0 });
   });
 
   it("nothing picked defines nothing", () => {

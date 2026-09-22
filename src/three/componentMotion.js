@@ -11,15 +11,65 @@ import { MM_PER_UNIT } from "./sceneObjects/dimensions.js";
 const v3 = (p) => new THREE.Vector3(p.x, p.y, p.z);
 const plain = (v) => ({ x: v.x, y: v.y, z: v.z });
 
+// The middle of the flat face a pick landed on, in the mesh's local frame:
+// the area-weighted centre of every triangle lying in the picked plane, so a
+// face tessellated more finely down one side still centres correctly.  Null
+// when the geometry has no triangles in that plane (an analytic primitive is
+// drawn on a box hull, so the caller falls back to the body's own centre).
+export function faceCentreLocal(geometry, normal, sample) {
+  const pos = geometry?.attributes?.position;
+  if (!pos) return null;
+  const idx = geometry.index;
+  const n = v3(normal).normalize();
+  const offset = n.dot(v3(sample));
+  const a = new THREE.Vector3(),
+    b = new THREE.Vector3(),
+    c = new THREE.Vector3();
+  const ab = new THREE.Vector3(),
+    ac = new THREE.Vector3(),
+    tn = new THREE.Vector3();
+  const sum = new THREE.Vector3();
+  let area = 0;
+  const count = idx ? idx.count : pos.count;
+  for (let t = 0; t + 2 < count; t += 3) {
+    const [i, j, k] = idx
+      ? [idx.getX(t), idx.getX(t + 1), idx.getX(t + 2)]
+      : [t, t + 1, t + 2];
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, j);
+    c.fromBufferAttribute(pos, k);
+    ab.subVectors(b, a);
+    ac.subVectors(c, a);
+    tn.crossVectors(ab, ac);
+    const twiceArea = tn.length();
+    if (twiceArea < 1e-12) continue;
+    tn.multiplyScalar(1 / twiceArea);
+    if (tn.dot(n) < 1 - 1e-4) continue; // faces another way
+    if (Math.abs(n.dot(a) - offset) > 1e-4) continue; // another plane
+    sum.addScaledVector(
+      a
+        .add(b)
+        .add(c)
+        .multiplyScalar(1 / 3),
+      twiceArea,
+    );
+    area += twiceArea;
+  }
+  return area > 0 ? plain(sum.multiplyScalar(1 / area)) : null;
+}
+
 // The axis a picked piece of geometry defines, in world space.  `pick` is a
 // sub-geometry selection as the 3D view records it (in the mesh's local frame)
-// and `matrixWorld` the picked mesh's world matrix:
-//   - a flat face: through its centre, along its normal;
+// and `matrixWorld` the picked mesh's world matrix.  `faceCentre`, when given,
+// replaces the pick's own sample point -- the 3D view records a point ON the
+// face (the raw hit point for a primitive), and a rotation wants the face's
+// middle:
+//   - a flat face: through its centre, along its normal (perpendicular to it);
 //   - a curved chain of edges (a hole's rim, a boss's edge): through the
 //     circle's centre, along the circle's normal;
 //   - a straight edge: along the edge.
 // Returns { origin, dir, kind } or null when the pick defines no axis.
-export function referenceFromPick(pick, matrixWorld) {
+export function referenceFromPick(pick, matrixWorld, faceCentre = null) {
   const m = new THREE.Matrix4().fromArray(matrixWorld);
   const toWorld = (p) => v3(p).applyMatrix4(m);
   const face = pick?.faces?.[0];
@@ -27,8 +77,11 @@ export function referenceFromPick(pick, matrixWorld) {
     const dir = new THREE.Vector3(face.nx, face.ny, face.nz)
       .transformDirection(m)
       .normalize();
-    if (face.cx == null) return null;
-    const origin = toWorld({ x: face.cx, y: face.cy, z: face.cz });
+    const at =
+      faceCentre ??
+      (face.cx == null ? null : { x: face.cx, y: face.cy, z: face.cz });
+    if (!at) return null;
+    const origin = toWorld(at);
     return { origin: plain(origin), dir: plain(dir), kind: "face" };
   }
   const edges = pick?.edges || [];

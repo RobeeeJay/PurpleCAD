@@ -209,16 +209,23 @@ test.describe.serial("component motion", () => {
     await expect
       .poll(async () => (await state()).motionTool.picking)
       .toBe(true);
-    // The lid's top face: spin about the vertical through its centre.
+    // The lid's top face, clicked well off centre: the rotation still turns
+    // about the perpendicular through the MIDDLE of that face.
     await page.evaluate(
       (id) =>
         window.__store.getState().setSelectedSubGeometry({
           itemId: id,
           edges: [],
-          faces: [{ nx: 0, ny: 1, nz: 0, cx: 0, cy: 1, cz: 0 }],
+          faces: [{ nx: 0, ny: 1, nz: 0, cx: 0.8, cy: 1, cz: -0.6 }],
         }),
       LID,
     );
+    const ref = (await state()).motionTool.reference;
+    // The cube is 20 mm and sits at y 1, so its top face's centre is (0, 2, 0).
+    expect(ref.origin.x).toBeCloseTo(0, 6);
+    expect(ref.origin.y).toBeCloseTo(2, 6);
+    expect(ref.origin.z).toBeCloseTo(0, 6);
+    expect(ref.dir.y).toBeCloseTo(1, 6);
     await dialog().getByRole("button", { name: "Rotation" }).click();
     await dialog().getByLabel("Detect collisions").uncheck();
     await dialog().getByRole("button", { name: "Confirm" }).click();
