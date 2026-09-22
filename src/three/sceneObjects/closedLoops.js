@@ -25,6 +25,7 @@ export {
   polyCentroid,
   polyAreaCentroid,
   polyArea,
+  profileAnchor,
 } from "./polygonUtil.js";
 
 export function findClosedLoopsWithShapes(
@@ -538,4 +539,37 @@ export function groupLoopsWithHoles(loops) {
   return loops
     .map((_, i) => (parents[i] === -1 ? buildEntry(i) : null))
     .filter(Boolean);
+}
+
+// Every region of a sketch — roots and nested alike — each tagged with the
+// sketch shapes its boundary came from.  A text / cog / SVG profile records
+// WHICH shape it was extruded from (`textShapeIdx`), and that survives the
+// shape being moved or resized, which neither the stored outline nor the
+// stored click anchor does; the rebuild matches on it so a shape drawn where
+// the old one used to be can't capture the extrude.
+export function regionsWithShapes(
+  shapes,
+  curveSegments = 32,
+  precision = null,
+) {
+  const loops = findClosedLoopsWithShapes(shapes, curveSegments, precision);
+  const byPolygon = new Map(loops.map((l) => [l.polygon, l.shapeIndices]));
+  const all = [];
+  const collect = (e) => {
+    all.push({ ...e, shapeIndices: byPolygon.get(e.polygon) || [] });
+    e.entries.forEach(collect);
+  };
+  groupLoopsWithHoles(loops.map((l) => l.polygon)).forEach(collect);
+  return all;
+}
+
+// Narrow a sketch's regions to those built from the profile's own shape, when
+// the profile names one.  Returns the full set when nothing matches (the shape
+// was deleted, or its index no longer resolves), so matching degrades to
+// geometry rather than failing.
+export function regionsForProfile(regions, profile) {
+  const idx = profile?.textShapeIdx;
+  if (idx == null) return regions;
+  const own = regions.filter((g) => g.shapeIndices.includes(idx));
+  return own.length > 0 ? own : regions;
 }

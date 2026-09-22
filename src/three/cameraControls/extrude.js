@@ -12,7 +12,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { resolveItemDepth, formatAsFormula } from "../geometryParams.js";
-import { polyArea, polyCentroid } from "../sceneObjects.js";
+import { polyArea, polyCentroid, polyContainsPoint } from "../sceneObjects.js";
 import {
   makeExtrudePreviewMesh,
   extractFaceProfile,
@@ -331,8 +331,20 @@ export function createExtrudeHelpers(
         fills.map((f) => f.userData.extrudeProfile),
       );
       const best = i >= 0 ? fills[i] : null;
+      // Keep the original click anchor only while it still lies inside the
+      // matched region.  Carrying a stale one forward is how an edited extrude
+      // ends up anchored on empty sketch space, which a shape drawn there
+      // later then captures.
+      const live = best?.userData.extrudeProfile;
+      const keep =
+        sp.profileCentroid &&
+        live &&
+        polyContainsPoint(live.polygon2D, sp.profileCentroid);
       if (best && !picked.some((p) => p.fill === best))
-        picked.push({ fill: best, pc: sp.profileCentroid });
+        picked.push({
+          fill: best,
+          pc: keep ? sp.profileCentroid : live.profileCentroid,
+        });
     }
     if (!picked.length) return;
     extrudeProfileList = picked.map(({ fill, pc }) => ({

@@ -821,6 +821,24 @@ Established landmines (each was a real bug — extend this list, never shrink it
   item-id lookup silently misses and every export falls back to the slow rebuild —
   the exact bug this replaced.
 
+- **An extrude's profile is matched back to its sketch by a stale POINT — a
+  later shape drawn there steals it.** `profileCentroid` is the point that was
+  CLICKED at create time; nothing moves it when the sketch is edited, and the
+  retarget preselect deliberately carried it over. Move the shape and draw a
+  new one over the abandoned spot and the rebuild hands the extrude to the new
+  shape (a second cog in one sketch swapped a 20-tooth gear for a 28-tooth one
+  — geometry AND position). Matching now narrows to the shape the profile was
+  built from (`textShapeIdx`, via `regionsForProfile`/`regionsWithShapes` in
+  `closedLoops.js`) before any geometry test, falling back to geometry when
+  that index no longer resolves (a deleted shape renumbers the rest), and
+  `profileAnchor` refuses to containment-test an anchor that has fallen outside
+  its own stored outline. **An op's FROZEN source is the case to test**: the
+  extrude ITEM's outline is kept live, so every single-function check on it
+  passed while the chamfer — which rebuilds from a snapshot whose outline and
+  anchor are stale TOGETHER — still came out on the wrong cog.
+  `extrudeStaleAnchor.test.js` drives the real document through the store and a
+  full recalc for exactly that reason.
+
 - **Frozen sources nest — NEVER let dense meshes ride the chain.** Each op's
   `regenerator.source` snapshot contains the prior item INCLUDING its
   `geometryData` and ITS nested source… stacking ops on one body stores

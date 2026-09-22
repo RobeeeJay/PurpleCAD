@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
+import fs from "node:fs";
 
 // The sketch Cog tool, driven the way a person uses it: the Draw section's
 // last button opens the dialog with its Centre button live, a click places the
@@ -231,5 +232,88 @@ test.describe.serial("sketch Cog tool", () => {
     // Still exactly one cog: the earlier one.
     expect(after.shapes.filter((s) => s.type === "cog")).toHaveLength(1);
     expect(after.constraints.filter((c) => c.type === "cog")).toHaveLength(1);
+  });
+
+  // Regression, from a saved document: an extrude is matched back to its
+  // sketch loop through the point that was CLICKED when it was made, and an
+  // edit had left that point on bare sketch space.  Drawing a second cog over
+  // that spot handed the first cog's extrude to the new cog -- the body on
+  // screen jumped from one gear to the other, while the timeline's Edit still
+  // highlighted the right one.  This is the RENDERED body, so only e2e sees it.
+  test("a second cog in the sketch leaves the first cog's extrude on the first cog", async ({}, testInfo) => {
+    const doc = JSON.parse(
+      fs.readFileSync("test-files/extrude-jump.pcad", "utf8"),
+    );
+    await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
+    // loadDocument starts the recalculation asynchronously, so give it a moment
+    // to appear before waiting for it to go -- checking straight away passed
+    // while the rebuild had not begun, and measured a half-built scene.
+    await page.waitForTimeout(1000);
+    await expect(page.getByText(/Recalculating/)).toBeHidden({
+      timeout: 60000,
+    });
+    await page.waitForTimeout(500);
+
+    const cogs = await page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.find((i) => i.type === "sketch")
+        .shapes.filter((s) => s.type === "cog")
+        .map((s) => ({
+          x: s.x,
+          y: s.y,
+          pitch: s.pitchDiameter,
+          teeth: s.teeth,
+        })),
+    );
+    expect(cogs).toHaveLength(2);
+
+    // The extruded body's world bounding box, in scene units.
+    const box = await page.evaluate(() => {
+      const d = window.__store.getState()._cameraControls.meshWorldData(2);
+      const m = d.matrix;
+      const lo = [Infinity, Infinity, Infinity];
+      const hi = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < d.positions.length; i += 3) {
+        const [x, y, z] = [
+          d.positions[i],
+          d.positions[i + 1],
+          d.positions[i + 2],
+        ];
+        const w = [
+          m[0] * x + m[4] * y + m[8] * z + m[12],
+          m[1] * x + m[5] * y + m[9] * z + m[13],
+          m[2] * x + m[6] * y + m[10] * z + m[14],
+        ];
+        for (let k = 0; k < 3; k++) {
+          lo[k] = Math.min(lo[k], w[k]);
+          hi[k] = Math.max(hi[k], w[k]);
+        }
+      }
+      return { lo, hi };
+    });
+    const centre = box.lo.map((v, k) => (v + box.hi[k]) / 2);
+    const span = Math.max(box.hi[0] - box.lo[0], box.hi[2] - box.lo[2]);
+
+    // Tip diameter = pitch + 2 modules.  A cog SHAPE holds its pitch diameter
+    // in scene units (the dialog's field is the mm one).
+    const tip = (c) => c.pitch + (2 * c.pitch) / c.teeth;
+    expect(span, "spans cog 1, not cog 2").toBeCloseTo(tip(cogs[0]), 1);
+    expect(Math.abs(span - tip(cogs[1]))).toBeGreaterThan(0.5);
+
+    // The sketch lies on the ground, so local (x, y) is world (x, 0, -y),
+    // offset by the sketch's own position.
+    const sketchPos = await page.evaluate(
+      () =>
+        window.__store.getState().items.find((i) => i.type === "sketch")
+          .position,
+    );
+    const worldOf = (c) => [sketchPos.x + c.x, sketchPos.z - c.y];
+    const [wx1, wz1] = worldOf(cogs[0]);
+    const [wx2, wz2] = worldOf(cogs[1]);
+    const near = (x, z) => Math.hypot(centre[0] - x, centre[2] - z);
+    expect(near(wx1, wz1), "sits over cog 1").toBeLessThan(0.3);
+    expect(near(wx2, wz2), "nowhere near cog 2").toBeGreaterThan(1);
+    await snap(testInfo, "two-cogs-one-extrude");
   });
 });

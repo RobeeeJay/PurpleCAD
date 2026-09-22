@@ -70,6 +70,24 @@ export function polyAreaCentroid(poly) {
   return { x: cx / (3 * a2), y: cy / (3 * a2) };
 }
 
+// Which point an extrude's stored profile should be matched against when its
+// loop is re-derived from the live sketch.  `profileCentroid` is the point that
+// was CLICKED when the extrude was made (deliberately, since a click is always
+// inside its own region while a centroid need not be) and nothing moves it when
+// the sketch is edited.  Once an edit has taken the shape out from under it,
+// the anchor is a bare coordinate in the sketch — and a shape drawn there LATER
+// swallows it, handing the extrude to that shape.  So an anchor that no longer
+// lies inside its own stored polygon is stale: fall back to the polygon's own
+// centroid, which moves with the shape, and tell the caller not to trust a
+// containment test with it.
+export function profileAnchor(profile) {
+  const poly = profile?.polygon2D;
+  const pc = profile?.profileCentroid;
+  if (!Array.isArray(poly) || poly.length < 3) return { pc, inside: !!pc };
+  if (pc && polyContainsPoint(poly, pc)) return { pc, inside: true };
+  return { pc: polyCentroid(poly), inside: false };
+}
+
 export function polyArea(poly) {
   let a = 0;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++)

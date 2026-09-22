@@ -15,12 +15,13 @@ import {
 import { resolveItemDepth } from "../geometryParams.js";
 import { DEFAULT_MATERIAL } from "../materialPresets.js";
 import {
-  findClosedLoops,
-  groupLoopsWithHoles,
+  regionsWithShapes,
+  regionsForProfile,
   polyContainsPoint,
   polyCentroid,
   polyAreaCentroid,
   polyArea,
+  profileAnchor,
   withWinding,
 } from "./closedLoops.js";
 import {
@@ -194,24 +195,20 @@ export function buildSceneObjects(
         if (profile.sketchId != null) {
           const sketchItem = items.find((si) => si.id === profile.sketchId);
           if (sketchItem && sketchItem.shapes && sketchItem.shapes.length > 0) {
-            const allLoops = findClosedLoops(
-              sketchItem.shapes,
-              curveSegments,
-              precision,
+            // Every region, roots and descendants alike, so a sub-region
+            // like the part of a circle inside a rectangle can be matched —
+            // narrowed to the profile's own shape where it names one (a cog
+            // or a text glyph), which survives that shape being moved.
+            const allEntries = regionsForProfile(
+              regionsWithShapes(sketchItem.shapes, curveSegments, precision),
+              profile,
             );
-            const grouped = groupLoopsWithHoles(allLoops);
-            if (grouped.length > 0) {
-              // Search every entry in the hierarchy (roots and all
-              // descendants) so that sub-regions like the part of a
-              // circle inside a rectangle can be matched — those are
-              // children of a root, not roots themselves.
-              const allEntries = [];
-              const collect = (e) => {
-                allEntries.push(e);
-                e.entries.forEach(collect);
-              };
-              grouped.forEach(collect);
-              const pc = profile.profileCentroid;
+            if (allEntries.length > 0) {
+              // profileAnchor drops a stale click anchor — one a sketch edit
+              // has left outside its own polygon — so a shape drawn over that
+              // point later can't capture this extrude (mirrors
+              // extrudeWithLivePolygon).
+              const { pc, inside } = profileAnchor(profile);
               // Use polyContainsPoint rather than nearest-centroid
               // distance so that the match is resolution-independent.
               // At higher curve segment counts the arithmetic-mean
@@ -222,9 +219,9 @@ export function buildSceneObjects(
               // the arc is split into.
               let match = allEntries[0];
               if (pc) {
-                let containing = allEntries.filter((g) =>
-                  polyContainsPoint(g.polygon, pc),
-                );
+                let containing = inside
+                  ? allEntries.filter((g) => polyContainsPoint(g.polygon, pc))
+                  : [];
                 // A ring's inner loop is emitted BOTH as the outer entry's hole
                 // AND as a standalone disc with the same centroid; the area
                 // tiebreak (vs the stale stored area) then picks the disc after

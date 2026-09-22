@@ -4,10 +4,11 @@ import {
   polyCentroid,
   polyAreaCentroid,
   polyArea,
+  profileAnchor,
 } from "./sceneObjects/polygonUtil.js";
 import {
-  findClosedLoops,
-  groupLoopsWithHoles,
+  regionsWithShapes,
+  regionsForProfile,
   withWinding,
 } from "./sceneObjects/closedLoops.js";
 
@@ -88,23 +89,26 @@ export function extrudeWithLivePolygon(item, allItems, precision) {
   const sketch = allItems.find((i) => i.id === profile.sketchId);
   if (!sketch || !Array.isArray(sketch.shapes) || sketch.shapes.length === 0)
     return item;
-  const loops = findClosedLoops(sketch.shapes, 32, precision);
-  if (!loops || loops.length === 0) return item;
-  const grouped = groupLoopsWithHoles(loops);
-  const allEntries = [];
-  const collect = (e) => {
-    allEntries.push(e);
-    e.entries.forEach(collect);
-  };
-  grouped.forEach(collect);
+  // Narrowed to the profile's OWN sketch shape where it names one: a cog or a
+  // text glyph keeps its shape index, and an op's FROZEN source carries an
+  // outline and an anchor that are both stale together once that shape has
+  // moved, so geometry alone cannot tell it from a shape drawn where it used
+  // to be.
+  const allEntries = regionsForProfile(
+    regionsWithShapes(sketch.shapes, 32, precision),
+    profile,
+  );
   if (allEntries.length === 0) return item;
-  const pc = profile.profileCentroid;
+  // A stale click anchor (one no longer inside its own polygon) must not be
+  // containment-tested: a shape drawn later over that point steals the profile
+  // — a second cog in the sketch moved the first cog's extrude onto it.
+  const { pc, inside } = profileAnchor(profile);
   const storedArea = polyArea(profile.polygon2D);
   let match = allEntries[0];
   if (pc) {
-    const containing = allEntries.filter((g) =>
-      polyContainsPoint(g.polygon, pc),
-    );
+    const containing = inside
+      ? allEntries.filter((g) => polyContainsPoint(g.polygon, pc))
+      : [];
     let pool = containing.length > 0 ? containing : allEntries;
     // A ring's inner loop shows up BOTH as the outer entry's hole AND as a
     // spurious standalone disc entry with the SAME centroid — so the distance
@@ -119,7 +123,7 @@ export function extrudeWithLivePolygon(item, allItems, precision) {
       );
       if (withHoles.length > 0) pool = withHoles;
     }
-    // Rank by spatial distance from the stored centroid first, area only as a
+    // Rank by spatial distance from the anchor first, area only as a
     // tiebreaker.  Area-alone fallback once mismatched a glyph whose centroid
     // (in its counter) stopped landing inside its own re-simplified loop to a
     // same-area letter elsewhere in the word — collapsing the real one.
