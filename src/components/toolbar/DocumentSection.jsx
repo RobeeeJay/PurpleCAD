@@ -22,6 +22,7 @@ const DocumentSection = () => {
   const items = useStore((s) => s.items);
   const curveResolution = useStore((s) => s.curveResolution);
   const variables = useStore((s) => s.variables);
+  const folders = useStore((s) => s.folders);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
   const cameraControls = useStore((s) => s._cameraControls);
   const selectedId = useStore((s) => s.selectedId);
@@ -95,6 +96,9 @@ const DocumentSection = () => {
             history: packHistory(history),
             activeHistoryId,
             variables,
+            // Components (tree folders) and their motions: not part of the
+            // timeline, but a reopened file without them has lost its setup.
+            folders,
           },
           null,
           2,

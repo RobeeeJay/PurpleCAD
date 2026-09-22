@@ -80,7 +80,9 @@ export const createDocumentSlice = (set) => ({
       );
       const variables = Array.isArray(data.variables) ? data.variables : [];
       saveVariables(variables);
-      saveFolders([]);
+      // Files saved before components were written into them have none.
+      const folders = Array.isArray(data.folders) ? data.folders : [];
+      saveFolders(folders);
       return {
         items,
         history: withOrphanFlags(history),
@@ -91,7 +93,7 @@ export const createDocumentSlice = (set) => ({
         undoStack: [],
         redoStack: [],
         variables,
-        folders: [],
+        folders,
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),
