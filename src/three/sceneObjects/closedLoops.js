@@ -16,6 +16,7 @@ import {
 } from "./loopIntersect.js";
 import { polyContainsPoint, polyCentroid, polyArea } from "./polygonUtil.js";
 import { cogShapeContours } from "../cogGeometry.js";
+import { MM_PER_UNIT } from "./dimensions.js";
 
 export {
   signedPolyAreaXY,
@@ -55,7 +56,11 @@ export function findClosedLoopsWithShapes(
   const textLoops = [];
   shapes.forEach((s, i) => {
     if (s.type === "cog") {
-      for (const polygon of cogShapeContours(s))
+      // At the active resolution, like the circles and arcs around it -- the
+      // cached outline is a fixed coarse one, and an extruded cog made from
+      // it never got finer with "high resolution".
+      const tol = precision != null ? precision / MM_PER_UNIT : null;
+      for (const polygon of cogShapeContours(s, tol))
         if (polygon.length >= 3) textLoops.push({ polygon, shapeIndices: [i] });
       return;
     }

@@ -19,11 +19,28 @@
 export const COG_PRESSURE_ANGLE = (20 * Math.PI) / 180;
 export const COG_MIN_TEETH = 6;
 
-// Samples per involute flank; the outline's other arcs are short enough that a
-// few points each keep them round at any sensible size.
+// Fixed sample counts: the outline cached on the shape, and the FLOOR for every
+// resolution.  They already hold the outline to about 0.005 mm on a 40 mm gear
+// -- finer than the high-resolution setting's 0.01 mm -- so at the default
+// settings a cog looks the same either way, and only a finer print precision
+// adds points.  Going coarser at preview, as circles do, was tried and
+// measured: the coarse outline let a 1 mm bevel through the validity checks
+// that refuse it on this outline, and the same 0.2 mm bevel took 14 s once and
+// 940 s the next time, against a steady 12 s here.
 const FLANK_SAMPLES = 10;
 const FILLET_SAMPLES = 6;
 const HOLE_SAMPLES = 64;
+const MAX_SAMPLES = 256;
+
+// Segments for an arc of radius r spanning `angle` so no chord strays more
+// than `tol` from it -- the rule sketch circles and arcs use (arcSegsN).
+// Never fewer than the fixed count `fallback` (see above).
+function arcCount(r, angle, tol, fallback) {
+  if (!(tol > 0) || !(r > 0)) return fallback;
+  const half = Math.acos(Math.max(-1, Math.min(1, 1 - tol / r)));
+  const n = Math.ceil(Math.abs(angle) / (2 * half));
+  return Math.max(fallback, Math.min(MAX_SAMPLES, n));
+}
 
 const inv = (a) => Math.tan(a) - a;
 
@@ -73,13 +90,26 @@ const polar = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
 // The left flank of the tooth centred on angle 0 (the +angle side), sampled
 // from radius r0 up to the tip, plus the local line its lowest part follows:
 // a radial line below the base circle, the involute's own tangent otherwise.
-function leftFlank(R, halfPitchAngle) {
+function leftFlank(R, halfPitchAngle, tol) {
   const r0 = Math.max(R.base, R.root);
   const t0 = Math.sqrt(Math.max(0, (r0 / R.base) ** 2 - 1));
   const t1 = Math.sqrt((R.tip / R.base) ** 2 - 1);
+  // The involute's radius of curvature is base radius x t, largest at the tip,
+  // so a step dt there bows base * t1 * dt^2 / 8 off its chord: size dt so
+  // that stays within tol everywhere.
+  const n =
+    tol > 0
+      ? Math.max(
+          FLANK_SAMPLES,
+          Math.min(
+            MAX_SAMPLES,
+            Math.ceil((t1 - t0) / Math.sqrt((8 * tol) / (R.base * t1))),
+          ),
+        )
+      : FLANK_SAMPLES;
   const involute = [];
-  for (let i = 0; i <= FLANK_SAMPLES; i++) {
-    const t = t0 + ((t1 - t0) * i) / FLANK_SAMPLES;
+  for (let i = 0; i <= n; i++) {
+    const t = t0 + ((t1 - t0) * i) / n;
     const r = R.base * Math.sqrt(1 + t * t);
     involute.push({ r, a: halfAngleAt(r, R, halfPitchAngle) });
   }
@@ -166,13 +196,15 @@ const rotate = (p, a) => ({
 // The gear's closed contours relative to its centre: the outline, then the
 // centre hole when it has one.  `filletUsed` is the root fillet actually drawn,
 // which is smaller than the one asked for when that doesn't fit the gap.
-export function cogOutline(p) {
+// `tol`, when given, is the largest a chord may stray from the true curve (in
+// the same unit as the parameters); without it the fixed counts are used.
+export function cogOutline(p, tol = null) {
   const { teeth, backlash, rootFillet, holeDiameter } = p;
   const R = cogRadii(p);
   const halfPitchAngle =
     ((Math.PI * R.module) / 2 - backlash / 2) / (2 * R.pitch);
   const gapHalfAngle = Math.PI / teeth;
-  const { involute, line } = leftFlank(R, halfPitchAngle);
+  const { involute, line } = leftFlank(R, halfPitchAngle, tol);
   const fillet = fittingFillet(line, R, rootFillet, gapHalfAngle);
 
   // One tooth and the half-gaps either side, centred on angle 0, walked
@@ -194,8 +226,17 @@ export function cogOutline(p) {
   // which OCC's wire builder rejects.
   let rootStart;
   if (fillet) {
+    const sweep =
+      Math.atan2(fillet.onRoot.y - fillet.c.y, fillet.onRoot.x - fillet.c.x) -
+      Math.atan2(fillet.onFlank.y - fillet.c.y, fillet.onFlank.x - fillet.c.x);
+    const turn = Math.abs(Math.atan2(Math.sin(sweep), Math.cos(sweep)));
     leftDown.push(
-      ...arcPoints(fillet.c, fillet.onFlank, fillet.onRoot, FILLET_SAMPLES),
+      ...arcPoints(
+        fillet.c,
+        fillet.onFlank,
+        fillet.onRoot,
+        arcCount(fillet.rf, turn, tol, FILLET_SAMPLES),
+      ),
     );
     rootStart = Math.atan2(fillet.onRoot.y, fillet.onRoot.x);
   } else {
@@ -206,15 +247,21 @@ export function cogOutline(p) {
   }
   // The root from the fillet to mid-gap, where the next unit starts.
   const rootHalf = [];
-  for (let i = 1; i <= 2; i++)
+  const rootN = arcCount(R.root, gapHalfAngle - rootStart, tol, 2);
+  for (let i = 1; i <= rootN; i++)
     rootHalf.push(
-      polar(R.root, rootStart + ((gapHalfAngle - rootStart) * i) / 2),
+      polar(R.root, rootStart + ((gapHalfAngle - rootStart) * i) / rootN),
     );
 
   const left = [...leftDown, ...rootHalf];
   const right = left.map(mirror).reverse(); // mid-gap (below) up to the tip
-  // Across the tip, along the tip circle: its two corners plus its middle.
-  const unit = [...right, polar(R.tip, 0), ...left];
+  // Across the tip, along the tip circle, between its two corners.
+  const tipHalf = Math.atan2(left[0].y, left[0].x);
+  const tipN = arcCount(R.tip, 2 * tipHalf, tol, 2);
+  const tipArc = [];
+  for (let i = 1; i < tipN; i++)
+    tipArc.push(polar(R.tip, -tipHalf + (2 * tipHalf * i) / tipN));
+  const unit = [...right, ...tipArc, ...left];
 
   const outline = [];
   for (let k = 0; k < teeth; k++) {
@@ -227,9 +274,10 @@ export function cogOutline(p) {
   const contours = [outline];
   if (holeDiameter > 0) {
     const rh = holeDiameter / 2;
+    const holeN = arcCount(rh, 2 * Math.PI, tol, HOLE_SAMPLES);
     const hole = [];
-    for (let i = 0; i < HOLE_SAMPLES; i++)
-      hole.push(polar(rh, (2 * Math.PI * i) / HOLE_SAMPLES));
+    for (let i = 0; i < holeN; i++)
+      hole.push(polar(rh, (2 * Math.PI * i) / holeN));
     contours.push(hole);
   }
   return { contours, filletUsed: fillet ? fillet.rf : 0, radii: R };
@@ -254,10 +302,15 @@ export function makeCogShape({ x, y, ...params }) {
 }
 
 // A cog shape's contours in sketch coordinates: turned by its rotation (a
-// rotate tool sets one) and placed at its centre.
-export function cogShapeContours(shape) {
+// rotate tool sets one) and placed at its centre.  With a tolerance the outline
+// is rebuilt at that resolution; without, the cached one is used.
+export function cogShapeContours(shape, tol = null) {
   const a = shape.rotation || 0;
-  return (shape.contours || cogOutline(shape).contours).map((c) =>
+  const rel =
+    tol > 0
+      ? cogOutline(shape, tol).contours
+      : shape.contours || cogOutline(shape).contours;
+  return rel.map((c) =>
     c.map((q) => {
       const r = a ? rotate(q, a) : q;
       return { x: r.x + shape.x, y: r.y + shape.y };

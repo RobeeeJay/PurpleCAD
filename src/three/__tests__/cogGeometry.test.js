@@ -225,3 +225,98 @@ describe("a cog in a sketch", () => {
     expect(a1 - a0).toBeCloseTo(half, 12);
   });
 });
+
+describe("a cog at the active resolution", () => {
+  // The resolution setting is a chord tolerance.  A cog's fixed outline is
+  // already within ~0.005 mm on a 40 mm gear, finer than even high resolution
+  // (0.01 mm), so it is the floor: a tolerance only ever adds points.  Going
+  // coarser at preview was measured to destabilise OCC's bevels on it.
+  const segDist = (p, a, b) => {
+    const dx = b.x - a.x,
+      dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy || 1e-30;
+    const t = Math.max(
+      0,
+      Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2),
+    );
+    return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+  };
+  // How far the true outline (sampled very finely) strays from a polyline.
+  const worstError = (poly, truth) =>
+    Math.max(
+      ...truth.map((p) =>
+        Math.min(
+          ...poly.map((a, i) => segDist(p, a, poly[(i + 1) % poly.length])),
+        ),
+      ),
+    );
+
+  it("gets finer as the tolerance tightens, staying within it", () => {
+    const truth = cogOutline(GEAR, 3e-5).contours;
+    let previous = 0;
+    // Below the ~0.005 the fixed outline already achieves on this 40-unit gear.
+    for (const tol of [0.004, 0.001, 0.0003]) {
+      const [outline, hole] = cogOutline(GEAR, tol).contours;
+      expect(outline.length, `tol ${tol}`).toBeGreaterThan(previous);
+      previous = outline.length;
+      expect(
+        worstError(outline, truth[0]),
+        `outline, tol ${tol}`,
+      ).toBeLessThanOrEqual(tol);
+      expect(
+        worstError(hole, truth[1]),
+        `hole, tol ${tol}`,
+      ).toBeLessThanOrEqual(tol);
+    }
+  });
+
+  it("stays one clean loop at every resolution", () => {
+    for (const tol of [0.1, 0.01, 0.001]) {
+      const [outline] = cogOutline(GEAR, tol).contours;
+      expect(selfIntersections(outline), `tol ${tol}`).toBe(0);
+      const shortest = Math.min(
+        ...outline.map((a, i) => {
+          const b = outline[(i + 1) % outline.length];
+          return Math.hypot(b.x - a.x, b.y - a.y);
+        }),
+      );
+      expect(shortest, `tol ${tol}`).toBeGreaterThan(1e-6);
+    }
+  });
+
+  it("at the default settings is exactly the fixed outline, preview and high resolution", () => {
+    const small = {
+      pitchDiameter: 4,
+      teeth: 20,
+      backlash: 0,
+      rootFillet: 0.05,
+      holeDiameter: 0.8,
+    };
+    const fixed = cogOutline(small).contours;
+    // Preview 0.1 mm and print 0.01 mm, in scene units (10 mm each).
+    expect(cogOutline(small, 0.01).contours).toEqual(fixed);
+    expect(cogOutline(small, 0.001).contours).toEqual(fixed);
+  });
+
+  it("a region and an extrude of it get finer with a finer print precision", async () => {
+    // The loop finder is where both get their outline; precision is in mm and
+    // the shape in scene units (10 mm each), as in the app.
+    const { findClosedLoopsWithShapes } =
+      await import("../sceneObjects/closedLoops.js");
+    const shape = makeCogShape({
+      x: 0,
+      y: 0,
+      pitchDiameter: 4,
+      teeth: 20,
+      backlash: 0,
+      rootFillet: 0.05,
+      holeDiameter: 0.8,
+    });
+    const points = (precisionMm) =>
+      findClosedLoopsWithShapes([shape], 32, precisionMm).reduce(
+        (n, l) => n + l.polygon.length,
+        0,
+      );
+    expect(points(0.001)).toBeGreaterThan(points(0.1));
+  });
+});
