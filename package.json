@@ -7,7 +7,7 @@
     "purplecad-mcp": "mcp/purplecad-mcp.mjs"
   },
   "scripts": {
-    "dev": "concurrently -k -n vite,electron -c blue,magenta \"vite --port 3000\" \"npm run addon:build && npm run sqlite:rebuild && wait-on tcp:127.0.0.1:3000 && unset ELECTRON_RUN_AS_NODE; ELECTRON_START_URL=http://localhost:3000 electron .\"",
+    "dev": "concurrently -k -n vite,electron -c blue,magenta \"vite --port 3000\" \"npm run addon:build && npm run sqlite:rebuild && ./scripts/dev-bundle-name.sh && wait-on tcp:127.0.0.1:3000 && unset ELECTRON_RUN_AS_NODE; ELECTRON_START_URL=http://localhost:3000 electron .\"",
     "mcp": "node mcp/purplecad-mcp.mjs",
     "build": "vite build",
     "format": "prettier --write \"src/**/*.{js,jsx}\"",
@@ -17,7 +17,7 @@
     "e2e:build": "npm run addon:build && VITE_E2E=1 vite build",
     "test:e2e": "npm run e2e:build && ./scripts/with-display.sh playwright test",
     "test:e2e:run": "./scripts/with-display.sh playwright test",
-    "electron:start": "npm run addon:build && npm run sqlite:rebuild && vite build && unset ELECTRON_RUN_AS_NODE; electron .",
+    "electron:start": "npm run addon:build && npm run sqlite:rebuild && ./scripts/dev-bundle-name.sh && vite build && unset ELECTRON_RUN_AS_NODE; electron .",
     "addon:build": "npm --prefix native/occ-addon run build",
     "addon:test": "npm --prefix native/occ-addon test",
     "sqlite:rebuild": "electron-rebuild -w better-sqlite3",

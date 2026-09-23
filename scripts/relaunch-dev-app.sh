@@ -31,6 +31,10 @@ changed "${SRC_DIRS[@]}" || exit 0
   exit 0
 }
 
+# The dev bundle calls itself Electron in the menu bar and Cmd+Tab until its
+# Info.plist is patched, and a reinstall of node_modules undoes that.
+./scripts/dev-bundle-name.sh >>"$LOG" 2>&1 || true
+
 # Kill only THIS checkout's dev app; the packaged PurpleCAD.app is left alone.
 pkill -f "$PWD/node_modules/electron/dist/Electron.app" 2>/dev/null
 # ELECTRON_RUN_AS_NODE would make it exit with no window.
