@@ -193,3 +193,87 @@
   cursor: not-allowed;
   filter: none;
 }
+
+/* ── Font picker (text tool) ────────────────────────────────────────────── */
+/* Replaces a <datalist>, whose popup the browser sizes and filters itself:
+   it showed only a handful of families, could not be scrolled, and could not
+   carry a sample of each face. */
+.font-picker {
+  position: relative;
+}
+
+.font-picker-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.font-picker-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  /* The whole list scrolls -- a machine with hundreds of families installed
+     was unreachable past the first few. */
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(var(--black-rgb), 0.45);
+  z-index: 9100;
+}
+
+/* Opened upward when the field sits too near the bottom of the window, which
+   is where this dialog lives. */
+.font-picker-list.up {
+  top: auto;
+  bottom: calc(100% + 2px);
+}
+
+.font-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.font-row.active {
+  background-color: var(--bg-tertiary);
+}
+
+.font-row.chosen .font-row-name {
+  font-weight: 600;
+}
+
+.font-row-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The sample keeps to its own half and never pushes the name out. */
+.font-row-sample {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 1.2;
+  color: var(--text-secondary);
+}
+
+.font-row-empty {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}

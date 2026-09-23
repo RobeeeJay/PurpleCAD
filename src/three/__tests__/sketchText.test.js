@@ -10,6 +10,7 @@ import {
   makeTextShape,
   textShapeContours,
   enumerateSystemFonts,
+  fontSamplePath,
   ensureFontLoaded,
   isFontAvailable,
 } from "../sketchText.js";
@@ -141,5 +142,40 @@ describe("sketchText", () => {
     const m = translateShape(s, 3, -4);
     expect({ x: m.x, y: m.y }).toEqual({ x: 4, y: -2 });
     expect(m.w).toBe(s.w); // size unchanged by a move
+  });
+
+  // The font list previews each face.  An installed family can be drawn by
+  // name in CSS, but a BUNDLED font is typeface JSON that CSS knows nothing
+  // about -- its preview has to be traced from the same outlines the sketch
+  // uses, or the list would show one typeface under another's name.
+  describe("font list previews", () => {
+    it("draws a bundled font's sample from its own outlines", () => {
+      const a = fontSamplePath("helvetiker", "Sample", 16);
+      expect(a.d.startsWith("M"), "an SVG path").toBe(true);
+      expect(a.width).toBeGreaterThan(0);
+      expect(a.height).toBeGreaterThan(0);
+      // Different faces trace different outlines for the same word.
+      const b = fontSamplePath("gentilis", "Sample", 16);
+      expect(b.d).not.toBe(a.d);
+    });
+
+    it("is drawn y-down, inside the box it reports", () => {
+      // SVG's y grows downward, the font's grows up; every point has to land
+      // inside the reported box or the preview is clipped or floats away.
+      const { d, width, height } = fontSamplePath("helvetiker", "Hg", 16);
+      const nums = d.replace(/[MLZ]/g, " ").trim().split(/[\s]+/).map(Number);
+      const xs = nums.filter((_, i) => i % 2 === 0);
+      const ys = nums.filter((_, i) => i % 2 === 1);
+      expect(Math.min(...xs)).toBeGreaterThanOrEqual(-0.01);
+      expect(Math.min(...ys)).toBeGreaterThanOrEqual(-0.01);
+      expect(Math.max(...xs)).toBeLessThanOrEqual(width + 0.01);
+      expect(Math.max(...ys)).toBeLessThanOrEqual(height + 0.01);
+    });
+
+    it("returns nothing for a font it cannot draw", () => {
+      // An unparsed system font falls back to the default face, so the only
+      // empty case is text with no ink.
+      expect(fontSamplePath("helvetiker", "   ", 16)).toBeNull();
+    });
   });
 });

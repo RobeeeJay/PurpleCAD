@@ -676,6 +676,88 @@ test.describe.serial("2D sketch workflow", () => {
     );
   });
 
+  // The font list was a <datalist>: the browser filtered it by whatever was
+  // already in the field (so opening it on the current font showed almost
+  // nothing), capped its own height with no scrolling, and could not show what
+  // each face looks like.  It is a real list now.
+  test("the font list scrolls, filters, and shows each face", async () => {
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("text"),
+    );
+    const at = toScreen(-4, 1);
+    await page.mouse.click(at.x, at.y);
+    const dialog = page.locator(".variables-dialog");
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    const field = dialog.getByLabel("Font");
+    await field.click();
+    const list = dialog.locator(".font-picker-list");
+    await expect(list).toBeVisible();
+    // Every bundled face is offered, each with a sample drawn beside its name.
+    // Installed families are listed too where the platform allows it, so the
+    // count is a floor, not an equality.
+    const rows = list.locator(".font-row");
+    expect(await rows.count()).toBeGreaterThanOrEqual(4);
+    await expect(rows.first().locator(".font-row-name")).not.toBeEmpty();
+    expect(await rows.first().locator(".font-row-sample").count()).toBe(1);
+
+    // The list scrolls on its own rather than running off the dialog.
+    const scrolls = await list.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        overflowY: s.overflowY,
+        maxHeight: parseFloat(s.maxHeight),
+        height: el.getBoundingClientRect().height,
+      };
+    });
+    expect(scrolls.overflowY).toBe("auto");
+    expect(scrolls.maxHeight).toBeGreaterThan(0);
+    expect(scrolls.height).toBeLessThanOrEqual(scrolls.maxHeight + 1);
+
+    // The dialog is anchored to the bottom of the window, so the list has to
+    // sit fully on screen rather than dropping off the bottom edge.
+    const box = await list.boundingBox();
+    const viewport = await page.evaluate(() => ({
+      h: window.innerHeight,
+      w: window.innerWidth,
+    }));
+    expect(box.y, "top edge on screen").toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height, "bottom edge on screen").toBeLessThanOrEqual(
+      viewport.h + 1,
+    );
+
+    // Typing narrows it, and the name is matched anywhere in the family.
+    await field.fill("genti");
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText("Gentilis");
+
+    // Picking sets the draft's font, and the field shows what was picked.
+    await rows.first().click();
+    await expect(list).toBeHidden();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => window.__store.getState().textDraft.font),
+      )
+      .toBe("gentilis");
+    await expect(field).toHaveValue("Gentilis");
+
+    // Clicking the field opens the list again.  Focus stays on it after a
+    // pick, so there is no second focus event to rely on.
+    await field.click();
+    await expect(list).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(list).toBeHidden();
+
+    // Only once the list is out of the way does Escape close the dialog --
+    // and it has to work at all, which needs the field to still hold focus
+    // after a row was clicked.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+  });
+
   test("measure reports the distance between two picked points", async () => {
     await page.evaluate(() => window.__store.getState().startMeasureTool());
     // Two known endpoints of the hub line drawn earlier: (4,4) and (5,4).

@@ -217,6 +217,31 @@ export function textToContours(text, size, fontId, tolerance = 0) {
   return out.filter((c) => c.length >= 3);
 }
 
+// A sample of a font drawn as one SVG path, for the font list's preview.  The
+// bundled fonts are three.js typeface JSON, not installed families, so CSS
+// cannot render them -- their preview has to come from the same outlines the
+// sketch is built from, or it would show a DIFFERENT typeface than the one it
+// names.  Returns { d, width, height } in a y-down SVG box, or null.
+export function fontSamplePath(fontId, sample, height = 16) {
+  const contours = textToContours(sample, height, fontId);
+  if (contours.length === 0) return null;
+  const b = bboxOf(contours);
+  if (!isFinite(b.minX)) return null;
+  const d = contours
+    .map(
+      (c) =>
+        "M" +
+        c
+          .map(
+            (p) => `${(p.x - b.minX).toFixed(2)} ${(b.maxY - p.y).toFixed(2)}`,
+          )
+          .join("L") +
+        "Z",
+    )
+    .join("");
+  return { d, width: b.maxX - b.minX, height: b.maxY - b.minY };
+}
+
 function bboxOf(contours) {
   let minX = Infinity,
     minY = Infinity,

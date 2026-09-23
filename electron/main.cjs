@@ -258,6 +258,13 @@ function createWindow() {
   session.defaultSession.setPermissionRequestHandler(
     (_wc, permission, callback) => callback(permission === "local-fonts"),
   );
+  // Chromium also asks SYNCHRONOUSLY whether a permission is held, and the
+  // default answer for a page served from file:// is no -- so queryLocalFonts
+  // could resolve empty in the packaged app while working in dev, which read
+  // as the font list "sometimes" being incomplete.
+  session.defaultSession.setPermissionCheckHandler(
+    (_wc, permission) => permission === "local-fonts",
+  );
 
   const win = new BrowserWindow({
     width: 1400,
