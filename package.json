@@ -31,6 +31,7 @@
     "dist:linux": "npm run addon:build && vite build && electron-builder --linux --publish never",
     "dist:all": "npm run addon:build && vite build && electron-builder --mac --win --linux --publish never",
     "test:coverage": "./scripts/with-display.sh vitest run --coverage",
+    "icons": "python3 scripts/make-app-icons.py && iconutil -c icns app-icons/mac.iconset -o app-icons/icon.icns",
     "e2e:image": "podman build -f Containerfile.e2e -t purple-cad-e2e .",
     "test:e2e:podman": "podman run --rm --name purple-cad-e2e-run -v \"$PWD/test-results:/app/test-results\" purple-cad-e2e",
     "e2e:podman:stop": "podman rm -f purple-cad-e2e-run >/dev/null 2>&1; echo 'still running (empty = clean):'; podman ps --filter ancestor=purple-cad-e2e --format '{{.Names}} {{.Status}}'"
@@ -64,6 +65,7 @@
       "native/occ-addon/build/Release/occ_addon.node"
     ],
     "mac": {
+      "icon": "app-icons/icon.icns",
       "target": [
         {
           "target": "dmg",
@@ -83,6 +85,7 @@
       "category": "public.app-category.productivity"
     },
     "win": {
+      "icon": "app-icons/windows/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -99,6 +102,7 @@
       ]
     },
     "linux": {
+      "icon": "app-icons/linux",
       "target": [
         {
           "target": "AppImage",
