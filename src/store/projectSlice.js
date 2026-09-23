@@ -5,6 +5,7 @@
 // way documentSlice.loadDocument does.
 
 import * as db from "./db.js";
+import { motionInitial } from "./motionSlice.js";
 import {
   replayUpTo,
   withOrphanFlags,
@@ -65,6 +66,10 @@ function projectStatePatch() {
     hoveredId: null,
     undoStack: [],
     redoStack: [],
+    // Motion is session state about a component in the project being left.
+    // Folder ids restart per project, so a motion left playing would carry
+    // over onto whichever component holds that id here.
+    ...motionInitial,
   };
 }
 

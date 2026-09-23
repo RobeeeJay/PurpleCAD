@@ -15,6 +15,7 @@ import {
   pruneTextureSourceChains,
 } from "./internals.js";
 import { clearCamera } from "./db.js";
+import { motionInitial } from "./motionSlice.js";
 
 export const createDocumentSlice = (set) => ({
   newDocument: () =>
@@ -45,6 +46,11 @@ export const createDocumentSlice = (set) => ({
         redoStack: [],
         variables: [],
         folders: [],
+        // A playing motion and the red ring that paused it belong to a
+        // component in the document being replaced -- and folder ids restart
+        // per document, so leaving them set can start the NEW document's
+        // component moving on its own.
+        ...motionInitial,
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),
@@ -94,6 +100,7 @@ export const createDocumentSlice = (set) => ({
         redoStack: [],
         variables,
         folders,
+        ...motionInitial,
         cameraResetTrigger: state.cameraResetTrigger + 1,
       };
     }),

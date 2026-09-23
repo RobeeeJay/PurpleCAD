@@ -70,6 +70,21 @@ describe("projectSlice", () => {
     expect(g().cameraResetTrigger).toBeGreaterThan(t);
   });
 
+  it("switching drops a playing motion and its collision ring", async () => {
+    // Folder ids restart per project, so "folder-1" playing in one project
+    // would carry straight onto a different component in the next.
+    await g().createProject("A");
+    store.setState({
+      motionPlaying: { "folder-1": true },
+      motionCollision: { folderId: "folder-1", point: { x: 1, y: 2, z: 3 } },
+      motionTool: { folderId: "folder-1" },
+    });
+    await g().createProject("B");
+    expect(g().motionPlaying).toEqual({});
+    expect(g().motionCollision).toBeNull();
+    expect(g().motionTool).toBeNull();
+  });
+
   it("renames a project", async () => {
     await g().createProject("Old");
     const id = g().activeProjectId;

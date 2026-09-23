@@ -86,6 +86,81 @@ describe("the motion dialog", () => {
   });
 });
 
+// A motion that is playing, and the red ring a collision left in the view, are
+// session state about a component in the CURRENT document.  Folder ids restart
+// per document and per project ("folder-1" in each), so leaving either set
+// across a swap does not merely strand the ring: it hands the next document's
+// component a motion it never had.
+describe("swapping the document out", () => {
+  const playingAndCollided = () => {
+    useStore.setState({
+      folders: [
+        { id: "folder-1", name: "Lid", parentId: null, expanded: true },
+      ],
+    });
+    s().openMotionTool("folder-1");
+    s().setMotionReference(AXIS);
+    s().confirmMotion();
+    s().toggleMotionPlaying("folder-1");
+    s().setMotionCollision("folder-1", { x: 1, y: 2, z: 3 });
+    expect(s().motionPlaying["folder-1"]).toBe(true);
+  };
+
+  const emptyDocument = {
+    version: 1,
+    history: [
+      {
+        id: 0,
+        label: "Scene created",
+        itemId: null,
+        instruction: { type: "scene_created" },
+        hiddenIds: [],
+      },
+    ],
+    activeHistoryId: null,
+    variables: [],
+  };
+
+  it("a new document leaves no motion playing and no collision ringed", () => {
+    playingAndCollided();
+    s().newDocument();
+    expect(s().motionPlaying).toEqual({});
+    expect(s().motionCollision).toBeNull();
+    expect(s().motionTool).toBeNull();
+  });
+
+  it("loading a document does the same", () => {
+    playingAndCollided();
+    s().loadDocument(emptyDocument);
+    expect(s().motionPlaying).toEqual({});
+    expect(s().motionCollision).toBeNull();
+  });
+
+  it("deleting the component takes its motion state with it", () => {
+    playingAndCollided();
+    s().openMotionTool("folder-1");
+    s().deleteFolder("folder-1");
+    expect(s().motionPlaying).toEqual({});
+    expect(s().motionCollision).toBeNull();
+    // The dialog was open on it, so it closes and gives the 3D view back.
+    expect(s().motionTool).toBeNull();
+    expect(s().selectionOverride).toBeNull();
+  });
+
+  it("deleting a DIFFERENT component leaves the motion alone", () => {
+    playingAndCollided();
+    useStore.setState({
+      folders: [
+        ...s().folders,
+        { id: "folder-9", name: "Other", parentId: null, expanded: true },
+      ],
+    });
+    s().deleteFolder("folder-9");
+    expect(s().motionPlaying["folder-1"]).toBe(true);
+    expect(s().motionCollision.folderId).toBe("folder-1");
+  });
+});
+
 describe("playing a motion", () => {
   const withMotion = () => {
     s().openMotionTool("folder-1");

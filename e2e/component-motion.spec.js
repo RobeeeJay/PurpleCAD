@@ -243,4 +243,34 @@ test.describe.serial("component motion", () => {
       .poll(async () => (await lidMatrix())[0])
       .toBeCloseTo(before[0], 6);
   });
+
+  // The ring is a scene object, not DOM, so only e2e can see it leave.  It used
+  // to stay in the view after the document under it had been swapped out, with
+  // no component left to explain it -- and the component it belonged to stayed
+  // marked as playing, which in a new project would drive whichever component
+  // had inherited that folder id.
+  test("swapping the document out takes the collision ring with it", async () => {
+    await page.evaluate(
+      (fid) =>
+        window.__store.getState().setMotionCollision(fid, { x: 1, y: 2, z: 3 }),
+      folderId,
+    );
+    await expect
+      .poll(async () => (await motion()).collisionMarker)
+      .not.toBeNull();
+    await page.evaluate((fid) => {
+      const s = window.__store.getState();
+      if (!s.motionPlaying[fid]) s.toggleMotionPlaying(fid);
+    }, folderId);
+
+    await page.evaluate(() => window.__store.getState().newDocument());
+    await page.waitForTimeout(500);
+    expect(
+      (await motion()).collisionMarker,
+      "ring left in the view",
+    ).toBeNull();
+    expect((await motion()).playing, "still animating").toEqual([]);
+    expect((await state()).motionCollision).toBeNull();
+    expect((await state()).motionPlaying).toEqual({});
+  });
 });

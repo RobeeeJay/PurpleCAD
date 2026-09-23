@@ -95,7 +95,26 @@ export const createFolderSlice = (set) => ({
       }
 
       saveFolders(folders);
-      return { folders, items, history: withOrphanFlags(history) };
+      // The component is gone, so anything the motion tools still hold about
+      // it goes too -- otherwise its red collision ring stays in the view with
+      // nothing to explain it, and its entry keeps the animation loop running.
+      const { [id]: _wasPlaying, ...motionPlaying } = state.motionPlaying;
+      const editingThis = state.motionTool?.folderId === id;
+      return {
+        folders,
+        items,
+        history: withOrphanFlags(history),
+        motionPlaying,
+        motionCollision:
+          state.motionCollision?.folderId === id ? null : state.motionCollision,
+        ...(editingThis
+          ? {
+              motionTool: null,
+              selectionOverride: null,
+              selectedSubGeometry: null,
+            }
+          : null),
+      };
     }),
 
   // Drag-and-drop reparenting of a folder into another folder (or to root
