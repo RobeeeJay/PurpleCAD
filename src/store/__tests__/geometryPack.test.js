@@ -76,4 +76,24 @@ describe("geometryPack", () => {
         .length,
     ).toBe(g.positions.length);
   });
+
+  it("keeps a welded mesh's flat mark through a save", () => {
+    // A welded STL or mesh split is drawn with per-triangle normals; losing the
+    // mark on save would reload it smooth-shaded, smeared at every corner.
+    const g = {
+      positions: Array.from({ length: 3000 }, (_, i) => i * 0.001),
+      indices: Array.from({ length: 3000 }, (_, i) => i % 1000),
+      normals: null,
+      flat: true,
+    };
+    const packed = packGeometryData(g);
+    expect(packed.__packedGeometry).toBe(1);
+    const back = unpackGeometryData(JSON.parse(JSON.stringify(packed)));
+    expect(back.flat).toBe(true);
+    // An unmarked mesh stays unmarked.
+    const plain = unpackGeometryData(
+      JSON.parse(JSON.stringify(packGeometryData({ ...g, flat: undefined }))),
+    );
+    expect(plain.flat).toBeUndefined();
+  });
 });

@@ -71,6 +71,35 @@ function buildSketchPlaneGrid() {
   return group;
 }
 
+// The display geometry for a baked mesh.  Normals are computed here when not
+// stored (OCC results store none): over an OCC tessellation that is right,
+// since its vertices are shared only WITHIN a face, so curved faces shade
+// smooth and edges between faces stay sharp.  A WELDED mesh (`flat`: a welded
+// STL import, a mesh split) shares vertices ACROSS its sharp edges too, and
+// averaging there smears every corner.  Those meshes were triangle soups --
+// three private vertices per triangle -- and rendered flat and crisp, so they
+// are split apart again for display only, which gives exactly the look they
+// had.  Everything unmarked keeps its current look.
+export function csgDisplayGeometry({ positions, normals, indices, flat }) {
+  let geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(new Float32Array(positions), 3),
+  );
+  if (normals)
+    geometry.setAttribute(
+      "normal",
+      new THREE.BufferAttribute(new Float32Array(normals), 3),
+    );
+  if (indices)
+    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+  if (!normals) {
+    if (flat && geometry.index) geometry = geometry.toNonIndexed();
+    geometry.computeVertexNormals();
+  }
+  return geometry;
+}
+
 export function buildSceneObjects(
   items,
   scene,
@@ -168,22 +197,7 @@ export function buildSceneObjects(
         break;
       case "csg": {
         if (!item.geometryData) return;
-        const { positions, normals, indices } = item.geometryData;
-        geometry = new THREE.BufferGeometry();
-        geometry.setAttribute(
-          "position",
-          new THREE.BufferAttribute(new Float32Array(positions), 3),
-        );
-        if (normals)
-          geometry.setAttribute(
-            "normal",
-            new THREE.BufferAttribute(new Float32Array(normals), 3),
-          );
-        if (indices)
-          geometry.setIndex(
-            new THREE.BufferAttribute(new Uint32Array(indices), 1),
-          );
-        if (!normals) geometry.computeVertexNormals();
+        geometry = csgDisplayGeometry(item.geometryData);
         break;
       }
       case "extrude": {
