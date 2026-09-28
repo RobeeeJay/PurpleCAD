@@ -40,6 +40,7 @@ whitespace noise in the diff.
 npm test                  # all unit tests (vitest), runs in ~7s
 npx vite build            # production bundle, ~3s
 npm run test:e2e:podman   # Electron e2e, headless Linux container
+npm run test:e2e:gpu      # macOS: only the two GPU specs the container skips
 ```
 
 **Run the e2e suite through podman** (`npm run test:e2e:podman`), and run the
@@ -80,13 +81,22 @@ build is its own layer and is reused by every later app-code rebuild; app
 edits rebuild only the COPY layers, ~1 min). The podman VM needs more than
 its 2 GiB default: `podman machine set --memory 8192 --cpus 8`.
 
-The container is an ADDITIONAL lane, not a replacement. Its addon links a
-LINUX OCC, so it verifies the JS/renderer/store/IPC surface but NOT the exact
-native binary the shipped macOS app runs -- run `npm run test:e2e` on macOS
-before a release, and whenever a change touches `binding.cc` or the addon
-build. `E2E_NO_SANDBOX=1` (set in the image) makes `e2e/launch.js` pass
-`--no-sandbox`, which rootless containers require; the macOS run keeps the
-sandbox on.
+**On macOS, run only the two GPU specs (`npm run test:e2e:gpu`) -- the
+owner's decision, to stop duplicating the container.** The container runs the
+whole suite; the path-tracer and `visual` specs skip there for want of a GPU,
+and are the only thing a full macOS run added routinely. They also launch the
+app, which loads the macOS addon -- the clang build linked against the macOS
+OCC -- so they catch the failures that have actually been macOS-only (wrong
+architecture, rpath, "symbol not found" at require time). Run the FULL macOS
+suite (`npm run test:e2e`) before a release, or when chasing a problem that
+looks platform-specific: a native op behaving differently on macOS than on
+Linux for the same source is the one thing the pair can't see (no case of it is
+on record). This is the one standing exception to "never run a single spec".
+Like any host Playwright run, never start it while the container suite is
+running (see Environment setup), and it wipes `test-results/`, including the
+container run's part `.pcad` files. `E2E_NO_SANDBOX=1` (set in the image)
+makes `e2e/launch.js` pass `--no-sandbox`, which rootless containers require;
+the macOS run keeps the sandbox on.
 
 Run tests through the npm scripts, not `npx vitest`/`playwright` directly:
 they route through `scripts/with-display.sh`, which runs the command under
@@ -328,7 +338,8 @@ What that means in practice:
   the packaged app build reproducibly offline. Add them to `CMakeLists.txt`.
 - It must compile cleanly under BOTH clang (macOS) and gcc (the Linux container
   and `dist:linux`) -- see the addon section below. Verify with
-  `npm run e2e:image` and a macOS `npm run test:e2e`.
+  `npm run e2e:image` (the container suite) and `npm run test:e2e:gpu` on
+  macOS, which loads the clang build.
 - Expose it as addon functions and reach it through the normal OCC op path:
   an op body in `occOps.js` AND `electron/occ-bridge.cjs` (the two-
   implementation rule below applies), a wrapper in `occClient.js`, and a

@@ -16,6 +16,7 @@
     "test:watch": "./scripts/with-display.sh vitest",
     "e2e:build": "npm run addon:build && VITE_E2E=1 vite build",
     "test:e2e": "npm run e2e:build && ./scripts/with-display.sh playwright test",
+    "test:e2e:gpu": "npm run e2e:build && ./scripts/with-display.sh playwright test e2e/pathtrace.spec.js e2e/visual.spec.js",
     "test:e2e:run": "./scripts/with-display.sh playwright test",
     "electron:start": "npm run addon:build && npm run sqlite:rebuild && ./scripts/dev-bundle-name.sh && vite build && unset ELECTRON_RUN_AS_NODE; electron .",
     "addon:build": "npm --prefix native/occ-addon run build",
