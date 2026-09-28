@@ -10,6 +10,7 @@ import {
   weldExistingMeshes,
   weldForImport,
   openMeshWarning,
+  openMeshNotice,
 } from "../importWeld.js";
 
 beforeAll(async () => {
@@ -172,5 +173,44 @@ describe("welding on import", () => {
     expect(openMeshWarning("Box (STL)", report)).toBe(
       "Box (STL) isn't a closed solid: it has 4 open edges. Booleans with it may leave holes.",
     );
+  });
+});
+
+// Phase 2: a boolean with an open mesh goes ahead, with a warning -- the
+// owner's decision, over refusing it.
+describe("the open-mesh warning before a boolean", () => {
+  const lidless = FACES.slice(0, 2).concat(FACES.slice(4));
+
+  it("says nothing when every mesh is closed", async () => {
+    expect(await openMeshNotice([csg(1, "Part (STL)", soup())])).toBeNull();
+  });
+
+  it("names the open mesh and how many open edges it has", async () => {
+    const notice = await openMeshNotice([
+      csg(1, "Box (STL)", soup(lidless)),
+      csg(2, "Part (STL)", soup()),
+    ]);
+    expect(notice).toBe(
+      "Box (STL) (4 open edges) isn't a closed solid, so this result may have holes.",
+    );
+  });
+
+  it("names every open mesh when there are several", async () => {
+    const notice = await openMeshNotice([
+      csg(1, "Box (STL)", soup(lidless)),
+      csg(2, "Tray (STL)", soup(lidless, 3)),
+    ]);
+    expect(notice).toBe(
+      "Box (STL) (4 open edges), Tray (STL) (4 open edges) aren't closed solids, so this result may have holes.",
+    );
+  });
+
+  it("does not check a body OCC built", async () => {
+    // A body with a regenerator was made by an OCC op: its mesh is a
+    // tessellation of a solid, not a surface of unknown closure.
+    const built = csg(1, "Chamfer 1", soup(lidless), {
+      regenerator: { kind: "chamfer" },
+    });
+    expect(await openMeshNotice([built])).toBeNull();
   });
 });

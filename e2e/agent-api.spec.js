@@ -163,6 +163,8 @@ test.describe.serial("agent API", () => {
       tools: [bossId],
     });
     partId = part.id;
+    // Two closed OCC bodies: nothing to warn about.
+    expect(part.warning).toBeUndefined();
     expect(part.bboxMm.size[0]).toBeCloseTo(60, 1);
     expect(part.bboxMm.size[2]).toBeCloseTo(18, 1);
     const expected = 60 * 40 * 8 + Math.PI * 10 ** 2 * 10;

@@ -44,6 +44,39 @@ export function openMeshWarning(name, report) {
   }. Booleans with it may leave holes.`;
 }
 
+// A mesh body from outside OCC -- an import, or the pieces of a mesh split --
+// whose surface may not be closed.  OCC results are built as solids.
+const isMeshBody = (item) =>
+  item?.type === "csg" && !item.regenerator && item.geometryData?.positions;
+
+// The warning to show when a boolean is about to take an open mesh, or null.
+// A warning, not a refusal: the owner's decision -- OCC will often still give
+// a usable body, but where the surface is open the result can have holes
+// (a real imported part split by the old mesh fallback gave a fused body with
+// 137 open edges and no error).  Checked fresh at commit, natively: the weld
+// that reports it takes about a millisecond on a real part.
+export async function openMeshNotice(items) {
+  const open = [];
+  for (const item of items ?? []) {
+    if (!isMeshBody(item)) continue;
+    try {
+      const { weldMesh } = await import("./occClient.js");
+      const r = await weldMesh({
+        positions: item.geometryData.positions,
+        indices: item.geometryData.indices,
+      });
+      if (r?.openEdges) open.push(`${item.name} (${r.openEdges} open edges)`);
+    } catch (err) {
+      console.error(`Closure check of ${item.name} failed:`, err);
+    }
+  }
+  if (!open.length) return null;
+  const which = open.length === 1 ? open[0] : open.join(", ");
+  return `${which} ${
+    open.length === 1 ? "isn't a closed solid" : "aren't closed solids"
+  }, so this result may have holes.`;
+}
+
 // Weld a freshly imported mesh.  Falls back to the mesh as imported if the
 // weld can't run, so an import never fails on account of it.
 export async function weldForImport(geometryData) {

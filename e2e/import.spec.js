@@ -136,6 +136,76 @@ test.describe.serial("import", () => {
     ).toBe(1);
   });
 
+  // A boolean with an open mesh goes ahead but says so: where the surface is
+  // open the result can have holes, and nothing else would tell the user.
+  const openBoxId = () =>
+    page.evaluate(
+      () =>
+        window.__store
+          .getState()
+          .items.find((i) => i.type === "csg" && i.name === "open box (STL)")
+          ?.id,
+    );
+  const addCube = (id) =>
+    page.evaluate((id) => {
+      const s = window.__store.getState();
+      s.addItem({
+        id,
+        name: `Cube ${id}`,
+        type: "cube",
+        children: [],
+        position: { x: 0.5, y: 0.5, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      window.__store.setState({ notification: null });
+    }, id);
+
+  test("a boolean in the dialog with the open STL warns it may have holes", async () => {
+    const boxId = await openBoxId();
+    expect(boxId, "the open box from the last test").toBeTruthy();
+    await addCube(7001);
+    await page.evaluate((boxId) => {
+      window.__store.getState().startBooleanTool("union");
+      window.__store.setState({ selectedIds: [boxId, 7001] });
+    }, boxId);
+    await page.getByTitle("Apply Union").click();
+    await expect
+      .poll(() => page.evaluate(() => window.__store.getState().notification), {
+        timeout: 30000,
+      })
+      .toBe(
+        "open box (STL) (4 open edges) isn't a closed solid, so this result may have holes.",
+      );
+  });
+
+  test("feature.boolean with an open STL returns a warning", async () => {
+    await page.evaluate(() => window.__store.getState().newDocument());
+    await importVia("Import an STL mesh", {
+      name: "open box.stl",
+      mimeType: "model/stl",
+      buffer: cubeStl({ lidless: true }),
+    });
+    await expect.poll(openBoxId, { timeout: 30000 }).toBeTruthy();
+    const boxId = await openBoxId();
+    await addCube(7002);
+    const r = await page.evaluate(
+      (boxId) =>
+        window.__api.call("feature.boolean", {
+          operation: "difference",
+          target: boxId,
+          tools: [7002],
+        }),
+      boxId,
+    );
+    expect(r.ok, `feature.boolean failed: ${JSON.stringify(r.error)}`).toBe(
+      true,
+    );
+    expect(r.result.warning).toBe(
+      "open box (STL) (4 open edges) isn't a closed solid, so this result may have holes.",
+    );
+  });
+
   test("importing a STEP file (exported by the app) creates a solid body", async () => {
     // Round-trip: export a cube through the app's own STEP writer...
     const stepText = await page.evaluate(async () => {

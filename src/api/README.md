@@ -29,6 +29,10 @@ e2e suite does. `e2e/agent-api.spec.js` drives it exactly as an agent will.
   error with the reason lost.
 - **Results carry enough to check.** A command that makes a body returns its
   bounding box and volume, measured from the surface on screen.
+- **A caveat is a `warning`, not an error.** A result that succeeded but may be
+  flawed says so in a `warning` string -- e.g. `feature.boolean` with an
+  imported mesh that isn't closed, whose result may have holes. The UI shows
+  the same text as a notice.
 
 Error codes: `BAD_ARGS`, `UNKNOWN_COMMAND`, `CONFIRMATION_REQUIRED`,
 `NOT_FOUND`, `BAD_SHAPE`, `BAD_CONSTRAINT`, `SKETCH_UNSOLVED`, `NO_PROFILE`,

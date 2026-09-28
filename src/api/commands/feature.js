@@ -1,3 +1,4 @@
+import { openMeshNotice } from "../../three/importWeld.js";
 import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { buildExtrudeDef } from "../../three/cameraControls/extrude.js";
@@ -72,7 +73,7 @@ const OP_LABEL = { union: "Union", difference: "Cut" };
 defineCommand({
   name: "feature.boolean",
   description:
-    "Combine solid bodies into a new one. union fuses target with every tool; difference cuts every tool out of target. The inputs are consumed -- hidden from this step on, as with the Boolean tool -- and the result is a new body, returned with its bounding box and volume. Bodies that only touch must share a face to fuse.",
+    "Combine solid bodies into a new one. union fuses target with every tool; difference cuts every tool out of target. The inputs are consumed -- hidden from this step on, as with the Boolean tool -- and the result is a new body, returned with its bounding box and volume. Bodies that only touch must share a face to fuse. When an input is an imported mesh that isn't closed, the result carries a `warning`: it may have holes where that surface was open.",
   input: {
     properties: {
       operation: { type: "string", enum: ["union", "difference"] },
@@ -105,6 +106,8 @@ defineCommand({
     });
 
     await waitForSettled();
+    // An open imported mesh is booleaned anyway, with a warning, as in the UI.
+    const warning = await openMeshNotice(ordered);
     const printPrecision = activePrecision();
     let result;
     try {
@@ -155,6 +158,6 @@ defineCommand({
     });
     useStore.getState().consumeItems(ordered.map((i) => i.id));
     await waitForSettled();
-    return bodySummary(id);
+    return warning ? { ...bodySummary(id), warning } : bodySummary(id);
   },
 });

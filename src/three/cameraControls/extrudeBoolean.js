@@ -6,6 +6,14 @@
 import { useStore } from "../../store";
 import { activePrecision } from "../resolution.js";
 import { hostFaceExtentAlongNormal } from "../csgUtils.js";
+import { openMeshNotice } from "../importWeld.js";
+
+// Once a cut or fuse is committed, warn if a body it went into was an open
+// mesh: the result may have holes where that surface was open.
+async function warnIfOpen(bodies) {
+  const notice = await openMeshNotice(bodies);
+  if (notice) useStore.getState().showNotification(notice);
+}
 
 // Determine the solids a cut-extrusion subtracts from.  In priority order:
 //   1. sourceItemId from the extrude profile (face-profile path — the user
@@ -97,6 +105,7 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
     useStore
       .getState()
       .consumeItems([extrudeItemId, ...targets.map((t) => t.id)]);
+    await warnIfOpen(targets);
   } catch (err) {
     console.error("Cut extrusion failed:", err);
     useStore
@@ -180,6 +189,7 @@ export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
       id += 1;
     }
     useStore.getState().consumeItems(targets.map((t) => t.id));
+    await warnIfOpen(targets);
   } catch (err) {
     console.error("Cut extrusion failed:", err);
     useStore
@@ -265,6 +275,7 @@ export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
       },
     });
     if (hosts.length) useStore.getState().consumeItems(hosts.map((h) => h.id));
+    await warnIfOpen(hosts);
   } catch (err) {
     // The fuse can THROW, not only come back empty -- OCC refuses a host it
     // can't boolean, such as an imported mesh too dense to turn into a solid.
@@ -322,6 +333,7 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       },
     });
     useStore.getState().consumeItems(inputs.map((i) => i.id));
+    await warnIfOpen(solids);
   } catch (err) {
     console.error("Union extrude batch failed:", err);
     useStore

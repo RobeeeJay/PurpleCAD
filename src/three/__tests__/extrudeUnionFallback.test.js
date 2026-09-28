@@ -18,13 +18,15 @@ const S = { x: 1, y: 1, z: 1 };
 
 // A finely tessellated sphere, standing in for an imported STL: every facet is
 // curved, so coplanar merging can't reduce it -- its face count stays its
-// triangle count, which is what the boolean size limits measure.
-const denseSphere = (r = 3, seg = 80) => {
-  const positions = [];
-  const indices = [];
-  for (let i = 0; i <= seg; i++) {
+// triangle count, which is what the boolean size limits measure.  Closed, as a
+// good STL is: the seam column and the poles are shared vertices, not copies
+// a rounding error apart (which the open-mesh check rightly reports as holes).
+// `open` leaves out the first band of triangles below the north pole.
+const denseSphere = (r = 3, seg = 80, { open = false } = {}) => {
+  const positions = [0, r, 0];
+  for (let i = 1; i < seg; i++) {
     const v = (i / seg) * Math.PI;
-    for (let j = 0; j <= seg; j++) {
+    for (let j = 0; j < seg; j++) {
       const u = (j / seg) * 2 * Math.PI;
       positions.push(
         r * Math.sin(v) * Math.cos(u),
@@ -33,12 +35,17 @@ const denseSphere = (r = 3, seg = 80) => {
       );
     }
   }
-  for (let i = 0; i < seg; i++)
+  positions.push(0, -r, 0);
+  const south = positions.length / 3 - 1;
+  const at = (i, j) =>
+    i === 0 ? 0 : i === seg ? south : 1 + (i - 1) * seg + (j % seg);
+  const indices = [];
+  for (let i = open ? 1 : 0; i < seg; i++)
     for (let j = 0; j < seg; j++) {
-      const a = i * (seg + 1) + j;
-      const b = a + seg + 1;
-      if (i !== 0) indices.push(a, b, a + 1);
-      if (i !== seg - 1) indices.push(a + 1, b, b + 1);
+      const a = at(i, j);
+      const b = at(i + 1, j);
+      if (i !== 0) indices.push(a, b, at(i, j + 1));
+      if (i !== seg - 1) indices.push(at(i, j + 1), b, at(i + 1, j + 1));
     }
   return { positions, indices };
 };
@@ -68,7 +75,7 @@ const boss = (id) => ({
   scale: S,
 });
 
-const docWithMeshHost = (seg) => ({
+const docWithMeshHost = (seg, shape) => ({
   version: 1,
   activeHistoryId: null,
   variables: [],
@@ -95,7 +102,7 @@ const docWithMeshHost = (seg) => ({
           position: O,
           rotation: O,
           scale: S,
-          geometryData: denseSphere(3, seg),
+          geometryData: denseSphere(3, seg, shape),
         },
       },
       hiddenIds: [],
@@ -147,5 +154,20 @@ describe("an extrude OCC can't fuse into its host", () => {
     const fused = s.items.find((i) => i.id === 200);
     expect(fused?.type, "the fused body").toBe("csg");
     expect(fused.regenerator.inputIds).toEqual([5]);
+  }, 120000);
+
+  // A warning, not a refusal: the fuse goes ahead, but where the surface is
+  // open the result can have holes, and the user should hear that.
+  it("fuses into an open mesh and warns it may have holes", async () => {
+    useStore.getState().loadDocument(docWithMeshHost(40, { open: true }));
+    useStore.setState({ notification: null });
+    await runExtrudeUnion([boss(101)], [5], 200);
+    const s = useStore.getState();
+    expect(s.notification).toBe(
+      "Imported part (STL) (40 open edges) isn't a closed solid, so this result may have holes.",
+    );
+    expect(s.items.find((i) => i.id === 200)?.type, "the fused body").toBe(
+      "csg",
+    );
   }, 120000);
 });

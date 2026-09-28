@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { useEscapeKey, useDebouncedPreview } from "./inputs.jsx";
 import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";
 import { performCsg, withCommitGuard } from "../three/occClient.js";
+import { openMeshNotice } from "../three/importWeld.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 
@@ -199,6 +200,9 @@ const BooleanDialog = () => {
     // the object being cut from).  Omitted when it uses the default material.
     const primaryMaterial = ordered[0]?.material;
     const opLabel = OP_NAME[operation];
+    // Checked before the boolean, shown once its result is committed.
+    const notice = await openMeshNotice(ordered);
+    const warn = () => notice && useStore.getState().showNotification(notice);
     try {
       if (ordered.some(isImportedMesh)) {
         const cc = useStore.getState()._cameraControls;
@@ -224,6 +228,7 @@ const BooleanDialog = () => {
         });
         consumeItems(ordered.map((i) => i.id));
         finish(meshId);
+        warn();
         return;
       }
 
@@ -266,6 +271,7 @@ const BooleanDialog = () => {
       });
       consumeItems(ordered.map((i) => i.id));
       finish(id);
+      warn();
     } catch (err) {
       console.error("CSG operation failed:", err);
       alert("Boolean operation failed: " + err.message);
