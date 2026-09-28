@@ -10,6 +10,15 @@ import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { translateShape } from "../sketchGeometry.js";
 import {
+  constraintsAmong,
+  remapConstraintShapeIndices,
+} from "../../store/internals.js";
+
+// What a copy carries besides the shapes: the joins between them, and the lock
+// that keeps a cog or a text a single editable shape -- without it a pasted
+// cog was plain outline that its editor would no longer open on.
+const CLIPBOARD_CONSTRAINTS = new Set(["coincident", "cog", "text"]);
+import {
   selectedSketchLineIndices,
   offsetSelectedSketchGeometry,
 } from "../sketchModifyActions.js";
@@ -201,22 +210,14 @@ export function createSketchKeyboardHandler(
             : [];
       if (indices.length === 0) return;
       e.preventDefault();
-      const indexSet = new Set(indices);
-      const idxMap = new Map(indices.map((origIdx, i) => [origIdx, i]));
+      const present = indices.filter((i) => shapes[i]);
       sketchClipboard = {
-        shapes: indices.map((i) => shapes[i]).filter(Boolean),
-        constraints: constraints
-          .filter(
-            (c) =>
-              c.type === "coincident" &&
-              indexSet.has(c.shapeAIdx) &&
-              indexSet.has(c.shapeBIdx),
-          )
-          .map((c) => ({
-            ...c,
-            shapeAIdx: idxMap.get(c.shapeAIdx),
-            shapeBIdx: idxMap.get(c.shapeBIdx),
-          })),
+        shapes: present.map((i) => shapes[i]),
+        constraints: constraintsAmong(
+          constraints,
+          present,
+          CLIPBOARD_CONSTRAINTS,
+        ),
       };
       return;
     }
@@ -234,20 +235,22 @@ export function createSketchKeyboardHandler(
       e.preventDefault();
       const baseIdx = (selItem.shapes || []).length;
       const PASTE_OFFSET = 0.5;
-      const newShapes = sketchClipboard.shapes
-        .map((s) => translateShape(s, PASTE_OFFSET, PASTE_OFFSET))
-        .filter(Boolean)
+      // Clipboard position -> new sketch index, or -1 for a shape that could
+      // not be moved.  Dropping one used to shift every later shape down while
+      // the constraints kept the old numbering, joining the wrong shapes.
+      const newShapes = [];
+      const pasteMap = new Map();
+      sketchClipboard.shapes.forEach((s, i) => {
+        const moved = translateShape(s, PASTE_OFFSET, PASTE_OFFSET);
+        if (!moved) return pasteMap.set(i, -1);
         // Pasted copies start ungrouped (don't inherit the source's group).
-        .map((s) => {
-          if (s.group == null) return s;
-          const { group, ...rest } = s;
-          return rest;
-        });
-      const newConstraints = sketchClipboard.constraints.map((c) => ({
-        ...c,
-        shapeAIdx: c.shapeAIdx + baseIdx,
-        shapeBIdx: c.shapeBIdx + baseIdx,
-      }));
+        const { group, ...ungrouped } = moved;
+        pasteMap.set(i, baseIdx + newShapes.length);
+        newShapes.push(group == null ? moved : ungrouped);
+      });
+      const newConstraints = sketchClipboard.constraints
+        .map((c) => remapConstraintShapeIndices(c, pasteMap))
+        .filter(Boolean);
       useStore
         .getState()
         .addSketchShapes(selectedIdRef.current, newShapes, newConstraints);

@@ -633,6 +633,17 @@ export const SHAPE_INDEX_FIELDS = [
 // its two shapes as every piece of connected geometry that makes it up.
 export const SHAPE_INDEX_LIST_FIELDS = ["shapesA", "shapesB"];
 
+// The constraints of `types` that tie the shapes at `indices` only to each other,
+// renumbered to positions within `indices` -- what a copy of those shapes
+// carries.  One that reaches a shape outside the set is left behind.
+export const constraintsAmong = (constraints, indices, types) => {
+  const indexMap = new Map(indices.map((orig, i) => [orig, i]));
+  return constraints
+    .filter((c) => types.has(c.type))
+    .map((c) => remapConstraintShapeIndices(c, indexMap))
+    .filter(Boolean);
+};
+
 // Remap a constraint's shape-index fields through `indexMap` (old index → new
 // index, or -1 for a removed shape).  Returns null when the constraint
 // references any removed shape, so the caller can drop it.  Used when deleting
