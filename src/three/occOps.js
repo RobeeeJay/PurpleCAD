@@ -2449,6 +2449,28 @@ function solidFromMesh({ positions, indices }) {
   return id ? { shapeId: id } : null;
 }
 
+// Weld a mesh by exact position (native meshoptimizer) and report whether it
+// is closed.  An imported STL stores three private vertices per triangle; the
+// welded mesh is the same surface in about a sixth of the vertices, and its
+// edges say whether it has holes.  No point moves: only bit-identical positions
+// merge.
+function weldMesh({ positions, indices }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.weldMesh(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+  );
+  return {
+    positions: Array.from(r.positions),
+    indices: Array.from(r.indices),
+    openEdges: r.openEdges,
+    nonManifoldEdges: r.nonManifoldEdges,
+    degenerateTriangles: r.degenerateTriangles,
+    verticesBefore: r.verticesBefore,
+    verticesAfter: r.verticesAfter,
+  };
+}
+
 // Release a cached OCC solid held in the native shape store (JIT timeline
 // cache).  Fire-and-forget cleanup; a missing/already-released id is a no-op.
 function releaseShape({ id }) {
@@ -2481,4 +2503,5 @@ export const ops = {
   releaseShape,
   solidFromMesh,
   tessellateItem,
+  weldMesh,
 };

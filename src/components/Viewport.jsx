@@ -1,3 +1,4 @@
+import { weldExistingMeshes } from "../three/importWeld.js";
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import RotationWidget from "./RotationWidget";
@@ -297,6 +298,8 @@ const Viewport = () => {
   // the next document.  Clearing is always safe: a miss just rebuilds.
   useEffect(() => {
     clearSolids();
+    // Weld imported meshes this document still stores as triangle soups.
+    weldExistingMeshes();
   }, [cameraResetTrigger]);
 
   // On Cancel (cancelEpoch bump), tell the OCC worker to abort its in-flight

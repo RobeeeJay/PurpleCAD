@@ -1859,6 +1859,25 @@ function solidFromMesh({ positions, indices }) {
   return id ? { shapeId: id } : null;
 }
 
+// Weld a mesh by exact position (native meshoptimizer) and report whether it
+// is closed -- mirrors occOps.js#weldMesh.
+function weldMesh({ positions, indices }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.weldMesh(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+  );
+  return {
+    positions: Array.from(r.positions),
+    indices: Array.from(r.indices),
+    openEdges: r.openEdges,
+    nonManifoldEdges: r.nonManifoldEdges,
+    degenerateTriangles: r.degenerateTriangles,
+    verticesBefore: r.verticesBefore,
+    verticesAfter: r.verticesAfter,
+  };
+}
+
 // Release a cached OCC solid (JIT-timeline cache); no-op if already gone.
 function releaseShape({ id }) {
   if (id != null) {
@@ -1874,4 +1893,4 @@ function setCancelBuffer(view) {
   occ.setCancelBuffer(view);
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, setCancelBuffer };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, setCancelBuffer };

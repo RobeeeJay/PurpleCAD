@@ -1,3 +1,4 @@
+import { weldForImport, openMeshWarning } from "../../three/importWeld.js";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
@@ -324,10 +325,13 @@ const DocumentSection = () => {
           useStore.getState()._cameraControls?.updateSvgPreview?.(),
         );
       } else if (ext === "stl") {
-        addImportedSolid(
+        const name = `${baseName} (STL)`;
+        const { geometryData, report } = await weldForImport(
           parseStl(await file.arrayBuffer()).geometryData,
-          `${baseName} (STL)`,
         );
+        addImportedSolid(geometryData, name);
+        const warning = openMeshWarning(name, report);
+        if (warning) useStore.getState().showNotification(warning);
       } else if (ext === "step" || ext === "stp") {
         const res = await importStep({ stepText: await file.text() });
         addImportedSolid(

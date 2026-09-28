@@ -1,3 +1,4 @@
+#include "mesh_tools.h"
 #include <napi.h>
 
 // ── Primitives ───────────────────────────────────────────────────────────
@@ -2772,6 +2773,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("exportSTEP",         Napi::Function::New(env, ExportSTEP));
   exports.Set("importSTEP",         Napi::Function::New(env, ImportSTEP));
   exports.Set("makeSolidFromMesh",  Napi::Function::New(env, MakeSolidFromMesh));
+  exports.Set("weldMesh",           Napi::Function::New(env, WeldMesh));
 
   // Shape store management
   exports.Set("releaseShape",       Napi::Function::New(env, ReleaseShape));

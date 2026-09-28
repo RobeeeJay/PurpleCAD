@@ -223,6 +223,13 @@ export function solidFromMesh(geometryData) {
   return callOp("solidFromMesh", geometryData);
 }
 
+// Weld a mesh by exact position and report its open / non-manifold edges.
+// Direct route, like solidFromMesh: it runs on import and while a document
+// loads, and must not be discarded by a cancel aimed at some other op.
+export function weldMesh(geometryData) {
+  return callOp("weldMesh", geometryData);
+}
+
 // Genuine cancel: ask the main process to flip the shared cancel flag, so the
 // worker's in-flight native OCC op aborts (UserBreak) and frees the CPU — no
 // process/worker kill, so nothing shared is corrupted.  Electron-only; a no-op

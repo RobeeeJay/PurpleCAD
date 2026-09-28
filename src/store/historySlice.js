@@ -248,6 +248,53 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Store welded copies of meshes that earlier steps created: `byId` maps an
+  // item id to its new geometryData.  The surface is identical -- only how the
+  // mesh is stored changes -- so this is neither a timeline step nor undoable,
+  // and nothing downstream needs rebuilding.  Covers both a single "create"
+  // and the pieces of a "createGroup" (a split).  An item a later step has
+  // rebuilt (it carries a regenerator) keeps its own geometry.
+  replaceCreatedGeometry: (byId) =>
+    set((state) => {
+      const has = (id) => Object.prototype.hasOwnProperty.call(byId, id);
+      let changed = false;
+      const history = state.history.map((entry) => {
+        const inst = entry.instruction;
+        if (inst?.type === "create" && has(inst.item?.id)) {
+          changed = true;
+          return {
+            ...entry,
+            instruction: {
+              ...inst,
+              item: { ...inst.item, geometryData: byId[inst.item.id] },
+            },
+          };
+        }
+        if (
+          inst?.type === "createGroup" &&
+          inst.items?.some((i) => has(i.id))
+        ) {
+          changed = true;
+          return {
+            ...entry,
+            instruction: {
+              ...inst,
+              items: inst.items.map((i) =>
+                has(i.id) ? { ...i, geometryData: byId[i.id] } : i,
+              ),
+            },
+          };
+        }
+        return entry;
+      });
+      if (!changed) return {};
+      const items = state.items.map((i) =>
+        has(i.id) && !i.regenerator ? { ...i, geometryData: byId[i.id] } : i,
+      );
+      saveTimeline(history, state.activeHistoryId);
+      return { history: withOrphanFlags(history), items };
+    }),
+
   // Record a plane cut: the pieces the Split dialog cut from `id` (already
   // built, with ids).  Each keeps the original's material.  It used to add each
   // half as its own "Added" step and hide the original with no step at all, so

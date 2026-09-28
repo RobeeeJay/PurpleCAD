@@ -9,12 +9,13 @@ import { launchApp } from "./launch.js";
 let app;
 let page;
 
-// Binary STL: 12 triangles of a cube spanning ±10 mm.
-const cubeStl = () => {
+// Binary STL: 12 triangles of a cube spanning ±10 mm -- or 10, with its top
+// face left off, for a mesh that isn't closed.
+const cubeStl = ({ lidless = false } = {}) => {
   const tris = [];
   const quad = (a, b, c, d) => tris.push([a, b, c], [a, c, d]);
   const v = (x, y, z) => [x * 10, y * 10, z * 10];
-  quad(v(-1, -1, 1), v(1, -1, 1), v(1, 1, 1), v(-1, 1, 1));
+  if (!lidless) quad(v(-1, -1, 1), v(1, -1, 1), v(1, 1, 1), v(-1, 1, 1));
   quad(v(1, -1, -1), v(-1, -1, -1), v(-1, 1, -1), v(1, 1, -1));
   quad(v(1, -1, 1), v(1, -1, -1), v(1, 1, -1), v(1, 1, 1));
   quad(v(-1, -1, -1), v(-1, -1, 1), v(-1, 1, 1), v(-1, 1, -1));
@@ -85,6 +86,54 @@ test.describe.serial("import", () => {
       return mx.map((v, k) => v - mn[k]);
     });
     for (const e of ext) expect(e).toBeCloseTo(2, 1);
+
+    // Welded as it came in: the STL's 36 private vertices are its 8 corners,
+    // stored indexed -- and still DRAWN per triangle (split apart for display),
+    // so the cube's edges stay crisp rather than smooth-shaded.  A closed mesh
+    // raises no warning.
+    const stored = await page.evaluate(() => {
+      const s = window.__store.getState();
+      const it = s.items.find((i) => i.type === "csg");
+      const drawn = s._cameraControls.meshWorldData(it.id);
+      return {
+        vertices: it.geometryData.positions.length / 3,
+        indices: it.geometryData.indices?.length,
+        flat: it.geometryData.flat,
+        drawnIndexed: drawn.indices != null,
+        note: s.notification,
+      };
+    });
+    expect(stored).toEqual({
+      vertices: 8,
+      indices: 36,
+      flat: true,
+      drawnIndexed: false,
+      note: null,
+    });
+  });
+
+  test("an STL that isn't closed is imported with a warning", async () => {
+    await page.evaluate(() => window.__store.getState().newDocument());
+    await importVia("Import an STL mesh", {
+      name: "open box.stl",
+      mimeType: "model/stl",
+      buffer: cubeStl({ lidless: true }),
+    });
+    await expect
+      .poll(() => page.evaluate(() => window.__store.getState().notification), {
+        timeout: 30000,
+      })
+      .toBe(
+        "open box (STL) isn't a closed solid: it has 4 open edges. Booleans with it may leave holes.",
+      );
+    // It is still imported: a warning, not a refusal.
+    expect(
+      await page.evaluate(
+        () =>
+          window.__store.getState().items.filter((i) => i.type === "csg")
+            .length,
+      ),
+    ).toBe(1);
   });
 
   test("importing a STEP file (exported by the app) creates a solid body", async () => {

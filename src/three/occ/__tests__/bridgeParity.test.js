@@ -193,6 +193,44 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     });
   }, 60000);
 
+  it("weldMesh welds identically in both implementations", async () => {
+    // An STL-style triangle soup: a cube with three private vertices per
+    // triangle.  Both impls must return the same welded mesh and topology.
+    const soup = [];
+    const g = { positions: [], indices: null };
+    const box = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ];
+    const faces = [
+      [0, 2, 1],
+      [0, 3, 2],
+      [4, 5, 6],
+      [4, 6, 7],
+      [0, 1, 5],
+      [0, 5, 4],
+      [2, 3, 7],
+      [2, 7, 6],
+      [1, 2, 6],
+      [1, 6, 5],
+      [3, 0, 4],
+      [3, 4, 7],
+    ];
+    for (const f of faces) for (const v of f) soup.push(...box[v]);
+    g.positions = soup;
+    const a = await ops.weldMesh(JSON.parse(JSON.stringify(g)));
+    const b = bridge.weldMesh(JSON.parse(JSON.stringify(g)));
+    expect(a).toEqual(b);
+    expect(a.verticesAfter).toBe(8);
+    expect(a.openEdges).toBe(0);
+  });
+
   it("solidFromMesh retains identical solids", async () => {
     // Baked-mesh sew: both impls must produce the same solid from the same
     // mesh.  Compare via tessellation of the retained shapes.

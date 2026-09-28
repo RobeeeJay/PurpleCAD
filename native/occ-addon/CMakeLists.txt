@@ -27,8 +27,15 @@ find_package(OpenCASCADE REQUIRED
     /usr/local/opt/opencascade/lib/cmake/opencascade
 )
 
+# meshoptimizer, vendored at a pinned release (third_party/meshoptimizer/
+# VENDORED.md).  Only the translation units the addon uses are compiled.
+set(MESHOPT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src)
+
 add_library(${PROJECT_NAME} SHARED
   src/binding.cc
+  src/mesh_tools.cpp
+  ${MESHOPT_DIR}/allocator.cpp
+  ${MESHOPT_DIR}/indexgenerator.cpp
   ${CMAKE_JS_SRC}
 )
 
@@ -39,6 +46,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
+  ${MESHOPT_DIR}
   ${CMAKE_JS_INC}
   ${NODE_ADDON_API_DIR}
   ${OpenCASCADE_INCLUDE_DIR}

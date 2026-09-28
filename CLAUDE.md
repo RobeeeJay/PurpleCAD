@@ -351,6 +351,11 @@ What that means in practice:
 args)`.
   3. Call from React via `await occClient.theOp(args)`. The busy
      counter / spinner auto-attaches.
+  4. Add the same body to `electron/occ-bridge.cjs` and its exports (see the
+     two-implementation rule below), AND add the op name to `OCC_OPS` in
+     `electron/main.cjs`. That list registers one IPC channel per name; an op
+     missing from it has no handler, so it passes every vitest test (which
+     never crosses IPC) and fails in the app.
 - **`occOps.js` must never be statically imported** from the renderer
   bundle — it uses Node.js `createRequire` for the native addon.
   `vite.config.js` marks it `external` so Rollup skips bundling it.
