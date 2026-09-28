@@ -2646,12 +2646,23 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
       }
     }
 
-    // After merging, a still-huge face count means a curved/organic mesh whose
-    // boolean would hang the main thread — reject it, UNLESS the caller opted out
-    // (skipCaps): export never booleans, and the emboss stamp is a legitimately
-    // dense curved wrap that must be booleaned (and is now cancellable).
+    // After merging, a curved/organic mesh keeps roughly one face per triangle.
+    // Reject one too big to boolean in reasonable time, UNLESS the caller opted
+    // out (skipCaps): export never booleans, and the emboss stamp is a
+    // legitimately dense curved wrap that must be booleaned.
+    //
+    // This was 5000, which refused an ordinary imported STL part (~14.6k faces).
+    // Measured on clean curved meshes (this Mac, two runs): at 49k triangles
+    // sewing took 5.0-5.3 s and the boolean after it under 2 s (1.1-1.9 s for
+    // a fuse and a cut through a whole ring of faces); at 14.6k, 1.3 s and
+    // 0.3-0.5 s.  The boolean is never the slow part, it runs in the OCC worker
+    // and honours cancel, and this check comes AFTER the sew -- so a refusal
+    // here had already paid the expensive stage.  It now matches kMaxTris,
+    // which is checked BEFORE sewing and is the limit that actually saves
+    // time.  A DIRTY mesh (open, self-intersecting) can be slow at any size;
+    // no count tells clean from dirty.
     if (!skipCaps) {
-      const int kMaxFaces = 5000;
+      const int kMaxFaces = 50000;
       int faceCount = 0;
       for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
         if (++faceCount > kMaxFaces) break;

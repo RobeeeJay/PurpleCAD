@@ -17,8 +17,8 @@ const O = { x: 0, y: 0, z: 0 };
 const S = { x: 1, y: 1, z: 1 };
 
 // A finely tessellated sphere, standing in for an imported STL: every facet is
-// curved, so coplanar merging can't reduce it, and it passes OCC's face cap for
-// booleans (5000) -- which is the error a real imported part hits.
+// curved, so coplanar merging can't reduce it -- its face count stays its
+// triangle count, which is what the boolean size limits measure.
 const denseSphere = (r = 3, seg = 80) => {
   const positions = [];
   const indices = [];
@@ -68,7 +68,7 @@ const boss = (id) => ({
   scale: S,
 });
 
-const docWithMeshHost = () => ({
+const docWithMeshHost = (seg) => ({
   version: 1,
   activeHistoryId: null,
   variables: [],
@@ -95,7 +95,7 @@ const docWithMeshHost = () => ({
           position: O,
           rotation: O,
           scale: S,
-          geometryData: denseSphere(),
+          geometryData: denseSphere(3, seg),
         },
       },
       hiddenIds: [],
@@ -104,8 +104,11 @@ const docWithMeshHost = () => ({
 });
 
 describe("an extrude OCC can't fuse into its host", () => {
+  // Over the 50,000-triangle limit (160 segments: 50,880 triangles), which OCC
+  // refuses before it even sews.  This used an ~12.6k-triangle mesh when the
+  // face cap was 5000; that mesh now fuses (below).
   it("is added as a separate body, and says why", async () => {
-    useStore.getState().loadDocument(docWithMeshHost());
+    useStore.getState().loadDocument(docWithMeshHost(160));
     useStore.setState({ notification: null });
     await runExtrudeUnion([boss(101)], [5], 200);
     const s = useStore.getState();
@@ -115,7 +118,7 @@ describe("an extrude OCC can't fuse into its host", () => {
     expect(s.notification ?? "", "notification").toMatch(
       /added as a separate body/,
     );
-    expect(s.notification).toMatch(/too many curved faces/);
+    expect(s.notification).toMatch(/too detailed \(50880 triangles\)/);
     // The extrusion exists...
     expect(s.items.find((i) => i.id === 101)?.type, "the prism").toBe(
       "extrude",
@@ -130,5 +133,19 @@ describe("an extrude OCC can't fuse into its host", () => {
       "no fused result",
     ).toBeFalsy();
     expect(s.history.at(-1).label).toBe("Extruded");
+  }, 120000);
+
+  // The limit that refused an ordinary imported part: an STL of ~14.6k faces
+  // was over the old 5000-face cap, so an extrude from a sketch on it could
+  // never merge.  86 segments gives 14,620 curved triangles.
+  it("fuses into an imported mesh the size of a real part", async () => {
+    useStore.getState().loadDocument(docWithMeshHost(86));
+    useStore.setState({ notification: null });
+    await runExtrudeUnion([boss(101)], [5], 200);
+    const s = useStore.getState();
+    expect(s.notification, "no fallback message").toBeNull();
+    const fused = s.items.find((i) => i.id === 200);
+    expect(fused?.type, "the fused body").toBe("csg");
+    expect(fused.regenerator.inputIds).toEqual([5]);
   }, 120000);
 });
