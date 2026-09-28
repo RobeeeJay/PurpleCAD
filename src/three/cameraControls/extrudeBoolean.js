@@ -99,6 +99,9 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
       .consumeItems([extrudeItemId, ...targets.map((t) => t.id)]);
   } catch (err) {
     console.error("Cut extrusion failed:", err);
+    useStore
+      .getState()
+      .showNotification(`The cut couldn't be made: ${err.message}`);
   }
 }
 
@@ -179,6 +182,9 @@ export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
     useStore.getState().consumeItems(targets.map((t) => t.id));
   } catch (err) {
     console.error("Cut extrusion failed:", err);
+    useStore
+      .getState()
+      .showNotification(`The cut couldn't be made: ${err.message}`);
   }
 }
 
@@ -198,6 +204,17 @@ export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
 // `hostIds` are existing solids (a boss) fused in and consumed.  Falls back to
 // adding the prisms as separate items if the union can't be produced.
 export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
+  // The prisms exist ONLY inside the union's recipe until it is committed, so a
+  // failed fuse must add them separately or the extrude produces nothing.
+  let committed = false;
+  const keepSeparately = (reason) => {
+    useStore.getState().addItems(extrudeDefs, "Extruded");
+    useStore
+      .getState()
+      .showNotification(
+        `The extrusion couldn't be merged with the body it starts on, so it was added as a separate body.${reason ? ` ${reason}` : ""}`,
+      );
+  };
   try {
     const { performCsg } = await import("../occClient.js");
     const store = useStore.getState();
@@ -223,10 +240,12 @@ export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
     });
     if (!result) {
       // Couldn't fuse — keep the geometry by adding the prisms separately.
-      useStore.getState().addItems(extrudeDefs, "Extruded");
+      committed = true;
+      keepSeparately();
       return;
     }
     const material = (hosts[0] ?? extrudeDefs[0])?.material;
+    committed = true;
     useStore.getState().addItem({
       id: unionId,
       name: `Extruded ${unionId}`,
@@ -247,7 +266,12 @@ export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
     });
     if (hosts.length) useStore.getState().consumeItems(hosts.map((h) => h.id));
   } catch (err) {
+    // The fuse can THROW, not only come back empty -- OCC refuses a host it
+    // can't boolean, such as an imported mesh too dense to turn into a solid.
+    // That used to skip the fallback above and only log: a backward extrude
+    // into an imported STL produced no body and no message at all.
     console.error("Extrude union failed:", err);
+    if (!committed) keepSeparately(err.message);
   }
 }
 
@@ -300,5 +324,8 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
     useStore.getState().consumeItems(inputs.map((i) => i.id));
   } catch (err) {
     console.error("Union extrude batch failed:", err);
+    useStore
+      .getState()
+      .showNotification(`The extrusions couldn't be merged: ${err.message}`);
   }
 }

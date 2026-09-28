@@ -48,6 +48,9 @@ export const getDisplayLabel = (entry, history) => {
     // Otherwise several items at once (a multi-area extrude's prisms): name it
     // by count rather than one arbitrary member, calling them what they are.
     const items = inst.items || [];
+    // A group of one -- an extrude whose fuse fell back to a separate body --
+    // read "Extruded 1 extrusions"; name the item instead.
+    if (items.length === 1) return `${label} ${items[0].name}`;
     const noun = items.every((it) => it.type === "extrude")
       ? "extrusions"
       : "bodies";

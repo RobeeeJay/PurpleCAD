@@ -51,6 +51,13 @@ describe("timeline step labels", () => {
     expect(getDisplayLabel(e, [e])).toBe("Split 2 bodies");
   });
 
+  it('names a group of one by its item, not "1 extrusions"', () => {
+    const e = group("Extruded", [
+      { id: 4, name: "Extrude 4", type: "extrude" },
+    ]);
+    expect(getDisplayLabel(e, [e])).toBe("Extruded Extrude 4");
+  });
+
   it("names an ordinary step by its item", () => {
     const h = [created(10, "Block")];
     expect(getDisplayLabel(h[0], h)).toBe("Added Block");
