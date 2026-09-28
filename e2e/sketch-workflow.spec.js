@@ -676,6 +676,85 @@ test.describe.serial("2D sketch workflow", () => {
     );
   });
 
+  // Pasted copies used to land unselected beside the originals, which stayed
+  // selected -- so the obvious next move, dragging the copy into place, moved
+  // the original instead.  Nudging had one resolution, 1mm per press.
+  test("pasted geometry is selected, drags, and nudges finely with Shift", async () => {
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(2, -3);
+    const B = toScreen(4, -3);
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+    const orig = (await shapes()).length - 1;
+    const original = { ...(await shapes())[orig] };
+
+    const mid = toScreen(3, -3);
+    await page.mouse.click(mid.x, mid.y);
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.__store.getState().selectedSketchElement),
+      )
+      .toMatchObject({ type: "line", shapeIdx: orig });
+
+    await page.keyboard.press("ControlOrMeta+c");
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect.poll(async () => (await shapes()).length).toBe(orig + 2);
+    const copy = orig + 1;
+
+    // The copy is now the selection, and the original is not -- selected just
+    // as a click would select it, so single-line tools take it.
+    const sel = () =>
+      page.evaluate(() => {
+        const s = window.__store.getState();
+        return {
+          multi: s.sketchMultiSelectedIndices,
+          single: s.selectedSketchElement,
+        };
+      });
+    await expect
+      .poll(sel)
+      .toEqual({ multi: [], single: { type: "line", shapeIdx: copy } });
+
+    // Drag the copy (pasted half a unit up and right of the original).
+    const pasted = (await shapes())[copy];
+    const grab = toScreen((pasted.x1 + pasted.x2) / 2, pasted.y1);
+    const drop = toScreen((pasted.x1 + pasted.x2) / 2, pasted.y1 + 1);
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    await page.mouse.move(drop.x, drop.y, { steps: 8 });
+    await page.mouse.up();
+    const dragged = (await shapes())[copy];
+    expect(dragged.y1 - pasted.y1, "the copy moved up").toBeGreaterThan(0.5);
+    expect((await shapes())[orig], "the original stayed put").toMatchObject(
+      original,
+    );
+
+    // Still selected after the drag.  A plain arrow nudges 1mm (0.1 scene
+    // units); with Shift, 0.1mm.
+    await expect
+      .poll(sel)
+      .toEqual({ multi: [], single: { type: "line", shapeIdx: copy } });
+    const x0 = (await shapes())[copy].x1;
+    await page.keyboard.press("ArrowRight");
+    await expect
+      .poll(async () => (await shapes())[copy].x1 - x0)
+      .toBeCloseTo(0.1, 6);
+    await page.keyboard.press("Shift+ArrowRight");
+    await expect
+      .poll(async () => (await shapes())[copy].x1 - x0)
+      .toBeCloseTo(0.11, 6);
+    // The original never moved through any of it.
+    expect((await shapes())[orig]).toMatchObject(original);
+
+    await page.keyboard.press("Escape");
+  });
+
   // The font list was a <datalist>: the browser filtered it by whatever was
   // already in the field (so opening it on the current font showed almost
   // nothing), capped its own height with no scrolling, and could not show what

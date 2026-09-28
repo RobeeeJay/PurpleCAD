@@ -1342,6 +1342,7 @@ export function createSketchInteraction(
     {
       sketchModeRef,
       itemsRef,
+      objectsRef,
       selectedIdRef,
       extrudeSelectModeRef,
       sketchPlacementModeRef,
@@ -1360,6 +1361,7 @@ export function createSketchInteraction(
       clearMultiSelectOverlays,
       clearCoincidentFirstOverlay,
       clearSketchSelection,
+      sketchSelectLine,
       cancelSketchDraw,
       clearMarqueeRect,
       clearModifyPreview,

@@ -18,6 +18,7 @@ export function createSketchKeyboardHandler(
   {
     sketchModeRef,
     itemsRef,
+    objectsRef,
     selectedIdRef,
     extrudeSelectModeRef,
     sketchPlacementModeRef,
@@ -36,6 +37,7 @@ export function createSketchKeyboardHandler(
     clearMultiSelectOverlays,
     clearCoincidentFirstOverlay,
     clearSketchSelection,
+    sketchSelectLine,
     cancelSketchDraw,
     clearMarqueeRect,
     clearModifyPreview,
@@ -57,8 +59,9 @@ export function createSketchKeyboardHandler(
       return;
 
     // Arrow keys nudge the selected sketch geometry by 1mm (one grid step in
-    // scene units).  Translates the whole selection rigidly, then solves the
-    // rest of the system around it — same path a body drag uses.
+    // scene units), or 0.1mm with Shift held, for fine placement.  Translates
+    // the whole selection rigidly, then solves the rest of the system around
+    // it — same path a body drag uses.
     const nudge = {
       ArrowUp: [0, 1],
       ArrowDown: [0, -1],
@@ -84,7 +87,7 @@ export function createSketchKeyboardHandler(
       );
       if (indices && selItem) {
         e.preventDefault();
-        const step = 1 / MM_PER_UNIT;
+        const step = (e.shiftKey ? 0.1 : 1) / MM_PER_UNIT;
         const dx = nudge[0] * step;
         const dy = nudge[1] * step;
         const placed = new Map();
@@ -248,6 +251,21 @@ export function createSketchKeyboardHandler(
       useStore
         .getState()
         .addSketchShapes(selectedIdRef.current, newShapes, newConstraints);
+      // The copies become the selection, so they can be dragged or nudged
+      // straight away -- they used to land unselected beside the originals,
+      // which stayed selected, so a drag moved the wrong geometry.  One shape
+      // is selected exactly as a click would select it, so the tools that act
+      // on a single selected line (Horizontal, Offset, ...) take it; several
+      // become a multi-selection, as a marquee makes.
+      const pasted = newShapes.map((_, i) => baseIdx + i);
+      clearSketchSelection();
+      if (pasted.length === 1) {
+        const sketchMesh = objectsRef.current[selectedIdRef.current];
+        if (sketchMesh) sketchSelectLine(pasted[0], newShapes[0], sketchMesh);
+      } else {
+        multiSelectedRef.current = pasted;
+        showMultiSelectOverlays(pasted);
+      }
       return;
     }
 
