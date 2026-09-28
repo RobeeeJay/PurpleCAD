@@ -14,7 +14,12 @@ import {
   arcSegsN,
   sampleShapeForPoly,
 } from "./loopIntersect.js";
-import { polyContainsPoint, polyCentroid, polyArea } from "./polygonUtil.js";
+import {
+  polyContainsPoint,
+  polyCentroid,
+  polyArea,
+  signedPolyAreaXY,
+} from "./polygonUtil.js";
 import { cogShapeContours } from "../cogGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 
@@ -27,6 +32,114 @@ export {
   polyArea,
   profileAnchor,
 } from "./polygonUtil.js";
+
+// Enumerating every simple cycle is exact for a small sketch -- and existing
+// documents' extrudes are matched against what it returns, so small sketches
+// keep it -- but beyond this many cycles the sketch is an overlapping
+// arrangement, and its regions are the faces below.
+const MAX_ENUMERATED_CYCLES = 128;
+
+// The bounded faces of a planar arrangement, plus each connected piece's outer
+// outline: the regions you can see, not every union of them.  Linear in the
+// edge count: every directed edge borders exactly one face, and walking "take
+// the sharpest right turn" from it goes round that face.
+function arrangementFaces(
+  shapeNodes,
+  subEntries,
+  nodes,
+  curveSegments,
+  precision,
+) {
+  const live = shapeNodes.map((sn) => !!sn && sn.a !== sn.b);
+  // A dangling edge (a node of degree 1) bounds no region; tracing round it
+  // would put a zero-width spike in a face that OCC's wire builder rejects.
+  const degree = new Map();
+  const bump = (n, d) => degree.set(n, (degree.get(n) || 0) + d);
+  shapeNodes.forEach((sn, si) => {
+    if (live[si]) {
+      bump(sn.a, 1);
+      bump(sn.b, 1);
+    }
+  });
+  for (let pruned = true; pruned;) {
+    pruned = false;
+    shapeNodes.forEach((sn, si) => {
+      if (live[si] && (degree.get(sn.a) === 1 || degree.get(sn.b) === 1)) {
+        live[si] = false;
+        bump(sn.a, -1);
+        bump(sn.b, -1);
+        pruned = true;
+      }
+    });
+  }
+
+  const segsOf = (sh) =>
+    arcSegsN(
+      sh,
+      sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI,
+      curveSegments,
+      precision,
+    );
+  // Half-edge h = 2*si (a -> b) or 2*si + 1 (b -> a).  Its direction as it
+  // leaves its node is taken from the curve's first sample, not the far end,
+  // so two arcs leaving one point (circles crossing there) sort by where
+  // they actually go.
+  const tail = (h) => (h & 1 ? shapeNodes[h >> 1].b : shapeNodes[h >> 1].a);
+  const head = (h) => (h & 1 ? shapeNodes[h >> 1].a : shapeNodes[h >> 1].b);
+  const samples = (h) => {
+    const sh = subEntries[h >> 1].shape;
+    return sampleShapeForPoly(sh, (h & 1) === 0, Math.max(2, segsOf(sh)));
+  };
+  const out = new Map();
+  shapeNodes.forEach((sn, si) => {
+    if (!live[si]) return;
+    for (const h of [si * 2, si * 2 + 1]) {
+      const from = nodes[tail(h)];
+      const pts = samples(h);
+      const to = pts.length > 1 ? pts[1] : nodes[head(h)];
+      const list = out.get(tail(h)) || [];
+      list.push({ h, ang: Math.atan2(to.y - from.y, to.x - from.x) });
+      out.set(tail(h), list);
+    }
+  });
+  const slot = new Map();
+  out.forEach((list) => {
+    list.sort((p, q) => p.ang - q.ang);
+    list.forEach((e, i) => slot.set(e.h, i));
+  });
+  // The face on h's left continues along the edge just clockwise of h's twin.
+  const next = (h) => {
+    const list = out.get(head(h));
+    return list[(slot.get(h ^ 1) - 1 + list.length) % list.length].h;
+  };
+
+  const faces = [];
+  const seen = new Set();
+  out.forEach((list) => {
+    for (const { h: start } of list) {
+      if (seen.has(start)) continue;
+      const walk = [];
+      let h = start;
+      while (!seen.has(h)) {
+        seen.add(h);
+        walk.push(h);
+        h = next(h);
+      }
+      if (h !== start) continue;
+      const polygon = walk.flatMap(samples);
+      const area = signedPolyAreaXY(polygon);
+      const shapeIndices = [
+        ...new Set(walk.map((e) => subEntries[e >> 1].origIdx)),
+      ];
+      // Counter-clockwise: a bounded face.  Clockwise: a piece's outline, kept
+      // (reversed) when it is a simple loop, as the cycle search offered it.
+      if (area > 1e-12) faces.push({ polygon, shapeIndices });
+      else if (area < -1e-12 && new Set(walk.map(tail)).size === walk.length)
+        faces.push({ polygon: polygon.slice().reverse(), shapeIndices });
+    }
+  });
+  return faces;
+}
 
 export function findClosedLoopsWithShapes(
   shapes,
@@ -359,8 +472,14 @@ export function findClosedLoopsWithShapes(
   // the budget runs out we keep the regions found so far rather than hang.
   const cycles = [];
   let dfsBudget = 150000;
+  // Enumerating every cycle also returns every UNION of adjacent regions, so
+  // the count explodes with overlap: six overlapping circles gave 6211 loops
+  // (1.28M points), and grouping them into regions took 142 s on the main
+  // thread -- the window froze while a copy was nudged over its original.
+  // Past this many, stop and take the arrangement's faces instead.
+  let overflow = results.length > MAX_ENUMERATED_CYCLES;
   const dfs = (start, cur, path, visited) => {
-    if (path.length > 24 || dfsBudget <= 0) return;
+    if (path.length > 24 || dfsBudget <= 0 || overflow) return;
     dfsBudget--;
     for (const { si, otherNode } of adj[cur] || []) {
       if (path.some((e) => e.si === si)) continue;
@@ -369,6 +488,10 @@ export function findClosedLoopsWithShapes(
         if (!cycleKeys.has(key)) {
           cycleKeys.add(key);
           cycles.push([...path, { si, fromNode: cur, toNode: otherNode }]);
+          if (results.length + cycles.length > MAX_ENUMERATED_CYCLES) {
+            overflow = true;
+            return;
+          }
         }
         continue;
       }
@@ -385,6 +508,22 @@ export function findClosedLoopsWithShapes(
     const ni = parseInt(n);
     if ((adj[ni] || []).length >= 2) dfs(ni, ni, [], new Set([ni]));
   });
+
+  if (overflow) {
+    // The faces replace BOTH the enumerated cycles and the parallel-edge pairs
+    // above -- those pairs are faces too, and would come back twice.
+    results.length = 0;
+    cycles.length = 0;
+    results.push(
+      ...arrangementFaces(
+        shapeNodes,
+        subEntries,
+        nodes,
+        curveSegments,
+        precision,
+      ),
+    );
+  }
 
   cycles.forEach((path) => {
     const poly = [];

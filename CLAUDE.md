@@ -954,6 +954,21 @@ sources are picked) that reuses the creation UI.
   skip list, and to the double-click editor list in `sketchClickHandler.js`.
   An outline must have no zero-length segment: OCC's wire builder rejects the
   whole profile (the cog's first cut had a duplicated base-circle point).
+- **Sketch region finding enumerates EVERY simple cycle -- and that explodes
+  on overlap.** `findClosedLoopsWithShapes` returns each cycle through the split
+  arcs/lines, which includes every union of adjacent regions, and
+  `groupLoopsWithHoles` is all-pairs over them. Six overlapping circles (a
+  pasted set of three concentric circles nudged over its original) gave 6211
+  loops / 1.28M points and 142 s of grouping on the main thread: the whole
+  window stopped taking input, with nothing in the console. The DFS step budget
+  did not help -- it bounds the search, not the OUTPUT. Past
+  `MAX_ENUMERATED_CYCLES` (128) the finder now returns the arrangement's faces
+  instead (`arrangementFaces`: half-edge tracing, linear); below it the output
+  is unchanged, because saved extrudes are matched against it, unions
+  included. Region finding runs on EVERY sketch change, so anything slow here
+  is paid per nudge. Also: the splitter only divides a line where another
+  CROSSES it (`lineCrossIntersect` rejects endpoint parameters), so a line
+  that merely ENDS on another does not split the region (`loopFaces.test.js`).
 - **The 3D ground ruler is centred on the RAW camera target — never add a
   screen-space shift to it.** The compact axis indicator shifts right by
   `camRight * halfPanelWidth` to clear the left panel, but `camRight` rotates
