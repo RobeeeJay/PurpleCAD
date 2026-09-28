@@ -96,6 +96,17 @@ describe("weldMesh", () => {
     expect(triangles(r)).toEqual(triangles(input));
   });
 
+  it("merges -0 with 0, which are the same point", async () => {
+    // STL exporters write -0.0 freely.  Compared bit-for-bit it was a
+    // different corner, so a closed part came back with open edges.
+    const input = soup();
+    for (let i = 0; i < input.positions.length; i++)
+      if (input.positions[i] === 0 && i % 2) input.positions[i] = -0;
+    const r = await ops.weldMesh(input);
+    expect(r.verticesAfter).toBe(8);
+    expect(r.openEdges).toBe(0);
+  });
+
   it("counts a zero-area triangle apart instead of as an edge", async () => {
     const input = soup();
     input.positions.push(0, 0, 0, 0, 0, 0, 1, 0, 0); // repeats a corner

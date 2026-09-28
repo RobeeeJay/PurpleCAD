@@ -68,6 +68,10 @@ Napi::Value WeldMesh(const Napi::CallbackInfo& info) {
     } else {
       throw std::runtime_error("weldMesh: positions must be float");
     }
+    // The remap compares bytes, and -0.0 and 0.0 differ in their sign bit
+    // though they are the same point; exporters write both.  Adding +0.0
+    // turns -0.0 into 0.0 and leaves every other value as it is.
+    for (double& c : pos) c += 0.0;
     const size_t vertexCount = pos.size() / 3;
     if (vertexCount < 3) throw std::runtime_error("weldMesh: too few vertices");
 
