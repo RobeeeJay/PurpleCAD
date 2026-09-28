@@ -107,7 +107,8 @@ export const createUiConstructToolsSlice = (set) => ({
     set((state) =>
       state.splitTool ? { splitTool: { ...state.splitTool, ...partial } } : {},
     ),
-  cancelSplit3d: () => set({ splitTool: null, splitPick: null }),
+  cancelSplit3d: () =>
+    set({ splitTool: null, splitPick: null, toolError: null }),
   setSplitPick: (v) => set({ splitPick: v || null }),
 
   startPointToPointTool: () =>

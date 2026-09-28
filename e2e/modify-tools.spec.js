@@ -205,5 +205,119 @@ test.describe.serial("modify tools through their dialogs", () => {
     expect(
       await page.evaluate(() => window.__store.getState().items.length),
     ).toBeGreaterThan(countBefore);
+    // Recorded as ONE Split step.  It used to add each half as its own "Added"
+    // step and hide the cube with no step at all, so nothing said it was split.
+    // (The old path ended on "Added" for the second half.)  The step holds both
+    // halves and names the cube it came from.
+    const last = await page.evaluate(() => {
+      const h = window.__store.getState().history.at(-1);
+      return {
+        label: h.label,
+        pieces: h.instruction.items?.length,
+        splitFrom: h.instruction.splitFrom,
+      };
+    });
+    expect(last).toEqual({ label: "Split", pieces: 2, splitFrom: 14 });
+  });
+
+  // The test above sets the cut directly, which is how a face-pick problem went
+  // unseen: the cut phase stayed locked to whole objects, so the widget greyed
+  // out faces and hover lit whole bodies, and clicking the body's own face --
+  // the natural first try -- "worked" but cut nothing and returned a copy.
+  // Everything here is picked with real clicks.
+  test("split takes its cut from a face picked in the view", async ({}, testInfo) => {
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.newDocument();
+      const box = (id, name, x, y, sy) => ({
+        id,
+        name,
+        type: "cube",
+        children: [],
+        parentId: null,
+        position: { x, y, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: sy, z: 1 },
+      });
+      s.addItem(box(40, "Block", 0, 1, 1)); // spans y 0..2
+      s.addItem(box(41, "Step", 3, 0.5, 0.5)); // spans y 0..1: top face is y = 1
+      s.selectItem(null);
+    });
+    await page.waitForTimeout(800);
+    const at = (x, y, z) =>
+      page.evaluate(
+        ([x, y, z]) =>
+          window.__store.getState()._cameraControls.worldToScreen(x, y, z),
+        [x, y, z],
+      );
+    const tool = () =>
+      page.evaluate(() => {
+        const s = window.__store.getState();
+        return {
+          pick: s.splitPick,
+          cut: s.splitTool?.cutLabel ?? null,
+          error: s.toolError,
+        };
+      });
+    const widgetOn = (title) =>
+      page
+        .locator(`.selection-widget-btn[title^="${title}"]`)
+        .evaluate((b) => b.classList.contains("active"));
+
+    await page.getByTitle(/^Split object/).click();
+    expect(await widgetOn("Select objects")).toBe(true);
+    let p = await at(0, 1, 1);
+    await page.mouse.click(p.x, p.y);
+    await expect.poll(async () => (await tool()).pick).toBe("cut");
+
+    // Picking the cut: the widget now offers faces, not whole objects.
+    expect(await widgetOn("Select faces")).toBe(true);
+    expect(await widgetOn("Select objects")).toBe(false);
+
+    // The block's own top face lies on its surface and cuts nothing: refused,
+    // with the reason on the tool's error line, and the pick stays live.
+    p = await at(0.3, 2, 0.3);
+    await page.mouse.click(p.x, p.y);
+    await expect
+      .poll(async () => (await tool()).error)
+      .toMatch(/doesn't pass through Block/);
+    expect((await tool()).cut).toBeNull();
+    await expect(page.locator(".tool-error-line")).toContainText(
+      "doesn't pass through Block",
+    );
+    const file = testInfo.outputPath("split-refused.png");
+    await page.screenshot({ path: file, timeout: 15_000 });
+    await testInfo.attach("split-refused", {
+      path: file,
+      contentType: "image/png",
+    });
+
+    // The step's top face runs through the block's middle: accepted.
+    p = await at(3, 1, 0);
+    await page.mouse.click(p.x, p.y);
+    await expect.poll(async () => (await tool()).cut).toBe("face of Step");
+    expect((await tool()).error).toBeNull();
+
+    await page.getByTitle("Split the object").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => window.__store.getState().history.at(-1).label),
+        { timeout: 30000 },
+      )
+      .toBe("Split");
+    // Named by the body it cut -- it used to read "Split 2 extrusions".
+    await expect(page.getByText("Split Block", { exact: true })).toBeVisible();
+    // Cut at y = 1: one half above, one below.
+    const halves = await page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.filter((i) => /^Block \(/.test(i.name))
+        .map((i) => i.position.y)
+        .sort(),
+    );
+    expect(halves).toHaveLength(2);
+    expect(halves[0]).toBeCloseTo(0.5, 2);
+    expect(halves[1]).toBeCloseTo(1.5, 2);
   });
 });

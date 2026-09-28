@@ -9,7 +9,11 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { textShapeContours, makeTextShape } from "../sketchText.js";
-import { frameFromPoints, frameFromPointNormal } from "../planeFrame.js";
+import {
+  frameFromPoints,
+  frameFromPointNormal,
+  planeCrossesPoints,
+} from "../planeFrame.js";
 import { createProjectTool } from "./projectTool.js";
 
 export function createToolPreviews({
@@ -409,9 +413,39 @@ export function createToolPreviews({
       label = `face of ${item.name}`;
     }
     if (!frame) return;
-    useStore.getState().updateSplit3d({ cutFrame: frame, cutLabel: label });
-    useStore.getState().setSplitPick(null);
+    // The cut has to pass THROUGH the body.  A face of the body itself -- the
+    // natural first thing to click -- lies on its surface and cuts nothing; the
+    // split used to go ahead anyway and hand back a renamed copy.
+    const store = useStore.getState();
+    const target = objectsRef.current[store.splitTool?.objectId];
+    if (target && !planeCrossesPoints(frame, worldPositions(target))) {
+      store.setToolError(
+        `That ${item.type === "plane" || item.type === "sketch" ? "plane" : "face"} doesn't pass through ${store.splitTool.objectName} — pick a face or plane that cuts across it.`,
+      );
+      return;
+    }
+    store.setToolError(null);
+    store.updateSplit3d({ cutFrame: frame, cutLabel: label });
+    store.setSplitPick(null);
     controls.previewPlane(frame);
+  };
+
+  // A mesh's vertices in world space, flattened.  A primitive is drawn on a box
+  // hull, so for one this is the hull's corners -- a superset of the body, which
+  // can let through a plane that clips only the hull; the split itself then
+  // comes back one-sided and the dialog refuses it there.
+  const worldPositions = (mesh) => {
+    mesh.updateMatrixWorld(true);
+    const src = mesh.geometry.attributes.position;
+    const out = new Float32Array(src.count * 3);
+    const v = new THREE.Vector3();
+    for (let i = 0; i < src.count; i++) {
+      v.fromBufferAttribute(src, i).applyMatrix4(mesh.matrixWorld);
+      out[i * 3] = v.x;
+      out[i * 3 + 1] = v.y;
+      out[i * 3 + 2] = v.z;
+    }
+    return out;
   };
 
   // The active sketch + its mesh, or null.  Shared by the Project tool and the

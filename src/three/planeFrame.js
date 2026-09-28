@@ -62,6 +62,28 @@ export function normalOf(rotation) {
   return { x: n.x, y: n.y, z: n.z };
 }
 
+// Does a frame's plane pass THROUGH a body, given the body's world vertices as a
+// flat [x,y,z,...] array?  True only when vertices lie clearly on both sides.
+// A face of the body itself has every vertex on one side or in the plane, so it
+// cuts nothing -- the split tool used to accept it and hand back a renamed copy.
+// `tol` absorbs float noise in vertices that sit on the plane.
+export function planeCrossesPoints(frame, positions, tol = 1e-6) {
+  const n = normalOf(frame.rotation);
+  const o = frame.position;
+  let above = false;
+  let below = false;
+  for (let i = 0; i < positions.length; i += 3) {
+    const d =
+      (positions[i] - o.x) * n.x +
+      (positions[i + 1] - o.y) * n.y +
+      (positions[i + 2] - o.z) * n.z;
+    if (d > tol) above = true;
+    else if (d < -tol) below = true;
+    if (above && below) return true;
+  }
+  return false;
+}
+
 // Apply the dialog's per-axis rotation (degrees, in the plane's local frame) and
 // an offset along the resulting normal to a base frame → the final
 // { position, rotation } stored on the plane item.

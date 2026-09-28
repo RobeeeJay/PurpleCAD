@@ -19,6 +19,59 @@ import { createHistoryEntryEditsSlice } from "./historyEntryEditsSlice.js";
 import { createHistoryExtrudeSlice } from "./historyExtrudeSlice.js";
 import { splitGeometryComponents } from "../three/geometryComponents.js";
 
+// Record a split as ONE "Split" step: the pieces are created in a createGroup
+// entry and the original is hidden from that same step on, so the timeline
+// shows the body before and its pieces after, and one undo reverses the lot.
+// Shared by both kinds of split -- by connected pieces, and by a cut plane.
+function commitSplit(state, id, parts) {
+  const newEntry = makeEntry("Split", parts[0].id, {
+    type: "createGroup",
+    items: parts,
+    // So the timeline can name the body that was cut rather than count pieces.
+    splitFrom: id,
+  });
+
+  let insertIdx;
+  let newActiveId;
+  if (state.activeHistoryId !== null) {
+    const activeIdx = state.history.findIndex(
+      (h) => h.id === state.activeHistoryId,
+    );
+    insertIdx = activeIdx + 1;
+    newActiveId = newEntry.id;
+  } else {
+    insertIdx = state.history.length;
+    newActiveId = null;
+  }
+  newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
+
+  const inserted = [
+    ...state.history.slice(0, insertIdx),
+    newEntry,
+    ...state.history.slice(insertIdx),
+  ];
+  // Hide the original from the split step onward so a timeline replay
+  // shows the source before, the pieces after.  Forward-invalidate later
+  // steps too (a mid-timeline split shifts the chain — see modifyItem).
+  const rawHistory = dirtyEntriesFrom(
+    hideIdsFrom(inserted, insertIdx, [id]),
+    insertIdx,
+  );
+  const items = replayUpTo(rawHistory, insertIdx);
+
+  saveTimeline(rawHistory, newActiveId);
+  return Object.assign(
+    {
+      items,
+      history: withOrphanFlags(rawHistory),
+      activeHistoryId: newActiveId,
+      selectedId: parts[0].id,
+      selectedIds: parts.map((p) => p.id),
+    },
+    withUndo(state),
+  );
+}
+
 export const createHistorySlice = (set) => ({
   ...createHistoryNavSlice(set),
   ...createItemFlagsSlice(set),
@@ -195,6 +248,16 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Record a plane cut: the pieces the Split dialog cut from `id` (already
+  // built, with ids).  Each keeps the original's material.  It used to add each
+  // half as its own "Added" step and hide the original with no step at all, so
+  // the timeline showed no split -- only an ordinary-looking new body.
+  splitIntoParts: (id, parts) =>
+    set((state) => {
+      if (!parts?.length || !state.items.some((i) => i.id === id)) return {};
+      return commitSplit(state, id, parts);
+    }),
+
   // Separate a solid into its geometrically-disconnected pieces.  Each
   // connected component (a lump sharing no welded vertices with the others)
   // becomes its own standalone item; the original is consumed (hidden from
@@ -224,50 +287,7 @@ export const createHistorySlice = (set) => ({
         geometryData,
       }));
 
-      const newEntry = makeEntry("Split", parts[0].id, {
-        type: "createGroup",
-        items: parts,
-      });
-
-      let insertIdx;
-      let newActiveId;
-      if (state.activeHistoryId !== null) {
-        const activeIdx = state.history.findIndex(
-          (h) => h.id === state.activeHistoryId,
-        );
-        insertIdx = activeIdx + 1;
-        newActiveId = newEntry.id;
-      } else {
-        insertIdx = state.history.length;
-        newActiveId = null;
-      }
-      newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
-
-      const inserted = [
-        ...state.history.slice(0, insertIdx),
-        newEntry,
-        ...state.history.slice(insertIdx),
-      ];
-      // Hide the original from the split step onward so a timeline replay
-      // shows the source before, the pieces after.  Forward-invalidate later
-      // steps too (a mid-timeline split shifts the chain — see modifyItem).
-      const rawHistory = dirtyEntriesFrom(
-        hideIdsFrom(inserted, insertIdx, [id]),
-        insertIdx,
-      );
-      const items = replayUpTo(rawHistory, insertIdx);
-
-      saveTimeline(rawHistory, newActiveId);
-      return Object.assign(
-        {
-          items,
-          history: withOrphanFlags(rawHistory),
-          activeHistoryId: newActiveId,
-          selectedId: parts[0].id,
-          selectedIds: parts.map((p) => p.id),
-        },
-        withUndo(state),
-      );
+      return commitSplit(state, id, parts);
     }),
 
   modifyItem: (id, patches, label = "Modified") =>

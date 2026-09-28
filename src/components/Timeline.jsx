@@ -35,17 +35,7 @@ import {
   RectangularPatternIcon,
 } from "./toolbar/timelineIcons.jsx";
 import "../styles/Timeline.css";
-
-// Detect chamfer / fillet entries by looking at the instruction payload —
-// covers both newly-labelled entries ("Chamfered" / "Filleted") and old
-// "Modified" entries written before the label change.
-const chamferInfo = (entry) => {
-  const inst = entry?.instruction;
-  if (inst?.type !== "modify") return null;
-  const r = inst.patches?.regenerator;
-  if (r?.kind !== "chamfer") return null;
-  return { isFillet: r.segments !== 1 };
-};
+import { chamferInfo, getDisplayLabel } from "./timelineLabels.js";
 
 // Detect push/pull entries — a modify whose regenerator is a push/pull op.
 const pushPullInfo = (entry) => {
@@ -187,43 +177,6 @@ const entryIcon = (entry) => {
   if (label.startsWith("Rotated")) return "↻";
   if (label.startsWith("Scaled")) return "⤢";
   return "◆";
-};
-
-const getItemName = (history, itemId) => {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const inst = history[i].instruction;
-    if (inst.type === "create" && inst.item && inst.item.id === itemId) {
-      return inst.item.name;
-    }
-    if (inst.type === "createGroup" && inst.items) {
-      const m = inst.items.find((it) => it.id === itemId);
-      if (m) return m.name;
-    }
-  }
-  return `#${itemId}`;
-};
-
-const getDisplayLabel = (entry, history) => {
-  // Promote legacy "Modified" entries that contain a chamfer regenerator
-  // to "Chamfered" / "Filleted" so the label matches the entry's actual
-  // operation regardless of when it was recorded.
-  const ci = chamferInfo(entry);
-  const label =
-    ci && entry.label === "Modified"
-      ? ci.isFillet
-        ? "Filleted"
-        : "Chamfered"
-      : entry.label;
-  // A createGroup step makes several items at once (a multi-area extrude's
-  // prisms); name it by count rather than one arbitrary member.
-  if (entry.instruction?.type === "createGroup") {
-    const n = entry.instruction.items?.length || 0;
-    return `${label} ${n} extrusions`;
-  }
-  if (entry.itemId != null) {
-    return `${label} ${getItemName(history, entry.itemId)}`;
-  }
-  return label;
 };
 
 // Edit control for an extrude entry.  Editing re-enters profile-select mode
