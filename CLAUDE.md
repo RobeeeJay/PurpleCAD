@@ -313,6 +313,33 @@ bullet list after shipping, not before.
   subdirectory. Run the unit suite AND the e2e suite after any split, and
   grep for `await import("./` whenever a file changes directory.
 
+## Third-party libraries: native C++ over WASM
+
+**Decision (owner's standing preference):** when a third-party library offers
+both a C++ build and a JavaScript/WASM build, integrate the **C++ build natively,
+in the addon (`native/occ-addon`)**, as far as the feature allows -- not the
+WASM package in the renderer. This applies to every feature added from now on
+(first applied to meshoptimizer).
+
+What that means in practice:
+
+- Vendor the library's sources at a pinned release into the addon tree (with
+  its LICENSE) rather than fetching at build time, so the container image and
+  the packaged app build reproducibly offline. Add them to `CMakeLists.txt`.
+- It must compile cleanly under BOTH clang (macOS) and gcc (the Linux container
+  and `dist:linux`) -- see the addon section below. Verify with
+  `npm run e2e:image` and a macOS `npm run test:e2e`.
+- Expose it as addon functions and reach it through the normal OCC op path:
+  an op body in `occOps.js` AND `electron/occ-bridge.cjs` (the two-
+  implementation rule below applies), a wrapper in `occClient.js`, and a
+  `bridgeParity.test.js` case. It then runs in the OCC worker, off the
+  renderer thread, and vitest exercises the real native code.
+- A native loop that can run long polls `CancelRequested()` like the other hot
+  loops in `binding.cc` (see "OCC cancellation").
+- WASM stays the fallback only where a feature genuinely has to run in the
+  renderer; it would also need `'wasm-unsafe-eval'` added to the CSP in
+  `index.html`, which currently blocks WebAssembly compilation.
+
 ## OCC execution boundary
 
 - `occClient.js` is the only renderer-side surface for OCC calls. In
