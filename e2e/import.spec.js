@@ -206,6 +206,62 @@ test.describe.serial("import", () => {
     );
   });
 
+  // An imported mesh goes through OCC like any body.  It used to take a
+  // three-bvh-csg mesh boolean whose result was never closed (hundreds of
+  // open edges along the intersection) and had no recipe to rebuild from.
+  test("a boolean in the dialog with an imported STL gives a closed, rebuildable body", async () => {
+    await page.evaluate(() => window.__store.getState().newDocument());
+    await importVia("Import an STL mesh", {
+      name: "cube.stl",
+      mimeType: "model/stl",
+      buffer: cubeStl(),
+    });
+    const stlId = () =>
+      page.evaluate(
+        () =>
+          window.__store.getState().items.find((i) => i.name === "cube (STL)")
+            ?.id ?? null,
+      );
+    await expect.poll(stlId, { timeout: 30000 }).not.toBeNull();
+    const cubeId = await stlId();
+    // A box primitive overlapping half of the 20 mm STL cube.
+    await page.evaluate((cubeId) => {
+      const s = window.__store.getState();
+      s.addItem({
+        id: 7100,
+        name: "Box 7100",
+        type: "cube",
+        children: [],
+        position: { x: 1, y: 1, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      s.startBooleanTool("union");
+      window.__store.setState({ selectedIds: [cubeId, 7100] });
+    }, cubeId);
+    await page.getByTitle("Apply Union").click();
+    const unionId = () =>
+      page.evaluate(
+        () =>
+          window.__store
+            .getState()
+            .items.find((i) => i.regenerator?.kind === "boolean")?.id ?? null,
+      );
+    await expect.poll(unionId, { timeout: 30000 }).not.toBeNull();
+    const result = await page.evaluate(
+      async (id) => {
+        const it = window.__store.getState().items.find((i) => i.id === id);
+        const w = await window.electronAPI.invokeOcc("weldMesh", {
+          positions: it.geometryData.positions,
+          indices: it.geometryData.indices,
+        });
+        return { open: w.openEdges, inputs: it.regenerator.inputIds };
+      },
+      await unionId(),
+    );
+    expect(result).toEqual({ open: 0, inputs: [cubeId, 7100] });
+  });
+
   test("importing a STEP file (exported by the app) creates a solid body", async () => {
     // Round-trip: export a cube through the app's own STEP writer...
     const stepText = await page.evaluate(async () => {

@@ -1,10 +1,10 @@
 // meshSplit: renderer-side fallback that cuts a baked mesh into two parts along
-// a plane (three-bvh-csg).  A 2x2x2 cube split by the XY plane (z=0) yields a
+// a plane.  A 2x2x2 cube split by the XY plane (z=0) yields a
 // top half (z in [0,1]) and a bottom half (z in [-1,0]).
 
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
-import { meshSplit, openLoopsOnPlane } from "../meshBoolean.js";
+import { meshSplit, openLoopsOnPlane } from "../meshSplit.js";
 
 const zRange = (positions) => {
   let mn = Infinity,

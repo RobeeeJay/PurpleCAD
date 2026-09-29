@@ -13,7 +13,7 @@ import { createEmbossPreviewHelpers } from "./cameraControls/emboss.js";
 import { createTexturePreviewHelpers } from "./cameraControls/texture.js";
 import { createDraftPreviewHelpers } from "./cameraControls/draft.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
-import { meshBoolean, meshSplit } from "./meshBoolean.js";
+import { meshSplit } from "./meshSplit.js";
 import { bboxCenterOf, massCentroidOf } from "./objectOrigin.js";
 import { getCamera, saveCamera } from "../store/db.js";
 import {
@@ -518,15 +518,8 @@ export function attachCameraControls(ctx) {
   controls.clearSweepPreview = () => sweep.clearSweepPreview();
   controls.commitSweep = () => sweep.commitSweep();
   controls.cancelSweep = () => sweep.cancelSweep();
-  // Triangle-mesh boolean over the live scene meshes (used when an imported
-  // mesh is an operand, where OCC's solid boolean is infeasible).
-  controls.meshBoolean = (itemIds, operation) =>
-    meshBoolean(
-      itemIds.map((id) => objectsRef.current[id]).filter(Boolean),
-      operation,
-    );
-  // Renderer-side mesh split (target ∩/− a half-space box at the cut plane) —
-  // the fallback when OCC can't rebuild a baked-mesh target as a solid.
+  // Renderer-side mesh split at the cut plane -- the fallback when OCC can't
+  // rebuild a baked-mesh target as a solid.
   controls.meshSplit = (itemId, plane) => {
     const mesh = objectsRef.current[itemId];
     if (!mesh) return null;
