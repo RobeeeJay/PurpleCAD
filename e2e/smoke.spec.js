@@ -216,3 +216,30 @@ test("duplicating a project copies its timeline and data", async () => {
   });
   expect(inCopy).toBe(true);
 });
+
+test("the About box names the license and opens its full text", async () => {
+  await page.evaluate(() => window.__store.getState().setAboutDialogOpen(true));
+  await expect(page.locator(".about-license")).toHaveText(
+    "License: PolyForm Noncommercial 1.0.0",
+  );
+  await page
+    .getByRole("button", { name: "PolyForm Noncommercial 1.0.0" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "License" });
+  // The repository's own LICENSE.md, Required Notice lines first.
+  await expect(dialog).toContainText(
+    "Required Notice: Copyright (c) 2026 Robeena Shepherd",
+  );
+  await expect(dialog).toContainText("PolyForm Noncommercial License 1.0.0");
+  await dialog.getByRole("tab", { name: "Trademarks" }).click();
+  await expect(dialog).toContainText("Takes its own name, logo and icons.");
+  await dialog.getByRole("tab", { name: "Open CASCADE" }).click();
+  await expect(dialog).toContainText("GNU LESSER GENERAL PUBLIC LICENSE");
+  // Closing the license leaves the About box open behind it.
+  await dialog.getByTitle("Close").click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".about-license")).toBeVisible();
+  await page.evaluate(() =>
+    window.__store.getState().setAboutDialogOpen(false),
+  );
+});
