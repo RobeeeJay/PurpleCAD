@@ -243,3 +243,49 @@ test("the About box names the license and opens its full text", async () => {
     window.__store.getState().setAboutDialogOpen(false),
   );
 });
+
+test("license links open in the system browser, never in the app window", async () => {
+  // Stand in for the browser: record what main would hand to it.
+  await app.evaluate(({ shell }) => {
+    globalThis.__opened = [];
+    shell.openExternal = async (url) => {
+      globalThis.__opened.push(url);
+    };
+  });
+  const opened = () => app.evaluate(() => globalThis.__opened);
+  const appUrl = page.url();
+
+  await page.evaluate(() => window.__store.getState().setAboutDialogOpen(true));
+  await page
+    .getByRole("button", { name: "PolyForm Noncommercial 1.0.0" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "License" });
+  const polyform = "https://polyformproject.org/licenses/noncommercial/1.0.0";
+  await dialog.getByRole("link", { name: polyform }).click();
+  await expect.poll(opened).toEqual([polyform]);
+  // The app stayed where it was, dialog and all.
+  expect(page.url()).toBe(appUrl);
+  await expect(dialog).toBeVisible();
+
+  // Only web addresses: main refuses to hand anything else to the system.
+  expect(
+    await page.evaluate(() =>
+      window.electronAPI.openExternal("file:///etc/passwd"),
+    ),
+  ).toBe(false);
+  await dialog.getByTitle("Close").click();
+  await page.evaluate(() =>
+    window.__store.getState().setAboutDialogOpen(false),
+  );
+
+  // A page that tries to navigate itself away is stopped, and the address
+  // goes to the browser instead.  Last on purpose: Playwright keeps waiting
+  // for the navigation the app cancelled, and won't click anything after it
+  // (Electron itself reports it isn't loading, and the page works).
+  await page.evaluate(() => {
+    window.location.href = "https://example.com/";
+  });
+  await expect.poll(opened).toEqual([polyform, "https://example.com/"]);
+  expect(page.url()).toBe(appUrl);
+  expect(await page.evaluate(() => document.title)).toMatch(/PurpleCAD/);
+});

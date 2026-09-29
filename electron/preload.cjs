@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     });
     ipcRenderer.send("api:ready");
   },
+  // Open a web link in the system browser; resolves false for anything that
+  // isn't http(s), which main refuses.
+  openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
   // Menu → renderer: the native "About PurpleCAD" item opens the in-app dialog.
   // Replaces any prior listener so a re-register can't stack duplicates.
   onMenuAbout: (cb) => {

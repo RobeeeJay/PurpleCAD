@@ -6,12 +6,12 @@
 // draw, so it can be tested without a DOM.
 
 // Inline runs: [{ t: "text" | "strong" | "em" | "code" | "link", v, href? }].
-// A link keeps its URL so the dialog can show it -- an <a> in the Electron
-// window would navigate the app itself away.
+// A bare web address is a link too: the third-party tables are full of them.
+// It stops before trailing punctuation, so "(https://x.org)." links x.org.
 export function inline(text) {
   const out = [];
   const re =
-    /(`[^`]+`)|(\*\*\*[^*]+\*\*\*)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\([^)]+\))|(<https?:\/\/[^>]+>)/g;
+    /(`[^`]+`)|(\*\*\*[^*]+\*\*\*)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\([^)]+\))|(<https?:\/\/[^>]+>)|(https?:\/\/[^\s<>()|]*[^\s<>()|.,;:'"!?])/g;
   let last = 0;
   let m;
   while ((m = re.exec(text))) {
@@ -24,7 +24,9 @@ export function inline(text) {
     else if (m[5]) {
       const [, v, href] = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(s);
       out.push({ t: "link", v, href });
-    } else out.push({ t: "link", v: s.slice(1, -1), href: s.slice(1, -1) });
+    } else if (m[6])
+      out.push({ t: "link", v: s.slice(1, -1), href: s.slice(1, -1) });
+    else out.push({ t: "link", v: s, href: s });
     last = m.index + s.length;
   }
   if (last < text.length) out.push({ t: "text", v: text.slice(last) });

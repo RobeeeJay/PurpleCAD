@@ -990,6 +990,14 @@ sources are picked) that reuses the creation UI.
 
 ## Misc
 
+- **The app window never navigates.** A web link calls
+  `window.electronAPI.openExternal(url)` (main opens http(s) only in the system
+  browser; anything else is refused). `main.cjs` backs this up: a new-window
+  request or a navigation to another origin is cancelled, and a web address
+  goes to the browser instead. In e2e, Playwright keeps waiting on a navigation
+  the app cancelled and will not click anything afterwards, although Electron
+  reports it isn't loading and the page works -- so a test that provokes one
+  does it LAST (`smoke.spec.js` "license links ...").
 - The `_cameraControls` slot on the store is a deliberate non-reactive
   handle for toolbar buttons that need access to viewport helpers (eg
   `dropSelectedToGround`). Don't `useStore.subscribe` to it.

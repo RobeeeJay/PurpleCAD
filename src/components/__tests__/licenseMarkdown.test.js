@@ -25,6 +25,36 @@ describe("inline", () => {
   });
 });
 
+describe("bare web addresses", () => {
+  it("are links, stopping before a closing bracket or full stop", () => {
+    // The Required Notice lines put the address in brackets, before a stop.
+    expect(
+      inline("PurpleCAD (https://github.com/RobeeeJay/PurpleCAD)."),
+    ).toEqual([
+      { t: "text", v: "PurpleCAD (" },
+      {
+        t: "link",
+        v: "https://github.com/RobeeeJay/PurpleCAD",
+        href: "https://github.com/RobeeeJay/PurpleCAD",
+      },
+      { t: "text", v: ")." },
+    ]);
+  });
+
+  it("are found in the third-party tables", () => {
+    const table = parseMarkdown(thirdParty).find((b) => b.type === "table");
+    const sources = table.rows.map((r) => r.at(-1)[0]);
+    for (const s of sources) expect(s.t, JSON.stringify(s)).toBe("link");
+  });
+
+  it("leave an in-page anchor as a link the dialog won't open", () => {
+    // PolyForm's "[Distribution License](#distribution-license)".
+    expect(inline("[Distribution License](#distribution-license)")).toEqual([
+      { t: "link", v: "Distribution License", href: "#distribution-license" },
+    ]);
+  });
+});
+
 describe("parseMarkdown on the licence files", () => {
   it("keeps every Required Notice line of LICENSE.md, first", () => {
     const blocks = parseMarkdown(license);

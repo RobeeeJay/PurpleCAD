@@ -22,21 +22,31 @@ const TABS = [
   },
 ];
 
-// Links are shown with their URL rather than followed: an <a> in the app
-// window would navigate PurpleCAD itself away.
+// A web link opens in the system browser -- followed in place it would take
+// the app window itself away from PurpleCAD.  Any other link (the PolyForm
+// text's #section anchors) is shown as plain text.
+const isWeb = (href) => /^https?:\/\//.test(href);
+const openLink = (e, href) => {
+  e.preventDefault();
+  window.electronAPI?.openExternal?.(href);
+};
+
 const Runs = ({ runs }) =>
   runs.map((r, k) => {
     if (r.t === "strong") return <strong key={k}>{r.v}</strong>;
     if (r.t === "em") return <em key={k}>{r.v}</em>;
     if (r.t === "code") return <code key={k}>{r.v}</code>;
-    if (r.t === "link")
+    if (r.t === "link" && isWeb(r.href))
       return (
-        <span key={k} className="license-link">
+        <a
+          key={k}
+          href={r.href}
+          title={`Open ${r.href} in your browser`}
+          className="license-link"
+          onClick={(e) => openLink(e, r.href)}
+        >
           {r.v}
-          {r.href !== r.v && (
-            <span className="license-link-url"> ({r.href})</span>
-          )}
-        </span>
+        </a>
       );
     return <span key={k}>{r.v}</span>;
   });

@@ -159,8 +159,8 @@
   font-size: 0.95em;
 }
 
-.license-link-url {
-  color: var(--text-secondary);
+.license-link {
+  color: var(--accent, #6c3fd4);
   overflow-wrap: anywhere;
 }
 

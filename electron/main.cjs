@@ -229,6 +229,23 @@ ipcMain.on("api:reply", (_e, { id, reply }) => {
   else pending.resolve(reply?.result);
 });
 
+// Links in the app (the license dialog's) open in the system browser.  Only
+// http(s): the renderer must not be able to hand shell.openExternal a file://
+// path or an application scheme.  Called through `electron.shell` each time,
+// not a destructured copy, so the e2e suite can stand in for the browser.
+const isWebUrl = (url) => {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+};
+ipcMain.handle("shell:openExternal", async (_e, url) => {
+  if (!isWebUrl(url)) return false;
+  await electron.shell.openExternal(url);
+  return true;
+});
+
 // Async timeline save (invoke): the hot path — a mouseup commit on a big
 // document must not block the renderer on the IPC round-trip + SQLite write.
 ipcMain.handle("db:saveTimelineAsync", (_e, a) => {
@@ -287,6 +304,23 @@ function createWindow() {
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error(`Renderer failed to load ${url}: ${desc} (${code})`);
+  });
+  // The app window only ever shows the app.  A link that tries to navigate it
+  // or open a new window goes to the system browser instead (web links only);
+  // anything else is dropped.  Same-origin navigation -- a dev-server reload
+  // -- is left alone.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isWebUrl(url)) electron.shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (e, url) => {
+    let same = false;
+    try {
+      same = new URL(url).origin === new URL(win.webContents.getURL()).origin;
+    } catch {}
+    if (same) return;
+    e.preventDefault();
+    if (isWebUrl(url)) electron.shell.openExternal(url);
   });
 
   if (DEV_URL) {
