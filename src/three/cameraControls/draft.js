@@ -9,8 +9,7 @@ import { withLivePolygons } from "../csgUtils.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 import { releaseSolid } from "../solidCache.js";
-
-const GHOST_OPACITY = 0.12;
+import { createGhost } from "./ghostSource.js";
 
 // Source snapshot + draft params for the active draft tool, or null until a
 // neutral face and at least one face to taper are picked.
@@ -92,7 +91,8 @@ export async function commitDraft({ items, printPrecision }) {
 
 export function createDraftPreviewHelpers({ scene, itemsRef, objectsRef }) {
   let previewGroup = null;
-  let ghosted = null;
+  const { ghost: ghostSource, unghost: unghostSource } =
+    createGhost(objectsRef);
   let requestId = 0;
 
   const removePreview = () => {
@@ -104,42 +104,6 @@ export function createDraftPreviewHelpers({ scene, itemsRef, objectsRef }) {
     });
     previewGroup = null;
   };
-  const ghostSource = (itemId) => {
-    const mesh = objectsRef.current[itemId];
-    if (!mesh || (ghosted && ghosted.mesh === mesh)) return;
-    unghostSource();
-    const mat = mesh.material;
-    ghosted = {
-      mesh,
-      opacity: mat.opacity,
-      transparent: mat.transparent,
-      depthWrite: mat.depthWrite,
-      uOpacity: mat.uniforms?.uOpacity ? mat.uniforms.uOpacity.value : null,
-      edges: mesh.children.map((c) => ({ child: c, visible: c.visible })),
-    };
-    mat.transparent = true;
-    mat.depthWrite = false;
-    if (mat.uniforms?.uOpacity) mat.uniforms.uOpacity.value = GHOST_OPACITY;
-    else mat.opacity = GHOST_OPACITY;
-    mat.needsUpdate = true;
-    mesh.children.forEach((c) => (c.visible = false));
-  };
-  const unghostSource = () => {
-    if (!ghosted) return;
-    const { mesh, opacity, transparent, depthWrite, uOpacity, edges } = ghosted;
-    const mat = mesh.material;
-    if (mat) {
-      mat.transparent = transparent;
-      mat.depthWrite = depthWrite;
-      if (uOpacity != null && mat.uniforms?.uOpacity)
-        mat.uniforms.uOpacity.value = uOpacity;
-      else mat.opacity = opacity;
-      mat.needsUpdate = true;
-    }
-    edges.forEach(({ child, visible }) => (child.visible = visible));
-    ghosted = null;
-  };
-
   const clearDraftPreview = () => {
     requestId++;
     removePreview();

@@ -10,8 +10,7 @@ import { withLivePolygons } from "../csgUtils.js";
 import { chamferResultTransform } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 import { releaseSolid } from "../solidCache.js";
-
-const GHOST_OPACITY = 0.12;
+import { createGhost } from "./ghostSource.js";
 
 // Source snapshot + hole recipe (local frame, mm sizes) for the active hole
 // tool, or null until both a face and point are picked.
@@ -108,7 +107,8 @@ export async function commitHole({ items, printPrecision }) {
 
 export function createHolePreviewHelpers({ scene, itemsRef, objectsRef }) {
   let previewGroup = null;
-  let ghosted = null;
+  const { ghost: ghostSource, unghost: unghostSource } =
+    createGhost(objectsRef);
   let requestId = 0;
 
   const removePreview = () => {
@@ -119,43 +119,6 @@ export function createHolePreviewHelpers({ scene, itemsRef, objectsRef }) {
       o.material?.dispose();
     });
     previewGroup = null;
-  };
-
-  const ghostSource = (itemId) => {
-    const mesh = objectsRef.current[itemId];
-    if (!mesh || (ghosted && ghosted.mesh === mesh)) return;
-    unghostSource();
-    const mat = mesh.material;
-    ghosted = {
-      mesh,
-      opacity: mat.opacity,
-      transparent: mat.transparent,
-      depthWrite: mat.depthWrite,
-      uOpacity: mat.uniforms?.uOpacity ? mat.uniforms.uOpacity.value : null,
-      edges: mesh.children.map((c) => ({ child: c, visible: c.visible })),
-    };
-    mat.transparent = true;
-    mat.depthWrite = false;
-    if (mat.uniforms?.uOpacity) mat.uniforms.uOpacity.value = GHOST_OPACITY;
-    else mat.opacity = GHOST_OPACITY;
-    mat.needsUpdate = true;
-    mesh.children.forEach((c) => (c.visible = false));
-  };
-
-  const unghostSource = () => {
-    if (!ghosted) return;
-    const { mesh, opacity, transparent, depthWrite, uOpacity, edges } = ghosted;
-    const mat = mesh.material;
-    if (mat) {
-      mat.transparent = transparent;
-      mat.depthWrite = depthWrite;
-      if (uOpacity != null && mat.uniforms?.uOpacity)
-        mat.uniforms.uOpacity.value = uOpacity;
-      else mat.opacity = opacity;
-      mat.needsUpdate = true;
-    }
-    edges.forEach(({ child, visible }) => (child.visible = visible));
-    ghosted = null;
   };
 
   const clearHolePreview = () => {

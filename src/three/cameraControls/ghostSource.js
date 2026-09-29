@@ -1,8 +1,11 @@
 // Ghosting the body a tool's live preview is drawn over: fade it to a
 // translucent outline-free shell so the preview reads through it, and put
-// every material setting back exactly when the preview goes.  The same code
-// sits inline in the chamfer, draft, emboss, hole, push/pull and shell
-// previews; new previews use this.
+// every material setting back exactly when the preview goes.  The mesh stays
+// `visible` -- picking ignores opacity -- so a tool can still pick faces on
+// it mid-preview.  `userData.ghosted` tells the render-mode sync to leave the
+// mesh alone: re-applying the mode reset its opacity and popped the body back
+// opaque over the preview.  Only two of the six previews that used to carry
+// their own copy of this set that flag.
 
 const GHOST_OPACITY = 0.12;
 
@@ -24,6 +27,7 @@ export function createGhost(objectsRef) {
     edges.forEach(({ child, visible }) => {
       child.visible = visible;
     });
+    delete mesh.userData.ghosted;
     ghosted = null;
   };
 
@@ -48,6 +52,7 @@ export function createGhost(objectsRef) {
     mesh.children.forEach((c) => {
       c.visible = false;
     });
+    mesh.userData.ghosted = true;
   };
 
   return { ghost, unghost };

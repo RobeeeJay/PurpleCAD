@@ -15,8 +15,7 @@ import {
   shiftSelectionToSource,
 } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
-
-const GHOST_OPACITY = 0.12;
+import { createGhost } from "./ghostSource.js";
 
 // Arm a push/pull retarget: pre-select the faces the original op used (shifted
 // from the source frame back into this item's rendered, bbox-centred frame)
@@ -144,7 +143,8 @@ export async function commitPushPull({
 
 export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
   let previewGroup = null;
-  let ghosted = null;
+  const { ghost: ghostSource, unghost: unghostSource } =
+    createGhost(objectsRef);
   let requestId = 0;
 
   const removePreview = () => {
@@ -155,50 +155,6 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
       obj.material?.dispose();
     });
     previewGroup = null;
-  };
-
-  // Dim the source mesh (keeping it pickable) so the result reads on top of it.
-  const ghostSource = (itemId) => {
-    const mesh = objectsRef.current[itemId];
-    if (!mesh || (ghosted && ghosted.mesh === mesh)) return;
-    unghostSource();
-    const mat = mesh.material;
-    ghosted = {
-      mesh,
-      opacity: mat.opacity,
-      transparent: mat.transparent,
-      depthWrite: mat.depthWrite,
-      uOpacity: mat.uniforms?.uOpacity ? mat.uniforms.uOpacity.value : null,
-      edges: mesh.children.map((c) => ({ child: c, visible: c.visible })),
-    };
-    mat.transparent = true;
-    mat.depthWrite = false;
-    if (mat.uniforms?.uOpacity) mat.uniforms.uOpacity.value = GHOST_OPACITY;
-    else mat.opacity = GHOST_OPACITY;
-    mat.needsUpdate = true;
-    mesh.children.forEach((c) => {
-      c.visible = false;
-    });
-    mesh.userData.ghosted = true;
-  };
-
-  const unghostSource = () => {
-    if (!ghosted) return;
-    const { mesh, opacity, transparent, depthWrite, uOpacity, edges } = ghosted;
-    const mat = mesh.material;
-    if (mat) {
-      mat.transparent = transparent;
-      mat.depthWrite = depthWrite;
-      if (uOpacity != null && mat.uniforms?.uOpacity)
-        mat.uniforms.uOpacity.value = uOpacity;
-      else mat.opacity = opacity;
-      mat.needsUpdate = true;
-    }
-    edges.forEach(({ child, visible }) => {
-      child.visible = visible;
-    });
-    delete mesh.userData.ghosted;
-    ghosted = null;
   };
 
   const clearPushPullPreview = () => {
