@@ -231,6 +231,32 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     expect(a.openEdges).toBe(0);
   });
 
+  it("simplifyMesh simplifies identically in both implementations", async () => {
+    // A flat 24x24 grid: detail both impls must collapse the same way, to the
+    // same bound.
+    const positions = [];
+    const indices = [];
+    const n = 24;
+    const at = (i, j) => i * (n + 1) + j;
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++) positions.push(i / n, 1, j / n);
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++)
+        indices.push(
+          at(i, j),
+          at(i, j + 1),
+          at(i + 1, j + 1),
+          at(i, j),
+          at(i + 1, j + 1),
+          at(i + 1, j),
+        );
+    const g = { positions, indices, mode: "deviation", value: 0.001 };
+    const a = await ops.simplifyMesh(JSON.parse(JSON.stringify(g)));
+    const b = bridge.simplifyMesh(JSON.parse(JSON.stringify(g)));
+    expect(a).toEqual(b);
+    expect(a.trianglesAfter).toBeLessThan(a.trianglesBefore);
+  });
+
   it("solidFromMesh retains identical solids", async () => {
     // Baked-mesh sew: both impls must produce the same solid from the same
     // mesh.  Compare via tessellation of the retained shapes.

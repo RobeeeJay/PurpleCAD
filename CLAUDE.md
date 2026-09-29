@@ -428,6 +428,17 @@ flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
   accepts it, so the short spelling builds green on macOS and breaks Linux
   only. Bind the derived handle to its own name first, then upcast. Verify a
   gcc build (`npm run e2e:image`) after touching `binding.cc`.
+- **Simplify's deviation is a certified BOUND -- never swap it for sampling.**
+  meshoptimizer's own error is an estimate (about 3x over on a real part), and
+  probing vertices, centroids and edge midpoints under-read too: 0.050 mm where
+  brute force found 0.079 mm inside the triangles. `mesh_tools.cpp` bounds it
+  instead (distance to one triangle is convex; seam-split and coplanar-quad
+  candidates; halving across the longest edge down to a size bound), and where
+  it strays it locks the nearest ORIGINAL vertex and re-runs -- tightening the
+  whole request cost two thirds of the reduction, and locking whole triangles
+  half of it. `simplifyMesh.test.js` checks the bound against brute force; keep
+  that check. The bound runs on `std::thread`s: pure geometry on read-only
+  arrays, no OCC state, so safe in the OCC worker (gcc links `Threads`).
 - OCC 8.0.0 removed `TopTools_ListIteratorOfListOfShape.hxx`. Iterate
   `TopTools_ListOfShape` (an `NCollection_List`) with a range-based `for` loop
   instead of that iterator. If a future OCC bump reintroduces a similar

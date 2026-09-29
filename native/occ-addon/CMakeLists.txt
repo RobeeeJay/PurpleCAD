@@ -36,6 +36,7 @@ add_library(${PROJECT_NAME} SHARED
   src/mesh_tools.cpp
   ${MESHOPT_DIR}/allocator.cpp
   ${MESHOPT_DIR}/indexgenerator.cpp
+  ${MESHOPT_DIR}/simplifier.cpp
   ${CMAKE_JS_SRC}
 )
 
@@ -52,8 +53,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${OpenCASCADE_INCLUDE_DIR}
 )
 
+# mesh_tools.cpp measures deviation across threads; gcc needs pthread linked.
+find_package(Threads REQUIRED)
+
 target_link_libraries(${PROJECT_NAME} PRIVATE
   ${CMAKE_JS_LIB}
+  Threads::Threads
   TKernel
   TKMath
   TKG2d

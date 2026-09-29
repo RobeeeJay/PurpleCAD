@@ -485,6 +485,17 @@ function buildItemShapeLocal(item, allItems, precision) {
   if (item.type === "csg" && item.regenerator) {
     const regen = item.regenerator;
 
+    // A simplified mesh IS its baked mesh -- the op's whole output -- (mirrors occOps.js) so a
+    // later op sews that, exactly as for an imported mesh.
+    if (regen.kind === "simplify") {
+      const g = item.geometryData;
+      if (!g?.positions || g.positions.length < 9) return null;
+      return occ.makeSolidFromMesh(
+        new Float64Array(g.positions),
+        g.indices?.length ? new Uint32Array(g.indices) : null,
+      );
+    }
+
     // A 3D PATTERN rebuilds its copies in OCC when its source can be rebuilt.
     // Sewing the baked mesh instead (the fallback below) produces a shell whose
     // face count is its TRIANGLE count -- a ring of eight spikes came to 8.4k
@@ -1878,6 +1889,30 @@ function weldMesh({ positions, indices }) {
   };
 }
 
+// Simplify a mesh natively (meshoptimizer) -- mirrors occOps.js#simplifyMesh.
+// Held to a MEASURED maximum
+// deviation or a triangle budget.  `value` is the deviation in scene units, or
+// the triangle count.  The result is welded, closed wherever the input was,
+// and adds no pinched edges; the op throws with a reason when it can't be.
+function simplifyMesh({ positions, indices, mode, value }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.simplifyMesh(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    mode,
+    value,
+  );
+  return {
+    positions: Array.from(r.positions),
+    indices: Array.from(r.indices),
+    trianglesBefore: r.trianglesBefore,
+    trianglesAfter: r.trianglesAfter,
+    maxDeviation: r.maxDeviation,
+    openEdges: r.openEdges,
+    nonManifoldEdges: r.nonManifoldEdges,
+  };
+}
+
 // Release a cached OCC solid (JIT-timeline cache); no-op if already gone.
 function releaseShape({ id }) {
   if (id != null) {
@@ -1893,4 +1928,4 @@ function setCancelBuffer(view) {
   occ.setCancelBuffer(view);
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, setCancelBuffer };
+module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, setCancelBuffer };

@@ -487,6 +487,17 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
   if (item.type === "csg" && item.regenerator) {
     const r = item.regenerator;
 
+    // A simplified mesh IS its baked mesh -- the op's whole output -- so a
+    // later op sews that, exactly as for an imported mesh.
+    if (r.kind === "simplify") {
+      const g = item.geometryData;
+      if (!g?.positions || g.positions.length < 9) return null;
+      return occ.makeSolidFromMesh(
+        new Float64Array(g.positions),
+        g.indices?.length ? new Uint32Array(g.indices) : null,
+      );
+    }
+
     // A 3D PATTERN rebuilds its copies in OCC when its source can be rebuilt.
     // Sewing the baked mesh instead (the fallback below) produces a shell whose
     // face count is its TRIANGLE count -- a ring of eight spikes came to 8.4k
@@ -2471,6 +2482,29 @@ function weldMesh({ positions, indices }) {
   };
 }
 
+// Simplify a mesh natively (meshoptimizer), held to a MEASURED maximum
+// deviation or a triangle budget.  `value` is the deviation in scene units, or
+// the triangle count.  The result is welded, closed wherever the input was,
+// and adds no pinched edges; the op throws with a reason when it can't be.
+function simplifyMesh({ positions, indices, mode, value }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.simplifyMesh(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    mode,
+    value,
+  );
+  return {
+    positions: Array.from(r.positions),
+    indices: Array.from(r.indices),
+    trianglesBefore: r.trianglesBefore,
+    trianglesAfter: r.trianglesAfter,
+    maxDeviation: r.maxDeviation,
+    openEdges: r.openEdges,
+    nonManifoldEdges: r.nonManifoldEdges,
+  };
+}
+
 // Release a cached OCC solid held in the native shape store (JIT timeline
 // cache).  Fire-and-forget cleanup; a missing/already-released id is a no-op.
 function releaseShape({ id }) {
@@ -2504,4 +2538,5 @@ export const ops = {
   solidFromMesh,
   tessellateItem,
   weldMesh,
+  simplifyMesh,
 };

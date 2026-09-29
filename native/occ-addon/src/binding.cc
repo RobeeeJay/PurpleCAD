@@ -185,6 +185,7 @@ static Message_ProgressRange CancelRange() {
 static inline bool CancelRequested() {
   return g_cancelPtr != nullptr && *g_cancelPtr != 0;
 }
+bool MeshCancelRequested() { return CancelRequested(); }
 
 static int StoreRecord(const TopoDS_Shape& s,
                        std::map<std::string, TopoDS_Shape> faces,
@@ -2774,6 +2775,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("importSTEP",         Napi::Function::New(env, ImportSTEP));
   exports.Set("makeSolidFromMesh",  Napi::Function::New(env, MakeSolidFromMesh));
   exports.Set("weldMesh",           Napi::Function::New(env, WeldMesh));
+  exports.Set("simplifyMesh",       Napi::Function::New(env, SimplifyMesh));
 
   // Shape store management
   exports.Set("releaseShape",       Napi::Function::New(env, ReleaseShape));

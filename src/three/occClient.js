@@ -279,6 +279,12 @@ export function shellItem(args) {
   return runOp("shellItem", args);
 }
 
+// Simplify a mesh body's triangles, held to a measured deviation or a triangle
+// count (occOps.js#simplifyMesh).
+export function simplifyMesh(args) {
+  return runOp("simplifyMesh", args);
+}
+
 export function holeItem(args) {
   return runOp("holeItem", args);
 }
