@@ -155,4 +155,18 @@ electron/                       # Electron main process
 
 ## License
 
-MIT
+PurpleCAD is licensed under the
+[PolyForm Noncommercial License 1.0.0](LICENSE.md): you may use, change and
+share it for any noncommercial purpose, but not sell it, bundle it with
+something that is sold, or use it for commercial work. Versions published
+before this change were MIT-licensed, and copies of those keep that license.
+
+The PurpleCAD name, logo and application icons are not covered by the
+license; see [TRADEMARKS.md](TRADEMARKS.md). A fork takes its own name and
+icons and says clearly that it is forked from PurpleCAD.
+
+Third-party components keep their own licenses:
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). PurpleCAD makes use of
+facilities provided by the Open CASCADE Technology software (OCCT), under the
+GNU LGPL 2.1 with the Open CASCADE exception; both texts are in
+[licenses/occt/](licenses/occt/).

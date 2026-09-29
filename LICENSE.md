@@ -1,84 +1,95 @@
-# Third-party licenses
+Required Notice: Copyright (c) 2026 Robeena Shepherd (https://github.com/RobeeeJay/PurpleCAD)
 
-Licenses of PurpleCAD's dependencies, as recorded in each installed
-package's manifest. Regenerate the version numbers after a dependency
-update (`node_modules/<name>/package.json` is the source of truth).
+Required Notice: This software is, or is derived from, PurpleCAD (https://github.com/RobeeeJay/PurpleCAD).
 
-## Runtime dependencies
+Required Notice: The PurpleCAD name, logo and application icons are not licensed under these terms. See TRADEMARKS.md.
 
-| Package | Version | License | Source |
-| --- | --- | --- | --- |
-| @modelcontextprotocol/sdk | 1.30.0 | MIT | https://modelcontextprotocol.io |
-| better-sqlite3 | 12.11.1 | MIT | https://github.com/WiseLibs/better-sqlite3 |
-| decimal.js | 10.6.0 | MIT | https://github.com/MikeMcl/decimal.js |
-| opentype.js | 1.3.4 | MIT | https://github.com/opentypejs/opentype.js |
-| react | 19.2.7 | MIT | https://react.dev/ |
-| react-dom | 19.2.7 | MIT | https://react.dev/ |
-| three | 0.185.1 | MIT | https://threejs.org/ |
-| three-gpu-pathtracer | 0.0.24 | MIT | https://github.com/gkjohnson/three-gpu-pathtracer |
-| three-mesh-bvh | 0.9.10 | MIT | https://github.com/gkjohnson/three-mesh-bvh |
-| zustand | 5.0.14 | MIT | https://github.com/pmndrs/zustand |
+PurpleCAD is licensed under the PolyForm Noncommercial License 1.0.0, below.
+These terms cover everything in this repository except:
 
-## Native geometry kernel
+- the PurpleCAD logo and application icons -- the files under `app-icons/`
+  and `public/favicon.png` -- which are covered by `TRADEMARKS.md`; and
+- the third-party components listed in `THIRD_PARTY_LICENSES.md`, which remain
+  under their own licenses.
 
-| Component | Version | License | Source |
-| --- | --- | --- | --- |
-| Open CASCADE Technology (OCCT) | 8.0.1 (8.0.0 / 7.9.0 supported) | LGPL-2.1-only, with the OCCT LGPL exception | https://github.com/Open-Cascade-SAS/OCCT |
-| meshoptimizer (vendored, `native/occ-addon/third_party/meshoptimizer`) | 1.3 (`9e1f07b`) | MIT | https://github.com/zeux/meshoptimizer |
-| node-addon-api | 8.8.0 | MIT | https://github.com/nodejs/node-addon-api |
-| cmake-js (build only) | 7.4.0 | MIT | https://github.com/cmake-js/cmake-js |
+In short, and not in place of the terms: you may use, study, change and share
+PurpleCAD for any noncommercial purpose. You may not sell it, sell a product
+or service it is bundled with, or use it for commercial work. Forks must take
+a new name, logo and icons, and must keep the Required Notice lines above,
+which say where they came from.
 
-OCCT is dynamically linked by the native addon (`native/occ-addon`), which
-satisfies the LGPL's relinking requirement; the OCCT exception additionally
-permits use in proprietary applications. See
-https://dev.opencascade.org/resources/licensing for the exception text.
+---
 
-The packaged macOS app bundles the OCCT shared libraries
-(`Contents/Resources/occ-libs`, see `scripts/afterPack.cjs`). Distributing
-them carries the LGPL-2.1's conditions: ship this notice and the LGPL text
-with the release, and make the exact OCCT source used available alongside
-it (upstream tag `V8_0_1`, the one `Containerfile.e2e` and the addon CI build
-clone).
+# PolyForm Noncommercial License 1.0.0
 
-meshoptimizer is compiled into the addon from its unmodified release sources;
-its MIT notice is `native/occ-addon/third_party/meshoptimizer/LICENSE.md`.
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
 
-## Vendored code and assets
+## Acceptance
 
-| Item | Origin | License |
-| --- | --- | --- |
-| `src/three/vendor/TTFLoader.js` | three.js examples (adapted: local opentype.js import) | MIT |
-| `src/assets/fonts/helvetiker_*.typeface.json` | three.js examples fonts; MgOpen Moderna by Magenta Ltd, renamed | MgOpen font licence (permissive; modified versions must be renamed) — http://www.ellak.gr/fonts/MgOpen/license.html |
-| `src/assets/fonts/optimer_regular.typeface.json` | three.js examples fonts; MgOpen Cosmetica by Magenta Ltd, renamed | MgOpen font licence, as above |
-| `src/assets/fonts/gentilis_regular.typeface.json` | three.js examples fonts; Gentium by SIL International, renamed (Reserved Font Name "Gentium") | SIL Open Font License 1.1 |
+In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
 
-Each font's full licence text is embedded in its JSON
-(`original_font_information.license_description`).
+## Copyright License
 
-## Development dependencies
+The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose.  However, you may only distribute the software according to [Distribution License](#distribution-license) and make changes or new works based on the software according to [Changes and New Works License](#changes-and-new-works-license).
 
-| Package | Version | License | Source |
-| --- | --- | --- | --- |
-| @electron/rebuild | 4.2.0 | MIT | https://github.com/electron/rebuild |
-| @playwright/test | 1.61.1 | Apache-2.0 | https://playwright.dev |
-| @vitejs/plugin-react | 6.0.3 | MIT | https://github.com/vitejs/vite-plugin-react |
-| @vitest/coverage-v8 | 4.1.10 | MIT | https://vitest.dev |
-| concurrently | 10.0.3 | MIT | https://github.com/open-cli-tools/concurrently |
-| electron | 43.1.0 | MIT | https://github.com/electron/electron |
-| electron-builder | 26.15.3 | MIT | https://github.com/electron-userland/electron-builder |
-| electron-reloader | 1.2.3 | MIT | https://github.com/sindresorhus/electron-reloader |
-| prettier | 3.9.5 | MIT | https://github.com/prettier/prettier |
-| vite | 8.1.4 | MIT | https://vite.dev |
-| vitest | 4.1.10 | MIT | https://vitest.dev |
-| wait-on | 9.0.10 | MIT | https://github.com/jeffbski/wait-on |
+## Distribution License
 
-Electron itself bundles Chromium and Node.js; their licenses ship inside the
-packaged app (`LICENSES.chromium.html` et al. in the Electron distribution).
+The licensor grants you an additional copyright license to distribute copies of the software.  Your license to distribute covers distributing the software with changes and new works permitted by [Changes and New Works License](#changes-and-new-works-license).
 
-Transitive npm dependencies carry their own licenses. Checked against the
-installed production tree (`npm ls --omit=dev --all`): 83 packages, all
-permissive — MIT (66), ISC (6), BlueOak-1.0.0 (2), Apache-2.0 (2),
-BSD-2-Clause, BSD-3-Clause, and dual MIT/WTFPL and BSD/MIT/Apache choices. No
-GPL, LGPL or other copyleft package is among them; OCCT (above) is the only
-copyleft component. Re-run the check after a dependency update; for a packaged
-release, `npx license-checker --production --summary` gives the same view.
+## Notices
+
+You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
+
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+
+## Changes and New Works License
+
+The licensor grants you an additional copyright license to make changes and new works based on the software for any permitted purpose.
+
+## Patent License
+
+The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
+
+## Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose.
+
+## Personal Uses
+
+Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
+
+## Noncommercial Organizations
+
+Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
+
+## Fair Use
+
+You may have "fair use" rights for the software under the law. These terms do not limit them.
+
+## No Other Rights
+
+These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
+
+## Patent Defense
+
+If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
+
+## Violations
+
+The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
+
+## No Liability
+
+***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
+
+## Definitions
+
+The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
+
+**You** refers to the individual or entity agreeing to these terms.
+
+**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
+
+**Your licenses** are all the licenses granted to you for the software under these terms.
+
+**Use** means anything you do with the software requiring one of your licenses.

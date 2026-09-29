@@ -323,6 +323,29 @@ bullet list after shipping, not before.
   subdirectory. Run the unit suite AND the e2e suite after any split, and
   grep for `await import("./` whenever a file changes directory.
 
+## Licensing
+
+**Decision (owner's):** PurpleCAD is licensed under the PolyForm
+Noncommercial License 1.0.0 (`LICENSE.md`, verbatim from the PolyForm
+project, with three `Required Notice:` lines above it). It replaced MIT on
+2026-09-29; copies published before keep MIT. The name, logo and app icons
+(`app-icons/`, `public/favicon.png`) are outside the license and governed by
+`TRADEMARKS.md`: forks rename, re-icon, and state they are forked from
+PurpleCAD.
+
+- **A new dependency must be permissive** (MIT, BSD, ISC, Apache-2.0, Zlib,
+  BlueOak...) -- anything we may relicense under noncommercial terms. GPL or
+  AGPL code cannot be included: its terms forbid adding a noncommercial
+  restriction. LGPL is acceptable only dynamically linked, like OCCT.
+- **Record it in `THIRD_PARTY_LICENSES.md`** in the same commit, with the
+  installed version. Re-run the production-tree licence scan after a
+  dependency update (the file says how).
+- **The packaged app ships the terms.** `build.extraResources` copies
+  `LICENSE.md`, `THIRD_PARTY_LICENSES.md`, `TRADEMARKS.md` and `licenses/`
+  (OCCT's LGPL 2.1 and exception texts, from tag `V8_0_1`) into the app's
+  resources: the license requires every copy to carry its terms and notices.
+  Bump `licenses/occt/` with the OCCT tag.
+
 ## Third-party libraries: native C++ over WASM
 
 **Decision (owner's standing preference):** when a third-party library offers
