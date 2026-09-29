@@ -236,6 +236,8 @@ export function createMeasureAndPrimitivePreviews({
   };
   // Enter the "pick a face / sketch plane to offset the extrude start" mode.
   controls.beginExtrudeStartPick = () => beginExtrudeStartPick();
+  // Enter the "pick a face for the extrude to reach" mode (fills the distance).
+  controls.beginExtrudeToPick = () => extrude.beginExtrudeToPick();
   // Extrude the selected solid face directly (the React extrude button calls
   // this when a face is selected).  Returns true if a face extrude started.
   controls.extrudeSelectedFace = () => extrude.startFaceExtrudeFromSelection();

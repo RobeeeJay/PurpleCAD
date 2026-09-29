@@ -93,6 +93,11 @@ export default function SketchOverlays({
           Click a face or sketch plane to start the extrude from · Esc to cancel
         </div>
       )}
+      {extrudeSelectMode === "to" && (
+        <div className="sketch-placement-hint">
+          Click a face for the extrude to reach · Esc to cancel
+        </div>
+      )}
       {extrudeSelectMode === "profile" && extrudeDepthInput && (
         <div className="sketch-distance-input-overlay">
           <button
@@ -194,6 +199,23 @@ export default function SketchOverlays({
             }}
             style={{ width: 64, marginRight: 8 }}
           />
+          <button
+            type="button"
+            onClick={() => cameraControlsRef.current?.beginExtrudeToPick?.()}
+            title="To… — click a face and the distance is set so the extrude reaches it"
+            style={{
+              fontSize: 11,
+              padding: "2px 6px",
+              marginRight: 8,
+              borderRadius: 3,
+              border: "1px solid var(--border-color)",
+              background: "var(--bg-tertiary)",
+              color: "var(--text-primary)",
+              cursor: "pointer",
+            }}
+          >
+            To…
+          </button>
           <span
             title="How far the profile is extruded along its normal. Negative extrudes backwards through the sketch plane; the prism starts at the plane either way."
             style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}

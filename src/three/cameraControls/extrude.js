@@ -6,6 +6,8 @@
 //             the selection (live preview), types a distance in the overlay,
 //             and presses Confirm/Enter.  The mouse never sets the distance.
 //   start   → optional sub-mode to pick a face/plane the extrude starts from.
+//   to      → optional sub-mode to pick a face the extrude should reach; it
+//             fills in the distance (extrudeFacePick.js).
 //   commit  → finalizeExtrude writes the extrude item(s) to the store (and,
 //             for cut/boss/multi-area, runs a CSG boolean asynchronously).
 
@@ -23,10 +25,8 @@ import {
   runUnionExtrudes,
   runExtrudeUnion,
 } from "./extrudeBoolean.js";
-import {
-  EXTRUDE_FACE_HIGHLIGHT,
-  EXTRUDE_FACE_HIGHLIGHT_ALT,
-} from "../theme.js";
+import { EXTRUDE_FACE_HIGHLIGHT } from "../theme.js";
+import { createExtrudeFacePick } from "./extrudeFacePick.js";
 
 // Which candidate region profile is the one an extrude was built from?
 //
@@ -820,116 +820,29 @@ export function createExtrudeHelpers(
     renderer.domElement.style.cursor = "";
   };
 
-  // --- Offset start-point picking ----------------------------------------
-  // The user taps "Set start" in the depth overlay, then clicks a solid face
-  // or sketch plane; the prism's base slides along the extrude normal to sit
-  // at that surface.  The offset is the signed projection of the picked point
-  // onto the normal, measured from the primary profile's base.
-
-  // Solid faces are the meaningful offset targets.  They're tested BEFORE the
-  // sketch-region fills because those fills are invisible (opacity 0) yet still
-  // raycastable, and they sit right on the sketch plane — when you sketch on an
-  // object's face the fill is coincident with that face and would otherwise
-  // intercept every ray, so the face under the cursor never lights up.
-  // Mirror the Alt/Option face-pick target set (onViewHover faceMode): every
-  // visible non-sketch mesh.  Crucially this INCLUDES extrude / csg solids —
-  // those are exactly the bodies you want to start an offset from, and
-  // excluding them was why their faces couldn't be picked.
-  const solidStartTargets = () =>
-    Object.values(objectsRef.current).filter((m) => {
-      if (m.visible === false) return false;
-      const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
-      return it && it.type !== "sketch";
-    });
-
-  // The picked point + whether it was a face (vs a sketch-plane fill).  Faces
-  // win; a fill is only used when no solid face is under the cursor.
-  const startPickHit = (ray) => {
-    const solidHits = ray.intersectObjects(solidStartTargets(), false);
-    if (solidHits.length > 0) return { hit: solidHits[0], isFace: true };
-    const fills = extrudeSelectGroupRef?.current?.children ?? [];
-    const fillHits = fills.length ? ray.intersectObjects(fills, false) : [];
-    if (fillHits.length > 0) return { hit: fillHits[0], isFace: false };
-    return null;
-  };
-
-  const beginExtrudeStartPick = () => {
-    // The start offset is measured from the selected profile's plane, so a
-    // profile must exist first — otherwise there's nothing to offset and face
-    // clicks would no-op (origin/normal still null).
-    if (!extrudeProfileList.length) {
-      useStore
-        .getState()
-        .showNotification?.("Select geometry to extrude first");
-      return;
-    }
-    useStore.getState().setExtrudeSelectMode("start");
-    renderer.domElement.style.cursor = "crosshair";
-  };
-
-  // Clear any transient start-pick highlight (fill opacity + face overlay).
-  const clearStartHighlight = () => {
-    const fills = extrudeSelectGroupRef?.current?.children ?? [];
-    fills.forEach((m) => {
-      m.material.opacity = 0;
-    });
-    clearFaceHighlight();
-  };
-
-  const handleExtrudeStartHover = (screenX, screenY) => {
-    clearStartHighlight();
-    const picked = startPickHit(makeRay(screenX, screenY));
-    if (!picked) {
-      renderer.domElement.style.cursor = "crosshair";
-      return;
-    }
-    // Light up the surface under the cursor so the user sees what the extrude
-    // will start from: the face-overlay highlight for a solid face, a
-    // translucent fill for a sketch plane.
-    if (picked.isFace)
-      applyFaceHighlight(picked.hit, EXTRUDE_FACE_HIGHLIGHT_ALT);
-    else picked.hit.object.material.opacity = 0.3;
-    renderer.domElement.style.cursor = "pointer";
-  };
-
-  const handleExtrudeStartClick = (screenX, screenY) => {
-    // Measure the offset from the (live) first profile's plane, so it's correct
-    // even if the cached origin/normal lag the selection.
-    const primary = extrudeProfileList[0];
-    if (!primary) return;
-    const picked = startPickHit(makeRay(screenX, screenY));
-    if (!picked) return;
-    clearStartHighlight();
-    const origin = new THREE.Vector3(
-      primary.position.x,
-      primary.position.y,
-      primary.position.z,
-    );
-    const normal = new THREE.Vector3(
-      primary.normalWorld.x,
-      primary.normalWorld.y,
-      primary.normalWorld.z,
-    );
-    const offset = picked.hit.point.clone().sub(origin).dot(normal);
-    // Remember the solid the start was taken from so the extrude fuses into it.
-    extrudeStartSolidId = picked.isFace
-      ? (picked.hit.object.userData.itemId ?? null)
-      : null;
-    const store = useStore.getState();
-    const current = store.extrudeDepthInput || {};
-    // Clear any typed offset buffer so the Offset field reflects the picked
-    // face distance rather than a stale formula the user typed earlier.
-    store.setExtrudeDepthInput({
-      ...current,
-      startOffset: offset,
-      offsetFormula: undefined,
-    });
-    store.setExtrudeSelectMode("profile");
-    rebuildPreviews(
-      current.currentDepth ?? current.defaultDepth ?? DEFAULT_DEPTH,
-    );
-    renderer.domElement.style.cursor = "crosshair";
-  };
+  // Picking a face for the extrude to start from, or to reach
+  // (extrudeFacePick.js).
+  const {
+    beginExtrudeStartPick,
+    beginExtrudeToPick,
+    clearStartHighlight,
+    handleExtrudeStartHover,
+    handleExtrudeStartClick,
+  } = createExtrudeFacePick({
+    renderer,
+    objectsRef,
+    itemsRef,
+    extrudeSelectGroupRef,
+    makeRay,
+    applyFaceHighlight,
+    clearFaceHighlight,
+    getProfiles: () => extrudeProfileList,
+    setStartSolidId: (id) => {
+      extrudeStartSolidId = id;
+    },
+    rebuildPreviews,
+    defaultDepth: DEFAULT_DEPTH,
+  });
 
   const cancelExtrude = () => {
     clearExtrudePreview();
@@ -967,6 +880,7 @@ export function createExtrudeHelpers(
     startFaceExtrudeFromSelection,
     preselectRetargetProfile,
     beginExtrudeStartPick,
+    beginExtrudeToPick,
     handleExtrudeStartHover,
     handleExtrudeStartClick,
     clearStartHighlight,

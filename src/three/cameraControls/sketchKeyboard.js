@@ -368,7 +368,10 @@ export function createSketchKeyboardHandler(
         // (keeping the captured profiles + depth) rather than cancelling the
         // whole extrude — so geometry stays selectable.  (Returning to the
         // legacy "depth" state left every click unhandled: selection was dead.)
-        if (extrudeSelectModeRef.current === "start") {
+        if (
+          extrudeSelectModeRef.current === "start" ||
+          extrudeSelectModeRef.current === "to"
+        ) {
           clearStartHighlight();
           useStore.getState().setExtrudeSelectMode("profile");
           return;

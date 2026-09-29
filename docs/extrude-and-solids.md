@@ -26,6 +26,11 @@ Notes:
   instead of adding it — the profile becomes a pocket.
 - **Start-from** lets you begin the extrude from a picked face rather than the
   sketch plane.
+- **To…** sets the depth for you: click it, then click a face, and the depth
+  becomes the distance to that face, so the extrude ends on it. On a face
+  parallel to the sketch it lands exactly on the face; on a sloped face it
+  reaches the point you clicked. It fills in a number, so it doesn't follow
+  the face if that moves later.
 
 The result is a solid body on the [timeline](timeline-and-history.md); its
 recipe remembers the sketch, so editing the sketch rebuilds the solid.

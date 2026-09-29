@@ -953,7 +953,11 @@ export function attachCameraControls(ctx) {
     if (!currentCamera) return;
 
     if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
-      if (extrudeSelectModeRef.current === "start")
+      // "start" and "to" both pick a face (extrudeFacePick.js).
+      if (
+        extrudeSelectModeRef.current === "start" ||
+        extrudeSelectModeRef.current === "to"
+      )
         handleExtrudeStartHover(e.clientX, e.clientY);
       else {
         // Any non-start extrude mode (the unified "profile" phase, or the legacy
@@ -1012,10 +1016,16 @@ export function attachCameraControls(ctx) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5) {
-        if (extrudeSelectModeRef.current === "start")
+        if (
+          extrudeSelectModeRef.current === "start" ||
+          extrudeSelectModeRef.current === "to"
+        )
           handleExtrudeStartClick(e.clientX, e.clientY);
         else handleExtrudeProfileClick(e.clientX, e.clientY, e.shiftKey);
-      } else if (extrudeSelectModeRef.current !== "start") {
+      } else if (
+        extrudeSelectModeRef.current !== "start" &&
+        extrudeSelectModeRef.current !== "to"
+      ) {
         // Drag-select: add the boxed regions, or remove them with Alt held.
         // Shift restricts text to the single glyph instead of the whole word.
         handleExtrudeProfileBox(
