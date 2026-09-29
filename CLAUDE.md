@@ -328,10 +328,13 @@ bullet list after shipping, not before.
 **Decision (owner's):** PurpleCAD is licensed under the PolyForm
 Noncommercial License 1.0.0 (`LICENSE.md`, verbatim from the PolyForm
 project, with three `Required Notice:` lines above it). It replaced MIT on
-2026-09-29; copies published before keep MIT. The name, logo and app icons
-(`app-icons/`, `public/favicon.png`) are outside the license and governed by
-`TRADEMARKS.md`: forks rename, re-icon, and state they are forked from
-PurpleCAD.
+2026-09-29; copies published before keep MIT. The name, logo and ALL icons
+are outside the license and governed by `TRADEMARKS.md`: the app icons
+(`app-icons/`, `public/favicon.png`), `cad-icons/`, and every `<svg>` icon
+drawn in `src/components/`. Forks rename, redraw the icons, and state they are
+forked from PurpleCAD. A new icon is reserved artwork too -- nothing to do but
+keep it in `src/components/` or `cad-icons/`, where the policy's list covers
+it.
 
 - **A new dependency must be permissive** (MIT, BSD, ISC, Apache-2.0, Zlib,
   BlueOak...) -- anything we may relicense under noncommercial terms. GPL or

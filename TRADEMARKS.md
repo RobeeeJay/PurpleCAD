@@ -1,16 +1,26 @@
 # PurpleCAD trademarks
 
-The name **PurpleCAD**, the PurpleCAD logo, and the application icons (the
-files under `app-icons/` and `public/favicon.png`) identify this project. They
-are not part of the software licensed under the PolyForm Noncommercial License
-(`LICENSE.md`): that license covers the code, and "These terms do not imply
-any other licenses." The logo and icon artwork is Copyright (c) 2026 Robeena
-Shepherd, all rights reserved except as this policy allows.
+The name **PurpleCAD**, the PurpleCAD logo, and PurpleCAD's icons identify
+this project. The icons are:
+
+- the application icons: `app-icons/` and `public/favicon.png`;
+- the toolbar icon set: `cad-icons/`;
+- every icon drawing in the application's source: the `<svg>` icons in
+  `src/components/` — the toolbar, timeline, object tree, selection widgets
+  and dialogs — including `src/components/icons/` and
+  `src/components/toolbar/timelineIcons.jsx`.
+
+None of these is part of the software licensed under the PolyForm
+Noncommercial License (`LICENSE.md`): that license covers the code, and "These
+terms do not imply any other licenses." Where an icon drawing sits inside a
+source file, the license covers the rest of the file and not the drawing. The
+logo and icon artwork is Copyright (c) 2026 Robeena Shepherd, all rights
+reserved except as this policy allows.
 
 ## What you may do
 
-- **Share PurpleCAD unchanged** -- the software as published here, for a
-  noncommercial purpose the license permits -- under its own name and with
+- **Share PurpleCAD unchanged** — the software as published here, for a
+  noncommercial purpose the license permits — under its own name and with
   its own icons.
 - **Say what your work relates to**, accurately and in plain words: that it
   is forked from PurpleCAD, that it opens PurpleCAD's `.pcad` documents, or
@@ -18,7 +28,7 @@ Shepherd, all rights reserved except as this policy allows.
 
 ## What you may not do
 
-- Use the PurpleCAD name, logo or icons -- or anything confusingly similar --
+- Use the PurpleCAD name, logo or icons — or anything confusingly similar —
   for a modified version, a fork, or any other product or service.
 - Use them in a way that suggests the PurpleCAD project made, endorses or
   supports your work.
@@ -30,7 +40,9 @@ Shepherd, all rights reserved except as this policy allows.
 A modified version of PurpleCAD is a fork, however small the change. A fork:
 
 1. **Takes its own name, logo and icons.** None of PurpleCAD's may remain in
-   the application, its window titles, its installer, or its listings.
+   the application, its window titles, its installer, or its listings — and
+   that includes the toolbar and other interface icons, which a fork redraws
+   rather than keeps.
 2. **Says clearly that it is forked from PurpleCAD**, with a link to
    https://github.com/RobeeeJay/PurpleCAD, in each of:
    - the first page of its documentation (its README or equivalent);

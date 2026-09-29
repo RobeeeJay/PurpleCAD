@@ -2,20 +2,26 @@ Required Notice: Copyright (c) 2026 Robeena Shepherd (https://github.com/RobeeeJ
 
 Required Notice: This software is, or is derived from, PurpleCAD (https://github.com/RobeeeJay/PurpleCAD).
 
-Required Notice: The PurpleCAD name, logo and application icons are not licensed under these terms. See TRADEMARKS.md.
+Required Notice: The PurpleCAD name, logo, application icons and toolbar icons are not licensed under these terms. See TRADEMARKS.md.
 
 PurpleCAD is licensed under the PolyForm Noncommercial License 1.0.0, below.
 These terms cover everything in this repository except:
 
-- the PurpleCAD logo and application icons -- the files under `app-icons/`
-  and `public/favicon.png` -- which are covered by `TRADEMARKS.md`; and
+- the PurpleCAD logo and icons, which are covered by `TRADEMARKS.md`: the
+  application icons (`app-icons/`, `public/favicon.png`), the toolbar icon
+  set (`cad-icons/`), and every icon drawing in the application's source —
+  the `<svg>` icons in `src/components/`, including `src/components/icons/`
+  and `src/components/toolbar/timelineIcons.jsx`. Where such a drawing sits
+  inside a source file, the rest of that file is covered by these terms and
+  the drawing is not; and
 - the third-party components listed in `THIRD_PARTY_LICENSES.md`, which remain
   under their own licenses.
 
 In short, and not in place of the terms: you may use, study, change and share
 PurpleCAD for any noncommercial purpose. You may not sell it, sell a product
 or service it is bundled with, or use it for commercial work. Forks must take
-a new name, logo and icons, and must keep the Required Notice lines above,
+a new name, logo and icons — toolbar icons included — and must keep the
+Required Notice lines above,
 which say where they came from.
 
 ---

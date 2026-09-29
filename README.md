@@ -161,9 +161,10 @@ share it for any noncommercial purpose, but not sell it, bundle it with
 something that is sold, or use it for commercial work. Versions published
 before this change were MIT-licensed, and copies of those keep that license.
 
-The PurpleCAD name, logo and application icons are not covered by the
-license; see [TRADEMARKS.md](TRADEMARKS.md). A fork takes its own name and
-icons and says clearly that it is forked from PurpleCAD.
+The PurpleCAD name, logo, application icons and toolbar icons are not covered
+by the license; see [TRADEMARKS.md](TRADEMARKS.md). A fork takes its own name
+and icons, toolbar icons included, and says clearly that it is forked from
+PurpleCAD.
 
 Third-party components keep their own licenses:
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). PurpleCAD makes use of
