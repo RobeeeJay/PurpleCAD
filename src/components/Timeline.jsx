@@ -22,6 +22,7 @@ import {
   ChamferIcon,
   FilletIcon,
   ShellIcon,
+  SimplifyIcon,
   HoleIcon,
   EmbossIcon,
   TextureIcon,
@@ -53,6 +54,13 @@ const shellInfo = (entry) => {
   const r = inst.patches?.regenerator;
   if (r?.kind !== "shell") return null;
   return { thickness: r.thickness ?? 0 };
+};
+
+// Detect simplify entries — a modify whose regenerator is a simplify op.
+const simplifyInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  return inst.patches?.regenerator?.kind === "simplify" ? {} : null;
 };
 
 // Detect hole entries — a modify whose regenerator is a hole op.
@@ -147,6 +155,7 @@ const entryIcon = (entry) => {
   const ci = chamferInfo(entry);
   if (ci) return ci.isFillet ? <FilletIcon /> : <ChamferIcon />;
   if (shellInfo(entry)) return <ShellIcon />;
+  if (simplifyInfo(entry)) return <SimplifyIcon />;
   if (holeInfo(entry)) return <HoleIcon />;
   if (embossInfo(entry)) return <EmbossIcon />;
   if (textureInfo(entry)) return <TextureIcon />;
@@ -236,6 +245,7 @@ const Timeline = () => {
     (state) => state.setPushPullEditTarget,
   );
   const setShellTarget = useStore((state) => state.setShellTarget);
+  const setSimplifyTarget = useStore((state) => state.setSimplifyTarget);
   const beginHoleEdit = useStore((state) => state.beginHoleEdit);
   const beginEmbossEdit = useStore((state) => state.beginEmbossEdit);
   const beginTextureEdit = useStore((state) => state.beginTextureEdit);
@@ -640,6 +650,21 @@ const Timeline = () => {
                   onClick={(e) => {
                     e.stopPropagation();
                     setShellTarget({ itemId: entry.itemId, entryId: entry.id });
+                  }}
+                >
+                  <EditIcon />
+                </button>
+              )}
+              {simplifyInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit simplify — deviation or triangle count"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSimplifyTarget({
+                      itemId: entry.itemId,
+                      entryId: entry.id,
+                    });
                   }}
                 >
                   <EditIcon />

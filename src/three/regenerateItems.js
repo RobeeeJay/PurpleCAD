@@ -25,6 +25,7 @@ import {
   regenerateShell,
   regenerateDraft,
   regenerateHole,
+  regenerateSimplify,
 } from "./regenerators/modify.js";
 import {
   regenerateEmboss,
@@ -125,6 +126,8 @@ export async function regenerateItemsForResolution(
           return regenerateShell(r, out, printPrecision, item.position, opts);
         case "hole":
           return regenerateHole(r, out, printPrecision, item.position, opts);
+        case "simplify":
+          return regenerateSimplify(r, out, printPrecision, item.position);
         case "emboss":
           return regenerateEmboss(r, out, printPrecision, item.position, opts);
         case "texture":
@@ -169,6 +172,7 @@ export async function regenerateItemsForResolution(
         r.kind === "chamfer" ||
         r.kind === "pushpull" ||
         r.kind === "shell" ||
+        r.kind === "simplify" ||
         r.kind === "hole" ||
         r.kind === "emboss" ||
         r.kind === "draft" ||
@@ -228,6 +232,7 @@ export async function regenerateItemsForResolution(
     // Carry the freshly-recomputed stamp so buildItemShapeLocal stays in sync
     // with the live sketch geometry.
     if (r.kind === "emboss" && result.stamp) nextRegen.stamp = result.stamp;
+    if (r.kind === "simplify") nextRegen.stats = result.stats;
     out.push({
       ...item,
       position: result.position,

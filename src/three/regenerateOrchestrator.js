@@ -266,6 +266,7 @@ async function runRecalcPass(force = false) {
         it.regenerator.kind === "chamfer" ||
         it.regenerator.kind === "pushpull" ||
         it.regenerator.kind === "shell" ||
+        it.regenerator.kind === "simplify" ||
         it.regenerator.kind === "hole" ||
         it.regenerator.kind === "emboss" ||
         it.regenerator.kind === "draft" ||

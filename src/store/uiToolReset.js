@@ -18,6 +18,7 @@ export const TOOL_RESET_PATCH = {
   pushPullRetargetTarget: null,
   pushPullEditTarget: null,
   shellTarget: null,
+  simplifyTarget: null,
   holeTool: null,
   embossTool: null,
   textureTool: null,

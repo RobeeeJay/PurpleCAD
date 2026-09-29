@@ -1,4 +1,5 @@
-// Face-modify regenerators: chamfer/fillet, push-pull, shell, draft and hole.
+// Face-modify regenerators: chamfer/fillet, push-pull, shell, draft, hole and
+// simplify.
 // Each rebuilds one op from its frozen recipe against the LIVE source, then
 // re-anchors the result with resolveChainedPosition.  Split out of
 // regenerateItems.js.
@@ -14,7 +15,9 @@ import {
   shellItem,
   holeItem,
   draftItem,
+  simplifyMesh,
 } from "../occClient.js";
+import { MM_PER_UNIT } from "../sceneObjects.js";
 import { resolveChainedPosition } from "./shared.js";
 
 export async function regenerateChamfer(
@@ -308,5 +311,73 @@ export async function regenerateHole(
     // Present only when the caller passed retainResult (timeline solid cache);
     // undefined on the live-preview path, which releases its result as before.
     shapeId: result.shapeId,
+  };
+}
+
+// Simplify a mesh body's baked mesh natively, held to a measured deviation or
+// cut to a triangle count.  The result is in the body's own local frame, so
+// it keeps the body's position, rotation and scale.  `params` is what the
+// dialog stores: { mode: "deviation", toleranceMm } or
+// { mode: "triangles", targetTriangles }.
+export async function simplifySource(source, params) {
+  const g = source?.geometryData;
+  if (!g?.positions?.length) return null;
+  const deviation = params.mode === "deviation";
+  const r = await simplifyMesh({
+    positions: g.positions,
+    indices: g.indices,
+    mode: params.mode,
+    value: deviation
+      ? params.toleranceMm / MM_PER_UNIT
+      : params.targetTriangles,
+  });
+  if (!r) return null;
+  return {
+    // Flat-shaded like an imported mesh: a smooth normal averaged across a
+    // simplified mesh's large triangles would bend the light across edges.
+    geometryData: {
+      positions: r.positions,
+      indices: r.indices,
+      normals: null,
+      flat: true,
+    },
+    stats: {
+      trianglesBefore: r.trianglesBefore,
+      trianglesAfter: r.trianglesAfter,
+      maxDeviationMm: r.maxDeviation * MM_PER_UNIT,
+    },
+  };
+}
+
+// Rebuild a simplify from its live source: the source's mesh at the current
+// resolution, simplified again with the stored parameters.
+export async function regenerateSimplify(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const source = regenerator.source;
+  let result;
+  try {
+    result = await simplifySource(source, regenerator);
+  } catch (err) {
+    console.warn(
+      `Simplify regen failed (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    { cx: 0, cy: 0, cz: 0 },
+    currentPosition,
+    regenerator.basePosition,
+  );
+  return {
+    position,
+    basePosition,
+    geometryData: result.geometryData,
+    stats: result.stats,
   };
 }

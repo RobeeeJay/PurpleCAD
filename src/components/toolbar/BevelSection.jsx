@@ -1,5 +1,6 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import { canSimplify } from "../../three/cameraControls/simplify.js";
 
 const BevelSection = ({ bare = false }) => {
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
@@ -10,6 +11,7 @@ const BevelSection = ({ bare = false }) => {
   const selectedId = useStore((s) => s.selectedId);
   const items = useStore((s) => s.items);
   const setShellTarget = useStore((s) => s.setShellTarget);
+  const setSimplifyTarget = useStore((s) => s.setSimplifyTarget);
   const holeTool = useStore((s) => s.holeTool);
   const startHoleTool = useStore((s) => s.startHoleTool);
   const cancelHoleTool = useStore((s) => s.cancelHoleTool);
@@ -32,6 +34,10 @@ const BevelSection = ({ bare = false }) => {
   };
   const openShell = () => {
     if (canShell) setShellTarget({ itemId: selectedId });
+  };
+  // Simplify works on a body's mesh, so only a mesh body qualifies.
+  const openSimplify = () => {
+    if (canSimplify(selectedBody)) setSimplifyTarget({ itemId: selectedId });
   };
   // Hole guides its own face + point pick, so it needs no pre-selection.
   const toggleHole = () => {
@@ -296,6 +302,46 @@ const BevelSection = ({ bare = false }) => {
             strokeWidth="1.5"
             strokeLinejoin="miter"
             points="7,8.5 12,6 17,8.5 12,11"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title={
+          canSimplify(selectedBody)
+            ? "Simplify — fewer triangles for the selected mesh body, within a deviation or to a count"
+            : "Simplify — select a mesh body (an import, a split piece, or a modelled body) first"
+        }
+        disabled={!canSimplify(selectedBody)}
+        onClick={openSimplify}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <polygon
+            points="3,20 12,4 21,20"
+            fill="rgba(108,63,212,0.15)"
+            stroke="#c4c2b8"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
+          />
+          <polyline
+            points="12,20 7.5,12 12,4"
+            fill="none"
+            stroke="#6C3FD4"
+            strokeWidth="1.2"
+          />
+          <polyline
+            points="7.5,20 5.25,16 9.75,16 7.5,20"
+            fill="none"
+            stroke="#6C3FD4"
+            strokeWidth="1.2"
+          />
+          <line
+            x1="7.5"
+            y1="12"
+            x2="9.75"
+            y2="16"
+            stroke="#6C3FD4"
+            strokeWidth="1.2"
           />
         </svg>
       </button>

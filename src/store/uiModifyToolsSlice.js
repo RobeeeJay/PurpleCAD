@@ -45,6 +45,12 @@ export const createUiModifyToolsSlice = (set, get) => ({
         ? { ...TOOL_RESET_PATCH, shellTarget: target }
         : { shellTarget: target },
     ),
+  setSimplifyTarget: (target) =>
+    set((s) =>
+      target && !s.simplifyTarget
+        ? { ...TOOL_RESET_PATCH, simplifyTarget: target }
+        : { simplifyTarget: target, toolError: null },
+    ),
   setOriginToolActive: (v) =>
     set((s) => {
       const own = {

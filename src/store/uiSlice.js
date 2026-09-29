@@ -106,6 +106,10 @@ export const uiInitial = {
   // thickness.  Null = closed.
   shellTarget: null,
 
+  // Simplify dialog target, the same shape as shellTarget: { itemId } for a
+  // fresh simplify of a mesh body, { itemId, entryId } to edit a committed one.
+  simplifyTarget: null,
+
   // Change-origin tool.  `originToolActive` arms it (click an object to pick its
   // origin); `originDialogItemId` is the object whose OriginDialog is open;
   // `originVertexPick` is the object whose next click snaps the origin to a

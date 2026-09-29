@@ -21,6 +21,7 @@ import BooleanDialog from "./BooleanDialog";
 import Pattern3dDialog from "./Pattern3dDialog";
 import SplitDialog from "./SplitDialog";
 import ShellDialog from "./ShellDialog";
+import SimplifyDialog from "./SimplifyDialog";
 import OriginDialog from "./OriginDialog";
 import HoleDialog from "./HoleDialog";
 import EmbossDialog from "./EmbossDialog";
@@ -371,6 +372,7 @@ const Viewport = () => {
       <Pattern3dDialog />
       <SplitDialog />
       <ShellDialog />
+      <SimplifyDialog />
       <OriginDialog />
       <HoleDialog />
       <EmbossDialog />

@@ -205,6 +205,17 @@ describe("the open-mesh warning before a boolean", () => {
     );
   });
 
+  it("checks a simplified mesh, which is still a mesh", async () => {
+    // Simplify keeps an open import's hole: its result must not slip past the
+    // check just because it now carries a recipe.
+    const simplified = csg(1, "Box (STL)", soup(lidless), {
+      regenerator: { kind: "simplify" },
+    });
+    expect(await openMeshNotice([simplified])).toBe(
+      "Box (STL) (4 open edges) isn't a closed solid, so this result may have holes.",
+    );
+  });
+
   it("does not check a body OCC built", async () => {
     // A body with a regenerator was made by an OCC op: its mesh is a
     // tessellation of a solid, not a surface of unknown closure.

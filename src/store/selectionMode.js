@@ -40,6 +40,7 @@ export function anyToolActive(s) {
     s.pushPullRetargetTarget ||
     s.pushPullEditTarget ||
     s.shellTarget ||
+    s.simplifyTarget ||
     s.holeTool ||
     s.embossTool ||
     s.draftTool ||

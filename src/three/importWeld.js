@@ -44,10 +44,13 @@ export function openMeshWarning(name, report) {
   }. Booleans with it may leave holes.`;
 }
 
-// A mesh body from outside OCC -- an import, or the pieces of a mesh split --
-// whose surface may not be closed.  OCC results are built as solids.
+// A mesh body from outside OCC -- an import, the pieces of a mesh split, or a
+// simplified mesh -- whose surface may not be closed.  OCC results are built
+// as solids.
 const isMeshBody = (item) =>
-  item?.type === "csg" && !item.regenerator && item.geometryData?.positions;
+  item?.type === "csg" &&
+  (!item.regenerator || item.regenerator.kind === "simplify") &&
+  item.geometryData?.positions;
 
 // The warning to show when a boolean is about to take an open mesh, or null.
 // A warning, not a refusal: the owner's decision -- OCC will often still give

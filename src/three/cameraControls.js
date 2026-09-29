@@ -7,6 +7,7 @@ import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js"
 import { createComponentMotionHelpers } from "./cameraControls/componentMotionTool.js";
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createShellPreviewHelpers } from "./cameraControls/shell.js";
+import { createSimplifyPreviewHelpers } from "./cameraControls/simplify.js";
 import { createHolePreviewHelpers } from "./cameraControls/hole.js";
 import { createEmbossPreviewHelpers } from "./cameraControls/emboss.js";
 import { createTexturePreviewHelpers } from "./cameraControls/texture.js";
@@ -423,6 +424,15 @@ export function attachCameraControls(ctx) {
   });
   controls.updateShellPreview = (args) => shellPreview.updateShellPreview(args);
   controls.clearShellPreview = () => shellPreview.clearShellPreview();
+
+  const simplifyPreview = createSimplifyPreviewHelpers({
+    scene,
+    itemsRef,
+    objectsRef,
+  });
+  controls.updateSimplifyPreview = (args) =>
+    simplifyPreview.updateSimplifyPreview(args);
+  controls.clearSimplifyPreview = () => simplifyPreview.clearSimplifyPreview();
 
   const holePreview = createHolePreviewHelpers({ scene, itemsRef, objectsRef });
   controls.updateHolePreview = () => holePreview.updateHolePreview();

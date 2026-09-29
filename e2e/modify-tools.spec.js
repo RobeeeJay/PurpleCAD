@@ -320,4 +320,124 @@ test.describe.serial("modify tools through their dialogs", () => {
     expect(halves[0]).toBeCloseTo(0.5, 2);
     expect(halves[1]).toBeCloseTo(1.5, 2);
   });
+
+  test("simplify reduces a mesh body, and its timeline Edit re-runs it", async () => {
+    // A dense closed sphere standing in for an imported STL, selected, in a
+    // new document: the split test before this one uses ids 40 and 41.
+    await page.evaluate(() => {
+      window.__store.getState().newDocument();
+      const seg = 48;
+      const positions = [0, 1, 0];
+      for (let i = 1; i < seg; i++)
+        for (let j = 0; j < seg; j++) {
+          const v = (i / seg) * Math.PI;
+          const u = (j / seg) * 2 * Math.PI;
+          positions.push(
+            Math.sin(v) * Math.cos(u),
+            Math.cos(v),
+            Math.sin(v) * Math.sin(u),
+          );
+        }
+      positions.push(0, -1, 0);
+      const south = positions.length / 3 - 1;
+      const at = (i, j) =>
+        i === 0 ? 0 : i === seg ? south : 1 + (i - 1) * seg + (j % seg);
+      const indices = [];
+      for (let i = 0; i < seg; i++)
+        for (let j = 0; j < seg; j++) {
+          if (i !== 0) indices.push(at(i, j), at(i + 1, j), at(i, j + 1));
+          if (i !== seg - 1)
+            indices.push(at(i, j + 1), at(i + 1, j), at(i + 1, j + 1));
+        }
+      const s = window.__store.getState();
+      s.addItem({
+        id: 60,
+        name: "Ball (STL)",
+        type: "csg",
+        children: [],
+        position: { x: 0, y: 1, z: -6 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        geometryData: { positions, indices, normals: null, flat: true },
+      });
+      window.__store.setState({ selectedId: 60, selectedIds: [60] });
+    });
+    const tris = () =>
+      page.evaluate(() => {
+        const it = window.__store.getState().items.find((i) => i.id === 60);
+        return it.geometryData ? it.geometryData.indices.length / 3 : null;
+      });
+    const before = await tris();
+
+    await page
+      .getByTitle("Simplify — fewer triangles", { exact: false })
+      .click();
+    await page.locator("#simplify-tolerance").fill("0.2");
+    // The preview runs the op through IPC and reports what it would do.
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "triangles, within",
+      { timeout: 30000 },
+    );
+    await page.getByTitle("Apply the simplify").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => window.__store.getState().history.at(-1).label),
+        { timeout: 30000 },
+      )
+      .toBe("Simplified");
+    const first = await tris();
+    expect(first, `${before} triangles before`).toBeLessThan(before / 2);
+
+    // Edit re-opens the same dialog on the step, and saving re-runs it.
+    const steps = await page.evaluate(
+      () => window.__store.getState().history.length,
+    );
+    await page
+      .getByTitle("Edit simplify — deviation or triangle count")
+      .click();
+    await page
+      .getByRole("button", { name: "Triangle count", exact: true })
+      .click();
+    await page.locator("#simplify-triangles").fill("300");
+    await page.getByTitle("Apply the simplify").click();
+    await expect.poll(tris, { timeout: 60000 }).toBeLessThanOrEqual(300);
+    expect(
+      await page.evaluate(() => window.__store.getState().history.length),
+    ).toBe(steps);
+
+    // The simplified body still booleans: the app's OCC bridge sews its mesh.
+    // A cube over half the ball, so the union keeps the other half's surface.
+    await page.evaluate(() => {
+      window.__store.getState().addItem({
+        id: 61,
+        name: "Cube 61",
+        type: "cube",
+        children: [],
+        position: { x: 1, y: 1, z: -6 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      window.__store.getState().startBooleanTool("union");
+      window.__store.setState({ selectedIds: [60, 61] });
+    });
+    await page.getByTitle("Apply Union").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const r = window.__store
+              .getState()
+              .items.find(
+                (i) =>
+                  i.regenerator?.kind === "boolean" &&
+                  i.regenerator.inputIds?.includes(60),
+              );
+            return r?.geometryData ? r.geometryData.indices.length / 3 : 0;
+          }),
+        { timeout: 30000 },
+      )
+      // Far more than a cube's 12: the ball's half is in it.
+      .toBeGreaterThan(60);
+  });
 });

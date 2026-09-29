@@ -12,6 +12,47 @@ import {
   withUndo,
   commitEntryEdit,
 } from "./internals.js";
+// Change a committed step's parameters from its timeline Edit: mark the
+// regenerator dirty and clear its geometry so the regen orchestrator rebuilds
+// it, then relink so later steps build on the edited result.  Shared by the
+// ops whose edit is only a parameter change (push/pull, shell, simplify).
+function withEditedParams(state, entryId, kind, params) {
+  const newHistory = state.history.map((entry) => {
+    if (entry.id !== entryId) return entry;
+    const inst = entry.instruction;
+    if (inst?.type !== "modify") return entry;
+    const r = inst.patches?.regenerator;
+    if (r?.kind !== kind) return entry;
+    return {
+      ...entry,
+      instruction: {
+        ...inst,
+        patches: {
+          ...inst.patches,
+          regenerator: { ...r, ...params, regeneratedAt: "dirty" },
+          geometryData: null,
+        },
+      },
+    };
+  });
+  // Editing an upstream op must re-point downstream sources (an emboss on a
+  // chamfer rebuilds against the edited chamfer, not its stale snapshot).
+  const relinked = commitEntryEdit(newHistory, entryId);
+  const activeIdx =
+    state.activeHistoryId != null
+      ? relinked.findIndex((h) => h.id === state.activeHistoryId)
+      : relinked.length - 1;
+  const items = replayUpTo(
+    relinked,
+    activeIdx !== -1 ? activeIdx : relinked.length - 1,
+  );
+  saveTimeline(relinked, state.activeHistoryId);
+  return Object.assign(
+    { items, history: withOrphanFlags(relinked) },
+    withUndo(state),
+  );
+}
+
 export const createHistoryEntryEditsSlice = (set) => ({
   // Update the amount / angleRad on an existing chamfer-or-fillet history
   // entry, then replay history so the regenerator reflects the new values.
@@ -106,86 +147,14 @@ export const createHistoryEntryEditsSlice = (set) => ({
   // `regeneratedAt` is reset and `geometryData` cleared so the skip-check in
   // regenerateItemsForResolution misses and re-tessellates.
   updatePushPullParams: (entryId, params) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        const r = inst.patches?.regenerator;
-        if (r?.kind !== "pushpull") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              regenerator: {
-                ...r,
-                ...params,
-                regeneratedAt: "dirty",
-              },
-              geometryData: null,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-  // Edit a committed shell's wall thickness from its timeline step.  Mirrors
-  // updatePushPullParams: mark the regenerator dirty + clear geometry so the
-  // regen orchestrator rebuilds it at the new thickness.
+    set((state) => withEditedParams(state, entryId, "pushpull", params)),
+  // Edit a committed shell's wall thickness from its timeline step.
   updateShellParams: (entryId, params) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        const r = inst.patches?.regenerator;
-        if (r?.kind !== "shell") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              regenerator: { ...r, ...params, regeneratedAt: "dirty" },
-              geometryData: null,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
+    set((state) => withEditedParams(state, entryId, "shell", params)),
+  // Edit a committed simplify's deviation / triangle count from its timeline
+  // step.
+  updateSimplifyParams: (entryId, params) =>
+    set((state) => withEditedParams(state, entryId, "simplify", params)),
   // Update a committed hole step in place with re-edited params (geometry
   // already rebuilt by commitHole).  `patch` = { hole, position, centerOffset,
   // geometryData, regeneratedAt }.
