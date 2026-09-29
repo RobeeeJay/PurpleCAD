@@ -61,6 +61,7 @@ test.describe.serial("MCP", () => {
       "sketch_create",
       "feature_extrude",
       "feature_boolean",
+      "feature_simplify",
       "body_list",
       "view_render",
     ])

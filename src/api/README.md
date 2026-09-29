@@ -70,6 +70,10 @@ bridge, so a green unit run says nothing about a command.
   calling it from here would pass the tests and do something different in the
   shipped app, and an unguarded commit can be cancelled by a preview into an
   empty result with no error.
+- **A tool's commit reports failure on the dialog's error line.**
+  `feature.simplify` reuses `commitSimplify`, which puts its reason in
+  `toolError` and returns false; the command takes that back (and clears it --
+  the status line hides while it is set) to return it as the error.
 - **Measure a body by its own geometry.** A stress field or an optimisation
   preview swaps the mesh on screen, so `meshWorldData` reads the geometry kept
   aside in `userData` when there is one.

@@ -245,4 +245,68 @@ test.describe.serial("agent API", () => {
     expect(shape.code).toBe("BAD_SHAPE");
     expect(shape.details.supported).toContain("circle");
   });
+
+  test("simplifies a modelled body, to a count or within a deviation", async () => {
+    await ok("document.new", { discardCurrent: true });
+    // A plate with a round boss fused on: a modelled mesh body, its curved
+    // wall tessellated finely enough to be worth simplifying.
+    const plate = await ok("sketch.create", {
+      plane: "XY",
+      shapes: [{ type: "circle", cx: 0, cy: 0, r: 30 }],
+    });
+    const disc = await ok("feature.extrude", { sketchId: plate.id, depth: 4 });
+    const bossSketch = await ok("sketch.create", {
+      plane: "XY",
+      offset: 4,
+      shapes: [{ type: "circle", cx: 0, cy: 0, r: 12 }],
+    });
+    const boss = await ok("feature.extrude", {
+      sketchId: bossSketch.id,
+      depth: 10,
+    });
+    const part = await ok("feature.boolean", {
+      operation: "union",
+      target: disc.id,
+      tools: [boss.id],
+    });
+
+    // A plain extrusion has no mesh to reduce.
+    expect(
+      (await refused("feature.simplify", { bodyId: boss.id, triangles: 50 }))
+        .code,
+    ).toBe("BAD_ARGS");
+    expect(
+      (
+        await refused("feature.simplify", {
+          bodyId: part.id,
+          maxDeviationMm: 0.1,
+          triangles: 50,
+        })
+      ).code,
+    ).toBe("BAD_ARGS");
+
+    // A modelled body's tessellation is already lean -- at 0.3 mm nothing
+    // on this one goes -- so 1 mm, where the arcs' facets can merge.
+    const within = await ok("feature.simplify", {
+      bodyId: part.id,
+      maxDeviationMm: 1,
+    });
+    expect(within.id).toBe(part.id);
+    expect(within.trianglesBefore).toBe(part.triangles);
+    expect(within.maxDeviationMm).toBeLessThanOrEqual(1);
+    expect(within.triangles).toBeLessThan(part.triangles);
+    // Same body, same place: each side can move in by at most the deviation.
+    for (let k = 0; k < 3; k++)
+      expect(
+        Math.abs(within.bboxMm.size[k] - part.bboxMm.size[k]),
+      ).toBeLessThanOrEqual(2 * within.maxDeviationMm);
+
+    // A second simplify stacks on the first, on the same body.
+    const counted = await ok("feature.simplify", {
+      bodyId: part.id,
+      triangles: 100,
+    });
+    expect(counted.triangles).toBeLessThanOrEqual(100);
+    expect(counted.maxDeviationMm).toBeGreaterThan(0);
+  });
 });

@@ -3,6 +3,10 @@ import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { buildExtrudeDef } from "../../three/cameraControls/extrude.js";
 import { performCsg, withCommitGuard } from "../../three/occClient.js";
+import {
+  canSimplify,
+  commitSimplify,
+} from "../../three/cameraControls/simplify.js";
 import { activePrecision } from "../../three/resolution.js";
 import { bodySummary, NON_BODY_TYPES } from "../bodies.js";
 import { extrudeProfile, sketchRegions } from "../profiles.js";
@@ -159,5 +163,63 @@ defineCommand({
     useStore.getState().consumeItems(ordered.map((i) => i.id));
     await waitForSettled();
     return warning ? { ...bodySummary(id), warning } : bodySummary(id);
+  },
+});
+
+defineCommand({
+  name: "feature.simplify",
+  description:
+    "Reduce a mesh body's triangles, in place: an imported mesh, a split piece, or any modelled body (not a primitive or a plain extrusion). Give exactly one of maxDeviationMm -- remove as many triangles as possible while no point of the new surface lies further than this from the original, or the other way round (a measured bound, not an estimate) -- or triangles, the count to cut to. Returns the body with trianglesBefore and maxDeviationMm, the bound actually achieved. The body stays closed if it was.",
+  input: {
+    properties: {
+      bodyId: { type: "integer" },
+      maxDeviationMm: { type: "number", exclusiveMinimum: 0 },
+      triangles: { type: "integer", minimum: 4 },
+    },
+    required: ["bodyId"],
+  },
+  run: async ({ bodyId, maxDeviationMm, triangles }) => {
+    if ((maxDeviationMm == null) === (triangles == null))
+      throw new ApiError(
+        "BAD_ARGS",
+        "Give exactly one of maxDeviationMm or triangles.",
+      );
+    // The validator doesn't read exclusiveMinimum; MCP clients do.
+    if (maxDeviationMm != null && !(maxDeviationMm > 0))
+      throw new ApiError("BAD_ARGS", "maxDeviationMm must be more than 0.");
+    const item = itemOrThrow(bodyId);
+    if (!canSimplify(item))
+      throw new ApiError(
+        "BAD_ARGS",
+        `Item ${bodyId} is a ${item.type}; simplify takes a mesh body -- an import, a split piece, or a modelled body.`,
+      );
+    await waitForSettled();
+    const params =
+      triangles != null
+        ? { mode: "triangles", targetTriangles: triangles }
+        : { mode: "deviation", toleranceMm: maxDeviationMm };
+    const ok = await commitSimplify({
+      item: useStore.getState().items.find((i) => i.id === bodyId),
+      params,
+      printPrecision: activePrecision(),
+    });
+    if (!ok) {
+      // The tool reports its reason on the dialog's error line; there is no
+      // dialog here, so take it back and hand it over instead.
+      const reason = useStore.getState().toolError;
+      useStore.getState().setToolError(null);
+      throw new ApiError(
+        "GEOMETRY_REJECTED",
+        reason ?? "The simplify produced nothing.",
+      );
+    }
+    await waitForSettled();
+    const stats = useStore.getState().items.find((i) => i.id === bodyId)
+      ?.regenerator?.stats;
+    return {
+      ...bodySummary(bodyId),
+      trianglesBefore: stats?.trianglesBefore,
+      maxDeviationMm: stats?.maxDeviationMm,
+    };
   },
 });
