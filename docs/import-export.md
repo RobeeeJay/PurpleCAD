@@ -75,6 +75,11 @@ after. Simplify keeps the body closed if it was, and never joins two separate
 parts of its surface. It adds a step to the timeline; **Edit** on that step
 reopens the dialog.
 
+A mesh over 50,000 triangles is too detailed to go into a boolean, and the
+message saying so offers **Simplify to fit**: it opens Simplify on that mesh,
+set to triangle count just under the limit. Simplify, then repeat the
+operation.
+
 ## Projects
 
 The **Projects** button (Document group) manages multiple documents and switches

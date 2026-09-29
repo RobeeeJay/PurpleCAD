@@ -36,6 +36,7 @@ function App() {
   const redoSketch = useStore((state) => state.redoSketch);
   const notification = useStore((state) => state.notification);
   const clearNotification = useStore((state) => state.clearNotification);
+  const notificationAction = useStore((state) => state.notificationAction);
 
   // Prefix the window/tab title with the active project's name.  Refresh the
   // list once on mount too: at store-init the DB bridge may not have returned
@@ -103,9 +104,10 @@ function App() {
 
   useEffect(() => {
     if (!notification) return;
-    const t = setTimeout(clearNotification, 4000);
+    // Long enough to read the message AND reach its button.
+    const t = setTimeout(clearNotification, notificationAction ? 12000 : 4000);
     return () => clearTimeout(t);
-  }, [notification, clearNotification]);
+  }, [notification, notificationAction, clearNotification]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -182,11 +184,42 @@ function App() {
             maxWidth: 340,
             textAlign: "center",
             zIndex: 9999,
-            pointerEvents: "none",
+            pointerEvents: notificationAction ? "auto" : "none",
             lineHeight: 1.45,
           }}
         >
           {notification}
+          {notificationAction?.kind === "simplifyToFit" && (
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                title="Open Simplify on this mesh, set to fit under the limit"
+                onClick={() => {
+                  const s = useStore.getState();
+                  s.clearNotification();
+                  s.selectItem(notificationAction.itemId);
+                  s.setSimplifyTarget({
+                    itemId: notificationAction.itemId,
+                    preset: {
+                      mode: "triangles",
+                      targetTriangles: notificationAction.targetTriangles,
+                    },
+                  });
+                }}
+                style={{
+                  fontSize: 12,
+                  padding: "4px 12px",
+                  borderRadius: 3,
+                  border: "1px solid var(--accent, #4488ff)",
+                  background: "var(--accent, #4488ff)",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Simplify to fit
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -279,6 +279,10 @@ export const uiInitial = {
   // Transient message shown as a centered overlay (auto-dismissed by the
   // consumer component after a short delay).  null = nothing visible.
   notification: null,
+  // What the notification offers to do about itself, or null: today only
+  // { kind: "simplifyToFit", itemId, targetTriangles } (see
+  // uiViewSettingsSlice#simplifyToFit).
+  notificationAction: null,
 
   settingsDialogOpen: false,
   aboutDialogOpen: false,

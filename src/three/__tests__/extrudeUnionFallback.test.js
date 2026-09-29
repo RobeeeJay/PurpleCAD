@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { ensureOcc } from "../occ/init.js";
 import { useStore } from "../../store";
 import { runExtrudeUnion } from "../cameraControls/extrudeBoolean.js";
+import { commitSimplify } from "../cameraControls/simplify.js";
 
 beforeAll(async () => {
   await ensureOcc();
@@ -140,7 +141,37 @@ describe("an extrude OCC can't fuse into its host", () => {
       "no fused result",
     ).toBeFalsy();
     expect(s.history.at(-1).label).toBe("Extruded");
+    // The message offers to simplify that mesh to fit, a tenth under the
+    // 50,000-triangle limit.
+    expect(s.notificationAction).toEqual({
+      kind: "simplifyToFit",
+      itemId: 5,
+      targetTriangles: 45000,
+    });
   }, 120000);
+
+  // The offer must actually fix it: simplified to the preset, the same
+  // extrude merges.
+  it("merges once the mesh is simplified to fit", async () => {
+    useStore.getState().loadDocument(docWithMeshHost(160));
+    useStore.setState({ notification: null });
+    await runExtrudeUnion([boss(101)], [5], 200);
+    const { itemId, targetTriangles } = useStore.getState().notificationAction;
+    const host = useStore.getState().items.find((i) => i.id === itemId);
+    const ok = await commitSimplify({
+      item: host,
+      params: { mode: "triangles", toleranceMm: 0.05, targetTriangles },
+      printPrecision: 0.1,
+    });
+    expect(ok).toBe(true);
+    useStore.setState({ notification: null, notificationAction: null });
+    await runExtrudeUnion([boss(102)], [5], 201);
+    const s = useStore.getState();
+    expect(s.notification, "no fallback message").toBeNull();
+    expect(s.items.find((i) => i.id === 201)?.type, "the fused body").toBe(
+      "csg",
+    );
+  }, 240000);
 
   // The limit that refused an ordinary imported part: an STL of ~14.6k faces
   // was over the old 5000-face cap, so an extrude from a sketch on it could

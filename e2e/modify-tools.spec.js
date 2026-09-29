@@ -440,4 +440,46 @@ test.describe.serial("modify tools through their dialogs", () => {
       // Far more than a cube's 12: the ball's half is in it.
       .toBeGreaterThan(60);
   });
+
+  test("a too-detailed refusal offers to simplify the mesh to fit", async () => {
+    // The refusal names the mesh by its triangle count; the offer opens
+    // Simplify on that body, set a tenth under the boolean limit.
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.newDocument();
+      // A closed tetrahedron is enough: only its count is matched.
+      s.addItem({
+        id: 62,
+        name: "Dense part (STL)",
+        type: "csg",
+        children: [],
+        position: { x: 0, y: 1, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        geometryData: {
+          positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+          indices: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3],
+          normals: null,
+          flat: true,
+        },
+      });
+      s.selectItem(null);
+      s.showNotification(
+        "The extrusion couldn't be merged with the body it starts on, so it was added as a separate body. Imported mesh is too detailed (4 triangles) to use in a boolean. Simplify or decimate it first.",
+      );
+    });
+    await page.getByRole("button", { name: "Simplify to fit" }).click();
+    await expect(page.locator("#simplify-triangles")).toHaveValue("45000");
+    expect(
+      await page.evaluate(() => {
+        const s = window.__store.getState();
+        return {
+          target: s.simplifyTarget?.itemId,
+          selected: s.selectedId,
+          note: s.notification,
+        };
+      }),
+    ).toEqual({ target: 62, selected: 62, note: null });
+    await page.getByTitle("Cancel").click();
+  });
 });

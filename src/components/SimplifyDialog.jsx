@@ -18,7 +18,8 @@ import {
 // Simplify dialog: fewer triangles for a mesh body, either held within a
 // deviation from the original or cut to a triangle count.  Opens fresh from
 // the Modify toolbar ({ itemId }) or on a committed step from its timeline
-// Edit ({ itemId, entryId }).
+// Edit ({ itemId, entryId }).  A fresh target may carry a `preset` of the
+// dialog's values.
 const DEFAULT_TOLERANCE_MM = 0.05;
 // The finest deviation offered: below it meshoptimizer's own estimate stops
 // the reduction before anything useful happens.
@@ -52,11 +53,12 @@ const SimplifyDialog = () => {
   useEffect(() => {
     if (!target) return;
     setStats(null);
-    setMode(regenerator?.mode ?? "deviation");
-    setToleranceMm(String(regenerator?.toleranceMm ?? DEFAULT_TOLERANCE_MM));
-    setTriangles(
-      String(regenerator?.targetTriangles ?? Math.round(sourceTris / 2)),
-    );
+    // A committed step's own values, else a preset from whoever opened it
+    // (Simplify to fit), else the defaults.
+    const seed = regenerator ?? target.preset ?? {};
+    setMode(seed.mode ?? "deviation");
+    setToleranceMm(String(seed.toleranceMm ?? DEFAULT_TOLERANCE_MM));
+    setTriangles(String(seed.targetTriangles ?? Math.round(sourceTris / 2)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target, regenerator]);
 

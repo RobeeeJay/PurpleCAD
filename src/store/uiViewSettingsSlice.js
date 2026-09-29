@@ -11,6 +11,34 @@ import {
   SNAP_DEFAULTS,
 } from "./internals.js";
 
+// The triangle limit on a mesh going into a boolean: kMaxTris in binding.cc's
+// MakeSolidFromMesh, which refuses anything over it before sewing.
+export const MAX_BOOLEAN_TRIANGLES = 50000;
+
+// A refusal naming a mesh too detailed for a boolean offers to simplify it to
+// fit.  The native message carries the mesh's exact triangle count, which
+// picks out the body among the document's meshes; aimed a tenth under the
+// limit so the result isn't refused again by a hair.
+export function simplifyToFit(items, message) {
+  const m = /too detailed \((\d+) triangles\)/.exec(message ?? "");
+  if (!m) return null;
+  const count = Number(m[1]);
+  const body = (items ?? []).find((i) => {
+    const g = i.type === "csg" && i.visible !== false && i.geometryData;
+    if (!g?.positions) return false;
+    const tris = g.indices?.length
+      ? g.indices.length / 3
+      : g.positions.length / 9;
+    return tris === count;
+  });
+  if (!body) return null;
+  return {
+    kind: "simplifyToFit",
+    itemId: body.id,
+    targetTriangles: Math.floor(MAX_BOOLEAN_TRIANGLES * 0.9),
+  };
+}
+
 export const createUiViewSettingsSlice = (set) => ({
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   toggleCrossSectionView: () =>
@@ -48,8 +76,13 @@ export const createUiViewSettingsSlice = (set) => ({
     }),
   toggleHideHiddenItems: () =>
     set((state) => ({ hideHiddenItems: !state.hideHiddenItems })),
-  showNotification: (message) => set({ notification: message }),
-  clearNotification: () => set({ notification: null }),
+  showNotification: (message) =>
+    set((state) => ({
+      notification: message,
+      notificationAction: simplifyToFit(state.items, message),
+    })),
+  clearNotification: () =>
+    set({ notification: null, notificationAction: null }),
   toggleSnap: () =>
     set((state) => {
       const next = { ...state, snapEnabled: !state.snapEnabled };
