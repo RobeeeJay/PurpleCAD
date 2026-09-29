@@ -54,6 +54,26 @@ export function frameFromPointNormal(point, normal) {
   };
 }
 
+// A plane frame lying exactly on a clicked triangle (world corners a, b, c),
+// through the click point projected onto it.  The raycast's hit point sits a
+// float32 hair off the face -- about 1e-6 on a real STL -- and a split plane
+// that close to a face grazes it inside OCC's tolerances: on mms2_base the
+// difference half came back empty, 1e-6 from a face where the exact plane
+// split cleanly.  `towards` orients the normal (the face normal the pick
+// already computed, which accounts for mirrored transforms).  Null when the
+// triangle is degenerate.
+export function frameFromFaceHit(point, a, b, c, towards) {
+  const n = new THREE.Vector3()
+    .subVectors(b, a)
+    .cross(new THREE.Vector3().subVectors(c, a));
+  if (n.lengthSq() < 1e-24) return null;
+  n.normalize();
+  if (towards && n.dot(towards) < 0) n.negate();
+  const p = new THREE.Vector3(point.x, point.y, point.z);
+  p.addScaledVector(n, -new THREE.Vector3().subVectors(p, a).dot(n));
+  return frameFromPointNormal(p, n);
+}
+
 const eul = (r) => new THREE.Euler(r.x || 0, r.y || 0, r.z || 0);
 
 // The unit normal (+Z) of a frame's rotation.

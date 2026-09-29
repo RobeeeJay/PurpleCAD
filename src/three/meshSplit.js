@@ -6,6 +6,28 @@
 
 import * as THREE from "three";
 
+// Split with OCC, and with the exact mesh split below wherever OCC fails --
+// by throwing, as it does on an imported mesh it can't rebuild as a solid,
+// or by handing back one side only.  The second used to be reported as "that
+// cut doesn't pass through" for a cut that plainly did: a plane grazing a
+// face of mms2_base inside OCC's tolerances came back with an empty
+// difference, while the mesh split cut it into 11,384 and 10,004 triangles.
+// Returns { result } with both parts, or { result, error } for the caller to
+// explain: one side only (the cut misses), or nothing at all.
+export async function splitWithFallback(occSplit, meshFallback) {
+  let result = null;
+  let error = null;
+  try {
+    result = await occSplit();
+  } catch (err) {
+    error = err;
+  }
+  if (result?.partA && result?.partB) return { result };
+  const mesh = meshFallback();
+  if (mesh?.partA && mesh?.partB) return { result: mesh };
+  return { result: result ?? mesh ?? null, error };
+}
+
 // Split a world-space scene mesh into two parts along a plane -- the fallback
 // when OCC can't rebuild the target as a solid.  partA is the +normal side,
 // partB the -normal side.

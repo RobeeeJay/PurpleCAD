@@ -3,6 +3,7 @@ import * as THREE from "three";
 import {
   frameFromPoints,
   frameFromPointNormal,
+  frameFromFaceHit,
   applyPlaneAdjust,
   normalOf,
   planeCrossesPoints,
@@ -128,5 +129,46 @@ describe("planeCrossesPoints", () => {
     expect(planeCrossesPoints(at({ x: 0.5, y: 1.5, z: 0 }, n), cube)).toBe(
       true,
     );
+  });
+});
+
+describe("frameFromFaceHit", () => {
+  // A downward-facing triangle at y = -0.72049868, as on mms2_base's step.
+  const y = -0.7204986810684204;
+  const a = new THREE.Vector3(0, y, 0);
+  const b = new THREE.Vector3(0, y, 1);
+  const c = new THREE.Vector3(1, y, 0);
+  const down = new THREE.Vector3(0, -1, 0);
+
+  it("puts the plane on the face, not on the float hit point", () => {
+    // The raycast's point sat 1.3e-6 off the face; a split plane there grazed
+    // the face inside OCC's tolerances and came back one-sided.
+    const hit = { x: 0.3, y: -0.7205, z: 0.2 };
+    const f = frameFromFaceHit(hit, a, b, c, down);
+    const n = normalOf(f.rotation);
+    const off =
+      (f.position.x - a.x) * n.x +
+      (f.position.y - a.y) * n.y +
+      (f.position.z - a.z) * n.z;
+    expect(Math.abs(off), `plane ${off} from the face`).toBeLessThan(1e-12);
+    // In the plane, the point stays where the click was.
+    expect(f.position.x).toBeCloseTo(0.3, 12);
+    expect(f.position.z).toBeCloseTo(0.2, 12);
+  });
+
+  it("keeps the normal the pick computed, whichever way the corners run", () => {
+    // The corners here wind upward; the face normal from the pick says down.
+    expect(normalOf(frameFromFaceHit(a, a, b, c, down).rotation).y).toBeCloseTo(
+      -1,
+      9,
+    );
+    expect(normalOf(frameFromFaceHit(a, a, c, b, down).rotation).y).toBeCloseTo(
+      -1,
+      9,
+    );
+  });
+
+  it("gives up on a degenerate triangle", () => {
+    expect(frameFromFaceHit(a, a, a, b, down)).toBeNull();
   });
 });

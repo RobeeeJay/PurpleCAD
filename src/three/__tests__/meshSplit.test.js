@@ -4,7 +4,11 @@
 
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
-import { meshSplit, openLoopsOnPlane } from "../meshSplit.js";
+import {
+  meshSplit,
+  openLoopsOnPlane,
+  splitWithFallback,
+} from "../meshSplit.js";
 
 const zRange = (positions) => {
   let mn = Infinity,
@@ -221,5 +225,55 @@ describe("meshSplit gives closed parts", () => {
     expect(loops.map((l) => l.length).sort()).toEqual([3, 3]);
     const all = loops.flat().sort();
     expect(all).toEqual([0, 0, 1, 2, 3, 4]);
+  });
+});
+
+describe("splitWithFallback", () => {
+  const both = { partA: "A", partB: "B" };
+  const meshBoth = { partA: "mesh A", partB: "mesh B" };
+
+  it("takes OCC's split when it has both sides", async () => {
+    const r = await splitWithFallback(
+      async () => both,
+      () => meshBoth,
+    );
+    expect(r).toEqual({ result: both });
+  });
+
+  it("falls back to the mesh split when OCC comes back one-sided", async () => {
+    // mms2_base: a plane grazing a face inside OCC's tolerances lost its
+    // difference half.  That used to be reported as "the cut doesn't pass
+    // through", with the mesh split never tried.
+    const r = await splitWithFallback(
+      async () => ({ partA: "A", partB: null }),
+      () => meshBoth,
+    );
+    expect(r).toEqual({ result: meshBoth });
+  });
+
+  it("falls back to the mesh split when OCC throws", async () => {
+    const r = await splitWithFallback(
+      async () => {
+        throw new Error("Couldn't build the object to split.");
+      },
+      () => meshBoth,
+    );
+    expect(r).toEqual({ result: meshBoth });
+  });
+
+  it("reports a one-sided cut, or OCC's error when nothing came back", async () => {
+    const oneSided = await splitWithFallback(
+      async () => ({ partA: "A", partB: null }),
+      () => ({ partA: "mesh A", partB: null }),
+    );
+    expect(oneSided.result.partB).toBeNull();
+    const err = new Error("no solid");
+    const none = await splitWithFallback(
+      async () => {
+        throw err;
+      },
+      () => null,
+    );
+    expect(none).toEqual({ result: null, error: err });
   });
 });

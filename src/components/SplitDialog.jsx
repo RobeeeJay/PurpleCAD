@@ -3,6 +3,7 @@ import { useEscapeKey } from "./inputs.jsx";
 import ToolErrorLine from "./ToolErrorLine.jsx";
 import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";
 import { splitItem } from "../three/occClient.js";
+import { splitWithFallback } from "../three/meshSplit.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 
@@ -35,32 +36,21 @@ const SplitDialog = () => {
     const target = items.find((i) => i.id === objectId);
     if (!target || !cutFrame) return;
     const plane = { position: cutFrame.position, rotation: cutFrame.rotation };
-    let result;
-    try {
-      result = await splitItem({
-        target,
-        plane,
-        allItems: items,
-        printPrecision,
-      });
-    } catch (err) {
-      // OCC couldn't rebuild the target as a solid (imported dense mesh, a
-      // pattern, or a sweep whose recipe won't re-resolve) — cut the baked mesh
-      // directly instead.
-      result =
+    const { result, error } = await splitWithFallback(
+      () => splitItem({ target, plane, allItems: items, printPrecision }),
+      () =>
         useStore.getState()._cameraControls?.meshSplit?.(target.id, plane) ??
-        null;
-      if (!result) {
-        setToolError(`Split failed: ${err.message}`);
-        return;
-      }
-    }
-    // Both halves or nothing: one side alone means the cut missed the body --
-    // a plane that clipped only a primitive's box hull gets past the pick-time
-    // check.  Going ahead used to replace the body with a renamed copy.
+        null,
+    );
     if (!result?.partA || !result?.partB) {
+      // Nothing came back at all: say why OCC failed.  One side only: the cut
+      // misses the body -- a plane that clips only a primitive's box hull gets
+      // past the pick-time check.  Going ahead used to replace the body with
+      // a renamed copy.
       setToolError(
-        `That cut doesn't pass through ${target.name} — pick a face or plane that cuts across it.`,
+        !result && error
+          ? `Split failed: ${error.message}`
+          : `That cut doesn't pass through ${target.name} — pick a face or plane that cuts across it.`,
       );
       return;
     }

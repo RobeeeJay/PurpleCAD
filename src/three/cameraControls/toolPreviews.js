@@ -12,6 +12,7 @@ import { textShapeContours, makeTextShape } from "../sketchText.js";
 import {
   frameFromPoints,
   frameFromPointNormal,
+  frameFromFaceHit,
   planeCrossesPoints,
 } from "../planeFrame.js";
 import { createProjectTool } from "./projectTool.js";
@@ -409,7 +410,20 @@ export function createToolPreviews({
     } else if (hit.face) {
       const nm = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
       const worldN = hit.face.normal.clone().applyMatrix3(nm).normalize();
-      frame = frameFromPointNormal(hit.point, worldN);
+      // On the clicked triangle exactly, not on the float hit point.
+      const pos = hit.object.geometry.attributes.position;
+      const corner = (i) =>
+        new THREE.Vector3()
+          .fromBufferAttribute(pos, i)
+          .applyMatrix4(hit.object.matrixWorld);
+      frame =
+        frameFromFaceHit(
+          hit.point,
+          corner(hit.face.a),
+          corner(hit.face.b),
+          corner(hit.face.c),
+          worldN,
+        ) ?? frameFromPointNormal(hit.point, worldN);
       label = `face of ${item.name}`;
     }
     if (!frame) return;
