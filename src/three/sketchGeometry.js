@@ -432,6 +432,16 @@ export function rederiveAllCorners(shapes) {
 
 // Translate any sketch shape by (dx, dy).  Returns a new shape, or null for
 // unknown types.  Used by sketch-element body-drag and clipboard paste.
+// Shift-drag in a sketch: keep only the larger of the two components of the
+// drag so far, measured from where it started, so the geometry slides along
+// one axis.  A drag 10 mm right then 11 mm up locks to "11 mm up".  Ties keep
+// the horizontal.
+export function lockToAxis(anchor, pt) {
+  return Math.abs(pt.x - anchor.x) >= Math.abs(pt.y - anchor.y)
+    ? { x: pt.x, y: anchor.y }
+    : { x: anchor.x, y: pt.y };
+}
+
 export function translateShape(shape, dx, dy) {
   switch (shape.type) {
     case "line":
