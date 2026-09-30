@@ -998,6 +998,13 @@ sources are picked) that reuses the creation UI.
   the app cancelled and will not click anything afterwards, although Electron
   reports it isn't loading and the page works -- so a test that provokes one
   does it LAST (`smoke.spec.js` "license links ...").
+- **A new item's id comes from `maxItemId(history) + 1`, never a local
+  count.** Four hand-rolled counters scanned only single `create` steps and
+  missed a Split's `createGroup` pieces: in MultiSystem2 a new sketch took a
+  deleted piece's id and a merged extrude took the surviving piece's, so two
+  objects shared an id (a doubled object-list entry; the extrude Edit opened
+  on the piece). `itemIdAfterSplit.test.js` fails if that counting pattern
+  reappears anywhere in `src`.
 - The `_cameraControls` slot on the store is a deliberate non-reactive
   handle for toolbar buttons that need access to viewport helpers (eg
   `dropSelectedToGround`). Don't `useStore.subscribe` to it.

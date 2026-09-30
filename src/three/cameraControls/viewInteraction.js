@@ -5,6 +5,7 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
+import { maxItemId } from "../../store/internals.js";
 import { START_FACE_HIGHLIGHT, FACE_HOVER_COLOR } from "../theme.js";
 import { nearestVertexOf } from "../objectOrigin.js";
 import { growConnectedFaceSet } from "../embossFaceSet.js";
@@ -403,16 +404,10 @@ export function createViewInteraction(
           }
 
           if (position && rotation) {
-            const hist = useStore.getState().history;
-            let maxId = 0;
-            hist.forEach((entry) => {
-              if (
-                entry.instruction?.type === "create" &&
-                entry.instruction.item.id > maxId
-              )
-                maxId = entry.instruction.item.id;
-            });
-            const id = maxId + 1;
+            // maxItemId counts every id ever created, a Split's pieces
+            // included -- a count of single "create" steps alone handed a new
+            // sketch the id of a deleted split piece.
+            const id = maxItemId(useStore.getState().history) + 1;
             useStore.getState().addItem({
               id,
               name: `Sketch ${id}`,

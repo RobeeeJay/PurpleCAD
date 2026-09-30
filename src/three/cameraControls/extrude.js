@@ -13,6 +13,7 @@
 
 import * as THREE from "three";
 import { useStore } from "../../store";
+import { maxItemId } from "../../store/internals.js";
 import { resolveItemDepth, formatAsFormula } from "../geometryParams.js";
 import { polyArea, polyCentroid, polyContainsPoint } from "../sceneObjects.js";
 import {
@@ -669,15 +670,7 @@ export function createExtrudeHelpers(
       // prisms, and any host solids — fuses into one body, like the multi-area
       // extrude flow.  Cut keeps its per-region difference.
       if (profiles.length > 1) {
-        let maxId = 0;
-        useStore.getState().history.forEach((e) => {
-          if (
-            e.instruction &&
-            e.instruction.type === "create" &&
-            e.instruction.item.id > maxId
-          )
-            maxId = e.instruction.item.id;
-        });
+        const maxId = maxItemId(useStore.getState().history);
         if (!isCut && combineSingle) {
           // The extra regions become new prisms in ONE timeline step; a separate
           // Union step then fuses them with the retargeted original (by id) and
@@ -722,15 +715,10 @@ export function createExtrudeHelpers(
         }
       }
     } else {
-      let maxId = 0;
-      store.history.forEach((e) => {
-        if (
-          e.instruction &&
-          e.instruction.type === "create" &&
-          e.instruction.item.id > maxId
-        )
-          maxId = e.instruction.item.id;
-      });
+      // Every id ever created, a Split's pieces included: counting single
+      // "create" steps alone gave a merged extrude the id of the split piece
+      // it merged into -- two objects with one id (MultiSystem2).
+      const maxId = maxItemId(store.history);
       // A non-cut extrude fuses into the body it's attached to: union all the
       // prisms with each other AND with their host solid(s) — the source of a
       // face boss, the solid the sketch sits on, or the "Start from" solid.

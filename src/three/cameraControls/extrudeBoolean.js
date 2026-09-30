@@ -4,6 +4,7 @@
 // replace their inputs with a single CSG item.
 
 import { useStore } from "../../store";
+import { maxItemId } from "../../store/internals.js";
 import { activePrecision } from "../resolution.js";
 import { hostFaceExtentAlongNormal } from "../csgUtils.js";
 import { openMeshNotice } from "../importWeld.js";
@@ -75,12 +76,7 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
         allItems: items,
       });
       if (!result) continue;
-      let maxId = 0;
-      useStore.getState().history.forEach((e) => {
-        if (e.instruction?.type === "create" && e.instruction.item.id > maxId)
-          maxId = e.instruction.item.id;
-      });
-      const id = maxId + 1;
+      const id = maxItemId(useStore.getState().history) + 1;
       useStore.getState().addItem({
         id,
         name: `Cut ${id}`,
