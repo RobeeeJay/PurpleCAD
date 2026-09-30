@@ -100,9 +100,15 @@ const MirrorDialog = () => {
     open && valid,
     async () => {
       const cc = useStore.getState()._cameraControls;
+      // Dropped if the dialog closes, or a newer preview starts, first.
+      const token = cc?.beginToolPreview?.();
       try {
         const results = await buildResults();
-        if (results) cc?.previewPattern3d?.(results.map((r) => r.result));
+        if (results)
+          cc?.previewPattern3d?.(
+            results.map((r) => r.result),
+            token,
+          );
       } catch {
         cc?.clearPattern3dPreview?.();
       }

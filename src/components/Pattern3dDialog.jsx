@@ -176,6 +176,8 @@ const Pattern3dDialog = () => {
       const args = build();
       const cc = useStore.getState()._cameraControls;
       if (!args) return;
+      // Dropped if the dialog closes, or a newer preview starts, first.
+      const token = cc?.beginToolPreview?.();
       try {
         const result = await pattern3dItem({
           patternType: tool.patternType,
@@ -184,7 +186,7 @@ const Pattern3dDialog = () => {
           allItems: items,
           printPrecision,
         });
-        cc?.previewPattern3d?.(result);
+        cc?.previewPattern3d?.(result, token);
       } catch {
         cc?.clearPattern3dPreview?.();
       }

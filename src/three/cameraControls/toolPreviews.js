@@ -72,11 +72,29 @@ export function createToolPreviews({
   };
   controls.clearPlanePreview = () => controls.previewPlane(null);
 
-  // Live preview of a 3D pattern (circular/rectangular) or a mirror while its
-  // dialog adjusts parameters / picks.  Accepts a single result or an array of
-  // results (Mirror can mirror several objects at once).  Pass null to clear.
+  // Live preview of a 3D pattern (circular/rectangular), a mirror or a boolean
+  // while its dialog adjusts parameters / picks.  Accepts a single result or an
+  // array of results (Mirror can mirror several objects at once).
+  //
+  // Each preview is computed asynchronously -- a boolean with an imported mesh
+  // takes seconds -- so a dialog takes a token when it starts one
+  // (beginToolPreview) and hands it back with the result.  Clearing, which
+  // every dialog does as it closes, invalidates the outstanding tokens, and a
+  // newer run supersedes an older one.  Without this, a result landing after
+  // its dialog had closed was drawn with nothing left to clear it: it stayed
+  // in the scene, in every project, until the next preview happened to
+  // replace it (the base STL "appearing in every project").
   let patternPreviewGroup = null;
-  controls.previewPattern3d = (result) => {
+  let previewToken = 0;
+  controls.beginToolPreview = () => ++previewToken;
+  const current = (token) => token == null || token === previewToken;
+  // Whether a tool preview is in the scene -- for tests and diagnostics.
+  controls.previewShown = () => patternPreviewGroup != null;
+  controls.previewPattern3d = (result, token) => {
+    if (result && !current(token)) return;
+    drawPreviewGroup(result);
+  };
+  const drawPreviewGroup = (result) => {
     if (patternPreviewGroup) {
       patternPreviewGroup.children.forEach((m) => {
         m.geometry.dispose();
@@ -119,7 +137,10 @@ export function createToolPreviews({
     scene.add(group);
     patternPreviewGroup = group;
   };
-  controls.clearPattern3dPreview = () => controls.previewPattern3d(null);
+  controls.clearPattern3dPreview = () => {
+    previewToken++;
+    drawPreviewGroup(null);
+  };
 
   // Boolean/Cut preview: fade the input bodies to 15% opacity so the translucent
   // result ghost reads clearly through them, then show the ghost.  Restored by
@@ -127,8 +148,10 @@ export function createToolPreviews({
   // uniform) and the standard mesh materials (material.opacity).
   let booleanDimmed = [];
   const BOOLEAN_DIM_OPACITY = 0.15;
-  controls.previewBoolean = (result, inputIds) => {
-    controls.clearBooleanPreview();
+  controls.previewBoolean = (result, inputIds, token) => {
+    if (!current(token)) return;
+    restoreDimmed();
+    drawPreviewGroup(null);
     for (const id of inputIds || []) {
       const mesh = objectsRef.current[id];
       const m = mesh?.material;
@@ -148,9 +171,9 @@ export function createToolPreviews({
       else m.opacity = BOOLEAN_DIM_OPACITY;
       m.needsUpdate = true;
     }
-    controls.previewPattern3d(result);
+    drawPreviewGroup(result);
   };
-  controls.clearBooleanPreview = () => {
+  const restoreDimmed = () => {
     for (const d of booleanDimmed) {
       d.m.transparent = d.prevTransparent;
       d.m.opacity = d.prevOpacity;
@@ -159,7 +182,10 @@ export function createToolPreviews({
       d.m.needsUpdate = true;
     }
     booleanDimmed = [];
-    controls.previewPattern3d(null);
+  };
+  controls.clearBooleanPreview = () => {
+    restoreDimmed();
+    controls.clearPattern3dPreview();
   };
 
   // Pick 3 points (snapping to object vertices) to define a new Plane.  Markers

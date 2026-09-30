@@ -141,6 +141,8 @@ const BooleanDialog = () => {
         cc?.clearBooleanPreview?.();
         return;
       }
+      // Dropped if the dialog closes, or a newer preview starts, first.
+      const token = cc?.beginToolPreview?.();
       try {
         const result = await performCsg({
           selectedItems: ordered,
@@ -152,6 +154,7 @@ const BooleanDialog = () => {
           cc?.previewBoolean?.(
             result,
             ordered.map((i) => i.id),
+            token,
           );
         else cc?.clearBooleanPreview?.();
       } catch {
