@@ -595,9 +595,32 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   face meshes with a patch missing on every tooth (240 open edges, identical
   at every mesher setting tried), and the stricter `BRepAlgoAPI_Check` flags
   GOOD results too, so it can't discriminate. Each attempt therefore also
-  meshes its result (`MeshesClosed`) and refuses one with any OPEN edge -- an
+  meshes its result (`OpenEdgeCount`) and refuses one with OPEN edges -- an
   edge used by three triangles is tolerated, because a good embossed ring
   chamfer has one (a degenerate sliver) and draws fine.
+  Both checks are made AGAINST THE USER'S BODY (`BevelBrokeBody`), not an
+  ideal: an imported mesh can arrive failing BRepCheck with a few open edges
+  already (MultiSystem2's base: 3, from a Split's degenerate triangles), and
+  the absolute check refused every chamfer on it, at any size. A bevel is
+  refused when it opens MORE edges than its source had, or makes a valid body
+  invalid -- and never judged against the merged retry copy, since merging
+  itself can open the mesh (3 to 7 there). Selection is the other trap: the
+  endpoint match's "points on the curve" fallback took any edge within 0.5 mm
+  of both ends of a picked segment, which on a mesh body picks up seams
+  between coplanar triangles (unbevellable) and hole-wall seams; it is 1e-3
+  now (`holeRimChamfer.test.js`). Still unsolved there: the upper half of each
+  boss-hole rim, whose "flat" top faces are 1-7 um out of plane -- a loose
+  merge lets the chamfer run but leaves faces the mesher can't close (79 open
+  edges), so it was not kept. Nor was FLATTENING the mesh before sewing
+  (snapping runs of triangles within 10 um / 0.6 deg onto a fitted plane,
+  vertices shared by runs to their least-squares point): the base then sewed
+  closed with merged faces, but the upper arc still failed, bevels that
+  worked before (the left hole's rim; a chamfer on a sewn emboss result,
+  `recalcSewInput.test.js`) stopped working, and moving vertices up to 20 um
+  folded sliver triangles until a fold-back guard was added. The upper arc
+  alone fails on a CLEAN all-OCC stepped block too ("doesn't fit") while the
+  whole rim works there: a bevel along an arc that ends against a step wall
+  is an OCC limit, not only STL noise.
   The live preview must SAY when a bevel fails -- on the shared tool error
   line (`toolError` / `ToolErrorLine`, as emboss and draft do), in one short
   sentence: it used to swallow the error and keep its last good preview, so a
@@ -609,6 +632,30 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   closed" return; opening the tool added a hook, React threw, and six e2e
   specs saw an empty white window. Vitest renders no components, so only the
   e2e suite catches this.
+- **`UnifySameDomain` can merge a mesh into a face BRepMesh can't triangulate --
+  and `TessellateInto` skips such a face SILENTLY.** On MultiSystem2's base STL
+  (closed, 0 open edges) the import sew's coplanar merge made two faces that
+  meshed to nothing: a 4 mm patch of the top vanished from the body and from
+  every Split piece and cut built on it, and the recalc's input sew
+  (`solidFromMesh`) lost them again on each rebuild. `MakeSolidFromMesh` now
+  counts the merged result's open mesh edges (`OpenEdgeCount`) and keeps the
+  unmerged faces when merging opened it (`meshSew.test.js`). Measured
+  cost: +0.7 s on that 14k-triangle import; none visible on a 50k/100k-triangle
+  curved mesh. Degenerate triangles already baked into a mesh (a Split's output
+  had zero-area ones) still leave a zero-width gap; that is the input, not the
+  sew.
+- **Sewing can turn a PATCH of a correctly wound mesh inside-out.** Where the
+  surface pinches (four triangles on one edge -- beside MultiSystem2's right
+  boss), sewing's orientation pass, and `ShapeFix_Shell`'s, carries across the
+  pinch onto the wrong side; the patch is drawn from behind and looks missing,
+  though the shell is closed and its volume right. When the input is
+  consistently wound (every edge walked equally often each way),
+  `MakeSolidFromMesh`'s `adoptWinding` turns the sewn faces that disagree with
+  their source triangle -- the SMALLER of the agree/disagree groups, never a
+  fixed side: turning the larger one reversed the whole solid, the display and
+  volume still looked right, and every overlapping boolean came back EMPTY
+  while all unit tests passed. `meshSew.test.js` cuts through the piece to
+  catch both.
 - **A sewn triangle shell can come out INSIDE-OUT despite `OrientClosedSolid`.**
   Its point classification silently fails on sewn tessellations; an inside-out
   tool vanishes from a union and inverts a difference. `MakeSolidFromMesh`

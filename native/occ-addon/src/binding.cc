@@ -90,6 +90,8 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopTools_DataMapOfShapeInteger.hxx>
+#include <Geom_Plane.hxx>
 #include <TopoDS_Shell.hxx>
 #include <BRep_Builder.hxx>
 #include <ShapeFix_Shell.hxx>
@@ -784,12 +786,15 @@ struct InvalidBevel : std::runtime_error {
 // degenerate sliver in the mesh, measured: 0 open edges, 1 over-shared) and
 // draws correctly, while every broken cog bevel had hundreds of open edges.
 // The triangulation is cleared afterwards so the display meshing starts fresh.
-static bool MeshesClosed(const TopoDS_Shape& shape, double deflection) {
+// Edges of the shape's mesh used by only one triangle (-1: nothing meshed).
+// A face BRepMesh can't triangulate is left out of the mesh, so it shows here
+// as the open outline of the hole it leaves.
+static long OpenEdgeCount(const TopoDS_Shape& shape, double deflection) {
   std::vector<float> pos;
   std::vector<uint32_t> idx;
   TessellateInto(shape, deflection, pos, idx);
   BRepTools::Clean(shape);
-  if (idx.empty()) return false;
+  if (idx.empty()) return -1;
   // Weld: one id per distinct position, at a grid far below any feature.
   std::map<std::tuple<long long, long long, long long>, uint32_t> ids;
   std::vector<uint32_t> weld(pos.size() / 3);
@@ -807,13 +812,34 @@ static bool MeshesClosed(const TopoDS_Shape& shape, double deflection) {
       if (a == b) continue;
       uses[{std::min(a, b), std::max(a, b)}]++;
     }
+  long open = 0;
   for (const auto& kv : uses)
-    if (kv.second == 1) return false;
-  return true;
+    if (kv.second == 1) open++;
+  return open;
+}
+// Did the bevel break the body?  Judged against the user's body as it was,
+// not against an ideal: an imported mesh can arrive already failing BRepCheck
+// or with a sliver gap in its surface (MultiSystem2's base has 3 open edges,
+// from degenerate triangles a Split left in its mesh), and holding the result
+// to a standard its source never met refused EVERY chamfer on it, at any size.
+// Nor against the merged copy a retry bevels: merging can itself open the
+// mesh (3 open edges to 7 on that base).  A bevel that makes the body worse --
+// the broken bevels this check exists for open hundreds of edges -- is still
+// refused.
+static bool BevelBrokeBody(const TopoDS_Shape& result,
+                           const TopoDS_Shape& source) {
+  const bool valid = BRepCheck_Analyzer(result).IsValid();
+  const long open = OpenEdgeCount(result, 0.01);
+  if (valid && open == 0) return false;
+  if (open < 0) return true;
+  if (!valid && BRepCheck_Analyzer(source).IsValid()) return true;
+  const long sourceOpen = OpenEdgeCount(source, 0.01);
+  return sourceOpen < 0 || open > sourceOpen;
 }
 static const TopoDS_Shape& RequireValidBevel(const TopoDS_Shape& result,
-                                             const char* what) {
-  if (!BRepCheck_Analyzer(result).IsValid() || !MeshesClosed(result, 0.01))
+                                             const char* what,
+                                             const TopoDS_Shape& source) {
+  if (BevelBrokeBody(result, source))
   {
     const std::string size =
         std::string(what) == "fillet" ? "radius" : "distance";
@@ -1733,7 +1759,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       if (!mk.IsDone())
         throw std::runtime_error(
           "chamfer computation failed (geometry rejected the operation)");
-      RequireValidBevel(mk.Shape(), "chamfer");
+      RequireValidBevel(mk.Shape(), "chamfer", shape);
       // Carry names forward from the original faces — only valid on the primary
       // attempt (chamfering `shape` itself).  A unified-copy retry loses subshape
       // identity, so names don't propagate there and the result falls back to
@@ -1781,9 +1807,7 @@ Napi::Number ChamferShape(const Napi::CallbackInfo& info) {
       mk.Build(CancelRange());
       if (!mk.IsDone()) return TopoDS_Shape();
       // An invalid rim bevel is no better a fallback than none.
-      if (!BRepCheck_Analyzer(mk.Shape()).IsValid() ||
-          !MeshesClosed(mk.Shape(), 0.01))
-        return TopoDS_Shape();
+      if (BevelBrokeBody(mk.Shape(), shape)) return TopoDS_Shape();
       resultFaces = s.IsSame(shape)
                         ? PropagateFaceNames(mk, mk.Shape(), rec.faces)
                         : std::map<std::string, TopoDS_Shape>{};
@@ -1872,7 +1896,7 @@ Napi::Number FilletShape(const Napi::CallbackInfo& info) {
       if (!mk.IsDone())
         throw std::runtime_error(
           "fillet computation failed (geometry rejected the operation)");
-      return RequireValidBevel(mk.Shape(), "fillet");
+      return RequireValidBevel(mk.Shape(), "fillet", shape);
     };
 
     try {
@@ -2521,6 +2545,10 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
           " triangles) to use in a boolean. Simplify or decimate it first.");
 
     const uint32_t nv = (uint32_t)(pos.ElementLength() / 3);
+    // Each face handed to the sew, with the normal its triangle's winding
+    // gives it -- see adoptWinding below.
+    std::vector<TopoDS_Face> addedFaces;
+    std::vector<gp_Dir> addedNormals;
     // Add every (non-degenerate) triangle as a face to a sewing pass, polling
     // the cancel flag periodically.  Reusable so we can try a fast pass then a
     // thorough fallback.
@@ -2535,8 +2563,16 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
         BRepBuilderAPI_MakePolygon poly(a, b, c, Standard_True);
         if (!poly.IsDone()) return;
         BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
-        if (face.IsDone()) sew.Add(face.Face());
+        if (!face.IsDone()) return;
+        sew.Add(face.Face());
+        gp_Vec n = gp_Vec(a, b).Crossed(gp_Vec(a, c));
+        if (n.Magnitude() > 0) {
+          addedFaces.push_back(face.Face());
+          addedNormals.push_back(gp_Dir(n));
+        }
       };
+      addedFaces.clear();
+      addedNormals.clear();
       if (hasIdx) {
         Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
         for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3) {
@@ -2563,6 +2599,104 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
     //     without it the un-cut per-triangle shell doesn't unify, the face count
     //     stays ~= the triangle count (blowing the kMaxFaces cap, or hanging the
     //     boolean), which broke emboss when this was globally disabled.
+    // Is the mesh consistently wound?  Every edge (welded by position) walked
+    // as often one way as the other -- which also holds where the surface
+    // pinches and four triangles share an edge.
+    bool windingConsistent = true;
+    {
+      std::map<std::tuple<double, double, double>, uint32_t> weld;
+      auto vid = [&](uint32_t i) {
+        return weld
+            .emplace(std::make_tuple(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]),
+                     (uint32_t)weld.size())
+            .first->second;
+      };
+      std::unordered_map<uint64_t, int> balance;
+      auto walk = [&](uint32_t ia, uint32_t ib, uint32_t ic) {
+        const uint32_t v[3] = {vid(ia), vid(ib), vid(ic)};
+        for (int k = 0; k < 3; k++) {
+          const uint32_t u = v[k], w = v[(k + 1) % 3];
+          if (u == w) continue;
+          const uint64_t key = ((uint64_t)std::min(u, w) << 32) | std::max(u, w);
+          balance[key] += u < w ? 1 : -1;
+        }
+      };
+      if (hasIdx) {
+        Napi::Uint32Array idx = info[1].As<Napi::Uint32Array>();
+        for (size_t i = 0; i + 2 < idx.ElementLength(); i += 3)
+          walk(idx[i], idx[i + 1], idx[i + 2]);
+      } else {
+        for (uint32_t i = 0; i + 2 < nv; i += 3) walk(i, i + 1, i + 2);
+      }
+      for (const auto& kv : balance)
+        if (kv.second != 0) {
+          windingConsistent = false;
+          break;
+        }
+    }
+
+    // Sewing orients the faces by propagating across shared edges, and so
+    // does ShapeFix_Shell; where the surface pinches (four triangles on one
+    // edge) both can carry the orientation onto the wrong side, and a patch
+    // comes out inside-out -- drawn from behind, so it looks missing (a wall
+    // beside MultiSystem2's right boss, flipped by every boolean on the base
+    // though the mesh itself was right).  A consistently wound mesh already
+    // says which way every face faces: turn each sewn face to agree with the
+    // triangle it came from.
+    auto adoptWinding = [&](BRepBuilderAPI_Sewing& sew,
+                            const TopoDS_Shape& shape) -> TopoDS_Shape {
+      TopTools_DataMapOfShapeInteger source;
+      for (size_t k = 0; k < addedFaces.size(); k++) {
+        const TopoDS_Shape m = sew.IsModified(addedFaces[k])
+                                   ? sew.Modified(addedFaces[k])
+                                   : TopoDS_Shape(addedFaces[k]);
+        for (TopExp_Explorer ex(m, TopAbs_FACE); ex.More(); ex.Next())
+          if (!source.IsBound(ex.Current())) source.Bind(ex.Current(), (int)k);
+      }
+      // Whether each sewn face faces with its triangle or against it.  Which
+      // of the two the sewn shell calls "outward" is the plane convention's
+      // business, so no side is assumed: the faces are told apart, and the
+      // smaller group -- the patch the orientation pass got wrong -- is
+      // turned.  (Turning the larger one reversed the whole solid, which a
+      // boolean then treats as everything outside it: every cut came back
+      // empty.)
+      std::vector<std::vector<std::pair<TopoDS_Face, int>>> shells;
+      int with = 0, against = 0;
+      for (TopExp_Explorer sx(shape, TopAbs_SHELL); sx.More(); sx.Next()) {
+        shells.emplace_back();
+        for (TopExp_Explorer fx(sx.Current(), TopAbs_FACE); fx.More();
+             fx.Next()) {
+          const TopoDS_Face face = TopoDS::Face(fx.Current());
+          int k, side = 0;
+          Handle(Geom_Plane) plane =
+              Handle(Geom_Plane)::DownCast(BRep_Tool::Surface(face));
+          if (!plane.IsNull() && source.Find(face, k)) {
+            gp_Dir d = plane->Axis().Direction();
+            if (face.Orientation() == TopAbs_REVERSED) d.Reverse();
+            side = d.Dot(addedNormals[k]) < 0 ? -1 : 1;
+            (side > 0 ? with : against)++;
+          }
+          shells.back().emplace_back(face, side);
+        }
+      }
+      const int turn = against <= with ? -1 : 1;
+      if ((turn < 0 ? against : with) == 0) return shape;
+      BRep_Builder bb;
+      TopoDS_Compound out;
+      bb.MakeCompound(out);
+      for (auto& faces : shells) {
+        TopoDS_Shell shell;
+        bb.MakeShell(shell);
+        for (auto& [face, side] : faces) {
+          if (side == turn) face.Reverse();
+          bb.Add(shell, face);
+        }
+        shell.Closed(BRep_Tool::IsClosed(shell));
+        bb.Add(out, shell);
+      }
+      return out;
+    };
+
     TopoDS_Shape sewn;
     if (fastSew) {
       BRepBuilderAPI_Sewing sew(1.0e-6, Standard_True, Standard_True,
@@ -2570,18 +2704,22 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
       fillSew(sew);
       sew.Perform(CancelRange());
       sewn = sew.SewedShape();
+      if (!sewn.IsNull() && windingConsistent) sewn = adoptWinding(sew, sewn);
       if (sewn.IsNull()) {
         // Fast pass produced nothing (a mesh that needs cutting) — retry full.
         BRepBuilderAPI_Sewing sewFull(1.0e-6);
         fillSew(sewFull);
         sewFull.Perform(CancelRange());
         sewn = sewFull.SewedShape();
+        if (!sewn.IsNull() && windingConsistent)
+          sewn = adoptWinding(sewFull, sewn);
       }
     } else {
       BRepBuilderAPI_Sewing sew(1.0e-6);
       fillSew(sew);
       sew.Perform(CancelRange());
       sewn = sew.SewedShape();
+      if (!sewn.IsNull() && windingConsistent) sewn = adoptWinding(sew, sewn);
     }
     if (sewn.IsNull()) throw std::runtime_error("mesh sewing produced nothing");
 
@@ -2595,7 +2733,7 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
     std::vector<TopoDS_Solid> solids;
     for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next()) {
       TopoDS_Shell shell = TopoDS::Shell(ex.Current());
-      if (fastSew) {
+      if (fastSew && !windingConsistent) {
         // Cutting-off sewing keeps the mesh's own winding, which the developable
         // emboss wrap can leave INCONSISTENT (a curved / S-curve wall flips
         // handedness region to region — some triangles reversed).  Cutting-on
@@ -2638,6 +2776,7 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
     // Skipped only for the fast export sew (no boolean; unify is slow on a curved
     // mesh and would alter the triangles).
     if (!fastSew) {
+      const TopoDS_Shape unmerged = result;
       try {
         ShapeUpgrade_UnifySameDomain unify(result, Standard_True, Standard_True,
                                            Standard_False);
@@ -2645,6 +2784,19 @@ Napi::Number MakeSolidFromMesh(const Napi::CallbackInfo& info) {
         if (!unify.Shape().IsNull()) result = unify.Shape();
       } catch (const std::exception&) {
         // keep the un-unified shape
+      }
+      // Merging can fold a mesh's sliver triangles into a face BRepMesh
+      // cannot triangulate; the mesher leaves it out and the body is drawn --
+      // and every boolean on it rebuilt -- with a hole (a 4 mm patch of
+      // MultiSystem2's base top, lost at import and again each time the
+      // recalc sewed a later step's mesh).  Keep the unmerged faces when
+      // merging opened the mesh.
+      if (!result.IsSame(unmerged)) {
+        const long merged = OpenEdgeCount(result, 0.01);
+        if (merged != 0) {
+          const long before = OpenEdgeCount(unmerged, 0.01);
+          if (before >= 0 && (merged < 0 || before < merged)) result = unmerged;
+        }
       }
     }
 
