@@ -1384,9 +1384,9 @@ test.describe.serial("2D sketch workflow", () => {
     // The depth overlay appears once a profile is selected.
     const overlay = page.locator(".sketch-distance-input-overlay");
     await expect(overlay).toBeVisible({ timeout: 5000 });
-    // The bar holds two formula fields: start-offset first, DEPTH second
-    // (autofocused).
-    const depth = overlay.locator("input").nth(1);
+    // The distance field, by id: the bar also holds the offset field and the
+    // Combine checkbox, so counting inputs picks the wrong one.
+    const depth = page.locator("#extrude-distance");
     await depth.fill("8");
     await depth.press("Enter");
 

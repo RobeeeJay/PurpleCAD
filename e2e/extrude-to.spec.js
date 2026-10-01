@@ -95,8 +95,8 @@ test("To… sets the distance so the extrusion reaches the clicked face", async 
   await clickView(p, "the circle");
   const overlay = page.locator(".sketch-distance-input-overlay");
   await expect(overlay).toBeVisible({ timeout: 5000 });
-  const offset = overlay.locator("input").nth(0);
-  const distance = overlay.locator("input").nth(1);
+  const offset = page.locator("#extrude-offset");
+  const distance = page.locator("#extrude-distance");
 
   // Start from the cube's top face: the offset reads 25 mm.
   await page.getByTitle("Start from…", { exact: false }).click();

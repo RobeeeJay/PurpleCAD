@@ -6,23 +6,8 @@
 // clicks, which accumulated a second profile and spawned extra timeline
 // entries.  bestProfileMatchIndex matches on the polygon itself.
 
-import { describe, it, expect, vi } from "vitest";
-
-// extrude.js pulls THREE + scene helpers at import; stub the heavy deps so the
-// pure matcher can run in node.  polyArea / polyCentroid (and theme constants)
-// must stay REAL.
-vi.mock("../../../store", () => ({ useStore: { getState: () => ({}) } }));
-vi.mock("../extrudeGeometry.js", () => ({
-  makeExtrudePreviewMesh: () => null,
-  extractFaceProfile: () => null,
-}));
-vi.mock("../extrudeBoolean.js", () => ({
-  runCutExtrusion: () => {},
-  runUnionExtrudes: () => {},
-  runExtrudeUnion: () => {},
-}));
-
-import { bestProfileMatchIndex } from "../extrude.js";
+import { describe, it, expect } from "vitest";
+import { bestProfileMatchIndex } from "../extrudeGeometry.js";
 
 const rect = (x1, y1, x2, y2) => [
   { x: x1, y: y1 },

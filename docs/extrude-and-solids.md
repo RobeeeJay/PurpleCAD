@@ -24,6 +24,10 @@ Notes:
   depth extrudes backwards.
 - Turn on **Cut** in the overlay to subtract the extruded solid from the target
   instead of adding it — the profile becomes a pocket.
+- **Combine** (on by default) merges the extrusion into the body it's attached
+  to — the body its sketch sits on, the face it was extruded from, or the
+  Start-from body. Turn it off to make the extrusion a new object instead. It
+  doesn't apply to a Cut, which always subtracts.
 - **Start-from** lets you begin the extrude from a picked face rather than the
   sketch plane.
 - **To…** sets the depth for you: click it, then click a face, and the depth
@@ -34,6 +38,14 @@ Notes:
 
 The result is a solid body on the [timeline](timeline-and-history.md); its
 recipe remembers the sketch, so editing the sketch rebuilds the solid.
+
+**Editing an extrusion** from the timeline shows the scene as it was when you
+made it: the timeline moves to its step, so objects hidden or added later are
+as they were then, and it moves back when you confirm or cancel. You can switch
+**Combine** in the edit too: off un-merges it — it becomes its own object and
+the body it had merged into shows again — and on merges a standalone extrusion
+into its body. (It can't be switched for an extrusion made as several separate
+objects.)
 
 ## Chamfer & Fillet (edges)
 

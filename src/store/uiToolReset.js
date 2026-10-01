@@ -10,6 +10,7 @@ export const TOOL_RESET_PATCH = {
   extrudeRetargetId: null,
   extrudeRetargetGroup: null,
   extrudeRetargetFusedId: null,
+  extrudeEditReturn: null,
   extrudeDepthInput: null,
   cutExtrudeInProgress: false,
   chamferSelectMode: null,

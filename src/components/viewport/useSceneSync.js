@@ -753,11 +753,32 @@ export function useSceneSync({
       fusedDef ??
       (retargetId != null ? items.find((i) => i.id === retargetId) : null);
     const depth = retarget ? resolveItemDepth(retarget) : 1.0;
+    // Combine starts as the edited extrusion is: ticked if it merged into a
+    // body, unticked if it stands alone; a new one starts ticked.  Locked for
+    // a multi-region group, and for an extrusion merged by a SEPARATE union
+    // step (the older multi-region path) -- toggling either would need a
+    // conversion that isn't built, and merging the latter again would merge
+    // it twice.
+    const fusedItem =
+      fusedId != null ? items.find((i) => i.id === fusedId) : null;
+    const mergedElsewhere =
+      retargetId != null &&
+      st.history.some((e) => {
+        const r = e.instruction?.item?.regenerator;
+        return (
+          (r?.kind === "boolean" || r?.kind === "extrudeUnion") &&
+          (r.inputIds || []).includes(retargetId)
+        );
+      });
     st.setExtrudeDepthInput({
       defaultDepth: depth,
       currentDepth: depth,
       cut: !!retarget?.isCut,
       startOffset: retarget?.startOffset ?? 0,
+      combine: fusedItem
+        ? (fusedItem.regenerator?.inputIds?.length ?? 0) > 0
+        : retargetId == null,
+      combineLocked: !!st.extrudeRetargetGroup || mergedElsewhere,
     });
   }, [extrudeSelectMode]); // eslint-disable-line react-hooks/exhaustive-deps
 

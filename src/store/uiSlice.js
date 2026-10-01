@@ -39,6 +39,10 @@ export const uiInitial = {
   // Its prism recipes live in regenerator.extrudeDefs, not as store items, so it
   // can't use extrudeRetargetGroup (which keys on a createGroup's prism ids).
   extrudeRetargetFusedId: null,
+  // While an extrusion is edited from the timeline, the timeline shows its
+  // step -- the scene as it was when it was made -- and returns here after:
+  // { to: activeHistoryId } (to: null = the latest step).  Null otherwise.
+  extrudeEditReturn: null,
 
   // Sub-geometry selection used by the 3D Bevel/Chamfer toolbar buttons.
   selectedSubGeometry: null,

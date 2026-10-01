@@ -335,4 +335,114 @@ export const createHistoryExtrudeSlice = (set) => ({
         history: withOrphanFlags(newHistory),
       };
     }),
+  // Combine, changed while editing a merged extrude: set the bodies it merges
+  // into.  Dropping them leaves the extrusion as a new object and shows them
+  // again from its step on; adding them merges it in and hides them from its
+  // step on, as a fresh merge would.  The step is edited in place and
+  // rebuilds.
+  setExtrudeUnionHosts: (itemId, hostIds) =>
+    set((state) => {
+      const idx = state.history.findIndex(
+        (e) =>
+          e.instruction?.type === "create" &&
+          e.instruction.item?.id === itemId &&
+          e.instruction.item.regenerator?.kind === "extrudeUnion",
+      );
+      if (idx < 0) return {};
+      const entry = state.history[idx];
+      const item = entry.instruction.item;
+      const old = item.regenerator.inputIds || [];
+      const added = hostIds.filter((id) => !old.includes(id));
+      const removed = old.filter((id) => !hostIds.includes(id));
+      if (!added.length && !removed.length) return {};
+      let history = state.history.map((e, i) =>
+        i !== idx
+          ? e
+          : {
+              ...e,
+              instruction: {
+                ...e.instruction,
+                item: {
+                  ...item,
+                  geometryData: null,
+                  regenerator: {
+                    ...item.regenerator,
+                    inputIds: hostIds,
+                    regeneratedAt: "dirty",
+                  },
+                },
+              },
+            },
+      );
+      history = showIdsFrom(hideIdsFrom(history, idx, added), idx, removed);
+      return finishStepConversion(state, history, entry.id);
+    }),
+  // Combine, turned on while editing a standalone extrude: merge it into
+  // `hostIds`.  Its step becomes a merged extrude (an extrudeUnion csg) under
+  // the SAME item id, its prism recipe embedded under a fresh id, and the
+  // hosts are hidden from its step on.
+  fuseExtrudeIntoHosts: (extrudeId, hostIds) =>
+    set((state) => {
+      if (!hostIds.length) return {};
+      const idx = state.history.findIndex(
+        (e) =>
+          e.instruction?.type === "create" &&
+          e.instruction.item?.id === extrudeId &&
+          e.instruction.item.type === "extrude",
+      );
+      if (idx < 0) return {};
+      const entry = state.history[idx];
+      const item = entry.instruction.item;
+      const defId = maxItemId(state.history) + 1;
+      // eslint-disable-next-line no-unused-vars
+      const { parentId, material, visible, ...prism } = item;
+      const def = { ...prism, id: defId, name: `Extrude ${defId}` };
+      // Any point works as the fused body's frame: the rebuild localises the
+      // world result by it and places the body back at it.
+      const center = buildBrushTransform(item).position;
+      const fused = {
+        id: extrudeId,
+        name: item.name,
+        type: "csg",
+        children: item.children ?? [],
+        parentId: parentId ?? null,
+        ...(material ? { material } : null),
+        ...(visible === false ? { visible } : null),
+        position: center,
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        geometryData: null,
+        regenerator: {
+          kind: "extrudeUnion",
+          extrudeDefs: [def],
+          inputIds: hostIds,
+          originalCenter: center,
+          regeneratedAt: "dirty",
+        },
+      };
+      let history = state.history.map((e, i) =>
+        i !== idx
+          ? e
+          : { ...e, instruction: { ...e.instruction, item: fused } },
+      );
+      history = hideIdsFrom(history, idx, hostIds);
+      return finishStepConversion(state, history, entry.id);
+    }),
 });
+
+// Shared tail of the two Combine conversions: relink the later steps onto the
+// edited one, rebuild from it, and redisplay where the user is.
+function finishStepConversion(state, history, entryId) {
+  const dirtied = dirtyAllEntries(commitEntryEdit(history, entryId));
+  const activeIdx =
+    state.activeHistoryId !== null
+      ? dirtied.findIndex((h) => h.id === state.activeHistoryId)
+      : dirtied.length - 1;
+  const items = markCsgDirty(replayUpTo(dirtied, activeIdx));
+  saveTimeline(dirtied, state.activeHistoryId);
+  return {
+    ...withUndo(state),
+    items,
+    history: withOrphanFlags(dirtied),
+  };
+}

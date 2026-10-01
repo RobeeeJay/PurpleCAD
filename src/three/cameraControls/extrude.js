@@ -15,10 +15,11 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { resolveItemDepth, formatAsFormula } from "../geometryParams.js";
-import { polyArea, polyCentroid, polyContainsPoint } from "../sceneObjects.js";
+import { polyArea, polyContainsPoint } from "../sceneObjects.js";
 import {
   makeExtrudePreviewMesh,
   extractFaceProfile,
+  bestProfileMatchIndex,
 } from "./extrudeGeometry.js";
 import {
   runCutExtrusion,
@@ -28,39 +29,6 @@ import {
 } from "./extrudeBoolean.js";
 import { EXTRUDE_FACE_HIGHLIGHT } from "../theme.js";
 import { createExtrudeFacePick } from "./extrudeFacePick.js";
-
-// Which candidate region profile is the one an extrude was built from?
-//
-// Matches on the stored profile's POLYGON — relative area, centroid, and hole
-// count — rather than "the smallest region containing the stored centroid".
-// A ring-shaped profile's centroid sits inside its own hole, so a containment
-// test skips the real region and matches a nested one instead, which made
-// editing an extrude start on the wrong geometry.  Returns the index of the
-// best candidate in `candidates`, or -1 when nothing matches the sketch.
-export function bestProfileMatchIndex(sp, candidates) {
-  if (!sp?.polygon2D) return -1;
-  const spArea = polyArea(sp.polygon2D);
-  const spC = polyCentroid(sp.polygon2D);
-  const spHoles = (sp.holes || []).length;
-  let bestIdx = -1;
-  let bestErr = Infinity;
-  candidates.forEach((fp, i) => {
-    if (!fp?.polygon2D || fp.sketchId !== sp.sketchId) return;
-    const fC = polyCentroid(fp.polygon2D);
-    // Relative area error tolerates a curve tessellated at a different
-    // resolution; the centroid term separates same-area regions; a hole-count
-    // mismatch is a strong (but not fatal) penalty.
-    const err =
-      Math.abs(polyArea(fp.polygon2D) - spArea) / Math.max(spArea, 1e-9) +
-      Math.hypot(fC.x - spC.x, fC.y - spC.y) * 0.1 +
-      ((fp.holes || []).length === spHoles ? 0 : 0.5);
-    if (err < bestErr) {
-      bestErr = err;
-      bestIdx = i;
-    }
-  });
-  return bestIdx;
-}
 
 // The extrude item a profile commits to.  Module-level and exported because
 // the agent API commits extrudes too, and has to write exactly the item this
@@ -619,6 +587,15 @@ export function createExtrudeHelpers(
     }
   };
 
+  // After a timeline edit, go back to the step the user was on.
+  const returnFromEdit = () => {
+    const back = useStore.getState().extrudeEditReturn;
+    if (!back) return;
+    useStore.setState({ extrudeEditReturn: null });
+    const target = back.to ?? useStore.getState().history.at(-1)?.id;
+    if (target != null) useStore.getState().restoreToHistory(target);
+  };
+
   const finalizeExtrude = (depthOverride = null, formulaOverride = null) => {
     if (!extrudeProfileList.length) return;
     // Allow negative depths so the user can extrude backwards from the
@@ -638,6 +615,13 @@ export function createExtrudeHelpers(
     // profiles fuse into one body.  When off, pure-sketch multi-profile
     // extrudes stay separate; a boss still merges into its host.
     const combineSingle = store.alwaysExtrudeSingleObject !== false;
+    // The dialog's Combine (default on): merge into the body the extrusion
+    // is attached to -- a face boss's source, the solid the sketch sits on,
+    // the Start-from solid.  Off, it is always a new object.  A cut is always
+    // a difference, so the option doesn't apply to it.
+    const combine = store.extrudeDepthInput?.combine !== false;
+    const hostsFor = (items) =>
+      combine ? unionTargetIdsFor(profiles, items) : [];
     // Persist the depth signed — the sign controls direction (positive =
     // along face normal, negative = opposite) for both cut and non-cut
     // extrudes.
@@ -655,6 +639,19 @@ export function createExtrudeHelpers(
       // embedded prism recipes from the new selection + depth, no new entry.
       store.retargetFusedExtrude(fusedId, profiles, depthStored, startOffset);
       store.setExtrudeRetargetFusedId(null);
+      // Combine, as the dialog now has it: keep or find the body to merge
+      // into, or none -- the extrusion then stands alone.
+      if (!isCut && !store.extrudeDepthInput?.combineLocked) {
+        const items = useStore.getState().items;
+        const current =
+          items.find((i) => i.id === fusedId)?.regenerator?.inputIds ?? [];
+        const hosts = !combine
+          ? []
+          : current.length
+            ? current
+            : hostsFor(items).filter((id) => id !== fusedId);
+        store.setExtrudeUnionHosts(fusedId, hosts);
+      }
     } else if (retargetGroup) {
       // Retarget a whole multi-area group: rebuild its prisms from the new
       // selection and re-point the union — the group is edited as one unit.
@@ -665,6 +662,20 @@ export function createExtrudeHelpers(
       // Retarget the original extrude to the first selected profile.
       store.retargetExtrude(retargetId, profiles[0], depthStored, startOffset);
       store.setExtrudeRetargetId(null);
+      // Combine ticked on a standalone extrusion: merge it into the body it
+      // is attached to.  One region only -- several go through the extra-
+      // regions path below.
+      if (
+        !isCut &&
+        combine &&
+        profiles.length === 1 &&
+        !store.extrudeDepthInput?.combineLocked
+      ) {
+        const hosts = hostsFor(useStore.getState().items).filter(
+          (id) => id !== retargetId,
+        );
+        if (hosts.length) store.fuseExtrudeIntoHosts(retargetId, hosts);
+      }
       // Extra regions picked during retarget aren't dropped: each becomes a new
       // extrude, and (non-cut) the whole set — the retargeted original, the new
       // prisms, and any host solids — fuses into one body, like the multi-area
@@ -689,10 +700,7 @@ export function createExtrudeHelpers(
           if (defs.length > 1) store.addItems(defs, "Extruded");
           else store.addItem(defs[0]);
           store.selectItem(null);
-          const unionTargets = unionTargetIdsFor(
-            profiles,
-            useStore.getState().items,
-          );
+          const unionTargets = hostsFor(useStore.getState().items);
           store.setCutExtrudeInProgress(true);
           void runUnionExtrudes(
             [retargetId, ...defs.map((d) => d.id)],
@@ -725,9 +733,7 @@ export function createExtrudeHelpers(
       // Union when there's more than one prism OR a host to merge with;
       // otherwise the lone prism stands alone.  Cut keeps its per-target
       // difference (unioning subtractions makes no sense).
-      const unionTargets = isCut
-        ? []
-        : unionTargetIdsFor(profiles, store.items);
+      const unionTargets = isCut ? [] : hostsFor(store.items);
       const willUnion =
         !isCut &&
         (unionTargets.length > 0 || (profiles.length > 1 && combineSingle));
@@ -805,6 +811,7 @@ export function createExtrudeHelpers(
     store.setExtrudeRetargetFusedId(null);
     store.setExtrudeSelectMode(null);
     store.setExtrudeDepthInput(null);
+    returnFromEdit();
     renderer.domElement.style.cursor = "";
   };
 
@@ -854,6 +861,7 @@ export function createExtrudeHelpers(
     store.setExtrudeRetargetGroup(null);
     store.setExtrudeRetargetFusedId(null);
     store.setExtrudeDepthInput(null);
+    returnFromEdit();
     store.setCutExtrudeInProgress(false);
   };
 

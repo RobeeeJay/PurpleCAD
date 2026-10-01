@@ -36,6 +36,7 @@ import {
   RectangularPatternIcon,
 } from "./toolbar/timelineIcons.jsx";
 import "../styles/Timeline.css";
+import ExtrudeActions from "./TimelineExtrudeActions.jsx";
 import { chamferInfo, getDisplayLabel } from "./timelineLabels.js";
 
 // Detect push/pull entries — a modify whose regenerator is a push/pull op.
@@ -187,53 +188,6 @@ const entryIcon = (entry) => {
   if (label.startsWith("Scaled")) return "⤢";
   return "◆";
 };
-
-// Edit control for an extrude entry.  Editing re-enters profile-select mode
-// seeded with the extrude's current profile, so the user can change the profile
-// AND the length and Confirm edits the entry in place (retargetExtrude).  With
-// `groupIds` it acts on a whole multi-area group as one unit; otherwise on the
-// single `itemId`.
-function ExtrudeActions({ itemId, groupIds, fusedId }) {
-  const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
-  const extrudeRetargetId = useStore((s) => s.extrudeRetargetId);
-  const extrudeRetargetGroup = useStore((s) => s.extrudeRetargetGroup);
-  const extrudeRetargetFusedId = useStore((s) => s.extrudeRetargetFusedId);
-  const setExtrudeRetargetId = useStore((s) => s.setExtrudeRetargetId);
-  const setExtrudeRetargetGroup = useStore((s) => s.setExtrudeRetargetGroup);
-  const setExtrudeRetargetFusedId = useStore(
-    (s) => s.setExtrudeRetargetFusedId,
-  );
-  const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
-  const isGroup = !!groupIds;
-  const isFused = fusedId != null;
-  const editActive =
-    extrudeSelectMode === "profile" &&
-    (isFused
-      ? extrudeRetargetFusedId === fusedId
-      : isGroup
-        ? !!extrudeRetargetGroup && extrudeRetargetGroup[0] === groupIds[0]
-        : !extrudeRetargetGroup && extrudeRetargetId === itemId);
-  return (
-    <button
-      className={`timeline-action-btn${editActive ? " active" : ""}`}
-      title="Edit extrusion — change the profile and length, then Confirm"
-      onClick={(e) => {
-        e.stopPropagation();
-        // Enter profile mode FIRST: setExtrudeSelectMode spreads
-        // TOOL_RESET_PATCH when freshly entering extrude, which nulls
-        // extrudeRetargetId/Group/Fused — so arming the edit target before it
-        // would be wiped, and Confirm would build a NEW extrude instead of
-        // editing.
-        setExtrudeSelectMode("profile");
-        setExtrudeRetargetGroup(isGroup ? groupIds : null);
-        setExtrudeRetargetFusedId(isFused ? fusedId : null);
-        setExtrudeRetargetId(isFused ? null : isGroup ? groupIds[0] : itemId);
-      }}
-    >
-      <EditIcon />
-    </button>
-  );
-}
 
 const Timeline = () => {
   const history = useStore((state) => state.history);
@@ -544,12 +498,20 @@ const Timeline = () => {
               )}
               {entry.instruction?.type === "create" &&
                 entry.instruction.item?.type === "extrude" && (
-                  <ExtrudeActions itemId={entry.instruction.item.id} />
+                  <ExtrudeActions
+                    itemId={entry.instruction.item.id}
+                    entryId={entry.id}
+                  />
                 )}
               {entry.instruction?.type === "create" &&
                 ["extrudeUnion", "extrudeCut"].includes(
                   entry.instruction.item?.regenerator?.kind,
-                ) && <ExtrudeActions fusedId={entry.instruction.item.id} />}
+                ) && (
+                  <ExtrudeActions
+                    fusedId={entry.instruction.item.id}
+                    entryId={entry.id}
+                  />
+                )}
               {entry.instruction?.type === "create" &&
                 ["cube", "sphere", "cylinder", "torus", "cone"].includes(
                   entry.instruction.item?.type,
@@ -570,7 +532,9 @@ const Timeline = () => {
                   const ids = entry.instruction.items
                     .filter((p) => p.type === "extrude")
                     .map((p) => p.id);
-                  return ids.length ? <ExtrudeActions groupIds={ids} /> : null;
+                  return ids.length ? (
+                    <ExtrudeActions groupIds={ids} entryId={entry.id} />
+                  ) : null;
                 })()}
               {chamferInfo(entry) && (
                 <button

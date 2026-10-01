@@ -118,6 +118,7 @@ export default function SketchOverlays({
             style={{
               fontSize: 11,
               padding: "2px 8px",
+              // 16px to Combine: this 8 plus the bar's own 8px gap.
               marginRight: 8,
               borderRadius: 3,
               border: `1px solid ${
@@ -132,6 +133,63 @@ export default function SketchOverlays({
           >
             Cut
           </button>
+          {/* Combine: merge into the body the extrusion is attached to (on),
+              or always make a new object (off) -- editing an extrusion can
+              switch it either way.  Not for a cut, which is always a
+              difference; locked where the change would need a conversion
+              that isn't built (combineLocked, set in useSceneSync). */}
+          <label
+            htmlFor="extrude-combine"
+            title={
+              extrudeDepthInput.cut
+                ? "A cut always subtracts from the body — Combine doesn't apply"
+                : extrudeDepthInput.combineLocked
+                  ? "Combine can't be changed for this extrusion: it was made as several objects, or merged by a separate Union step"
+                  : "Combine — merge the extrusion into the body it's attached to. Off: always make a new object"
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              fontSize: 11,
+              marginRight: 8,
+              // The bar is dark in BOTH themes (--panel-bg-rgb isn't themed),
+              // so a bare label can't use --text-primary: that is near-black
+              // in the light theme -- black on black.  The same grey as the
+              // Offset / Distance labels.
+              color: "#aaa",
+              opacity:
+                extrudeDepthInput.cut || extrudeDepthInput.combineLocked
+                  ? 0.5
+                  : 1,
+            }}
+          >
+            <input
+              id="extrude-combine"
+              type="checkbox"
+              // The bar styles every input as an 80px text field (padding,
+              // border, background): undo that for a checkbox, which then sits
+              // close to its label.
+              style={{
+                width: "auto",
+                margin: 0,
+                padding: 0,
+                border: "none",
+                background: "none",
+              }}
+              checked={extrudeDepthInput.combine !== false}
+              disabled={
+                !!extrudeDepthInput.cut || !!extrudeDepthInput.combineLocked
+              }
+              onChange={(e) =>
+                useStore.getState().setExtrudeDepthInput({
+                  ...useStore.getState().extrudeDepthInput,
+                  combine: e.target.checked,
+                })
+              }
+            />
+            Combine
+          </label>
           <button
             type="button"
             onClick={() => cameraControlsRef.current?.beginExtrudeStartPick?.()}
@@ -163,6 +221,7 @@ export default function SketchOverlays({
           <FormulaInput
             type="text"
             variables={variables}
+            id="extrude-offset"
             title="Offset the extrude start ± from the sketch plane (or the picked Start-from face)"
             // ± distance the prism base is slid along the profile normal.  A
             // bare number or a formula; negative slides the opposite way, 0
@@ -225,6 +284,7 @@ export default function SketchOverlays({
           <FormulaInput
             type="text"
             autoFocus
+            id="extrude-distance"
             title="How far the profile is extruded along its normal. Negative extrudes backwards through the sketch plane; the prism starts at the plane either way."
             variables={variables}
             // Accept either a bare number or a formula like "width * 2".

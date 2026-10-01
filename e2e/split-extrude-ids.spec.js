@@ -134,7 +134,7 @@ test("objects made after a Split get ids of their own", async () => {
   await clickView(await screen(x, y, z), "the circle");
   const overlay = page.locator(".sketch-distance-input-overlay");
   await expect(overlay).toBeVisible({ timeout: 5000 });
-  const distance = overlay.locator("input").nth(1);
+  const distance = page.locator("#extrude-distance");
   await distance.fill("5");
   await distance.press("Enter");
   await expect
@@ -173,5 +173,5 @@ test("objects made after a Split get ids of their own", async () => {
     })
     .click();
   await expect(overlay).toBeVisible({ timeout: 5000 });
-  await expect(overlay.locator("input").nth(1)).toHaveValue("5.00");
+  await expect(page.locator("#extrude-distance")).toHaveValue("5.00");
 });
