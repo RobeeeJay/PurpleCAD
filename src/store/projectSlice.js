@@ -15,6 +15,7 @@ import {
   pruneTextureSourceChains,
 } from "./internals.js";
 import { DEFAULT_MATERIAL } from "../three/materialPresets.js";
+import { backfillSplitRecipes } from "../three/splitRecipe.js";
 
 export const projectInitial = {
   projects: db.listProjects(),
@@ -39,7 +40,7 @@ function projectStatePatch() {
     activeHistoryId: null,
   };
   const history = pruneTextureSourceChains(
-    backfillEmbossFrames(timeline.history),
+    backfillSplitRecipes(backfillEmbossFrames(timeline.history)),
   );
   const activeHistoryId = timeline.activeHistoryId ?? null;
   const maxId = Math.max(0, ...history.map((h) => h.id));

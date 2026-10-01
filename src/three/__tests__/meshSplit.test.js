@@ -248,7 +248,8 @@ describe("splitWithFallback", () => {
       async () => ({ partA: "A", partB: null }),
       () => meshBoth,
     );
-    expect(r).toEqual({ result: meshBoth });
+    // Flagged, so the dialog stores no re-cut recipe: OCC can't rebuild it.
+    expect(r).toEqual({ result: meshBoth, viaMesh: true });
   });
 
   it("falls back to the mesh split when OCC throws", async () => {
@@ -258,7 +259,7 @@ describe("splitWithFallback", () => {
       },
       () => meshBoth,
     );
-    expect(r).toEqual({ result: meshBoth });
+    expect(r).toEqual({ result: meshBoth, viaMesh: true });
   });
 
   it("reports a one-sided cut, or OCC's error when nothing came back", async () => {

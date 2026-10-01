@@ -924,6 +924,24 @@ Established landmines (each was a real bug — extend this list, never shrink it
   `extrudeStaleAnchor.test.js` drives the real document through the store and a
   full recalc for exactly that reason.
 
+- **A Split's pieces are re-cut from their source, not kept as baked
+  meshes.** They used to carry no recipe, so a resolution change (or an
+  upstream edit) never reached them -- MultiSystem2's extruded circles stayed
+  blocky through four Splits. A plane-split piece carries `regenerator:
+  { kind: "split", sourceId, plane, side }`; the recalc re-cuts a Split step's
+  pieces TOGETHER (`isSplitGroup` / `regenerateSplitGroup` -- a createGroup
+  has no single `geomTargetId`), and a later op builds a piece by RE-CUTTING
+  its source too (`splitPieceLocal`, both OCC implementations), framed on the
+  recipe's `center` (where the piece's mesh is centred; a piece may have been
+  moved since). It used to sew the piece's baked mesh, as for `simplify`: a
+  float32 copy whose "flat" faces aren't, so a chamfer the unsplit body took
+  at once failed instantly on its piece (`splitPieceChamfer.test.js`). A
+  piece whose re-cut was refused (`regenFailed`) still sews its mesh. A re-cut must divide the source AT the plane or
+  it is refused: a plane lying on one of the source's faces grazes it and
+  OCC's difference returns the WHOLE body. Old documents get the recipe at
+  load (`backfillSplitRecipes`: the plane both pieces have a face in, facing
+  each other, checked to separate them). Mesh-fallback splits get none
+  (`splitResolution.test.js`).
 - **Frozen sources nest — NEVER let dense meshes ride the chain.** Each op's
   `regenerator.source` snapshot contains the prior item INCLUDING its
   `geometryData` and ITS nested source… stacking ops on one body stores

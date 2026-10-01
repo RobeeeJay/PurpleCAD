@@ -24,7 +24,7 @@ export async function splitWithFallback(occSplit, meshFallback) {
   }
   if (result?.partA && result?.partB) return { result };
   const mesh = meshFallback();
-  if (mesh?.partA && mesh?.partB) return { result: mesh };
+  if (mesh?.partA && mesh?.partB) return { result: mesh, viaMesh: true };
   return { result: result ?? mesh ?? null, error };
 }
 

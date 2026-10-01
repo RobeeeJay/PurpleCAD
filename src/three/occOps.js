@@ -487,9 +487,24 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
   if (item.type === "csg" && item.regenerator) {
     const r = item.regenerator;
 
+    // A Split piece is re-cut from its source: a later op then gets the
+    // source's true faces.  Sewn from its mesh instead, it was float32
+    // triangles whose "flat" faces weren't, and a chamfer on a rim that the
+    // unsplit body took at once failed on the piece (MultiSystem2's ring).
+    // Not when its re-cut was refused (a plane lying on a face of the source
+    // grazes it, and the halves come back wrong): that piece keeps its mesh.
+    if (r.kind === "split" && r.center && !r.regenFailed) {
+      try {
+        const id = splitPieceLocal(r, allItems, precision);
+        if (id != null) return id;
+      } catch {
+        // the mesh below
+      }
+    }
     // A simplified mesh IS its baked mesh -- the op's whole output -- so a
-    // later op sews that, exactly as for an imported mesh.
-    if (r.kind === "simplify") {
+    // later op sews that, exactly as for an imported mesh; so does a Split
+    // piece that can't be re-cut.
+    if (r.kind === "simplify" || r.kind === "split") {
       const g = item.geometryData;
       if (!g?.positions || g.positions.length < 9) return null;
       return occ.makeSolidFromMesh(
@@ -1892,12 +1907,9 @@ async function performCsg({
   };
 }
 
-// Slice a solid into two parts along a plane (origin = plane.position, normal =
-// the plane's local +Z rotated by plane.rotation).  Builds the target's world
-// solid, intersects it with a large half-space box on the +normal side (partA)
-// and cuts that box away (partB).  Returns { partA, partB } (either may be null
-// when the plane misses that side), each bbox-centred like a CSG result.
-async function splitItem({ target, plane, allItems, printPrecision }) {
+// Both sides of `target` cut along `plane`, as world solids { aId, bId } --
+// either may be 0 where the plane misses that side.  The caller releases them.
+function splitHalvesWorld(target, plane, allItems, printPrecision) {
   const localId = buildItemShapeLocal(target, allItems, printPrecision);
   if (localId == null) throw new Error("Couldn't build the object to split.");
   const t = buildBrushTransform(target);
@@ -1929,14 +1941,44 @@ async function splitItem({ target, plane, allItems, printPrecision }) {
   );
   occ.releaseShape(boxLocal);
 
-  let aId, bId;
   try {
-    aId = occ.booleanOp([solidId, box], "intersection");
-    bId = occ.booleanOp([solidId, box], "difference");
+    return {
+      aId: occ.booleanOp([solidId, box], "intersection"),
+      bId: occ.booleanOp([solidId, box], "difference"),
+    };
   } finally {
     occ.releaseShape(solidId);
     occ.releaseShape(box);
   }
+}
+
+// A Split piece, re-cut from its source in the frame its mesh is drawn in
+// (centred on `center`).  Null when the source is gone or the cut is empty.
+function splitPieceLocal(r, allItems, precision) {
+  const source = (allItems || []).find((i) => i.id === r.sourceId);
+  if (!source) return null;
+  const { aId, bId } = splitHalvesWorld(source, r.plane, allItems, precision);
+  const keep = r.side === "a" ? aId : bId;
+  const drop = r.side === "a" ? bId : aId;
+  if (drop) occ.releaseShape(drop);
+  if (!keep) return null;
+  const c = r.center;
+  const localId = occ.transformShape(keep, -c.x, -c.y, -c.z, 0, 0, 0);
+  occ.releaseShape(keep);
+  return localId;
+}
+
+// Slice a solid into two parts along a plane (origin = plane.position, normal =
+// the plane's local +Z rotated by plane.rotation): the part on the +normal side
+// (partA) and the rest (partB).  Returns { partA, partB } (either may be null
+// when the plane misses that side), each bbox-centred like a CSG result.
+async function splitItem({ target, plane, allItems, printPrecision }) {
+  const { aId, bId } = splitHalvesWorld(
+    target,
+    plane,
+    allItems,
+    printPrecision,
+  );
 
   const part = (id) => {
     if (!id) return null;

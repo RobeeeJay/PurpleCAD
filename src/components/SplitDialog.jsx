@@ -36,7 +36,7 @@ const SplitDialog = () => {
     const target = items.find((i) => i.id === objectId);
     if (!target || !cutFrame) return;
     const plane = { position: cutFrame.position, rotation: cutFrame.rotation };
-    const { result, error } = await splitWithFallback(
+    const { result, error, viaMesh } = await splitWithFallback(
       () => splitItem({ target, plane, allItems: items, printPrecision }),
       () =>
         useStore.getState()._cameraControls?.meshSplit?.(target.id, plane) ??
@@ -63,6 +63,23 @@ const SplitDialog = () => {
         ? items.find((i) => i.id === r.sourceId)?.material
         : target.material;
     const firstId = maxItemId(useStore.getState().history) + 1;
+    // The recipe a recalc re-cuts the piece from, so it follows the source's
+    // resolution and edits -- and a later op on the piece builds it the same
+    // way, centred where its mesh is.  None for a mesh-fallback split: OCC
+    // couldn't build that body, so it couldn't re-cut it either.
+    const recipe = (side, center) =>
+      viaMesh
+        ? null
+        : {
+            regenerator: {
+              kind: "split",
+              sourceId: target.id,
+              plane,
+              side,
+              center,
+              regeneratedAt: printPrecision,
+            },
+          };
     const part = (p, i) => ({
       id: firstId + i,
       name: `${target.name} (${i + 1})`,
@@ -73,6 +90,7 @@ const SplitDialog = () => {
       rotation: { x: 0, y: 0, z: 0 },
       scale: { x: 1, y: 1, z: 1 },
       geometryData: p.geometryData,
+      ...recipe(i === 0 ? "a" : "b", p.position),
       ...(bodyMaterial && { material: bodyMaterial }),
     });
     // One "Split" step: both halves, with the original hidden from it on.

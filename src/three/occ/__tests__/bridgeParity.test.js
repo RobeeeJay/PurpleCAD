@@ -325,6 +325,46 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     );
   }, 30000);
 
+  it("chamfer on a Split piece, re-cut from its recipe", async () => {
+    const c = cube(14);
+    const plane = { position: O, rotation: O };
+    const halves = await ops.splitItem({
+      target: c,
+      plane,
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+    const piece = {
+      id: 15,
+      type: "csg",
+      position: halves.partA.position,
+      rotation: O,
+      scale: S,
+      geometryData: halves.partA.geometryData,
+      regenerator: {
+        kind: "split",
+        sourceId: 14,
+        plane,
+        side: "a",
+        center: halves.partA.position,
+        regeneratedAt: 0.1,
+      },
+    };
+    // The piece's top edge along X, in its own (centred) frame.
+    const z = 1 - halves.partA.position.z;
+    await parity("chamferOrFilletItem", {
+      source: piece,
+      subGeo: {
+        edges: [{ ax: -1, ay: 1, az: z, bx: 1, by: 1, bz: z }],
+        faces: [],
+      },
+      amount: 0.2,
+      segments: 1,
+      allItems: [c, piece],
+      printPrecision: 0.1,
+    });
+  }, 30000);
+
   it("revolve", async () => {
     const sketch = {
       id: 21,

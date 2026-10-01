@@ -4,7 +4,7 @@
 
 import * as THREE from "three";
 import { withLivePolygons, hostFaceExtentAlongNormal } from "../csgUtils.js";
-import { pattern3dItem, performCsg } from "../occClient.js";
+import { pattern3dItem, performCsg, splitItem } from "../occClient.js";
 
 // Resolve a 3D pattern's live params: mirror/circular read the plane object's
 // frame (origin + normal); circular uses the normal as the rotation axis.
@@ -155,5 +155,78 @@ export async function regenerateExtrudeUnion(
     operation: isCut ? "difference" : "union",
     printPrecision,
     allItems: accumulatedItems,
+  });
+}
+
+// Re-cut a Split step's pieces from their source as it now stands -- at the
+// current resolution, after any upstream edit.  One split gives both sides, so
+// the whole group is rebuilt together: an array of { position, geometryData }
+// matching `pieces`, null for a piece without a recipe or a side that came
+// back empty, or null overall when the source can't be split.
+export async function regenerateSplitGroup(
+  pieces,
+  accumulatedItems,
+  printPrecision,
+) {
+  const r = pieces.find((p) => p?.regenerator?.kind === "split")?.regenerator;
+  const source = r && accumulatedItems.find((i) => i.id === r.sourceId);
+  if (!source) return null;
+  let result;
+  try {
+    result = await splitItem({
+      target: withLivePolygons(source, accumulatedItems, printPrecision),
+      plane: r.plane,
+      allItems: accumulatedItems,
+      printPrecision,
+    });
+  } catch (err) {
+    console.warn(
+      `Split regen couldn't re-cut its source (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  // Both sides, each on its own side of the plane -- or keep the pieces.  A
+  // plane lying on one of the source's faces grazes it inside OCC's
+  // tolerances, and the difference then comes back as the WHOLE body (the
+  // cut of MultiSystem2's base along its lower face -- the Split that needed
+  // the mesh fallback when it was made).
+  const rot = r.plane.rotation || { x: 0, y: 0, z: 0 };
+  const n = new THREE.Vector3(0, 0, 1).applyEuler(
+    new THREE.Euler(rot.x || 0, rot.y || 0, rot.z || 0),
+  );
+  const d = n.dot(
+    new THREE.Vector3(
+      r.plane.position.x,
+      r.plane.position.y,
+      r.plane.position.z,
+    ),
+  );
+  const onSide = (part, sign) => {
+    const P = part?.geometryData?.positions;
+    if (!P?.length) return false;
+    const o = part.position;
+    for (let i = 0; i < P.length; i += 3) {
+      const s =
+        (P[i] + o.x) * n.x +
+        (P[i + 1] + o.y) * n.y +
+        (P[i + 2] + o.z) * n.z -
+        d;
+      if (s * sign < -1e-3) return false;
+    }
+    return true;
+  };
+  if (!onSide(result?.partA, 1) || !onSide(result?.partB, -1)) {
+    console.warn(
+      "Split regen: the re-cut didn't divide its source at the plane; keeping previous geometry.",
+    );
+    return null;
+  }
+  return pieces.map((p) => {
+    const side = p?.regenerator?.kind === "split" ? p.regenerator.side : null;
+    const part =
+      side === "a" ? result?.partA : side === "b" ? result?.partB : null;
+    return part
+      ? { position: part.position, geometryData: part.geometryData }
+      : null;
   });
 }

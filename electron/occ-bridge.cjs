@@ -485,9 +485,20 @@ function buildItemShapeLocal(item, allItems, precision) {
   if (item.type === "csg" && item.regenerator) {
     const regen = item.regenerator;
 
-    // A simplified mesh IS its baked mesh -- the op's whole output -- (mirrors occOps.js) so a
-    // later op sews that, exactly as for an imported mesh.
-    if (regen.kind === "simplify") {
+    // A Split piece is re-cut from its source (mirrors occOps.js): sewn from
+    // its mesh, its "flat" faces weren't, and chamfers on it failed.
+    if (regen.kind === "split" && regen.center && !regen.regenFailed) {
+      try {
+        const id = splitPieceLocal(regen, allItems, precision);
+        if (id != null) return id;
+      } catch {
+        // the mesh below
+      }
+    }
+    // A simplified mesh IS its baked mesh -- the op's whole output -- (mirrors
+    // occOps.js) so a later op sews that, as does a Split piece that can't be
+    // re-cut.
+    if (regen.kind === "simplify" || regen.kind === "split") {
       const g = item.geometryData;
       if (!g?.positions || g.positions.length < 9) return null;
       return occ.makeSolidFromMesh(
@@ -1567,7 +1578,9 @@ function loftItem({ profileSource, secondProfileSource, printPrecision }) {
 }
 
 // Slice a solid into two parts along a plane (mirrors occOps.js#splitItem).
-function splitItem({ target, plane, allItems, printPrecision }) {
+// Both sides of `target` cut along `plane`, as world solids { aId, bId }
+// (mirrors occOps.js#splitHalvesWorld).  The caller releases them.
+function splitHalvesWorld(target, plane, allItems, printPrecision) {
   const localId = buildItemShapeLocal(target, allItems, printPrecision);
   if (localId == null) throw new Error("Couldn't build the object to split.");
   const t = buildBrushTransform(target);
@@ -1588,14 +1601,35 @@ function splitItem({ target, plane, allItems, printPrecision }) {
   );
   occ.releaseShape(boxLocal);
 
-  let aId, bId;
   try {
-    aId = occ.booleanOp([solidId, box], "intersection");
-    bId = occ.booleanOp([solidId, box], "difference");
+    return {
+      aId: occ.booleanOp([solidId, box], "intersection"),
+      bId: occ.booleanOp([solidId, box], "difference"),
+    };
   } finally {
     occ.releaseShape(solidId);
     occ.releaseShape(box);
   }
+}
+
+// A Split piece re-cut from its source, in its mesh's frame (mirrors
+// occOps.js#splitPieceLocal).
+function splitPieceLocal(r, allItems, precision) {
+  const source = (allItems || []).find((i) => i.id === r.sourceId);
+  if (!source) return null;
+  const { aId, bId } = splitHalvesWorld(source, r.plane, allItems, precision);
+  const keep = r.side === "a" ? aId : bId;
+  const drop = r.side === "a" ? bId : aId;
+  if (drop) occ.releaseShape(drop);
+  if (!keep) return null;
+  const c = r.center;
+  const localId = occ.transformShape(keep, -c.x, -c.y, -c.z, 0, 0, 0);
+  occ.releaseShape(keep);
+  return localId;
+}
+
+function splitItem({ target, plane, allItems, printPrecision }) {
+  const { aId, bId } = splitHalvesWorld(target, plane, allItems, printPrecision);
 
   const part = (id) => {
     if (!id) return null;

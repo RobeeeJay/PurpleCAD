@@ -220,6 +220,69 @@ test.describe.serial("modify tools through their dialogs", () => {
     expect(last).toEqual({ label: "Split", pieces: 2, splitFrom: 14 });
   });
 
+  // A Split's halves used to be stored as finished meshes, so a resolution
+  // change left them as blocky as when they were cut while the rest of the
+  // model went fine.  They now carry a recipe the recalculation re-cuts.
+  test("split halves follow a change of resolution", async () => {
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.newDocument();
+      s.addItem({
+        id: 60,
+        name: "Post",
+        type: "cylinder",
+        children: [],
+        parentId: null,
+        position: { x: 0, y: 1, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      s.startSplit3d({ objectId: 60, objectName: "Post" });
+      // Across the post's middle: normal +y.
+      s.updateSplit3d({
+        cutFrame: {
+          position: { x: 0, y: 1, z: 0 },
+          rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+        },
+        cutLabel: "plane",
+      });
+    });
+    await page.getByTitle("Split the object").click();
+    const halves = () =>
+      page.evaluate(() =>
+        window.__store
+          .getState()
+          .items.filter((i) => /^Post \(/.test(i.name))
+          .map((i) => ({
+            kind: i.regenerator?.kind ?? null,
+            tris: i.geometryData.indices.length / 3,
+          })),
+      );
+    await expect.poll(async () => (await halves()).length).toBe(2);
+    const before = await halves();
+    expect(before.map((h) => h.kind)).toEqual(["split", "split"]);
+
+    await page.evaluate(() => {
+      window.__store.setState({ printPrecisionMm: 0.01 });
+      window.__store.getState().toggleCurveResolution();
+    });
+    await page.locator(".timeline-recalc-btn").click();
+    // How many times over the half that grew least has its triangles.
+    const growth = async () => {
+      const after = await halves();
+      return Math.min(...after.map((h, k) => h.tris / before[k].tris));
+    };
+    await expect
+      .poll(growth, {
+        timeout: 60000,
+        message: `halves had ${before.map((h) => h.tris)} triangles`,
+      })
+      .toBeGreaterThan(2);
+    await page.evaluate(() =>
+      window.__store.getState().toggleCurveResolution(),
+    );
+  });
+
   // The test above sets the cut directly, which is how a face-pick problem went
   // unseen: the cut phase stayed locked to whole objects, so the widget greyed
   // out faces and hover lit whole bodies, and clicking the body's own face --

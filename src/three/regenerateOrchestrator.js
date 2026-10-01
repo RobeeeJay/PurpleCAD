@@ -20,6 +20,7 @@ import {
   withOrphanFlags,
 } from "../store/internals.js";
 import { regenerateItemsForResolution } from "./regenerateItems.js";
+import { regenerateSplitGroup } from "./regenerators/combine.js";
 import { activePrecision } from "./resolution.js";
 import { getSolid, setSolid, pruneSolids } from "./solidCache.js";
 import { solidFromMesh } from "./occClient.js";
@@ -42,6 +43,12 @@ export function entryCacheValid(entry, cachedItem, precision) {
 // create, or a modify that stamps a geometryData / regenerator patch (e.g.
 // a chamfer turning an extrude into a CSG).  Returns the affected item id,
 // or null for steps that carry no geometry of their own.
+// A Split step carrying re-cut recipes: its pieces are rebuilt together (one
+// split gives both), so it takes its own path through the recalc.
+const isSplitGroup = (inst) =>
+  inst.type === "createGroup" &&
+  (inst.items || []).some((i) => i.regenerator?.kind === "split");
+
 function geomTargetId(inst) {
   if (inst.type === "create" && inst.item?.type === "csg") return inst.item.id;
   if (
@@ -118,7 +125,10 @@ async function runRecalcPass(force = false) {
 
   const total = history.reduce(
     (n, e, i) =>
-      i <= jitBound && geomTargetId(e.instruction) != null ? n + 1 : n,
+      i <= jitBound &&
+      (geomTargetId(e.instruction) != null || isSplitGroup(e.instruction))
+        ? n + 1
+        : n,
     0,
   );
   let done = 0;
@@ -184,6 +194,72 @@ async function runRecalcPass(force = false) {
     const prevItemState =
       preTargetId != null ? accItems.find((it) => it.id === preTargetId) : null;
     accItems = applyInstruction(accItems, entry.instruction);
+    if (isSplitGroup(entry.instruction)) {
+      const inst = entry.instruction;
+      const ids = inst.items.map((i) => i.id);
+      const pieces = ids.map((id) => accItems.find((it) => it.id === id));
+      const fresh = pieces.every((p) =>
+        entryCacheValid(entry, p, printPrecision),
+      );
+      let next = entry;
+      if (force || !fresh) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[OCC] recalc: re-cutting entry ${entry.id} ("${entry.label}")`,
+        );
+        const parts = await regenerateSplitGroup(
+          pieces,
+          accItems,
+          printPrecision,
+        );
+        // A piece that can't be re-cut keeps its last mesh, settled at this
+        // precision so the next pass doesn't retry it -- as a failed regen
+        // does elsewhere.
+        const stamped = inst.items.map((item, k) => {
+          if (item.regenerator?.kind !== "split") return item;
+          const part = parts?.[k];
+          return {
+            ...item,
+            ...(part ?? null),
+            regenerator: {
+              ...item.regenerator,
+              // Where the new mesh is centred: a later op builds the piece
+              // in this frame (see buildItemShapeLocal's "split" case).
+              ...(part ? { center: part.position } : null),
+              regeneratedAt: printPrecision,
+              regenFailed: !part,
+            },
+          };
+        });
+        const byId = new Map(stamped.map((i) => [i.id, i]));
+        accItems = accItems.map((it) =>
+          byId.has(it.id)
+            ? {
+                ...it,
+                position: byId.get(it.id).position,
+                geometryData: byId.get(it.id).geometryData,
+                regenerator: byId.get(it.id).regenerator,
+              }
+            : it,
+        );
+        ids.forEach((id) => recomputedItems.add(id));
+        next = {
+          ...entry,
+          dirty: false,
+          instruction: { ...inst, items: stamped },
+        };
+        await breathe();
+      }
+      for (const id of ids) {
+        lastEntryForItem.set(id, entry.id);
+        const it = accItems.find((a) => a.id === id);
+        if (it?.position) lastPositionForItem.set(id, it.position);
+      }
+      done += 1;
+      useStore.getState().setRegenProgress({ current: done, total });
+      newHistory.push(next);
+      continue;
+    }
     const targetId = preTargetId;
     if (targetId == null) {
       newHistory.push(entry);
