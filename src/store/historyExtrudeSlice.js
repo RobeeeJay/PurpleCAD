@@ -13,10 +13,14 @@ import {
   rewriteCreatedItem,
   dirtyAllEntries,
   maxItemId,
+  hideIdsFrom,
+  showIdsFrom,
+  commitEntryEdit,
 } from "./internals.js";
 import {
   buildBrushTransform,
   shiftUnionAnchorForRetarget,
+  cutStartInsetFor,
 } from "../three/csgUtils.js";
 export const createHistoryExtrudeSlice = (set) => ({
   retargetExtrude: (extrudeId, newProfile, newDepth, startOffset = 0) =>
@@ -284,9 +288,16 @@ export const createHistoryExtrudeSlice = (set) => ({
           scale: { x: 1, y: 1, z: 1 },
         };
       });
+      // A new offset needs its inset measured afresh against the hosts: the
+      // old one belongs to the old offset, and kept, the rebuild would start
+      // the cut from the hosts' top whatever the dialog said.
+      const hosts = (oldRegen.inputIds || [])
+        .map((id) => state.items.find((i) => i.id === id))
+        .filter(Boolean);
       const setDefs = (regen) => ({
         ...regen,
         extrudeDefs: newDefs,
+        ...(isCut ? { cutStartInset: cutStartInsetFor(hosts, newDefs) } : null),
         regeneratedAt: "dirty",
       });
       const updatedItems = markCsgDirty(

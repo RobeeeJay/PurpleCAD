@@ -173,6 +173,17 @@ export function hostFaceExtentAlongNormal(hosts, normal, origin) {
   return top === -Infinity ? null : top;
 }
 
+// How far an offset cut starts from its hosts' face along the cut normal:
+// regenerateExtrudeUnion re-anchors it to the live face plus this each
+// rebuild.  0 for a cut from the sketch plane, which is never re-anchored.
+export function cutStartInsetFor(hosts, extrudeDefs) {
+  const def = extrudeDefs.find((d) => (d.startOffset || 0) !== 0);
+  const ref = def?.profile;
+  if (!ref?.normalWorld || !ref.position) return 0;
+  const top = hostFaceExtentAlongNormal(hosts, ref.normalWorld, ref.position);
+  return top == null ? 0 : def.startOffset - top;
+}
+
 // Re-derive every extrude profile in an item AND, recursively, in a chamfer/
 // bevel source's nested source — so the live sketch geometry feeds the OCC
 // shape (the Electron bridge can't import this ESM helper and otherwise builds

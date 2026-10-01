@@ -6,7 +6,7 @@
 import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { activePrecision } from "../resolution.js";
-import { hostFaceExtentAlongNormal } from "../csgUtils.js";
+import { cutStartInsetFor } from "../csgUtils.js";
 import { openMeshNotice } from "../importWeld.js";
 
 // Once a cut or fuse is committed, warn if a body it went into was an open
@@ -136,23 +136,9 @@ export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
     // re-anchors the cut to the host's live face + this inset each regen, so a
     // variable that resizes the body keeps the cut on the face it was started
     // from.  Measured against the pre-cut target.
-    const ref = extrudeDefs.find((d) => (d.startOffset || 0) !== 0)?.profile;
     let id = cutId;
     for (const target of targets) {
-      const cutStartInset =
-        ref?.normalWorld && ref.position
-          ? (() => {
-              const top = hostFaceExtentAlongNormal(
-                [target],
-                ref.normalWorld,
-                ref.position,
-              );
-              return top == null
-                ? 0
-                : (extrudeDefs.find((d) => (d.startOffset || 0) !== 0)
-                    ?.startOffset || 0) - top;
-            })()
-          : 0;
+      const cutStartInset = cutStartInsetFor([target], extrudeDefs);
       // One difference with every prism as a tool — BooleanOp takes the first
       // input as the argument and the rest as tools.
       const result = await performCsg({

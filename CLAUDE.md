@@ -779,6 +779,11 @@ only once the model has settled, and nothing throws. New commands are covered in
   ⇒ 0, which is correct for old top-anchored cuts). Only prisms with a non-zero
   `startOffset` re-anchor — a cut from the sketch plane (offset 0) stays put.
   `cutTracksHostFace.test.js` drives the real shrink-Height repro.
+  **The inset belongs to the offset it was measured for.** A cut made at offset
+  0 stores inset 0 unmeasured; the timeline Edit (`retargetFusedExtrude`) used
+  to change the offset and keep that 0, so the rebuild started the cut at the
+  host's top -- MultiSystem2's boss cut ran 1.2 mm high and left a thin floor.
+  Both paths now measure it with `cutStartInsetFor` (`cutOffsetEdit.test.js`).
 
 ## Display ↔ OCC-rebuild parity (the "reverts to an earlier state" bug class)
 
