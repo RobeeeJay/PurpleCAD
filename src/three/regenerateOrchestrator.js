@@ -509,10 +509,15 @@ async function runRecalcPass(force = false) {
   useStore.getState().setRegenProgress(null);
 
   // Re-derive the visible scene from the refreshed history at whatever step
-  // the user is currently parked on.
+  // the user is parked on NOW -- not when this pass began: moving to another
+  // step doesn't change the history, so the guard below lets this pass
+  // through, and replaying the old step showed the scene as it stood there.
+  // Opening an extrusion's Edit while a recalc ran showed the body it had
+  // merged into as hidden, and Combine then found nothing to merge with.
+  const activeId = useStore.getState().activeHistoryId;
   const activeIdx =
-    state.activeHistoryId !== null
-      ? newHistory.findIndex((h) => h.id === state.activeHistoryId)
+    activeId !== null
+      ? newHistory.findIndex((h) => h.id === activeId)
       : newHistory.length - 1;
   const items = replayUpTo(
     newHistory,
@@ -522,6 +527,6 @@ async function runRecalcPass(force = false) {
   // running, don't clobber it with the stale result — that newer edit triggers
   // its own recalc.
   if (useStore.getState().history !== history) return;
-  saveTimeline(newHistory, state.activeHistoryId);
+  saveTimeline(newHistory, activeId);
   useStore.setState({ history: withOrphanFlags(newHistory), items });
 }
