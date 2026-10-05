@@ -542,8 +542,8 @@ const RenderSection = () => {
         className={`toolbar-btn ${curveResolution === "print" ? "active" : ""}`}
         title={
           curveResolution === "print"
-            ? "High resolution (3D print) — click for preview (8)"
-            : "Preview resolution — click for high (3D print) (8)"
+            ? "High resolution (3D print) — click for normal (8)"
+            : "Normal resolution — click for high (3D print) (8)"
         }
         onClick={toggleCurveResolution}
       >

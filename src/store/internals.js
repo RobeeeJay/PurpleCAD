@@ -474,7 +474,7 @@ export const SNAP_DEFAULTS = {
   snapAngleDeg: 9,
   fov: 35,
   curveDetectionAngleDeg: 5,
-  previewPrecisionMm: 0.1,
+  previewPrecisionMm: 0.05,
   printPrecisionMm: 0.01,
   alwaysExtrudeSingleObject: true,
   axisVisible: false,
@@ -493,7 +493,7 @@ export const loadSnapSettings = () => {
       curveDetectionAngleDeg:
         parsed.curveDetectionAngleDeg >= 0 ? parsed.curveDetectionAngleDeg : 5,
       previewPrecisionMm:
-        parsed.previewPrecisionMm > 0 ? parsed.previewPrecisionMm : 0.5,
+        parsed.previewPrecisionMm > 0 ? parsed.previewPrecisionMm : 0.05,
       printPrecisionMm:
         parsed.printPrecisionMm > 0 ? parsed.printPrecisionMm : 0.01,
       // Default on (combine) — only an explicit false turns it off.

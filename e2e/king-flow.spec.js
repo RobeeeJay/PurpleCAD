@@ -492,10 +492,46 @@ test.describe.serial("king", () => {
     // Measured over the bar's full thickness: a box carries vertices only at
     // its corners, so a thin slice through the middle of one is empty.
     const armY = V.TotalHeight + CROSS.armY;
-    const armLo = armY - CROSS.thick / 2;
-    const armHi = armY + CROSS.thick / 2;
+    // The bar's corners sit exactly on the band's edges, and positions are
+    // float32: both can round a hair outside it and leave nothing to measure
+    // (it did, once the normal resolution went to 0.05 mm and moved the head
+    // by a hundred-thousandth of a millimetre).  A tenth of a millimetre of
+    // margin keeps them in.
+    const armLo = armY - CROSS.thick / 2 - 0.1;
+    const armHi = armY + CROSS.thick / 2 + 0.1;
     const across = await widthBetween(kingId, armLo, armHi);
-    expect(across).toBeCloseTo(CROSS.arm, -1);
+    // Where the union actually has material above the head, for when the arm
+    // isn't found: each height (mm above the base) with its widest reach.
+    const above = await page.evaluate(
+      ({ n, from }) => {
+        const it = window.__store.getState().items.find((i) => i.id === n);
+        const p = it.geometryData.positions;
+        let base = Infinity;
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let i = 0; i < p.length; i += 3) {
+          base = Math.min(base, p[i + 1]);
+          lo = Math.min(lo, p[i]);
+          hi = Math.max(hi, p[i]);
+        }
+        const cx = (lo + hi) / 2;
+        const at = new Map();
+        for (let i = 0; i < p.length; i += 3) {
+          const y = Math.round((p[i + 1] - base) * 100) / 10;
+          if (y < from) continue;
+          at.set(y, Math.max(at.get(y) ?? 0, Math.abs(p[i] - cx) * 20));
+        }
+        return [...at]
+          .sort((a, b) => a[0] - b[0])
+          .map(([y, w]) => `${y}:${w.toFixed(1)}`)
+          .join(" ");
+      },
+      { n: kingId, from: V.TotalHeight - 5 },
+    );
+    expect(
+      across,
+      `arm band ${armLo}..${armHi} mm; heights (mm above base) : width -- ${above}`,
+    ).toBeCloseTo(CROSS.arm, -1);
     const depth = await page.evaluate(
       ({ id, yLo, yHi }) => {
         const it = window.__store.getState().items.find((i) => i.id === id);

@@ -167,7 +167,7 @@ const SettingsDialog = () => {
 
           <div style={rowStyle}>
             <span style={labelStyle}>
-              <span>Preview resolution</span>
+              <span>Normal resolution</span>
               <span style={{ fontSize: 10, opacity: 0.7 }}>
                 surface deviation while editing (lower = denser)
               </span>
@@ -187,9 +187,9 @@ const SettingsDialog = () => {
 
           <div style={rowStyle}>
             <span style={labelStyle}>
-              <span>Normal resolution</span>
+              <span>High resolution</span>
               <span style={{ fontSize: 10, opacity: 0.7 }}>
-                final density (the high-res toggle / 3D print)
+                final density (the high-resolution toggle / 3D print)
               </span>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>

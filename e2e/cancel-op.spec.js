@@ -94,9 +94,14 @@ test("cancelling a forced recalculation leaves the app healthy", async () => {
             (s.regenProgress != null && s.regenProgress.total > 0) ||
             s.pendingOperations > 0;
           const item = s.items.find((i) => i.regenerator);
-          return { busy, settled: item?.regenerator?.regeneratedAt ?? null };
+          return {
+            busy,
+            // Settled at the normal resolution -- read from the settings, as
+            // the default moved (0.1 mm, then 0.05).
+            settled: item?.regenerator?.regeneratedAt === s.previewPrecisionMm,
+          };
         }),
       { timeout: 120000 },
     )
-    .toEqual({ busy: false, settled: 0.1 });
+    .toEqual({ busy: false, settled: true });
 });

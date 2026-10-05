@@ -132,10 +132,10 @@ const DocumentSection = () => {
   const confirmExportResolution = (kind) => {
     if (curveResolution === "print") return true;
     return window.confirm(
-      `High-resolution print mode is OFF, so this ${kind} will export at the ` +
-        `coarser preview tessellation (curved surfaces will look faceted).\n\n` +
-        `Turn on print mode (the resolution toggle) for a smooth mesh, then ` +
-        `export again.\n\nExport at preview resolution anyway?`,
+      `High resolution is OFF, so this ${kind} will export at the coarser ` +
+        `normal tessellation (curved surfaces will look faceted).\n\n` +
+        `Turn on high resolution (the resolution toggle) for a smooth mesh, ` +
+        `then export again.\n\nExport at normal resolution anyway?`,
     );
   };
 
