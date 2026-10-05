@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { measure, shapeMetrics, loopArea } from "../measure.js";
+import {
+  measure,
+  shapeMetrics,
+  loopArea,
+  chainsOf,
+  circleOf,
+  measurePicksVertex,
+} from "../measure.js";
 
 describe("measure", () => {
   it("segment length", () => {
@@ -291,5 +298,105 @@ describe("measure", () => {
         ],
       ]),
     ).toBeNull();
+  });
+});
+
+// A chain of lines is ONE thing to the Measure readout: its length, and the
+// diameter when it goes round a circle -- only a second, separate line makes
+// the reading a distance.
+describe("chains of selected lines", () => {
+  // n straight lines, end to end, round a circle of radius r at (cx, cy).
+  const ring = (n, r, cx = 0, cy = 0) =>
+    Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * 2 * Math.PI;
+      const b = ((i + 1) / n) * 2 * Math.PI;
+      return [
+        [cx + r * Math.cos(a), cy + r * Math.sin(a)],
+        [cx + r * Math.cos(b), cy + r * Math.sin(b)],
+      ];
+    });
+
+  it("lines drawn end to end form one chain, in any order and direction", () => {
+    const a = [
+      [0, 0],
+      [1, 0],
+    ];
+    const b = [
+      [2, 0],
+      [1, 0],
+    ]; // reversed, and joins a's end
+    const c = [
+      [0, 1],
+      [0, 0],
+    ]; // joins a's start
+    const chains = chainsOf([b, c, a]);
+    expect(chains.length, JSON.stringify(chains)).toBe(1);
+    expect(chains[0].pts.length).toBe(4);
+    expect(chains[0].closed).toBe(false);
+  });
+
+  it("two separate lines stay two chains", () => {
+    const chains = chainsOf([
+      [
+        [0, 0],
+        [1, 0],
+      ],
+      [
+        [0, 5],
+        [1, 5],
+      ],
+    ]);
+    expect(chains.length).toBe(2);
+  });
+
+  it("a ring of lines is one closed chain", () => {
+    const chains = chainsOf(ring(24, 3));
+    expect(chains.length).toBe(1);
+    expect(chains[0].closed).toBe(true);
+  });
+
+  it("a ring of lines approximating a circle reports that circle", () => {
+    const c = circleOf(chainsOf(ring(32, 2.5, 4, -1))[0]);
+    expect(c, "no circle found").not.toBeNull();
+    expect(c.r * 2).toBeCloseTo(5, 6);
+    expect(c.cx).toBeCloseTo(4, 6);
+    expect(c.cy).toBeCloseTo(-1, 6);
+  });
+
+  it("a square or a hexagon is not a circle, though its corners lie on one", () => {
+    expect(circleOf(chainsOf(ring(4, 1))[0])).toBeNull();
+    expect(circleOf(chainsOf(ring(6, 1))[0])).toBeNull();
+  });
+
+  it("an open arc of lines, or a lopsided loop, is not a circle", () => {
+    const arc = ring(32, 1).slice(0, 20);
+    expect(circleOf(chainsOf(arc)[0])).toBeNull();
+    // A closed loop of 16 lines whose corners bulge 10% off one radius.
+    const lumpy = ring(16, 1).map(([p, q], i) => [
+      p.map((v) => v * (i % 2 ? 1.1 : 1)),
+      q.map((v) => v * (i % 2 ? 1 : 1.1)),
+    ]);
+    const chains = chainsOf(lumpy);
+    expect(chains[0].closed).toBe(true);
+    expect(circleOf(chains[0])).toBeNull();
+  });
+});
+
+// Measuring in a sketch, a click with a line under it and a line's end in
+// snap range picks the end only when close to it for that line's size.
+describe("measurePicksVertex", () => {
+  it("picks the end of a long line when the click is at it", () => {
+    expect(measurePicksVertex(3, 200)).toBe(true);
+  });
+  it("picks the line when the click is mid-way along a short one", () => {
+    // A 10 px line clicked in its middle: 5 px from either end, inside the
+    // 14 px snap range -- the case that used to pick a vertex.
+    expect(measurePicksVertex(5, 10)).toBe(false);
+  });
+  it("still picks the end of a short line when the click is right on it", () => {
+    expect(measurePicksVertex(1, 10)).toBe(true);
+  });
+  it("never picks an end beyond the snap range", () => {
+    expect(measurePicksVertex(15, 1000)).toBe(false);
   });
 });

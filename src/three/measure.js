@@ -139,6 +139,135 @@ export function loopArea(polylines, tol) {
   return Math.abs(A) / 2;
 }
 
+// The selected pieces joined into chains: two pieces belong to one chain when
+// an end of one meets an end of the other (within the tolerance loopArea
+// uses).  Each chain is its points in order, [x, y] -- the sketch plane's own
+// 2D coordinates -- and whether it closes.  A chain is one thing to measure: a
+// polyline's segments, or lines drawn end to end, read as one length rather
+// than as a distance between two of them.
+export function chainsOf(polylines, tol) {
+  const xy = (p) => (Array.isArray(p) ? [p[0], p[1]] : [p.x, p.y]);
+  const lines = (polylines || [])
+    .filter((pl) => pl && pl.length >= 2)
+    .map((pl) => pl.map(xy));
+  if (lines.length === 0) return [];
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const pl of lines)
+    for (const [x, y] of pl) {
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+  const diag = Math.hypot(maxX - minX, maxY - minY) || 1;
+  const t2 = (tol ?? Math.max(1e-6, diag * 1e-3)) ** 2;
+  const eq = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 <= t2;
+  const used = new Array(lines.length).fill(false);
+  const chains = [];
+  for (let start = 0; start < lines.length; start++) {
+    if (used[start]) continue;
+    used[start] = true;
+    let pts = lines[start].slice();
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (used[i]) continue;
+        const pl = lines[i];
+        const head = pts[0];
+        const tail = pts[pts.length - 1];
+        if (eq(tail, pl[0])) pts = pts.concat(pl.slice(1));
+        else if (eq(tail, pl[pl.length - 1]))
+          pts = pts.concat(pl.slice(0, -1).reverse());
+        else if (eq(head, pl[pl.length - 1])) pts = pl.slice(0, -1).concat(pts);
+        else if (eq(head, pl[0])) pts = pl.slice(1).reverse().concat(pts);
+        else continue;
+        used[i] = true;
+        grew = true;
+      }
+    }
+    const closed = pts.length > 2 && eq(pts[0], pts[pts.length - 1]);
+    chains.push({ pts, closed });
+  }
+  return chains;
+}
+
+// The circle a closed chain of lines approximates, { cx, cy, r }, or null.
+// Its corners must all lie on one circle (within 2% of the radius) and go
+// round it evenly (no gap over 40 degrees) with at least 12 of them -- a
+// square or a hexagon has its corners on a circle too, and is not one.
+export function circleOf(chain) {
+  if (!chain?.closed) return null;
+  const pts = chain.pts.slice(0, -1); // the closing point repeats the first
+  if (pts.length < 12) return null;
+  // Least-squares circle (Kasa): x^2 + y^2 + D x + E y + F = 0.
+  let sx = 0,
+    sy = 0,
+    sxx = 0,
+    syy = 0,
+    sxy = 0,
+    sz = 0,
+    sxz = 0,
+    syz = 0;
+  const n = pts.length;
+  for (const [x, y] of pts) {
+    const z = x * x + y * y;
+    sx += x;
+    sy += y;
+    sxx += x * x;
+    syy += y * y;
+    sxy += x * y;
+    sz += z;
+    sxz += x * z;
+    syz += y * z;
+  }
+  // Normal equations for [D, E, F].
+  const A = [
+    [sxx, sxy, sx],
+    [sxy, syy, sy],
+    [sx, sy, n],
+  ];
+  const b = [-sxz, -syz, -sz];
+  const det = (m) =>
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const d = det(A);
+  if (Math.abs(d) < 1e-18) return null;
+  const col = (k) => A.map((row, i) => row.map((v, j) => (j === k ? b[i] : v)));
+  const D = det(col(0)) / d;
+  const E = det(col(1)) / d;
+  const F = det(col(2)) / d;
+  const cx = -D / 2;
+  const cy = -E / 2;
+  const r2 = cx * cx + cy * cy - F;
+  if (!(r2 > 0)) return null;
+  const r = Math.sqrt(r2);
+  for (const [x, y] of pts)
+    if (Math.abs(Math.hypot(x - cx, y - cy) - r) > r * 0.02) return null;
+  const angles = pts
+    .map(([x, y]) => Math.atan2(y - cy, x - cx))
+    .sort((a, b) => a - b);
+  let gap = angles[0] + 2 * Math.PI - angles[angles.length - 1];
+  for (let i = 1; i < angles.length; i++)
+    gap = Math.max(gap, angles[i] - angles[i - 1]);
+  if (gap > (40 * Math.PI) / 180) return null;
+  return { cx, cy, r };
+}
+
+// Measuring in a sketch: does a click that has a line's end within snap
+// range AND the line under it pick the end (a vertex) or the line?  The end,
+// only when the click is within a quarter of the line's on-screen length of it
+// (and the usual snap range): on a long line its end is still easy to pick,
+// but the lines of a chain round a circle are a few pixels long, every click
+// on one was within snap range of an end, and no line could be picked at all.
+export function measurePicksVertex(distToVertexPx, lineLengthPx, snapPx = 14) {
+  return distToVertexPx <= Math.min(snapPx, 0.25 * lineLengthPx);
+}
+
 // The point a measurement runs FROM and TO. A vertex is itself; a line is the
 // point halfway ALONG it; a face (or a closed loop, or a sampled object) is the
 // centre of its extent.

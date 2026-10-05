@@ -130,11 +130,33 @@ test.describe.serial("measure tool", () => {
   });
 
   test("two vertices report the distance between them", async () => {
+    // Picked as a click picks a vertex: the point, and where it was clicked
+    // (`at`), which the markers are drawn from.
     await pick(
-      { kind: "point", p: [0, 0, 0] },
-      { kind: "point", p: [3, 4, 0] },
+      { kind: "point", p: [0, 0, 0], at: [0, 0, 0], pick: "vertex" },
+      { kind: "point", p: [3, 4, 0], at: [3, 4, 0], pick: "vertex" },
     );
     expect(await readText()).toBe("Distance 50.00 mm");
+    // Each pick is marked by a dot a few pixels across at any zoom -- it was a
+    // sphere sized off the part, which hid the point and grew as you zoomed.
+    const markers = () =>
+      page.evaluate(() =>
+        window.__store.getState()._cameraControls.getMeasureMarkers(),
+      );
+    await expect
+      .poll(
+        async () => (await markers()).filter((m) => m.type === "Points").length,
+      )
+      .toBe(2);
+    const drawn = await markers();
+    expect(
+      drawn.some((m) => m.type === "Mesh"),
+      JSON.stringify(drawn),
+    ).toBe(false);
+    for (const d of drawn.filter((m) => m.type === "Points")) {
+      expect(d.sizeAttenuation).toBe(false);
+      expect(d.size).toBeLessThanOrEqual(8);
+    }
   });
 
   test("two edges measure mid-point to mid-point", async () => {
@@ -209,8 +231,9 @@ test.describe.serial("measure tool", () => {
     await page.evaluate((id) => {
       const s = window.__store.getState();
       // A 4x3 rectangle drawn as four separate lines (0-3), a circle (4), a
-      // quarter arc (5), and two parallel lines 2.5 apart (6,7). No
-      // constraints: these are measured as authored.
+      // quarter arc (5), two parallel lines 2.5 apart (6,7), two lines joined
+      // end to end (8,9), and 24 lines round a circle of radius 1.5 (10-33).
+      // No constraints: these are measured as authored.
       const shapes = [
         { type: "line", x1: 0, y1: 0, x2: 4, y2: 0 },
         { type: "line", x1: 4, y1: 0, x2: 4, y2: 3 },
@@ -227,6 +250,19 @@ test.describe.serial("measure tool", () => {
         },
         { type: "line", x1: -8, y1: 0, x2: -3, y2: 0 },
         { type: "line", x1: -6, y1: 2.5, x2: -1, y2: 2.5 },
+        { type: "line", x1: 0, y1: -6, x2: 3, y2: -6 },
+        { type: "line", x1: 3, y1: -6, x2: 3, y2: -10 },
+        ...Array.from({ length: 24 }, (_, i) => {
+          const a = (i / 24) * 2 * Math.PI;
+          const b = ((i + 1) / 24) * 2 * Math.PI;
+          return {
+            type: "line",
+            x1: 20 + 1.5 * Math.cos(a),
+            y1: 1.5 * Math.sin(a),
+            x2: 20 + 1.5 * Math.cos(b),
+            y2: 1.5 * Math.sin(b),
+          };
+        }),
       ];
       s.addItem(
         {
@@ -260,6 +296,7 @@ test.describe.serial("measure tool", () => {
     // Sampled as a polyline, so the circumference is a hair under 2*pi*r.
     expect(num(text, "Length")).toBeCloseTo(2 * Math.PI * 2 * MM, 0);
     expect(text).toContain("Radius 20.00 mm");
+    expect(text).toContain("Diameter 40.00 mm");
     expect(num(text, "Area")).toBeCloseTo(Math.PI * 4 * MM * MM, 0);
   });
 
@@ -296,5 +333,27 @@ test.describe.serial("measure tool", () => {
     const text = await readText();
     expect(text).toContain("Length (3)");
     expect(text).not.toContain("Area");
+  });
+
+  // A chain is one line to measure: only a second, separate line makes the
+  // reading a distance.
+  test("two lines joined end to end report one length and no distance", async () => {
+    await selectShapes(8, 9);
+    const text = await readText();
+    expect(num(text, "Length \\(2\\)")).toBeCloseTo(7 * MM, 1); // 3 + 4
+    expect(text).not.toContain("Distance");
+    expect(text).not.toContain("Diameter");
+  });
+
+  test("a ring of lines approximating a circle reports its diameter", async () => {
+    await selectShapes(...Array.from({ length: 24 }, (_, i) => 10 + i));
+    const text = await readText();
+    expect(num(text, "Diameter")).toBeCloseTo(3 * MM, 1);
+    expect(text).not.toContain("Distance");
+    // A closed loop, so its area too -- the 24-gon's, a hair under pi r^2.
+    expect(num(text, "Area")).toBeCloseTo(
+      12 * 1.5 * 1.5 * Math.sin((2 * Math.PI) / 24) * MM * MM,
+      0,
+    );
   });
 });

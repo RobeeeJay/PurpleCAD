@@ -13,6 +13,8 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { effectiveSketchSelTypes } from "../../store/selectionMode.js";
 import { getShapeLength, polyArea } from "../sceneObjects.js";
+import { getSketchShapePoints } from "../sceneObjects/sketchShapes.js";
+import { measurePicksVertex } from "../measure.js";
 import { SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
 import { DEFAULT_FONT_ID as TEXT_DEFAULT_FONT_ID } from "../sketchText.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
@@ -480,6 +482,33 @@ export function createSketchInteraction(
     else clearRectangularPatternPreview();
   });
 
+  // The sketch shape index of the line under a screen point, or null --
+  // the same lines, and the same test, as a line click below.
+  const lineUnder = (screenX, screenY) => {
+    const group = sketchShapesGroupRef?.current;
+    if (!group) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(
+      {
+        x: ((screenX - rect.left) / rect.width) * 2 - 1,
+        y: -((screenY - rect.top) / rect.height) * 2 + 1,
+      },
+      cameraRef.current,
+    );
+    const lineObjs = group.children.filter(
+      (c) =>
+        c.userData.shapeIdx != null &&
+        !c.userData.isOffset &&
+        !c.userData.isMirror &&
+        !c.userData.isCircularPattern &&
+        !c.userData.isRectangularPattern &&
+        !c.userData.isCornerBridge,
+    );
+    const hits = hitTestSketchLines(ray, lineObjs);
+    return hits.length > 0 ? (hits[0].object.userData.shapeIdx ?? null) : null;
+  };
+
   const trySelectSketchElement = (screenX, screenY) => {
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
@@ -490,9 +519,39 @@ export function createSketchInteraction(
     // The top-right selection-type widget gates which kinds a click resolves to.
     const { eff } = effectiveSketchSelTypes(useStore.getState());
     // Point hit first (ignore offset-copy points — they're inert).
-    const snap = eff.point
+    let snap = eff.point
       ? findSnap(screenX, screenY, shapes, sketchMesh)
       : null;
+    // Measuring, a line under the click beats a nearby end unless the click
+    // is close to the end relative to the line (see measurePicksVertex).
+    if (snap && eff.line && useStore.getState().measureTool) {
+      const hit = lineUnder(screenX, screenY);
+      const shape = hit != null ? shapes[hit] : null;
+      if (shape) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const toPx = (w) => {
+          const n = w.clone().project(cameraRef.current);
+          return [
+            ((n.x + 1) / 2) * rect.width + rect.left,
+            ((-n.y + 1) / 2) * rect.height + rect.top,
+          ];
+        };
+        const px = getSketchShapePoints(shape, sketchMesh).map(toPx);
+        let lengthPx = 0;
+        for (let i = 1; i < px.length; i++)
+          lengthPx += Math.hypot(
+            px[i][0] - px[i - 1][0],
+            px[i][1] - px[i - 1][1],
+          );
+        const at = toPx(
+          new THREE.Vector3(snap.x, snap.y, 0.003)
+            .applyQuaternion(sketchMesh.quaternion)
+            .add(sketchMesh.position),
+        );
+        const dist = Math.hypot(screenX - at[0], screenY - at[1]);
+        if (!measurePicksVertex(dist, lengthPx)) snap = null;
+      }
+    }
     if (
       snap &&
       !isOffsetShapeIdx(selItem, snap.shapeIdx) &&

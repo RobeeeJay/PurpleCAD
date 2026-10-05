@@ -21,35 +21,47 @@ export function createMeasureAndPrimitivePreviews({
   preselectRetargetProfile,
   rebuildPreviews,
 }) {
-  // Measure tool markers: a coloured sphere at each picked point and a dashed
+  // Measure tool markers: a coloured dot at each picked point and a dashed
   // line between two picks, so the user sees what was picked and what's measured.
+  // The dot is a few PIXELS across at every zoom: it was a sphere sized off the
+  // picked object (4% of its radius), which on a big part was a ball hiding the
+  // point it marked and grew as you zoomed in to look at it.
+  const DOT_PX = 7;
+  let dotTexture = null;
+  const roundDot = () => {
+    if (dotTexture) return dotTexture;
+    const c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(16, 16, 15, 0, Math.PI * 2);
+    ctx.fill();
+    dotTexture = new THREE.CanvasTexture(c);
+    return dotTexture;
+  };
   let measureGroup = null;
   controls.clearMeasureMarkers = () => {
     if (!measureGroup) return;
     scene.remove(measureGroup);
+    // The dot texture is shared across redraws; the rest is per-draw.
     measureGroup.traverse((o) => {
       o.geometry?.dispose?.();
       o.material?.dispose?.();
     });
     measureGroup = null;
   };
+  // What the markers are drawn with, for the e2e suite to check the dots.
+  controls.getMeasureMarkers = () =>
+    (measureGroup?.children || []).map((o) => ({
+      type: o.type,
+      size: o.material?.size ?? null,
+      sizeAttenuation: o.material?.sizeAttenuation ?? null,
+    }));
   controls.updateMeasureMarkers = (picks) => {
     controls.clearMeasureMarkers();
     const list = (picks || []).filter((p) => p && p.at);
     if (list.length === 0) return;
-    // Size the markers off the PICKED objects, not the whole scene — the scene
-    // bbox includes the 1000-unit sketch reference plane, which made a giant
-    // sphere.  Fall back to a small fixed size if no object is under the pick.
-    let refSize = 0;
-    for (const pick of list) {
-      const mesh = objectsRef.current[pick.itemId];
-      if (!mesh || !mesh.geometry) continue;
-      mesh.geometry.computeBoundingSphere?.();
-      const br = mesh.geometry.boundingSphere?.radius || 0;
-      const ws = Math.abs(mesh.getWorldScale(new THREE.Vector3()).x) || 1;
-      refSize = Math.max(refSize, br * ws);
-    }
-    const r = Math.max(0.02, (refSize || 1) * 0.04);
     const g = new THREE.Group();
     const colors = [0xffaa33, 0x33ddff];
     list.forEach((pick, i) => {
@@ -80,29 +92,38 @@ export function createMeasureAndPrimitivePreviews({
         face.renderOrder = 999;
         g.add(face);
       }
-      // A sphere where the measurement actually runs from: the centre of a
-      // face or a line, the vertex itself for a point.  Marking the clicked
-      // spot instead would draw a line the readout disagrees with.
-      const anchor = anchorOf(pick);
-      const m = new THREE.Mesh(
-        new THREE.SphereGeometry(r, 16, 12),
-        new THREE.MeshBasicMaterial({ color, depthTest: false }),
+      // A dot where the measurement actually runs from: the centre of a face
+      // or a line, the vertex itself for a point.  Marking the clicked spot
+      // instead would draw a line the readout disagrees with.
+      const anchor = anchorOf(pick) ?? new THREE.Vector3(...pick.at);
+      const dot = new THREE.Points(
+        new THREE.BufferGeometry().setFromPoints([anchor]),
+        new THREE.PointsMaterial({
+          color,
+          size: DOT_PX,
+          sizeAttenuation: false,
+          map: roundDot(),
+          alphaTest: 0.5,
+          transparent: true,
+          depthTest: false,
+        }),
       );
-      if (anchor) m.position.copy(anchor);
-      else m.position.set(pick.at[0], pick.at[1], pick.at[2]);
-      m.renderOrder = 1000;
-      g.add(m);
+      dot.renderOrder = 1000;
+      g.add(dot);
     });
     if (list.length >= 2) {
+      const ends = [
+        anchorOf(list[0]) ?? new THREE.Vector3(...list[0].at),
+        anchorOf(list[1]) ?? new THREE.Vector3(...list[1].at),
+      ];
+      // The same number of dashes whatever the line's length.
+      const dash = ends[0].distanceTo(ends[1]) / 32 || 0.01;
       const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([
-          anchorOf(list[0]) ?? new THREE.Vector3(...list[0].at),
-          anchorOf(list[1]) ?? new THREE.Vector3(...list[1].at),
-        ]),
+        new THREE.BufferGeometry().setFromPoints(ends),
         new THREE.LineDashedMaterial({
           color: 0xffffff,
-          dashSize: r * 2.5,
-          gapSize: r * 1.5,
+          dashSize: dash,
+          gapSize: dash * 0.6,
           depthTest: false,
         }),
       );
