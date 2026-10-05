@@ -1,7 +1,7 @@
 // End-to-end smoke tests for STL + STEP export.  Verifies that the native
 // C++ addon's export pipeline produces valid output.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll } from "vitest";
 import { makeCube, makeSphere } from "../primitives.js";
 import { tessellate } from "../tessellate.js";
 
@@ -14,8 +14,15 @@ vi.mock("../../../store", () => {
 });
 
 describe("occOps.exportSTL / exportSTEP", () => {
+  // Loading occOps and the native addon takes a couple of seconds on its own,
+  // and past vitest's 5 s under a full parallel run: done once, up front, so
+  // no test's own timeout pays for it.
+  let ops;
+  beforeAll(async () => {
+    ({ ops } = await import("../../occOps.js"));
+  }, 60000);
+
   it("exportSTL emits a valid binary STL for a scene", async () => {
-    const { ops } = await import("../../occOps.js");
     const items = [
       { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } },
       { id: 2, type: "sphere", position: { x: 4, y: 0, z: 0 } },
@@ -28,15 +35,16 @@ describe("occOps.exportSTL / exportSTEP", () => {
     const triCount = view.getUint32(80, true);
     expect(triCount).toBeGreaterThan(0);
     expect(buf.byteLength).toBe(84 + triCount * 50);
-  });
+    // Export tessellates at a 0.001 deviation, so the sphere alone is about
+    // 2.5 s -- over vitest's 5 s default once the heavier OCC test files run
+    // beside this one.
+  }, 30000);
 
   it("exportSTL returns null for an empty scene", async () => {
-    const { ops } = await import("../../occOps.js");
     expect(await ops.exportSTL({ items: [] })).toBeNull();
   });
 
   it("exports a selected subset, resolving recipes against the whole scene", async () => {
-    const { ops } = await import("../../occOps.js");
     const cube = { id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } };
     // A chamfer whose recipe source (the cube) is NOT in the export subset —
     // it must still resolve via allItems.
@@ -126,7 +134,6 @@ describe("occOps.exportSTL / exportSTEP", () => {
   });
 
   it("exportSTEP emits an ISO-10303-21 file", async () => {
-    const { ops } = await import("../../occOps.js");
     const items = [{ id: 1, type: "cube", position: { x: 0, y: 0, z: 0 } }];
     const content = await ops.exportSTEP({ items });
     expect(typeof content).toBe("string");
