@@ -72,6 +72,7 @@ function init(dbFile) {
 
   stmts = {
     settingGet: db.prepare("SELECT value FROM settings WHERE key = ?"),
+    settingAll: db.prepare("SELECT key, value FROM settings"),
     settingSet: db.prepare(
       "INSERT INTO settings (key, value) VALUES (?, ?) " +
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -155,6 +156,11 @@ const settingSet = (key, value) => {
 const settingRemove = (key) => {
   if (stmts) stmts.settingDel.run(key);
 };
+// Every setting, as { key: value } -- the renderer loads them all once at start.
+const allSettings = () =>
+  stmts
+    ? Object.fromEntries(stmts.settingAll.all().map((r) => [r.key, r.value]))
+    : {};
 
 // ── Projects ────────────────────────────────────────────────────────────────
 const now = () => Date.now();
@@ -410,8 +416,19 @@ function safeParse(raw) {
   }
 }
 
+// One project's persisted data in one read, as the renderer caches it.
+const projectData = (pid) => ({
+  timeline: getTimeline(pid),
+  variables: getVariables(pid) || [],
+  folders: getFolders(pid) || [],
+  material: getMaterial(pid),
+  camera: getCamera(pid),
+});
+
 module.exports = {
   init,
+  allSettings,
+  projectData,
   settingGet,
   settingSet,
   settingRemove,

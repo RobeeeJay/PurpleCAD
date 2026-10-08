@@ -7,6 +7,10 @@ const securityWarnings = [];
 test.beforeAll(async () => {
   app = await launchApp();
   page = await app.firstWindow();
+  // Ready before any test runs, not only before the first: a failure restarts
+  // the worker, and the next test then meets a fresh app still loading its
+  // database (the store doesn't exist until that load finishes).
+  await expect(page.locator(".toolbar")).toBeVisible({ timeout: 30000 });
   // Surface renderer console errors in the test output for easier debugging,
   // and collect Electron's security warnings (they only print in unpackaged
   // runs — exactly what this suite is).
@@ -176,7 +180,7 @@ test("the store test hook is exposed for state-driven assertions", async () => {
 });
 
 test("duplicating a project copies its timeline and data", async () => {
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
     const s = window.__store.getState();
     s.addItem({
       id: 7,
@@ -189,7 +193,7 @@ test("duplicating a project copies its timeline and data", async () => {
     const before = window.__store.getState();
     const srcId = before.activeProjectId;
     const src = before.projects.find((p) => p.id === srcId);
-    before.duplicateProject(srcId);
+    await before.duplicateProject(srcId);
     const after = window.__store.getState();
     const copy = after.projects.find(
       (p) => p.id !== srcId && p.name === `${src.name} copy`,

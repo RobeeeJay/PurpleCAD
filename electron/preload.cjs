@@ -1,39 +1,15 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-// Expose a single invoke helper on window.electronAPI so the renderer can
-// call OCC operations on the main process without accessing Node.js directly.
-const sync = (channel, arg) => ipcRenderer.sendSync(channel, arg);
-
+// The renderer's bridge to the main process: OCC operations, and persistence.
+// Persistence is load-once and write-through, all asynchronous -- the same
+// shape an iPad host provides -- apart from dbCallSync, which src/store/db.js
+// uses only for writes made while the window is unloading.
 contextBridge.exposeInMainWorld("electronAPI", {
   invokeOcc: (op, args) => ipcRenderer.invoke(`occ:${op}`, args),
-  // Synchronous SQLite-backed store (replaces localStorage).  sendSync blocks the
-  // renderer briefly but keeps the persistence API synchronous.
-  settingGet: (key) => sync("db:settingGet", key),
-  settingSet: (key, value) => sync("db:settingSet", { key, value }),
-  settingRemove: (key) => sync("db:settingRemove", key),
-  projListProjects: () => sync("db:listProjects"),
-  projCreate: (name) => sync("db:createProject", name),
-  projDuplicate: (id) => sync("db:duplicateProject", id),
-  projRename: (id, name) => sync("db:renameProject", { id, name }),
-  projDelete: (id) => sync("db:deleteProject", id),
-  projSetThumbnail: (id, thumbnail) => sync("db:setThumbnail", { id, thumbnail }),
-  projGetActive: () => sync("db:getActiveProjectId"),
-  projSetActive: (id) => sync("db:setActiveProjectId", id),
-  dbGetTimeline: (pid) => sync("db:getTimeline", pid),
-  dbSaveTimeline: (pid, data) => sync("db:saveTimeline", { pid, data }),
-  // Async variant for the hot save path: a big document's timeline is tens of
-  // MB — sendSync would freeze the renderer for the IPC clone + SQLite write.
-  dbSaveTimelineAsync: (pid, data) =>
-    ipcRenderer.invoke("db:saveTimelineAsync", { pid, data }),
-  dbGetVariables: (pid) => sync("db:getVariables", pid),
-  dbSaveVariables: (pid, data) => sync("db:saveVariables", { pid, data }),
-  dbGetFolders: (pid) => sync("db:getFolders", pid),
-  dbSaveFolders: (pid, data) => sync("db:saveFolders", { pid, data }),
-  dbGetMaterial: (pid) => sync("db:getMaterial", pid),
-  dbSaveMaterial: (pid, data) => sync("db:saveMaterial", { pid, data }),
-  dbGetCamera: (pid) => sync("db:getCamera", pid),
-  dbSaveCamera: (pid, state) => sync("db:saveCamera", { pid, state }),
-  dbClearCamera: (pid) => sync("db:clearCamera", pid),
+  dbBootstrap: () => ipcRenderer.invoke("db:bootstrap"),
+  dbLoadProject: (pid) => ipcRenderer.invoke("db:loadProject", pid),
+  dbCall: (name, arg) => ipcRenderer.invoke("db:call", { name, arg }),
+  dbCallSync: (name, arg) => ipcRenderer.sendSync("db:callSync", { name, arg }),
   // Agent API: the main process forwards socket requests here, the renderer
   // runs them (src/api) and replies with the same id.  Re-registering replaces
   // the previous handler rather than stacking a second one.

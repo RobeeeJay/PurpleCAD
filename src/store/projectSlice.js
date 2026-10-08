@@ -82,7 +82,8 @@ export const createProjectSlice = (set, get) => ({
     }),
 
   // Capture the current viewport into the given project's thumbnail (a reset-
-  // view, shaded, overlay-free shot).  Synchronous so it also runs on unload.
+  // view, shaded, overlay-free shot).  Synchronous so it also runs on unload,
+  // where db.js sends the write synchronously.
   refreshThumbnail: (id) => {
     const thumb = get()._cameraControls?.captureThumbnailDataUrl?.();
     if (thumb) {
@@ -91,17 +92,17 @@ export const createProjectSlice = (set, get) => ({
     }
   },
 
-  createProject: (name) => {
+  createProject: async (name) => {
     get().refreshThumbnail(get().activeProjectId);
-    const id = db.createProject(name || "Untitled");
-    get().applyProjectSwitch(id);
+    const id = await db.createProject(name || "Untitled");
+    await get().applyProjectSwitch(id);
     set({ projects: db.listProjects() });
   },
 
   // Copy a project (timeline, variables, folders, material, camera) without
   // switching to it — the new card appears in the grid for the user to pick.
-  duplicateProject: (id) => {
-    db.duplicateProject(id);
+  duplicateProject: async (id) => {
+    await db.duplicateProject(id);
     set({ projects: db.listProjects() });
   },
 
@@ -110,22 +111,25 @@ export const createProjectSlice = (set, get) => ({
     set({ projects: db.listProjects() });
   },
 
-  deleteProject: (id) => {
+  deleteProject: async (id) => {
     const remaining = get().projects.filter((p) => p.id !== id);
     if (remaining.length === 0) return; // never delete the last project
     db.deleteProject(id);
-    if (get().activeProjectId === id) get().applyProjectSwitch(remaining[0].id);
+    if (get().activeProjectId === id)
+      await get().applyProjectSwitch(remaining[0].id);
     set({ projects: db.listProjects() });
   },
 
-  switchProject: (id) => {
+  switchProject: async (id) => {
     if (id === get().activeProjectId) return;
     get().refreshThumbnail(get().activeProjectId);
-    get().applyProjectSwitch(id);
+    await get().applyProjectSwitch(id);
   },
 
-  // Point the db facade at `id` and reset the store from its data.
-  applyProjectSwitch: (id) => {
+  // Point the db facade at `id` and reset the store from its data, loading
+  // that data first -- the facade holds only projects it has loaded.
+  applyProjectSwitch: async (id) => {
+    await db.loadProject(id);
     db.setActiveProjectId(id);
     set((state) => ({
       ...projectStatePatch(),

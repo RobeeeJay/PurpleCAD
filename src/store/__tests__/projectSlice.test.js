@@ -96,16 +96,17 @@ describe("projectSlice", () => {
     await g().createProject("A");
     await g().createProject("B");
     const b = g().activeProjectId;
-    g().deleteProject(b);
+    // Async: switching to another project loads its data first.
+    await g().deleteProject(b);
     expect(g().activeProjectId).not.toBe(b);
     expect(g().projects.some((p) => p.id === b)).toBe(false);
   });
 
-  it("refuses to delete the last remaining project", () => {
+  it("refuses to delete the last remaining project", async () => {
     // Collapse to a single project first.
-    while (g().projects.length > 1) g().deleteProject(g().projects[0].id);
+    while (g().projects.length > 1) await g().deleteProject(g().projects[0].id);
     const only = g().projects[0].id;
-    g().deleteProject(only);
+    await g().deleteProject(only);
     expect(g().projects.length).toBe(1);
     expect(g().projects[0].id).toBe(only);
   });

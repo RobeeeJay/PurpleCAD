@@ -173,9 +173,14 @@ test.describe.serial("texture library", () => {
     await dialog.locator(".project-rename").press("Enter");
     await expect(dialog.getByText("Rock face", { exact: true })).toBeVisible();
 
-    // Persisted app-wide (settings table), not just component state.
-    const stored = await page.evaluate(() => {
-      const raw = window.electronAPI.settingGet("texture_library");
+    // Persisted app-wide (settings table), not just component state: read
+    // back from the database itself, not the renderer's cache.  Writes go
+    // through in order, so this read sees them.
+    const stored = await page.evaluate(async () => {
+      const raw = await window.electronAPI.dbCall(
+        "db:settingGet",
+        "texture_library",
+      );
       return JSON.parse(raw).map((t) => t.name);
     });
     expect(stored).toEqual(["Rock face"]);
@@ -185,8 +190,11 @@ test.describe.serial("texture library", () => {
     const confirms = await page.evaluate(() => window.__confirms);
     expect(confirms.some((m) => /Delete "Rock face"/.test(m))).toBe(true);
     await expect(dialog.getByText("Rock face", { exact: true })).toBeHidden();
-    const after = await page.evaluate(() =>
-      JSON.parse(window.electronAPI.settingGet("texture_library") || "[]"),
+    const after = await page.evaluate(async () =>
+      JSON.parse(
+        (await window.electronAPI.dbCall("db:settingGet", "texture_library")) ||
+          "[]",
+      ),
     );
     expect(after).toEqual([]);
   });

@@ -138,12 +138,13 @@ try {
 }
 
 // SQLite-backed persistence for renderer settings/data (replaces localStorage).
-// Synchronous IPC keeps the renderer's load-at-init code path unchanged.
+// The renderer loads what it needs once (db:bootstrap, db:loadProject), reads
+// from that cache, and writes through asynchronously (db:call).  It used to
+// call every one of these synchronously (sendSync), which an iPad web view has
+// no equivalent of; the one synchronous channel left, db:callSync, is for the
+// writes made while the window unloads, which an async message could lose.
 const kvStore = require("./kvStore.cjs");
-// Synchronous DB bridge (sendSync): settings, project CRUD, and per-project
-// data.  sendSync returns event.returnValue, which Electron structured-clones,
-// so structured objects/arrays come back to the renderer intact.
-const syncHandlers = {
+const dbHandlers = {
   "db:settingGet": (a) => kvStore.settingGet(a),
   "db:settingSet": (a) => (kvStore.settingSet(a.key, a.value), true),
   "db:settingRemove": (a) => (kvStore.settingRemove(a), true),
@@ -167,11 +168,25 @@ const syncHandlers = {
   "db:saveCamera": (a) => (kvStore.saveCamera(a.pid, a.state), true),
   "db:clearCamera": (a) => (kvStore.clearCamera(a), true),
 };
-for (const [channel, fn] of Object.entries(syncHandlers)) {
-  ipcMain.on(channel, (e, arg) => {
-    e.returnValue = fn(arg);
-  });
-}
+const dbCall = ({ name, arg }) => {
+  const fn = dbHandlers[name];
+  if (!fn) throw new Error(`unknown db call ${name}`);
+  return fn(arg);
+};
+ipcMain.handle("db:bootstrap", () => {
+  const activeProjectId = kvStore.getActiveProjectId();
+  return {
+    settings: kvStore.allSettings(),
+    projects: kvStore.listProjects(),
+    activeProjectId,
+    project: kvStore.projectData(activeProjectId),
+  };
+});
+ipcMain.handle("db:loadProject", (_e, pid) => kvStore.projectData(pid));
+ipcMain.handle("db:call", (_e, call) => dbCall(call));
+ipcMain.on("db:callSync", (e, call) => {
+  e.returnValue = dbCall(call);
+});
 // ── Agent API transport ─────────────────────────────────────────────────────
 // Requests arriving on the API socket (apiServer.cjs) are forwarded to the
 // renderer, where the commands run against the live store and scene, and the
@@ -243,13 +258,6 @@ const isWebUrl = (url) => {
 ipcMain.handle("shell:openExternal", async (_e, url) => {
   if (!isWebUrl(url)) return false;
   await electron.shell.openExternal(url);
-  return true;
-});
-
-// Async timeline save (invoke): the hot path — a mouseup commit on a big
-// document must not block the renderer on the IPC round-trip + SQLite write.
-ipcMain.handle("db:saveTimelineAsync", (_e, a) => {
-  kvStore.saveTimeline(a.pid, a.data);
   return true;
 });
 

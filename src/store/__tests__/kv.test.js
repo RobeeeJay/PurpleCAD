@@ -31,8 +31,9 @@ describe("db facade (in-memory fallback)", () => {
     expect(db.getMaterial().defaultMaterial.color).toBe("#fff");
   });
 
-  it("isolates data between projects", () => {
-    const id = db.createProject("Second");
+  it("isolates data between projects", async () => {
+    const id = await db.createProject("Second");
+    expect(typeof id).toBe("number");
     db.saveVariables([{ name: "only-in-2" }], id);
     expect(db.getVariables(id)[0].name).toBe("only-in-2");
     expect(db.getVariables(1).some((v) => v.name === "only-in-2")).toBe(false);

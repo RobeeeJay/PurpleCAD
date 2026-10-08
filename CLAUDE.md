@@ -1068,6 +1068,18 @@ sources are picked) that reuses the creation UI.
   the app cancelled and will not click anything afterwards, although Electron
   reports it isn't loading and the page works -- so a test that provokes one
   does it LAST (`smoke.spec.js` "license links ...").
+- **Persistence is load-once, write-through -- and the store exists only
+  after the load.** `src/store/db.js` fetches settings, the project list and
+  the active project's data once (`initDb`, before `main.jsx` imports the app),
+  serves reads from that cache, and writes through asynchronously; a project
+  is `loadProject`ed before a switch reads it, so project switch / create /
+  delete / duplicate are async. It used to be ~25 synchronous IPC calls, which
+  an iPad web view can't make. The one synchronous channel left
+  (`dbCallSync`) is for writes made while the window unloads. Because
+  `window.__store` now appears a moment after the page loads, an e2e
+  `beforeAll` must wait for the app (`.toolbar`) before ANY test touches the
+  store: a failure restarts the worker, and the next test otherwise meets an
+  app still loading (`smoke.spec.js` lost two tests that way).
 - **A new item's id comes from `maxItemId(history) + 1`, never a local
   count.** Four hand-rolled counters scanned only single `create` steps and
   missed a Split's `createGroup` pieces: in MultiSystem2 a new sketch took a
