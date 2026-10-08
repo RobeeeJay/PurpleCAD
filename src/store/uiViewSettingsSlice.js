@@ -11,7 +11,7 @@ import {
   SNAP_DEFAULTS,
 } from "./internals.js";
 
-// The triangle limit on a mesh going into a boolean: kMaxTris in binding.cc's
+// The triangle limit on a mesh going into a boolean: kMaxTris in occ_io.cc's
 // MakeSolidFromMesh, which refuses anything over it before sewing.
 export const MAX_BOOLEAN_TRIANGLES = 50000;
 

@@ -372,7 +372,7 @@ What that means in practice:
   `bridgeParity.test.js` case. It then runs in the OCC worker, off the
   renderer thread, and vitest exercises the real native code.
 - A native loop that can run long polls `CancelRequested()` like the other hot
-  loops in `binding.cc` (see "OCC cancellation").
+  loops in the addon (see "OCC cancellation").
 - WASM stays the fallback only where a feature genuinely has to run in the
   renderer; it would also need `'wasm-unsafe-eval'` added to the CSP in
   `index.html`, which currently blocks WebAssembly compilation.
@@ -437,6 +437,27 @@ args)`.
   'arm64'" -- and only blows up at require() time with `symbol not found in
 flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
   Check with `lipo -archs ~/occ-8.0.1-arm64/lib/libTKernel.8.0.1.dylib`.
+- **Each op is written ONCE, against `src/occ_js.h`; N-API and JavaScriptCore
+  are adapters.** The iPad has no Node, so the ops cannot take
+  `Napi::CallbackInfo`: each is `Val Op(Js& js)` over a small engine interface
+  (`js[0]`, `js.num(v, fallback)`, `js.f64(v)`, `js.makeObject()`...), and
+  `napi_binding.cc` (Node/Electron) and `jsc_binding.cc` (iPad) implement that
+  interface and register `occjs::Ops()`. The core is split by topic:
+  `occ_kernel.cc` (shape store, cancel, tessellation), `occ_select.cc` (edge /
+  face matching and persistent names), `occ_build.cc` (primitives, sweeps,
+  transforms), `occ_modify.cc` (boolean, chamfer/fillet, push/pull, draft,
+  shell, hole), `occ_io.cc` (STEP, mesh sewing, the op table), with
+  `occ_core.h` declaring what they share. A new op is a function in the right
+  topic file, a declaration in `occ_core.h` and a row in `Ops()` -- never an
+  adapter change, and never `napi.h` in a core file (the iPad build compiles
+  them without Node). `jscBridge.test.js` (macOS only; the addon build makes
+  `build/occ_jsc_host` there) runs the unchanged `occ-bridge.cjs` under both
+  engines and requires identical results. Two things it found:
+  `JSObjectGetTypedArrayBytesPtr` returns the BUFFER's start, not the view's,
+  so a subarray needs its `byteOffset` added (its subarray case fails without
+  it); and OCC's face order for some ops (shell) changes from RUN to run in
+  one engine, counts unchanged, so meshes are compared as sorted triangle
+  sets, exact coordinates and winding kept.
 - **`npm run build` goes through `native/occ-addon/build.sh`, not bare
   cmake-js.** macOS 27 removed Rosetta, and this machine's Intel Homebrew
   (`/usr/local/bin/cmake`, `ninja`, `pkg-config`) sits first on PATH, so
@@ -453,7 +474,7 @@ flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
   "conversion from 'handle<Geom2d_TrimmedCurve>' ... requested") while clang
   accepts it, so the short spelling builds green on macOS and breaks Linux
   only. Bind the derived handle to its own name first, then upcast. Verify a
-  gcc build (`npm run e2e:image`) after touching `binding.cc`.
+  gcc build (`npm run e2e:image`) after touching the addon's C++.
 - **Simplify's deviation is a certified BOUND -- never swap it for sampling.**
   meshoptimizer's own error is an estimate (about 3x over on a real part), and
   probing vertices, centroids and edge midpoints under-read too: 0.050 mm where
@@ -470,7 +491,7 @@ flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
   instead of that iterator. If a future OCC bump reintroduces a similar
   removed-header break, prefer the range-based-for fix over re-adding the old
   header.
-- `BooleanOp`'s union path (`binding.cc`) sets `SetFuzzyValue(1e-5)` on the
+- `BooleanOp`'s union path (`occ_modify.cc`) sets `SetFuzzyValue(1e-5)` on the
   `BRepAlgoAPI_Fuse` and then runs `ShapeUpgrade_UnifySameDomain` on the
   result (falling back to the raw fuse if unification throws). This is
   required so independently-built abutting solids (e.g. multiple extruded
@@ -504,7 +525,7 @@ The working mechanism (keep all three pieces in lockstep):
    before each op (safe — the thread is free between ops). `occClient.cancelOcc`
    (renderer) triggers the IPC; the Viewport `cancelEpoch` effect and the
    `inputs.jsx` preview-supersede call it, each also `clearSolids()`.
-2. **Native polls it.** `binding.cc` aliases the SAB as `g_cancelPtr`
+2. **Native polls it.** `occ_kernel.cc` aliases the SAB as `g_cancelPtr`
    (`SetCancelBuffer`). `CancelIndicator : Message_ProgressIndicator` returns it
    from `UserBreak()`; `CancelRange()` hands a range rooted at that indicator
    into every heavy `.Build(...)` (boolean, chamfer, fillet, pushpull prism,
@@ -567,7 +588,7 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   once made this look like an 88s O(faces²) wall — it wasn't; see the
   `conform-emboss-rework` memory.)
 - **OCC kernel faults are converted to exceptions — keep `OSD::SetSignal`.**
-  `binding.cc`'s `Init` calls `OSD::SetSignal(Standard_False)`: hardware faults
+  `occjs::Init` (`occ_kernel.cc`) calls `OSD::SetSignal(Standard_False)`: hardware faults
   inside OCC algorithms (ChFi3d's chamfer builder NULL-derefs on degenerate
   stripes — observed via `PerformSetOfSurf` after a resolution switch) become
   catchable `Standard_Failure` instead of a SIGSEGV that kills the whole app
@@ -668,7 +689,7 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   `ShapeFix_Shape` didn't fully repair it. Sewing is load-bearing for downstream
   op compatibility; the fast path is _cutting-off sewing_, not _no sewing_.
 - **This is native-only — no `occOps.js` / `occ-bridge.cjs` op-body change.**
-  The cancel range + fast-sew live entirely in `binding.cc` (shared by both JS
+  The cancel range + fast-sew live entirely in the addon (shared by both JS
   impls), so the lockstep rule is satisfied by rebuilding the addon
   (`cd native/occ-addon && npm run build`). The only JS surface is the SAB
   plumbing (`main.cjs` / `occ-worker.cjs` / `occClient.cancelOcc`) and the

@@ -1957,7 +1957,7 @@ function releaseShape({ id }) {
 
 // Register the shared cancel flag (an Int32Array over a SharedArrayBuffer).  The
 // native builders poll it via UserBreak and abort mid-op when another thread
-// flips it — see binding.cc's CancelIndicator.
+// flips it — see occ_kernel.cc's CancelIndicator.
 function setCancelBuffer(view) {
   occ.setCancelBuffer(view);
 }

@@ -2,7 +2,7 @@
 //
 // Shapes are returned as integer IDs into the native shape store.  The
 // caller is responsible for calling occ.releaseShape(id) when done.
-// See binding.cc for the exact OCC constructor calls and default sizes.
+// See occ_build.cc for the exact OCC constructor calls and default sizes.
 
 import { createRequire } from "module";
 const _require = createRequire(import.meta.url);

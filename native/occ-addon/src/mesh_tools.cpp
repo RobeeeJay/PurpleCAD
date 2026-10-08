@@ -61,17 +61,17 @@ Topology CountEdges(const std::vector<uint32_t>& idx) {
 
 // Positions arrive as doubles from the op layer; a Float32Array (straight from
 // an STL) is widened.
-std::vector<double> ReadPositions(const Napi::Value& v, const char* op) {
-  if (!v.IsTypedArray())
+std::vector<double> ReadPositions(occjs::Js& js, occjs::Val v, const char* op) {
+  const occjs::Typed arr = js.typed(v);
+  if (arr.kind == occjs::TypedKind::None)
     throw std::runtime_error(std::string(op) + ": positions must be a typed array");
   std::vector<double> pos;
-  Napi::TypedArray arr = v.As<Napi::TypedArray>();
-  if (arr.TypedArrayType() == napi_float64_array) {
-    auto p = v.As<Napi::Float64Array>();
-    pos.assign(p.Data(), p.Data() + p.ElementLength());
-  } else if (arr.TypedArrayType() == napi_float32_array) {
-    auto p = v.As<Napi::Float32Array>();
-    pos.assign(p.Data(), p.Data() + p.ElementLength());
+  if (arr.kind == occjs::TypedKind::Float64) {
+    auto p = static_cast<const double*>(arr.data);
+    pos.assign(p, p + arr.length);
+  } else if (arr.kind == occjs::TypedKind::Float32) {
+    auto p = static_cast<const float*>(arr.data);
+    pos.assign(p, p + arr.length);
   } else {
     throw std::runtime_error(std::string(op) + ": positions must be float");
   }
@@ -79,11 +79,11 @@ std::vector<double> ReadPositions(const Napi::Value& v, const char* op) {
 }
 
 // No index buffer: an STL's triangle soup, three private vertices each.
-std::vector<uint32_t> ReadIndices(const Napi::CallbackInfo& info, size_t at,
+std::vector<uint32_t> ReadIndices(occjs::Js& js, size_t at,
                                   size_t vertexCount, const char* op) {
   std::vector<uint32_t> idx;
-  if (info.Length() > at && info[at].IsTypedArray()) {
-    auto i = info[at].As<Napi::Uint32Array>();
+  if (js.argc() > at && js.isTypedArray(js[at])) {
+    auto i = js.u32(js[at]);
     idx.assign(i.Data(), i.Data() + i.ElementLength());
   } else {
     idx.resize(vertexCount);
@@ -633,197 +633,178 @@ double BoundDeviation(const std::vector<double>& pos,
 
 }  // namespace
 
-Napi::Value WeldMesh(const Napi::CallbackInfo& info) {
-  Napi::Env env = info.Env();
-  try {
-    if (info.Length() < 1)
-      throw std::runtime_error("weldMesh: positions must be a typed array");
-    std::vector<double> pos = ReadPositions(info[0], "weldMesh");
-    const size_t vertexCount = pos.size() / 3;
-    if (vertexCount < 3) throw std::runtime_error("weldMesh: too few vertices");
-    const std::vector<uint32_t> idx = ReadIndices(info, 1, vertexCount, "weldMesh");
+occjs::Val WeldMesh(occjs::Js& js) {
+  if (js.argc() < 1)
+    throw std::runtime_error("weldMesh: positions must be a typed array");
+  std::vector<double> pos = ReadPositions(js, js[0], "weldMesh");
+  const size_t vertexCount = pos.size() / 3;
+  if (vertexCount < 3) throw std::runtime_error("weldMesh: too few vertices");
+  const std::vector<uint32_t> idx = ReadIndices(js, 1, vertexCount, "weldMesh");
 
-    const Welded w = Weld(std::move(pos), idx);
-    const Topology topo = CountEdges(w.idx);
+  const Welded w = Weld(std::move(pos), idx);
+  const Topology topo = CountEdges(w.idx);
 
-    auto outPos = Napi::Float64Array::New(env, w.pos.size());
-    std::copy(w.pos.begin(), w.pos.end(), outPos.Data());
-    auto outIdx = Napi::Uint32Array::New(env, w.idx.size());
-    std::copy(w.idx.begin(), w.idx.end(), outIdx.Data());
-
-    Napi::Object out = Napi::Object::New(env);
-    out.Set("positions", outPos);
-    out.Set("indices", outIdx);
-    out.Set("openEdges", Napi::Number::New(env, topo.open));
-    out.Set("nonManifoldEdges", Napi::Number::New(env, topo.nonManifold));
-    out.Set("degenerateTriangles", Napi::Number::New(env, topo.degenerate));
-    out.Set("verticesBefore", Napi::Number::New(env, double(w.before)));
-    out.Set("verticesAfter", Napi::Number::New(env, double(w.pos.size() / 3)));
-    return out;
-  } catch (const std::exception& e) {
-    throw Napi::Error::New(env, e.what());
-  }
+  occjs::Val out = js.makeObject();
+  js.set(out, "positions", js.makeFloat64Array(w.pos.data(), w.pos.size()));
+  js.set(out, "indices", js.makeUint32Array(w.idx.data(), w.idx.size()));
+  js.set(out, "openEdges", double(topo.open));
+  js.set(out, "nonManifoldEdges", double(topo.nonManifold));
+  js.set(out, "degenerateTriangles", double(topo.degenerate));
+  js.set(out, "verticesBefore", double(w.before));
+  js.set(out, "verticesAfter", double(w.pos.size() / 3));
+  return out;
 }
 
-Napi::Value SimplifyMesh(const Napi::CallbackInfo& info) {
-  Napi::Env env = info.Env();
-  try {
-    if (info.Length() < 4)
-      throw std::runtime_error("simplifyMesh: expected positions, indices, mode, value");
-    std::vector<double> pos = ReadPositions(info[0], "simplifyMesh");
-    const size_t vertexCount = pos.size() / 3;
-    if (vertexCount < 3) throw std::runtime_error("simplifyMesh: too few vertices");
-    const std::vector<uint32_t> idx = ReadIndices(info, 1, vertexCount, "simplifyMesh");
-    const std::string mode = info[2].As<Napi::String>().Utf8Value();
-    const double value = info[3].As<Napi::Number>().DoubleValue();
-    const bool byError = mode == "deviation";
-    if (!byError && mode != "triangles")
-      throw std::runtime_error("simplifyMesh: mode must be deviation or triangles");
-    if (!(value > 0)) throw std::runtime_error("simplifyMesh: value must be positive");
+occjs::Val SimplifyMesh(occjs::Js& js) {
+  if (js.argc() < 4)
+    throw std::runtime_error("simplifyMesh: expected positions, indices, mode, value");
+  std::vector<double> pos = ReadPositions(js, js[0], "simplifyMesh");
+  const size_t vertexCount = pos.size() / 3;
+  if (vertexCount < 3) throw std::runtime_error("simplifyMesh: too few vertices");
+  const std::vector<uint32_t> idx = ReadIndices(js, 1, vertexCount, "simplifyMesh");
+  const std::string mode = js.string(js[2]);
+  const double value = js.number(js[3]);
+  const bool byError = mode == "deviation";
+  if (!byError && mode != "triangles")
+    throw std::runtime_error("simplifyMesh: mode must be deviation or triangles");
+  if (!(value > 0)) throw std::runtime_error("simplifyMesh: value must be positive");
 
-    // Simplify the WELDED mesh: on a soup no two triangles share a vertex, so
-    // there is nothing to collapse.  An OCC tessellation shares positions
-    // along face seams without sharing vertices -- welding joins those too.
-    const Welded w = Weld(std::move(pos), idx);
-    const size_t nv = w.pos.size() / 3;
-    const Topology before = CountEdges(w.idx);
-    std::unordered_set<uint64_t> nonManifoldBefore;
-    for (const auto& e : EdgeUses(w.idx, nullptr))
-      if (e.second > 2) nonManifoldBefore.insert(e.first);
+  // Simplify the WELDED mesh: on a soup no two triangles share a vertex, so
+  // there is nothing to collapse.  An OCC tessellation shares positions
+  // along face seams without sharing vertices -- welding joins those too.
+  const Welded w = Weld(std::move(pos), idx);
+  const size_t nv = w.pos.size() / 3;
+  const Topology before = CountEdges(w.idx);
+  std::unordered_set<uint64_t> nonManifoldBefore;
+  for (const auto& e : EdgeUses(w.idx, nullptr))
+    if (e.second > 2) nonManifoldBefore.insert(e.first);
 
-    std::vector<float> fpos(w.pos.begin(), w.pos.end());
-    std::vector<std::vector<uint32_t>> ring(nv);
-    for (size_t t = 0; t + 2 < w.idx.size(); t += 3)
-      for (int a = 0; a < 3; a++)
-        for (int b = 0; b < 3; b++)
-          if (a != b) ring[w.idx[t + a]].push_back(w.idx[t + b]);
+  std::vector<float> fpos(w.pos.begin(), w.pos.end());
+  std::vector<std::vector<uint32_t>> ring(nv);
+  for (size_t t = 0; t + 2 < w.idx.size(); t += 3)
+    for (int a = 0; a < 3; a++)
+      for (int b = 0; b < 3; b++)
+        if (a != b) ring[w.idx[t + a]].push_back(w.idx[t + b]);
 
-    // An open mesh keeps its border where it is: collapsing border edges
-    // would move the hole, not simplify the surface.
-    const unsigned options = meshopt_SimplifyErrorAbsolute |
-                             (before.open ? meshopt_SimplifyLockBorder : 0);
-    const size_t targetIndices =
-        byError ? 0 : std::min(w.idx.size(), size_t(value) * 3);
-    // A collapse can close a thin gap and pinch two sheets of the surface
-    // together along one edge (four triangles on it, two each way).  Lock the
-    // vertices around each new pinch and simplify again; two rounds cleared
-    // every pinch on a real part, for 4% more triangles.  Locks accumulate
-    // across calls, so a lock placed for the deviation (below) stays.
-    std::vector<unsigned char> lock(nv, 0);
-    auto simplify = [&](float targetError, std::vector<uint32_t>& out) {
-      for (int round = 0; round < 8; round++) {
-        if (MeshCancelRequested()) throw std::runtime_error("cancelled");
-        out.assign(w.idx.size(), 0);
-        const size_t n = meshopt_simplifyWithAttributes(
-            out.data(), w.idx.data(), w.idx.size(), fpos.data(), nv,
-            sizeof(float) * 3, nullptr, 0, nullptr, 0, lock.data(),
-            targetIndices, targetError, options, nullptr);
-        out.resize(n);
-        bool pinched = false;
-        for (const auto& e : EdgeUses(out, nullptr)) {
-          if (e.second <= 2 || nonManifoldBefore.count(e.first)) continue;
-          pinched = true;
-          for (uint32_t v : {uint32_t(e.first >> 32), uint32_t(e.first)}) {
-            lock[v] = 1;
-            for (uint32_t u : ring[v]) lock[u] = 1;
-          }
-        }
-        if (!pinched) return;
-      }
-      throw std::runtime_error(
-          "Simplifying would join separate parts of the surface; try a smaller reduction.");
-    };
-
-    std::vector<uint32_t> out;
-    double deviation = 0;
-    int attempts = 0;
-    if (!byError) {
-      attempts = 1;
-      simplify(FLT_MAX, out);
-      // No bound was asked for, so find the smallest one that certifies:
-      // bisect between zero and a first loose bound, to within 2%.
-      std::vector<uint32_t> over;
-      double fits = BoundDeviation(w.pos, w.idx, out, DBL_MAX, nullptr);
-      double fails = 0;
-      while (fits > 0 && fits - fails > 0.02 * fits) {
-        const double t = (fits + fails) / 2;
-        over.clear();
-        const double d = BoundDeviation(w.pos, w.idx, out, t, &over);
-        if (over.empty())
-          fits = std::min(t, d);
-        else
-          fails = t;
-      }
-      deviation = fits;
-    } else {
-      // meshoptimizer's error is its own estimate, not a bound: measured on a
-      // real part it ran to about three times the request.  So the bound is
-      // enforced by measuring the result, and where it is exceeded the
-      // original vertices there are locked and the simplify runs again.
-      // Tightening the request for the whole mesh instead left most of the
-      // reduction on the table (9% fewer triangles at 0.05 mm, against 20% or
-      // more when only the few offending spots are held).
-      std::vector<uint32_t> over;
-      for (;; attempts++) {
-        if (attempts >= 24)
-          throw std::runtime_error(
-              "Couldn't simplify within that deviation; try a larger one.");
-        // Asked for exactly the tolerance.  Asking for more and letting the
-        // locks hold what strays sounded like more reduction but measured as
-        // less (at 0.2 mm, 64-78% of the triangles kept against 50%): more of
-        // the surface strays, and the locks pile up.
-        simplify(float(value), out);
-        over.clear();
-        deviation = BoundDeviation(w.pos, w.idx, out, value, &over);
-        if (over.empty()) break;
-        // Holding just the offending vertex usually settles a spot within a
-        // few rounds.  Where it doesn't -- the vertex is already held and the
-        // patch still strays, so another collapse nearby is to blame -- hold
-        // everything within two edges of it.
-        bool fresh = false;
-        for (uint32_t v : over) fresh |= !lock[v];
-        for (uint32_t v : over) {
+  // An open mesh keeps its border where it is: collapsing border edges
+  // would move the hole, not simplify the surface.
+  const unsigned options = meshopt_SimplifyErrorAbsolute |
+                           (before.open ? meshopt_SimplifyLockBorder : 0);
+  const size_t targetIndices =
+      byError ? 0 : std::min(w.idx.size(), size_t(value) * 3);
+  // A collapse can close a thin gap and pinch two sheets of the surface
+  // together along one edge (four triangles on it, two each way).  Lock the
+  // vertices around each new pinch and simplify again; two rounds cleared
+  // every pinch on a real part, for 4% more triangles.  Locks accumulate
+  // across calls, so a lock placed for the deviation (below) stays.
+  std::vector<unsigned char> lock(nv, 0);
+  auto simplify = [&](float targetError, std::vector<uint32_t>& out) {
+    for (int round = 0; round < 8; round++) {
+      if (MeshCancelRequested()) throw std::runtime_error("cancelled");
+      out.assign(w.idx.size(), 0);
+      const size_t n = meshopt_simplifyWithAttributes(
+          out.data(), w.idx.data(), w.idx.size(), fpos.data(), nv,
+          sizeof(float) * 3, nullptr, 0, nullptr, 0, lock.data(),
+          targetIndices, targetError, options, nullptr);
+      out.resize(n);
+      bool pinched = false;
+      for (const auto& e : EdgeUses(out, nullptr)) {
+        if (e.second <= 2 || nonManifoldBefore.count(e.first)) continue;
+        pinched = true;
+        for (uint32_t v : {uint32_t(e.first >> 32), uint32_t(e.first)}) {
           lock[v] = 1;
-          if (!fresh)
-            for (uint32_t u : ring[v]) {
-              lock[u] = 1;
-              for (uint32_t x : ring[u]) lock[x] = 1;
-            }
+          for (uint32_t u : ring[v]) lock[u] = 1;
         }
       }
-      attempts++;
+      if (!pinched) return;
     }
+    throw std::runtime_error(
+        "Simplifying would join separate parts of the surface; try a smaller reduction.");
+  };
 
-    const Topology after = CountEdges(out);
-    if (after.open > before.open)
-      throw std::runtime_error("Simplifying opened holes in the mesh.");
-
-    // Keep only the vertices the simplified triangles use.
-    std::vector<uint32_t> remap(nv, UINT32_MAX);
-    std::vector<double> outPos;
-    for (uint32_t& v : out) {
-      if (remap[v] == UINT32_MAX) {
-        remap[v] = uint32_t(outPos.size() / 3);
-        outPos.insert(outPos.end(), &w.pos[3 * v], &w.pos[3 * v] + 3);
+  std::vector<uint32_t> out;
+  double deviation = 0;
+  int attempts = 0;
+  if (!byError) {
+    attempts = 1;
+    simplify(FLT_MAX, out);
+    // No bound was asked for, so find the smallest one that certifies:
+    // bisect between zero and a first loose bound, to within 2%.
+    std::vector<uint32_t> over;
+    double fits = BoundDeviation(w.pos, w.idx, out, DBL_MAX, nullptr);
+    double fails = 0;
+    while (fits > 0 && fits - fails > 0.02 * fits) {
+      const double t = (fits + fails) / 2;
+      over.clear();
+      const double d = BoundDeviation(w.pos, w.idx, out, t, &over);
+      if (over.empty())
+        fits = std::min(t, d);
+      else
+        fails = t;
+    }
+    deviation = fits;
+  } else {
+    // meshoptimizer's error is its own estimate, not a bound: measured on a
+    // real part it ran to about three times the request.  So the bound is
+    // enforced by measuring the result, and where it is exceeded the
+    // original vertices there are locked and the simplify runs again.
+    // Tightening the request for the whole mesh instead left most of the
+    // reduction on the table (9% fewer triangles at 0.05 mm, against 20% or
+    // more when only the few offending spots are held).
+    std::vector<uint32_t> over;
+    for (;; attempts++) {
+      if (attempts >= 24)
+        throw std::runtime_error(
+            "Couldn't simplify within that deviation; try a larger one.");
+      // Asked for exactly the tolerance.  Asking for more and letting the
+      // locks hold what strays sounded like more reduction but measured as
+      // less (at 0.2 mm, 64-78% of the triangles kept against 50%): more of
+      // the surface strays, and the locks pile up.
+      simplify(float(value), out);
+      over.clear();
+      deviation = BoundDeviation(w.pos, w.idx, out, value, &over);
+      if (over.empty()) break;
+      // Holding just the offending vertex usually settles a spot within a
+      // few rounds.  Where it doesn't -- the vertex is already held and the
+      // patch still strays, so another collapse nearby is to blame -- hold
+      // everything within two edges of it.
+      bool fresh = false;
+      for (uint32_t v : over) fresh |= !lock[v];
+      for (uint32_t v : over) {
+        lock[v] = 1;
+        if (!fresh)
+          for (uint32_t u : ring[v]) {
+            lock[u] = 1;
+            for (uint32_t x : ring[u]) lock[x] = 1;
+          }
       }
-      v = remap[v];
     }
-
-    auto jsPos = Napi::Float64Array::New(env, outPos.size());
-    std::copy(outPos.begin(), outPos.end(), jsPos.Data());
-    auto jsIdx = Napi::Uint32Array::New(env, out.size());
-    std::copy(out.begin(), out.end(), jsIdx.Data());
-    Napi::Object res = Napi::Object::New(env);
-    res.Set("positions", jsPos);
-    res.Set("indices", jsIdx);
-    res.Set("trianglesBefore", Napi::Number::New(env, double(w.idx.size() / 3)));
-    res.Set("trianglesAfter", Napi::Number::New(env, double(out.size() / 3)));
-    res.Set("maxDeviation", Napi::Number::New(env, deviation));
-    res.Set("openEdges", Napi::Number::New(env, after.open));
-    res.Set("nonManifoldEdges", Napi::Number::New(env, after.nonManifold));
-    res.Set("attempts", Napi::Number::New(env, attempts));
-    return res;
-  } catch (const std::exception& e) {
-    throw Napi::Error::New(env, e.what());
+    attempts++;
   }
+
+  const Topology after = CountEdges(out);
+  if (after.open > before.open)
+    throw std::runtime_error("Simplifying opened holes in the mesh.");
+
+  // Keep only the vertices the simplified triangles use.
+  std::vector<uint32_t> remap(nv, UINT32_MAX);
+  std::vector<double> outPos;
+  for (uint32_t& v : out) {
+    if (remap[v] == UINT32_MAX) {
+      remap[v] = uint32_t(outPos.size() / 3);
+      outPos.insert(outPos.end(), &w.pos[3 * v], &w.pos[3 * v] + 3);
+    }
+    v = remap[v];
+  }
+
+  occjs::Val res = js.makeObject();
+  js.set(res, "positions", js.makeFloat64Array(outPos.data(), outPos.size()));
+  js.set(res, "indices", js.makeUint32Array(out.data(), out.size()));
+  js.set(res, "trianglesBefore", double(w.idx.size() / 3));
+  js.set(res, "trianglesAfter", double(out.size() / 3));
+  js.set(res, "maxDeviation", deviation);
+  js.set(res, "openEdges", double(after.open));
+  js.set(res, "nonManifoldEdges", double(after.nonManifold));
+  js.set(res, "attempts", double(attempts));
+  return res;
 }

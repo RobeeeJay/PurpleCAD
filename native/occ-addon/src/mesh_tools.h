@@ -3,13 +3,13 @@
 // simplification held to a measured deviation.
 #pragma once
 
-#include <napi.h>
+#include "occ_js.h"
 
 // weldMesh(positions: Float64Array | Float32Array, indices: Uint32Array | null)
 //   -> { positions: Float64Array, indices: Uint32Array,
 //        openEdges, nonManifoldEdges, degenerateTriangles,
 //        verticesBefore, verticesAfter }
-Napi::Value WeldMesh(const Napi::CallbackInfo& info);
+occjs::Val WeldMesh(occjs::Js& js);
 
 // simplifyMesh(positions, indices | null, mode: "deviation" | "triangles",
 //              value: max deviation in the positions' units, or a triangle
@@ -17,7 +17,7 @@ Napi::Value WeldMesh(const Napi::CallbackInfo& info);
 //   -> { positions: Float64Array, indices: Uint32Array, trianglesBefore,
 //        trianglesAfter, maxDeviation, openEdges, nonManifoldEdges, attempts }
 // Throws with a reason when the result would open holes or pinch the surface.
-Napi::Value SimplifyMesh(const Napi::CallbackInfo& info);
+occjs::Val SimplifyMesh(occjs::Js& js);
 
-// The cancel flag (binding.cc), for the long loops here.
+// The cancel flag (occ_kernel.cc), for the long loops here.
 bool MeshCancelRequested();
