@@ -228,3 +228,5 @@ JSObjectRef OccMakeAddon(JSContextRef ctx) {
   }
   return addon;
 }
+
+void OccSetCancelFlag(volatile int32_t* flag) { occjs::SetCancelFlag(flag); }

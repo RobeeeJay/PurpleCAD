@@ -223,6 +223,8 @@ long OpenEdgeCount(const TopoDS_Shape& shape, double deflection) {
 // For mesh_tools.cpp's long loops.
 bool MeshCancelRequested() { return occ::CancelRequested(); }
 
+void occjs::SetCancelFlag(volatile int32_t* flag) { occ::SetCancelFlag(flag); }
+
 void occjs::Init() {
   // Convert hardware faults inside OCC algorithms (SIGSEGV/SIGFPE/…) into
   // catchable Standard_Failure exceptions on this thread.  OCC's fillet/chamfer

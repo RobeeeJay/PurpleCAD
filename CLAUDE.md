@@ -746,6 +746,16 @@ stricter than the store's: mm in the user's Z-up frame only, a command returns
 only once the model has settled, and nothing throws. New commands are covered in
 `e2e/agent-api.spec.js` -- vitest cannot reach the scene or the OCC bridge.
 
+## iPad app (ios/app)
+
+The renderer in a WKWebView, and `occ-bridge.cjs` unchanged in JavaScriptCore
+on its own thread -- documented in **`ios/app/README.md`**, with the Phase 0
+measurements in `ios/spike/README.md`. Its contract with the renderer is
+`window.electronAPI`: a renderer change that adds or reshapes an
+`electronAPI` call has to land in `ios/app/PurpleCAD/js/electron-shim.js` too,
+or it works on the desktop and silently does nothing on the iPad. Check a
+change there with the smoke run (`--smoke`), in the simulator at least.
+
 ## Variables / formulas
 
 - Dimension distances, extrude depths, and chamfer/fillet parameters can

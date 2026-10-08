@@ -118,4 +118,7 @@ const std::vector<Op>& Ops();
 // Process-wide setup each adapter runs once before the first op.
 void Init();
 
+// The flag that aborts the running op when set non-zero (occ_kernel.cc).
+void SetCancelFlag(volatile int32_t* flag);
+
 }  // namespace occjs
