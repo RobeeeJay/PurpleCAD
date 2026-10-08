@@ -16,3 +16,4 @@ release/
 
 # Intermediate for icon.icns; rebuild with `npm run icons`.
 app-icons/mac.iconset/
+build-spike/
