@@ -45,10 +45,13 @@ the app's `Documents/smoke-iso.png`.
 xcrun simctl install booted ios/app/build/Release-iphonesimulator/PurpleCAD.app
 xcrun simctl launch --console-pty --terminate-running-process booted \
   com.robeesworld.purplecad --smoke
-# iPad (unlocked)
+# iPad (unlocked); the report comes off the device afterwards (see below)
 xcrun devicectl device install app --device <UDID> ios/app/build/Release-iphoneos/PurpleCAD.app
 xcrun devicectl device process launch --console --terminate-existing \
   --device <UDID> com.robeesworld.purplecad --smoke
+xcrun devicectl device copy from --device <UDID> --domain-type appDataContainer \
+  --domain-identifier com.robeesworld.purplecad --source Documents/console.log \
+  --destination console.log
 ```
 
 ### Results (2026-10-08)
@@ -65,7 +68,34 @@ iPad Air 11-inch (M4) simulator: every check passed.
 
 The simulator runs on the Mac's CPU, so these are not iPad timings.
 
+iPad Pro 12.9-inch (6th generation, M2, iPadOS 27): every check passed, on
+two launches.
+- The app was ready in 0.14–0.19 s.
+- The flow up to the render took 8.2–8.9 s, including the two runs of the
+  slow union.
+- The union and the rebuild gave the same figures as the simulator.
+- Cancel: the 2000-gon union took 4.58 and 4.59 s uncancelled, 1.5x the Mac's
+  3.1 s. Cancelled 300 ms in, it returned after 417–419 ms.
+- The render (looked at) shows the same part, on the dark theme the iPad was
+  set to.
+
+This is an M2. The M1 minimum is still unmeasured.
+
 ## Findings worth keeping
+
+- **iPadOS 27 requires the scene lifecycle.** An app delegate that makes its
+  own window is trapped at launch on the device
+  (`_UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`, SIGTRAP).
+  The iOS 26 simulator runs the same app fine. The window now belongs to
+  `SceneDelegate`. The crash report was the only evidence:
+  `xcrun devicectl device info files --device <UDID> --domain-type systemCrashLogs`.
+- **`devicectl --console` relays none of the app's stdout on the iPad.** It
+  did for the Phase 0 spike, which never started UIKit. `Log` also writes
+  `Documents/console.log`, which is copied off the device afterwards:
+  `xcrun devicectl device copy from --device <UDID> --domain-type appDataContainer --domain-identifier com.robeesworld.purplecad --source Documents/console.log --destination console.log`.
+  While the app was crashing, `devicectl` still reported "terminated with
+  the exit code 0", so that line proves nothing. The report in the copied
+  log is the verdict.
 
 - **A cancelled boolean returns; it doesn't throw.** `BooleanOp` takes
   `Shape()` without checking `IsDone()`, so a cancelled union comes back with

@@ -174,6 +174,7 @@ w(f'''\t\t{BC_PROJ} /* Release */ = {{isa = XCBuildConfiguration; buildSettings 
 \t\t\t\t);
 \t\t\t\tINFOPLIST_KEY_CFBundleDisplayName = PurpleCAD;
 \t\t\t\tINFOPLIST_KEY_UILaunchScreen_Generation = YES;
+\t\t\t\tINFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 \t\t\t\tINFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 \t\t\t\tLD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 \t\t\t\tMARKETING_VERSION = 0.1;

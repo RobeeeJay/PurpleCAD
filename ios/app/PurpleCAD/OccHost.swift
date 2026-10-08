@@ -97,11 +97,25 @@ final class OccHost {
   }
 }
 
-/// Unbuffered lines on stdout, which `devicectl ... --console` and
-/// `simctl launch --console-pty` relay -- the smoke run's only channel out.
+/// Unbuffered lines on stdout, which `simctl launch --console-pty` relays,
+/// and in Documents/console.log, started afresh each launch: on an iPad,
+/// `devicectl ... --console` relayed none of the app's stdout (it did for the
+/// Phase 0 spike, which never started UIKit), so the smoke run's report is
+/// copied off the device instead (README.md).
 enum Log {
+  private static let file: FileHandle? = {
+    let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("console.log")
+    FileManager.default.createFile(atPath: url.path, contents: nil)
+    return try? FileHandle(forWritingTo: url)
+  }()
+  private static let lock = NSLock()
+
   static func line(_ s: String) {
+    lock.lock()
+    defer { lock.unlock() }
     fputs(s + "\n", stdout)
     fflush(stdout)
+    file?.write(Data((s + "\n").utf8))
   }
 }
