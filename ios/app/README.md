@@ -1,10 +1,13 @@
 # PurpleCAD for iPad
 
-The iPad app hosts the desktop renderer unchanged in a WKWebView. It runs the
-OCC ops through the unchanged `electron/occ-bridge.cjs`, inside a
-JavaScriptCore context on a dedicated thread. The core of the native addon is
-shared with the desktop. Phase 1 of the iPad port split it out
-(`native/occ-addon/src/occ_js.h`); this is Phase 2.
+The iPad app hosts the desktop renderer unchanged in a WKWebView. Two pieces of
+the desktop's main process run unchanged too, each in a JavaScriptCore context
+on its own thread:
+- `electron/occ-bridge.cjs` runs the OCC ops, over the addon core shared with
+  the desktop (Phase 1, `native/occ-addon/src/occ_js.h`);
+- `electron/kvStore.cjs` keeps the documents, over the system SQLite.
+
+The app itself is Phase 2 of the iPad port; persistence and files are Phase 3.
 
 | Desktop (Electron) | iPad |
 |---|---|
@@ -14,7 +17,10 @@ shared with the desktop. Phase 1 of the iPad port split it out
 | The OCC worker thread running `occ-bridge.cjs` | `OccHost.swift`: one thread, a 16 MB stack, JavaScriptCore running `occ-bridge.cjs` (`js/occ-host.js` loads it) |
 | `napi_binding.cc` | `jsc_binding.cc` |
 | The `SharedArrayBuffer` cancel flag | An int32 Swift owns, set with `OccSetCancelFlag` |
-| SQLite (`db.js`, through `dbBootstrap`) | Not yet: `db.js` falls back to the web view's `localStorage`, which survives a relaunch. Native SQLite is Phase 3. |
+| `kvStore.cjs` over better-sqlite3, answering `db:*` | `DbHost.swift`: `kvStore.cjs` over the system SQLite, through `js/db-host.js` (the slice of better-sqlite3 it uses). Same schema: the Mac's `sqlite3` reads the iPad's file. |
+| `db:callSync` while the window unloads | None. An iPad app is backgrounded, not unloaded: `db.js` flushes on `visibilitychange`, and the host keeps the app awake 2 s to write it. |
+| Save / Export: a browser download | A `WKDownload`, offered to the share sheet ("Save to Files"). |
+| Open: the file input | The same file input (the iPad's picker), and a `.pcad` opened from the Files app (a `purplecad:open-document` event into the same code). |
 
 ## Building and running
 
@@ -35,13 +41,19 @@ OCCT libraries from the addon's `CMakeLists.txt`, so the two can't drift.
 Launched with `--smoke`, the app runs `js/smoke.js` once the page loads:
 - the agent-API plate flow from `e2e/agent-api.spec.js`: a plate sized by
   variables, a boss, a union, a variable change, a rebuild check and a render;
-- a cancel check.
+- a cancel check;
+- persistence: the timeline read back from SQLite, past the page's cache;
+- files: the toolbar's real Save button, the download caught, and the file
+  reopened the way the Files app opens a `.pcad`, as a new project.
+
+`--smoke-reload` is the second half, a fresh launch afterwards: the part,
+its variables and both projects must come back from the database.
 
 It prints each check and exits 0 only if all hold. It also writes the render to
 the app's `Documents/smoke-iso.png`.
 
 ```bash
-# simulator
+# simulator (then the same with --smoke-reload)
 xcrun simctl install booted ios/app/build/Release-iphonesimulator/PurpleCAD.app
 xcrun simctl launch --console-pty --terminate-running-process booted \
   com.robeesworld.purplecad --smoke
@@ -81,6 +93,15 @@ two launches.
 
 This is an M2. The M1 minimum is still unmeasured.
 
+Persistence and files (Phase 3), on both the simulator and the iPad, from a
+fresh install: every check of `--smoke` and `--smoke-reload` passed.
+- The timeline in SQLite had all six steps, the last making the union.
+- Save produced a 43,711-byte `scene.pcad`. Reopened, it made a project
+  "scene" that rebuilt the part at 80 x 40 x 18.
+- After a relaunch, the part, `Width = 80` and both projects came back.
+- The iPad's database, copied off the device, opens in the Mac's `sqlite3`:
+  two projects, six timeline rows each, and a 16 KB thumbnail.
+
 ## Findings worth keeping
 
 - **iPadOS 27 requires the scene lifecycle.** An app delegate that makes its
@@ -102,6 +123,13 @@ This is an M2. The M1 minimum is still unmeasured.
   an empty or partial mesh. The desktop behaves the same: `occClient`'s cancel
   epoch discards the result. The smoke check therefore measures time, and
   checks the result isn't the full one.
+- **A blob download survives an immediate revoke.** `handleSave` revokes its
+  blob URL as soon as it has clicked the link. WebKit still delivers the
+  download whole (43,711 bytes, reopened fine), so the renderer needed no
+  change.
+- **A timeline step's stored label is just "Added".** The name shown in the
+  timeline comes from the item it creates; a check that looked for "Union"
+  in the labels failed for that reason, not because the save was incomplete.
 - **The simulator build must exclude x86_64.** OCCT for the simulator is
   arm64 only. A generic simulator destination otherwise also links x86_64 and
   fails on every OCCT symbol.
@@ -111,7 +139,16 @@ This is an M2. The M1 minimum is still unmeasured.
 
 ## Not yet
 
-- Native SQLite, projects, Files-app `.pcad` (Phase 3).
+- The Files app handing a `.pcad` to PurpleCAD is not exercised by the smoke
+  run. Only the `openDocument` path it calls is, and the document type is in
+  the built Info.plist. Tap a `.pcad` in Files to try it.
+- The flush on going to the background is unit-tested (`dbCache.test.js`) but
+  not driven on a device. A timeline save waits 150 ms, which no outside tool
+  can background the app inside.
+- A long OCC op when the app goes to the background is not aborted: iOS
+  suspends the thread, and the op carries on when the app returns. The
+  document is saved first, so only the op's work is at risk if iOS kills a
+  suspended app.
 - Touch, Pencil and keyboard (Phase 4). The renderer still expects a mouse and
   a trackpad.
 - Layout (Phase 5): portrait leaves the 3D view cramped beside the fixed

@@ -425,8 +425,55 @@ const projectData = (pid) => ({
   camera: getCamera(pid),
 });
 
+// The calls the renderer makes over db:call, by name.  The desktop's main
+// process and the iPad host (ios/app, which runs this file unchanged in
+// JavaScriptCore) both answer the renderer through call() and bootstrap().
+const dbHandlers = {
+  "db:settingGet": (a) => settingGet(a),
+  "db:settingSet": (a) => (settingSet(a.key, a.value), true),
+  "db:settingRemove": (a) => (settingRemove(a), true),
+  "db:listProjects": () => listProjects(),
+  "db:createProject": (a) => createProject(a),
+  "db:duplicateProject": (a) => duplicateProject(a),
+  "db:renameProject": (a) => (renameProject(a.id, a.name), true),
+  "db:deleteProject": (a) => (deleteProject(a), true),
+  "db:setThumbnail": (a) => (setThumbnail(a.id, a.thumbnail), true),
+  "db:getActiveProjectId": () => getActiveProjectId(),
+  "db:setActiveProjectId": (a) => (setActiveProjectId(a), true),
+  "db:getTimeline": (a) => getTimeline(a),
+  "db:saveTimeline": (a) => (saveTimeline(a.pid, a.data), true),
+  "db:getVariables": (a) => getVariables(a),
+  "db:saveVariables": (a) => (saveVariables(a.pid, a.data), true),
+  "db:getFolders": (a) => getFolders(a),
+  "db:saveFolders": (a) => (saveFolders(a.pid, a.data), true),
+  "db:getMaterial": (a) => getMaterial(a),
+  "db:saveMaterial": (a) => (saveMaterial(a.pid, a.data), true),
+  "db:getCamera": (a) => getCamera(a),
+  "db:saveCamera": (a) => (saveCamera(a.pid, a.state), true),
+  "db:clearCamera": (a) => (clearCamera(a), true),
+};
+// The renderer's writes and one-off reads (src/store/db.js), by name.
+const call = ({ name, arg }) => {
+  const fn = dbHandlers[name];
+  if (!fn) throw new Error(`unknown db call ${name}`);
+  return fn(arg);
+};
+
+// Everything the renderer reads before its store exists.
+function bootstrap() {
+  const activeProjectId = getActiveProjectId();
+  return {
+    settings: allSettings(),
+    projects: listProjects(),
+    activeProjectId,
+    project: projectData(activeProjectId),
+  };
+}
+
 module.exports = {
   init,
+  bootstrap,
+  call,
   allSettings,
   projectData,
   settingGet,

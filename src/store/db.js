@@ -260,11 +260,19 @@ export function flushTimelineSave() {
   send("db:saveTimeline", { pid: savePid, data });
 }
 
-if (typeof window !== "undefined")
+if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", () => {
     unloading = true;
     flushTimelineSave();
   });
+  // An iPad app is never unloaded: it goes to the background and may be
+  // killed there without warning, so the pending save goes out as the page
+  // is hidden (the host keeps the app awake long enough to write it).
+  // visibilitychange bubbles from the document to the window.
+  window.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushTimelineSave();
+  });
+}
 
 export function getTimeline(id) {
   const raw = cache

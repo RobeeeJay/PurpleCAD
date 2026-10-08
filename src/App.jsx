@@ -59,8 +59,16 @@ function App() {
       const s = useStore.getState();
       s.refreshThumbnail?.(s.activeProjectId);
     };
+    // The iPad never unloads; going to the background is its way of leaving.
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") onLeave();
+    };
     window.addEventListener("beforeunload", onLeave);
-    return () => window.removeEventListener("beforeunload", onLeave);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.removeEventListener("beforeunload", onLeave);
+      document.removeEventListener("visibilitychange", onHidden);
+    };
   }, []);
   useEffect(() => {
     const name = projects.find((p) => p.id === activeProjectId)?.name;

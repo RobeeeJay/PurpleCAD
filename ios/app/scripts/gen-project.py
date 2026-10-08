@@ -21,7 +21,8 @@ ROOT = os.path.dirname(os.path.dirname(APP))
 def oid(*parts):
     return hashlib.md5("/".join(parts).encode()).hexdigest()[:24].upper()
 
-SWIFT = ["AppDelegate.swift", "WebViewController.swift", "AppSchemeHandler.swift", "OccHost.swift"]
+SWIFT = ["AppDelegate.swift", "WebViewController.swift", "AppSchemeHandler.swift",
+         "ScriptThread.swift", "OccHost.swift", "DbHost.swift"]
 # The OCC core, exactly as the addon's CMakeLists lists it (checked below).
 cmake = open(os.path.join(ROOT, "native/occ-addon/CMakeLists.txt")).read()
 core_block = re.search(r"add_library\(occ_core OBJECT(.*?)\)", cmake, re.S).group(1)
@@ -107,7 +108,7 @@ rm -rf "$res/web" "$res/js" "$res/occ"
 mkdir -p "$res/web" "$res/js" "$res/occ"
 cp -R "$dist/" "$res/web/"
 cp "$SRCROOT/PurpleCAD/js/"*.js "$res/js/"
-cp "$SRCROOT/../../electron/occ-bridge.cjs" "$res/occ/"
+cp "$SRCROOT/../../electron/occ-bridge.cjs" "$SRCROOT/../../electron/kvStore.cjs" "$res/occ/"
 '''
 OCCT = r'''set -e
 # The OCCT libraries the app links, and everything they link in turn, into
@@ -172,6 +173,7 @@ w(f'''\t\t{BC_PROJ} /* Release */ = {{isa = XCBuildConfiguration; buildSettings 
 \t\t\t\t\t"$(SRCROOT)/../../native/occ-addon/src",
 \t\t\t\t\t"$(SRCROOT)/../../native/occ-addon/third_party/meshoptimizer/src",
 \t\t\t\t);
+\t\t\t\tINFOPLIST_FILE = PurpleCAD/Info.plist;
 \t\t\t\tINFOPLIST_KEY_CFBundleDisplayName = PurpleCAD;
 \t\t\t\tINFOPLIST_KEY_UILaunchScreen_Generation = YES;
 \t\t\t\tINFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -180,7 +182,8 @@ w(f'''\t\t{BC_PROJ} /* Release */ = {{isa = XCBuildConfiguration; buildSettings 
 \t\t\t\tMARKETING_VERSION = 0.1;
 \t\t\t\tOTHER_LDFLAGS = (
 \t\t\t\t\t"-L$(OCCT_IOS)/lib",
-{ldflags}\t\t\t\t\t"-framework",
+{ldflags}\t\t\t\t\t"-lsqlite3",
+\t\t\t\t\t"-framework",
 \t\t\t\t\tJavaScriptCore,
 \t\t\t\t);
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.robeesworld.purplecad;

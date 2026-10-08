@@ -753,7 +753,11 @@ on its own thread -- documented in **`ios/app/README.md`**, with the Phase 0
 measurements in `ios/spike/README.md`. Its contract with the renderer is
 `window.electronAPI`: a renderer change that adds or reshapes an
 `electronAPI` call has to land in `ios/app/PurpleCAD/js/electron-shim.js` too,
-or it works on the desktop and silently does nothing on the iPad. Check a
+or it works on the desktop and silently does nothing on the iPad. The
+iPad also runs `electron/kvStore.cjs` unchanged (over its own SQLite shim,
+`js/db-host.js`), so a new `kvStore` query may use only the better-sqlite3
+calls that shim provides -- `prepare().run/get/all`, `exec`, `pragma`,
+`transaction` -- or the shim grows with it. Check a
 change there with the smoke run (`--smoke`), in the simulator at least.
 
 ## Variables / formulas

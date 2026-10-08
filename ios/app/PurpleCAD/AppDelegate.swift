@@ -29,5 +29,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     window.rootViewController = WebViewController()
     window.makeKeyAndVisible()
     self.window = window
+    // Launched by opening a .pcad in the Files app.
+    for context in connectionOptions.urlContexts {
+      (window.rootViewController as? WebViewController)?.openDocument(url: context.url)
+    }
+  }
+
+  func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
+    for context in contexts {
+      (window?.rootViewController as? WebViewController)?.openDocument(url: context.url)
+    }
+  }
+
+  func sceneDidEnterBackground(_ scene: UIScene) {
+    (window?.rootViewController as? WebViewController)?.enteredBackground()
   }
 }

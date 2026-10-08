@@ -3,6 +3,9 @@
 // the electronAPI shim and the OCC thread, reporting each step to Swift, which
 // prints it and exits 0 only if every check held.  It is the iPad's
 // end-to-end check until an XCUITest suite exists.
+//
+// --smoke-reload (window.__smokeMode = "reload") is the second half: a fresh
+// launch after --smoke, checking the part came back from the database.
 (function () {
   const report = (msg) => window.webkit.messageHandlers.smoke.postMessage(msg);
   const log = (line) => report({ log: line });
@@ -12,7 +15,7 @@
   async function waitFor(get, what, timeout = 60000) {
     const start = performance.now();
     for (;;) {
-      const v = get();
+      const v = await get();
       if (v) return v;
       if (performance.now() - start > timeout) throw new Error(`timed out waiting for ${what}`);
       await new Promise((r) => setTimeout(r, 100));
@@ -37,6 +40,8 @@
     const api = await waitFor(() => window.__api, "window.__api");
     await waitFor(() => document.querySelector(".toolbar"), "the toolbar");
     log(`app ready (${ms()}), ${api.list().length} commands`);
+    check(!!window.electronAPI.dbBootstrap, "persistence goes to the native database");
+    if (window.__smokeMode === "reload") return reload();
 
     const gl = document.createElement("canvas").getContext("webgl2");
     check(!!gl, "WebGL2 is available");
@@ -131,6 +136,57 @@
     check(img.mimeType === "image/png" && img.data.length > 5000,
           `rendered a ${img.data.length}-character PNG`);
     report({ png: img.data });
+
+    // The timeline as SQLite holds it, read past the page's cache once the
+    // coalesced save (150 ms) has gone out.
+    await new Promise((r) => setTimeout(r, 1000));
+    const pid = await window.electronAPI.dbCall("db:getActiveProjectId");
+    const saved = await window.electronAPI.dbCall("db:getTimeline", pid);
+    // Scene, two sketches, two extrudes, the union.  A step's stored label
+    // is plain "Added"; the item it creates says what it was.
+    const steps = saved ? saved.history : [];
+    const last = steps[steps.length - 1];
+    const made = last && last.instruction && last.instruction.item;
+    check(steps.length === 6 && made && made.id === part.id,
+          `the database holds the timeline (${steps.length} steps, the last ` +
+            `making item ${made && made.id}, the union is ${part.id})`);
+
+    // Save through the toolbar's real Save button.  The host catches the
+    // download (in a normal run it goes to the share sheet) and reopens it
+    // the way the Files app opens a .pcad: as a new project.
+    const downloaded = new Promise((r) => (window.__smokeDownloaded = (name, size) => r({ name, size })));
+    document.querySelector('button[title="Save / Export"]').click();
+    await new Promise((r) => setTimeout(r, 200));
+    document.querySelector('button[title="Save the document as a portable .pcad file"]').click();
+    const file = await Promise.race([
+      downloaded,
+      new Promise((r) => setTimeout(() => r(null), 10000)),
+    ]);
+    check(file && file.name === "scene.pcad" && file.size > 1000,
+          `Save made ${file ? `${file.name}, ${file.size} bytes` : "no download"}`);
+    if (!file) return;
+    const opened = await waitFor(async () => {
+      const projects = await window.electronAPI.dbCall("db:listProjects");
+      return projects.find((p) => p.name === "scene");
+    }, "the reopened document's project", 30000).catch(() => null);
+    check(!!opened, `reopening it made project "${opened && opened.name}"`);
+    await new Promise((r) => setTimeout(r, 500));
+    const reopened = (await call("body.list", {})).bodies;
+    check(reopened.length === 1 && near(reopened[0].bboxMm.size[0], 80, 0.1),
+          `the reopened document rebuilt its part (${reopened.map((b) => b.bboxMm.size.map((v) => v.toFixed(2)))})`);
+  }
+
+  // A new launch: the document must come back from the database alone.
+  async function reload() {
+    const { bodies } = await call("body.list", {});
+    check(bodies.length === 1 && near(bodies[0].bboxMm.size[0], 80, 0.1) &&
+          near(bodies[0].bboxMm.size[2], 18, 0.1),
+          `the part came back (${bodies.map((b) => b.bboxMm.size.map((v) => v.toFixed(2)))})`);
+    const vars = await call("variables.list", {});
+    const width = (vars.variables || []).find((v) => v.name === "Width");
+    check(width && width.valueMm === 80, `Width came back as ${width && width.valueMm}`);
+    const projects = await window.electronAPI.dbCall("db:listProjects");
+    check(projects.length >= 2, `${projects.length} projects listed (the part, and its reopened copy)`);
   }
 
   run().then(

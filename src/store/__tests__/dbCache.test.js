@@ -131,6 +131,22 @@ describe("the Electron persistence cache", () => {
     ]);
   });
 
+  // An iPad app is backgrounded, never unloaded, and may be killed in the
+  // background: the coalesced save has to go out as the page is hidden, not
+  // 150 ms later.  It goes asynchronously -- the host stays awake for it.
+  it("a hidden page sends the pending save at once", () => {
+    db.saveTimeline({ history: [{ id: 0 }, { id: 8 }] });
+    globalThis.document = { visibilityState: "visible" };
+    listeners.visibilitychange();
+    expect(host.calls).toEqual([]);
+    globalThis.document.visibilityState = "hidden";
+    listeners.visibilitychange();
+    delete globalThis.document;
+    expect(host.calls.map(([kind, name]) => `${kind} ${name}`)).toEqual([
+      "async db:saveTimeline",
+    ]);
+  });
+
   it("creating a project waits for the host's id and its new list", async () => {
     const id = await db.createProject("Fresh");
     expect(id).toBe(3);

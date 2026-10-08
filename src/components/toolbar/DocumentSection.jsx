@@ -231,24 +231,35 @@ const DocumentSection = () => {
     fileInputRef.current.value = "";
     fileInputRef.current.click();
   };
+  // A .pcad's text, opened as a new project.  The file input uses it, and so
+  // does the iPad host when the Files app opens a .pcad in PurpleCAD (a
+  // purplecad:open-document event, below).
+  const openDocumentText = async (fileName, text) => {
+    const baseName = fileName.replace(/\.(pcad|cad\.json|json)$/i, "");
+    try {
+      const data = JSON.parse(text);
+      if (!data.history || !Array.isArray(data.history)) {
+        alert("Invalid document file.");
+        return;
+      }
+      await createProject(baseName || "Imported");
+      loadDocument(data);
+    } catch (err) {
+      alert("Failed to read document: " + err.message);
+    }
+  };
+  const openDocumentRef = useRef(openDocumentText);
+  openDocumentRef.current = openDocumentText;
+  useEffect(() => {
+    const onOpen = (e) => openDocumentRef.current(e.detail.name, e.detail.text);
+    window.addEventListener("purplecad:open-document", onOpen);
+    return () => window.removeEventListener("purplecad:open-document", onOpen);
+  }, []);
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const baseName = file.name.replace(/\.(pcad|cad\.json|json)$/i, "");
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!data.history || !Array.isArray(data.history)) {
-          alert("Invalid document file.");
-          return;
-        }
-        await createProject(baseName || "Imported");
-        loadDocument(data);
-      } catch (err) {
-        alert("Failed to read document: " + err.message);
-      }
-    };
+    reader.onload = (ev) => openDocumentText(file.name, ev.target.result);
     reader.readAsText(file);
   };
 
