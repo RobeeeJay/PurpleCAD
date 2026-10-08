@@ -32,7 +32,7 @@ targets, builds the spike three ways, runs macOS and the simulator).
 | Does it link into an iOS binary? | **Yes**, against the 13 libraries the workload needs. | Linked for the simulator and the device. |
 | Does OCC run on iOS? | **Yes**: same result as macOS (14,078 triangles). | Run in the iPad Air 11-inch (M4) simulator via `simctl spawn`. |
 | Does JSC on a background thread drive it? | **Yes**: same result, `onMainThread: false`, no measurable overhead (2.2 s jsc vs 2.2–2.3 s native on macOS, two runs each). | Run on macOS and in the simulator. |
-| Time and memory on a real iPad | **Not yet measured**: no iPad was connected. | See *Remaining*. |
+| Time and memory on a real iPad | **3.0 s, 620–730 MB peak**, native and jsc alike. | Run on an iPad Pro 11-inch (M2, iPad14,5) through `SpikeApp.xcodeproj`, two launches of four runs each. |
 
 Measured figures from the clean macOS run (M-series Mac, two runs each):
 
@@ -50,6 +50,24 @@ to 3.3–4.4 s. The simulator runs on the Mac's own CPU, so its times are
 Size: the 48 OCCT libraries are 68 MB for iOS. The 13 this workload needs are
 32 MB. The app will need more than 13 (STEP, fillets and so on), so expect a
 figure between the two.
+
+On the iPad (M2), two launches, each running native, jsc, native, jsc in one
+process:
+
+| Mode | Sew | Cut | Mesh | Total |
+|---|---|---|---|---|
+| native | 2.18–2.25 s | 0.39 s | 0.37–0.41 s | 2.95–3.05 s |
+| jsc | 2.20–2.25 s | 0.39 s | 0.38–0.39 s | 2.97–3.03 s |
+
+Peak memory is the process's lifetime peak, so it only rises across the four
+runs: 619 → 666 → 708 → 732 MB in the first launch, 620 → 634 → 647 → 680 MB
+in the second. The first run's ~620 MB is the workload's own peak. The rise
+after it is memory the spike keeps between runs; it does not free its shapes.
+The app's shape store will need the same care.
+
+The iPad takes about 1.35x the Mac's time. This is an M2, not the M1 minimum;
+an M1 is expected to be slower but has not been measured *(est: about 3.5 s,
+from the M1's lower single-core speed; not measured)*.
 
 ## Findings worth keeping
 
@@ -74,17 +92,37 @@ figure between the two.
 |---|---|
 | OCCT builds and links for iOS | **Passed.** |
 | The JSC model works (synchronous native calls from a background JS thread) | **Passed.** |
-| On an M1 iPad: this workload within 3x the M-series Mac's time (≤ ~7 s), and peak memory well inside the app's limit (≤ 1.5 GB) | **Pending a device.** |
+| On an M1 iPad: this workload within 3x the M-series Mac's time (≤ ~7 s), and peak memory well inside the app's limit (≤ 1.5 GB) | **Passed on an M2** (3.0 s, ≤ 732 MB). Not yet run on an M1. |
 
-## Remaining
+## Running on a device
 
-The device run needs:
+`SpikeApp.xcodeproj` wraps `spike.mm` in a signed app. With no arguments, the
+app runs the workload four times (native, jsc, native, jsc) and prints one
+JSON line for each. The Embed OCCT phase copies the 13 dylibs into
+`Frameworks/` as `libTKxxx.8.0.dylib`, the name each dylib's install name
+gives, and signs them.
 
-- an M1-or-later iPad connected to this Mac;
-- a small app bundle around `spike.mm`, because a device runs only signed apps,
-  unlike `simctl spawn`. The Apple Development signing identity is already on
-  this Mac.
+```bash
+node ios/spike/mesh.js ios/spike/ms2.bin
+xcodebuild -project ios/spike/SpikeApp.xcodeproj -scheme SpikeApp \
+  -configuration Release -destination id=<UDID> \
+  -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
+  SYMROOT=$PWD/ios/spike/build build
+xcrun devicectl device install app --device <UDID> \
+  ios/spike/build/Release-iphoneos/SpikeApp.app
+xcrun devicectl device process launch --console --terminate-existing \
+  --device <UDID> com.robeesworld.purplecad.spike
+```
 
-The 13 OCCT dylibs go in the bundle's `Frameworks/`; `spike-ios` already
-links with `@executable_path/Frameworks`. Run the workload on M1 (the
-minimum) as well as anything newer.
+Two traps when doing this:
+
+- **Developer Mode has to be on** (Settings, then Privacy & Security). Without
+  it the install fails with `Installing cryptex com.apple.MobileAsset.DDI is
+  disallowed because developer mode is not enabled`.
+- **Build with `-destination id=<UDID>`, not `-sdk iphoneos`.** Without a
+  destination, Xcode signs with a team profile that doesn't list the iPad.
+  The install then fails with `This provisioning profile cannot be installed
+  on this device`. With the destination, Xcode registers the device and adds
+  it to the profile.
+
+Still to do: run the same workload on an M1 iPad, the minimum.

@@ -269,9 +269,24 @@ static NSString* runJSC(const Input& in) {
 
 int main(int argc, const char* argv[]) {
   @autoreleasepool {
+    // As an app on a device (no arguments): the mesh is in the bundle, and
+    // each mode runs twice -- a device only runs signed apps, so this is how
+    // the spike gets there (SpikeApp.xcodeproj); devicectl captures stdout.
     if (argc < 3) {
-      fprintf(stderr, "usage: spike <mesh.bin> <native|jsc>\n");
-      return 2;
+      NSString* path = [[NSBundle mainBundle] pathForResource:@"ms2"
+                                                       ofType:@"bin"];
+      Input in;
+      if (!path || !readInput(path.UTF8String, in)) {
+        fprintf(stderr, "usage: spike <mesh.bin> <native|jsc>\n");
+        return 2;
+      }
+      for (const char* mode : {"native", "jsc", "native", "jsc"}) {
+        NSString* line =
+            strcmp(mode, "jsc") == 0 ? runJSC(in) : runNative(in);
+        printf("%s\n", line.UTF8String);
+        fflush(stdout);
+      }
+      return 0;
     }
     Input in;
     if (!readInput(argv[1], in)) {
