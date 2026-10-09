@@ -559,8 +559,11 @@ export function createToolPreviews({
   };
 
   // Snapshot / restore the camera view (used by the Objects-list Solo button so
-  // toggling solo off returns to where the user was).
-  controls.captureView = () => {
+  // toggling solo off returns to where the user was).  Not "captureView": that
+  // is the agent API's PNG render (materialFitHelpers.js), and sharing the
+  // name let the render, assigned later, replace this snapshot -- every Solo
+  // press then threw before it could frame anything.
+  controls.snapshotView = () => {
     if (!cameraRef.current || !cameraControlsRef.current) return null;
     return {
       positionX: cameraRef.current.position.x,

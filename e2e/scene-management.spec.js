@@ -76,6 +76,57 @@ test.describe.serial("scene management", () => {
     ).toBeNull();
   });
 
+  // Through the real button, not the store: the store-level test above
+  // passed all the while the button threw on every press (its camera
+  // snapshot, captureView, had been replaced by the agent API's render of the
+  // same name).
+  test("the Solo button frames its object, and pressing it again goes back", async () => {
+    const view = () =>
+      page.evaluate(() => {
+        const t = window.__store.getState()._cameraControls.getViewTarget();
+        return [t.x, t.y, t.z];
+      });
+    const settled = () =>
+      expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__store.getState()._cameraControls.isCameraAnimating(),
+          ),
+        )
+        .toBe(false);
+    const errors = [];
+    const onError = (e) => errors.push(e.message);
+    page.on("pageerror", onError);
+    await settled();
+    const before = await view();
+
+    const row = page.locator(".tree-item", { hasText: "Beta" });
+    await row.hover();
+    await row.locator(".solo-btn").click();
+    await expect
+      .poll(() => page.evaluate(() => window.__store.getState().soloItemId))
+      .toBe(901);
+    await page.waitForTimeout(100);
+    await settled();
+    const framed = await view();
+    // Beta sits at x = 3 (scene units): framing it moves the target there.
+    expect(framed[0], `target x ${before[0]} -> ${framed[0]}`).toBeCloseTo(
+      3,
+      0,
+    );
+
+    await row.locator(".solo-btn").click();
+    await expect
+      .poll(() => page.evaluate(() => window.__store.getState().soloItemId))
+      .toBeNull();
+    await page.waitForTimeout(100);
+    await settled();
+    const back = await view();
+    for (let i = 0; i < 3; i++) expect(back[i]).toBeCloseTo(before[i], 4);
+    page.off("pageerror", onError);
+    expect(errors).toEqual([]);
+  });
+
   test("a folder can be created and renamed from the tree", async () => {
     await page.locator(".tree-view-header .tree-header-btn").nth(1).click();
     const folders = await page.evaluate(

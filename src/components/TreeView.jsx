@@ -333,7 +333,7 @@ const TreeViewItem = ({
       clearItemSolo();
     } else if (state.soloItemId == null) {
       // First solo: remember where we are, then frame the soloed object.
-      setItemSolo(node.id, cc?.captureView?.() ?? null);
+      setItemSolo(node.id, cc?.snapshotView?.() ?? null);
       cc?.frameObject?.(node.id);
     } else {
       // Switching solo: keep the original snapshot, frame the new object.
