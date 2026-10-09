@@ -40,6 +40,10 @@ export function simplifyToFit(items, message) {
 }
 
 export const createUiViewSettingsSlice = (set) => ({
+  // The on-screen Shift (TouchModifiers.jsx): a finger or the Pencil has no
+  // key to hold, so touchInput.js reads this as the events' shiftKey.
+  touchShift: false,
+  toggleTouchShift: () => set((state) => ({ touchShift: !state.touchShift })),
   setShadowsEnabled: (v) => set({ shadowsEnabled: !!v }),
   toggleCrossSectionView: () =>
     set((state) => ({ crossSectionView: !state.crossSectionView })),

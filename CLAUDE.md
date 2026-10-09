@@ -760,6 +760,19 @@ calls that shim provides -- `prepare().run/get/all`, `exec`, `pragma`,
 `transaction` -- or the shim grows with it. Check a
 change there with the smoke run (`--smoke`), in the simulator at least.
 
+**Touch and the Pencil are the mouse and the wheel, not a second input
+path.** `touchInput.js` turns pointer events of type `touch` / `pen` into
+calls to the viewport's own `onMouseDown/Move/Up` and `onMouseWheel`, by the
+rules in `touchGestures.js` (pure, `touchGestures.test.js`): the Pencil is the
+mouse; a finger tap is a click, a one-finger drag the Shift+wheel orbit (a pan
+in a sketch), two fingers the wheel pan plus `zoomBy`, a held finger the
+sketch long-press menu, a double tap on empty space Home. A finger on a
+transform handle drags it. Shift comes from the on-screen toggle
+(`touchShift`). So a new mouse behaviour reaches the iPad for free, and a new
+gesture belongs in the rules, not in a handler. `e2e/touch-input.spec.js`
+dispatches the pointer events an iPad sends; WebKit's own side (no second,
+compatibility click after a tap) can only be checked on an iPad.
+
 ## Variables / formulas
 
 - Dimension distances, extrude depths, and chamfer/fillet parameters can

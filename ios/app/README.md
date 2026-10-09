@@ -149,7 +149,12 @@ fresh install: every check of `--smoke` and `--smoke-reload` passed.
   suspends the thread, and the op carries on when the app returns. The
   document is saved first, so only the op's work is at risk if iOS kills a
   suspended app.
-- Touch, Pencil and keyboard (Phase 4). The renderer still expects a mouse and
-  a trackpad.
+- Touch (Phase 4) is in, as rules over the mouse and wheel handlers
+  (CLAUDE.md, "Touch and the Pencil..."): Pencil = mouse; finger tap = click;
+  one finger orbits (pans in a sketch); two fingers pan and pinch-zoom; a held
+  finger opens the sketch's long-press menu; double tap on empty space = Home;
+  an on-screen Shift toggle. Tested in Electron with synthetic iPad pointer
+  events; not yet with real fingers. Still to come: finger-sized hit
+  tolerances and gizmos, and a check of hardware-keyboard shortcuts.
 - Layout (Phase 5): portrait leaves the 3D view cramped beside the fixed
   250 px panel.

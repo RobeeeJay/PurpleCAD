@@ -27,6 +27,7 @@ import { createTransformHandleDrag } from "./cameraControls/transformHandleDrag.
 import { createViewInteraction } from "./cameraControls/viewInteraction.js";
 import { createEmbossInteraction } from "./cameraControls/embossPick.js";
 import { createSketchInteraction } from "./cameraControls/sketchInteraction.js";
+import { attachTouchInput } from "./cameraControls/touchInput.js";
 import { createToolPreviews } from "./cameraControls/toolPreviews.js";
 import { createMeasureAndPrimitivePreviews } from "./cameraControls/measurePrimitivePreviews.js";
 import { createMaterialAndFitHelpers } from "./cameraControls/materialFitHelpers.js";
@@ -797,7 +798,7 @@ export function attachCameraControls(ctx) {
   });
 
   // ── Transform-handle (gizmo) drag — 3D view mode ──────────────────────────
-  const { tryBeginHandleDrag, updateHandleDrag, commitHandleDrag } =
+  const { handleAt, tryBeginHandleDrag, updateHandleDrag, commitHandleDrag } =
     createTransformHandleDrag({
       renderer,
       cameraRef,
@@ -849,6 +850,7 @@ export function attachCameraControls(ctx) {
     onSketchMouseMove,
     onSketchMouseUp,
     onKeyDown,
+    openLongPressMenuAt,
     clearSketchVisualsFor3D,
     refreshSketchSelectionOverlay,
     unsubItems,
@@ -1078,14 +1080,8 @@ export function attachCameraControls(ctx) {
     onViewMouseUp(e);
   };
 
-  // ── Camera navigation (wheel + touch) ─────────────────────────────────────
-  const {
-    onMouseWheel,
-    onTouchStart,
-    onTouchMove,
-    onTouchEnd,
-    disposeNavigation,
-  } = createNavigationHandlers(
+  // ── Camera navigation (wheel; touch through touchInput.js) ──────────────────
+  const { onMouseWheel, zoomBy, disposeNavigation } = createNavigationHandlers(
     {
       cameraRef,
       targetRef,
@@ -1163,9 +1159,32 @@ export function attachCameraControls(ctx) {
   el.addEventListener("wheel", onMouseWheel, { passive: false });
   const onContextMenu = (e) => e.preventDefault();
   el.addEventListener("contextmenu", onContextMenu);
-  el.addEventListener("touchstart", onTouchStart, { passive: true });
-  el.addEventListener("touchmove", onTouchMove, { passive: false });
-  el.addEventListener("touchend", onTouchEnd);
+  // Fingers and the Pencil, as clicks, drags and wheel gestures.
+  const detachTouch = attachTouchInput(el, {
+    onMouseDown,
+    onMouseMove,
+    onMouseUp,
+    onMouseWheel,
+    zoomBy,
+    sketchModeRef,
+    handleAt,
+    bodyAt: (x, y) => {
+      const rect = el.getBoundingClientRect();
+      raycasterRef.current.setFromCamera(
+        {
+          x: ((x - rect.left) / rect.width) * 2 - 1,
+          y: -((y - rect.top) / rect.height) * 2 + 1,
+        },
+        cameraRef.current,
+      );
+      const bodies = Object.values(objectsRef.current).filter(
+        (o) => o?.visible,
+      );
+      return raycasterRef.current.intersectObjects(bodies, true).length > 0;
+    },
+    openLongPressMenuAt,
+    home: () => controls.home?.(),
+  });
   document.addEventListener("keyup", onModifierUp);
   document.addEventListener("keydown", onKeyDown);
 
@@ -1178,9 +1197,7 @@ export function attachCameraControls(ctx) {
     el.removeEventListener("mouseup", onMouseUp);
     el.removeEventListener("wheel", onMouseWheel);
     el.removeEventListener("contextmenu", onContextMenu);
-    el.removeEventListener("touchstart", onTouchStart);
-    el.removeEventListener("touchmove", onTouchMove);
-    el.removeEventListener("touchend", onTouchEnd);
+    detachTouch();
     document.removeEventListener("keyup", onModifierUp);
     document.removeEventListener("keydown", onKeyDown);
     unsubItems();

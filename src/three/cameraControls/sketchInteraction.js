@@ -779,6 +779,23 @@ export function createSketchInteraction(
   const { updateSketchPreview, handleSketchClick } = sketchDraw;
 
   // ── Sketch-mode pointer dispatch (return true when handled) ───────────────
+  // The element list for a press held still: from a mouse held down, or a
+  // finger held on the glass (touchInput.js, which never sends the press).
+  const openLongPressMenuAt = (x, y) => {
+    const items = buildLongPressItems(x, y);
+    if (items.length === 0) return;
+    sketchDragRef.current = null;
+    renderer.domElement.style.cursor = "";
+    longPressMenuRef.current = true;
+    // Cancel the pending marquee armed on mouse-down — a long press opens
+    // the element list, it must not also start a selection box if the
+    // cursor drifts while held.
+    marqueeStartRef.current = null;
+    marqueeActiveRef.current = false;
+    clearMarqueeRect();
+    useStore.getState().setSketchLongPressMenu({ x, y, items });
+  };
+
   const onSketchMouseDown = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
     // SVG placement: start dragging the pending import to move it.
@@ -860,21 +877,7 @@ export function createSketchInteraction(
         downY = e.clientY;
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
-        const items = buildLongPressItems(downX, downY);
-        if (items.length > 0) {
-          sketchDragRef.current = null;
-          renderer.domElement.style.cursor = "";
-          longPressMenuRef.current = true;
-          // Cancel the pending marquee armed on mouse-down — a long press opens
-          // the element list, it must not also start a selection box if the
-          // cursor drifts while held.
-          marqueeStartRef.current = null;
-          marqueeActiveRef.current = false;
-          clearMarqueeRect();
-          useStore
-            .getState()
-            .setSketchLongPressMenu({ x: downX, y: downY, items });
-        }
+        openLongPressMenuAt(downX, downY);
       }, 500);
       const didDrag = startSketchDrag(e.clientX, e.clientY, e.shiftKey);
       if (!didDrag) {
@@ -1446,6 +1449,7 @@ export function createSketchInteraction(
     onSketchMouseMove,
     onSketchMouseUp,
     onKeyDown,
+    openLongPressMenuAt,
     clearSketchVisualsFor3D,
     refreshSketchSelectionOverlay,
     unsubItems,

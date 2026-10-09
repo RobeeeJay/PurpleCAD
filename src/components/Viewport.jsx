@@ -40,6 +40,7 @@ import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
 import { useSceneSync } from "./viewport/useSceneSync";
 import "../styles/Viewport.css";
+import TouchModifiers from "./viewport/TouchModifiers";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { clearSolids } from "../three/solidCache.js";
@@ -389,6 +390,7 @@ const Viewport = () => {
       <SvgPlacementOverlay />
       <UnderlayPlacementOverlay />
       <PlanePickHint />
+      <TouchModifiers />
       {widgetVisible && (
         <RotationWidget
           rotationState={rotationState}

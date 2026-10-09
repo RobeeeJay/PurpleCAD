@@ -37,6 +37,7 @@ export function createMaterialAndFitHelpers({
   // toolbar reads this so a newly created primitive spawns where the user is
   // looking instead of always at the world origin.
   controls.getViewTarget = () => targetRef.current.clone();
+  controls.getCameraPosition = () => cameraRef.current.position.clone();
 
   // Capture the current viewport canvas as a PNG blob, for the Save menu's
   // "Save image" option.  Relies on preserveDrawingBuffer (sceneSetup.js) so

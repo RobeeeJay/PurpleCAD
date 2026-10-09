@@ -50,6 +50,20 @@ export function createTransformHandleDrag({
   };
 
   // Returns true if a handle was hit (drag started) so the caller can return.
+  // Is a transform handle under this point?  Asks only, grabs nothing: a
+  // finger landing there drags the handle rather than orbiting (touchInput.js).
+  const handleAt = (x, y) => {
+    const { originToolActive, originVertexPick } = useStore.getState();
+    if (originToolActive || originVertexPick != null) return false;
+    const handleMeshes = handlesRef.current.map((h) => h.mesh);
+    if (handleMeshes.length === 0) return false;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const nx = ((x - rect.left) / rect.width) * 2 - 1;
+    const ny = -((y - rect.top) / rect.height) * 2 + 1;
+    raycasterRef.current.setFromCamera({ x: nx, y: ny }, cameraRef.current);
+    return raycasterRef.current.intersectObjects(handleMeshes).length > 0;
+  };
+
   const tryBeginHandleDrag = (e) => {
     // While the change-origin tool is armed, clicks pick an origin — never grab
     // a transform handle.
@@ -427,5 +441,5 @@ export function createTransformHandleDrag({
     return true;
   };
 
-  return { tryBeginHandleDrag, updateHandleDrag, commitHandleDrag };
+  return { handleAt, tryBeginHandleDrag, updateHandleDrag, commitHandleDrag };
 }

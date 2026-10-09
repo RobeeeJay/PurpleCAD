@@ -265,3 +265,36 @@
   bottom: 0;
   width: 44px;
 }
+
+/* The on-screen Shift for touch (TouchModifiers.jsx): bottom right, above the
+   face/point readout, at a finger's 44 pt. */
+.touch-modifiers {
+  position: absolute;
+  right: 16px;
+  bottom: 48px;
+  z-index: 12;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(var(--panel-bg-rgb), 0.82);
+  border: 1px solid rgba(var(--color-info-rgb), 0.3);
+}
+
+.touch-modifiers button {
+  min-width: 64px;
+  min-height: 44px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-info-soft);
+  font-size: var(--font-size-base);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.touch-modifiers button.active {
+  background: rgba(var(--color-info-bg-rgb), 0.35);
+  border-color: rgba(var(--color-info-rgb), 0.6);
+  color: var(--color-info-bg);
+}

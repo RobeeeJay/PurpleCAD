@@ -257,5 +257,11 @@ export function useViewportCamera({
     return () => cancelAnimationFrame(raf);
   }, [cameraResetTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A double tap on empty space reaches Home from the viewport's touch input
+  // (touchInput.js), which holds only the controls object.
+  useEffect(() => {
+    if (cameraControlsRef.current) cameraControlsRef.current.home = handleHome;
+  });
+
   return { handleOrientationChange, handleHome };
 }
