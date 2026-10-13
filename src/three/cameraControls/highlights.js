@@ -367,6 +367,10 @@ export function createHighlightHelpers({
         cx: centroidSample.x,
         cy: centroidSample.y,
         cz: centroidSample.z,
+        // The angle this highlight grew by: the native face matcher grows the
+        // pick by the same rule, so a click on a bore's wall takes the whole
+        // wall that lit up, not just the facet under the cursor.
+        smoothDeg: selectionChainAngle(useStore.getState?.()),
       };
     }
   };

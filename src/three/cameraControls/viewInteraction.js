@@ -691,6 +691,9 @@ export function createViewInteraction(
                     ny: n.ny,
                     nz: n.nz,
                     ...(n.cx != null ? { cx: n.cx, cy: n.cy, cz: n.cz } : null),
+                    ...(n.smoothDeg != null
+                      ? { smoothDeg: n.smoothDeg }
+                      : null),
                   },
                 ],
           });

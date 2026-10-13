@@ -371,6 +371,50 @@ Val PushPullFaces(Js& js) {
   // descriptive error (same convention as chamfer/fillet).
   if (faces.empty()) return js.makeNumber(0);
 
+  // Faces that don't all face one way -- a bore's wall, a curved region taken
+  // whole by curve detection -- can't each be swept along their own normal:
+  // pushed, neighbouring prisms diverge and leave wedges of uncut material
+  // between them; pulled, they overlap at every seam.  Offset them together
+  // instead, so neighbouring faces are extended or trimmed to meet
+  // (GeomAbs_Intersection), as a single face's prism does for its sides.
+  bool oneWay = true;
+  {
+    FaceNormal n0 = ComputeFaceNormal(faces[0]);
+    for (const auto& face : faces) {
+      BRepAdaptor_Surface s(face, false);
+      FaceNormal n = ComputeFaceNormal(face);
+      if (s.GetType() != GeomAbs_Plane || !n.valid || !n0.valid ||
+          std::abs(n.x - n0.x) + std::abs(n.y - n0.y) + std::abs(n.z - n0.z) >
+              1e-6) {
+        oneWay = false;
+        break;
+      }
+    }
+  }
+  if (!oneWay) {
+    try {
+      BRepOffset_MakeOffset offset;
+      offset.Initialize(shape, 0.0, 1.0e-5, BRepOffset_Skin, false, false,
+                        GeomAbs_Intersection);
+      for (const auto& face : faces) offset.SetOffsetOnFace(face, distance);
+      offset.MakeOffsetShape(CancelRange());
+      if (!offset.IsDone() || offset.Shape().IsNull())
+        throw std::runtime_error("the faces could not be offset together");
+      TopoDS_Shape moved = offset.Shape();
+      // Skin offset of a solid hands back a solid inside a compound, or a
+      // shell; push/pull returns a solid like the prism path.
+      for (TopExp_Explorer ex(moved, TopAbs_SOLID); ex.More(); ex.Next()) {
+        moved = ex.Current();
+        break;
+      }
+      return js.makeNumber(StoreShape(moved));
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+          std::string("Push/pull failed — try a smaller distance (") +
+          e.what() + ")");
+    }
+  }
+
   const bool pull = distance > 0;
   const Standard_Real kFuzzy = 1.0e-5;
   TopoDS_Shape result = shape;

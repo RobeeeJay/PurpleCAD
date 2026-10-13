@@ -205,11 +205,11 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
       // Faces respect the curve-detection angle (like edges): the region grows
       // across a tessellated curve via the local dihedral and stops at a sharp
       // edge — matching the hover highlight (applyFaceHighlight).  The chain
-      // toggle gates whether curvature is followed at all.
-      const cosThr = Math.cos(
-        (Math.max(0, selectionChainAngle(useStore.getState?.())) * Math.PI) /
-          180,
-      );
+      // toggle gates whether curvature is followed at all.  A face picked
+      // since push/pull grew regions natively carries the angle it was picked
+      // with (smoothDeg), which is what the op will take: draw by that.
+      const cosOf = (deg) => Math.cos((Math.max(0, deg) * Math.PI) / 180);
+      const cosNow = cosOf(selectionChainAngle(useStore.getState?.()));
       const visitedAll = new Set();
       for (const f of faces) {
         // Seed: triangle whose centre is closest to the stored centroid
@@ -252,6 +252,7 @@ export function buildSelectionHighlight(hitMesh, subGeo, options = {}) {
           continue;
         }
         if (seed < 0) continue;
+        const cosThr = f.smoothDeg != null ? cosOf(f.smoothDeg) : cosNow;
         const queue = [seed];
         const seenLocal = new Set([seed]);
         while (queue.length > 0) {

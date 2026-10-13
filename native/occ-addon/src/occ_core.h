@@ -20,6 +20,7 @@
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
+#include <BRepOffset_MakeOffset.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Ax3.hxx>
 
@@ -180,6 +181,11 @@ struct EdgeFaceSpec {
     bool hasCentroid;
     double cx, cy, cz;
     std::string name;
+    // Curve detection (SelectSubGeoFaces): grow from the picked face across
+    // edges where neighbouring faces meet within this angle -- the same rule
+    // the hover highlight draws by -- so a click on a bore's wall takes the
+    // whole wall.  0 = the picked face alone (and every older document).
+    double smoothDeg = 0;
   };
   std::vector<EdgeEp> edges;
   std::vector<FaceNorm> faces;

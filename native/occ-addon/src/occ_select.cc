@@ -168,7 +168,8 @@ EdgeFaceSpec ParseSubGeo(Js& js, Val subGeo) {
         hasCx ? js.num(js.get(f, "cx")) : 0.0,
         hasCx ? js.num(js.get(f, "cy")) : 0.0,
         hasCx ? js.num(js.get(f, "cz")) : 0.0,
-        name
+        name,
+        js.has(f, "smoothDeg") ? js.num(js.get(f, "smoothDeg")) : 0.0
       });
     }
   }
@@ -588,61 +589,158 @@ std::vector<SelectedEdge> SelectSubGeoEdges(
   return out;
 }
 
+// A face's outward normal where it meets `edge`, from the edge's curve on the
+// face: on a curved face the normal turns, and whether two faces meet
+// smoothly is decided by their normals AT the edge between them.
+static bool NormalAtEdge(const TopoDS_Face& face, const TopoDS_Edge& edge,
+                         gp_Dir& out) {
+  try {
+    double f, l;
+    Handle(Geom2d_Curve) pc = BRep_Tool::CurveOnSurface(edge, face, f, l);
+    if (pc.IsNull()) return false;
+    const gp_Pnt2d uv = pc->Value((f + l) / 2.0);
+    BRepAdaptor_Surface s(face, false);
+    gp_Pnt p;
+    gp_Vec du, dv;
+    s.D1(uv.X(), uv.Y(), p, du, dv);
+    gp_Vec n = du.Crossed(dv);
+    if (n.Magnitude() < 1e-12) return false;
+    if (face.Orientation() == TopAbs_REVERSED) n.Reverse();
+    out = gp_Dir(n);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+// Every face reached from `seed` across edges where the two faces meet within
+// `deg` -- the native side of the hover highlight's curve detection
+// (highlights.js grows across triangles by the same rule), so a selection
+// takes what was highlighted.
+static void GrowSmoothRegion(
+    const TopoDS_Face& seed, double deg,
+    const TopTools_IndexedDataMapOfShapeListOfShape& edgeFaces,
+    TopTools_IndexedMapOfShape& into) {
+  const double cosMax = std::cos(deg * M_PI / 180.0);
+  std::vector<TopoDS_Face> queue{seed};
+  into.Add(seed);
+  while (!queue.empty()) {
+    const TopoDS_Face f = queue.back();
+    queue.pop_back();
+    for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const TopoDS_Edge e = TopoDS::Edge(ex.Current());
+      if (!edgeFaces.Contains(e)) continue;
+      for (const TopoDS_Shape& g : edgeFaces.FindFromKey(e)) {
+        if (g.IsSame(f) || into.Contains(g)) continue;  // a seam, or seen
+        gp_Dir n1, n2;
+        if (!NormalAtEdge(f, e, n1) || !NormalAtEdge(TopoDS::Face(g), e, n2))
+          continue;
+        if (n1.Dot(n2) < cosMax) continue;
+        into.Add(g);
+        queue.push_back(TopoDS::Face(g));
+      }
+    }
+  }
+}
+
+// Distance from a point to a face (1e299 if it can't be measured).
+static double PointToFace(const gp_Pnt& p, const TopoDS_Face& face) {
+  BRepBuilderAPI_MakeVertex vMk(p);
+  BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
+                                  Extrema_ExtAlgo_Grad);
+  dist.Perform();
+  return (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
+}
+
 // Resolve the actual faces a subGeo spec selects — the face-only analogue of
 // SelectSubGeoEdges (which explodes matched faces into their edges for
 // chamfer/fillet).  Matches by normal, using the stored centroid only as a
 // nearest tie-break among same-normal faces so a resized face still matches.
-// Used by push/pull, which needs the TopoDS_Face itself to sweep a prism.
+// A face carrying smoothDeg grows into its smooth region (GrowSmoothRegion).
+// Used by push/pull and draft, which need the TopoDS_Face itself.
 std::vector<TopoDS_Face> SelectSubGeoFaces(
     const TopoDS_Shape& shape, const EdgeFaceSpec& spec,
     const std::map<std::string, TopoDS_Shape>* namedFaces) {
-  std::vector<TopoDS_Face> out;
   const double eps = 0.05;
+  // Ordered and without repeats: two picks inside one smooth region would
+  // otherwise move its faces twice.
+  TopTools_IndexedMapOfShape chosen;
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+  bool edgeFacesBuilt = false;
   for (const auto& req : spec.faces) {
+    std::vector<TopoDS_Face> picked;
     TopoDS_Face named = ResolveNamedFace(shape, namedFaces, req.name);
     if (!named.IsNull()) {
-      out.push_back(named);
-      continue;
-    }
-    TopoDS_Face best;
-    double bestDist = 1e300;
-    bool found = false;
-    std::vector<TopoDS_Face> allNormalMatches;
-    TopExp_Explorer fexp(shape, TopAbs_FACE);
-    for (; fexp.More(); fexp.Next()) {
-      TopoDS_Face face = TopoDS::Face(fexp.Current());
-      auto n = ComputeFaceNormal(face);
-      if (!n.valid) continue;
-      if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
-          std::abs(req.nz - n.z) >= eps)
-        continue;
-      if (!req.hasCentroid) {
-        allNormalMatches.push_back(face);
-        continue;
-      }
-      // Push/pull stores a face centroid that may sit OFF the face plane (the
-      // profile centroid, not an on-surface hit point), so match by normal and
-      // use the centroid only as a nearest tie-break among same-normal faces.
-      // (SelectSubGeoEdges, used by chamfer/fillet, gets an on-surface hit
-      // point and can match curved faces by point-on-face instead.)
-      gp_Pnt pnt(req.cx, req.cy, req.cz);
-      BRepBuilderAPI_MakeVertex vMk(pnt);
-      BRepExtrema_DistShapeShape dist(vMk.Vertex(), face, Extrema_ExtFlag_MIN,
-                                      Extrema_ExtAlgo_Grad);
-      dist.Perform();
-      double d = (dist.IsDone() && dist.NbSolution() >= 1) ? dist.Value() : 1e299;
-      if (!found || d < bestDist) {
-        best = face;
-        bestDist = d;
-        found = true;
-      }
-    }
-    if (req.hasCentroid) {
-      if (found) out.push_back(best);
+      picked.push_back(named);
     } else {
-      for (const auto& f : allNormalMatches) out.push_back(f);
+      TopoDS_Face best;
+      double bestDist = 1e300;
+      bool found = false;
+      std::vector<TopoDS_Face> allNormalMatches;
+      TopExp_Explorer fexp(shape, TopAbs_FACE);
+      for (; fexp.More(); fexp.Next()) {
+        TopoDS_Face face = TopoDS::Face(fexp.Current());
+        auto n = ComputeFaceNormal(face);
+        if (!n.valid) continue;
+        if (std::abs(req.nx - n.x) >= eps || std::abs(req.ny - n.y) >= eps ||
+            std::abs(req.nz - n.z) >= eps)
+          continue;
+        if (!req.hasCentroid) {
+          allNormalMatches.push_back(face);
+          continue;
+        }
+        // Push/pull stores a face centroid that may sit OFF the face plane
+        // (the profile centroid, not an on-surface hit point), so match by
+        // normal and use the centroid only as a nearest tie-break among
+        // same-normal faces.  (SelectSubGeoEdges, used by chamfer/fillet,
+        // gets an on-surface hit point and can match curved faces by
+        // point-on-face instead.)
+        double d = PointToFace(gp_Pnt(req.cx, req.cy, req.cz), face);
+        if (!found || d < bestDist) {
+          best = face;
+          bestDist = d;
+          found = true;
+        }
+      }
+      // A curve-detected pick is a hit point ON the clicked face.  On a truly
+      // curved face the normal at its middle isn't the clicked one, so the
+      // normal filter above finds nothing there -- fall back to the face
+      // nearest the point.  (Only then: measuring every face of a sewn mesh
+      // body is slow.)
+      if (req.smoothDeg > 0 && req.hasCentroid && (!found || bestDist > 1e-4)) {
+        const gp_Pnt hit(req.cx, req.cy, req.cz);
+        for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
+          const TopoDS_Face face = TopoDS::Face(ex.Current());
+          const double d = PointToFace(hit, face);
+          if (!found || d < bestDist) {
+            best = face;
+            bestDist = d;
+            found = true;
+          }
+        }
+      }
+      if (req.hasCentroid) {
+        if (found) picked.push_back(best);
+      } else {
+        picked = allNormalMatches;
+      }
+    }
+    for (const auto& face : picked) {
+      if (req.smoothDeg > 0) {
+        if (!edgeFacesBuilt) {
+          TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE,
+                                        edgeFaces);
+          edgeFacesBuilt = true;
+        }
+        GrowSmoothRegion(face, req.smoothDeg, edgeFaces, chosen);
+      } else {
+        chosen.Add(face);
+      }
     }
   }
+  std::vector<TopoDS_Face> out;
+  for (int i = 1; i <= chosen.Extent(); i++)
+    out.push_back(TopoDS::Face(chosen(i)));
   return out;
 }
 
