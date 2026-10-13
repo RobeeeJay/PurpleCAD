@@ -1030,6 +1030,14 @@ Established landmines (each was a real bug — extend this list, never shrink it
   anchor are stale TOGETHER — still came out on the wrong cog.
   `extrudeStaleAnchor.test.js` drives the real document through the store and a
   full recalc for exactly that reason.
+  A profile now also records WHICH SKETCH SHAPES bound it (`loopShapes`: the
+  outer loop's shape indices and each hole's), and `regionsForProfile` /
+  `bestProfileMatchIndex` narrow by that first.  Concentric rings defeated
+  every geometric test: they share an anchor and a centroid, and once grown 4 %
+  a ring's stored area is nearer its neighbour's -- Extruded 5 in
+  `recalc-overload.pcad` took the inner ring twice (`profileLoopShapes.test.js`).
+  Older documents get `loopShapes` at load (`backfillLoopShapes`) only where the
+  sketch still has exactly one region matching the stored outline.
 
 - **A Split's pieces are re-cut from their source, not kept as baked
   meshes.** They used to carry no recipe, so a resolution change (or an

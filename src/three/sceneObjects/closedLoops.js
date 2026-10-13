@@ -172,7 +172,7 @@ export function findClosedLoopsWithShapes(
     if (s.type === "cog") {
       // At the active resolution, like the circles and arcs around it -- the
       // cached outline is a fixed coarse one, and an extruded cog made from
-      // it never got finer with "high resolution".
+      // it never got finer with the resolution.
       const tol = precision != null ? precision / MM_PER_UNIT : null;
       for (const polygon of cogShapeContours(s, tol))
         if (polygon.length >= 3) textLoops.push({ polygon, shapeIndices: [i] });
@@ -695,18 +695,48 @@ export function regionsWithShapes(
   const byPolygon = new Map(loops.map((l) => [l.polygon, l.shapeIndices]));
   const all = [];
   const collect = (e) => {
-    all.push({ ...e, shapeIndices: byPolygon.get(e.polygon) || [] });
+    all.push({
+      ...e,
+      shapeIndices: byPolygon.get(e.polygon) || [],
+      loopShapes: loopShapesOf(e.polygon, e.holes, byPolygon),
+    });
     e.entries.forEach(collect);
   };
   groupLoopsWithHoles(loops.map((l) => l.polygon)).forEach(collect);
   return all;
 }
 
-// Narrow a sketch's regions to those built from the profile's own shape, when
-// the profile names one.  Returns the full set when nothing matches (the shape
-// was deleted, or its index no longer resolves), so matching degrades to
-// geometry rather than failing.
+// A region's identity in its sketch: the shapes its outer loop runs along and
+// those of each hole, as sorted indices.  Unlike its outline, area or a click
+// point, this survives the shapes being moved or resized -- concentric rings
+// share a centre, and once grown a ring's old area can be nearer its
+// neighbour's than its own.  `shapesOf` maps a loop polygon to its indices.
+export function loopShapesOf(polygon, holes, shapesOf) {
+  const norm = (ids) => [...new Set(ids || [])].sort((a, b) => a - b);
+  return {
+    outer: norm(shapesOf.get(polygon)),
+    holes: (holes || [])
+      .filter((h) => h.length >= 3)
+      .map((h) => norm(shapesOf.get(h)))
+      .sort((a, b) => String(a).localeCompare(String(b))),
+  };
+}
+export const loopShapesKey = (ls) =>
+  ls
+    ? `${ls.outer.join(",")}|${ls.holes.map((h) => h.join(",")).join(";")}`
+    : "";
+
+// Narrow a sketch's regions to the profile's own: the ones bounded by the
+// shapes it was picked from (loopShapes), or else built from its text / cog
+// shape (textShapeIdx).  Returns the full set when nothing matches (a shape
+// was deleted and the indices renumbered), so matching degrades to geometry
+// rather than failing.
 export function regionsForProfile(regions, profile) {
+  const key = loopShapesKey(profile?.loopShapes);
+  if (key && profile.loopShapes.outer.length) {
+    const same = regions.filter((g) => loopShapesKey(g.loopShapes) === key);
+    if (same.length > 0) return same;
+  }
   const idx = profile?.textShapeIdx;
   if (idx == null) return regions;
   const own = regions.filter((g) => g.shapeIndices.includes(idx));

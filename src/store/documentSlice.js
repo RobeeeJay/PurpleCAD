@@ -17,6 +17,7 @@ import {
 import { clearCamera } from "./db.js";
 import { motionInitial } from "./motionSlice.js";
 import { backfillSplitRecipes } from "../three/splitRecipe.js";
+import { backfillLoopShapes } from "../three/profileBackfill.js";
 
 export const createDocumentSlice = (set) => ({
   newDocument: () =>
@@ -69,7 +70,11 @@ export const createDocumentSlice = (set) => ({
         return {};
       }
       const history = pruneTextureSourceChains(
-        backfillSplitRecipes(backfillEmbossFrames(unpackHistory(data.history))),
+        backfillLoopShapes(
+          backfillSplitRecipes(
+            backfillEmbossFrames(unpackHistory(data.history)),
+          ),
+        ),
       );
       const maxId = Math.max(...history.map((h) => h.id));
       setNextHistoryId(maxId + 1);

@@ -7,6 +7,7 @@ import * as THREE from "three";
 import {
   findClosedLoopsWithShapes,
   groupLoopsWithHoles,
+  loopShapesOf,
 } from "../three/sceneObjects/closedLoops.js";
 import { polyCentroid } from "../three/sceneObjects/polygonUtil.js";
 import { activePrecision } from "../three/resolution.js";
@@ -21,11 +22,17 @@ export function sketchRegions(item) {
     item.shapes ?? [],
     CURVE_SEGMENTS,
     activePrecision(),
-  ).map((l) => l.polygon);
-  return groupLoopsWithHoles(loops).filter((g) => g.polygon.length >= 3);
+  );
+  const shapesOf = new Map(loops.map((l) => [l.polygon, l.shapeIndices]));
+  return groupLoopsWithHoles(loops.map((l) => l.polygon))
+    .filter((g) => g.polygon.length >= 3)
+    .map((g) => ({
+      ...g,
+      loopShapes: loopShapesOf(g.polygon, g.holes, shapesOf),
+    }));
 }
 
-export function extrudeProfile(sketch, { polygon, holes }) {
+export function extrudeProfile(sketch, { polygon, holes, loopShapes }) {
   const euler = new THREE.Euler(
     sketch.rotation.x,
     sketch.rotation.y,
@@ -39,6 +46,7 @@ export function extrudeProfile(sketch, { polygon, holes }) {
     profileCentroid: polyCentroid(polygon),
     polygon2D: polygon,
     holes: holes.filter((h) => h.length >= 3),
+    loopShapes,
     position: { ...sketch.position },
     rotation: { x: euler.x, y: euler.y, z: euler.z },
     normalWorld: { x: normal.x, y: normal.y, z: normal.z },

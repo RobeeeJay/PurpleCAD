@@ -30,6 +30,7 @@ import {
   findClosedLoopsWithShapes,
   groupLoopsWithHoles,
   polyCentroid,
+  loopShapesOf,
 } from "./closedLoops.js";
 import {
   SKETCH_FACE_HIGHLIGHT,
@@ -271,6 +272,9 @@ export function buildExtrudeSelectGroup(
         profileCentroid: polyCentroid(polygon),
         polygon2D: polygon,
         holes: holes.filter((h) => h.length >= 3),
+        // Which sketch shapes bound it: how a rebuild finds it again after
+        // the sketch is edited (regionsForProfile).
+        loopShapes: loopShapesOf(polygon, holes, polyShapeIndices),
         position: { x: pos.x, y: pos.y, z: pos.z },
         rotation: { x: euler.x, y: euler.y, z: euler.z },
         normalWorld: { x: normal.x, y: normal.y, z: normal.z },

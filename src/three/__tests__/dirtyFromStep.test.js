@@ -82,14 +82,10 @@ describe("an edit invalidates from the step it reaches", () => {
     const before = extentX(
       useStore.getState().items.find((i) => i.id === 5).geometryData,
     );
-    // Grow the two bosses' rings (circles 0-5 of Sketch 4) by 2 %.  Not more:
-    // the rebuild re-matches each stored ring to the sketch's regions by area,
-    // and from about 4 % the outer ring's old area is nearer the grown INNER
-    // ring's, so both prisms take the inner ring (a separate, older weakness
-    // of profile matching, which this edit used never to reach).
+    // Grow the two bosses' rings (circles 0-5 of Sketch 4) by 20 %.
     for (let i = 0; i < 6; i++) {
       const s = useStore.getState().items.find((it) => it.id === 4).shapes[i];
-      useStore.getState().updateSketchShape(4, i, { ...s, r: s.r * 1.02 });
+      useStore.getState().updateSketchShape(4, i, { ...s, r: s.r * 1.2 });
     }
     const sketchStep = entryIndex(4);
     expect(Math.min(...dirtyIndices())).toBe(sketchStep);
@@ -102,11 +98,11 @@ describe("an edit invalidates from the step it reaches", () => {
     const after = extentX(
       useStore.getState().items.find((i) => i.id === 5).geometryData,
     );
-    // The outer ring is 0.553 units in radius: 2 % more on each boss's far
-    // side widens the pair by 2 x 0.011.
+    // The outer ring is 0.553 units in radius: 20 % more on each boss's far
+    // side widens the pair by 2 x 0.11.
     expect(after - before, `extent ${before} -> ${after}`).toBeCloseTo(
-      2 * 0.553 * 0.02,
-      3,
+      2 * 0.553 * 0.2,
+      2,
     );
   }, 300000);
 

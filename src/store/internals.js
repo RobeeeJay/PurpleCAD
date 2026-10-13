@@ -13,6 +13,7 @@ import * as db from "./db.js";
 import { packHistory } from "./geometryPack.js";
 import { pruneNestedSourceGeometry } from "../three/textureDisplace.js";
 import { backfillSplitRecipes } from "../three/splitRecipe.js";
+import { backfillLoopShapes } from "../three/profileBackfill.js";
 
 // ---------------------------------------------------------------------------
 // Instruction application
@@ -362,7 +363,9 @@ export const loadTimeline = () => {
       return {
         ...parsed,
         history: pruneTextureSourceChains(
-          backfillSplitRecipes(backfillEmbossFrames(parsed.history)),
+          backfillLoopShapes(
+            backfillSplitRecipes(backfillEmbossFrames(parsed.history)),
+          ),
         ),
       };
     }
