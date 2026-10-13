@@ -75,6 +75,21 @@ export default function SketchOverlays({
   // formula); the store only receives values that evaluate.
   const [modifyDraft, setModifyDraft] = React.useState(null);
 
+  // The extrude distance, focused with its text selected as the bar opens --
+  // and it opens at once when geometry was picked before the tool started --
+  // so typing replaces the default length rather than adding to it.
+  const extrudeDistanceRef = React.useRef(null);
+  const extrudeBarOpen = extrudeSelectMode === "profile" && !!extrudeDepthInput;
+  React.useEffect(() => {
+    if (!extrudeBarOpen) return;
+    // A frame later: the toolbar click that opened the bar is done with focus.
+    const raf = requestAnimationFrame(() => {
+      extrudeDistanceRef.current?.focus();
+      extrudeDistanceRef.current?.select();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [extrudeBarOpen]);
+
   return (
     <>
       {sketchPlacementMode && (
@@ -282,6 +297,7 @@ export default function SketchOverlays({
             Distance (mm):
           </span>
           <FormulaInput
+            ref={extrudeDistanceRef}
             type="text"
             autoFocus
             id="extrude-distance"
