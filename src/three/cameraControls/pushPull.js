@@ -177,6 +177,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     ghostItemId,
   }) => {
     let result;
+    let failure = null;
     try {
       const { pushPullFaces } = await import("../occClient.js");
       result = await pushPullFaces({
@@ -186,12 +187,16 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
         allItems: items,
         printPrecision,
       });
-    } catch {
+    } catch (e) {
       result = null;
+      failure = e.message;
     }
-    // A newer request superseded this one, or the geometry was unworkable —
-    // leave whatever preview is currently shown rather than flickering it away.
-    if (myRequest !== requestId || !result) return;
+    if (myRequest !== requestId) return; // a newer request superseded this one
+    // An unworkable distance says so on the tool error line (as chamfer,
+    // emboss and draft do) and keeps the last good preview rather than
+    // flickering it away.
+    useStore.setState({ toolError: result ? null : failure });
+    if (!result) return;
 
     const { positions, normals, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();
@@ -289,7 +294,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     });
   };
 
-  // Live preview for PushPullEditDialog: replays a committed push/pull's stored
+  // Live preview for a timeline Edit (PushPullOverlay): replays a committed push/pull's stored
   // recipe (source + subGeo) with the new distance the user is typing, ghosting
   // the existing result mesh so the change is visible before Save.
   const updatePushPullEditPreview = async (regenerator, distanceMm, itemId) => {
