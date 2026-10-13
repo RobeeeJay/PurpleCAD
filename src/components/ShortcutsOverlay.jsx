@@ -23,7 +23,6 @@ const VIEW_3D = [
   { keys: ["4"], label: "Path-traced render" },
   { keys: ["5"], label: "Toggle shadows" },
   { keys: ["6"], label: "Toggle cross-section" },
-  { keys: ["8"], label: "Toggle curve resolution" },
   { keys: ["Z"], label: "Select objects" },
   { keys: ["X"], label: "Select faces" },
   { keys: ["C"], label: "Select edges" },

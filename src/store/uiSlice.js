@@ -25,9 +25,6 @@ export const uiInitial = {
   constraintsVisible: true,
   dimensionsVisible: true,
   cameraResetTrigger: 0,
-  // Active tessellation mode; its density (mm deviation) is previewPrecisionMm /
-  // printPrecisionMm, configurable in Settings.  See three/resolution.js.
-  curveResolution: "preview", // "preview" | "print"
 
   sketchPlacementMode: false,
   extrudeSelectMode: null, // null | "profile" | "depth"

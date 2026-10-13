@@ -475,11 +475,6 @@ export function createSketchKeyboardHandler(
         store.toggleCrossSectionView();
         return;
       }
-      if (e.key === "8") {
-        e.preventDefault();
-        store.toggleCurveResolution();
-        return;
-      }
     }
 
     if (sketchModeRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {

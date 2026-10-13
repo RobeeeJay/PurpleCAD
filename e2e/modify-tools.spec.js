@@ -263,8 +263,7 @@ test.describe.serial("modify tools through their dialogs", () => {
     expect(before.map((h) => h.kind)).toEqual(["split", "split"]);
 
     await page.evaluate(() => {
-      window.__store.setState({ printPrecisionMm: 0.01 });
-      window.__store.getState().toggleCurveResolution();
+      window.__store.getState().setResolutionMm(0.01);
     });
     await page.locator(".timeline-recalc-btn").click();
     // How many times over the half that grew least has its triangles.
@@ -278,9 +277,7 @@ test.describe.serial("modify tools through their dialogs", () => {
         message: `halves had ${before.map((h) => h.tris)} triangles`,
       })
       .toBeGreaterThan(2);
-    await page.evaluate(() =>
-      window.__store.getState().toggleCurveResolution(),
-    );
+    await page.evaluate(() => window.__store.getState().setResolutionMm(0.05));
   });
 
   // The test above sets the cut directly, which is how a face-pick problem went

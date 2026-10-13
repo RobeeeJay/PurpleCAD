@@ -18,10 +18,8 @@ const SettingsDialog = () => {
   const setCurveDetectionAngleDeg = useStore(
     (s) => s.setCurveDetectionAngleDeg,
   );
-  const previewPrecisionMm = useStore((s) => s.previewPrecisionMm);
-  const setPreviewPrecisionMm = useStore((s) => s.setPreviewPrecisionMm);
-  const printPrecisionMm = useStore((s) => s.printPrecisionMm);
-  const setPrintPrecisionMm = useStore((s) => s.setPrintPrecisionMm);
+  const resolutionMm = useStore((s) => s.resolutionMm);
+  const setResolutionMm = useStore((s) => s.setResolutionMm);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
   const widgetVisible = useStore((s) => s.widgetVisible);
@@ -167,37 +165,18 @@ const SettingsDialog = () => {
 
           <div style={rowStyle}>
             <span style={labelStyle}>
-              <span>Normal resolution</span>
+              <span>Resolution</span>
               <span style={{ fontSize: 10, opacity: 0.7 }}>
-                surface deviation while editing (lower = denser)
+                surface deviation of curved faces (lower = denser); a new value
+                rebuilds the whole timeline
               </span>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <NumberInput
                 min="0.001"
                 step="0.05"
-                value={previewPrecisionMm}
-                onCommit={(n, raw) => setPreviewPrecisionMm(raw)}
-                onKeyDown={stop}
-                style={numStyle}
-              />
-              <span style={{ fontSize: 10, opacity: 0.7 }}>mm</span>
-            </span>
-          </div>
-
-          <div style={rowStyle}>
-            <span style={labelStyle}>
-              <span>High resolution</span>
-              <span style={{ fontSize: 10, opacity: 0.7 }}>
-                final density (the high-resolution toggle / 3D print)
-              </span>
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <NumberInput
-                min="0.001"
-                step="0.005"
-                value={printPrecisionMm}
-                onCommit={(n, raw) => setPrintPrecisionMm(raw)}
+                value={resolutionMm}
+                onCommit={(n, raw) => setResolutionMm(raw)}
                 onKeyDown={stop}
                 style={numStyle}
               />

@@ -150,7 +150,6 @@ const run = async (x1) => {
   storeState = {
     items: [],
     history: mkHistory(x1),
-    curveResolution: "preview",
     activeHistoryId: null,
     setRegenProgress: () => {},
   };

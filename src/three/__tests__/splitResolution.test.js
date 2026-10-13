@@ -66,8 +66,7 @@ describe("the pieces of a Split", () => {
       coarse.set(id, tris(item));
     }
 
-    useStore.setState({ printPrecisionMm: 0.01 });
-    useStore.getState().toggleCurveResolution();
+    useStore.getState().setResolutionMm(0.01);
     await recalculateTimeline();
     // The circles' pieces (7, 9, 11, 13 carry the curved walls) gain triangles.
     for (const id of [7, 9, 11, 13]) {

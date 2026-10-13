@@ -508,18 +508,16 @@ export const invalidateEdit = (prevHistory, newHistory, items) => {
 // perspective.  `curveDetectionAngleDeg` is the max bend between consecutive
 // connected lines for them to be treated as one smooth curve when highlighting.
 // Persisted alongside snap under the same `cad-snap` key.
-// previewPrecisionMm / printPrecisionMm are the tessellation deviation (sagitta,
-// mm) for the two resolution modes — lower = denser/smoother, more triangles.
-// Preview is the interactive/editing density; print ("Normal/High") is the
-// final density used when the resolution toggle is on.
+// resolutionMm is the tessellation deviation (sagitta, mm) everything is built
+// at -- lower = denser/smoother, more triangles.  It was previewPrecisionMm (the
+// "Normal" of a Normal/High pair); a saved value of that carries over.
 export const SNAP_DEFAULTS = {
   snapEnabled: false,
   snapDistanceMm: 5,
   snapAngleDeg: 9,
   fov: 35,
   curveDetectionAngleDeg: 5,
-  previewPrecisionMm: 0.05,
-  printPrecisionMm: 0.01,
+  resolutionMm: 0.05,
   alwaysExtrudeSingleObject: true,
   axisVisible: false,
 };
@@ -536,10 +534,12 @@ export const loadSnapSettings = () => {
       fov: parsed.fov > 0 ? parsed.fov : 35,
       curveDetectionAngleDeg:
         parsed.curveDetectionAngleDeg >= 0 ? parsed.curveDetectionAngleDeg : 5,
-      previewPrecisionMm:
-        parsed.previewPrecisionMm > 0 ? parsed.previewPrecisionMm : 0.05,
-      printPrecisionMm:
-        parsed.printPrecisionMm > 0 ? parsed.printPrecisionMm : 0.01,
+      resolutionMm:
+        parsed.resolutionMm > 0
+          ? parsed.resolutionMm
+          : parsed.previewPrecisionMm > 0
+            ? parsed.previewPrecisionMm
+            : 0.05,
       // Default on (combine) — only an explicit false turns it off.
       alwaysExtrudeSingleObject: parsed.alwaysExtrudeSingleObject !== false,
       // Combined-axis indicator defaults off — only an explicit true shows it.
@@ -560,8 +560,7 @@ export const saveSnapSettings = (snap) => {
         snapAngleDeg: snap.snapAngleDeg,
         fov: snap.fov,
         curveDetectionAngleDeg: snap.curveDetectionAngleDeg,
-        previewPrecisionMm: snap.previewPrecisionMm,
-        printPrecisionMm: snap.printPrecisionMm,
+        resolutionMm: snap.resolutionMm,
         alwaysExtrudeSingleObject: snap.alwaysExtrudeSingleObject,
         axisVisible: snap.axisVisible,
       }),

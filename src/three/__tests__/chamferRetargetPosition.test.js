@@ -145,7 +145,6 @@ const run = async (groupPrisms, inputIds) => {
   storeState = {
     items: [],
     history: mkHistory(groupPrisms, inputIds),
-    curveResolution: "preview",
     activeHistoryId: null,
     setRegenProgress: () => {},
   };

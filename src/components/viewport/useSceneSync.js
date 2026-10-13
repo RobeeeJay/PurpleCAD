@@ -293,7 +293,11 @@ export function useSceneSync({
     // every downstream step on each point drag is wasteful (and the 3D solids
     // are hidden behind the sketch anyway).  Runs in the sketch-close effect.
     if (sketchMode) {
-      pendingRecalcRef.current = true;
+      // Keep a pending forced pass forced (see the Resolution note below).
+      pendingRecalcRef.current =
+        precisionChanged || pendingRecalcRef.current === "force"
+          ? "force"
+          : true;
       return;
     }
 
@@ -303,18 +307,22 @@ export function useSceneSync({
     // is now incremental (JIT) — it rebuilds only stale/dirty steps up to the
     // viewed one and stamps the result back into history, so navigating to an
     // already-built step is free and a first visit caches the step.
+    // A new Resolution re-tessellates every step: force the full pass (as the
+    // Timeline's Recalculate does), so the steps after the one in view are
+    // rebuilt now rather than when next visited.
     import("../../three/regenerateOrchestrator.js").then((m) => {
       pendingRecalcRef.current = false;
-      m.recalculateTimeline();
+      m.recalculateTimeline(precisionChanged);
     });
   }, [items, printPrecision, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run a sketch edit's deferred timeline recalc once the sketch is closed.
   useEffect(() => {
     if (sketchMode || !pendingRecalcRef.current) return;
+    const force = pendingRecalcRef.current === "force";
     pendingRecalcRef.current = false;
     import("../../three/regenerateOrchestrator.js").then((m) =>
-      m.recalculateTimeline(),
+      m.recalculateTimeline(force),
     );
   }, [sketchMode]);
 

@@ -993,7 +993,7 @@ Established landmines (each was a real bug — extend this list, never shrink it
   insert/edit that repointed the source via `relinkSourceChain` rebuilt the
   geometry on the NEW source while the position stayed pinned to the OLD one — the
   recurring "insert a chamfer after a chamfer shifts the body" bug. Key it on the
-  brush point ALONE, never `centerOffset`: a resolution toggle re-tessellates and
+  brush point ALONE, never `centerOffset`: a resolution change re-tessellates and
   nudges the bbox centre, and re-anchoring on that would jitter the body every
   toggle. Every commit/edit path that sets `position` must also store
   `basePosition` (else the next recalc computes a spurious delta) — gizmo MOVES

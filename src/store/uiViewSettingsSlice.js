@@ -51,15 +51,6 @@ export const createUiViewSettingsSlice = (set) => ({
     set((state) => ({ constraintsVisible: !state.constraintsVisible })),
   toggleDimensionsVisible: () =>
     set((state) => ({ dimensionsVisible: !state.dimensionsVisible })),
-  toggleCurveResolution: () =>
-    // Changing tessellation resolution invalidates every cached entry (JIT
-    // timeline): each step must re-tessellate at the new precision.  The one
-    // edit that rightly marks the WHOLE timeline -- every other edit starts
-    // from the first step it reaches (invalidateEdit, internals.js).
-    set((state) => ({
-      curveResolution: state.curveResolution === "print" ? "preview" : "print",
-      history: dirtyAllEntries(state.history),
-    })),
   setRenderMode: (mode) => set({ renderMode: mode, pathTraceView: false }),
   setPathTraceView: (v) => set({ pathTraceView: !!v }),
   setProjectionMode: (mode) => set({ projectionMode: mode }),
@@ -143,21 +134,18 @@ export const createUiViewSettingsSlice = (set) => ({
       return { curveDetectionAngleDeg };
     }),
 
-  setPreviewPrecisionMm: (v) =>
+  // The Resolution setting.  A new value re-tessellates every step, so it
+  // invalidates every cached entry (the one edit that rightly marks the WHOLE
+  // timeline -- every other edit starts from the first step it reaches,
+  // invalidateEdit in internals.js), and useSceneSync runs a forced recalc.
+  setResolutionMm: (v) =>
     set((state) => {
       const n = Number(v);
-      const previewPrecisionMm =
-        Number.isFinite(n) && n > 0 ? Math.min(5, Math.max(0.001, n)) : 0.5;
-      saveSnapSettings({ ...state, previewPrecisionMm });
-      return { previewPrecisionMm };
-    }),
-  setPrintPrecisionMm: (v) =>
-    set((state) => {
-      const n = Number(v);
-      const printPrecisionMm =
-        Number.isFinite(n) && n > 0 ? Math.min(5, Math.max(0.001, n)) : 0.01;
-      saveSnapSettings({ ...state, printPrecisionMm });
-      return { printPrecisionMm };
+      const resolutionMm =
+        Number.isFinite(n) && n > 0 ? Math.min(5, Math.max(0.001, n)) : 0.05;
+      if (resolutionMm === state.resolutionMm) return {};
+      saveSnapSettings({ ...state, resolutionMm });
+      return { resolutionMm, history: dirtyAllEntries(state.history) };
     }),
   setSettingsDialogOpen: (open) => set({ settingsDialogOpen: !!open }),
   setAboutDialogOpen: (open) => set({ aboutDialogOpen: !!open }),

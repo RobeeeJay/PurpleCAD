@@ -332,8 +332,6 @@ const VIEWS = [
 const RenderSection = () => {
   const renderMode = useStore((s) => s.renderMode);
   const setRenderMode = useStore((s) => s.setRenderMode);
-  const curveResolution = useStore((s) => s.curveResolution);
-  const toggleCurveResolution = useStore((s) => s.toggleCurveResolution);
   const shadowsEnabled = useStore((s) => s.shadowsEnabled);
   const setShadowsEnabled = useStore((s) => s.setShadowsEnabled);
   const crossSectionView = useStore((s) => s.crossSectionView);
@@ -536,97 +534,6 @@ const RenderSection = () => {
             x2="10"
             y2="16"
           />
-        </svg>
-      </button>
-      <button
-        className={`toolbar-btn ${curveResolution === "print" ? "active" : ""}`}
-        title={
-          curveResolution === "print"
-            ? "High resolution (3D print) — click for normal (8)"
-            : "Normal resolution — click for high (3D print) (8)"
-        }
-        onClick={toggleCurveResolution}
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <circle
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            cx="10"
-            cy="10"
-            r="7"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="1.5 1.5"
-            x1="3"
-            y1="10"
-            x2="17"
-            y2="10"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="1.5 1.5"
-            x1="10"
-            y1="3"
-            x2="10"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="1.5 1.5"
-            x1="5"
-            y1="7"
-            x2="15"
-            y2="7"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="1.5 1.5"
-            x1="5"
-            y1="13"
-            x2="15"
-            y2="13"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="1.5 1.5"
-            x1="7"
-            y1="5"
-            x2="7"
-            y2="15"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="1.5 1.5"
-            x1="13"
-            y1="5"
-            x2="13"
-            y2="15"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="2"
-            strokeLinecap="square"
-            x1="15"
-            y1="15"
-            x2="21"
-            y2="21"
-          />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.5" cx="21" cy="21" />
         </svg>
       </button>
       <button

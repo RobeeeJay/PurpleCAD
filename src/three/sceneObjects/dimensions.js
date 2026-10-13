@@ -24,7 +24,7 @@ export function snapUnitToIntervalMm(value, intervalMm) {
 // Display-quality precision for wireframe & selection overlays.  The
 // smooth shader render is analytic (perfectly smooth), so wireframe /
 // hover / selection should ALWAYS look smooth to match — independently
-// of the user's curveResolution choice (which is for CSG/bevel
+// of the user's Resolution setting (which is for CSG/bevel
 // "operation" quality, not display).  Picked so 0.01 mm sagitta gives
 // ~86 segments at r=1.5, indistinguishable from smooth at normal
 // viewing distance.

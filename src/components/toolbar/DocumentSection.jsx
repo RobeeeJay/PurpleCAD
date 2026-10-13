@@ -21,7 +21,6 @@ const DocumentSection = () => {
   const loadDocument = useStore((s) => s.loadDocument);
   const createProject = useStore((s) => s.createProject);
   const items = useStore((s) => s.items);
-  const curveResolution = useStore((s) => s.curveResolution);
   const variables = useStore((s) => s.variables);
   const folders = useStore((s) => s.folders);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
@@ -126,19 +125,6 @@ const DocumentSection = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Exports tessellate at the ACTIVE resolution; in preview mode that's the
-  // coarse mesh, which pits/facets a printed part.  Warn before exporting so
-  // the user can switch on high-res print mode first.  Returns false to abort.
-  const confirmExportResolution = (kind) => {
-    if (curveResolution === "print") return true;
-    return window.confirm(
-      `High resolution is OFF, so this ${kind} will export at the coarser ` +
-        `normal tessellation (curved surfaces will look faceted).\n\n` +
-        `Turn on high resolution (the resolution toggle) for a smooth mesh, ` +
-        `then export again.\n\nExport at normal resolution anyway?`,
-    );
-  };
-
   // What an export takes: the whole scene, or only the selected objects
   // (single or multi) -- the menu offers both, rather than quietly exporting
   // the selection whenever there is one.
@@ -187,7 +173,6 @@ const DocumentSection = () => {
       alert("No objects to export.");
       return;
     }
-    if (!confirmExportResolution("STL")) return;
     try {
       const buffer = await exportSTL(exportPayload(list));
       if (!buffer) {
@@ -211,7 +196,6 @@ const DocumentSection = () => {
       alert("No objects to export.");
       return;
     }
-    if (!confirmExportResolution("STEP")) return;
     try {
       const content = await exportSTEP(exportPayload(list));
       if (!content) {

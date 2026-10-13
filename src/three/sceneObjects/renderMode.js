@@ -237,7 +237,7 @@ export function applyRenderMode(renderMode, ctx) {
           // must look as smooth as the shader, regardless of the user's CSG
           // resolution setting.  We pin it to DISPLAY_PRECISION_MM (the
           // print precision) so it always looks smooth at normal viewing.
-          // In print mode the user might want even finer; honour whichever
+          // A finer Resolution setting may want even finer; honour whichever
           // is smaller (more segments).
           const wireframePrecision =
             printPrecision != null

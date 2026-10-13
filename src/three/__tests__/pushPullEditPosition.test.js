@@ -94,7 +94,6 @@ describe("editing a push/pull distance recenters the origin", () => {
       activeHistoryId: "h3",
       items: [],
       variables: [],
-      curveResolution: "preview",
       undoStack: [],
       redoStack: [],
     });
