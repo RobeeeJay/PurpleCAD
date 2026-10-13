@@ -1,5 +1,5 @@
 import { weldForImport, openMeshWarning } from "../../three/importWeld.js";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
@@ -139,9 +139,10 @@ const DocumentSection = () => {
     );
   };
 
-  // Export the selected objects (single or multi) in their current cached
-  // timeline state, or the whole scene when nothing is selected.
-  const exportItems = () => {
+  // What an export takes: the whole scene, or only the selected objects
+  // (single or multi) -- the menu offers both, rather than quietly exporting
+  // the selection whenever there is one.
+  const selectedItems = () => {
     const ids = new Set(
       selectedIds?.length
         ? selectedIds
@@ -149,7 +150,19 @@ const DocumentSection = () => {
           ? [selectedId]
           : [],
     );
-    return ids.size ? items.filter((i) => ids.has(i.id)) : items;
+    return items.filter((i) => ids.has(i.id));
+  };
+  const nSelected = selectedItems().length;
+  // The file is named for what it holds: "scene", one object's name, or
+  // "selection" for several.
+  const exportScope = (scope) => {
+    if (scope === "scene") return { list: items, name: "scene" };
+    const list = selectedItems();
+    const name =
+      list.length === 1
+        ? (list[0].name || "selection").replace(/[\\/:*?"<>|]+/g, "_")
+        : "selection";
+    return { list, name };
   };
 
   // Export payload: the chosen items, the whole scene (so a selected body's
@@ -162,22 +175,28 @@ const DocumentSection = () => {
     precision: activePrecision(useStore.getState()),
   });
 
-  const handleExportSTL = async () => {
+  const nothingToExport = (scope) =>
+    scope === "scene"
+      ? "No exportable objects in the scene."
+      : "Nothing in the selection can be exported -- select a solid body.";
+
+  const handleExportSTL = async (scope) => {
     setSaveMenuOpen(false);
-    if (items.length === 0) {
+    const { list, name } = exportScope(scope);
+    if (list.length === 0) {
       alert("No objects to export.");
       return;
     }
     if (!confirmExportResolution("STL")) return;
     try {
-      const buffer = await exportSTL(exportPayload(exportItems()));
+      const buffer = await exportSTL(exportPayload(list));
       if (!buffer) {
-        alert("No exportable objects in the scene.");
+        alert(nothingToExport(scope));
         return;
       }
       download(
         new Blob([buffer], { type: "application/octet-stream" }),
-        "scene.stl",
+        `${name}.stl`,
       );
     } catch (err) {
       console.error("STL export failed:", err);
@@ -185,20 +204,24 @@ const DocumentSection = () => {
     }
   };
 
-  const handleExportSTEP = async () => {
+  const handleExportSTEP = async (scope) => {
     setSaveMenuOpen(false);
-    if (items.length === 0) {
+    const { list, name } = exportScope(scope);
+    if (list.length === 0) {
       alert("No objects to export.");
       return;
     }
     if (!confirmExportResolution("STEP")) return;
     try {
-      const content = await exportSTEP(exportPayload(exportItems()));
+      const content = await exportSTEP(exportPayload(list));
       if (!content) {
-        alert("No exportable objects in the scene.");
+        alert(nothingToExport(scope));
         return;
       }
-      download(new Blob([content], { type: "application/step" }), "scene.step");
+      download(
+        new Blob([content], { type: "application/step" }),
+        `${name}.step`,
+      );
     } catch (err) {
       console.error("STEP export failed:", err);
       alert("STEP export failed: " + err.message);
@@ -458,20 +481,32 @@ const DocumentSection = () => {
             >
               Save document (.pcad)
             </button>
-            <button
-              className="toolbar-dropdown-item"
-              title="Export the visible bodies as a 3D-printable STL mesh"
-              onClick={handleExportSTL}
-            >
-              Export as STL
-            </button>
-            <button
-              className="toolbar-dropdown-item"
-              title="Export the visible bodies as a STEP file for other CAD tools"
-              onClick={handleExportSTEP}
-            >
-              Export as STEP
-            </button>
+            {[
+              ["STL", "a 3D-printable STL mesh", handleExportSTL],
+              ["STEP", "a STEP file for other CAD tools", handleExportSTEP],
+            ].map(([fmt, what, handler]) => (
+              <Fragment key={fmt}>
+                <button
+                  className="toolbar-dropdown-item"
+                  title={`Export every visible body as ${what}`}
+                  onClick={() => handler("scene")}
+                >
+                  {`Export scene as ${fmt}`}
+                </button>
+                <button
+                  className="toolbar-dropdown-item"
+                  title={
+                    nSelected
+                      ? `Export only the selected ${nSelected === 1 ? "object" : `${nSelected} objects`} as ${what}`
+                      : "Select the objects to export first"
+                  }
+                  disabled={nSelected === 0}
+                  onClick={() => handler("selection")}
+                >
+                  {`Export selected as ${fmt}`}
+                </button>
+              </Fragment>
+            ))}
             <button
               className="toolbar-dropdown-item"
               title="Save a PNG screenshot of the viewport"
