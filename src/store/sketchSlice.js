@@ -9,7 +9,7 @@ import {
   pushSketchSnapshot,
   withOrphanFlags,
   saveTimeline,
-  markCsgDirty,
+  invalidateEdit,
 } from "./internals.js";
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { createSketchPatternToolSlice } from "./sketchPatternToolSlice.js";
@@ -171,10 +171,11 @@ const commitSketchShapesChange = (state, sketchId, newShapes) => {
         })
       : entry,
   );
-  saveTimeline(newHistory, state.activeHistoryId);
+  const edit = invalidateEdit(state.history, newHistory, updatedItems);
+  saveTimeline(edit.history, state.activeHistoryId);
   return {
-    items: markCsgDirty(updatedItems),
-    history: withOrphanFlags(newHistory),
+    items: edit.items,
+    history: withOrphanFlags(edit.history),
   };
 };
 
@@ -272,10 +273,11 @@ export const createSketchSlice = (set) => ({
           }),
         });
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -310,10 +312,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -352,10 +355,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -394,10 +398,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -429,10 +434,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -488,10 +494,11 @@ export const createSketchSlice = (set) => ({
             })
           : entry,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -583,10 +590,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -628,10 +636,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -682,10 +691,11 @@ export const createSketchSlice = (set) => ({
             })
           : entry,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -716,10 +726,11 @@ export const createSketchSlice = (set) => ({
             })
           : entry,
       );
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -761,10 +772,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -848,10 +860,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
         selectedSketchElement: null,
         sketchMultiSelectedIndices: [],
       };
@@ -927,10 +940,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -1116,10 +1130,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -1237,10 +1252,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -1329,10 +1345,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
         activeSketchTool: null,
         sketchMirrorState: null,
       };
@@ -1444,10 +1461,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
         activeSketchTool: null,
         sketchCircularPatternState: null,
         circularPatternDefaultCount: count,
@@ -1580,10 +1598,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
         ...defaults,
       };
     }),
@@ -1618,10 +1637,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 
@@ -1654,10 +1674,11 @@ export const createSketchSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
 });

@@ -9,7 +9,7 @@ import {
   pushSketchSnapshot,
   withOrphanFlags,
   saveTimeline,
-  markCsgDirty,
+  invalidateEdit,
   remapConstraintShapeIndices,
 } from "./internals.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
@@ -77,10 +77,11 @@ function commitSketch(state, sketchId, shapes, constraints) {
         })
       : entry,
   );
-  saveTimeline(newHistory, state.activeHistoryId);
+  const edit = invalidateEdit(state.history, newHistory, updatedItems);
+  saveTimeline(edit.history, state.activeHistoryId);
   return {
-    items: markCsgDirty(updatedItems),
-    history: withOrphanFlags(newHistory),
+    items: edit.items,
+    history: withOrphanFlags(edit.history),
   };
 }
 

@@ -53,7 +53,9 @@ export const createUiViewSettingsSlice = (set) => ({
     set((state) => ({ dimensionsVisible: !state.dimensionsVisible })),
   toggleCurveResolution: () =>
     // Changing tessellation resolution invalidates every cached entry (JIT
-    // timeline): each step must re-tessellate at the new precision.
+    // timeline): each step must re-tessellate at the new precision.  The one
+    // edit that rightly marks the WHOLE timeline -- every other edit starts
+    // from the first step it reaches (invalidateEdit, internals.js).
     set((state) => ({
       curveResolution: state.curveResolution === "print" ? "preview" : "print",
       history: dirtyAllEntries(state.history),

@@ -9,9 +9,11 @@ import {
   withOrphanFlags,
   saveTimeline,
   withUndo,
-  markCsgDirty,
   rewriteCreatedItem,
-  dirtyAllEntries,
+  dirtyEntriesFrom,
+  firstChangedIndex,
+  invalidateEdit,
+  markCsgDirtyFrom,
   maxItemId,
   hideIdsFrom,
   showIdsFrom,
@@ -53,36 +55,34 @@ export const createHistoryExtrudeSlice = (set) => ({
           : null;
       const shiftAnchors = (item) =>
         delta ? shiftUnionAnchorForRetarget(item, extrudeId, delta) : item;
-      // markCsgDirty: a retargeted prism may feed a union (a boss, or one of a
-      // multi-area extrude's prisms), which must rebuild against the new profile.
-      const updatedItems = markCsgDirty(
-        state.items.map((item) =>
-          item.id === extrudeId ? apply(item) : shiftAnchors(item),
-        ),
+      // A retargeted prism may feed a later union (a boss, or one of a
+      // multi-area extrude's prisms), which must rebuild against the new
+      // profile: invalidateEdit below takes everything from this step on.
+      const updatedItems = state.items.map((item) =>
+        item.id === extrudeId ? apply(item) : shiftAnchors(item),
       );
-      const newHistory = dirtyAllEntries(
-        state.history.map((entry) => {
-          const rewritten = rewriteCreatedItem(entry, extrudeId, apply);
-          if (rewritten !== entry) return rewritten;
-          const inst = entry.instruction;
-          if (inst?.type === "create" && inst.item?.regenerator) {
-            const next = shiftAnchors(inst.item);
-            if (next !== inst.item)
-              return { ...entry, instruction: { ...inst, item: next } };
-          }
-          if (inst?.type === "modify" && inst.patches?.regenerator) {
-            const next = shiftAnchors(inst.patches);
-            if (next !== inst.patches)
-              return { ...entry, instruction: { ...inst, patches: next } };
-          }
-          return entry;
-        }),
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
+      const newHistory = state.history.map((entry) => {
+        const rewritten = rewriteCreatedItem(entry, extrudeId, apply);
+        if (rewritten !== entry) return rewritten;
+        const inst = entry.instruction;
+        if (inst?.type === "create" && inst.item?.regenerator) {
+          const next = shiftAnchors(inst.item);
+          if (next !== inst.item)
+            return { ...entry, instruction: { ...inst, item: next } };
+        }
+        if (inst?.type === "modify" && inst.patches?.regenerator) {
+          const next = shiftAnchors(inst.patches);
+          if (next !== inst.patches)
+            return { ...entry, instruction: { ...inst, patches: next } };
+        }
+        return entry;
+      });
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
         ...withUndo(state),
-        items: updatedItems,
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
   // Edit an extrude's depth in place: rewrite its CREATE entry rather than
@@ -91,23 +91,20 @@ export const createHistoryExtrudeSlice = (set) => ({
   // edits a sketch's create entry).
   setExtrudeDepth: (id, depth) =>
     set((state) => {
-      const updatedItems = markCsgDirty(
-        state.items.map((item) =>
-          item.id === id ? Object.assign({}, item, { depth }) : item,
+      const updatedItems = state.items.map((item) =>
+        item.id === id ? Object.assign({}, item, { depth }) : item,
+      );
+      const newHistory = state.history.map((entry) =>
+        rewriteCreatedItem(entry, id, (item) =>
+          Object.assign({}, item, { depth }),
         ),
       );
-      const newHistory = dirtyAllEntries(
-        state.history.map((entry) =>
-          rewriteCreatedItem(entry, id, (item) =>
-            Object.assign({}, item, { depth }),
-          ),
-        ),
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
         ...withUndo(state),
-        items: updatedItems,
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
   // Set ONE distance on every prism of a multi-area extrude group at once —
@@ -115,34 +112,31 @@ export const createHistoryExtrudeSlice = (set) => ({
   setExtrudeGroupDepth: (ids, depth) =>
     set((state) => {
       const idSet = new Set(ids);
-      const updatedItems = markCsgDirty(
-        state.items.map((item) =>
-          idSet.has(item.id) ? Object.assign({}, item, { depth }) : item,
-        ),
+      const updatedItems = state.items.map((item) =>
+        idSet.has(item.id) ? Object.assign({}, item, { depth }) : item,
       );
-      const newHistory = dirtyAllEntries(
-        state.history.map((entry) => {
-          const inst = entry.instruction;
-          if (
-            inst?.type === "createGroup" &&
-            inst.items?.some((it) => idSet.has(it.id))
-          ) {
-            return Object.assign({}, entry, {
-              instruction: Object.assign({}, inst, {
-                items: inst.items.map((it) =>
-                  idSet.has(it.id) ? Object.assign({}, it, { depth }) : it,
-                ),
-              }),
-            });
-          }
-          return entry;
-        }),
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
+      const newHistory = state.history.map((entry) => {
+        const inst = entry.instruction;
+        if (
+          inst?.type === "createGroup" &&
+          inst.items?.some((it) => idSet.has(it.id))
+        ) {
+          return Object.assign({}, entry, {
+            instruction: Object.assign({}, inst, {
+              items: inst.items.map((it) =>
+                idSet.has(it.id) ? Object.assign({}, it, { depth }) : it,
+              ),
+            }),
+          });
+        }
+        return entry;
+      });
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
         ...withUndo(state),
-        items: updatedItems,
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
   // Retarget a whole multi-area extrude group to a new set of profiles.  The
@@ -244,12 +238,22 @@ export const createHistoryExtrudeSlice = (set) => ({
         const kept = hidden.filter((id) => !oldSet.has(id));
         return { ...entry, hiddenIds: [...new Set([...kept, ...newIds])] };
       });
-      const dirtied = dirtyAllEntries(finalHistory);
+      // From the first entry the retarget rewrote: nothing before it can
+      // depend on the group.
+      const from = firstChangedIndex(state.history, finalHistory);
+      const dirtied = dirtyEntriesFrom(
+        finalHistory,
+        from < 0 ? Infinity : from,
+      );
       const activeIdx =
         state.activeHistoryId !== null
           ? dirtied.findIndex((h) => h.id === state.activeHistoryId)
           : dirtied.length - 1;
-      const items = markCsgDirty(replayUpTo(dirtied, activeIdx));
+      const items = markCsgDirtyFrom(
+        replayUpTo(dirtied, activeIdx),
+        dirtied,
+        from,
+      );
       saveTimeline(dirtied, state.activeHistoryId);
       return {
         ...withUndo(state),
@@ -300,39 +304,36 @@ export const createHistoryExtrudeSlice = (set) => ({
         ...(isCut ? { cutStartInset: cutStartInsetFor(hosts, newDefs) } : null),
         regeneratedAt: "dirty",
       });
-      const updatedItems = markCsgDirty(
-        state.items.map((item) =>
-          item.id === itemId
-            ? { ...item, regenerator: setDefs(item.regenerator) }
-            : item,
-        ),
+      const updatedItems = state.items.map((item) =>
+        item.id === itemId
+          ? { ...item, regenerator: setDefs(item.regenerator) }
+          : item,
       );
-      const newHistory = dirtyAllEntries(
-        state.history.map((entry) => {
-          const inst = entry.instruction;
-          if (
-            inst?.type === "create" &&
-            inst.item?.id === itemId &&
-            inst.item.regenerator?.extrudeDefs
-          )
-            return {
-              ...entry,
-              instruction: {
-                ...inst,
-                item: {
-                  ...inst.item,
-                  regenerator: setDefs(inst.item.regenerator),
-                },
+      const newHistory = state.history.map((entry) => {
+        const inst = entry.instruction;
+        if (
+          inst?.type === "create" &&
+          inst.item?.id === itemId &&
+          inst.item.regenerator?.extrudeDefs
+        )
+          return {
+            ...entry,
+            instruction: {
+              ...inst,
+              item: {
+                ...inst.item,
+                regenerator: setDefs(inst.item.regenerator),
               },
-            };
-          return entry;
-        }),
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
+            },
+          };
+        return entry;
+      });
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
         ...withUndo(state),
-        items: updatedItems,
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
       };
     }),
   // Combine, changed while editing a merged extrude: set the bodies it merges
@@ -433,12 +434,18 @@ export const createHistoryExtrudeSlice = (set) => ({
 // Shared tail of the two Combine conversions: relink the later steps onto the
 // edited one, rebuild from it, and redisplay where the user is.
 function finishStepConversion(state, history, entryId) {
-  const dirtied = dirtyAllEntries(commitEntryEdit(history, entryId));
+  // From the first entry the conversion rewrote -- the converted step itself,
+  // which must rebuild -- onward; commitEntryEdit relinks the later steps.
+  const from = firstChangedIndex(state.history, history);
+  const dirtied = dirtyEntriesFrom(
+    commitEntryEdit(history, entryId),
+    from < 0 ? Infinity : from,
+  );
   const activeIdx =
     state.activeHistoryId !== null
       ? dirtied.findIndex((h) => h.id === state.activeHistoryId)
       : dirtied.length - 1;
-  const items = markCsgDirty(replayUpTo(dirtied, activeIdx));
+  const items = markCsgDirtyFrom(replayUpTo(dirtied, activeIdx), dirtied, from);
   saveTimeline(dirtied, state.activeHistoryId);
   return {
     ...withUndo(state),

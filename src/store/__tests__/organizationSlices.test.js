@@ -88,25 +88,38 @@ describe("folderSlice", () => {
 describe("variablesSlice", () => {
   beforeEach(reset);
 
-  it("setVariables persists and dirties dependent regenerators", () => {
+  // A variable change marks stale what it can reach: bodies from the first
+  // step that names it onward.  It used to mark EVERY regenerator, whatever
+  // it referenced (markCsgDirty on all items), so a body built before any use
+  // of the variable was rebuilt for nothing; this asserted that.
+  it("setVariables persists and dirties the regenerators it reaches", () => {
     const s = () => useStore.getState();
+    const csg = (id, amount) => ({
+      id,
+      type: "csg",
+      regenerator: { kind: "chamfer", amount, regeneratedAt: 0.1 },
+      geometryData: { positions: [0, 0, 0], indices: [0] },
+    });
+    const create = (id, item) => ({
+      id,
+      label: "Chamfered",
+      itemId: item.id,
+      instruction: { type: "create", item },
+      hiddenIds: [],
+    });
+    const before = csg(6, 0.2); // built before anything names "wall"
+    const uses = csg(5, "wall");
     useStore.setState({
-      items: [
-        {
-          id: 5,
-          type: "csg",
-          regenerator: { kind: "chamfer", amount: 0.1, regeneratedAt: 0.1 },
-          geometryData: { positions: [0, 0, 0], indices: [0] },
-        },
-      ],
+      items: [before, uses],
+      history: [create(1, before), create(2, uses)],
     });
     s().setVariables([{ name: "wall", value: "2.5" }]);
     expect(s().variables).toEqual([{ name: "wall", value: "2.5" }]);
-    // A variable change invalidates every regenerator so the next pass
-    // rebuilds with the new values (markCsgDirty).
-    expect(
-      s().items.find((i) => i.id === 5).regenerator.regeneratedAt,
-    ).not.toBe(0.1);
+    const at = (id) =>
+      s().items.find((i) => i.id === id).regenerator.regeneratedAt;
+    expect(at(5), "the chamfer sized by wall").toBe("dirty");
+    expect(at(6), "the chamfer before any use of wall").toBe(0.1);
+    expect(s().history.map((e) => !!e.dirty)).toEqual([false, true]);
   });
 });
 

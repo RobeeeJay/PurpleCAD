@@ -931,6 +931,18 @@ Established landmines (each was a real bug — extend this list, never shrink it
   chained to the old order's GEOMETRY, not the new order's OPERATIONS. When
   adding any new timeline mutation, mirror `deleteHistoryEntry`'s tail
   (`reorderRelink.test.js` is the template).
+- **An edit invalidates from the first step it reaches, never the whole
+  timeline.** A step only references what came before it, so
+  `invalidateEdit` (internals.js) marks entries dirty -- and live bodies stale
+  -- from the earliest entry the edit rewrote (`firstChangedIndex`); a
+  variable starts at the first entry naming it or a variable computed from it
+  (`firstEntryNaming`).  Only a resolution change marks everything.  The
+  extrude edits used to mark EVERY entry: editing the last extrude of
+  `recalc-overload.pcad` re-sewed its 14k-triangle import and re-ran every
+  boolean and chamfer, 11.7 s for nothing.  Sketch edits marked NO entry, so a
+  grown circle never reached the extrusion on it (`dirtyFromStep.test.js`).
+  A new edit path returns `invalidateEdit(state.history, newHistory, items)`
+  rather than `markCsgDirty` / `dirtyAllEntries`.
 - **A relink that SWAPS the source kind changes the op's FRAME — two traps.**
   A relinked source is a different object delivering a different local frame (an
   extrude = raw local, z 0..depth; a csg = bbox-centred by its `centerOffset`),

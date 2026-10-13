@@ -8,7 +8,7 @@ import {
   pushSketchSnapshot,
   withOrphanFlags,
   saveTimeline,
-  markCsgDirty,
+  invalidateEdit,
 } from "./internals.js";
 import { solveConstraints, varFields } from "../three/sketchSolver.js";
 import { resolveValue } from "../three/geometryParams.js";
@@ -213,10 +213,11 @@ export const createSketchCentreSlice = (set) => ({
         }
         return entry;
       });
-      saveTimeline(newHistory, state.activeHistoryId);
+      const edit = invalidateEdit(state.history, newHistory, updatedItems);
+      saveTimeline(edit.history, state.activeHistoryId);
       return {
-        items: markCsgDirty(updatedItems),
-        history: withOrphanFlags(newHistory),
+        items: edit.items,
+        history: withOrphanFlags(edit.history),
         activeSketchTool:
           state.activeSketchTool === "centre" ? null : state.activeSketchTool,
         sketchCentreState: null,

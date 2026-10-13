@@ -442,10 +442,12 @@ export const rewriteCreatedItem = (entry, id, apply) => {
   return entry;
 };
 
-export const markCsgDirty = (items) => {
+// Mark live CSG bodies stale -- every one, or only those `ids` names.
+export const markCsgDirty = (items, ids = null) => {
   let changed = false;
   const out = items.map((item) => {
     if (item.type !== "csg" || !item.regenerator) return item;
+    if (ids && !ids.has(item.id)) return item;
     if (item.regenerator.regeneratedAt === "dirty") return item;
     changed = true;
     return {
@@ -454,6 +456,45 @@ export const markCsgDirty = (items) => {
     };
   });
   return changed ? out : items;
+};
+
+// The earliest entry an edit rewrote, comparing the history before and after
+// it (an untouched entry keeps its identity); -1 if none changed.  Nothing
+// earlier can depend on what an edit rewrote -- a step only references what
+// came before it -- so this is where invalidation starts.
+export const firstChangedIndex = (prev, next) => {
+  const n = Math.min(prev.length, next.length);
+  for (let i = 0; i < n; i++) if (prev[i] !== next[i]) return i;
+  return prev.length === next.length ? -1 : n;
+};
+
+// The bodies the entries from `from` onward build or reshape.
+const bodiesBuiltFrom = (history, from) => {
+  const ids = new Set();
+  for (let i = Math.max(0, from); i < history.length; i++) {
+    const inst = history[i].instruction;
+    if (inst?.type === "create" && inst.item) ids.add(inst.item.id);
+    else if (inst?.type === "createGroup")
+      for (const it of inst.items || []) ids.add(it.id);
+    else if (inst?.type === "modify") ids.add(inst.itemId);
+  }
+  return ids;
+};
+
+// Mark stale only the live bodies an edit at step `from` can reach.
+export const markCsgDirtyFrom = (items, history, from) =>
+  from < 0 ? items : markCsgDirty(items, bodiesBuiltFrom(history, from));
+
+// Invalidate what an edit can affect, and nothing else: from the first entry
+// it rewrote, flag the entries for the recalc and mark the bodies they build
+// stale.  An edit to the last step rebuilds that step alone -- it used to
+// mark every entry and body, so editing the last extrude re-sewed the import
+// and re-ran every boolean before it.
+export const invalidateEdit = (prevHistory, newHistory, items) => {
+  const from = firstChangedIndex(prevHistory, newHistory);
+  if (from < 0) return { history: newHistory, items };
+  const history = dirtyEntriesFrom(newHistory, from);
+  return { history, items: markCsgDirtyFrom(items, history, from) };
 };
 
 // Viewport + snap preferences (the Settings dialog).  `fov` is the perspective
