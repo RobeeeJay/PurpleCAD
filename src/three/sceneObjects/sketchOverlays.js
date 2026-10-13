@@ -185,14 +185,22 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
 
 // ── Extrude profile selection fills (one fill mesh per closed sketch loop) ───
 
+// `alsoSketchIds`: sketches to offer even while hidden -- the ones an extrude
+// being edited was built from.  Making an extrude can hide its sketch, and
+// the edit shows the scene as of the extrude's own step, so without this the
+// edit opened with no region to pick and Confirm stayed disabled.
 export function buildExtrudeSelectGroup(
   items,
   objectsRef,
   curveSegments = 32,
   precision = null,
+  alsoSketchIds = null,
 ) {
   const sketchItems = items.filter(
-    (i) => i.type === "sketch" && i.shapes?.length > 0 && i.visible !== false,
+    (i) =>
+      i.type === "sketch" &&
+      i.shapes?.length > 0 &&
+      (i.visible !== false || alsoSketchIds?.has(i.id)),
   );
   if (sketchItems.length === 0) return null;
   const group = new THREE.Group();

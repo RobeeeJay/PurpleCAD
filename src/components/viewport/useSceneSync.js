@@ -705,11 +705,28 @@ export function useSceneSync({
       return;
     }
     if (!extrudeSelectGroupRef.current) {
+      // Editing an extrude: its own sketches are offered even if hidden.
+      const st = useStore.getState();
+      const editedIds =
+        st.extrudeRetargetGroup ??
+        (st.extrudeRetargetId != null ? [st.extrudeRetargetId] : []);
+      const fused =
+        st.extrudeRetargetFusedId != null
+          ? items.find((i) => i.id === st.extrudeRetargetFusedId)
+          : null;
+      const editedProfiles = [
+        ...editedIds.map((id) => items.find((i) => i.id === id)?.profile),
+        ...(fused?.regenerator?.extrudeDefs || []).map((d) => d.profile),
+      ];
+      const sourceSketches = new Set(
+        editedProfiles.map((p) => p?.sketchId).filter((id) => id != null),
+      );
       const group = buildExtrudeSelectGroup(
         items,
         objectsRef,
         curveSegments,
         printPrecision,
+        sourceSketches,
       );
       if (group) {
         scene.add(group);
