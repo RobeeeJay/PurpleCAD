@@ -211,8 +211,8 @@ const SelectionWidget = () => {
         className={`selection-widget-btn${chainOn ? " active" : ""}${chainEnabled ? "" : " greyed"}`}
         title={
           chainEnabled
-            ? "Chain selection — follow a face/edge across the curve angle limit"
-            : "Chain selection — enable Face or Edge selection to use"
+            ? "Chain selection (B) — follow a face/edge across the curve angle limit"
+            : "Chain selection (B) — enable Face or Edge selection to use"
         }
         disabled={!chainEnabled}
         onClick={chainEnabled ? () => toggleSelChain() : undefined}

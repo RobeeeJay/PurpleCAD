@@ -133,11 +133,11 @@ export function createSketchKeyboardHandler(
       }
     }
 
-    // Z X C V B toggle the selection-type filters, in a shared widget order, for
-    // whichever selection widget is showing (object → region → edge/line → point,
-    // then constraint): 3D = object/face/edge/point (no fifth type, so B is a
-    // no-op there); sketch = object/shape/line/point/constraint.  Bare keys only —
-    // Ctrl/Cmd/Alt combos stay free for copy/undo/etc.
+    // Z X C V B press the selection widget's buttons in order, for whichever
+    // widget is showing: 3D = object/face/edge/point, then Chain (its fifth
+    // button, which only acts while faces or edges are on); sketch =
+    // object/shape/line/point/constraint.  Bare keys only -- Ctrl/Cmd/Alt combos
+    // stay free for copy/undo/etc.
     if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
       const idx = { z: 0, x: 1, c: 2, v: 3, b: 4 }[e.key.toLowerCase()];
       if (idx !== undefined) {
@@ -153,6 +153,7 @@ export function createSketchKeyboardHandler(
             store.toggleSelFace,
             store.toggleSelEdge,
             store.toggleSelPoint,
+            store.toggleSelChain,
           ][idx];
           if (toggle) {
             e.preventDefault();

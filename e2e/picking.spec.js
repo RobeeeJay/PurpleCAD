@@ -112,4 +112,40 @@ test.describe.serial("real raycast picking", () => {
     expect(cleared).toBe(false);
     await page.keyboard.press("Escape");
   });
+
+  test("B toggles chain selection, only while faces or edges are on", async () => {
+    // B presses the 3D selection widget's fifth button, as Z X C V press the
+    // first four; in a sketch it stays the constraint filter.
+    const sel = () =>
+      page.evaluate(() => {
+        const s = window.__store.getState();
+        return { chain: s.selChain, face: s.selFace, object: s.selObject };
+      });
+    await page.evaluate(() =>
+      window.__store.setState({
+        selObject: false,
+        selFace: true,
+        selEdge: false,
+        selPoint: false,
+        selChain: true,
+      }),
+    );
+    await page.keyboard.press("b");
+    expect((await sel()).chain, "chain after B").toBe(false);
+    await page.keyboard.press("b");
+    expect((await sel()).chain, "chain after B again").toBe(true);
+    // With only Object selection on there is nothing to chain, and the
+    // widget greys the button: B leaves the setting alone.
+    await page.evaluate(() =>
+      window.__store.setState({
+        selObject: true,
+        selFace: false,
+        selEdge: false,
+      }),
+    );
+    await page.keyboard.press("b");
+    const after = await sel();
+    expect(after.chain, "chain after B with no face/edge selection").toBe(true);
+    expect(after.object, "object selection untouched by B").toBe(true);
+  });
 });
