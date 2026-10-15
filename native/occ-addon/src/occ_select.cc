@@ -370,22 +370,27 @@ std::map<std::string, TopoDS_Shape> NameEdgesByFacePairs(
   if (faceNames.empty()) return edges;
   TopTools_IndexedDataMapOfShapeListOfShape efMap;
   TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, efMap);
-  auto nameOfFace = [&](const TopoDS_Shape& f) -> std::string {
+  // A face can carry several names (an exact curved face takes the name of
+  // every facet it replaced), so an edge is named by every pair: an old
+  // `side7|top` finds the rim of the cylinder that facet became.
+  auto namesOfFace = [&](const TopoDS_Shape& f) {
+    std::vector<std::string> out;
     for (const auto& kv : faceNames)
-      if (kv.second.IsSame(f)) return kv.first;
-    return "";
+      if (kv.second.IsSame(f)) out.push_back(kv.first);
+    return out;
   };
   for (int i = 1; i <= efMap.Extent(); ++i) {
     const TopoDS_Shape& edge = efMap.FindKey(i);
-    std::vector<std::string> ns;
-    for (const TopoDS_Shape& f : efMap.FindFromIndex(i)) {
-      std::string n = nameOfFace(f);
-      if (!n.empty()) ns.push_back(n);
-    }
-    if (ns.size() < 2) continue;
-    std::sort(ns.begin(), ns.end());
-    std::string key = ns[0] + "|" + ns[1];
-    if (!edges.count(key)) edges[key] = edge;
+    std::vector<TopoDS_Shape> named;
+    for (const TopoDS_Shape& f : efMap.FindFromIndex(i))
+      if (!namesOfFace(f).empty()) named.push_back(f);
+    // A seam borders the same face on both sides: it is no pair of faces.
+    if (named.size() < 2 || named[0].IsSame(named[1])) continue;
+    for (const std::string& a : namesOfFace(named[0]))
+      for (const std::string& b : namesOfFace(named[1])) {
+        std::string key = a < b ? a + "|" + b : b + "|" + a;
+        if (!edges.count(key)) edges[key] = edge;
+      }
   }
   return edges;
 }

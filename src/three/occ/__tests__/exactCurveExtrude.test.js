@@ -9,7 +9,10 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { createRequire } from "module";
 import { ensureOcc } from "../init.js";
 import { ops } from "../../occOps.js";
-import { regionsWithShapes } from "../../sceneObjects/closedLoops.js";
+import {
+  regionsWithShapes,
+  windLoopForOcc,
+} from "../../sceneObjects/closedLoops.js";
 
 const bridge = createRequire(import.meta.url)(
   "../../../../electron/occ-bridge.cjs",
@@ -337,4 +340,63 @@ describe("revolve, sweep and loft built from exact curves", () => {
     for (const c of await countBoth(item, [a, b]))
       expect(c.faces, JSON.stringify(c)).toBe(3);
   }, 30000);
+});
+
+// An older document's selections name the faces of its facets: `side7` is the
+// wall over polygon edge 7.  Built from exact curves, one face replaces a run
+// of facets, so it carries every one of their names, and a recalculated
+// older project's `side7` lands on the curved face that facet became.
+describe("an exact extrude's face names", () => {
+  it("name each curved face for every polygon edge it replaced", () => {
+    const occ = createRequire(import.meta.url)(
+      "../../../../native/occ-addon/build/Release/occ_addon.node",
+    );
+    const shapes = [
+      line(0, 0, 2, 0),
+      line(2, 1, 0, 1),
+      {
+        type: "arc",
+        cx: 2,
+        cy: 0.5,
+        r: 0.5,
+        startAngle: -Math.PI / 2,
+        endAngle: Math.PI / 2,
+      },
+      {
+        type: "arc",
+        cx: 0,
+        cy: 0.5,
+        r: 0.5,
+        startAngle: Math.PI / 2,
+        endAngle: (3 * Math.PI) / 2,
+      },
+    ];
+    const [g] = regionsWithShapes(shapes, 32, 0.05);
+    const loop = windLoopForOcc(g.polygon, g.curves.outer, true);
+    const id = occ.makeExtrude(loop.flat, [], 0, 0, 1, loop.curves, []);
+    const names = occ.faceNames(id);
+    const n = g.polygon.length;
+    for (let k = 0; k < n; k++) expect(names).toContain(`side${k}`);
+    // Each name sits on its own edge's surface: an arc edge's on that end's
+    // half cylinder, a straight edge's on its flat side.
+    const pts = [];
+    for (let i = 0; i < loop.flat.length; i += 2)
+      pts.push({ x: loop.flat[i], y: loop.flat[i + 1] });
+    for (let k = 0; k < n; k++) {
+      const [x, y] = occ.namedFacePoint(id, `side${k}`);
+      const a = pts[k];
+      const b = pts[(k + 1) % n];
+      const mx = (a.x + b.x) / 2;
+      if (Math.abs(a.y - b.y) < 1e-9) {
+        expect(Math.abs(y - a.y), `side${k} on its flat side`).toBeLessThan(
+          1e-9,
+        );
+      } else {
+        const cx = mx > 1 ? 2 : 0;
+        const r = Math.hypot(x - cx, y - 0.5);
+        expect(Math.abs(r - 0.5), `side${k} on its end`).toBeLessThan(1e-9);
+      }
+    }
+    occ.releaseShape(id);
+  });
 });

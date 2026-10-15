@@ -22,6 +22,7 @@ import {
 import { regenerateItemsForResolution } from "./regenerateItems.js";
 import { regenerateSplitGroup } from "./regenerators/combine.js";
 import { activePrecision } from "./resolution.js";
+import { upgradeProfileCurves, pinFacetedProfiles } from "./profileBackfill.js";
 import { getSolid, setSolid, pruneSolids } from "./solidCache.js";
 import { solidFromMesh } from "./occClient.js";
 
@@ -78,7 +79,7 @@ export function recalculateTimeline(force = false) {
   }
   recalcRunning = (async () => {
     try {
-      await runRecalcPass(force);
+      await (force ? runUpgradingPass() : runRecalcPass(false));
     } finally {
       recalcRunning = null;
       if (recalcQueued) {
@@ -91,6 +92,46 @@ export function recalculateTimeline(force = false) {
   })();
   return recalcRunning;
 }
+
+// A full recalculation also upgrades profiles saved before exact curves, so an
+// older project's facets become true arcs where its saved selections allow:
+// a step that FAILS only since the upgrade has the profiles under it pinned
+// back to their facets (pinFacetedProfiles), and the pass runs again.  A step
+// already failing before is left out -- facets wouldn't have saved it.
+async function runUpgradingPass() {
+  const before = useStore.getState().history;
+  const upgraded = upgradeProfileCurves(
+    before,
+    activePrecision(useStore.getState()),
+  );
+  if (upgraded !== before) useStore.setState({ history: upgraded });
+  await runRecalcPass(true);
+  if (upgraded === before) return;
+  const failedBefore = new Set(before.filter(entryFailed).map((e) => e.id));
+  // Each round pins what the last one broke; a pinned profile isn't upgraded
+  // again, so this settles within a few rounds.
+  for (let round = 0; round < 3; round++) {
+    const h = useStore.getState().history;
+    const failed = new Set(
+      h
+        .filter((e) => entryFailed(e) && !failedBefore.has(e.id))
+        .map((e) => e.id),
+    );
+    const pinned = pinFacetedProfiles(h, failed);
+    if (pinned === h) return;
+    useStore.setState({ history: pinned });
+    await runRecalcPass(true);
+  }
+}
+
+const entryFailed = (e) => {
+  const inst = e.instruction;
+  const reg =
+    inst?.type === "create"
+      ? inst.item?.regenerator
+      : inst?.patches?.regenerator;
+  return !!reg?.regenFailed;
+};
 
 // Force every CSG / chamfer regenerator to re-run from scratch — used by
 // the Timeline's "Recalculate" button.  This processes the ENTIRE timeline,

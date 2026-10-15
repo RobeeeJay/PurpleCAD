@@ -8,6 +8,7 @@
 
 import { regionsWithShapes } from "./sceneObjects/closedLoops.js";
 import { polyArea, polyCentroid } from "./sceneObjects/polygonUtil.js";
+import { extrudeWithLivePolygon } from "./csgUtils.js";
 
 const AREA_TOL = 0.03;
 // Keys whose values are point lists or meshes: nothing to stamp inside them.
@@ -80,4 +81,101 @@ export function backfillLoopShapes(history) {
     return out;
   };
   return walk(history);
+}
+
+// Profiles saved before they recorded their exact curves (curves2D) are
+// upgraded when the timeline is recalculated in full: each takes its live
+// polygon and curves from its sketch, so its body rebuilds from true arcs and
+// beziers.  The polygon is replaced WITH the curves because the runs index its
+// vertices.  A profile whose sketch no longer has its region is left alone; one
+// pinned faceted (curves2D: null, by pinFacetedProfiles) is never offered again.
+// Every copy counts -- an extrude's own profile and the frozen sources of the
+// ops built on it -- so each is found by shape rather than by `type` (the sweep
+// tools' copies carry none).
+export function upgradeProfileCurves(history, precision) {
+  const sketches = new Map();
+  for (const e of history) {
+    const inst = e.instruction;
+    if (inst?.type === "create" && inst.item?.type === "sketch")
+      sketches.set(inst.item.id, inst.item);
+  }
+  if (sketches.size === 0) return history;
+  const sketchItems = [...sketches.values()];
+  const none = { outer: [], holes: [] };
+  const live = new Map();
+  const upgrade = (p) => {
+    // Copies of one profile upgrade alike: key on what identifies it.
+    const key = profileKey(p) + `|${p.polygon2D.length}`;
+    if (!live.has(key)) {
+      const probe = { type: "extrude", profile: { ...p, curves2D: none } };
+      const got = extrudeWithLivePolygon(probe, sketchItems, precision).profile;
+      live.set(key, got.curves2D === none ? null : got);
+    }
+    const got = live.get(key);
+    if (!got) return p;
+    return {
+      ...p,
+      polygon2D: got.polygon2D,
+      holes: got.holes,
+      curves2D: got.curves2D,
+      curvesUpgraded: true,
+    };
+  };
+  return walkProfiles(history, (p) =>
+    p.curves2D === undefined && sketches.has(p.sketchId) ? upgrade(p) : p,
+  );
+}
+
+// After an upgrading recalc, a step that failed only since (`failedIds`) is
+// pinned back to its facets: every upgraded profile it was built from -- and
+// every other copy of those profiles in the timeline -- gets curves2D null,
+// which rebuilds the facets its saved selections were made on.
+export function pinFacetedProfiles(history, failedIds) {
+  const keys = new Set();
+  for (const e of history)
+    if (failedIds.has(e.id))
+      walkProfiles(e.instruction, (p) => {
+        if (p.curvesUpgraded) keys.add(profileKey(p));
+        return p;
+      });
+  if (keys.size === 0) return history;
+  return walkProfiles(history, (p) => {
+    if (!p.curvesUpgraded || !keys.has(profileKey(p))) return p;
+    const { curvesUpgraded, ...rest } = p;
+    return { ...rest, curves2D: null };
+  });
+}
+
+// Which profile this is, the same for each copy of it: its sketch, the shapes
+// that bound it and the point it was picked at.
+function profileKey(p) {
+  const c = p.profileCentroid;
+  return `${p.sketchId}|${JSON.stringify(p.loopShapes ?? null)}|${
+    c ? `${c.x.toFixed(6)},${c.y.toFixed(6)}` : ""
+  }`;
+}
+
+// Map `fn` over every sketch profile inside `v`, copying only what changed.
+function walkProfiles(v, fn) {
+  if (Array.isArray(v)) {
+    let changed = false;
+    const out = v.map((x) => {
+      const y = walkProfiles(x, fn);
+      if (y !== x) changed = true;
+      return y;
+    });
+    return changed ? out : v;
+  }
+  if (!v || typeof v !== "object") return v;
+  let out = v;
+  if (v.sketchId != null && Array.isArray(v.polygon2D)) out = fn(v);
+  for (const [k, x] of Object.entries(out)) {
+    if (SKIP.has(k)) continue;
+    const y = walkProfiles(x, fn);
+    if (y !== x) {
+      if (out === v) out = { ...v };
+      out[k] = y;
+    }
+  }
+  return out;
 }

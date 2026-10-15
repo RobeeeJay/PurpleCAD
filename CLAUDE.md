@@ -1049,8 +1049,14 @@ Established landmines (each was a real bug — extend this list, never shrink it
   re-derive or move the runs with it (`extrudeWithLivePolygon`, `windLoop`),
   and anything that copies a profile field by field must copy `curves2D` (the
   sweep tool's copies once dropped it). A profile WITHOUT `curves2D` -- every
-  document from before -- deliberately stays faceted: its saved chamfer and
-  face selections were picked on the facets.
+  document from before -- stays faceted until a FULL recalculation
+  (Recalculate, or a new Resolution) upgrades it (`upgradeProfileCurves`):
+  every copy takes its live polygon and curves together. Saved selections
+  follow by name -- an exact face carries the `side{k}` name of every facet
+  it replaced, and edges every pair of those names -- and a step that fails
+  only since the upgrade has the profiles under it pinned back to facets
+  (`curves2D: null`, never upgraded again) and the pass re-run
+  (`upgradeProfileCurves.test.js`). Keep `null` distinct from `undefined`.
 - **A Split's pieces are re-cut from their source, not kept as baked
   meshes.** They used to carry no recipe, so a resolution change (or an
   upstream edit) never reached them -- MultiSystem2's extruded circles stayed

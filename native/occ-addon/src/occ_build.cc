@@ -153,12 +153,18 @@ static TopoDS_Edge CurveRunEdge(const double* q, const gp_Pnt& pa,
   return ccw ? mk.Edge() : TopoDS::Edge(mk.Edge().Reversed());
 }
 
+// Each wire edge with the polygon edges it stands for: (first index, count).
+using EdgeRanges =
+    std::vector<std::pair<TopoDS_Edge, std::pair<size_t, size_t>>>;
+
 // A closed loop with its curved runs as exact edges and straight edges
 // between, sharing one vertex per polygon point so the wire closes exactly.
 // A run whose curve can't be built falls back to its sampled segments.
+// `ranges`, when given, records which polygon edges each wire edge covers.
 static TopoDS_Wire BuildCurveWire(const double* pts, size_t n, double cx,
                                   double cy, const double* runs,
-                                  size_t nRuns) {
+                                  size_t nRuns,
+                                  EdgeRanges* ranges = nullptr) {
   if (n < 3) return TopoDS_Wire();
   auto P = [&](size_t i) {
     i %= n;
@@ -198,6 +204,7 @@ static TopoDS_Wire BuildCurveWire(const double* pts, size_t n, double cx,
       }
       if (area2 < 0) e.Reverse();
       wireMk.Add(e);
+      if (ranges && wireMk.IsDone()) ranges->push_back({wireMk.Edge(), {0, n}});
       return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
     }
   }
@@ -214,6 +221,7 @@ static TopoDS_Wire BuildCurveWire(const double* pts, size_t n, double cx,
     }
   auto straight = [&](size_t i) {
     wireMk.Add(BRepBuilderAPI_MakeEdge(V[i % n], V[(i + 1) % n]).Edge());
+    if (ranges) ranges->push_back({wireMk.Edge(), {i % n, 1}});
   };
   for (size_t k = 0; k < n;) {
     const size_t i = (s0 + k) % n;
@@ -233,10 +241,12 @@ static TopoDS_Wire BuildCurveWire(const double* pts, size_t n, double cx,
                                 (P(i).Y() + P(b).Y()) / 2, 0);
     TopoDS_Edge e = CurveRunEdge(runs + r * kCurveRunWidth, P(i), pm, P(b),
                                  V[i], V[b], cx, cy);
-    if (e.IsNull())
+    if (e.IsNull()) {
       for (size_t j = 0; j < c; j++) straight(i + j);
-    else
+    } else {
       wireMk.Add(e);
+      if (ranges) ranges->push_back({wireMk.Edge(), {i, c}});
+    }
     k += c;
   }
   return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
@@ -256,22 +266,24 @@ static bool CurveRunsArg(Js& js, Val v, F64& out) {
 // One profile loop: from its exact curves when `curves` holds them, else
 // from its polygon.
 static TopoDS_Wire LoopWire(Js& js, const F64& pts, Val curves, double cx,
-                            double cy) {
+                            double cy, EdgeRanges* ranges = nullptr) {
   F64 runs;
   if (curves != nullptr && CurveRunsArg(js, curves, runs))
     return BuildCurveWire(pts.Data(), pts.ElementLength() / 2, cx, cy,
-                          runs.Data(), runs.ElementLength() / kCurveRunWidth);
+                          runs.Data(), runs.ElementLength() / kCurveRunWidth,
+                          ranges);
   return BuildPolyWire(pts.Data(), pts.ElementLength() / 2, cx, cy);
 }
 
 static TopoDS_Face BuildProfileFace(Js& js, const F64& outer, Val holes,
                                     double cx, double cy,
                                     Val outerCurves = nullptr,
-                                    Val holeCurves = nullptr) {
+                                    Val holeCurves = nullptr,
+                                    EdgeRanges* outerRanges = nullptr) {
   auto loopWire = [&](const F64& pts, Val curves) {
     return LoopWire(js, pts, curves, cx, cy);
   };
-  TopoDS_Wire ow = loopWire(outer, outerCurves);
+  TopoDS_Wire ow = LoopWire(js, outer, outerCurves, cx, cy, outerRanges);
   if (ow.IsNull()) throw std::runtime_error("outer wire builder failed");
   BRepBuilderAPI_MakeFace faceMk(ow, true);
   if (!faceMk.IsDone())
@@ -308,8 +320,9 @@ Val MakeExtrude(Js& js) {
   Val outerCurves = js.argc() > 5 ? js[5] : nullptr;
   Val holeCurves = js.argc() > 6 ? js[6] : nullptr;
 
-  TopoDS_Face face =
-      BuildProfileFace(js, outer, holes, cx, cy, outerCurves, holeCurves);
+  EdgeRanges ranges;
+  TopoDS_Face face = BuildProfileFace(js, outer, holes, cx, cy, outerCurves,
+                                      holeCurves, &ranges);
 
   // Prism along +Z by depth (matches primitives.js: base at z=0, top at z=depth)
   gp_Vec dir(0, 0, depth);
@@ -325,9 +338,21 @@ Val MakeExtrude(Js& js) {
   std::map<std::string, TopoDS_Shape> faces, edges;
   if (!prismMk.FirstShape().IsNull()) faces["bottom"] = prismMk.FirstShape();
   if (!prismMk.LastShape().IsNull()) faces["top"] = prismMk.LastShape();
+  // Built from exact curves, one face stands for a run of polygon edges, and
+  // takes every one of their names: a face picked as `side7` on the faceted
+  // body of an older document finds the cylinder that facet became.
+  for (const auto& [edge, range] : ranges) {
+    for (const TopoDS_Shape& g : prismMk.Generated(edge)) {
+      if (g.ShapeType() != TopAbs_FACE) continue;
+      for (size_t k = 0; k < range.second; k++)
+        faces["side" + std::to_string(range.first + k)] = g;
+      break;
+    }
+  }
   TopoDS_Wire outerW = BRepTools::OuterWire(face);
   int ei = 0;
-  for (TopExp_Explorer ex(outerW, TopAbs_EDGE); ex.More(); ex.Next(), ++ei) {
+  for (TopExp_Explorer ex(outerW, TopAbs_EDGE);
+       ranges.empty() && ex.More(); ex.Next(), ++ei) {
     const TopTools_ListOfShape& gen = prismMk.Generated(ex.Current());
     for (const TopoDS_Shape& g : gen) {
       if (g.ShapeType() == TopAbs_FACE) {
