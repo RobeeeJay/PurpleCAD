@@ -307,7 +307,10 @@ bullet list after shipping, not before.
   options for splitting cohesive functionality into sibling modules (and
   re-export from the original if it's an import hub). Test files are exempt
   from the hard ceiling but still benefit from topic-based splitting when
-  large.
+  large. **`src/three/occOps.js` and `electron/occ-bridge.cjs` are exempt
+  too (owner's decision):** they are the two parallel OCC op tables, kept in
+  lockstep op for op, and splitting either would make that lockstep harder
+  to see and to keep.
 - **Splitting by NAME, not by line range.** Related declarations are rarely
   contiguous -- selection-filter toggles sit in the middle of uiSlice's tool
   phases, and a chamfer helper sits inside sketchInteraction's drag block.
