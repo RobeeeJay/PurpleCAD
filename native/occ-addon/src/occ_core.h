@@ -124,6 +124,7 @@
 #include <IFSelect_ReturnStatus.hxx>
 
 #include "mesh_tools.h"
+#include "mesh_recognize.h"
 
 #include <algorithm>
 #include <atomic>

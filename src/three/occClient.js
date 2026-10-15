@@ -285,6 +285,11 @@ export function simplifyMesh(args) {
   return runOp("simplifyMesh", args);
 }
 
+// Which surfaces a mesh body is made of (occOps.js#recognizeSurfaces).
+export function recognizeSurfaces(args) {
+  return runOp("recognizeSurfaces", args);
+}
+
 export function holeItem(args) {
   return runOp("holeItem", args);
 }

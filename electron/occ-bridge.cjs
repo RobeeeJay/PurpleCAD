@@ -2113,6 +2113,35 @@ function simplifyMesh({ positions, indices, mode, value }) {
   };
 }
 
+// Find the surfaces a mesh is made of -- mirrors occOps.js#recognizeSurfaces.
+function recognizeSurfaces({ positions, indices, tolerance }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.recognizeSurfaces(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    tolerance,
+  );
+  return {
+    regions: Array.from(r.regions, (g) => ({
+      type: g.type,
+      triangles: g.triangles,
+      area: g.area,
+      deviation: g.deviation,
+      ...(g.type === "mesh"
+        ? {}
+        : {
+            point: Array.from(g.point),
+            dir: Array.from(g.dir),
+            radius: g.radius,
+            halfAngle: g.halfAngle,
+          }),
+    })),
+    triangleRegion: Array.from(r.triangleRegion),
+    counts: { ...r.counts },
+    triangleCounts: { ...r.triangleCounts },
+  };
+}
+
 // Release a cached OCC solid (JIT-timeline cache); no-op if already gone.
 function releaseShape({ id }) {
   if (id != null) {
@@ -2129,6 +2158,6 @@ function setCancelBuffer(view) {
 }
 
 module.exports = {
-  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, setCancelBuffer };
+  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, recognizeSurfaces, setCancelBuffer };
 // Internals the unit tests check against occOps.js's copies.
 module.exports.__test = { embossVolumeHolds };

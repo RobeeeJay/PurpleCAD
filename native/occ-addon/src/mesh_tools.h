@@ -5,6 +5,21 @@
 
 #include "occ_js.h"
 
+#include <cstdint>
+#include <vector>
+
+// Reading a mesh from the op layer, and welding it -- shared by the tools here
+// and the surface recogniser (mesh_recognize.cpp).
+std::vector<double> ReadPositions(occjs::Js& js, occjs::Val v, const char* op);
+std::vector<uint32_t> ReadIndices(occjs::Js& js, size_t at, size_t vertexCount,
+                                  const char* op);
+struct Welded {
+  std::vector<double> pos;
+  std::vector<uint32_t> idx;
+  size_t before = 0;
+};
+Welded Weld(std::vector<double> pos, const std::vector<uint32_t>& idx);
+
 // weldMesh(positions: Float64Array | Float32Array, indices: Uint32Array | null)
 //   -> { positions: Float64Array, indices: Uint32Array,
 //        openEdges, nonManifoldEdges, degenerateTriangles,

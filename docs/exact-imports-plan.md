@@ -105,6 +105,37 @@ Find the regions of the mesh that are really one surface, fit that surface exact
    - A live preview colouring each region by what it was recognised as, plus a count ("212 faces: 30 planes, 12 cylinders, 2 cones, 168 triangles left").
    - A timeline step with a recipe (`kind: "meshToSurfaces"`, source, tolerance) and an Edit that reopens the same dialog, as every Modify tool has.
 
+### Recognition: Built, and What It Measured
+
+Steps 1 to 3 are in: the addon op `recognizeSurfaces` (`native/occ-addon/src/mesh_recognize.cpp`) welds the mesh, grows smooth regions up to a 30° crease, and fits each one with the simplest surface every vertex lies within the tolerance of. Nothing is rebuilt yet. It reports each region's type, fitted parameters and worst deviation, and labels every triangle with its region. The tests are in `recognizeSurfaces.test.js`.
+
+Four things went wrong on the way, and each has a test that fails without its fix:
+
+- **Simplest first.** I started by trying cylinders before planes and spheres before cylinders, and a cylinder wall meshed with vertices only on its two rims fitted a sphere perfectly, since every vertex is the same distance from the middle. The order is now plane, then cylinder or cone, then sphere.
+- **Peeling, then splitting.** A slot's flat sides run tangentially into its round ends, so the whole thing is one smooth region that fits nothing. The largest coplanar patch is peeled off as a plane and the rest refitted; but the rest is then two separate round ends, which together aren't one cylinder. What's left after a peel is now split into connected pieces and each is fitted alone.
+- **Shallow flats.** Peeling only takes a patch at least three times the mean patch area, so the strips of a curved surface aren't turned into flat faces. Two flat faces meeting at 20° are two equal patches and never passed that, so a region of eight patches or fewer is peeled regardless. On the V-Core bed arms this took the share of triangles left unrecognised from 12-22% down to 0-2.5%.
+- **Too few points.** A cylinder has five parameters and a sphere four, so through a handful of vertices one always passes exactly: a 4-triangle fan on a printed calibration tower "fitted" a sphere to 1e-15. A curved fit now needs at least ten vertices.
+
+Plus one OCC quirk: its sphere mesh has a row of slivers at each pole that weld onto a line, and each stood alone as a zero-area "plane". They're now left out of the segmentation and handed to a neighbouring region.
+
+Here is what it found in the nineteen V-Core 3 printed-part STLs, at 0.01 mm tolerance, with the surface types OCC reads from each part's STEP twin as a rough reference (the STEP counts surfaces, not faces, and a fillet is often a trimmed cylinder that I haven't broken out):
+
+| File | Triangles | Time | Found | Left as triangles | STEP has |
+| --- | --- | --- | --- | --- | --- |
+| motor_support_l | 5,838 | 1 ms | 17 planes, 13 cylinders | 0.0% | 16 planes, 9 cylinders, 5 trimmed |
+| pillow_block | 5,316 | 1 ms | 31 planes, 6 cylinders, 6 cones | 0.0% | 26 planes, 5 cylinders, 3 cones, 9 trimmed |
+| xy_motor_cage_top_left | 12,428 | 2 ms | 103 planes, 23 cylinders, 7 cones | 0.0% | 93 planes, 19 cylinders, 6 cones, 15 trimmed |
+| bed_arm_right | 11,450 | 3 ms | 93 planes, 13 cylinders, 5 cones, 2 mesh | 2.5% | 72 planes, 15 cylinders, 5 B-splines, 12 trimmed |
+| lead_screw_motor_cage_back | 5,200 | 9 ms | 196 planes, 14 cylinders, 10 cones, 4 mesh | 23.7% | 70 planes, 16 cylinders, 12 cones, 8 trimmed |
+| MGN12 3030 Centering Tool | 2,778 | 1 ms | 106 planes, 2 cylinders, 18 mesh | 41.7% | 22 planes, 74 B-splines |
+| cable_tie | 151,160 | 1,054 ms | 392 planes, 2 cylinders, 13 mesh | 94.4% | 43 planes, 51 cylinders, 15 tori |
+
+Ten of the nineteen leave under 1% of their triangles unrecognised, and sixteen stay under 6%. Of the three at the bottom, two are understood: the centering tool is mostly B-spline surfaces and the cable tie is tori, neither of which has a fit yet. The lead screw cage is not yet understood; its STEP has nothing but planes, cylinders and cones, yet two regions of 493 triangles each fit nothing to within 2.3 mm. Moving the tolerance between 0.002 mm and 0.05 mm barely changed any of it, though I measured that before the last two fixes above and haven't repeated it.
+
+Freeform parts stay triangles, which is the point: two surfboard fins came out 94-95% mesh, with about a hundred small flat patches peeled off each (which are genuinely flat to within the tolerance, so nothing is lost). A 5-million-triangle scan took 52 s and came out as half a million tiny planes (again on the build before the last two fixes), so the tool will want a size limit, the way the import's sewing has one.
+
+Two things to settle before the rebuild. Planes come out more numerous than the STEP's (196 against 70 on the lead screw cage), because coplanar regions split by a peel aren't merged back; step 3's "adjacent regions that fit the same surface merge" is still to do. And torus fitting, listed as optional above, is what the cable tie needs.
+
 ### How We'll Know It Works
 
 - Synthetic meshes with a known answer: tessellate exact shapes (a plate with a bore, a stepped shaft, a cone) at several Resolutions, convert, and check the surface types, the face count, and that every exact face lies within tolerance of the original surface.

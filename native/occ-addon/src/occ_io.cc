@@ -586,6 +586,7 @@ const std::vector<occjs::Op>& occjs::Ops() {
       {"makeSolidFromMesh", Guarded<MakeSolidFromMesh>},
       {"weldMesh", Guarded<WeldMesh>},
       {"simplifyMesh", Guarded<SimplifyMesh>},
+      {"recognizeSurfaces", Guarded<RecognizeSurfaces>},
 
       // Shape store management
       {"releaseShape", Guarded<ReleaseShape>},
