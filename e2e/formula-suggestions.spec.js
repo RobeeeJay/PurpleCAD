@@ -140,7 +140,16 @@ test.describe.serial("formula field suggestions", () => {
     // Not the value the next test types: re-filling an unchanged value only
     // selects the text, which (rightly) closes the list.
     await x.fill("Wal");
-    await expect.poll(async () => (await listState())?.names).toEqual(["Wall"]);
+    // This has failed intermittently with the list never opening; say what the
+    // field held, whether it had focus and where its caret was.
+    await expect
+      .poll(async () => (await listState())?.names, {
+        message: await x.evaluate(
+          (el) =>
+            `field "${el.value}", focused ${document.activeElement === el}, caret ${el.selectionStart}-${el.selectionEnd}`,
+        ),
+      })
+      .toEqual(["Wall"]);
     await page.evaluate(() => {
       const bar = document.querySelector(".sketch-centre-overlay");
       bar.querySelector('input[aria-label="Offset Y (mm)"]').focus();

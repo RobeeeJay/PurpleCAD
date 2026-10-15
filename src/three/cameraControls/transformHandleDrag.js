@@ -63,6 +63,8 @@ export function createTransformHandleDrag({
     raycasterRef.current.setFromCamera({ x: nx, y: ny }, cameraRef.current);
     return raycasterRef.current.intersectObjects(handleMeshes).length > 0;
   };
+  // For e2e: whether a finger landing at (x, y) would grab a handle.
+  controls.handleAt = handleAt;
 
   const tryBeginHandleDrag = (e) => {
     // While the change-origin tool is armed, clicks pick an origin — never grab

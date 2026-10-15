@@ -125,12 +125,20 @@ test.describe("touch input", () => {
   test("one finger dragged orbits, and selects nothing", async () => {
     const before = await state();
     const c = centre();
+    // This has failed intermittently with the view not turning at all.  A
+    // finger that lands on a transform handle drags it instead of orbiting,
+    // and the handles of the part the previous test selected go away a
+    // render after the selection does -- so say whether one was still there.
+    const onHandle = await page.evaluate(
+      ([x, y]) => window.__store.getState()._cameraControls.handleAt(x, y),
+      [c.x, c.y],
+    );
     await drag(1, c, { x: c.x + 120, y: c.y + 60 });
     const after = await state();
     // 120 px at the Shift+wheel orbit's 0.004 rad/px is ~0.48 rad.
     expect(
       Math.abs(after.ry - before.ry),
-      `rotation ${before.ry} -> ${after.ry}`,
+      `rotation ${before.ry} -> ${after.ry}; a handle under the finger: ${onHandle}`,
     ).toBeGreaterThan(0.3);
     expect(Math.abs(after.rx - before.rx)).toBeGreaterThan(0.1);
     expect(after.selected, "a drag is not a tap").toBeNull();
