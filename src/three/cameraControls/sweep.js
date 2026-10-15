@@ -34,6 +34,8 @@ const buildProfileSource = (profile) => ({
     profileCentroid: profile.profileCentroid,
     polygon2D: profile.polygon2D,
     holes: profile.holes || [],
+    // The exact curves under the polygon: the swept body is built from them.
+    curves2D: profile.curves2D,
     position: profile.position,
     rotation: profile.rotation,
     normalWorld: profile.normalWorld,
@@ -818,17 +820,7 @@ export function beginRevolveEdit(itemId, entryId) {
   store.setSweepSelectMode({
     kind: "revolve",
     editing: true,
-    profile: p
-      ? {
-          sketchId: p.sketchId,
-          profileCentroid: p.profileCentroid,
-          polygon2D: p.polygon2D,
-          holes: p.holes || [],
-          position: p.position,
-          rotation: p.rotation,
-          normalWorld: p.normalWorld,
-        }
-      : null,
+    profile: profileSnapshot(p),
     axis: r.axis,
     secondProfile: null,
     params: {
@@ -851,17 +843,7 @@ export function beginPipeRetarget(itemId, entryId) {
   const p = r.profileSource?.profile;
   store.setSweepSelectMode({
     kind: "pipe",
-    profile: p
-      ? {
-          sketchId: p.sketchId,
-          profileCentroid: p.profileCentroid,
-          polygon2D: p.polygon2D,
-          holes: p.holes || [],
-          position: p.position,
-          rotation: p.rotation,
-          normalWorld: p.normalWorld,
-        }
-      : null,
+    profile: profileSnapshot(p),
     path: r.pathRef,
     axis: null,
     secondProfile: null,
@@ -881,6 +863,7 @@ const profileSnapshot = (p) =>
         profileCentroid: p.profileCentroid,
         polygon2D: p.polygon2D,
         holes: p.holes || [],
+        curves2D: p.curves2D,
         position: p.position,
         rotation: p.rotation,
         normalWorld: p.normalWorld,

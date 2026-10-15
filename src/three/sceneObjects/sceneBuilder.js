@@ -100,6 +100,67 @@ export function csgDisplayGeometry({ positions, normals, indices, flat }) {
   return geometry;
 }
 
+// THREE.ExtrudeGeometry draws one flat quad per polygon edge.  Where those
+// edges sample an exact curve (the profile's curves2D), the wall takes the
+// curve's own normal instead, so a plain extruded cylinder shades round, as
+// its OCC body does once a boolean has tessellated it.  `loops` are the
+// profile's loops in sketch coordinates, `centre` what the geometry was
+// shifted by.
+export function smoothCurvedWalls(geometry, loops, centre) {
+  const key = (x, y) => `${Math.round(x * 1e4)},${Math.round(y * 1e4)}`;
+  const edgeRun = new Map();
+  for (const { polygon, runs } of loops) {
+    const n = polygon.length;
+    for (const run of runs || [])
+      for (let k = 0; k < run.count; k++) {
+        const a = polygon[(run.start + k) % n];
+        const b = polygon[(run.start + k + 1) % n];
+        const ka = key(a.x - centre.x, a.y - centre.y);
+        const kb = key(b.x - centre.x, b.y - centre.y);
+        edgeRun.set(`${ka}|${kb}`, run);
+        edgeRun.set(`${kb}|${ka}`, run);
+      }
+  }
+  if (edgeRun.size === 0) return;
+  const pos = geometry.attributes.position;
+  const nrm = geometry.attributes.normal;
+  // A wall triangle spans one polygon edge: two distinct points in plan.
+  const walls = [];
+  const bezierSum = new Map();
+  for (let t = 0; t < pos.count; t += 3) {
+    const ks = [t, t + 1, t + 2].map((i) => key(pos.getX(i), pos.getY(i)));
+    const plan = [...new Set(ks)];
+    if (plan.length !== 2) continue;
+    const run = edgeRun.get(`${plan[0]}|${plan[1]}`);
+    if (!run) continue;
+    const facet = [nrm.getX(t), nrm.getY(t)];
+    walls.push({ t, run, ks, facet });
+    // A bezier has no closed-form normal here: average its facets instead.
+    if (run.type === "bezier")
+      for (const k of plan) {
+        const s = bezierSum.get(k) || [0, 0];
+        bezierSum.set(k, [s[0] + facet[0], s[1] + facet[1]]);
+      }
+  }
+  for (const { t, run, ks, facet } of walls)
+    for (let j = 0; j < 3; j++) {
+      const x = pos.getX(t + j) + centre.x;
+      const y = pos.getY(t + j) + centre.y;
+      let [nx, ny] =
+        run.type === "arc"
+          ? [x - run.cx, y - run.cy]
+          : run.type === "ellipse"
+            ? [(x - run.cx) / run.rx ** 2, (y - run.cy) / run.ry ** 2]
+            : bezierSum.get(ks[j]);
+      const len = Math.hypot(nx, ny);
+      if (!(len > 0)) continue;
+      // Outward, as the facet faces: a bore's wall faces its axis.
+      const sign = nx * facet[0] + ny * facet[1] < 0 ? -1 : 1;
+      nrm.setXYZ(t + j, (sign * nx) / len, (sign * ny) / len, 0);
+    }
+  nrm.needsUpdate = true;
+}
+
 export function buildSceneObjects(
   items,
   scene,
@@ -205,6 +266,7 @@ export function buildSceneObjects(
         if (!profile) return;
         let poly = profile.polygon2D;
         let holePolys = profile.holes || [];
+        let curves = profile.curves2D;
         // Recompute polygon and holes live from the sketch so edits propagate.
         if (profile.sketchId != null) {
           const sketchItem = items.find((si) => si.id === profile.sketchId);
@@ -280,6 +342,7 @@ export function buildSceneObjects(
               if (match.polygon.length >= 3) {
                 poly = match.polygon;
                 holePolys = match.holes.filter((h) => h.length >= 3);
+                if (curves) curves = match.curves;
               }
             }
           }
@@ -338,6 +401,18 @@ export function buildSceneObjects(
         const baseZ = (depth < 0 ? -absDepth : 0) + startOffset;
         if (baseZ !== 0) geometry.translate(0, 0, baseZ);
         geometry.computeVertexNormals();
+        if (curves)
+          smoothCurvedWalls(
+            geometry,
+            [
+              { polygon: poly, runs: curves.outer },
+              ...holePolys.map((h, i) => ({
+                polygon: h,
+                runs: curves.holes?.[i],
+              })),
+            ],
+            profileCentroid2D,
+          );
         // The prism's base face sits at z=0 in the sketch's local
         // frame (positive depth extends to +depth, negative to
         // -|depth|).  Don't shift it to be midpoint-centred — the user

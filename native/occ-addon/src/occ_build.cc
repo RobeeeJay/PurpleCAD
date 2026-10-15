@@ -1,5 +1,18 @@
 #include "occ_core.h"
 
+#include <ElCLib.hxx>
+#include <GC_MakeArcOfCircle.hxx>
+#include <GC_MakeCircle.hxx>
+#include <Geom_TrimmedCurve.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <Geom_Circle.hxx>
+#include <Geom_Ellipse.hxx>
+#include <TColgp_Array1OfPnt.hxx>
+#include <gp_Elips.hxx>
+
+#include <algorithm>
+#include <vector>
+
 namespace occ {
 
 // ════════════════════════════════════════════════════════════════════════
@@ -77,20 +90,200 @@ static TopoDS_Wire BuildPolyWire(const double* pts, size_t n,
   return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
 }
 
+// A loop's exact curves, packed by the caller (packCurveRuns): per run
+// [start, count, kind, params...], edge k running from vertex k to k+1.
+// kind 1 = circle arc (cx, cy, r), 2 = cubic bezier (p0..p3), 3 = ellipse
+// (cx, cy, rx, ry).
+static constexpr size_t kCurveRunWidth = 11;
+
+// The edge for one curve run from vertex a to vertex b, through vertex m (a
+// sample between them: it says which way round a circle the run goes).  Null
+// when the curve doesn't pass through its own endpoints.
+static TopoDS_Edge CurveRunEdge(const double* q, const gp_Pnt& pa,
+                                const gp_Pnt& pm, const gp_Pnt& pb,
+                                const TopoDS_Vertex& va,
+                                const TopoDS_Vertex& vb, double cx,
+                                double cy) {
+  const int kind = static_cast<int>(q[2]);
+  if (kind == 2) {
+    TColgp_Array1OfPnt poles(1, 4);
+    for (int i = 0; i < 4; i++)
+      poles.SetValue(i + 1, gp_Pnt(q[3 + 2 * i] - cx, q[4 + 2 * i] - cy, 0));
+    // The samples may run either way along the stored curve.
+    if (pa.Distance(poles(1)) > pa.Distance(poles(4))) {
+      TColgp_Array1OfPnt rev(1, 4);
+      for (int i = 1; i <= 4; i++) rev.SetValue(i, poles(5 - i));
+      poles = rev;
+    }
+    Handle(Geom_BezierCurve) bez = new Geom_BezierCurve(poles);
+    BRepBuilderAPI_MakeEdge mk(bez, va, vb);
+    return mk.IsDone() ? mk.Edge() : TopoDS_Edge();
+  }
+  if (kind != 1 && kind != 3) return TopoDS_Edge();
+  gp_Pnt c(q[3] - cx, q[4] - cy, 0);
+  Handle(Geom_Curve) conic;
+  double ua, um, ub;
+  if (kind == 1) {
+    gp_Circ circ(gp_Ax2(c, gp::DZ()), q[5]);
+    conic = new Geom_Circle(circ);
+    ua = ElCLib::Parameter(circ, pa);
+    um = ElCLib::Parameter(circ, pm);
+    ub = ElCLib::Parameter(circ, pb);
+  } else {
+    // gp_Elips wants its major radius along its X direction.
+    const bool wide = q[5] >= q[6];
+    gp_Ax2 ax(c, gp::DZ(), wide ? gp::DX() : gp::DY());
+    gp_Elips el(ax, wide ? q[5] : q[6], wide ? q[6] : q[5]);
+    conic = new Geom_Ellipse(el);
+    ua = ElCLib::Parameter(el, pa);
+    um = ElCLib::Parameter(el, pm);
+    ub = ElCLib::Parameter(el, pb);
+  }
+  // Both conics run counter-clockwise; a clockwise run is built forwards
+  // from b to a and turned round.
+  const double twoPi = 2 * M_PI;
+  auto fwd = [&](double from, double to) {
+    double d = std::fmod(to - from, twoPi);
+    return d < 0 ? d + twoPi : d;
+  };
+  const bool ccw = fwd(ua, um) < fwd(ua, ub);
+  BRepBuilderAPI_MakeEdge mk = ccw ? BRepBuilderAPI_MakeEdge(conic, va, vb)
+                                   : BRepBuilderAPI_MakeEdge(conic, vb, va);
+  if (!mk.IsDone()) return TopoDS_Edge();
+  return ccw ? mk.Edge() : TopoDS::Edge(mk.Edge().Reversed());
+}
+
+// A closed loop with its curved runs as exact edges and straight edges
+// between, sharing one vertex per polygon point so the wire closes exactly.
+// A run whose curve can't be built falls back to its sampled segments.
+static TopoDS_Wire BuildCurveWire(const double* pts, size_t n, double cx,
+                                  double cy, const double* runs,
+                                  size_t nRuns) {
+  if (n < 3) return TopoDS_Wire();
+  auto P = [&](size_t i) {
+    i %= n;
+    return gp_Pnt(pts[i * 2] - cx, pts[i * 2 + 1] - cy, 0);
+  };
+  std::vector<int> owner(n, -1);
+  for (size_t r = 0; r < nRuns; r++) {
+    const double* q = runs + r * kCurveRunWidth;
+    const size_t start = static_cast<size_t>(q[0]);
+    const size_t count = static_cast<size_t>(q[1]);
+    if (count == 0 || count > n || start >= n) continue;
+    for (size_t k = 0; k < count; k++) owner[(start + k) % n] = (int)r;
+  }
+
+  BRepBuilderAPI_MakeWire wireMk;
+  // One curve round the whole loop: a full circle or ellipse, one closed
+  // edge, turned to the loop's own winding (a hole runs clockwise).
+  if (owner[0] >= 0 &&
+      std::all_of(owner.begin(), owner.end(),
+                  [&](int o) { return o == owner[0]; })) {
+    const double* q = runs + owner[0] * kCurveRunWidth;
+    gp_Pnt c(q[3] - cx, q[4] - cy, 0);
+    TopoDS_Edge e;
+    if (q[2] == 1) {
+      e = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(c, gp::DZ()), q[5])).Edge();
+    } else if (q[2] == 3) {
+      const bool wide = q[5] >= q[6];
+      gp_Elips el(gp_Ax2(c, gp::DZ(), wide ? gp::DX() : gp::DY()),
+                  wide ? q[5] : q[6], wide ? q[6] : q[5]);
+      e = BRepBuilderAPI_MakeEdge(el).Edge();
+    }
+    if (!e.IsNull()) {
+      double area2 = 0;
+      for (size_t i = 0; i < n; i++) {
+        size_t j = (i + 1) % n;
+        area2 += pts[2 * i] * pts[2 * j + 1] - pts[2 * j] * pts[2 * i + 1];
+      }
+      if (area2 < 0) e.Reverse();
+      wireMk.Add(e);
+      return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
+    }
+  }
+
+  std::vector<TopoDS_Vertex> V(n);
+  for (size_t i = 0; i < n; i++)
+    V[i] = BRepBuilderAPI_MakeVertex(P(i)).Vertex();
+  // Start where an edge changes owner, so no run is cut in two.
+  size_t s0 = 0;
+  for (size_t i = 0; i < n; i++)
+    if (owner[i] != owner[(i + n - 1) % n]) {
+      s0 = i;
+      break;
+    }
+  auto straight = [&](size_t i) {
+    wireMk.Add(BRepBuilderAPI_MakeEdge(V[i % n], V[(i + 1) % n]).Edge());
+  };
+  for (size_t k = 0; k < n;) {
+    const size_t i = (s0 + k) % n;
+    const int r = owner[i];
+    if (r < 0) {
+      straight(i);
+      k++;
+      continue;
+    }
+    size_t c = 0;
+    while (k + c < n && owner[(s0 + k + c) % n] == r) c++;
+    const size_t b = (i + c) % n;
+    // A one-edge run has no sample between its ends: the chord's midpoint
+    // lies on the same side of the centre as the short arc it stands for.
+    gp_Pnt pm = c >= 2 ? P(i + c / 2)
+                       : gp_Pnt((P(i).X() + P(b).X()) / 2,
+                                (P(i).Y() + P(b).Y()) / 2, 0);
+    TopoDS_Edge e = CurveRunEdge(runs + r * kCurveRunWidth, P(i), pm, P(b),
+                                 V[i], V[b], cx, cy);
+    if (e.IsNull())
+      for (size_t j = 0; j < c; j++) straight(i + j);
+    else
+      wireMk.Add(e);
+    k += c;
+  }
+  return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
+}
+
+// The packed curve runs in `v`, when it holds any.
+static bool CurveRunsArg(Js& js, Val v, F64& out) {
+  if (!js.isTypedArray(v)) return false;
+  out = js.f64(v);
+  return out.ElementLength() >= kCurveRunWidth;
+}
+
 // Build a planar face from an outer polygon + CW hole polygons (centroid-local,
 // z=0).  Shared by extrude / revolve / loft.  Throws on a bad outer wire/face.
-static TopoDS_Face BuildProfileFace(Js& js, const F64& outer, Val holes, double cx,
-                             double cy) {
-  TopoDS_Wire ow = BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+// `outerCurves` / `holeCurves` (optional) carry each loop's exact curves; a
+// loop without them is built from its polygon, as every older document is.
+// One profile loop: from its exact curves when `curves` holds them, else
+// from its polygon.
+static TopoDS_Wire LoopWire(Js& js, const F64& pts, Val curves, double cx,
+                            double cy) {
+  F64 runs;
+  if (curves != nullptr && CurveRunsArg(js, curves, runs))
+    return BuildCurveWire(pts.Data(), pts.ElementLength() / 2, cx, cy,
+                          runs.Data(), runs.ElementLength() / kCurveRunWidth);
+  return BuildPolyWire(pts.Data(), pts.ElementLength() / 2, cx, cy);
+}
+
+static TopoDS_Face BuildProfileFace(Js& js, const F64& outer, Val holes,
+                                    double cx, double cy,
+                                    Val outerCurves = nullptr,
+                                    Val holeCurves = nullptr) {
+  auto loopWire = [&](const F64& pts, Val curves) {
+    return LoopWire(js, pts, curves, cx, cy);
+  };
+  TopoDS_Wire ow = loopWire(outer, outerCurves);
   if (ow.IsNull()) throw std::runtime_error("outer wire builder failed");
   BRepBuilderAPI_MakeFace faceMk(ow, true);
   if (!faceMk.IsDone())
     throw std::runtime_error("face builder failed (outer wire)");
   TopoDS_Face face = faceMk.Face();
+  const bool haveHoleCurves = holeCurves != nullptr && js.isArray(holeCurves);
   for (uint32_t h = 0; h < js.length(holes); h++) {
     F64 hpts = js.f64(js.at(holes, h));
-    TopoDS_Wire hw =
-        BuildPolyWire(hpts.Data(), hpts.ElementLength() / 2, cx, cy);
+    Val hc = haveHoleCurves && h < js.length(holeCurves)
+                 ? js.at(holeCurves, h)
+                 : nullptr;
+    TopoDS_Wire hw = loopWire(hpts, hc);
     if (hw.IsNull()) continue;
     BRepBuilderAPI_MakeFace faceWithHole(face, hw);
     if (faceWithHole.IsDone()) face = faceWithHole.Face();
@@ -110,8 +303,13 @@ Val MakeExtrude(Js& js) {
   double cx                = js.num(js[2]);
   double cy                = js.num(js[3]);
   double depth             = js.num(js[4]);
+  // Optional exact curves: a Float64Array for the outer loop, an array of
+  // them (or nulls) for the holes.
+  Val outerCurves = js.argc() > 5 ? js[5] : nullptr;
+  Val holeCurves = js.argc() > 6 ? js[6] : nullptr;
 
-  TopoDS_Face face = BuildProfileFace(js, outer, holes, cx, cy);
+  TopoDS_Face face =
+      BuildProfileFace(js, outer, holes, cx, cy, outerCurves, holeCurves);
 
   // Prism along +Z by depth (matches primitives.js: base at z=0, top at z=depth)
   gp_Vec dir(0, 0, depth);
@@ -143,6 +341,120 @@ Val MakeExtrude(Js& js) {
                                             std::move(edges)));
 }
 
+// A world-space 3D polyline [x0,y0,z0, ...] as a wire, closed or open, with
+// its exact curves where `runs` gives them -- packed 15 numbers a run:
+// start, count, kind, then 12.  kind 1 = circle arc, built through three of
+// its own vertices (three points fix a circle, so no centre is needed in 3D);
+// kind 2 = cubic bezier, its four poles in world space.  Anything else, and a
+// curve that can't be built, keeps its sampled segments.
+static constexpr size_t kWorldRunWidth = 15;
+static TopoDS_Wire BuildWorldCurveWire(const double* pts, size_t n,
+                                       bool closed, const double* runs,
+                                       size_t nRuns) {
+  if (n < (closed ? 3u : 2u)) return TopoDS_Wire();
+  const size_t nEdges = closed ? n : n - 1;
+  auto P = [&](size_t i) {
+    i %= n;
+    return gp_Pnt(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+  };
+  std::vector<int> owner(nEdges, -1);
+  for (size_t r = 0; r < nRuns; r++) {
+    const double* q = runs + r * kWorldRunWidth;
+    const size_t start = static_cast<size_t>(q[0]);
+    const size_t count = static_cast<size_t>(q[1]);
+    if (count == 0 || count > nEdges || start >= nEdges) continue;
+    if (!closed && start + count > nEdges) continue;
+    for (size_t k = 0; k < count; k++) owner[(start + k) % nEdges] = (int)r;
+  }
+  std::vector<TopoDS_Vertex> V(n);
+  for (size_t i = 0; i < n; i++)
+    V[i] = BRepBuilderAPI_MakeVertex(P(i)).Vertex();
+  BRepBuilderAPI_MakeWire wireMk;
+  auto straight = [&](size_t i) {
+    if (P(i).Distance(P(i + 1)) > 1e-9)
+      wireMk.Add(BRepBuilderAPI_MakeEdge(V[i % n], V[(i + 1) % n]).Edge());
+  };
+  auto arcThrough = [&](size_t a, size_t m, size_t b) {
+    if (m == a || m == b) return TopoDS_Edge();
+    GC_MakeArcOfCircle mk(P(a), P(m), P(b));
+    if (!mk.IsDone()) return TopoDS_Edge();
+    Handle(Geom_TrimmedCurve) arc = mk.Value();
+    BRepBuilderAPI_MakeEdge e(arc, V[a % n], V[b % n]);
+    return e.IsDone() ? e.Edge() : TopoDS_Edge();
+  };
+  // A circle round a whole closed loop: one closed edge through three of its
+  // points, running the loop's way -- two arcs would split every face built
+  // on it in two.
+  if (closed && owner[0] >= 0 &&
+      runs[owner[0] * kWorldRunWidth + 2] == 1 &&
+      std::all_of(owner.begin(), owner.end(),
+                  [&](int o) { return o == owner[0]; })) {
+    GC_MakeCircle mk(P(0), P(n / 3), P((2 * n) / 3));
+    if (mk.IsDone()) {
+      Handle(Geom_Circle) circ = mk.Value();
+      wireMk.Add(BRepBuilderAPI_MakeEdge(circ).Edge());
+      if (wireMk.IsDone()) return wireMk.Wire();
+    }
+  }
+  size_t s0 = 0;
+  if (closed)
+    for (size_t i = 0; i < nEdges; i++)
+      if (owner[i] != owner[(i + nEdges - 1) % nEdges]) {
+        s0 = i;
+        break;
+      }
+  for (size_t k = 0; k < nEdges;) {
+    const size_t i = (s0 + k) % nEdges;
+    const int r = owner[i];
+    if (r < 0) {
+      straight(i);
+      k++;
+      continue;
+    }
+    size_t c = 0;
+    while (k + c < nEdges && owner[(s0 + k + c) % nEdges] == r) c++;
+    const double* q = runs + r * kWorldRunWidth;
+    TopoDS_Edge e;
+    if (q[2] == 1) {
+      e = arcThrough(i, i + c / 2, i + c);
+    } else if (q[2] == 2) {
+      TColgp_Array1OfPnt poles(1, 4);
+      for (int j = 0; j < 4; j++)
+        poles.SetValue(j + 1, gp_Pnt(q[3 + 3 * j], q[4 + 3 * j], q[5 + 3 * j]));
+      if (P(i).Distance(poles(1)) > P(i).Distance(poles(4))) {
+        TColgp_Array1OfPnt rev(1, 4);
+        for (int j = 1; j <= 4; j++) rev.SetValue(j, poles(5 - j));
+        poles = rev;
+      }
+      Handle(Geom_BezierCurve) bez = new Geom_BezierCurve(poles);
+      BRepBuilderAPI_MakeEdge mk(bez, V[i % n], V[(i + c) % n]);
+      if (mk.IsDone()) e = mk.Edge();
+    }
+    if (e.IsNull())
+      for (size_t j = 0; j < c; j++) straight(i + j);
+    else
+      wireMk.Add(e);
+    k += c;
+  }
+  return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
+}
+
+// A world-space polyline argument as a wire, from its curves when `curves`
+// holds any.
+static TopoDS_Wire WorldWireArg(Js& js, const F64& pts, Val curves,
+                                bool closed) {
+  const double* runs = nullptr;
+  size_t nRuns = 0;
+  F64 packed;
+  if (curves != nullptr && js.isTypedArray(curves)) {
+    packed = js.f64(curves);
+    runs = packed.Data();
+    nRuns = packed.ElementLength() / kWorldRunWidth;
+  }
+  return BuildWorldCurveWire(pts.Data(), pts.ElementLength() / 3, closed,
+                             runs, nRuns);
+}
+
 // makeRevolve(outerPts, holes, cx, cy, ax1, ay1, ax2, ay2, angleRad, prismSides)
 //   → shapeId
 // Revolve the profile around the sketch-local axis through (ax1,ay1)-(ax2,ay2).
@@ -163,6 +475,8 @@ Val MakeRevolve(Js& js) {
       js.isNumber(js[11]) ? js.int32(js[11]) : 0;
   // Axial advance per full turn (helical/coil sweep).  0 → a flat revolve.
   double pitch = js.num(js[12], 0.0);
+  Val outerCurves = js.argc() > 13 ? js[13] : nullptr;
+  Val holeCurves = js.argc() > 14 ? js[14] : nullptr;
 
   double dx = ax2 - ax1, dy = ay2 - ay1, dz = az2 - az1;
   double len = std::sqrt(dx * dx + dy * dy + dz * dz);
@@ -177,8 +491,7 @@ Val MakeRevolve(Js& js) {
   // whenever a non-zero offset/turn is set (the only way to exceed a full
   // turn meaningfully).  Outer boundary only (holes aren't lofted).
   if (std::abs(pitch) > 1e-9) {
-    TopoDS_Wire base =
-        BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+    TopoDS_Wire base = LoopWire(js, outer, outerCurves, cx, cy);
     if (base.IsNull())
       throw std::runtime_error("revolve profile wire builder failed");
     const int perTurn = prismSides >= 3 ? prismSides : 24;
@@ -207,8 +520,7 @@ Val MakeRevolve(Js& js) {
   if (angleRad > 2 * M_PI) angleRad = 2 * M_PI;
 
   if (prismSides >= 3) {
-    TopoDS_Wire base =
-        BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+    TopoDS_Wire base = LoopWire(js, outer, outerCurves, cx, cy);
     if (base.IsNull())
       throw std::runtime_error("revolve profile wire builder failed");
     // Fuse N ruled wedges (each a loft between two successive rotations of the
@@ -256,7 +568,8 @@ Val MakeRevolve(Js& js) {
     return js.makeNumber(StoreShape(result));
   }
 
-  TopoDS_Face face = BuildProfileFace(js, outer, holes, cx, cy);
+  TopoDS_Face face =
+      BuildProfileFace(js, outer, holes, cx, cy, outerCurves, holeCurves);
   BRepPrimAPI_MakeRevol rev(face, axis, angleRad);
   if (!rev.IsDone())
     throw std::runtime_error(
@@ -278,6 +591,10 @@ Val MakePipe(Js& js) {
   double twistTurns = js.num(js[5], 0.0);
   bool autoRotate =
       js.isBoolean(js[6]) ? js.boolean(js[6]) : false;
+  Val outerCurves = js.argc() > 7 ? js[7] : nullptr;
+  Val holeCurves = js.argc() > 8 ? js[8] : nullptr;
+  // The path's exact curves, in world space (BuildWorldCurveWire).
+  Val pathCurves = js.argc() > 9 ? js[9] : nullptr;
   size_t nPath = path.ElementLength() / 3;
   if (nPath < 2) throw std::runtime_error("pipe path needs at least 2 points");
 
@@ -285,16 +602,10 @@ Val MakePipe(Js& js) {
 
   if (!custom) {
     // Plain pipe: spine + a single start-oriented profile.
-    BRepBuilderAPI_MakeWire wireMk;
-    gp_Pnt prev(path[0], path[1], path[2]);
-    for (size_t i = 1; i < nPath; i++) {
-      gp_Pnt p(path[i * 3], path[i * 3 + 1], path[i * 3 + 2]);
-      if (prev.Distance(p) > 1e-9)
-        wireMk.Add(BRepBuilderAPI_MakeEdge(prev, p).Edge());
-      prev = p;
-    }
-    if (!wireMk.IsDone()) throw std::runtime_error("pipe path wire failed");
-    TopoDS_Face face = BuildProfileFace(js, outer, holes, cx, cy);
+    TopoDS_Wire spine = WorldWireArg(js, path, pathCurves, false);
+    if (spine.IsNull()) throw std::runtime_error("pipe path wire failed");
+    TopoDS_Face face =
+        BuildProfileFace(js, outer, holes, cx, cy, outerCurves, holeCurves);
     gp_Pnt p0(path[0], path[1], path[2]);
     gp_Dir tangent(path[3] - path[0], path[4] - path[1], path[5] - path[2]);
     gp_Trsf place;
@@ -302,7 +613,7 @@ Val MakePipe(Js& js) {
     place.Invert();
     TopoDS_Face placed =
         TopoDS::Face(BRepBuilderAPI_Transform(face, place, true).Shape());
-    BRepOffsetAPI_MakePipe pipe(wireMk.Wire(), placed);
+    BRepOffsetAPI_MakePipe pipe(spine, placed);
     pipe.Build(CancelRange());
     if (!pipe.IsDone()) throw std::runtime_error("pipe sweep failed");
     return js.makeNumber(StoreShape(pipe.Shape()));
@@ -352,8 +663,7 @@ Val MakePipe(Js& js) {
     return gp_Dir(v);
   };
 
-  TopoDS_Wire base =
-      BuildPolyWire(outer.Data(), outer.ElementLength() / 2, cx, cy);
+  TopoDS_Wire base = LoopWire(js, outer, outerCurves, cx, cy);
   if (base.IsNull())
     throw std::runtime_error("pipe profile wire builder failed");
 
@@ -389,21 +699,6 @@ Val MakePipe(Js& js) {
   return js.makeNumber(StoreShape(loft.Shape()));
 }
 
-// Build a closed wire from a world-space 3D polyline [x0,y0,z0, x1,y1,z1, ...].
-static TopoDS_Wire BuildWorldWire(const F64& pts) {
-  size_t n = pts.ElementLength() / 3;
-  if (n < 3) return TopoDS_Wire();
-  BRepBuilderAPI_MakeWire wireMk;
-  for (size_t i = 0; i < n; i++) {
-    size_t j = (i + 1) % n;
-    gp_Pnt p1(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
-    gp_Pnt p2(pts[j * 3], pts[j * 3 + 1], pts[j * 3 + 2]);
-    if (p1.Distance(p2) < 1e-9) continue;
-    wireMk.Add(BRepBuilderAPI_MakeEdge(p1, p2).Edge());
-  }
-  return wireMk.IsDone() ? wireMk.Wire() : TopoDS_Wire();
-}
-
 // makeLoft(wireAPts, wireBPts) → shapeId
 // Loft a smooth solid between two world-space closed profiles (each a flat 3D
 // polyline).  The caller positions both loops on their own sketch planes, so
@@ -412,8 +707,9 @@ static TopoDS_Wire BuildWorldWire(const F64& pts) {
 Val MakeLoft(Js& js) {
   F64 a = js.f64(js[0]);
   F64 b = js.f64(js[1]);
-  TopoDS_Wire wa = BuildWorldWire(a);
-  TopoDS_Wire wb = BuildWorldWire(b);
+  // Optional exact curves of each profile, in world space.
+  TopoDS_Wire wa = WorldWireArg(js, a, js.argc() > 2 ? js[2] : nullptr, true);
+  TopoDS_Wire wb = WorldWireArg(js, b, js.argc() > 3 ? js[3] : nullptr, true);
   if (wa.IsNull() || wb.IsNull())
     throw std::runtime_error("loft needs two closed profiles");
   BRepOffsetAPI_ThruSections loft(Standard_True /*solid*/,

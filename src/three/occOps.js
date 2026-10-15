@@ -15,7 +15,11 @@ import {
 } from "./csgUtils.js";
 import { polyCentroid, polyAreaCentroid } from "./sceneObjects.js";
 import { MM_PER_UNIT } from "./sceneObjects.js";
-import { withWinding } from "./sceneObjects/closedLoops.js";
+import {
+  windLoopForOcc,
+  windLoop,
+  packWorldCurveRuns,
+} from "./sceneObjects/closedLoops.js";
 import { resolveItemDepth } from "./geometryParams.js";
 
 const EXPORTABLE_TYPES = new Set([
@@ -150,13 +154,28 @@ function revolveArgs(source, axis, allItems, precision) {
   if (!ax) return null;
   const holes = (live.profile?.holes || []).filter((h) => h && h.length >= 3);
   const c = polyCentroid(poly);
-  const outerFlat = new Float64Array(
-    withWinding(poly, true).flatMap((p) => [p.x, p.y]),
+  return {
+    ...profileLoopsForOcc(live.profile, poly, holes),
+    cx: c.x,
+    cy: c.y,
+    ax,
+  };
+}
+
+// A profile's loops wound and flattened for the addon, with their exact
+// curves when the profile was made with them (mirrors the extrude op).
+function profileLoopsForOcc(profile, poly, holes) {
+  const curves = profile.curves2D;
+  const outer = windLoopForOcc(poly, curves?.outer, true);
+  const holeLoops = holes.map((h, i) =>
+    windLoopForOcc(h, curves?.holes?.[i], false),
   );
-  const holesFlat = holes.map(
-    (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
-  );
-  return { outerFlat, holesFlat, cx: c.x, cy: c.y, ax };
+  return {
+    outerFlat: outer.flat,
+    holesFlat: holeLoops.map((h) => h.flat),
+    outerCurves: outer.curves,
+    holeCurves: holeLoops.map((h) => h.curves),
+  };
 }
 
 // ── Pipe sweep helpers ────────────────────────────────────────────────────
@@ -253,7 +272,7 @@ function pathSegment(shape, i, precision) {
   if (shape?.type === "line") {
     const a = { x: shape.x1, y: shape.y1 };
     const b = { x: shape.x2, y: shape.y2 };
-    return { i, a, b, sample: (rev) => (rev ? [b, a] : [a, b]) };
+    return { i, shape, a, b, sample: (rev) => (rev ? [b, a] : [a, b]) };
   }
   if (shape?.type === "bezier") {
     const a = { x: shape.p0.x, y: shape.p0.y };
@@ -262,6 +281,7 @@ function pathSegment(shape, i, precision) {
     const pts = sampleCubic(shape.p0, shape.p1, shape.p2, shape.p3, n);
     return {
       i,
+      shape,
       a,
       b,
       sample: (rev) => (rev ? pts.slice().reverse() : pts.slice()),
@@ -275,6 +295,11 @@ function pathSegment(shape, i, precision) {
 // sampling curves along the way.  Geometry-based so it works whether or not
 // coincident constraints exist.
 export function orderPathPoints(sketch, startShapeIdx, precision) {
+  return orderPath(sketch, startShapeIdx, precision)?.pts ?? null;
+}
+
+// The ordered path and its curve runs: a bezier piece's edges lie on it.
+function orderPath(sketch, startShapeIdx, precision) {
   const shapes = sketch?.shapes || [];
   const segs = [];
   shapes.forEach((s, i) => {
@@ -287,6 +312,8 @@ export function orderPathPoints(sketch, startShapeIdx, precision) {
   const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < eps;
   const used = new Set([startShapeIdx]);
   let pts = startSeg.sample(false);
+  // Each piece's shape and edge count, in path order.
+  const pieces = [{ shape: startSeg.shape, edges: pts.length - 1 }];
   const extend = (atEnd) => {
     let changed = true;
     while (changed) {
@@ -302,8 +329,14 @@ export function orderPathPoints(sketch, startShapeIdx, precision) {
             : null;
         if (segPts) {
           used.add(seg.i);
-          if (atEnd) pts = pts.concat(segPts.slice(1));
-          else pts = segPts.slice(1).reverse().concat(pts);
+          const piece = { shape: seg.shape, edges: segPts.length - 1 };
+          if (atEnd) {
+            pts = pts.concat(segPts.slice(1));
+            pieces.push(piece);
+          } else {
+            pts = segPts.slice(1).reverse().concat(pts);
+            pieces.unshift(piece);
+          }
           changed = true;
           break;
         }
@@ -312,7 +345,16 @@ export function orderPathPoints(sketch, startShapeIdx, precision) {
   };
   extend(true);
   extend(false);
-  return pts;
+  const runs = [];
+  let start = 0;
+  for (const { shape, edges } of pieces) {
+    if (shape.type === "bezier") {
+      const { p0, p1, p2, p3 } = shape;
+      runs.push({ start, count: edges, type: "bezier", p0, p1, p2, p3 });
+    }
+    start += edges;
+  }
+  return { pts, runs };
 }
 
 // Resolve a pipe path ({ sketchId, shapeIdx }) to its live world polyline.
@@ -321,9 +363,13 @@ function pipePathWorld(pathRef, allItems, precision) {
     (i) => i.id === pathRef?.sketchId && i.type === "sketch",
   );
   if (!sketch) return null;
-  const pts2d = orderPathPoints(sketch, pathRef.shapeIdx, precision);
-  if (!pts2d || pts2d.length < 2) return null;
-  return pts2d.map((p) => sketchPointToWorld(sketch, p.x, p.y));
+  const path = orderPath(sketch, pathRef.shapeIdx, precision);
+  if (!path || path.pts.length < 2) return null;
+  const toWorld = (p) => sketchPointToWorld(sketch, p.x, p.y);
+  return {
+    pts: path.pts.map(toWorld),
+    curves: packWorldCurveRuns(path.runs, toWorld),
+  };
 }
 
 // Build makePipe args: 2D profile (live from sketch A) + the path's world
@@ -336,14 +382,17 @@ function pipeArgs(profileSource, pathRef, allItems, precision) {
   if (!pathWorld) return null;
   const holes = (live.profile?.holes || []).filter((h) => h && h.length >= 3);
   const c = polyCentroid(poly);
-  const outerFlat = new Float64Array(
-    withWinding(poly, true).flatMap((p) => [p.x, p.y]),
+  const pathFlat = new Float64Array(
+    pathWorld.pts.flatMap((p) => [p.x, p.y, p.z]),
   );
-  const holesFlat = holes.map(
-    (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
-  );
-  const pathFlat = new Float64Array(pathWorld.flatMap((p) => [p.x, p.y, p.z]));
-  return { outerFlat, holesFlat, cx: c.x, cy: c.y, pathFlat };
+  return {
+    ...profileLoopsForOcc(live.profile, poly, holes),
+    cx: c.x,
+    cy: c.y,
+    pathFlat,
+    // The path's curves too, for a sweep made since exact curves.
+    pathCurves: live.profile.curves2D ? pathWorld.curves : null,
+  };
 }
 
 // ── Loft helpers ──────────────────────────────────────────────────────────
@@ -364,22 +413,23 @@ function polyToWorld(poly, position, rotation) {
 function loftArgs(profileSource, secondSource, allItems, precision) {
   const liveA = extrudeWithLivePolygon(profileSource, allItems, precision);
   const liveB = extrudeWithLivePolygon(secondSource, allItems, precision);
-  const pa = liveA.profile?.polygon2D;
-  const pb = liveB.profile?.polygon2D;
-  if (!pa || pa.length < 3 || !pb || pb.length < 3) return null;
-  const worldA = polyToWorld(
-    withWinding(pa, true),
-    liveA.profile.position,
-    liveA.profile.rotation,
-  );
-  const worldB = polyToWorld(
-    withWinding(pb, true),
-    liveB.profile.position,
-    liveB.profile.rotation,
-  );
+  const a = loftLoop(liveA.profile);
+  const b = loftLoop(liveB.profile);
+  if (!a || !b) return null;
+  return { aFlat: a.flat, bFlat: b.flat, aCurves: a.curves, bCurves: b.curves };
+}
+
+// One loft section: the profile's outer loop wound CCW and mapped to its world
+// plane, with its exact curves when it was made with them.
+function loftLoop(profile) {
+  const poly = profile?.polygon2D;
+  if (!poly || poly.length < 3) return null;
+  const { pts, runs } = windLoop(poly, profile.curves2D?.outer, true);
+  const toWorld = (p) =>
+    polyToWorld([p], profile.position, profile.rotation)[0];
   return {
-    aFlat: new Float64Array(worldA.flatMap((p) => [p.x, p.y, p.z])),
-    bFlat: new Float64Array(worldB.flatMap((p) => [p.x, p.y, p.z])),
+    flat: new Float64Array(pts.map(toWorld).flatMap((p) => [p.x, p.y, p.z])),
+    curves: runs ? packWorldCurveRuns(runs, toWorld) : null,
   };
 }
 
@@ -450,16 +500,22 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
     // brush position it cancels against in buildBrushTransform — doesn't drift
     // when the profile's curves re-tessellate at a different resolution.
     const c = polyAreaCentroid(poly);
-    const outerFlat = new Float64Array(
-      withWinding(poly, true).flatMap((p) => [p.x, p.y]),
-    );
-    const holesFlat = holes
+    // Exact curves only for a profile made with them: an older document's
+    // features were picked on its faceted faces.
+    const curves = live.profile.curves2D;
+    const outer = windLoopForOcc(poly, curves?.outer, true);
+    const holeLoops = holes
       .filter((h) => h && h.length >= 3)
-      .map(
-        (h) =>
-          new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
-      );
-    const prismId = occ.makeExtrude(outerFlat, holesFlat, c.x, c.y, depth);
+      .map((h, i) => windLoopForOcc(h, curves?.holes?.[i], false));
+    const prismId = occ.makeExtrude(
+      outer.flat,
+      holeLoops.map((h) => h.flat),
+      c.x,
+      c.y,
+      depth,
+      outer.curves,
+      holeLoops.map((h) => h.curves),
+    );
     // startOffset slides the prism base along the extrude normal (local +Z),
     // matching the rendered mesh's translate, so the OCC shape used for CSG
     // lands where the user sees the preview.
@@ -802,6 +858,8 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         r.angleRad ?? 2 * Math.PI,
         r.prismSides ?? 0,
         r.offsetPerRotation ?? 0,
+        args.outerCurves,
+        args.holeCurves,
       );
       if (!resultId) return null;
       const offset = chamferCenterOffset(r, item);
@@ -837,6 +895,9 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         args.pathFlat,
         r.twistTurns ?? 0,
         !!r.autoRotate,
+        args.outerCurves,
+        args.holeCurves,
+        args.pathCurves,
       );
       if (!resultId) return null;
       // Built in WORLD; centerOffset (the world bbox centre) is also the item
@@ -871,7 +932,12 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
         precision,
       );
       if (!args) return null;
-      const resultId = occ.makeLoft(args.aFlat, args.bFlat);
+      const resultId = occ.makeLoft(
+        args.aFlat,
+        args.bFlat,
+        args.aCurves,
+        args.bCurves,
+      );
       if (!resultId) return null;
       // Built in WORLD; centerOffset (bbox centre) is also the item position.
       const offset = chamferCenterOffset(r, item);
@@ -1658,6 +1724,8 @@ async function revolveItem({
     angleRad ?? 2 * Math.PI,
     prismSides ?? 0,
     offsetPerRotation ?? 0,
+    args.outerCurves,
+    args.holeCurves,
   );
   if (!resultId) throw new Error("Revolve produced no geometry.");
 
@@ -1716,6 +1784,9 @@ async function pipeItem({
     args.pathFlat,
     twistTurns ?? 0,
     !!autoRotate,
+    args.outerCurves,
+    args.holeCurves,
+    args.pathCurves,
   );
   if (!resultId) throw new Error("Pipe produced no geometry.");
 
@@ -1766,7 +1837,12 @@ async function loftItem({
     printPrecision,
   );
   if (!args) throw new Error("Loft needs two closed profile loops.");
-  const resultId = occ.makeLoft(args.aFlat, args.bFlat);
+  const resultId = occ.makeLoft(
+    args.aFlat,
+    args.bFlat,
+    args.aCurves,
+    args.bCurves,
+  );
   if (!resultId) throw new Error("Loft produced no geometry.");
 
   let tess;

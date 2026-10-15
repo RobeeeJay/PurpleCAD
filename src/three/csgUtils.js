@@ -145,6 +145,10 @@ export function extrudeWithLivePolygon(item, allItems, precision) {
     profile: Object.assign({}, profile, {
       polygon2D: match.polygon,
       holes: match.holes.filter((h) => h.length >= 3),
+      // Re-derived WITH the polygon: runs index its vertices.  A profile
+      // from before exact curves gets none, so its body stays the faceted
+      // one its saved features were picked on.
+      curves2D: profile.curves2D ? match.curves : undefined,
     }),
   });
 }

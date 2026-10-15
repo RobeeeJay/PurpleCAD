@@ -31,6 +31,7 @@ import {
   groupLoopsWithHoles,
   polyCentroid,
   loopShapesOf,
+  loopCurvesOf,
 } from "./closedLoops.js";
 import {
   SKETCH_FACE_HIGHLIGHT,
@@ -221,6 +222,7 @@ export function buildExtrudeSelectGroup(
     });
     const isTextPoly = new Map();
     const polyShapeIndices = new Map();
+    const polyCurves = new Map();
     const allLoops = loopsWithShapes.map((l) => {
       isTextPoly.set(
         l.polygon,
@@ -228,6 +230,7 @@ export function buildExtrudeSelectGroup(
           l.shapeIndices.every((si) => textIdxs.has(si)),
       );
       polyShapeIndices.set(l.polygon, l.shapeIndices);
+      polyCurves.set(l.polygon, l.curves);
       return l.polygon;
     });
     const grouped = groupLoopsWithHoles(allLoops);
@@ -275,6 +278,8 @@ export function buildExtrudeSelectGroup(
         // Which sketch shapes bound it: how a rebuild finds it again after
         // the sketch is edited (regionsForProfile).
         loopShapes: loopShapesOf(polygon, holes, polyShapeIndices),
+        // The exact curves under the polygon, for an OCC rebuild.
+        curves2D: loopCurvesOf(polygon, holes, polyCurves),
         position: { x: pos.x, y: pos.y, z: pos.z },
         rotation: { x: euler.x, y: euler.y, z: euler.z },
         normalWorld: { x: normal.x, y: normal.y, z: normal.z },

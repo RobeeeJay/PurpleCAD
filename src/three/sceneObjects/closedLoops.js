@@ -19,6 +19,7 @@ import {
   polyCentroid,
   polyArea,
   signedPolyAreaXY,
+  reverseEdgeCurves,
 } from "./polygonUtil.js";
 import { cogShapeContours } from "../cogGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
@@ -31,6 +32,10 @@ export {
   polyAreaCentroid,
   polyArea,
   profileAnchor,
+  reverseEdgeCurves,
+  windLoopForOcc,
+  windLoop,
+  packWorldCurveRuns,
 } from "./polygonUtil.js";
 
 // Enumerating every simple cycle is exact for a small sketch -- and existing
@@ -38,6 +43,45 @@ export {
 // keep it -- but beyond this many cycles the sketch is an overlapping
 // arrangement, and its regions are the faces below.
 const MAX_ENUMERATED_CYCLES = 128;
+
+// A loop's polygon is sampled from its curves, and OCC can only rebuild a
+// curved face from the curve itself: a polygon makes N flat faces, which every
+// later boolean keeps.  So each loop also records which of its edges lie on
+// which exact curve -- edge k runs from vertex k to vertex k+1 (mod n), and a
+// run covers `count` edges from `start`.  Straight edges carry no run.
+function curveRun(shape, start, count) {
+  if (count === 0) return null;
+  if (shape.type === "arc")
+    return {
+      start,
+      count,
+      type: "arc",
+      cx: shape.cx,
+      cy: shape.cy,
+      r: shape.r,
+    };
+  if (shape.type === "bezier") {
+    const { p0, p1, p2, p3 } = shape;
+    return {
+      start,
+      count,
+      type: "bezier",
+      p0: { x: p0.x, y: p0.y },
+      p1: { x: p1.x, y: p1.y },
+      p2: { x: p2.x, y: p2.y },
+      p3: { x: p3.x, y: p3.y },
+    };
+  }
+  return null;
+}
+
+// Sample `shape` onto the end of `polygon`, recording its curve run.
+function appendSamples(polygon, runs, shape, startIsA, N) {
+  const pts = sampleShapeForPoly(shape, startIsA, N);
+  const run = curveRun(shape, polygon.length, pts.length);
+  if (run) runs.push(run);
+  for (const p of pts) polygon.push(p);
+}
 
 // The bounded faces of a planar arrangement, plus each connected piece's outer
 // outline: the regions you can see, not every union of them.  Linear in the
@@ -126,16 +170,31 @@ function arrangementFaces(
         h = next(h);
       }
       if (h !== start) continue;
-      const polygon = walk.flatMap(samples);
+      const polygon = [];
+      const curves = [];
+      for (const e of walk) {
+        const pts = samples(e);
+        const run = curveRun(
+          subEntries[e >> 1].shape,
+          polygon.length,
+          pts.length,
+        );
+        if (run) curves.push(run);
+        for (const p of pts) polygon.push(p);
+      }
       const area = signedPolyAreaXY(polygon);
       const shapeIndices = [
         ...new Set(walk.map((e) => subEntries[e >> 1].origIdx)),
       ];
       // Counter-clockwise: a bounded face.  Clockwise: a piece's outline, kept
       // (reversed) when it is a simple loop, as the cycle search offered it.
-      if (area > 1e-12) faces.push({ polygon, shapeIndices });
+      if (area > 1e-12) faces.push({ polygon, shapeIndices, curves });
       else if (area < -1e-12 && new Set(walk.map(tail)).size === walk.length)
-        faces.push({ polygon: polygon.slice().reverse(), shapeIndices });
+        faces.push({
+          polygon: polygon.slice().reverse(),
+          shapeIndices,
+          curves: reverseEdgeCurves(curves, polygon.length),
+        });
     }
   });
   return faces;
@@ -175,7 +234,8 @@ export function findClosedLoopsWithShapes(
       // it never got finer with the resolution.
       const tol = precision != null ? precision / MM_PER_UNIT : null;
       for (const polygon of cogShapeContours(s, tol))
-        if (polygon.length >= 3) textLoops.push({ polygon, shapeIndices: [i] });
+        if (polygon.length >= 3)
+          textLoops.push({ polygon, shapeIndices: [i], curves: [] });
       return;
     }
     if (s.type !== "text" || !Array.isArray(s.contours)) return;
@@ -193,6 +253,7 @@ export function findClosedLoopsWithShapes(
       textLoops.push({
         polygon: pts.map((p) => ({ x: p.x + s.x, y: p.y + s.y })),
         shapeIndices: [i],
+        curves: [],
       });
     }
   });
@@ -437,24 +498,25 @@ export function findClosedLoopsWithShapes(
             ? Math.abs(sh2.endAngle - sh2.startAngle)
             : Math.PI;
         const poly = [];
+        const curves = [];
         const idxSet = new Set();
-        poly.push(
-          ...sampleShapeForPoly(
-            sh1,
-            sn1.a === N1,
-            arcSegsN(sh1, ang1, curveSegments, precision),
-          ),
+        appendSamples(
+          poly,
+          curves,
+          sh1,
+          sn1.a === N1,
+          arcSegsN(sh1, ang1, curveSegments, precision),
         );
         idxSet.add(subEntries[si1].origIdx);
-        poly.push(
-          ...sampleShapeForPoly(
-            sh2,
-            sn2.a === N2,
-            arcSegsN(sh2, ang2, curveSegments, precision),
-          ),
+        appendSamples(
+          poly,
+          curves,
+          sh2,
+          sn2.a === N2,
+          arcSegsN(sh2, ang2, curveSegments, precision),
         );
         idxSet.add(subEntries[si2].origIdx);
-        results.push({ polygon: poly, shapeIndices: [...idxSet] });
+        results.push({ polygon: poly, shapeIndices: [...idxSet], curves });
       }
     }
     // Keep all edges (including arc edges that have a parallel line
@@ -527,22 +589,23 @@ export function findClosedLoopsWithShapes(
 
   cycles.forEach((path) => {
     const poly = [];
+    const curves = [];
     const idxSet = new Set();
     for (const edge of path) {
       const sn = shapeNodes[edge.si];
       const sh = subEntries[edge.si].shape;
       const arcAngle =
         sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI;
-      poly.push(
-        ...sampleShapeForPoly(
-          sh,
-          sn.a === edge.fromNode,
-          arcSegsN(sh, arcAngle, curveSegments, precision),
-        ),
+      appendSamples(
+        poly,
+        curves,
+        sh,
+        sn.a === edge.fromNode,
+        arcSegsN(sh, arcAngle, curveSegments, precision),
       );
       idxSet.add(subEntries[edge.si].origIdx);
     }
-    results.push({ polygon: poly, shapeIndices: [...idxSet] });
+    results.push({ polygon: poly, shapeIndices: [...idxSet], curves });
   });
 
   // ── Direct loops for self-closing shapes that were NOT split ─────────
@@ -561,6 +624,16 @@ export function findClosedLoopsWithShapes(
           };
         }),
         shapeIndices: [origIdx],
+        curves: [
+          {
+            start: 0,
+            count: segs,
+            type: "arc",
+            cx: shape.cx,
+            cy: shape.cy,
+            r: shape.r,
+          },
+        ],
       });
     } else if (shape.type === "ellipse") {
       const segs =
@@ -581,6 +654,17 @@ export function findClosedLoopsWithShapes(
           };
         }),
         shapeIndices: [origIdx],
+        curves: [
+          {
+            start: 0,
+            count: segs,
+            type: "ellipse",
+            cx: shape.cx,
+            cy: shape.cy,
+            rx: shape.rx,
+            ry: shape.ry,
+          },
+        ],
       });
     }
     // rects are always expanded to 4 lines; the DFS finds the rectangular
@@ -693,12 +777,14 @@ export function regionsWithShapes(
 ) {
   const loops = findClosedLoopsWithShapes(shapes, curveSegments, precision);
   const byPolygon = new Map(loops.map((l) => [l.polygon, l.shapeIndices]));
+  const curvesBy = new Map(loops.map((l) => [l.polygon, l.curves]));
   const all = [];
   const collect = (e) => {
     all.push({
       ...e,
       shapeIndices: byPolygon.get(e.polygon) || [],
       loopShapes: loopShapesOf(e.polygon, e.holes, byPolygon),
+      curves: loopCurvesOf(e.polygon, e.holes, curvesBy),
     });
     e.entries.forEach(collect);
   };
@@ -721,6 +807,19 @@ export function loopShapesOf(polygon, holes, shapesOf) {
       .sort((a, b) => String(a).localeCompare(String(b))),
   };
 }
+
+// A region's exact curves, as a profile stores them (`curves2D`): the outer
+// loop's runs and each hole's, holes in the order and filtering the profile's
+// own `holes` uses.  `curvesOf` maps a loop polygon to its runs.
+export function loopCurvesOf(polygon, holes, curvesOf) {
+  return {
+    outer: curvesOf.get(polygon) || [],
+    holes: (holes || [])
+      .filter((h) => h.length >= 3)
+      .map((h) => curvesOf.get(h) || []),
+  };
+}
+
 export const loopShapesKey = (ls) =>
   ls
     ? `${ls.outer.join(",")}|${ls.holes.map((h) => h.join(",")).join(";")}`

@@ -1039,6 +1039,18 @@ Established landmines (each was a real bug — extend this list, never shrink it
   Older documents get `loopShapes` at load (`backfillLoopShapes`) only where the
   sketch still has exactly one region matching the stored outline.
 
+- **A profile carries its exact curves (`curves2D`), and every copy of it
+  must too.** The polygon is samples; `curves2D` records which polygon edges
+  lie on which arc / bezier / ellipse (`{start, count, ...}` runs, edge k from
+  vertex k to k+1), and extrude, revolve, sweep (profile AND path) and loft
+  build exact OCC edges from it, so a bore is one cylindrical face rather than
+  one plane per sample (`exactCurveExtrude.test.js`). The runs index the
+  polygon's vertices: anything that re-derives or reverses the polygon must
+  re-derive or move the runs with it (`extrudeWithLivePolygon`, `windLoop`),
+  and anything that copies a profile field by field must copy `curves2D` (the
+  sweep tool's copies once dropped it). A profile WITHOUT `curves2D` -- every
+  document from before -- deliberately stays faceted: its saved chamfer and
+  face selections were picked on the facets.
 - **A Split's pieces are re-cut from their source, not kept as baked
   meshes.** They used to carry no recipe, so a resolution change (or an
   upstream edit) never reached them -- MultiSystem2's extruded circles stayed
