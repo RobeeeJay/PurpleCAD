@@ -115,16 +115,148 @@ describe("recognising the surfaces of a mesh", () => {
     expect(curved, `regions ${found(r)}`).toHaveLength(0);
   });
 
-  it("leaves a torus as triangles rather than inventing a surface", () => {
-    // No torus fit yet: what it can't name must stay mesh, not come back as a
-    // cylinder or sphere that only roughly matches.
-    const r = recognise(occ.makeTorus(2, 0.5), 0.05);
-    const t = r.triangleCounts;
-    const total = r.triangleRegion.length;
-    expect(t.cylinder + t.cone + t.sphere, `regions ${found(r)}`).toBe(0);
-    expect(t.mesh / total, `mesh share ${t.mesh}/${total}`).toBeGreaterThan(
-      0.9,
+  for (const res of [0.05, 0.01]) {
+    it(`finds a torus and both its radii at Resolution ${res}`, () => {
+      const r = recognise(occ.makeTorus(2, 0.5), res);
+      expect(found(r), "surfaces found").toBe("1 torus");
+      const [t] = r.regions;
+      expect(Math.abs(t.radius - 2), `major radius ${t.radius}`).toBeLessThan(
+        TOL,
+      );
+      expect(
+        Math.abs(t.minorRadius - 0.5),
+        `minor radius ${t.minorRadius}`,
+      ).toBeLessThan(TOL);
+    });
+
+    it(`finds a fillet round a rim as one torus at Resolution ${res}`, () => {
+      // The fillet runs tangentially into the side and the top, so all three
+      // are one smooth region, which nothing fits whole: it has to be grown
+      // through surface by surface.  A patch of the fillet is a short arc of
+      // its centre circle and fits a cylinder too, so this also checks the
+      // torus is found from a longer arc and refined to its true radii.
+      const cyl = occ.makeCylinder(-1, 1, 2);
+      const filleted = occ.filletShape(
+        cyl,
+        { edges: [{ ax: 1, ay: 1, az: 0, bx: 1, by: 1, bz: 0 }] },
+        0.3,
+      );
+      occ.releaseShape(cyl);
+      const r = recognise(filleted, res);
+      const tori = r.regions
+        .filter((g) => g.type === "torus")
+        .sort((a, b) => b.triangles - a.triangles);
+      expect(tori.length, `regions ${found(r)}`).toBeGreaterThan(0);
+      const [t] = tori;
+      expect(
+        [t.radius, t.minorRadius].map((x) => +x.toFixed(3)),
+        "fillet's radii",
+      ).toEqual([0.7, 0.3]);
+      expect(
+        t.triangles / r.triangleRegion.length,
+        `share of the body in the fillet's torus (${found(r)})`,
+      ).toBeGreaterThan(0.8);
+      expect(r.triangleCounts.mesh, "triangles left unrecognised").toBe(0);
+      // Top and bottom.  The top disc is meshed with every vertex on its rim,
+      // which lies on the torus too: only its facets' middles, far off the
+      // torus, keep the fillet from swallowing it.
+      expect(r.counts.plane, `regions ${found(r)}`).toBe(2);
+    });
+  }
+
+  it("keeps every vertex of a region on its surface, freeform included", () => {
+    // The promise everything later relies on: a region's surface is never
+    // more than the tolerance from any of its vertices.  A bumpy sphere is
+    // no canonical surface, so what is found there is many small local fits,
+    // and each must still hold.
+    const positions = [];
+    const seg = 64;
+    const rad = (u, v) => 1 + 0.05 * Math.sin(5 * u) * Math.sin(4 * v);
+    for (let i = 0; i <= seg; i++)
+      for (let j = 0; j < seg; j++) {
+        const v = (i / seg) * Math.PI;
+        const u = (j / seg) * 2 * Math.PI;
+        const r = rad(u, v);
+        positions.push(
+          r * Math.sin(v) * Math.cos(u),
+          r * Math.cos(v),
+          r * Math.sin(v) * Math.sin(u),
+        );
+      }
+    const indices = [];
+    const at = (i, j) => i * seg + (j % seg);
+    for (let i = 0; i < seg; i++)
+      for (let j = 0; j < seg; j++)
+        (indices.push(at(i, j), at(i + 1, j), at(i, j + 1)),
+          indices.push(at(i, j + 1), at(i + 1, j), at(i + 1, j + 1)));
+    const r = ops.recognizeSurfaces({ positions, indices, tolerance: TOL });
+    const dist = (g, p) => {
+      const d = p.map((x, k) => x - g.point[k]);
+      const t = d[0] * g.dir[0] + d[1] * g.dir[1] + d[2] * g.dir[2];
+      const rho = Math.hypot(...d.map((x, k) => x - g.dir[k] * t));
+      switch (g.type) {
+        case "plane":
+          return Math.abs(t);
+        case "sphere":
+          return Math.abs(Math.hypot(...d) - g.radius);
+        case "cylinder":
+          return Math.abs(rho - g.radius);
+        case "cone":
+          return (
+            Math.abs(rho - (g.radius + Math.tan(g.halfAngle) * t)) *
+            Math.cos(g.halfAngle)
+          );
+        case "torus":
+          return Math.abs(Math.hypot(rho - g.radius, t) - g.minorRadius);
+      }
+      return 0;
+    };
+    // Indices refer to the WELDED mesh, whose triangles are the input's in
+    // order, so the input's corners can be read directly.
+    let worst = 0;
+    r.triangleRegion.forEach((g, t) => {
+      const reg = r.regions[g];
+      if (reg.type === "mesh") return;
+      for (let k = 0; k < 3; k++) {
+        const v = indices[3 * t + k];
+        worst = Math.max(worst, dist(reg, positions.slice(3 * v, 3 * v + 3)));
+      }
+    });
+    expect(worst, `worst vertex off its surface (${found(r)})`).toBeLessThan(
+      TOL * 1.0001,
     );
+    // Near a line, a thin facet is within the tolerance of a plane at almost
+    // any tilt, so a flat region also needs its facets facing its way; and a
+    // torus has to be the ring kind, the only one a face can be built on.
+    const cosFlat = Math.cos((0.5 * Math.PI) / 180);
+    let worstTilt = 1;
+    r.triangleRegion.forEach((g, t) => {
+      const reg = r.regions[g];
+      if (reg.type !== "plane") return;
+      const p = [0, 1, 2].map((k) =>
+        positions.slice(3 * indices[3 * t + k], 3 * indices[3 * t + k] + 3),
+      );
+      const u = p[1].map((x, i) => x - p[0][i]);
+      const w = p[2].map((x, i) => x - p[0][i]);
+      const n = [
+        u[1] * w[2] - u[2] * w[1],
+        u[2] * w[0] - u[0] * w[2],
+        u[0] * w[1] - u[1] * w[0],
+      ];
+      const l = Math.hypot(...n);
+      if (l < 1e-12) return;
+      const c =
+        Math.abs(n[0] * reg.dir[0] + n[1] * reg.dir[1] + n[2] * reg.dir[2]) / l;
+      worstTilt = Math.min(worstTilt, c);
+    });
+    expect(
+      worstTilt,
+      "least-aligned facet of a flat region (cos)",
+    ).toBeGreaterThanOrEqual(cosFlat);
+    for (const g of r.regions.filter((g) => g.type === "torus"))
+      expect(g.radius, `torus ${g.radius}/${g.minorRadius}`).toBeGreaterThan(
+        g.minorRadius,
+      );
   });
 
   it("labels every triangle with its region", () => {

@@ -2781,6 +2781,7 @@ function recognizeSurfaces({ positions, indices, tolerance }) {
             dir: Array.from(g.dir),
             radius: g.radius,
             halfAngle: g.halfAngle,
+            minorRadius: g.minorRadius,
           }),
     })),
     triangleRegion: Array.from(r.triangleRegion),
