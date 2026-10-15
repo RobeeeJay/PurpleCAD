@@ -122,7 +122,7 @@ try {
     "holeItem", "embossItem", "draftItem", "revolveItem", "pipeItem",
     "loftItem", "exportSTL", "exportSTEP", "importStep", "splitItem", "tessellateItem",
     "pattern3dItem", "releaseShape", "solidFromMesh", "weldMesh", "simplifyMesh",
-    "recognizeSurfaces",
+    "recognizeSurfaces", "rebuildSurfaces",
   ];
   for (const op of OCC_OPS)
     ipcMain.handle(`occ:${op}`, (_e, args) => callOcc(op, args));

@@ -301,6 +301,7 @@ Val SetCancelBuffer(Js& js);
 Val ExportSTEP(Js& js);
 Val ImportSTEP(Js& js);
 Val MakeSolidFromMesh(Js& js);
+Val RebuildSurfaces(Js& js);
 Val MakeCubeTessellated(Js& js);
 
 }  // namespace occ

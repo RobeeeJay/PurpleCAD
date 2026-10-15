@@ -139,7 +139,40 @@ Eighteen of the nineteen leave under 0.5% of their triangles unrecognised. The l
 
 Where the STEP has B-splines or a swept curve (the centering tool, the cable tie's strap), the answer is many small local fits rather than a few surfaces: 274 cones and 84 spheres on the cable tie, each within the tolerance. The two surfboard fins, which are freeform throughout, come out as about 1,500 local fits each with 8% left as triangles, at 1.5 s. Every one of those holds its vertices within the tolerance (the freeform test checks exactly that on a bumpy sphere), so nothing is lost, but it's a lot of faces for what is really one smooth surface, and the rebuild will show whether that's a problem.
 
-Size, for the limit the tool will need, measured on three scans: 1.5 million triangles took 14.6 s, 5.0 million 32.5 s and 6.0 million 29.3 s, between 5 and 10 µs a triangle; the freeform fins cost about 110 µs a triangle. The limit itself waits for the rebuild's cost, which is likely the larger.
+Size, measured on three scans: 1.5 million triangles took 14.6 s, 5.0 million 32.5 s and 6.0 million 29.3 s, between 5 and 10 µs a triangle; the freeform fins cost about 110 µs a triangle. The limit (below) was set by the rebuild, which costs far more, and the cable tie in the table is now over it; its figures were measured first.
+
+### The Rebuild: Built, and What It Measured
+
+Step 4 is in as the addon op `rebuildSurfaces` (`native/occ-addon/src/mesh_rebuild.cpp`), reached through both OCC implementations. It recognises the mesh, makes each region one face on its fitted surface and each leftover triangle a flat face of its own, and joins them into a solid. It returns the body as BREP text and drawn at the current Resolution, or refuses with the reason, in which case the caller keeps the mesh. Nothing in the app calls it yet; that's the tool, step 5. The tests are in `rebuildSurfaces.test.js`.
+
+The design worry above, that exact faces and triangle faces wouldn't sew together, didn't come to pass, because they aren't sewn. The boundary between two regions is a run of mesh edges, and that run becomes *one* edge (a line, a circular arc, or a B-spline through its vertices), shared by both faces. So the solid's topology comes straight from the mesh. Sewing is kept as a second attempt and is used once in the corpus.
+
+Proof that the faces are exact and not a good imitation is the volume. Rebuilt from their meshes, a box with a bore comes out at 28.92124 (true: 32 − 2π·0.49 = 28.92124; the mesh, 28.93271), a sphere at 14.13716 (4/3·π·1.5³; the mesh, 14.06986) and a torus at 9.86960 (2π²·2·0.25; the mesh, 9.81940).
+
+What it took, most of it learned from what OCC's own fixes do to a face:
+
+- **One fix context for all faces.** Adding a cylinder's seam splits the circle it shares with its end cap. Fixed face by face, the cap kept the old circle and the shell came apart ("not connected"). All faces' fixes now share one record of what was replaced.
+- **Trim periodic surfaces to the region.** On a torus or a sphere, two circles bound two regions, and the fix took the wrong one when a boundary sat on the seam: a fillet came back as the other three quarters of its tube, 1.2 short in volume. Each periodic direction is trimmed to the arc the region's vertices span, so there's only one region to take. (Classifying a point and flipping the wires was tried first, and fails: the classifier only looks inside the wrong face's own bounds.)
+- **Check curves both ways.** A B-spline can pass within the tolerance of every point and still bulge between two close ones; one bulged 0.010 off the torus it bounded. Curves are now sampled against the polyline as well.
+- **Regions go back to triangles, one at a time.** When a region's boundary curves stray from its surface, its face covers a different area from its facets, the fix has had to widen its edges far past a chord's sag on that surface, or the face won't mesh, that region alone becomes triangles, and the build is retried. Faces the solid check objects to are traced back by their surface and demoted too. The chord-sag allowance is measured at the chord's ends: a chord across a near-flat cone passes near its axis, where the cone curves tightly but the region isn't, and that let a bad face keep a 0.020 edge.
+- **What didn't help.** Checking each face's validity on its own demoted half the corpus's good faces, because a face can fail alone and be fine in the solid; it's gone. Counting open mesh edges, as the bevel checks do, failed every curved body: the edges are curve fits within the tolerance of both faces, so each face meshes them up to a tolerance apart. What matters, that every face meshes at all, is checked directly.
+
+On the V-Core STLs at 0.01 mm:
+
+| File | Triangles | Time | Faces | Volume (mesh) | Loosest edge |
+| --- | --- | --- | --- | --- | --- |
+| lead_screw_motor_cage_front | 10,358 | 71 ms | 44 planes, 13 cylinders, 9 cones | 95,465.3 (95,468.8) | 0.010 |
+| xy_motor_cage_top_left | 12,428 | 131 ms | 99 planes, 23 cylinders, 11 cones | 45,691.4 (45,689.1) | 0.150 |
+| pillow_block | 5,316 | 37 ms | 31 planes, 6 cylinders, 6 cones | 11,067.9 (11,068.4) | 0.010 |
+| bed_arm_back | 12,778 | 471 ms | 100 planes, 24 cylinders, 221 triangles | 62,029.3 (62,042.6) | 0.126 |
+| xy_joiner_right | 8,826 | 839 ms | 93 planes, 22 cylinders, 6 cones, 796 triangles | 45,965.1 (45,962.5) | 0.155 |
+| bed_arm_left, bed_arm_right | | 1.0-1.2 s | refused: faces invalid in the solid, a shell badly oriented | | |
+| cable_tie | 151,160 | | refused: over the size limit | | |
+
+Sixteen of the nineteen rebuild, five of them with no triangles left at all, and every rebuilt volume is within 0.04% of the mesh's. The other eleven keep some triangles where regions were put back, from 2 to 796; that's the honest answer where a region's face wouldn't hold, and the faces round them are still exact. The loosest edges reach 0.155 mm, about fifteen times the tolerance, and they are all the same thing: a boundary between a plane and a cylinder or cone that is really curved (the plane meets the surface at an angle), but where the mesh has only its two ends. That run becomes a straight chord, exact on the plane and sagging off the curved face; on xy_motor_cage_top_left and bed_arm_back every edge looser than 0.05 is one, and a 3.775 mm chord on a 14.25 mm radius sags 3.775² / (8 × 14.25) = 0.125, against 0.126 measured. So the gap is the mesh's own. Building such an edge as the two surfaces' actual intersection curve would close it, and is the obvious next improvement.
+
+The **size limit** is 100,000 triangles, in recognition and rebuild alike. The rebuild costs per face, and what recognition leaves as triangles are a face each: the cable tie's ran 105 s and was then refused, while the 13k-triangle parts take under a second or two. 100,000 is *(est)* between those two measurements, not a measurement itself.
+
 
 ### How We'll Know It Works
 
@@ -150,10 +183,11 @@ Size, for the limit the tool will need, measured on three scans: 1.5 million tri
 
 ## Unknowns and Risks
 
-- **Hybrid sewing is the hard part.** An exact face next to a triangle face has to share an edge, and the exact face's boundary is a projected polyline while the triangles' boundary is the original one. They agree to within the fit tolerance, so sewing *should* close them, but nobody has tried it. If it can't, the fallback is all-or-nothing per connected group of regions, which is weaker but safe.
-- **Fillet bands.** A small fillet between two faces is a thin strip of a torus or cylinder with only a few triangles across it. It may be too thin to fit reliably, and will then stay triangles. That's acceptable, but worth measuring.
-- **Speed.** Segmentation and fitting are linear-ish, but sewing a few thousand faces isn't fast. The 50,000-triangle import cap stays in place until there are measurements.
-- **Recogniser on wires.** `ShapeAnalysis_CanonicalRecognition` on boundary wires (for exact line and circle edges) is untested.
+- **Hybrid sewing** turned out not to be needed: shared edges built from the mesh join exact and triangle faces directly (see the rebuild above). The fallback is per region rather than per group, which is better than the plan expected.
+- **Fillet bands** are found as tori when they have about 128 facets of arc; thinner ones grow as cylinder or cone strips, or stay triangles. Measured on one filleted cylinder and the corpus, not more widely.
+- **Speed** is now measured: see the size limit above. The 50,000-triangle import cap is unchanged.
+- **Recogniser on wires** wasn't needed: run curves are fitted directly as lines, arcs and B-splines.
+- **Still open:** the two refused bed arms (shell-level complaints that name no face to put back), elliptical walls (the lead screw cage), and many small faces on freeform parts, which the tool will have to show the user.
 
 ## Order of Work
 

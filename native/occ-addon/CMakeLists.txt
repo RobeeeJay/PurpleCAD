@@ -63,6 +63,7 @@ add_library(occ_core OBJECT
   src/mesh_tools.cpp
   src/mesh_recognize.cpp
   src/mesh_fit.cpp
+  src/mesh_rebuild.cpp
   ${MESHOPT_DIR}/allocator.cpp
   ${MESHOPT_DIR}/indexgenerator.cpp
   ${MESHOPT_DIR}/simplifier.cpp

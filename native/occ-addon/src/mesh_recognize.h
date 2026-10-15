@@ -20,6 +20,14 @@ struct Recognition {
   std::vector<recog::V3> normal;
 };
 
+// Above this, converting a mesh takes minutes: recognition is linear-ish
+// (1.4 s for a 151k-triangle cable tie, 32 s for a 5M scan), but the rebuild
+// costs per face, and what recognition leaves as triangles are a face each --
+// the cable tie's rebuild ran 105 s (and was then refused).  13k-triangle
+// parts take under 5 s.  100k sits between those, an estimate, not a
+// measurement.
+constexpr size_t kMaxSurfaceTriangles = 100000;
+
 Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
                       double tol, double creaseDeg = 30, double flatDeg = 0.5);
 

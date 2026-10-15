@@ -24,6 +24,10 @@ using namespace recog;
 
 Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
                       double tol, double creaseDeg, double flatDeg) {
+  const size_t inputTris = (idx.empty() ? pos.size() / 3 : idx.size()) / 3;
+  if (inputTris > kMaxSurfaceTriangles)
+    throw std::runtime_error("too many triangles to convert (" + std::to_string(inputTris) +
+                             "; the limit is " + std::to_string(kMaxSurfaceTriangles) + ")");
   const double cosCrease = std::cos(creaseDeg * M_PI / 180);
   const double cosFlat = std::cos(flatDeg * M_PI / 180);
 

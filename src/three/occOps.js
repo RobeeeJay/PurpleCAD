@@ -2757,10 +2757,44 @@ function simplifyMesh({ positions, indices, mode, value }) {
   };
 }
 
+// Rebuild a mesh as exact faces: each recognised region one face on its
+// surface, each leftover triangle a flat face, joined along shared edges.
+// Throws, with the reason, when the solid doesn't check out (open mesh,
+// invalid faces, volume off, an edge too loose); the caller keeps the mesh.
+// Returns the body as BREP text and drawn at `printPrecision`, in the mesh's
+// own frame.
+function rebuildSurfaces({ positions, indices, tolerance, printPrecision }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.rebuildSurfaces(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    tolerance,
+  );
+  try {
+    const tess = occ.tessellate(r.shapeId, printPrecision ?? 0.5);
+    return {
+      brep: occ.shapeToBrep(r.shapeId),
+      geometryData: {
+        positions: Array.from(tess.positions),
+        indices: Array.from(tess.indices),
+        edges: tess.edges ? Array.from(tess.edges) : null,
+      },
+      faces: r.faces,
+      faceTypes: { ...r.faceTypes },
+      volume: r.volume,
+      meshVolume: r.meshVolume,
+      maxEdgeTolerance: r.maxEdgeTolerance,
+      sewn: r.sewn === 1,
+    };
+  } finally {
+    occ.releaseShape(r.shapeId);
+  }
+}
+
 // Find the surfaces a mesh is made of: smooth regions split at creases, each
-// fitted with the simplest of plane, cylinder, cone and sphere that every one
-// of its vertices lies within `tolerance` of; the rest stay "mesh".  Indexed
-// by the WELDED mesh's triangles, which are the input's in order.
+// fitted with the simplest of plane, cylinder, cone, sphere and torus that
+// every one of its vertices lies within `tolerance` of; the rest stay "mesh".
+// Indexed by the WELDED mesh's triangles, which are the input's in order.
 function recognizeSurfaces({ positions, indices, tolerance }) {
   if (!positions || positions.length < 9) return null;
   const r = occ.recognizeSurfaces(
@@ -2825,4 +2859,5 @@ export const ops = {
   weldMesh,
   simplifyMesh,
   recognizeSurfaces,
+  rebuildSurfaces,
 };

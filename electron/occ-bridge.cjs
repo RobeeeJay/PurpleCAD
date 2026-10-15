@@ -2113,6 +2113,35 @@ function simplifyMesh({ positions, indices, mode, value }) {
   };
 }
 
+// Rebuild a mesh as exact faces -- mirrors occOps.js#rebuildSurfaces.
+function rebuildSurfaces({ positions, indices, tolerance, printPrecision }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.rebuildSurfaces(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    tolerance,
+  );
+  try {
+    const tess = occ.tessellate(r.shapeId, printPrecision ?? 0.5);
+    return {
+      brep: occ.shapeToBrep(r.shapeId),
+      geometryData: {
+        positions: Array.from(tess.positions),
+        indices: Array.from(tess.indices),
+        edges: tess.edges ? Array.from(tess.edges) : null,
+      },
+      faces: r.faces,
+      faceTypes: { ...r.faceTypes },
+      volume: r.volume,
+      meshVolume: r.meshVolume,
+      maxEdgeTolerance: r.maxEdgeTolerance,
+      sewn: r.sewn === 1,
+    };
+  } finally {
+    occ.releaseShape(r.shapeId);
+  }
+}
+
 // Find the surfaces a mesh is made of -- mirrors occOps.js#recognizeSurfaces.
 function recognizeSurfaces({ positions, indices, tolerance }) {
   if (!positions || positions.length < 9) return null;
@@ -2159,6 +2188,6 @@ function setCancelBuffer(view) {
 }
 
 module.exports = {
-  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, recognizeSurfaces, setCancelBuffer };
+  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, recognizeSurfaces, rebuildSurfaces, setCancelBuffer };
 // Internals the unit tests check against occOps.js's copies.
 module.exports.__test = { embossVolumeHolds };

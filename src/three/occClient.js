@@ -290,6 +290,11 @@ export function recognizeSurfaces(args) {
   return runOp("recognizeSurfaces", args);
 }
 
+// A mesh body rebuilt as exact faces (occOps.js#rebuildSurfaces).
+export function rebuildSurfaces(args) {
+  return runOp("rebuildSurfaces", args);
+}
+
 export function holeItem(args) {
   return runOp("holeItem", args);
 }
