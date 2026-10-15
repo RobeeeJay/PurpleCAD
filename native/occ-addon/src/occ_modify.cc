@@ -120,6 +120,10 @@ Val BooleanOp(Js& js) {
   // on ("geometry rejected the operation").  Unify the same-domain faces/edges
   // so the body has clean single faces.  Only for union (the case that creates
   // those internal seams); fall back to the raw result if unification rejects.
+  // A build that was cancelled (or failed) leaves an empty shape.  Returning
+  // its id as a result let a caller go on to mesh it, which faulted and took
+  // the app down; 0 is the "no result" every caller already handles.
+  if (result.IsNull()) return js.makeNumber(0);
   if (op == "union") {
     try {
       ShapeUpgrade_UnifySameDomain unifier(

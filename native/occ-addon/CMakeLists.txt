@@ -66,6 +66,14 @@ add_library(occ_core OBJECT
   ${MESHOPT_DIR}/simplifier.cpp
 )
 set_target_properties(occ_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# OCCT on Unix is built with OCC_CONVERT_SIGNALS: a hardware fault inside OCC
+# jumps to the nearest OCC_CATCH_SIGNALS and is rethrown as an exception, and
+# with none in scope it prints "*** Abort ***" and EXITS the process.  The
+# op table guards every op with one (occ_io.cc#Guarded); the macro is empty
+# unless this is defined here too, matching the library.
+if(UNIX)
+  target_compile_definitions(occ_core PRIVATE OCC_CONVERT_SIGNALS)
+endif()
 target_include_directories(occ_core PRIVATE
   ${MESHOPT_DIR}
   ${OpenCASCADE_INCLUDE_DIR}

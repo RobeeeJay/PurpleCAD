@@ -605,6 +605,18 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   (the addon shares the process via worker_thread). Removing it re-opens
   app-death on any kernel fragility. The faulted op fails like rejected
   geometry; the step settles as `regenFailed`.
+  **That was only half true, and the other half crashed the app.** On Unix
+  OCCT is built with `OCC_CONVERT_SIGNALS`: a fault jumps to the nearest
+  `OCC_CATCH_SIGNALS` handler, and with NONE in scope OCC prints "*** Abort
+  *** an exception was raised, but no catch was found" and EXITS. OCC's own
+  algorithms carry handlers (hence the ChFi3d case above); our code calling
+  OCC did not. Cancelling a recalc mid-emboss killed the app on macOS and
+  Linux alike: a cancelled `BooleanOp` stored the EMPTY shape and returned
+  its id, and meshing it NULL-dereferenced in the edge pass. Now the op table
+  runs every op under `OCC_CATCH_SIGNALS` (`occ_io.cc#Guarded`, with
+  `OCC_CONVERT_SIGNALS` defined for the core in CMakeLists), a cancelled or
+  empty boolean returns 0, and an empty shape meshes to nothing
+  (`cancelSafety.test.js`). Keep all three; check a new op's empty results.
 - **`BRepAlgoAPI_Fuse`'s two-shape constructor silently DROPS a COMPOUND tool.**
   A multi-letter emboss stamp is a compound (one sewn solid per letter); fusing it
   the two-argument way returns just the body — "missing letters", no error.
