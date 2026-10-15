@@ -92,6 +92,15 @@ Val ShapeCount(Js& js) {
   return js.makeNumber(static_cast<double>(StoreSize()));
 }
 
+// shapeVolume(id) → the signed volume of a stored shape.  An op checks a
+// boolean's result with it: OCC can return a "successful" result that has
+// silently dropped one of its inputs.
+Val ShapeVolume(Js& js) {
+  GProp_GProps props;
+  BRepGProp::VolumeProperties(FetchShape(js.int32(js[0])), props);
+  return js.makeNumber(props.Mass());
+}
+
 // Register the shared cancel flag: an Int32Array over a SharedArrayBuffer whose
 // element 0 the caller flips to non-zero (from another thread) to abort the
 // current long build.  We stash the backing pointer; a SAB never detaches, so
@@ -546,6 +555,7 @@ const std::vector<occjs::Op>& occjs::Ops() {
 
       // Shape store management
       {"releaseShape", ReleaseShape},
+      {"shapeVolume", ShapeVolume},
       {"clearAll", ClearAll},
       {"shapeCount", ShapeCount},
       {"setCancelBuffer", SetCancelBuffer},

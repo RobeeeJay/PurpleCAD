@@ -291,6 +291,7 @@ Val TessellateShape(Js& js);
 Val FaceNames(Js& js);
 Val NamedFacePoint(Js& js);
 Val ReleaseShape(Js& js);
+Val ShapeVolume(Js& js);
 Val ClearAll(Js& js);
 Val ShapeCount(Js& js);
 Val SetCancelBuffer(Js& js);

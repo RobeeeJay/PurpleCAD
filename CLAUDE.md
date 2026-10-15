@@ -575,6 +575,16 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   self-intersecting slivers — missing/garbled letters AND minutes-long booleans,
   triggered by wherever the user happened to click (`embossRingWrap.test.js`
   drives the real repro scene through the op).
+- **Conform emboss embosses the EXACT body first.** It used to boolean the
+  stamp against a MESHED copy of the body (analytic sphere + faceted stamp
+  once silently dropped the sphere for text turned 90/270 degrees), so every
+  embossed body was hundreds of flat faces after any recalculation. Now it
+  tries the exact body and keeps the result only when its volume is one the
+  two solids can make (`embossVolumeHolds`, native `shapeVolume`); otherwise
+  the meshed copy, as before. All eight emboss test documents and the rotated
+  sphere took the exact path, measured. The lettering stays sewn triangles,
+  so the outline skips shallow edges between sewn triangles
+  (`SewnTrianglesMeetFlat`).
 - **Conform emboss: the stamp mesh MUST be consistently wound.**
   `prismFromLoops` (`embossTessellate.js`) can emit mixed-handedness triangles for
   holed glyphs (O/A/e); sewn, that's a watertight but inconsistently-oriented
@@ -970,6 +980,20 @@ Established landmines (each was a real bug — extend this list, never shrink it
      `reorderPosition.test.js` drives BOTH reorder directions of the real scene
      through the full store + recalc pipeline and asserts the world bbox never
      moves — extend it when touching relink/anchor code.
+- **A chamfer's selection is coordinates in its source's frame -- and a relink
+  can swap that frame.** An appended chamfer stores its merged selection in
+  the PRE-chamfer source's frame (offset 0 under an emboss); a relink later
+  rebound one to the previous chamfer's RESULT (centred, offset z 14), so its
+  rim points sat 14 units off the body. On a faceted body the normal-only
+  fallback hid it; on an exact one it matched 782 lettering edges and the
+  ring was pinned back to facets after 272 s. `regenerateChamfer` now shifts
+  the selection by (authored - current) centring -- new chamfers record the
+  authored one (`sourceCenterOffset`); older ones take whichever of the two
+  candidate frames puts their points nearer the body's mesh vertices (a
+  bounding box can't tell: both frames often fit inside it) -- and drops the
+  leading edges a source chamfer has already bevelled. The normal fallback
+  also takes NO edge when a stored segment's normals fit more than four
+  (`kMaxNormalMatches`): one segment names one edge (`exactEmboss.test.js`).
 - **Not every op builds on the previous step's result — check `sourceDescribesPrev`.**
   An APPENDED chamfer merges the prior chamfer's selection and re-runs on the
   PRE-chamfer source; feeding it the previous entry's result (JIT cached solid /

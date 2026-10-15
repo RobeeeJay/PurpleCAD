@@ -1304,11 +1304,44 @@ function buildEmbossStampShape(stamp) {
 
 // See occOps.js embossResultShape: conform booleans the wrapped mesh; center
 // intersects a deep prism with the body (clipping to faces) then raises/lowers.
+// Whether an emboss result's volume is one these two solids can produce: a
+// raised emboss holds at least the body and at most body + stamp; a deboss at
+// most the body and at least body - stamp.  (A sliver of tolerance for the
+// stamp's sewn surface.)
+function embossVolumeHolds(bodyId, stampId, resultId, deboss) {
+  const vb = Math.abs(occ.shapeVolume(bodyId));
+  const vs = Math.abs(occ.shapeVolume(stampId));
+  const vr = occ.shapeVolume(resultId);
+  const eps = 1e-3 * vb + 1e-9;
+  return deboss
+    ? vr <= vb + eps && vr >= vb - vs - eps
+    : vr >= vb - eps && vr <= vb + vs + eps;
+}
+
 function embossResultShape(targetId, stamp, printPrecision) {
   if (!stamp) return 0;
   if (stamp.mode === "conform") {
     const s = buildEmbossStampShape(stamp);
     if (!s) return 0;
+    // First onto the body as it is, so its exact surfaces stay exact: against
+    // a faceted copy, an embossed cylinder came back as hundreds of flat faces
+    // after every recalculation.  That boolean is the fragile one -- on a
+    // sphere it silently DROPPED the body for text turned 90 or 270 degrees --
+    // but a dropped body shows as a volume no emboss of these two solids can
+    // have, so a result outside that range falls through to the faceted copy
+    // below, which booleans robustly.
+    const op = stamp.deboss ? "difference" : "union";
+    let exact = 0;
+    try {
+      exact = occ.booleanOp([targetId, s], op);
+    } catch {
+      exact = 0;
+    }
+    if (exact && embossVolumeHolds(targetId, s, exact, stamp.deboss)) {
+      occ.releaseShape(s);
+      return exact;
+    }
+    if (exact) occ.releaseShape(exact);
     // Boolean the wrapped mesh against a FACETED copy of the body, not the
     // analytic primitive: OCC's fuse/cut of an analytic sphere vs a faceted stamp
     // is fragile and silently drops the sphere for some stamp orientations (text
@@ -2076,4 +2109,7 @@ function setCancelBuffer(view) {
   occ.setCancelBuffer(view);
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, setCancelBuffer };
+module.exports = {
+  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, setCancelBuffer };
+// Internals the unit tests check against occOps.js's copies.
+module.exports.__test = { embossVolumeHolds };

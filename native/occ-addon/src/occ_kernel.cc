@@ -136,6 +136,26 @@ gp_Trsf BuildTransform(double tx, double ty, double tz,
 // Tessellate a shape and populate position/index vectors.
 // Mirrors tessellate.js logic exactly (same deflection formula, same
 // REVERSED-orientation winding flip).
+// Two faces sewn from a mesh's triangles (each a flat face with three
+// edges) meeting at a shallow angle: a surface a mesh approximates, such as a
+// conform emboss's wrapped lettering, not a crease.  Drawn, every such seam
+// would outline each triangle of the lettering.
+static bool SewnTrianglesMeetFlat(const TopoDS_Face& a, const TopoDS_Face& b) {
+  auto triangleNormal = [](const TopoDS_Face& f, gp_Dir& n) {
+    TopTools_IndexedMapOfShape es;
+    TopExp::MapShapes(f, TopAbs_EDGE, es);
+    if (es.Extent() != 3) return false;
+    BRepAdaptor_Surface s(f, false);
+    if (s.GetType() != GeomAbs_Plane) return false;
+    n = s.Plane().Axis().Direction();
+    if (f.Orientation() == TopAbs_REVERSED) n.Reverse();
+    return true;
+  };
+  gp_Dir na, nb;
+  if (!triangleNormal(a, na) || !triangleNormal(b, nb)) return false;
+  return na.Angle(nb) < 20.0 * M_PI / 180.0;
+}
+
 // With `edges`, also the shape's real edges as index pairs into `positions`
 // (see below).
 void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
@@ -207,6 +227,7 @@ void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
       if (!f1.IsSame(f2) &&
           BRep_Tool::Continuity(edge, f1, f2) != GeomAbs_C0)
         continue;
+      if (!f1.IsSame(f2) && SewnTrianglesMeetFlat(f1, f2)) continue;
     }
     for (const auto& [face, base] : faceBase) {
       if (!face.IsSame(f1)) continue;

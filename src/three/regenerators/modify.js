@@ -20,6 +20,106 @@ import {
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { resolveChainedPosition } from "./shared.js";
 
+// The selection is coordinates in the frame of the source it was picked on:
+// that source's centring (its regenerator's centerOffset; none for an
+// extrude).  A relink can bind a source centred differently -- an appended
+// chamfer picked against the emboss under it (offset 0) was later rebound to
+// the previous chamfer's result (offset z 14), so its rim points sat 14 units
+// off the body.  On a faceted body the normal fallback hid that; on an exact
+// one it matched hundreds of lettering edges and the chamfer failed.  Shift
+// the selection by (authored - current) centring.  A recipe from before the
+// authored centring was recorded is in one of two frames -- as it is, or the
+// raw frame under the current centring -- and takes the one whose points lie
+// nearer the source's body.
+function selectionInSourceFrame(subGeo, regenerator, source) {
+  const zero = { cx: 0, cy: 0, cz: 0 };
+  const cur = source?.regenerator?.centerOffset ?? zero;
+  const by = (auth) => ({
+    cx: auth.cx - cur.cx,
+    cy: auth.cy - cur.cy,
+    cz: auth.cz - cur.cz,
+  });
+  const moved = (d) =>
+    Math.abs(d.cx) > 1e-9 || Math.abs(d.cy) > 1e-9 || Math.abs(d.cz) > 1e-9;
+  if (regenerator.sourceCenterOffset) {
+    const d = by(regenerator.sourceCenterOffset);
+    return moved(d) ? shiftSelection(subGeo, d) : subGeo;
+  }
+  const d = by(zero);
+  const P = source?.geometryData?.positions;
+  if (!moved(d) || !P?.length) return subGeo;
+  // How far the selection's points are from the body: each from its nearest
+  // mesh vertex (an edge is where the mesh has vertices; in the wrong frame
+  // the points land mid-face, where an exact face's mesh has none).  A bounding
+  // box can't tell: both frames often fall inside it.
+  const pts = (sel) =>
+    sel.edges
+      .flatMap((e) => [
+        [e.ax, e.ay, e.az],
+        [e.bx, e.by, e.bz],
+      ])
+      .concat(
+        sel.faces.filter((f) => f.cx != null).map((f) => [f.cx, f.cy, f.cz]),
+      );
+  const off = (sel) => {
+    let sum = 0;
+    for (const [x, y, z] of pts(sel)) {
+      let best = Infinity;
+      for (let i = 0; i < P.length; i += 3) {
+        const d = (P[i] - x) ** 2 + (P[i + 1] - y) ** 2 + (P[i + 2] - z) ** 2;
+        if (d < best) best = d;
+      }
+      sum += Math.sqrt(best);
+    }
+    return sum;
+  };
+  const shifted = shiftSelection(subGeo, d);
+  return off(shifted) < off(subGeo) ? shifted : subGeo;
+}
+
+// An appended chamfer re-runs the merged selection -- the previous chamfer's
+// edges, then its own -- on the PRE-chamfer source.  A relink can rebind its
+// source to that previous chamfer's RESULT, where the first edges are already
+// bevelled away: matched by their normals alone, each took up to four
+// unrelated edges of the body and the chamfer failed.  When the source is the
+// chamfer whose selection this one starts with, drop that part; the source has
+// already done it.
+function withoutAppliedEdges(subGeo, source) {
+  const prior = source?.regenerator;
+  const done = prior?.kind === "chamfer" ? prior.subGeo?.edges || [] : [];
+  const edges = subGeo.edges || [];
+  if (done.length === 0 || done.length >= edges.length) return subGeo;
+  const same = (a, b) =>
+    ["ax", "ay", "az", "bx", "by", "bz"].every(
+      (k) => Math.abs(a[k] - b[k]) < 1e-9,
+    );
+  if (!done.every((e, i) => same(e, edges[i]))) return subGeo;
+  return { ...subGeo, edges: edges.slice(done.length) };
+}
+
+// A selection moved by d: edge end points and face sample points; normals
+// don't change under a translation.
+function shiftSelection(sel, d) {
+  const face = (f) =>
+    f.cx == null
+      ? f
+      : { ...f, cx: f.cx + d.cx, cy: f.cy + d.cy, cz: f.cz + d.cz };
+  const edge = (e) => ({
+    ...e,
+    ax: e.ax + d.cx,
+    ay: e.ay + d.cy,
+    az: e.az + d.cz,
+    bx: e.bx + d.cx,
+    by: e.by + d.cy,
+    bz: e.bz + d.cz,
+  });
+  return {
+    ...sel,
+    edges: (sel.edges || []).map(edge),
+    faces: (sel.faces || []).map(face),
+  };
+}
+
 export async function regenerateChamfer(
   regenerator,
   accumulatedItems,
@@ -52,7 +152,11 @@ export async function regenerateChamfer(
   // A sketch edit moves the polygon edges a side-face chamfer was bound to —
   // re-point the face selections at the live edges so OCC can still find them.
   const subGeo = remapExtrudeFaceSelections(
-    rawSubGeo,
+    selectionInSourceFrame(
+      withoutAppliedEdges(rawSubGeo, source),
+      regenerator,
+      source,
+    ),
     regenerator.source,
     source,
   );

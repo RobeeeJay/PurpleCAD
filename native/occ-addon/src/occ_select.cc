@@ -524,13 +524,24 @@ std::vector<SelectedEdge> SelectSubGeoEdges(
     // Pass 3: resize-invariant normal fallback — only when the endpoints have
     // moved off the shape entirely (a parametric resize repositions the curve),
     // so the precise passes win whenever the selection still traces the body.
+    //
+    // A stored segment names ONE edge, so when its normals fit more than a
+    // handful the match is ambiguous and takes none: on a body whose wall is
+    // sewn triangles (a conform emboss's lettering) a single rim segment's
+    // normal pair fit 782 of its edges, and the chamfer that got them failed
+    // after two minutes of retries.
     if (!matched && ep.hasNormals) {
-      for (TopExp_Explorer e2(shape, TopAbs_EDGE); e2.More(); e2.Next()) {
+      constexpr size_t kMaxNormalMatches = 4;
+      std::vector<TopoDS_Edge> fits;
+      for (TopExp_Explorer e2(shape, TopAbs_EDGE);
+           e2.More() && fits.size() <= kMaxNormalMatches; e2.Next()) {
         TopoDS_Edge edge = TopoDS::Edge(e2.Current());
         if (NormalSetMatches(EdgeAdjacentNormals(edge, edgeFaceMap), ep) &&
             SameSideAsSpec(edge, ep, shapeCentre))
-          addEdge(edge, faceTouchingEdge(edge));
+          fits.push_back(edge);
       }
+      if (fits.size() <= kMaxNormalMatches)
+        for (const auto& edge : fits) addEdge(edge, faceTouchingEdge(edge));
     }
   }
 
