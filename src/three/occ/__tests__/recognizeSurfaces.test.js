@@ -164,6 +164,25 @@ describe("recognising the surfaces of a mesh", () => {
     });
   }
 
+  it("finds an oval wall and both its semi-axes", () => {
+    // An elliptical prism: its wall is no cylinder, cone, sphere or torus.
+    const p = [];
+    for (let i = 0; i < 96; i++) {
+      const t = (i / 96) * 2 * Math.PI;
+      p.push(1.35 * Math.cos(t), 1.2 * Math.sin(t));
+    }
+    const r = recognise(
+      occ.makeExtrude(new Float64Array(p), [], 0, 0, 2),
+      0.05,
+    );
+    expect(found(r), "surfaces found").toBe("2 plane, 1 ellipticCylinder");
+    const e = r.regions.find((g) => g.type === "ellipticCylinder");
+    expect(
+      [e.radius, e.minorRadius].map((x) => +x.toFixed(4)),
+      "semi-axes",
+    ).toEqual([1.35, 1.2]);
+  });
+
   it("keeps every vertex of a region on its surface, freeform included", () => {
     // The promise everything later relies on: a region's surface is never
     // more than the tolerance from any of its vertices.  A bumpy sphere is
@@ -208,6 +227,28 @@ describe("recognising the surfaces of a mesh", () => {
           );
         case "torus":
           return Math.abs(Math.hypot(rho - g.radius, t) - g.minorRadius);
+        case "ellipticCylinder": {
+          // Nearest point on the ellipse, by sampling finely enough for the test.
+          const y = [
+            g.dir[1] * g.xdir[2] - g.dir[2] * g.xdir[1],
+            g.dir[2] * g.xdir[0] - g.dir[0] * g.xdir[2],
+            g.dir[0] * g.xdir[1] - g.dir[1] * g.xdir[0],
+          ];
+          const px = d[0] * g.xdir[0] + d[1] * g.xdir[1] + d[2] * g.xdir[2];
+          const py = d[0] * y[0] + d[1] * y[1] + d[2] * y[2];
+          let best = Infinity;
+          for (let i = 0; i < 20000; i++) {
+            const a = (i / 20000) * 2 * Math.PI;
+            best = Math.min(
+              best,
+              Math.hypot(
+                px - g.radius * Math.cos(a),
+                py - g.minorRadius * Math.sin(a),
+              ),
+            );
+          }
+          return best;
+        }
       }
       return 0;
     };

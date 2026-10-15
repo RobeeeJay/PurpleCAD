@@ -98,6 +98,18 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
       if (area[t] > 0 && std::abs(dot(normal[t], f.dir)) < cosFlat) return false;
     return true;
   };
+  // An "ellipse" whose axes differ by no more than the tolerance is a circle
+  // the cylinder fit missed (its centre comes from the facets' normals, the
+  // ellipse's from the vertices): it is taken as that cylinder.
+  auto ovalOrRound = [&](Fit e, const std::vector<uint32_t>& vs) {
+    if (e.type != "ellipticCylinder" || e.radius - e.minorRadius > tol) return e;
+    e.type = "cylinder";
+    e.radius = (e.radius + e.minorRadius) / 2;
+    e.minorRadius = 0;
+    e.dev = 0;
+    for (uint32_t v : vs) e.dev = std::max(e.dev, Distance(e, m.vert(v)));
+    return e;
+  };
   auto fitRegion = [&](const std::vector<uint32_t>& tris) {
     const auto vs = RegionVerts(m, tris);
     const Fit plane = FitPlane(m, vs);
@@ -114,11 +126,16 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
     if (rev.dev <= tol) return rev;
     const Fit sph = FitSphere(m, tris, normal, centroid, area, vs);
     if (sph.dev <= tol) return sph;
-    // A torus has seven parameters; it gets more points to spare too.
+    // An oval wall and a torus have seven parameters each; they get more
+    // points to spare too.
+    const Fit ell = vs.size() >= 14 ? ovalOrRound(FitEllipticCylinder(m, tris, normal, area, vs), vs) : Fit{};
+    if (ell.type != "mesh" && ell.dev <= tol) return ell;
     const Fit tor = vs.size() >= 14 ? FitTorus(m, tris, normal, centroid, area, vs) : Fit{};
     if (tor.type == "torus" && tor.dev <= tol) return tor;
     Fit f;  // stays triangles; remember how near the nearest fit came
-    f.dev = std::min({plane.dev, rev.dev, sph.dev, tor.type == "torus" ? tor.dev : 1e300});
+    f.dev = std::min({plane.dev, rev.dev, sph.dev,
+                      ell.type != "mesh" ? ell.dev : 1e300,
+                      tor.type == "torus" ? tor.dev : 1e300});
     return f;
   };
 
@@ -135,6 +152,8 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
     const Fit sph = FitSphere(m, tris, normal, centroid, area, vs);
     if (sph.dev <= tol) out.push_back(sph);
     if (vs.size() >= 14) {
+      const Fit ell = ovalOrRound(FitEllipticCylinder(m, tris, normal, area, vs), vs);
+      if (ell.type != "mesh" && ell.dev <= tol) out.push_back(ell);
       const Fit tor = FitTorus(m, tris, normal, centroid, area, vs);
       if (tor.type == "torus" && tor.dev <= tol) out.push_back(tor);
     }
@@ -145,6 +164,8 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
     if (type == "plane") return FitPlane(m, vs);
     if (type == "sphere") return FitSphere(m, tris, normal, centroid, area, vs);
     if (type == "torus") return FitTorus(m, tris, normal, centroid, area, vs);
+    if (type == "ellipticCylinder")
+      return ovalOrRound(FitEllipticCylinder(m, tris, normal, area, vs), vs);
     return FitRevolved(m, tris, normal, centroid, area, vs, tol);
   };
 
@@ -254,7 +275,12 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
     // a quarter more facets.
     auto pick = [&](std::vector<Grown>& grown) {
       auto rank = [](const std::string& t) {
-        return t == "plane" ? 0 : t == "cylinder" ? 1 : t == "cone" ? 2 : t == "sphere" ? 3 : 4;
+        return t == "plane"              ? 0
+               : t == "cylinder"         ? 1
+               : t == "cone"             ? 2
+               : t == "sphere"           ? 3
+               : t == "ellipticCylinder" ? 4
+                                         : 5;
       };
       std::stable_sort(grown.begin(), grown.end(), [&](const Grown& a, const Grown& b) {
         const int ra = rank(a.first.type), rb = rank(b.first.type);
@@ -565,6 +591,8 @@ occjs::Val RecognizeSurfaces(occjs::Js& js) {
       js.set(o, "radius", js.makeNumber(r.fit.radius));
       js.set(o, "halfAngle", js.makeNumber(r.fit.halfAngle));
       js.set(o, "minorRadius", js.makeNumber(r.fit.minorRadius));
+      if (r.fit.type == "ellipticCylinder")
+        js.set(o, "xdir", js.makeFloat64Array(r.fit.xdir.data(), 3));
     }
     js.setAt(list, uint32_t(i), o);
     counts[r.fit.type] += 1;
@@ -575,7 +603,8 @@ occjs::Val RecognizeSurfaces(occjs::Js& js) {
   js.set(out, "triangleRegion", js.makeUint32Array(triRegion.data(), triRegion.size()));
   occjs::Val c = js.makeObject();
   occjs::Val tc = js.makeObject();
-  for (const char* type : {"plane", "cylinder", "cone", "sphere", "torus", "mesh"}) {
+  for (const char* type :
+       {"plane", "cylinder", "cone", "sphere", "torus", "ellipticCylinder", "mesh"}) {
     js.set(c, type, js.makeNumber(counts[type]));
     js.set(tc, type, js.makeNumber(triCounts[type]));
   }

@@ -58,6 +58,19 @@ describe("rebuilding a mesh as exact faces", () => {
       volume: 2 * Math.PI ** 2 * 2 * 0.25,
     },
     {
+      name: "an oval prism",
+      make: () => {
+        const p = [];
+        for (let i = 0; i < 96; i++) {
+          const t = (i / 96) * 2 * Math.PI;
+          p.push(1.35 * Math.cos(t), 1.2 * Math.sin(t));
+        }
+        return occ.makeExtrude(new Float64Array(p), [], 0, 0, 2);
+      },
+      faces: "2 plane, 1 ellipticCylinder",
+      volume: Math.PI * 1.35 * 1.2 * 2,
+    },
+    {
       name: "a cone",
       make: () => occ.makeCone(-1, 1, 0.4, 2),
       faces: "2 plane, 1 cone",
@@ -93,6 +106,124 @@ describe("rebuilding a mesh as exact faces", () => {
     expect(r.faceTypes.torus, `faces ${faces(r)}`).toBe(1);
     expect(r.faceTypes.cylinder, `faces ${faces(r)}`).toBe(1);
     expect(r.faceTypes.plane, `faces ${faces(r)}`).toBe(2);
+    expect(r.maxEdgeTolerance, "loosest edge").toBeLessThan(2 * TOL);
+  });
+
+  it("joins a flat top to a curved front along their real curve, not a chord", () => {
+    // As in real STLs: a stepped block whose front is four strips of a
+    // radius-8 cylinder.  The higher top, over the first strip only, meets the
+    // front along that strip's end alone -- a straight chord between two
+    // corners, sagging 0.035 off the cylinder.  The edge there must be the
+    // curve where the plane and the cylinder really meet.
+    const R = 8,
+      H = 4,
+      H2 = 3,
+      D = -20;
+    const zf = (x) => Math.sqrt(R * R - x * x) - 5;
+    const P = [];
+    const ids = new Map();
+    const v = (x, y, z) => {
+      const k = `${x},${y},${z}`;
+      if (!ids.has(k)) {
+        ids.set(k, P.length / 3);
+        P.push(x, y, z);
+      }
+      return ids.get(k);
+    };
+    const f = (x, y) => v(x, y, zf(x));
+    // Convex planar polygons, each with the way it faces outward, fanned from
+    // their first corner (never one with collinear neighbours: that fan's first
+    // triangle would have no area).
+    const polys = [
+      [
+        [f(-3, 0), f(-1.5, 0), f(-1.5, H2), f(-1.5, H), f(-3, H)],
+        [0, 0, 1],
+      ],
+      [
+        [f(-1.5, 0), f(0, 0), f(0, H2), f(-1.5, H2)],
+        [0, 0, 1],
+      ],
+      [
+        [f(0, 0), f(1.5, 0), f(1.5, H2), f(0, H2)],
+        [0, 0, 1],
+      ],
+      [
+        [f(1.5, 0), f(3, 0), f(3, H2), f(1.5, H2)],
+        [0, 0, 1],
+      ],
+      [
+        [f(-3, H), f(-1.5, H), v(-1.5, H, D), v(-3, H, D)],
+        [0, 1, 0],
+      ],
+      [
+        [
+          f(-1.5, H2),
+          f(0, H2),
+          f(1.5, H2),
+          f(3, H2),
+          v(3, H2, D),
+          v(-1.5, H2, D),
+        ],
+        [0, 1, 0],
+      ],
+      [
+        [f(-1.5, H2), v(-1.5, H2, D), v(-1.5, H, D), f(-1.5, H)],
+        [1, 0, 0],
+      ],
+      [
+        [f(-3, 0), f(-3, H), v(-3, H, D), v(-3, 0, D)],
+        [-1, 0, 0],
+      ],
+      [
+        [f(3, 0), v(3, 0, D), v(3, H2, D), f(3, H2)],
+        [1, 0, 0],
+      ],
+      [
+        [
+          v(-3, 0, D),
+          v(-3, H, D),
+          v(-1.5, H, D),
+          v(-1.5, H2, D),
+          v(-1.5, 0, D),
+        ],
+        [0, 0, -1],
+      ],
+      [
+        [v(-1.5, 0, D), v(-1.5, H2, D), v(3, H2, D), v(3, 0, D)],
+        [0, 0, -1],
+      ],
+      [
+        [
+          f(-3, 0),
+          v(-3, 0, D),
+          v(-1.5, 0, D),
+          v(3, 0, D),
+          f(3, 0),
+          f(1.5, 0),
+          f(0, 0),
+          f(-1.5, 0),
+        ],
+        [0, -1, 0],
+      ],
+    ];
+    const indices = [];
+    for (const [poly, out] of polys)
+      for (let i = 1; i + 1 < poly.length; i++) {
+        const t = [poly[0], poly[i], poly[i + 1]];
+        const p = (k) => P.slice(3 * k, 3 * k + 3);
+        const u = p(t[1]).map((x, j) => x - p(t[0])[j]);
+        const w = p(t[2]).map((x, j) => x - p(t[0])[j]);
+        const n = [
+          u[1] * w[2] - u[2] * w[1],
+          u[2] * w[0] - u[0] * w[2],
+          u[0] * w[1] - u[1] * w[0],
+        ];
+        const dot = n[0] * out[0] + n[1] * out[1] + n[2] * out[2];
+        if (Math.hypot(...n) < 1e-12) continue;
+        indices.push(...(dot > 0 ? t : [t[0], t[2], t[1]]));
+      }
+    const r = rebuild({ positions: P, indices });
+    expect(r.faceTypes.cylinder, `faces ${faces(r)}`).toBe(1);
     expect(r.maxEdgeTolerance, "loosest edge").toBeLessThan(2 * TOL);
   });
 

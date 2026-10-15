@@ -143,7 +143,7 @@ Size, measured on three scans: 1.5 million triangles took 14.6 s, 5.0 million 32
 
 ### The Rebuild: Built, and What It Measured
 
-Step 4 is in as the addon op `rebuildSurfaces` (`native/occ-addon/src/mesh_rebuild.cpp`), reached through both OCC implementations. It recognises the mesh, makes each region one face on its fitted surface and each leftover triangle a flat face of its own, and joins them into a solid. It returns the body as BREP text and drawn at the current Resolution, or refuses with the reason, in which case the caller keeps the mesh. Nothing in the app calls it yet; that's the tool, step 5. The tests are in `rebuildSurfaces.test.js`.
+Step 4 is in as the addon op `rebuildSurfaces` (`native/occ-addon/src/mesh_rebuild.cpp`), reached through both OCC implementations. It recognises the mesh, makes each region one face on its fitted surface and each leftover triangle a flat face of its own, and joins them into a solid. It returns the body as BREP text and drawn at the current Resolution, or refuses with the reason, in which case the caller keeps the mesh. The Convert to Surfaces tool (below) is what calls it. The tests are in `rebuildSurfaces.test.js`.
 
 The design worry above, that exact faces and triangle faces wouldn't sew together, didn't come to pass, because they aren't sewn. The boundary between two regions is a run of mesh edges, and that run becomes *one* edge (a line, a circular arc, or a B-spline through its vertices), shared by both faces. So the solid's topology comes straight from the mesh. Sewing is kept as a second attempt and is used once in the corpus.
 
@@ -157,22 +157,36 @@ What it took, most of it learned from what OCC's own fixes do to a face:
 - **Regions go back to triangles, one at a time.** When a region's boundary curves stray from its surface, its face covers a different area from its facets, the fix has had to widen its edges far past a chord's sag on that surface, or the face won't mesh, that region alone becomes triangles, and the build is retried. Faces the solid check objects to are traced back by their surface and demoted too. The chord-sag allowance is measured at the chord's ends: a chord across a near-flat cone passes near its axis, where the cone curves tightly but the region isn't, and that let a bad face keep a 0.020 edge.
 - **What didn't help.** Checking each face's validity on its own demoted half the corpus's good faces, because a face can fail alone and be fine in the solid; it's gone. Counting open mesh edges, as the bevel checks do, failed every curved body: the edges are curve fits within the tolerance of both faces, so each face meshes them up to a tolerance apart. What matters, that every face meshes at all, is checked directly.
 
-On the V-Core STLs at 0.01 mm:
+Then three follow-ups, each from something the first corpus run showed.
+
+- **Edges along the real curve.** The loosest edges were all chords: a boundary where a plane cuts a cylinder or cone at an angle is really curved, but where the mesh has only its two ends, the run became a straight line, exact on the plane and sagging off the curved face (a 3.775 mm chord on a 14.25 mm radius sags 0.125, measured 0.126). Now, when a run's fitted curve strays more than twice the tolerance from either exact face, the edge is cut from the two surfaces' actual intersection (`mesh_edges.cpp`, `GeomAPI_IntSS`), trimmed between the run's ends. A plane and a cone meet in a trimmed ellipse, and a run past the trim's end got a range outside it, and the edge came out as the straight chord again; it uses the full periodic ellipse instead. The loosest edge on bed_arm_back went from 0.126 to 0.010, and on xy_joiner_left from 0.155 to 0.010. xy_motor_cage_top_left still has a 0.150 edge between a plane and a cone 3-4° off a cylinder: the run there is emitted as a straight line, and I haven't found why the intersection isn't used for it. It's inside the 20-tolerance gate, so the part rebuilds.
+- **The bed arms.** Both were refused with "BadOrientationOfSubshape" on the shell, naming no face. ShapeFix_Shell had left a handful of edges walked the same way by both their faces (5 on one arm, 9 on the other) between faces that each faced the right way. Two changes: every face is turned to agree with its own mesh facets before the shell is assembled, rather than leaving that to ShapeFix_Shell; and any face on an edge walked the same way by both its faces goes back to triangles (or, for a triangle, the regions beside it, since a triangle bounded by a neighbour's curved edge is where the trouble comes from). Faces that won't mesh in the finished solid are traced back the same way. Both arms rebuild now, keeping about 1,200-1,450 triangles each. A trap on the way: I first keyed the edge map with OCC's shape hasher as a `std::map` comparator, which isn't an ordering, and the check silently found nothing.
+- **Oval walls.** An elliptical cylinder is a sixth surface: the axis from the normals as for a cylinder, and a direct least-squares ellipse (Halir and Flusser's form of Fitzgibbon's) through the vertices seen down it. An oval prism comes back as one oval wall with its semi-axes exact, 1.35 and 1.20, and its volume true (10.17882 against π·1.35·1.2·2 = 10.17876; the mesh 10.17149). Left unchecked, the fit took degenerate ellipses (one 22 mm by 0.010 mm, one 4,536 mm long), which passed for pairs of near-flat facets and cost two parts hundreds of exact faces; an ellipse must now be no flatter than 1:10 and no bigger than twice the region, and one whose axes differ by no more than the tolerance is taken as the cylinder it is. The lead screw cage's "oval" turned out not to be one: it's a racetrack (two half-circles joined by short straights), and its 2.7% stays triangles. An elliptical *cone* (its chamfer) has no OCC surface type and would need a B-spline; not done.
+
+And one rebuild bug the tool's tests found: a full cylinder meshed with sixteen sides was treated as a partial band, because its vertices leave a 22.5° gap between every pair of neighbours and the trim to the region used "a gap over 5% of the circle" as the sign of an opening. It was trimmed to 337.5° and collapsed to a face of no area. The widest gap now has to stand out from the rest (three times the next) to count as the region's opening.
+
+On the V-Core STLs at 0.01 mm, with all of the above:
 
 | File | Triangles | Time | Faces | Volume (mesh) | Loosest edge |
 | --- | --- | --- | --- | --- | --- |
-| lead_screw_motor_cage_front | 10,358 | 71 ms | 44 planes, 13 cylinders, 9 cones | 95,465.3 (95,468.8) | 0.010 |
-| xy_motor_cage_top_left | 12,428 | 131 ms | 99 planes, 23 cylinders, 11 cones | 45,691.4 (45,689.1) | 0.150 |
-| pillow_block | 5,316 | 37 ms | 31 planes, 6 cylinders, 6 cones | 11,067.9 (11,068.4) | 0.010 |
-| bed_arm_back | 12,778 | 471 ms | 100 planes, 24 cylinders, 221 triangles | 62,029.3 (62,042.6) | 0.126 |
-| xy_joiner_right | 8,826 | 839 ms | 93 planes, 22 cylinders, 6 cones, 796 triangles | 45,965.1 (45,962.5) | 0.155 |
-| bed_arm_left, bed_arm_right | | 1.0-1.2 s | refused: faces invalid in the solid, a shell badly oriented | | |
+| lead_screw_motor_cage_front | 10,358 | 78 ms | 44 planes, 13 cylinders, 9 cones | 95,465.3 (95,468.8) | 0.010 |
+| xy_motor_cage_top_left | 12,428 | 225 ms | 97 planes, 23 cylinders, 11 cones, 6 triangles | 45,685.6 (45,689.1) | 0.150 |
+| pillow_block | 5,316 | 39 ms | 31 planes, 6 cylinders, 6 cones | 11,067.9 (11,068.4) | 0.010 |
+| bed_arm_back | 12,778 | 528 ms | 98 planes, 23 cylinders, 249 triangles | 62,031.7 (62,042.6) | 0.010 |
+| bed_arm_right | 11,450 | 1,506 ms | 75 planes, 21 cylinders, 1 cone, 1 torus, 1,156 triangles | 87,522.0 (87,525.9) | 0.074 |
+| xy_joiner_right | 8,826 | 1,120 ms | 89 planes, 21 cylinders, 6 cones, 874 triangles | 45,973.4 (45,962.5) | 0.155 |
 | cable_tie | 151,160 | | refused: over the size limit | | |
 
-Sixteen of the nineteen rebuild, five of them with no triangles left at all, and every rebuilt volume is within 0.04% of the mesh's. The other eleven keep some triangles where regions were put back, from 2 to 796; that's the honest answer where a region's face wouldn't hold, and the faces round them are still exact. The loosest edges reach 0.155 mm, about fifteen times the tolerance, and they are all the same thing: a boundary between a plane and a cylinder or cone that is really curved (the plane meets the surface at an angle), but where the mesh has only its two ends. That run becomes a straight chord, exact on the plane and sagging off the curved face; on xy_motor_cage_top_left and bed_arm_back every edge looser than 0.05 is one, and a 3.775 mm chord on a 14.25 mm radius sags 3.775² / (8 × 14.25) = 0.125, against 0.126 measured. So the gap is the mesh's own. Building such an edge as the two surfaces' actual intersection curve would close it, and is the obvious next improvement.
+Eighteen of the nineteen rebuild, all within 0.05% of the mesh's volume; three with no triangles left, and the rest keeping from 2 to 1,440 where regions were put back. (Earlier versions of this section said sixteen of nineteen, with the bed arms refused; the follow-ups above are what changed.)
 
 The **size limit** is 100,000 triangles, in recognition and rebuild alike. The rebuild costs per face, and what recognition leaves as triangles are a face each: the cable tie's ran 105 s and was then refused, while the 13k-triangle parts take under a second or two. 100,000 is *(est)* between those two measurements, not a measurement itself.
 
+
+### The Tool: Built
+
+Step 5 is in. **Convert to Surfaces**, on the Modify toolbar beside Simplify, takes a mesh body (an import, or a simplified one; anything modelled in PurpleCAD already has exact faces). Its bottom-bar dialog has one field, the tolerance (0.01 mm to start), and a live preview that only *recognises* (fast), colouring each triangle by the surface its region was found to be, with a key and a count: "3 faces: 2 planes, 1 cylinder", or "… 168 triangles left". Convert runs the rebuild; if it's refused, the error line says why ("Kept as a mesh: …") and the body is left as it was.
+
+The committed body is a `csg` with `regenerator: { kind: "meshToSurfaces", toleranceMm, source, brep, stats }`. The BREP is its shape: `buildItemShapeLocal` reads it back in both OCC implementations, so a later chamfer or boolean works on the exact faces, not the triangles; a recalculation re-runs the conversion from the source mesh at the current Resolution and carries the new BREP forward; a refused rebuild leaves the body sewn from its mesh, as before. The timeline step has an Edit that reopens the same dialog and saves in place. Tests: `convertSurfaces.test.js` (the exact volume, a finer Resolution drawing the real curve, a later op building from the BREP and not the mesh), a parity case, and an e2e test through the real toolbar, dialog, timeline Edit and a boolean in `modify-tools.spec.js`.
 
 ### How We'll Know It Works
 
@@ -187,7 +201,7 @@ The **size limit** is 100,000 triangles, in recognition and rebuild alike. The r
 - **Fillet bands** are found as tori when they have about 128 facets of arc; thinner ones grow as cylinder or cone strips, or stay triangles. Measured on one filleted cylinder and the corpus, not more widely.
 - **Speed** is now measured: see the size limit above. The 50,000-triangle import cap is unchanged.
 - **Recogniser on wires** wasn't needed: run curves are fitted directly as lines, arcs and B-splines.
-- **Still open:** the two refused bed arms (shell-level complaints that name no face to put back), elliptical walls (the lead screw cage), and many small faces on freeform parts, which the tool will have to show the user.
+- **Still open:** many small faces on freeform parts; the one 0.150 mm edge on xy_motor_cage_top_left; elliptical cones; and bodies that keep hundreds of triangles where a region's face wouldn't hold.
 
 ## Order of Work
 

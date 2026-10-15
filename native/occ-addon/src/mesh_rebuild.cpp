@@ -11,9 +11,11 @@
 // assembled shell doesn't check out.
 
 #include "occ_core.h"
+#include "mesh_edges.h"
 
 #include <functional>
 #include <map>
+#include <cstdio>
 #include <cstdlib>
 
 #include <BRepLib.hxx>
@@ -22,6 +24,9 @@
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_Ellipse.hxx>
+#include <Geom_SurfaceOfLinearExtrusion.hxx>
+#include <gp_Elips.hxx>
 #include <Geom_ConicalSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_Line.hxx>
@@ -30,6 +35,7 @@
 #include <Geom_TrimmedCurve.hxx>
 #include <Geom_RectangularTrimmedSurface.hxx>
 #include <Precision.hxx>
+#include <BRepLProp_SLProps.hxx>
 #include <BRepCheck_Result.hxx>
 #include <BRepCheck_ListOfStatus.hxx>
 #include <ShapeAnalysis_Edge.hxx>
@@ -67,6 +73,12 @@ Handle(Geom_Surface) SurfaceOf(const Fit& f, const recog::Mesh& m,
   if (f.type == "torus")
     return new Geom_ToroidalSurface(
         gp_Torus(gp_Ax3(P(f.point), D(f.dir)), f.radius, f.minorRadius));
+  if (f.type == "ellipticCylinder") {
+    // The ellipse across the axis, swept along it: an oval wall.
+    Handle(Geom_Ellipse) e = new Geom_Ellipse(
+        gp_Elips(gp_Ax2(P(f.point), D(f.dir), D(f.xdir)), f.radius, f.minorRadius));
+    return new Geom_SurfaceOfLinearExtrusion(e, gp_Dir(D(f.dir)));
+  }
   if (f.type == "cone") {
     // gp_Cone wants its radius at the location to be positive, and the fit's
     // reference point can be past the apex: place it at the region's middle.
@@ -75,8 +87,12 @@ Handle(Geom_Surface) SurfaceOf(const Fit& f, const recog::Mesh& m,
     tm /= std::max<size_t>(1, verts.size());
     const double r = f.radius + std::tan(f.halfAngle) * tm;
     if (r <= 0) return nullptr;
-    return new Geom_ConicalSurface(
-        gp_Cone(gp_Ax3(P(recog::add(f.point, recog::mul(f.dir, tm))), D(f.dir)), f.halfAngle, r));
+    // Always a positive half angle, the axis turned to where the cone widens:
+    // the fit's angle is signed (narrowing along its axis when negative), and
+    // gp_Cone's is taken as widening along its axis.
+    const V3 axis = f.halfAngle < 0 ? recog::mul(f.dir, -1) : f.dir;
+    return new Geom_ConicalSurface(gp_Cone(
+        gp_Ax3(P(recog::add(f.point, recog::mul(f.dir, tm))), D(axis)), std::abs(f.halfAngle), r));
   }
   return nullptr;
 }
@@ -108,16 +124,24 @@ Handle(Geom_Surface) TrimToRegion(const Handle(Geom_Surface)& S, const recog::Me
     if (t.size() < 2) return false;
     for (double& x : t) x = std::fmod(std::fmod(x, period) + period, period);
     std::sort(t.begin(), t.end());
-    double gap = t.front() + period - t.back();
+    double gap = t.front() + period - t.back(), next = 0;
     lo = t.front();
-    for (size_t i = 1; i < t.size(); i++)
-      if (t[i] - t[i - 1] > gap) {
-        gap = t[i] - t[i - 1];
+    for (size_t i = 1; i < t.size(); i++) {
+      const double g = t[i] - t[i - 1];
+      if (g > gap) {
+        next = gap;
+        gap = g;
         lo = t[i];
+      } else {
+        next = std::max(next, g);
       }
-    // Sampled vertices of a full band are spaced by the mesh: a gap that
-    // small is just the spacing.
-    if (gap < period * 0.05) return false;
+    }
+    // The vertices of a full band are spaced by the mesh, so the widest gap is
+    // only the region's opening if it stands out from the rest.  (A fixed
+    // share of the circle doesn't do: a 16-sided cylinder has a 22.5-degree
+    // gap between every pair of neighbours, and was trimmed to 337.5 degrees
+    // and collapsed to a face of no area.)
+    if (gap < period * 0.02 || gap < 3 * next) return false;
     const double margin = std::min(gap * 0.25, period * 0.02);
     hi = lo + (period - gap) + margin;
     lo -= margin;
@@ -177,6 +201,8 @@ std::string CheckSummary(const TopoDS_Shape& s) {
 double TightestRadius(const Fit& f, const V3& p) {
   if (f.type == "cylinder" || f.type == "sphere") return f.radius;
   if (f.type == "torus") return f.minorRadius;
+  // An ellipse curves tightest at the ends of its major axis: b^2 / a.
+  if (f.type == "ellipticCylinder") return f.minorRadius * f.minorRadius / f.radius;
   if (f.type == "cone") {
     const V3 d = recog::sub(p, f.point);
     const double h = recog::dot(d, f.dir);
@@ -186,16 +212,25 @@ double TightestRadius(const Fit& f, const V3& p) {
 }
 
 // The regions behind the faces a checked solid objects to: faces BRepCheck
-// flags in the solid, and faces with an edge widened past 20 times the
-// tolerance.  A face is traced to its region by its surface, which each face
-// was given its own of.
+// flags in the solid, faces with an edge widened past 20 times the
+// tolerance, and faces that won't mesh.  A face is traced to its face index by its surface, which each
+// face was given its own of.  A
+// triangle can't go back to triangles, so its neighbouring regions are blamed
+// instead: a triangle bounded by the curved edge of a region beside it is
+// where a self-intersecting wire comes from.
 std::set<int64_t> Culprits(const TopoDS_Shape& s, const std::vector<Handle(Geom_Surface)>& surf,
                            const std::vector<int64_t>& triOfFace,
-                           const std::vector<int64_t>& regionOfFace, double tol) {
+                           const std::vector<int64_t>& regionOfFace,
+                           const std::vector<std::set<int64_t>>& nbrFaces, double tol) {
   std::set<int64_t> out;
   if (s.IsNull()) return out;
   std::map<const Geom_Surface*, size_t> faceBySurface;
   for (size_t f = 0; f < surf.size(); f++) faceBySurface[surf[f].get()] = f;
+  auto faceIndex = [&](const TopoDS_Face& F) -> int64_t {
+    auto it = faceBySurface.find(BRep_Tool::Surface(F).get());
+    return it == faceBySurface.end() ? -1 : int64_t(it->second);
+  };
+  std::set<size_t> flagged;
   BRepCheck_Analyzer an(s);
   for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
     const TopoDS_Face& F = TopoDS::Face(ex.Current());
@@ -212,10 +247,25 @@ std::set<int64_t> Culprits(const TopoDS_Shape& s, const std::vector<Handle(Geom_
     }
     for (TopExp_Explorer e(F, TopAbs_EDGE); e.More() && !bad; e.Next())
       bad = BRep_Tool::Tolerance(TopoDS::Edge(e.Current())) > 20 * tol;
-    if (!bad) continue;
-    auto it = faceBySurface.find(BRep_Tool::Surface(F).get());
-    if (it != faceBySurface.end() && triOfFace[it->second] < 0)
-      out.insert(regionOfFace[it->second]);
+    const int64_t f = faceIndex(F);
+    if (bad && f >= 0) flagged.insert(size_t(f));
+  }
+  // And faces that won't mesh in the solid, which the check refuses too.
+  BRepMesh_IncrementalMesh(s, std::max(tol, 1e-3));
+  for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+    TopLoc_Location loc;
+    Handle(Poly_Triangulation) tr = BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), loc);
+    const int64_t f = faceIndex(TopoDS::Face(ex.Current()));
+    if ((tr.IsNull() || tr->NbTriangles() == 0) && f >= 0) flagged.insert(size_t(f));
+  }
+  BRepTools::Clean(s);
+  for (size_t f : flagged) {
+    if (triOfFace[f] < 0) {
+      out.insert(regionOfFace[f]);
+      continue;
+    }
+    for (int64_t g : nbrFaces[f])
+      if (triOfFace[g] < 0) out.insert(regionOfFace[g]);
   }
   return out;
 }
@@ -228,148 +278,6 @@ double MeshVolume(const recog::Mesh& m) {
     v += recog::dot(a, recog::cross(b, c)) / 6;
   }
   return v;
-}
-
-struct Curve {
-  Handle(Geom_Curve) c;
-  double u1 = 0, u2 = 0;
-};
-
-// The farthest any of `pts` is from the curve's span.
-double Stray(const Curve& cv, const std::vector<gp_Pnt>& pts) {
-  double worst = 0;
-  for (const gp_Pnt& p : pts) {
-    GeomAPI_ProjectPointOnCurve proj(p, cv.c, cv.u1, cv.u2);
-    double d = proj.NbPoints() ? proj.LowerDistance() : 1e300;
-    d = std::min({d, p.Distance(cv.c->Value(cv.u1)), p.Distance(cv.c->Value(cv.u2))});
-    worst = std::max(worst, d);
-  }
-  return worst;
-}
-
-// The farthest the curve's span gets from the polyline through `pts`: the
-// other way round from Stray.  A spline can pass within the tolerance of every
-// point and still bulge between two close ones -- one did, 0.010 off the
-// torus it bounded.
-double Bulge(const Curve& cv, const std::vector<gp_Pnt>& pts) {
-  const int n = int(pts.size()) * 4 + 8;
-  double worst = 0;
-  for (int i = 0; i <= n; i++) {
-    const gp_Pnt p = cv.c->Value(cv.u1 + (cv.u2 - cv.u1) * i / n);
-    double best = 1e300;
-    for (size_t k = 0; k + 1 < pts.size(); k++) {
-      const gp_Vec ab(pts[k], pts[k + 1]), ap(pts[k], p);
-      const double L = ab.SquareMagnitude();
-      const double t = L > 0 ? std::clamp(ap.Dot(ab) / L, 0.0, 1.0) : 0.0;
-      best = std::min(best, p.Distance(pts[k].Translated(ab * t)));
-    }
-    worst = std::max(worst, best);
-  }
-  return worst;
-}
-
-// A line, an arc or a B-spline through the run's points, whichever is the
-// simplest within `tol`; empty if none is.
-Curve FitRun(const std::vector<gp_Pnt>& pts, bool closed, double tol) {
-  const size_t n = pts.size();
-  if (!closed) {
-    const gp_Vec ab(pts.front(), pts.back());
-    if (ab.Magnitude() > Precision::Confusion()) {
-      Curve line;
-      line.c = new Geom_Line(pts.front(), gp_Dir(ab));
-      line.u1 = 0;
-      line.u2 = ab.Magnitude();
-      if (n == 2 || Stray(line, pts) <= tol) return line;
-    }
-  }
-  if (n >= 4) {
-    // A circle: its plane by the points' spread, then its centre there.
-    std::vector<V3> q;
-    for (const gp_Pnt& p : pts) q.push_back({p.X(), p.Y(), p.Z()});
-    V3 mean{0, 0, 0};
-    for (const V3& v : q) mean = recog::add(mean, v);
-    mean = recog::mul(mean, 1.0 / n);
-    recog::M3 cov{};
-    for (const V3& v : q) {
-      const V3 d = recog::sub(v, mean);
-      for (int i = 0; i < 3; i++)
-        for (int j = 0; j < 3; j++) cov[i][j] += d[i] * d[j];
-    }
-    const V3 nrm = recog::SmallestEigen(cov, nullptr);
-    const V3 u = recog::unit(std::abs(nrm[0]) < 0.9 ? recog::cross(nrm, {1, 0, 0})
-                                                    : recog::cross(nrm, {0, 1, 0}));
-    const V3 w = recog::cross(nrm, u);
-    double s[3][3] = {}, b[3] = {};
-    for (const V3& v : q) {
-      const V3 d = recog::sub(v, mean);
-      const double x = recog::dot(d, u), y = recog::dot(d, w);
-      const double row[3] = {x, y, 1};
-      for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) s[i][j] += row[i] * row[j];
-        b[i] -= row[i] * (x * x + y * y);
-      }
-    }
-    auto det3 = [](double x[3][3]) {
-      return x[0][0] * (x[1][1] * x[2][2] - x[1][2] * x[2][1]) -
-             x[0][1] * (x[1][0] * x[2][2] - x[1][2] * x[2][0]) +
-             x[0][2] * (x[1][0] * x[2][1] - x[1][1] * x[2][0]);
-    };
-    const double dd = det3(s);
-    if (std::abs(dd) > 1e-30) {
-      double sol[3];
-      for (int col = 0; col < 3; col++) {
-        double x[3][3];
-        for (int i = 0; i < 3; i++)
-          for (int j = 0; j < 3; j++) x[i][j] = j == col ? b[i] : s[i][j];
-        sol[col] = det3(x) / dd;
-      }
-      const double cx = -sol[0] / 2, cy = -sol[1] / 2;
-      const double R2 = cx * cx + cy * cy - sol[2];
-      if (R2 > 0) {
-        const V3 c = recog::add(mean, recog::add(recog::mul(u, cx), recog::mul(w, cy)));
-        const V3 x0 = recog::unit(recog::sub(q.front(), c));
-        gp_Ax2 ax(P(c), D(nrm), D(x0));
-        Handle(Geom_Circle) circ = new Geom_Circle(gp_Circ(ax, std::sqrt(R2)));
-        // Parameters along the run, unwrapped so they increase; if they fall
-        // instead, the circle runs the other way round.
-        auto paramOf = [&](const gp_Pnt& p) {
-          GeomAPI_ProjectPointOnCurve proj(p, circ);
-          return proj.NbPoints() ? proj.LowerDistanceParameter() : 0.0;
-        };
-        std::vector<double> ts{0};
-        for (size_t i = 1; i < n; i++) {
-          double t = paramOf(pts[i]);
-          while (t < ts.back() - M_PI) t += 2 * M_PI;
-          while (t > ts.back() + M_PI) t -= 2 * M_PI;
-          ts.push_back(t);
-        }
-        if (ts.back() < 0) {
-          circ = new Geom_Circle(gp_Circ(gp_Ax2(P(c), D(recog::mul(nrm, -1)), D(x0)), std::sqrt(R2)));
-          for (double& t : ts) t = -t;
-        }
-        Curve arc;
-        arc.c = circ;
-        arc.u1 = 0;
-        arc.u2 = closed ? 2 * M_PI : ts.back();
-        if (arc.u2 > Precision::PConfusion() && arc.u2 <= 2 * M_PI + 1e-9 &&
-            Stray(arc, pts) <= tol)
-          return arc;
-      }
-    }
-  }
-  if (n >= 3) {
-    TColgp_Array1OfPnt arr(1, int(n));
-    for (size_t i = 0; i < n; i++) arr.SetValue(int(i + 1), pts[i]);
-    GeomAPI_PointsToBSpline fit(arr, 2, 8, GeomAbs_C1, tol / 2);
-    if (fit.IsDone()) {
-      Curve sp;
-      sp.c = fit.Curve();
-      sp.u1 = sp.c->FirstParameter();
-      sp.u2 = sp.c->LastParameter();
-      if (Stray(sp, pts) <= tol && Bulge(sp, pts) <= tol) return sp;
-    }
-  }
-  return {};
 }
 
 }  // namespace
@@ -422,6 +330,7 @@ Val RebuildSurfaces(Js& js) {
     }
     if (shell.IsNull()) return TopoDS_Shape();
     ShapeFix_Shell fs(TopoDS::Shell(shell));
+    fs.FixOrientationMode() = 0;
     fs.Perform();
     BRepBuilderAPI_MakeSolid mk(TopoDS::Shell(fs.Shell()));
     if (!mk.IsDone()) return TopoDS_Shape();
@@ -524,7 +433,7 @@ Val RebuildSurfaces(Js& js) {
         if (faceOf[t] >= 0) faceTris[faceOf[t]].push_back(uint32_t(t));
       for (size_t f = 0; f < F; f++) faceVerts[f] = recog::RegionVerts(m, faceTris[f]);
     }
-    std::vector<Handle(Geom_Surface)> surf(F);
+    std::vector<Handle(Geom_Surface)> surf(F), basis(F);
     std::vector<std::string> typeOf(F);
     // How far a boundary curve may stray from each face: the tolerance, plus
     // the sag the face's own facets show -- an edge against a triangle face
@@ -542,6 +451,7 @@ Val RebuildSurfaces(Js& js) {
       } else {
         const Fit& fit = rec.regions[regionOfFace[f]].fit;
         Handle(Geom_Surface) S = SurfaceOf(fit, m, faceVerts[f]);
+        basis[f] = S;
         typeOf[f] = fit.type;
         // A cone whose middle is past its apex has no surface to build: its
         // region goes back to triangles.
@@ -621,6 +531,7 @@ Val RebuildSurfaces(Js& js) {
       return vtx[v];
     };
     std::vector<std::vector<TopoDS_Edge>> faceEdges(F);
+    std::vector<std::set<int64_t>> nbrFaces(F);
     std::vector<char> used(bedges.size(), 0);
     auto otherEnd = [&](size_t e, uint32_t v) { return bedges[e].a == v ? bedges[e].b : bedges[e].a; };
     auto nextOnPair = [&](uint32_t v, size_t from) -> int64_t {
@@ -644,6 +555,26 @@ Val RebuildSurfaces(Js& js) {
             emit(a, false, f1, f2);
             emit(b, false, f1, f2);
             return;
+          }
+          // Where two exact surfaces meet along a run the mesh drew with too
+          // few vertices, a fitted curve is a chord: a plane cutting a
+          // cylinder at an angle meets it in a curve, but a run of two
+          // vertices fits a straight line, exact on the plane and 0.126 off
+          // the cylinder.  The surfaces' own intersection is the edge.
+          if (!closed && triOfFace[f1] < 0 && triOfFace[f2] < 0 &&
+              !demoted[regionOfFace[f1]] && !demoted[regionOfFace[f2]]) {
+            double off = 0;
+            for (int64_t f : {f1, f2}) {
+              const Fit& fit = rec.regions[regionOfFace[f]].fit;
+              for (int i = 0; i <= 8; i++) {
+                const gp_Pnt p = cv.c->Value(cv.u1 + (cv.u2 - cv.u1) * i / 8);
+                off = std::max(off, recog::Distance(fit, {p.X(), p.Y(), p.Z()}));
+              }
+            }
+            if (off > 2 * tol) {
+              const Curve exact = IntersectionRun(basis[f1], basis[f2], pts, tol);
+              if (!exact.c.IsNull()) cv = exact;
+            }
           }
           // The curve must lie on both faces' surfaces, not only through the
           // mesh points: a region that fits its vertices can still be off a
@@ -675,6 +606,8 @@ Val RebuildSurfaces(Js& js) {
           B.UpdateVertex(v1, std::max(tol, P(m.vert(chain.front())).Distance(cv.c->Value(cv.u1)) * 1.01));
           B.UpdateVertex(v2, std::max(tol, P(m.vert(chain.back())).Distance(cv.c->Value(cv.u2)) * 1.01));
           faceEdges[f1].push_back(E);
+          nbrFaces[f1].insert(f2);
+          nbrFaces[f2].insert(f1);
           faceEdges[f2].push_back(E);
         };
     for (size_t start = 0; start < bedges.size(); start++) {
@@ -833,6 +766,72 @@ Val RebuildSurfaces(Js& js) {
     }
 
 
+    // Each face turned to look the way its facets do.  The mesh says which
+    // way every face faces; left to ShapeFix_Shell, two of the corpus's parts
+    // came out with thousands of edges walked the same way by both their
+    // faces ("BadOrientationOfSubshape"), and no face to blame.  A mesh wound
+    // inside out throughout gives a solid of negative volume, which solidFrom
+    // turns round.
+    // A face's sample: the middle of its biggest facet, and that facet's
+    // normal as the mesh winds it.
+    auto sample = [&](size_t f, gp_Pnt& p, gp_Dir& n) {
+      int64_t best = -1;
+      for (size_t t = 0; t < T; t++)
+        if (faceOf[t] == int64_t(f) && (best < 0 || rec.area[t] > rec.area[best])) best = int64_t(t);
+      if (best < 0 || rec.area[best] <= 0) return false;
+      const recog::V3 c = recog::mul(
+          recog::add(recog::add(m.vert(m.idx[3 * best]), m.vert(m.idx[3 * best + 1])),
+                     m.vert(m.idx[3 * best + 2])),
+          1.0 / 3);
+      p = P(c);
+      n = D(rec.normal[best]);
+      return true;
+    };
+    for (size_t f = 0; f < F; f++) {
+      gp_Pnt p;
+      gp_Dir n;
+      if (!sample(f, p, n)) continue;
+      GeomAPI_ProjectPointOnSurf proj(p, surf[f]);
+      if (!proj.NbPoints()) continue;
+      double u, v;
+      proj.LowerDistanceParameters(u, v);
+      BRepLProp_SLProps props(BRepAdaptor_Surface(faces[f]), u, v, 1, Precision::Confusion());
+      if (!props.IsNormalDefined()) continue;
+      gp_Dir fn = props.Normal();
+      if (faces[f].Orientation() == TopAbs_REVERSED) fn.Reverse();
+      if (fn.Dot(n) < 0) faces[f].Reverse();
+    }
+    // An edge both its faces walk the same way means one of them is
+    // inside out where they meet, whichever way it faces overall; no shell
+    // fix can settle it (two cylinders did this on a bed arm, and the shell
+    // was refused as "BadOrientationOfSubshape").  Their regions go back to
+    // triangles -- for a triangle, the regions beside it.
+    {
+      std::unordered_map<TopoDS_Shape, std::vector<std::pair<size_t, TopAbs_Orientation>>,
+                         TopTools_ShapeMapHasher, TopTools_ShapeMapHasher>
+          uses;
+      for (size_t f = 0; f < F; f++)
+        for (TopExp_Explorer ex(faces[f], TopAbs_EDGE); ex.More(); ex.Next()) {
+          // The explorer composes the face's own orientation into its edges'.
+          uses[ex.Current()].push_back({f, ex.Current().Orientation()});
+        }
+      for (auto& [E, us] : uses) {
+        if (us.size() != 2 || us[0].first == us[1].first || us[0].second != us[1].second)
+          continue;
+        for (auto [f, o] : us) {
+          if (triOfFace[f] < 0)
+            bad.insert(regionOfFace[f]);
+          else
+            for (int64_t g : nbrFaces[f])
+              if (triOfFace[g] < 0) bad.insert(regionOfFace[g]);
+        }
+      }
+      if (!bad.empty()) {
+        if (attempt >= 8) throw std::runtime_error("rebuildSurfaces: faces kept meeting inside out");
+        for (int64_t r : bad) demoted[r] = 1;
+        continue;
+      }
+    }
     TopoDS_Shell shell;
     B.MakeShell(shell);
     for (const TopoDS_Face& f : faces) B.Add(shell, f);
@@ -854,8 +853,9 @@ Val RebuildSurfaces(Js& js) {
       } else {
         // The faces the check objects to, back to triangles, and again; a
         // shell-level complaint names no face and ends it.
-        std::set<int64_t> culprits = Culprits(solid, surf, triOfFace, regionOfFace, tol);
-        if (culprits.empty() || attempt >= 8)
+        std::set<int64_t> culprits =
+          Culprits(solid, surf, triOfFace, regionOfFace, nbrFaces, tol);
+      if (culprits.empty() || attempt >= 8)
           throw std::runtime_error("rebuildSurfaces: the rebuilt solid was refused (" + c.why +
                                    "; sewn, " + c2.why + ")");
         for (int64_t r : culprits) demoted[r] = 1;
@@ -870,7 +870,8 @@ Val RebuildSurfaces(Js& js) {
   js.set(out, "shapeId", js.makeNumber(StoreShape(solid)));
   js.set(out, "faces", js.makeNumber(double(F)));
   Val types = js.makeObject();
-  for (const char* t : {"plane", "cylinder", "cone", "sphere", "torus", "triangle"})
+  for (const char* t :
+       {"plane", "cylinder", "cone", "sphere", "torus", "ellipticCylinder", "triangle"})
     js.set(types, t, js.makeNumber(faceTypes[t]));
   js.set(out, "faceTypes", types);
   js.set(out, "volume", js.makeNumber(c.volume));

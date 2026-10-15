@@ -485,6 +485,183 @@ Fit FitTorus(const Mesh& m, const std::vector<uint32_t>& tris,
   return f;
 }
 
+namespace {
+
+// The distance from (px, py) to the ellipse x = a cos t, y = b sin t, by
+// Newton's method on the angle of the nearest point.
+double EllipseDistance(double a, double b, double px, double py) {
+  double t = std::atan2(py * a, px * b);
+  for (int i = 0; i < 20; i++) {
+    const double c = std::cos(t), s = std::sin(t);
+    const double f = (a * a - b * b) * c * s - px * a * s + py * b * c;
+    const double df = (a * a - b * b) * (c * c - s * s) - px * a * c - py * b * s;
+    if (std::abs(df) < 1e-300) break;
+    const double step = f / df;
+    t -= step;
+    if (std::abs(step) < 1e-14) break;
+  }
+  return std::hypot(px - a * std::cos(t), py - b * std::sin(t));
+}
+
+// The real roots of x^3 + p x^2 + q x + r.
+std::vector<double> CubicRoots(double p, double q, double r) {
+  const double a = q - p * p / 3, b = 2 * p * p * p / 27 - p * q / 3 + r;
+  const double disc = b * b / 4 + a * a * a / 27;
+  std::vector<double> out;
+  if (disc > 0) {
+    const double sq = std::sqrt(disc);
+    out.push_back(std::cbrt(-b / 2 + sq) + std::cbrt(-b / 2 - sq) - p / 3);
+  } else {
+    const double rr = std::sqrt(-a * a * a / 27);
+    const double phi = std::acos(std::clamp(-b / (2 * rr), -1.0, 1.0));
+    const double m = 2 * std::cbrt(rr);
+    for (int k = 0; k < 3; k++) out.push_back(m * std::cos((phi + 2 * M_PI * k) / 3) - p / 3);
+  }
+  return out;
+}
+
+}  // namespace
+
+Fit FitEllipticCylinder(const Mesh& m, const std::vector<uint32_t>& tris,
+                        const std::vector<V3>& normal, const std::vector<double>& area,
+                        const std::vector<uint32_t>& vs) {
+  Fit bad;
+  bad.dev = 1e300;
+  // The axis: the direction the normals spread least along (they are all
+  // across it), as for a round cylinder.
+  double wsum = 0;
+  V3 nbar{0, 0, 0};
+  for (uint32_t t : tris) {
+    nbar = add(nbar, mul(normal[t], area[t]));
+    wsum += area[t];
+  }
+  if (wsum <= 0 || vs.size() < 10) return bad;
+  nbar = mul(nbar, 1 / wsum);
+  M3 cov{};
+  for (uint32_t t : tris) {
+    const V3 d = sub(normal[t], nbar);
+    for (int i = 0; i < 3; i++)
+      for (int j = 0; j < 3; j++) cov[i][j] += area[t] * d[i] * d[j];
+  }
+  const V3 axis = SmallestEigen(cov, nullptr);
+  const V3 u = unit(std::abs(axis[0]) < 0.9 ? cross(axis, {1, 0, 0}) : cross(axis, {0, 1, 0}));
+  const V3 w = cross(axis, u);
+  // The vertices seen down the axis, centred and scaled for conditioning.
+  std::vector<double> xs, ys;
+  double mx = 0, my = 0;
+  for (uint32_t v : vs) {
+    xs.push_back(dot(m.vert(v), u));
+    ys.push_back(dot(m.vert(v), w));
+    mx += xs.back();
+    my += ys.back();
+  }
+  const double n = double(vs.size());
+  mx /= n;
+  my /= n;
+  double sc = 0;
+  for (size_t i = 0; i < xs.size(); i++) sc = std::max({sc, std::abs(xs[i] - mx), std::abs(ys[i] - my)});
+  if (sc <= 0) return bad;
+  // Direct least-squares ellipse (Halir and Flusser's form of Fitzgibbon's):
+  // the conic a x^2 + b xy + c y^2 + d x + e y + f = 0 nearest the points
+  // with 4ac - b^2 = 1, which only an ellipse satisfies.
+  double S1[3][3] = {}, S2[3][3] = {}, S3[3][3] = {};
+  for (size_t i = 0; i < xs.size(); i++) {
+    const double x = (xs[i] - mx) / sc, y = (ys[i] - my) / sc;
+    const double d1[3] = {x * x, x * y, y * y}, d2[3] = {x, y, 1};
+    for (int r = 0; r < 3; r++)
+      for (int c = 0; c < 3; c++) {
+        S1[r][c] += d1[r] * d1[c];
+        S2[r][c] += d1[r] * d2[c];
+        S3[r][c] += d2[r] * d2[c];
+      }
+  }
+  auto det3 = [](const double x[3][3]) {
+    return x[0][0] * (x[1][1] * x[2][2] - x[1][2] * x[2][1]) -
+           x[0][1] * (x[1][0] * x[2][2] - x[1][2] * x[2][0]) +
+           x[0][2] * (x[1][0] * x[2][1] - x[1][1] * x[2][0]);
+  };
+  const double d3 = det3(S3);
+  if (std::abs(d3) < 1e-30) return bad;
+  double inv3[3][3];
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++) {
+      const int r1 = (c + 1) % 3, r2 = (c + 2) % 3, c1 = (r + 1) % 3, c2 = (r + 2) % 3;
+      inv3[r][c] = (S3[r1][c1] * S3[r2][c2] - S3[r1][c2] * S3[r2][c1]) / d3;
+    }
+  // T = -S3^-1 S2^T;  M = S1 + S2 T;  then C1^-1 M.
+  double T[3][3] = {}, M[3][3];
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++)
+      for (int k = 0; k < 3; k++) T[r][c] -= inv3[r][k] * S2[c][k];
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++) {
+      M[r][c] = S1[r][c];
+      for (int k = 0; k < 3; k++) M[r][c] += S2[r][k] * T[k][c];
+    }
+  double Mp[3][3];
+  for (int c = 0; c < 3; c++) {
+    Mp[0][c] = M[2][c] / 2;
+    Mp[1][c] = -M[1][c];
+    Mp[2][c] = M[0][c] / 2;
+  }
+  // Its eigenvectors, from the characteristic cubic and a null vector of
+  // (Mp - lambda I) as the cross product of two of its rows.
+  const double tr = Mp[0][0] + Mp[1][1] + Mp[2][2];
+  const double minors = Mp[0][0] * Mp[1][1] - Mp[0][1] * Mp[1][0] + Mp[0][0] * Mp[2][2] -
+                        Mp[0][2] * Mp[2][0] + Mp[1][1] * Mp[2][2] - Mp[1][2] * Mp[2][1];
+  double best[3] = {0, 0, 0};
+  bool found = false;
+  for (double lambda : CubicRoots(-tr, minors, -det3(Mp))) {
+    const V3 r0{Mp[0][0] - lambda, Mp[0][1], Mp[0][2]};
+    const V3 r1{Mp[1][0], Mp[1][1] - lambda, Mp[1][2]};
+    const V3 r2{Mp[2][0], Mp[2][1], Mp[2][2] - lambda};
+    V3 v = cross(r0, r1);
+    if (len(v) < 1e-12) v = cross(r0, r2);
+    if (len(v) < 1e-12) v = cross(r1, r2);
+    if (len(v) < 1e-12) continue;
+    if (4 * v[0] * v[2] - v[1] * v[1] > 0) {
+      best[0] = v[0];
+      best[1] = v[1];
+      best[2] = v[2];
+      found = true;
+    }
+  }
+  if (!found) return bad;
+  double con[6] = {best[0], best[1], best[2], 0, 0, 0};
+  for (int r = 0; r < 3; r++)
+    for (int k = 0; k < 3; k++) con[3 + r] += T[r][k] * best[k];
+  // Centre, axes and turn of the conic, back in the unscaled frame.
+  const double A = con[0], Bc = con[1], C = con[2], Dc = con[3], E = con[4], Fc = con[5];
+  const double den = Bc * Bc - 4 * A * C;
+  if (std::abs(den) < 1e-30) return bad;
+  const double cx = (2 * C * Dc - Bc * E) / den, cy = (2 * A * E - Bc * Dc) / den;
+  const double theta = 0.5 * std::atan2(Bc, A - C);
+  const double ct = std::cos(theta), st = std::sin(theta);
+  const double Ap = A * ct * ct + Bc * ct * st + C * st * st;
+  const double Cp = A * st * st - Bc * ct * st + C * ct * ct;
+  const double Fp = A * cx * cx + Bc * cx * cy + C * cy * cy + Dc * cx + E * cy + Fc;
+  if (Ap * Fp >= 0 || Cp * Fp >= 0) return bad;
+  double a = std::sqrt(-Fp / Ap) * sc, b = std::sqrt(-Fp / Cp) * sc;
+  // A real oval, the size of the region: squashed flat (b = 0.010 on a
+  // 22 mm one) it passes for a pair of near-parallel facet strips, and
+  // stretched (a = 4,536) for a nearly flat sheet.
+  if (std::min(a, b) < 0.1 * std::max(a, b) || std::max(a, b) > 2 * sc) return bad;
+  V3 xd = add(mul(u, ct), mul(w, st));
+  if (a < b) {
+    std::swap(a, b);
+    xd = cross(axis, xd);
+  }
+  Fit f;
+  f.type = "ellipticCylinder";
+  f.point = add(mul(u, cx * sc + mx), mul(w, cy * sc + my));
+  f.dir = axis;
+  f.xdir = unit(xd);
+  f.radius = a;
+  f.minorRadius = b;
+  for (uint32_t v : vs) f.dev = std::max(f.dev, Distance(f, m.vert(v)));
+  return f;
+}
+
 // How far a point is from a fitted surface.
 double Distance(const Fit& f, const V3& p) {
   const V3 d = sub(p, f.point);
@@ -496,6 +673,10 @@ double Distance(const Fit& f, const V3& p) {
   if (f.type == "cone")
     return std::abs(rho - (f.radius + std::tan(f.halfAngle) * t)) * std::cos(f.halfAngle);
   if (f.type == "torus") return std::abs(std::hypot(rho - f.radius, t) - f.minorRadius);
+  if (f.type == "ellipticCylinder") {
+    const V3 ydir = cross(f.dir, f.xdir);
+    return EllipseDistance(f.radius, f.minorRadius, dot(d, f.xdir), dot(d, ydir));
+  }
   return 1e300;
 }
 

@@ -48,6 +48,8 @@ struct Fit {
   double radius = 0;   // cylinder, sphere; cone: radius at `point`
   double halfAngle = 0;  // cone
   double minorRadius = 0;  // torus: tube radius; `radius` is the centre circle's
+                           // ellipticCylinder: semi-minor axis; `radius` the semi-major
+  V3 xdir{0, 0, 0};    // ellipticCylinder: the direction of the major axis
 };
 
 struct Region {
@@ -68,6 +70,11 @@ Fit FitRevolved(const Mesh& m, const std::vector<uint32_t>& tris,
 Fit FitTorus(const Mesh& m, const std::vector<uint32_t>& tris,
              const std::vector<V3>& normal, const std::vector<V3>& centroid,
              const std::vector<double>& area, const std::vector<uint32_t>& vs);
+// An elliptical cylinder (an oval wall): the axis from the normals, as for a
+// cylinder, and an ellipse fitted to the vertices seen down it.
+Fit FitEllipticCylinder(const Mesh& m, const std::vector<uint32_t>& tris,
+                        const std::vector<V3>& normal, const std::vector<double>& area,
+                        const std::vector<uint32_t>& vs);
 // How far a point is from a fitted surface.
 double Distance(const Fit& f, const V3& p);
 
