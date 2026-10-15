@@ -270,7 +270,8 @@ const DocumentSection = () => {
     reader.readAsText(file);
   };
 
-  const addImportedSolid = (geometryData, name) => {
+  // `regenerator`: an imported STEP body's recipe, its exact shape.
+  const addImportedSolid = (geometryData, name, regenerator) => {
     const id = maxItemId(history) + 1;
     addItem({
       id,
@@ -278,6 +279,7 @@ const DocumentSection = () => {
       type: "csg",
       children: [],
       geometryData,
+      ...(regenerator ? { regenerator } : null),
       position: { x: 0, y: 0, z: 0 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: { x: 1, y: 1, z: 1 },
@@ -351,10 +353,26 @@ const DocumentSection = () => {
         const warning = openMeshWarning(name, report);
         if (warning) useStore.getState().showNotification(warning);
       } else if (ext === "step" || ext === "stp") {
-        const res = await importStep({ stepText: await file.text() });
+        const res = await importStep({
+          stepText: await file.text(),
+          printPrecision: activePrecision(useStore.getState()),
+        });
+        const { geometryData } = finalizeImportedMesh(
+          res.positions,
+          res.indices,
+        );
+        // The shape keeps its exact surfaces as the body's recipe; the mesh
+        // is its drawing, at the current Resolution.
         addImportedSolid(
-          finalizeImportedMesh(res.positions, res.indices).geometryData,
+          { ...geometryData, edges: res.edges },
           `${baseName} (STEP)`,
+          res.brep
+            ? {
+                kind: "importedShape",
+                brep: res.brep,
+                regeneratedAt: activePrecision(useStore.getState()),
+              }
+            : null,
         );
       } else {
         alert("Import STL or STEP files in the 3D view, or SVG in a sketch.");

@@ -148,6 +148,25 @@ Val ExportSTEP(Js& js) {
 // importSTEP(stepText: string) → shapeId
 // Reads a STEP file's content into a single shape (all roots fused into one
 // compound).  The caller tessellates it and must release the shape.
+// shapeToBrep(id) → OCC's BREP text for a stored shape, without its mesh: an
+// imported STEP body keeps its exact surfaces as this, its recipe.
+Val ShapeToBrep(Js& js) {
+  std::ostringstream oss;
+  BRepTools::Write(FetchShape(js.int32(js[0])), oss, false, false,
+                   TopTools_FormatVersion_CURRENT);
+  return js.makeString(oss.str());
+}
+
+// shapeFromBrep(text) → shapeId: a shape read back from BREP text.
+Val ShapeFromBrep(Js& js) {
+  std::istringstream iss(js.string(js[0]));
+  TopoDS_Shape shape;
+  BRep_Builder builder;
+  BRepTools::Read(shape, iss, builder);
+  if (shape.IsNull()) throw std::runtime_error("BREP text produced no shape");
+  return js.makeNumber(StoreShape(shape));
+}
+
 Val ImportSTEP(Js& js) {
   std::string content = js.string(js[0]);
   std::istringstream iss(content);
@@ -571,6 +590,8 @@ const std::vector<occjs::Op>& occjs::Ops() {
       // Shape store management
       {"releaseShape", Guarded<ReleaseShape>},
       {"shapeVolume", Guarded<ShapeVolume>},
+      {"shapeToBrep", Guarded<ShapeToBrep>},
+      {"shapeFromBrep", Guarded<ShapeFromBrep>},
       {"clearAll", Guarded<ClearAll>},
       {"shapeCount", Guarded<ShapeCount>},
       {"setCancelBuffer", Guarded<SetCancelBuffer>},

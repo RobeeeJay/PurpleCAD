@@ -1103,6 +1103,15 @@ Established landmines (each was a real bug — extend this list, never shrink it
   beziers as `contourCurves` beside `contours`, so glyph loops are sampled per
   font curve and never simplified afterwards (that would drop vertices the
   runs index).
+- **An imported STEP body's recipe is its exact shape.** `importStep` returns
+  the shape as BREP text, baked into the body's frame (scene units, Y-up,
+  centred on the MESH's bounding box, as `finalizeImportedMesh` centres the
+  mesh), and the body carries `regenerator: { kind: "importedShape", brep }`.
+  `buildItemShapeLocal` reads it back in both OCC implementations instead of
+  sewing the mesh, and the recalc redraws it at the current Resolution with no
+  re-centring. Bodies imported before this have no shape left: re-import.
+  The BREP is the recipe, so it is never pruned from nested sources like
+  `geometryData` is (`importedStepShape.test.js`, `docs/exact-imports-plan.md`).
 - **A Split's pieces are re-cut from their source, not kept as baked
   meshes.** They used to carry no recipe, so a resolution change (or an
   upstream edit) never reached them -- MultiSystem2's extruded circles stayed

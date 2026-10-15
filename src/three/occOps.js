@@ -580,6 +580,9 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
   // An imported solid is a csg item carrying only its mesh (no recipe).  Sew a
   // solid from that mesh so it can take part in booleans/chamfers.
   //
+  // An imported STEP body: its exact shape, already in its local frame.
+  if (item.type === "csg" && item.regenerator?.kind === "importedShape")
+    return occ.shapeFromBrep(item.regenerator.brep);
   if (item.type === "csg" && !item.regenerator && item.geometryData) {
     const g = item.geometryData;
     if (!g.positions || g.positions.length < 9) return null;
@@ -2614,13 +2617,16 @@ async function exportSTEP({ items, allItems, precision }) {
 }
 
 // Read a STEP file's content into a tessellated mesh (raw mm / Z-up positions —
-// the renderer converts to scene units / Y-up and centres it).
+// the renderer converts to scene units / Y-up and centres it) AND the exact
+// shape, as BREP text in the frame that mesh ends up in: the item's recipe, so
+// an imported part keeps its exact surfaces (see importedShapeBrep).
 async function importStep({ stepText, printPrecision }) {
   const id = occ.importSTEP(stepText);
   if (!id) throw new Error("STEP import produced no shape.");
-  let tess;
+  let tess, brep;
   try {
     tess = occ.tessellate(id, printPrecision ?? 0.5);
+    if (tess) brep = importedShapeBrep(id, tess.positions);
   } finally {
     occ.releaseShape(id);
   }
@@ -2629,7 +2635,45 @@ async function importStep({ stepText, printPrecision }) {
     positions: Array.from(tess.positions),
     indices: Array.from(tess.indices),
     edges: tess.edges ? Array.from(tess.edges) : null,
+    brep,
   };
+}
+
+// An imported shape moved into its item's frame -- what finalizeImportedMesh
+// does to the mesh: file mm and Z-up to scene units and Y-up ((x, y, z) to
+// (x, z, -y), a -pi/2 turn about X), then centred on the MESH's bounding box,
+// the same one the mesh is centred on -- and written as BREP text.
+function importedShapeBrep(id, positions) {
+  const lo = [Infinity, Infinity, Infinity],
+    hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    const q = [
+      positions[i] / MM_PER_UNIT,
+      positions[i + 2] / MM_PER_UNIT,
+      -positions[i + 1] / MM_PER_UNIT,
+    ];
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], q[k]);
+      hi[k] = Math.max(hi[k], q[k]);
+    }
+  }
+  const c = lo.map((v, k) => (v + hi[k]) / 2);
+  const scaled = occ.scaleShape(id, 1 / MM_PER_UNIT);
+  const placed = occ.transformShape(
+    scaled,
+    -c[0],
+    -c[1],
+    -c[2],
+    -Math.PI / 2,
+    0,
+    0,
+  );
+  occ.releaseShape(scaled);
+  try {
+    return occ.shapeToBrep(placed);
+  } finally {
+    occ.releaseShape(placed);
+  }
 }
 
 // Tessellate an item's rebuilt solid in its LOCAL frame — the Texture tool's

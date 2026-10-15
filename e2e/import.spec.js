@@ -299,4 +299,69 @@ test.describe.serial("import", () => {
       )
       .toBe(before + 1);
   });
+
+  // A STEP file carries exact surfaces, and the import used to tessellate
+  // them and throw the shape away: the body was a mesh, and a curved wall
+  // was a fan of flat faces to every op after it.  It keeps the shape now,
+  // as the body's recipe -- and the recipe has to survive the save, so this
+  // reloads the window (last in the file: the reload resets the page).
+  test("an imported STEP keeps its exact surfaces, through a reload", async () => {
+    const stepText = await page.evaluate(async () => {
+      const item = {
+        id: 901,
+        type: "cylinder",
+        position: { x: 0, y: 1, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      };
+      return window.electronAPI.invokeOcc("exportSTEP", {
+        items: [item],
+        allItems: [item],
+        precision: 0.1,
+      });
+    });
+    expect(stepText).toContain("CYLINDRICAL_SURFACE");
+    const csgIds = () =>
+      page.evaluate(() =>
+        window.__store
+          .getState()
+          .items.filter((i) => i.type === "csg")
+          .map((i) => i.id),
+      );
+    const before = await csgIds();
+    await importVia("Import a STEP file", {
+      name: "cylinder.step",
+      mimeType: "application/step",
+      buffer: Buffer.from(stepText, "utf8"),
+    });
+    await expect
+      .poll(async () => (await csgIds()).length, { timeout: 60000 })
+      .toBe(before.length + 1);
+    const id = (await csgIds()).find((i) => !before.includes(i));
+    const kindOf = () =>
+      page.evaluate(
+        (n) =>
+          window.__store.getState().items.find((i) => i.id === n)?.regenerator
+            ?.kind ?? null,
+        id,
+      );
+    expect(await kindOf()).toBe("importedShape");
+
+    // Rebuilt from that recipe alone -- no mesh to fall back on -- its wall is
+    // still one cylinder.
+    const rebuilt = await page.evaluate((n) => {
+      const it = window.__store.getState().items.find((i) => i.id === n);
+      const { geometryData, ...recipe } = it;
+      return window.electronAPI.invokeOcc("exportSTEP", {
+        items: [recipe],
+        allItems: [recipe],
+        precision: 0.1,
+      });
+    }, id);
+    expect(rebuilt).toContain("CYLINDRICAL_SURFACE");
+
+    await page.reload();
+    await page.locator(".toolbar").waitFor();
+    await expect.poll(kindOf, { timeout: 30000 }).toBe("importedShape");
+  });
 });

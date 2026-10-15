@@ -19,6 +19,7 @@
 // posts to the OCC Web Worker in the browser and runs in-process in node.
 
 import { resolveChainedPosition } from "./regenerators/shared.js";
+import { tessellateItem } from "./occClient.js";
 import {
   regenerateChamfer,
   regeneratePushPull,
@@ -62,6 +63,28 @@ export { resolveChainedPosition, reviveDevelopable, shiftEmbossFrame };
 // input is recomputed-and-recached before its consumer runs here — stays
 // consistent with the remap.  Absent solidCtx (live preview / resolution
 // sweep), ops release their result as before and nothing is cached.
+// An imported STEP body: its exact shape, stored in the item's own frame, drawn
+// again at this Resolution.  Nothing re-centres it -- the frame is the one the
+// shape was stored in, so a finer mesh lands exactly where the coarse one was.
+async function regenerateImportedShape(item, printPrecision) {
+  const res = await tessellateItem({
+    source: item,
+    allItems: [],
+    printPrecision,
+  });
+  const g = res?.geometryData;
+  if (!g?.positions?.length) return null;
+  return {
+    position: item.position,
+    geometryData: {
+      positions: Array.from(g.positions),
+      normals: null,
+      indices: Array.from(g.indices),
+      edges: g.edges ? Array.from(g.edges) : null,
+    },
+  };
+}
+
 export async function regenerateItemsForResolution(
   items,
   printPrecision,
@@ -148,6 +171,8 @@ export async function regenerateItemsForResolution(
           return regenerateExtrudeUnion(r, out, printPrecision);
         case "extrudeCut":
           return regenerateExtrudeUnion(r, out, printPrecision, true);
+        case "importedShape":
+          return regenerateImportedShape(item, printPrecision);
         default:
           return null;
       }

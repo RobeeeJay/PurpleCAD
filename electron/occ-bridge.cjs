@@ -587,6 +587,9 @@ function buildItemShapeLocal(item, allItems, precision) {
   }
 
   // Imported solid (mesh only, no recipe) — sew a solid for booleans/chamfers.
+  // An imported STEP body: its exact shape, already in its local frame.
+  if (item.type === "csg" && item.regenerator?.kind === "importedShape")
+    return occ.shapeFromBrep(item.regenerator.brep);
   if (item.type === "csg" && !item.regenerator && item.geometryData) {
     const g = item.geometryData;
     if (!g.positions || g.positions.length < 9) return null;
@@ -1607,9 +1610,10 @@ function exportSTEP({ items, allItems, precision }) {
 function importStep({ stepText, printPrecision }) {
   const id = occ.importSTEP(stepText);
   if (!id) throw new Error("STEP import produced no shape.");
-  let tess;
+  let tess, brep;
   try {
     tess = occ.tessellate(id, printPrecision ?? 0.5);
+    if (tess) brep = importedShapeBrep(id, tess.positions);
   } finally {
     occ.releaseShape(id);
   }
@@ -1617,7 +1621,22 @@ function importStep({ stepText, printPrecision }) {
   return {
     positions: Array.from(tess.positions),
     indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null,
+    brep,
   };
+}
+
+// The imported shape in its item's frame, as BREP text (mirrors occOps.js).
+function importedShapeBrep(id, positions) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    const q = [positions[i] / MM_PER_UNIT, positions[i + 2] / MM_PER_UNIT, -positions[i + 1] / MM_PER_UNIT];
+    for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
+  }
+  const c = lo.map((v, k) => (v + hi[k]) / 2);
+  const scaled = occ.scaleShape(id, 1 / MM_PER_UNIT);
+  const placed = occ.transformShape(scaled, -c[0], -c[1], -c[2], -Math.PI / 2, 0, 0);
+  occ.releaseShape(scaled);
+  try { return occ.shapeToBrep(placed); } finally { occ.releaseShape(placed); }
 }
 
 // Revolve a sketch profile around an axis line (mirrors occOps.js#revolveItem).
