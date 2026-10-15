@@ -76,16 +76,66 @@ test("pausing mid Shift+scroll rotate does not move the pivot", async () => {
   expect(afterPause.z).toBeCloseTo(beforePause.z, 6);
 });
 
+// Zoom in with a two-finger pinch, the one zoom that works on every platform
+// (Ctrl+wheel zooms only on a Mac).
+const pinchIn = async (page) => {
+  const box = await page.locator(".viewport canvas").boundingBox();
+  const cx = box.x + 125 + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const pointer = (type, id, x, y) =>
+    page.evaluate(
+      ([type, id, x, y]) =>
+        document.querySelector(".viewport canvas").dispatchEvent(
+          new PointerEvent(type, {
+            pointerId: id,
+            pointerType: "touch",
+            isPrimary: id === 1,
+            clientX: x,
+            clientY: y,
+            buttons: type === "pointerup" ? 0 : 1,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      [type, id, x, y],
+    );
+  await pointer("pointerdown", 1, cx - 40, cy);
+  await pointer("pointerdown", 2, cx + 40, cy);
+  for (let i = 1; i <= 8; i++) {
+    await pointer("pointermove", 1, cx - 40 - i * 10, cy);
+    await pointer("pointermove", 2, cx + 40 + i * 10, cy);
+  }
+  await pointer("pointerup", 1, cx - 120, cy);
+  await pointer("pointerup", 2, cx + 120, cy);
+};
+
 test("panning then Shift+scroll rotating still re-anchors the pivot", async () => {
+  // A pan carries the pivot with the view, at its depth, so a rotate after it
+  // re-anchors only when what's under the crosshair is at a different depth
+  // by more than 5% of the view distance.  Zoomed in, panning down brings a
+  // taller part of the body under it.  This spec used to pan at Home's zoom
+  // and passed only while the document was still rebuilding: on the settled
+  // part no pan at that zoom crosses the 5%, measured both ways (pivot moved
+  // 0.000 settled; 3.511 here, and 0.000 here with re-anchoring disabled).
   await loadSettled(page, "test-files/bad-cut-extrude.pcad");
   await page.locator(".home-button").click();
   await page.waitForTimeout(400);
+  await pinchIn(page);
+  await page.waitForTimeout(100);
 
   await page.mouse.move(700, 400);
+  await page.keyboard.down("Shift");
+  await page.mouse.wheel(20, 0);
+  await page.waitForTimeout(20);
+  await page.keyboard.up("Shift");
+  // Past the 400 ms session timeout, so the next rotate starts a new session.
+  await page.waitForTimeout(500);
+
   for (let i = 0; i < 10; i++) {
-    await page.mouse.wheel(60, 0);
+    await page.mouse.wheel(0, 60);
     await page.waitForTimeout(20);
   }
+  await page.waitForTimeout(500);
   const afterPan = await getTarget(page);
 
   await page.keyboard.down("Shift");
@@ -94,12 +144,10 @@ test("panning then Shift+scroll rotating still re-anchors the pivot", async () =
   const afterRotate = await getTarget(page);
   await page.keyboard.up("Shift");
 
-  // The pivot SHOULD move to re-centre on whatever's now under the crosshair
-  // — a pan genuinely relocated the view, unlike a mere pause.
   const moved = Math.hypot(
     afterRotate.x - afterPan.x,
     afterRotate.y - afterPan.y,
     afterRotate.z - afterPan.z,
   );
-  expect(moved).toBeGreaterThan(0.1);
+  expect(moved, "pivot moved by the rotate after the pan").toBeGreaterThan(0.1);
 });
