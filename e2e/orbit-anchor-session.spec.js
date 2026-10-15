@@ -24,16 +24,37 @@ test.afterAll(async () => {
   await app?.close();
 });
 
+// Load the document and wait for its rebuild to finish.  Rotating while it
+// ran was the cause of this spec's intermittent failure: the first session
+// anchored on whatever was built so far, and the next one, after the pause,
+// on the finished body -- a real re-anchor (5.24 to 9.43 every time), not a
+// pause artefact.  It failed or passed by how fast the machine rebuilt.
+const loadSettled = async (page, file) => {
+  const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+  await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
+  await page.waitForTimeout(500);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const s = window.__store.getState();
+          return (
+            s.pendingOperations === 0 &&
+            (s.regenProgress == null || s.regenProgress.total === 0)
+          );
+        }),
+      { timeout: 60000 },
+    )
+    .toBe(true);
+};
+
 const getTarget = (page) =>
   page.evaluate(() =>
     window.__store.getState()._cameraControls.getViewTarget(),
   );
 
 test("pausing mid Shift+scroll rotate does not move the pivot", async () => {
-  const doc = JSON.parse(
-    fs.readFileSync("test-files/bad-cut-extrude.pcad", "utf8"),
-  );
-  await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
+  await loadSettled(page, "test-files/bad-cut-extrude.pcad");
   await page.locator(".home-button").click();
   await page.waitForTimeout(400);
 
@@ -56,10 +77,7 @@ test("pausing mid Shift+scroll rotate does not move the pivot", async () => {
 });
 
 test("panning then Shift+scroll rotating still re-anchors the pivot", async () => {
-  const doc = JSON.parse(
-    fs.readFileSync("test-files/bad-cut-extrude.pcad", "utf8"),
-  );
-  await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
+  await loadSettled(page, "test-files/bad-cut-extrude.pcad");
   await page.locator(".home-button").click();
   await page.waitForTimeout(400);
 
