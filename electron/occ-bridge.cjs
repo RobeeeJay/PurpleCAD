@@ -55,14 +55,15 @@ function withWinding(poly, wantCcw) {
 // A loop's exact curve runs, wound and packed for the addon's BuildCurveWire
 // (mirrors polygonUtil.js reverseEdgeCurves / packCurveRuns / windLoopForOcc).
 const CURVE_RUN_WIDTH = 11;
-const CURVE_KIND = { arc: 1, bezier: 2, ellipse: 3 };
+const CURVE_KIND = { arc: 1, bezier: 2, ellipse: 3, interp: 4 };
 function packCurveRuns(runs) {
   const out = new Float64Array(runs.length * CURVE_RUN_WIDTH);
   runs.forEach((run, i) => {
     const params =
       run.type === "arc" ? [run.cx, run.cy, run.r]
         : run.type === "ellipse" ? [run.cx, run.cy, run.rx, run.ry]
-          : [run.p0, run.p1, run.p2, run.p3].flatMap(p => [p.x, p.y]);
+          : run.type === "bezier" ? [run.p0, run.p1, run.p2, run.p3].flatMap(p => [p.x, p.y])
+            : [];
     out.set([run.start, run.count, CURVE_KIND[run.type], ...params], i * CURVE_RUN_WIDTH);
   });
   return out;
@@ -88,13 +89,13 @@ function windLoopForOcc(poly, runs, wantCcw) {
 // World-space packing for BuildWorldCurveWire (mirrors polygonUtil.js).
 const WORLD_RUN_WIDTH = 15;
 function packWorldCurveRuns(runs, toWorld) {
-  const kept = (runs || []).filter(r => r.type === "arc" || r.type === "bezier");
+  const kept = (runs || []).filter(r => r.type !== "ellipse");
   const out = new Float64Array(kept.length * WORLD_RUN_WIDTH);
   kept.forEach((run, i) => {
     const poles = run.type === "bezier"
       ? [run.p0, run.p1, run.p2, run.p3].flatMap(p => { const w = toWorld(p); return [w.x, w.y, w.z]; })
       : [];
-    out.set([run.start, run.count, run.type === "arc" ? 1 : 2, ...poles], i * WORLD_RUN_WIDTH);
+    out.set([run.start, run.count, CURVE_KIND[run.type], ...poles], i * WORLD_RUN_WIDTH);
   });
   return out;
 }
