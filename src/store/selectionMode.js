@@ -41,6 +41,7 @@ export function anyToolActive(s) {
     s.pushPullEditTarget ||
     s.shellTarget ||
     s.simplifyTarget ||
+    s.convertTarget ||
     s.holeTool ||
     s.embossTool ||
     s.draftTool ||

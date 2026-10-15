@@ -23,6 +23,7 @@ import {
   FilletIcon,
   ShellIcon,
   SimplifyIcon,
+  ConvertSurfacesIcon,
   HoleIcon,
   EmbossIcon,
   TextureIcon,
@@ -55,6 +56,13 @@ const shellInfo = (entry) => {
   const r = inst.patches?.regenerator;
   if (r?.kind !== "shell") return null;
   return { thickness: r.thickness ?? 0 };
+};
+
+// Detect convert-to-surfaces entries.
+const convertInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  return inst.patches?.regenerator?.kind === "meshToSurfaces" ? {} : null;
 };
 
 // Detect simplify entries — a modify whose regenerator is a simplify op.
@@ -157,6 +165,7 @@ const entryIcon = (entry) => {
   if (ci) return ci.isFillet ? <FilletIcon /> : <ChamferIcon />;
   if (shellInfo(entry)) return <ShellIcon />;
   if (simplifyInfo(entry)) return <SimplifyIcon />;
+  if (convertInfo(entry)) return <ConvertSurfacesIcon />;
   if (holeInfo(entry)) return <HoleIcon />;
   if (embossInfo(entry)) return <EmbossIcon />;
   if (textureInfo(entry)) return <TextureIcon />;
@@ -200,6 +209,7 @@ const Timeline = () => {
   );
   const setShellTarget = useStore((state) => state.setShellTarget);
   const setSimplifyTarget = useStore((state) => state.setSimplifyTarget);
+  const setConvertTarget = useStore((state) => state.setConvertTarget);
   const beginHoleEdit = useStore((state) => state.beginHoleEdit);
   const beginEmbossEdit = useStore((state) => state.beginEmbossEdit);
   const beginTextureEdit = useStore((state) => state.beginTextureEdit);
@@ -626,6 +636,21 @@ const Timeline = () => {
                   onClick={(e) => {
                     e.stopPropagation();
                     setSimplifyTarget({
+                      itemId: entry.itemId,
+                      entryId: entry.id,
+                    });
+                  }}
+                >
+                  <EditIcon />
+                </button>
+              )}
+              {convertInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit convert to surfaces — tolerance"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConvertTarget({
                       itemId: entry.itemId,
                       entryId: entry.id,
                     });

@@ -1115,6 +1115,13 @@ Established landmines (each was a real bug — extend this list, never shrink it
   re-centring. Bodies imported before this have no shape left: re-import.
   The BREP is the recipe, so it is never pruned from nested sources like
   `geometryData` is (`importedStepShape.test.js`, `docs/exact-imports-plan.md`).
+- **A mesh converted to surfaces builds from its BREP, too.** Convert to
+  Surfaces (`meshToSurfaces`) stores the rebuilt shape as `regenerator.brep`,
+  refreshed by every recalculation, and `buildItemShapeLocal` reads it back in
+  both OCC implementations; only a body whose last rebuild was refused
+  (`regenFailed`) is sewn from its mesh.  A later op must never sew a
+  converted body's drawing: drawn coarsely it keeps the chords the conversion
+  removed (`convertSurfaces.test.js`).
 - **A Split's pieces are re-cut from their source, not kept as baked
   meshes.** They used to carry no recipe, so a resolution change (or an
   upstream edit) never reached them -- MultiSystem2's extruded circles stayed

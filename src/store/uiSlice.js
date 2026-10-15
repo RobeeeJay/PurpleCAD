@@ -110,6 +110,9 @@ export const uiInitial = {
   // Simplify dialog target, the same shape as shellTarget: { itemId } for a
   // fresh simplify of a mesh body, { itemId, entryId } to edit a committed one.
   simplifyTarget: null,
+  // Convert to Surfaces dialog target, the same shape: { itemId } for a fresh
+  // conversion of a mesh body, { itemId, entryId } to edit a committed one.
+  convertTarget: null,
 
   // Change-origin tool.  `originToolActive` arms it (click an object to pick its
   // origin); `originDialogItemId` is the object whose OriginDialog is open;

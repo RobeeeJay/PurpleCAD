@@ -590,6 +590,15 @@ function buildItemShapeLocal(item, allItems, precision) {
   // An imported STEP body: its exact shape, already in its local frame.
   if (item.type === "csg" && item.regenerator?.kind === "importedShape")
     return occ.shapeFromBrep(item.regenerator.brep);
+  // A mesh converted to surfaces -- mirrors occOps.js: its exact shape, unless
+  // its last rebuild was refused, when it is still its mesh (sewn, below).
+  if (
+    item.type === "csg" &&
+    item.regenerator?.kind === "meshToSurfaces" &&
+    item.regenerator.brep &&
+    !item.regenerator.regenFailed
+  )
+    return occ.shapeFromBrep(item.regenerator.brep);
   if (item.type === "csg" && !item.regenerator && item.geometryData) {
     const g = item.geometryData;
     if (!g.positions || g.positions.length < 9) return null;
@@ -615,7 +624,7 @@ function buildItemShapeLocal(item, allItems, precision) {
     // A simplified mesh IS its baked mesh -- the op's whole output -- (mirrors
     // occOps.js) so a later op sews that, as does a Split piece that can't be
     // re-cut.
-    if (regen.kind === "simplify" || regen.kind === "split") {
+    if (regen.kind === "simplify" || regen.kind === "split" || regen.kind === "meshToSurfaces") {
       const g = item.geometryData;
       if (!g?.positions || g.positions.length < 9) return null;
       return occ.makeSolidFromMesh(
