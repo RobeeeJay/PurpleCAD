@@ -87,6 +87,7 @@ function App() {
           (s) =>
             s.type === "text" &&
             (!Array.isArray(s.contours) ||
+              !Array.isArray(s.contourCurves) ||
               s.contourTol !== textSimplifyTol(state)),
         ),
     ),

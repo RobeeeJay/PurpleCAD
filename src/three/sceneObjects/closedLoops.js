@@ -21,7 +21,7 @@ import {
   signedPolyAreaXY,
   reverseEdgeCurves,
 } from "./polygonUtil.js";
-import { cogShapeContours } from "../cogGeometry.js";
+import { cogShapeLoops } from "../cogGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 
 export {
@@ -233,13 +233,13 @@ export function findClosedLoopsWithShapes(
       // cached outline is a fixed coarse one, and an extruded cog made from
       // it never got finer with the resolution.
       const tol = precision != null ? precision / MM_PER_UNIT : null;
-      for (const polygon of cogShapeContours(s, tol))
+      for (const { polygon, curves } of cogShapeLoops(s, tol))
         if (polygon.length >= 3)
-          textLoops.push({ polygon, shapeIndices: [i], curves: [] });
+          textLoops.push({ polygon, shapeIndices: [i], curves });
       return;
     }
     if (s.type !== "text" || !Array.isArray(s.contours)) return;
-    for (const c of s.contours) {
+    s.contours.forEach((c, ci) => {
       // Drop a duplicated closing point (font glyph contours repeat the start
       // point) so the loop is a clean polygon — a zero-length closing segment
       // makes OCC's extrude wire-builder reject the profile.
@@ -249,13 +249,25 @@ export function findClosedLoopsWithShapes(
           b = pts[pts.length - 1];
         if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) pts = pts.slice(0, -1);
       }
-      if (pts.length < 3) continue;
+      if (pts.length < 3) return;
+      // Its glyph curves, when the shape caches them (text made or refreshed
+      // since exact curves), placed at the anchor like the points.
+      const at = (p) => ({ x: p.x + s.x, y: p.y + s.y });
       textLoops.push({
-        polygon: pts.map((p) => ({ x: p.x + s.x, y: p.y + s.y })),
+        polygon: pts.map(at),
         shapeIndices: [i],
-        curves: [],
+        curves:
+          pts === c
+            ? (s.contourCurves?.[ci] || []).map((r) => ({
+                ...r,
+                p0: at(r.p0),
+                p1: at(r.p1),
+                p2: at(r.p2),
+                p3: at(r.p3),
+              }))
+            : [],
       });
-    }
+    });
   });
 
   // ── Expand rects to 4 line segments so they participate in intersection

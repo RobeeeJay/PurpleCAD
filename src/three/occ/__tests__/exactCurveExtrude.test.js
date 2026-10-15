@@ -9,6 +9,8 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { createRequire } from "module";
 import { ensureOcc } from "../init.js";
 import { ops } from "../../occOps.js";
+import { makeCogShape } from "../../cogGeometry.js";
+import { makeTextShape } from "../../sketchText.js";
 import {
   regionsWithShapes,
   windLoopForOcc,
@@ -399,4 +401,115 @@ describe("an exact extrude's face names", () => {
     }
     occ.releaseShape(id);
   });
+});
+
+// A cog is arcs (root, fillets, tip) and involute flanks, which OCC has no
+// exact type for: each flank is a B-spline through its sampled points, which
+// lie on it (measured within 0.03 um of the true involute at the mesh's float
+// precision).  One face per curve, not one per sample.
+describe("an extruded cog", () => {
+  it("has a face per tooth curve, in both OCC implementations", async () => {
+    const cog = makeCogShape({
+      x: 0.5,
+      y: -0.3,
+      pitchDiameter: 4,
+      teeth: 20,
+      backlash: 0,
+      rootFillet: 0.05,
+      holeDiameter: 0,
+    });
+    const sk = {
+      id: 7,
+      type: "sketch",
+      shapes: [cog],
+      position: O,
+      rotation: O,
+    };
+    const [g] = regionsWithShapes([cog], 32, 0.05);
+    const item = {
+      id: 8,
+      type: "extrude",
+      position: O,
+      rotation: O,
+      scale: S,
+      depth: 1,
+      profile: {
+        sketchId: 7,
+        textShapeIdx: 0,
+        polygon2D: g.polygon,
+        holes: [],
+        loopShapes: g.loopShapes,
+        curves2D: g.curves,
+      },
+    };
+    const args = { items: [item], allItems: [sk, item], precision: 0.05 };
+    for (const impl of [ops, bridge]) {
+      const c = faceCounts(
+        await impl.exportSTEP(JSON.parse(JSON.stringify(args))),
+      );
+      // Per tooth: tip, two flanks, two radial lines, two fillets and two
+      // root arcs; then top and bottom.
+      expect(c.faces, JSON.stringify(c)).toBe(9 * 20 + 2);
+    }
+  }, 30000);
+});
+
+// A letter is built from its glyph's own curves: one face per font curve,
+// not one per sample.  "B" has straight stems and curved bowls, and two holes.
+describe("extruded text", () => {
+  it("has a face per glyph curve, in both OCC implementations", async () => {
+    const text = makeTextShape({
+      text: "B",
+      height: 2,
+      font: "helvetiker",
+      x: 0,
+      y: 0,
+      tolerance: 0.005,
+    });
+    const sk = {
+      id: 11,
+      type: "sketch",
+      shapes: [text],
+      position: O,
+      rotation: O,
+    };
+    const [g] = regionsWithShapes([text], 32, 0.05);
+    expect(g.holes).toHaveLength(2);
+    // Expected faces: per loop, one per curve run and one per straight edge;
+    // then top and bottom.
+    const edges = (poly, runs) =>
+      runs.length + (poly.length - runs.reduce((n, r) => n + r.count, 0));
+    const expected =
+      edges(g.polygon, g.curves.outer) +
+      g.holes.reduce((n, h, i) => n + edges(h, g.curves.holes[i]), 0) +
+      2;
+    const sampled =
+      g.polygon.length + g.holes.reduce((n, h) => n + h.length, 0) + 2;
+    const item = {
+      id: 12,
+      type: "extrude",
+      position: O,
+      rotation: O,
+      scale: S,
+      depth: 0.5,
+      profile: {
+        sketchId: 11,
+        textShapeIdx: 0,
+        polygon2D: g.polygon,
+        holes: g.holes,
+        loopShapes: g.loopShapes,
+        curves2D: g.curves,
+      },
+    };
+    const args = { items: [item], allItems: [sk, item], precision: 0.05 };
+    for (const impl of [ops, bridge]) {
+      const c = faceCounts(
+        await impl.exportSTEP(JSON.parse(JSON.stringify(args))),
+      );
+      expect(c.faces, `${JSON.stringify(c)}, ${sampled} sampled`).toBe(
+        expected,
+      );
+      expect(c.faces).toBeLessThan(sampled / 2);
+    }
+  }, 30000);
 });

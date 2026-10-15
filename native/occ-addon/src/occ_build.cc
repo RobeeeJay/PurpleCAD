@@ -1,6 +1,8 @@
 #include "occ_core.h"
 
 #include <ElCLib.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <TColgp_HArray1OfPnt.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GC_MakeCircle.hxx>
 #include <Geom_TrimmedCurve.hxx>
@@ -93,8 +95,28 @@ static TopoDS_Wire BuildPolyWire(const double* pts, size_t n,
 // A loop's exact curves, packed by the caller (packCurveRuns): per run
 // [start, count, kind, params...], edge k running from vertex k to k+1.
 // kind 1 = circle arc (cx, cy, r), 2 = cubic bezier (p0..p3), 3 = ellipse
-// (cx, cy, rx, ry).
+// (cx, cy, rx, ry), 4 = a smooth curve with no closed form (a cog's involute
+// flank): a B-spline through the run's own vertices, which are exact points
+// on it.
 static constexpr size_t kCurveRunWidth = 11;
+
+// A B-spline through the given points, as an edge between va and vb.  Null
+// when there are too few points or the interpolation fails.
+static TopoDS_Edge SmoothEdgeThrough(const std::vector<gp_Pnt>& pts,
+                                     const TopoDS_Vertex& va,
+                                     const TopoDS_Vertex& vb) {
+  if (pts.size() < 3) return TopoDS_Edge();
+  Handle(TColgp_HArray1OfPnt) arr =
+      new TColgp_HArray1OfPnt(1, static_cast<int>(pts.size()));
+  for (size_t i = 0; i < pts.size(); i++)
+    arr->SetValue(static_cast<int>(i) + 1, pts[i]);
+  GeomAPI_Interpolate interp(arr, false, Precision::Confusion());
+  interp.Perform();
+  if (!interp.IsDone()) return TopoDS_Edge();
+  Handle(Geom_BSplineCurve) spline = interp.Curve();
+  BRepBuilderAPI_MakeEdge mk(spline, va, vb);
+  return mk.IsDone() ? mk.Edge() : TopoDS_Edge();
+}
 
 // The edge for one curve run from vertex a to vertex b, through vertex m (a
 // sample between them: it says which way round a circle the run goes).  Null
@@ -239,8 +261,15 @@ static TopoDS_Wire BuildCurveWire(const double* pts, size_t n, double cx,
     gp_Pnt pm = c >= 2 ? P(i + c / 2)
                        : gp_Pnt((P(i).X() + P(b).X()) / 2,
                                 (P(i).Y() + P(b).Y()) / 2, 0);
-    TopoDS_Edge e = CurveRunEdge(runs + r * kCurveRunWidth, P(i), pm, P(b),
-                                 V[i], V[b], cx, cy);
+    TopoDS_Edge e;
+    if (runs[r * kCurveRunWidth + 2] == 4) {
+      std::vector<gp_Pnt> through;
+      for (size_t j = 0; j <= c; j++) through.push_back(P(i + j));
+      e = SmoothEdgeThrough(through, V[i], V[b]);
+    } else {
+      e = CurveRunEdge(runs + r * kCurveRunWidth, P(i), pm, P(b), V[i], V[b],
+                       cx, cy);
+    }
     if (e.IsNull()) {
       for (size_t j = 0; j < c; j++) straight(i + j);
     } else {
@@ -370,7 +399,8 @@ Val MakeExtrude(Js& js) {
 // its exact curves where `runs` gives them -- packed 15 numbers a run:
 // start, count, kind, then 12.  kind 1 = circle arc, built through three of
 // its own vertices (three points fix a circle, so no centre is needed in 3D);
-// kind 2 = cubic bezier, its four poles in world space.  Anything else, and a
+// kind 2 = cubic bezier, its four poles in world space; kind 4 = a smooth
+// curve through its own vertices.  Anything else, and a
 // curve that can't be built, keeps its sampled segments.
 static constexpr size_t kWorldRunWidth = 15;
 static TopoDS_Wire BuildWorldCurveWire(const double* pts, size_t n,
@@ -442,6 +472,10 @@ static TopoDS_Wire BuildWorldCurveWire(const double* pts, size_t n,
     TopoDS_Edge e;
     if (q[2] == 1) {
       e = arcThrough(i, i + c / 2, i + c);
+    } else if (q[2] == 4) {
+      std::vector<gp_Pnt> through;
+      for (size_t j = 0; j <= c; j++) through.push_back(P(i + j));
+      e = SmoothEdgeThrough(through, V[i % n], V[(i + c) % n]);
     } else if (q[2] == 2) {
       TColgp_Array1OfPnt poles(1, 4);
       for (int j = 0; j < 4; j++)

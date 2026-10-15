@@ -11,6 +11,8 @@ import {
   reverseEdgeCurves,
 } from "../sceneObjects/closedLoops.js";
 import { extrudeWithLivePolygon } from "../csgUtils.js";
+import { makeTextShape } from "../sketchText.js";
+import { makeCogShape } from "../cogGeometry.js";
 import * as THREE from "three";
 import { smoothCurvedWalls } from "../sceneObjects/sceneBuilder.js";
 import { polyAreaCentroid, withWinding } from "../sceneObjects/polygonUtil.js";
@@ -321,5 +323,53 @@ describe("a plain extrude's curved walls shade round", () => {
       const err = Math.hypot(nx - (x - cx) / r, ny - (y - 0.5) / r);
       expect(err, `end wall at (${x}, ${y}) off by ${err}`).toBeLessThan(1e-5);
     }
+  });
+});
+
+describe("text and cogs record their curves too", () => {
+  it("each glyph loop's beziers end on their own vertices, at any tolerance", () => {
+    for (const tolerance of [0, 0.005, 0.0005]) {
+      const text = makeTextShape({
+        text: "Bog&",
+        height: 2,
+        font: "helvetiker",
+        x: 3,
+        y: -1,
+        tolerance,
+      });
+      const loops = findClosedLoopsWithShapes([text], 32, 0.05);
+      expect(loops.length).toBeGreaterThan(4);
+      let curved = 0;
+      loops.forEach((l, i) => {
+        curved += checkRuns(
+          l.polygon,
+          l.curves,
+          `glyph loop ${i} at ${tolerance}`,
+        );
+      });
+      expect(curved, "curved edges").toBeGreaterThan(50);
+    }
+  });
+
+  it("a cog's arcs lie on their circles once placed and turned", () => {
+    const cog = {
+      ...makeCogShape({
+        x: 2,
+        y: 1,
+        pitchDiameter: 4,
+        teeth: 12,
+        backlash: 0,
+        rootFillet: 0.1,
+        holeDiameter: 1,
+      }),
+      rotation: 0.3,
+    };
+    const loops = findClosedLoopsWithShapes([cog], 32, 0.05);
+    expect(loops).toHaveLength(2);
+    loops.forEach((l, i) => checkRuns(l.polygon, l.curves, `cog loop ${i}`));
+    // The hole is one arc round its whole loop.
+    expect(loops[1].curves).toEqual([
+      expect.objectContaining({ type: "arc", count: loops[1].polygon.length }),
+    ]);
   });
 });

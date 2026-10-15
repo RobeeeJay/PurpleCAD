@@ -135,8 +135,8 @@ export function smoothCurvedWalls(geometry, loops, centre) {
     if (!run) continue;
     const facet = [nrm.getX(t), nrm.getY(t)];
     walls.push({ t, run, ks, facet });
-    // A bezier has no closed-form normal here: average its facets instead.
-    if (run.type === "bezier")
+    // A bezier or interp has no closed-form normal here: average its facets.
+    if (run.type === "bezier" || run.type === "interp")
       for (const k of plan) {
         const s = bezierSum.get(k) || [0, 0];
         bezierSum.set(k, [s[0] + facet[0], s[1] + facet[1]]);

@@ -237,7 +237,10 @@ export const createSketchSlice = (set) => ({
       const needs = (s) =>
         s.type === "text" &&
         isFontAvailable(s.font) &&
-        (!Array.isArray(s.contours) || s.contourTol !== tolerance);
+        (!Array.isArray(s.contours) ||
+          // Made before glyphs cached their exact curves.
+          !Array.isArray(s.contourCurves) ||
+          s.contourTol !== tolerance);
       let changed = false;
       const updatedItems = state.items.map((item) => {
         if (item.type !== "sketch" || !(item.shapes || []).some(needs))

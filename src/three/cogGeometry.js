@@ -187,6 +187,20 @@ function arcPoints(c, from, to, samples) {
   return pts;
 }
 
+const ORIGIN = { x: 0, y: 0 };
+// A flank's curve: an involute, which OCC has no exact type for -- it is
+// built as a smooth curve through its sampled points, which lie on it.
+const INTERP = { type: "interp" };
+// A circle-arc piece's curve run, its centre turned into place.
+const curveRunAt = (curve, c, start, count) => ({
+  type: "arc",
+  start,
+  count,
+  cx: c.x,
+  cy: c.y,
+  r: curve.r,
+});
+
 const mirror = (p) => ({ x: p.x, y: -p.y });
 const rotate = (p, a) => ({
   x: p.x * Math.cos(a) - p.y * Math.sin(a),
@@ -215,63 +229,96 @@ export function cogOutline(p, tol = null) {
     : line.top === R.base
       ? R.root
       : involute[0].r;
-  const leftDown = []; // tip to root on the +angle side
+  // The left half-tooth as pieces, tip to mid-gap on the +angle side, each
+  // with the exact curve its points sample where it has one -- so an extruded
+  // cog is built from arcs and smooth flanks rather than from the points.
+  const invPts = [];
   for (let i = involute.length - 1; i >= 0; i--) {
     const { r, a } = involute[i];
-    if (r > flankStart + 1e-12) leftDown.push(polar(r, a));
+    if (r > flankStart + 1e-12) invPts.push(polar(r, a));
   }
+  const left = [{ pts: invPts, curve: invPts.length >= 3 ? INTERP : null }];
+  const lastInv = invPts[invPts.length - 1];
   // Below the base circle the flank is radial: the involute's last point (on
   // the base circle) runs straight down to the fillet or the root, so it needs
   // no point of its own -- a second one there would be a zero-length segment,
   // which OCC's wire builder rejects.
-  let rootStart;
+  let rootStart, rootFrom;
   if (fillet) {
     const sweep =
       Math.atan2(fillet.onRoot.y - fillet.c.y, fillet.onRoot.x - fillet.c.x) -
       Math.atan2(fillet.onFlank.y - fillet.c.y, fillet.onFlank.x - fillet.c.x);
     const turn = Math.abs(Math.atan2(Math.sin(sweep), Math.cos(sweep)));
-    leftDown.push(
-      ...arcPoints(
-        fillet.c,
-        fillet.onFlank,
-        fillet.onRoot,
-        arcCount(fillet.rf, turn, tol, FILLET_SAMPLES),
-      ),
+    const arc = arcPoints(
+      fillet.c,
+      fillet.onFlank,
+      fillet.onRoot,
+      arcCount(fillet.rf, turn, tol, FILLET_SAMPLES),
     );
+    left.push({ pts: [lastInv, arc[0]], curve: null });
+    left.push({ pts: arc, curve: { type: "arc", c: fillet.c, r: fillet.rf } });
     rootStart = Math.atan2(fillet.onRoot.y, fillet.onRoot.x);
+    rootFrom = arc[arc.length - 1];
   } else {
     const bottom =
       line.top === R.base ? line.p : polar(involute[0].r, involute[0].a);
-    leftDown.push(bottom);
+    left.push({ pts: [lastInv, bottom], curve: null });
     rootStart = Math.atan2(bottom.y, bottom.x);
+    rootFrom = bottom;
   }
   // The root from the fillet to mid-gap, where the next unit starts.
-  const rootHalf = [];
   const rootN = arcCount(R.root, gapHalfAngle - rootStart, tol, 2);
+  const rootPts = [rootFrom];
   for (let i = 1; i <= rootN; i++)
-    rootHalf.push(
+    rootPts.push(
       polar(R.root, rootStart + ((gapHalfAngle - rootStart) * i) / rootN),
     );
+  left.push({ pts: rootPts, curve: { type: "arc", c: ORIGIN, r: R.root } });
 
-  const left = [...leftDown, ...rootHalf];
-  const right = left.map(mirror).reverse(); // mid-gap (below) up to the tip
+  // The right half mirrors the left, walked the other way: mid-gap (below) up
+  // to the tip.
+  const right = left
+    .map(({ pts, curve }) => ({
+      pts: pts.map(mirror).reverse(),
+      curve: curve?.c ? { ...curve, c: mirror(curve.c) } : curve,
+    }))
+    .reverse();
   // Across the tip, along the tip circle, between its two corners.
-  const tipHalf = Math.atan2(left[0].y, left[0].x);
+  const tipFrom = right[right.length - 1].pts.at(-1);
+  const tipTo = left[0].pts[0];
+  const tipHalf = Math.atan2(tipTo.y, tipTo.x);
   const tipN = arcCount(R.tip, 2 * tipHalf, tol, 2);
-  const tipArc = [];
+  const tipPts = [tipFrom];
   for (let i = 1; i < tipN; i++)
-    tipArc.push(polar(R.tip, -tipHalf + (2 * tipHalf * i) / tipN));
-  const unit = [...right, ...tipArc, ...left];
+    tipPts.push(polar(R.tip, -tipHalf + (2 * tipHalf * i) / tipN));
+  tipPts.push(tipTo);
+  const unit = [
+    ...right,
+    { pts: tipPts, curve: { type: "arc", c: ORIGIN, r: R.tip } },
+    ...left,
+  ].filter((pc) => pc.pts.length >= 2);
 
-  const outline = [];
+  // Every tooth, each unit turned into place; a unit ends at mid-gap where the
+  // next begins, so pieces share their end points.
+  const outline = [unit[0].pts[0]];
+  const outlineRuns = [];
   for (let k = 0; k < teeth; k++) {
     const a = (2 * Math.PI * k) / teeth;
-    // Each unit ends at mid-gap where the next begins; keep that point once.
-    unit.slice(k === 0 ? 0 : 1).forEach((q) => outline.push(rotate(q, a)));
+    for (const { pts, curve } of unit) {
+      const start = outline.length - 1;
+      for (const q of pts.slice(1)) outline.push(rotate(q, a));
+      if (curve)
+        outlineRuns.push(
+          curve.c
+            ? curveRunAt(curve, rotate(curve.c, a), start, pts.length - 1)
+            : { type: curve.type, start, count: pts.length - 1 },
+        );
+    }
   }
   outline.pop(); // the last unit's end is the first unit's start
 
   const contours = [outline];
+  const curves = [outlineRuns];
   if (holeDiameter > 0) {
     const rh = holeDiameter / 2;
     const holeN = arcCount(rh, 2 * Math.PI, tol, HOLE_SAMPLES);
@@ -279,8 +326,14 @@ export function cogOutline(p, tol = null) {
     for (let i = 0; i < holeN; i++)
       hole.push(polar(rh, (2 * Math.PI * i) / holeN));
     contours.push(hole);
+    curves.push([{ type: "arc", start: 0, count: holeN, cx: 0, cy: 0, r: rh }]);
   }
-  return { contours, filletUsed: fillet ? fillet.rf : 0, radii: R };
+  return {
+    contours,
+    curves,
+    filletUsed: fillet ? fillet.rf : 0,
+    radii: R,
+  };
 }
 
 // The parameters a cog shape is built from, as it stores them (scene units).
@@ -316,4 +369,24 @@ export function cogShapeContours(shape, tol = null) {
       return { x: r.x + shape.x, y: r.y + shape.y };
     }),
   );
+}
+
+// A cog shape's contours with the exact curve runs under each, placed like
+// cogShapeContours: arc centres turn and move with the gear.  Built fresh from
+// the parameters -- the cached contours carry no curves.
+export function cogShapeLoops(shape, tol = null) {
+  const a = shape.rotation || 0;
+  const place = (q) => {
+    const r = a ? rotate(q, a) : q;
+    return { x: r.x + shape.x, y: r.y + shape.y };
+  };
+  const { contours, curves } = cogOutline(shape, tol);
+  return contours.map((c, i) => ({
+    polygon: c.map(place),
+    curves: curves[i].map((run) => {
+      if (run.type !== "arc") return run;
+      const c2 = place({ x: run.cx, y: run.cy });
+      return { ...run, cx: c2.x, cy: c2.y };
+    }),
+  }));
 }

@@ -107,7 +107,9 @@ export function reverseEdgeCurves(runs, n) {
 // The addon's packing of a loop's curve runs (BuildCurveWire): 11 numbers a
 // run -- start, count, kind, then the curve's own numbers.
 const CURVE_RUN_WIDTH = 11;
-const CURVE_KIND = { arc: 1, bezier: 2, ellipse: 3 };
+// interp: a smooth curve with no closed form, built through the run's own
+// vertices (a cog's involute flank).
+const CURVE_KIND = { arc: 1, bezier: 2, ellipse: 3, interp: 4 };
 export function packCurveRuns(runs) {
   const out = new Float64Array(runs.length * CURVE_RUN_WIDTH);
   runs.forEach((run, i) => {
@@ -116,7 +118,9 @@ export function packCurveRuns(runs) {
         ? [run.cx, run.cy, run.r]
         : run.type === "ellipse"
           ? [run.cx, run.cy, run.rx, run.ry]
-          : [run.p0, run.p1, run.p2, run.p3].flatMap((p) => [p.x, p.y]);
+          : run.type === "bezier"
+            ? [run.p0, run.p1, run.p2, run.p3].flatMap((p) => [p.x, p.y])
+            : [];
     out.set(
       [run.start, run.count, CURVE_KIND[run.type], ...params],
       i * CURVE_RUN_WIDTH,
@@ -146,14 +150,12 @@ export function windLoop(poly, runs, wantCcw) {
 }
 
 // The addon's packing of curves in WORLD space (BuildWorldCurveWire): 15
-// numbers a run.  An arc needs none -- it is built through three of its own
-// vertices -- and a bezier's poles are mapped by `toWorld`.  An ellipse is
+// numbers a run.  An arc and an interp need none -- each is built through its
+// own vertices -- and a bezier's poles are mapped by `toWorld`.  An ellipse is
 // left out and keeps its sampled segments.
 const WORLD_RUN_WIDTH = 15;
 export function packWorldCurveRuns(runs, toWorld) {
-  const kept = (runs || []).filter(
-    (r) => r.type === "arc" || r.type === "bezier",
-  );
+  const kept = (runs || []).filter((r) => r.type !== "ellipse");
   const out = new Float64Array(kept.length * WORLD_RUN_WIDTH);
   kept.forEach((run, i) => {
     const poles =
@@ -164,7 +166,7 @@ export function packWorldCurveRuns(runs, toWorld) {
           })
         : [];
     out.set(
-      [run.start, run.count, run.type === "arc" ? 1 : 2, ...poles],
+      [run.start, run.count, CURVE_KIND[run.type], ...poles],
       i * WORLD_RUN_WIDTH,
     );
   });

@@ -217,6 +217,95 @@ export function textToContours(text, size, fontId, tolerance = 0) {
   return out.filter((c) => c.length >= 3);
 }
 
+// Glyph loops for `text` built from the font's own curves: each loop's points
+// AND the exact curve runs under them (closedLoops.js), so an extruded letter
+// is built from its beziers rather than from the points.  A line is one edge;
+// a bezier is sampled to `tolerance` (sketch units; 0 = SOURCE_DIVISIONS) and
+// recorded as a run -- a quadratic raised to the cubic it equals.  No
+// simplification afterwards: it would drop the vertices the runs index.
+export function textToLoops(text, size, fontId, tolerance = 0) {
+  const font = getFont(fontId);
+  if (!font || !(size > 0)) return [];
+  const out = [];
+  String(text)
+    .split("\n")
+    .forEach((line, li) => {
+      if (!line) return;
+      let shapes;
+      try {
+        shapes = font.generateShapes(line, size);
+      } catch {
+        return;
+      }
+      const dy = -li * size * LINE_SPACING;
+      for (const sh of shapes)
+        for (const path of [sh, ...sh.holes]) {
+          const loop = pathLoop(path, dy, tolerance);
+          if (loop.pts.length >= 3) out.push(loop);
+        }
+    });
+  return out;
+}
+
+const near = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < 1e-7;
+
+function pathLoop(path, dy, tol) {
+  const P = (v) => ({ x: v.x, y: v.y + dy });
+  const lerp = (a, b, t) => ({
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+  });
+  const pts = [];
+  const runs = [];
+  for (const c of path.curves) {
+    let ctrl = null;
+    if (c.isQuadraticBezierCurve) {
+      const [q0, q1, q2] = [P(c.v0), P(c.v1), P(c.v2)];
+      ctrl = [q0, lerp(q0, q1, 2 / 3), lerp(q2, q1, 2 / 3), q2];
+    } else if (c.isCubicBezierCurve) {
+      ctrl = [P(c.v0), P(c.v1), P(c.v2), P(c.v3)];
+    }
+    const start = ctrl ? ctrl[0] : P(c.getPoint(0));
+    if (!pts.length || !near(pts[pts.length - 1], start)) pts.push(start);
+    if (!ctrl || ctrl.every((q) => near(q, ctrl[0]))) continue;
+    const n = bezierDivisions(ctrl, tol);
+    const s0 = pts.length - 1;
+    for (let i = 1; i < n; i++) pts.push(cubicAt(ctrl, i / n));
+    const [p0, p1, p2, p3] = ctrl;
+    runs.push({ type: "bezier", start: s0, count: n, p0, p1, p2, p3 });
+  }
+  // The path closes on its first point: drop a repeat of it.
+  if (pts.length > 1 && near(pts[0], pts[pts.length - 1])) {
+    pts.pop();
+    // A run ending on the dropped point now ends on vertex 0 -- the same point.
+  }
+  return { pts, runs };
+}
+
+// Pieces for a cubic so no chord strays more than `tol` from it: the chord
+// error of n equal-t pieces is about (control deviation) / n^2.
+function bezierDivisions([p0, p1, p2, p3], tol) {
+  if (!(tol > 0)) return SOURCE_DIVISIONS;
+  const cx = p3.x - p0.x,
+    cy = p3.y - p0.y;
+  const cl = Math.hypot(cx, cy) || 1e-9;
+  const dist = (p) => Math.abs((p.x - p0.x) * cy - (p.y - p0.y) * cx) / cl;
+  const dev = Math.max(dist(p1), dist(p2));
+  return Math.max(2, Math.min(64, Math.ceil(Math.sqrt(dev / tol))));
+}
+
+function cubicAt([q0, q1, q2, q3], t) {
+  const mt = 1 - t;
+  const a = mt * mt * mt,
+    b = 3 * mt * mt * t,
+    c = 3 * mt * t * t,
+    d = t * t * t;
+  return {
+    x: a * q0.x + b * q1.x + c * q2.x + d * q3.x,
+    y: a * q0.y + b * q1.y + c * q2.y + d * q3.y,
+  };
+}
+
 // A sample of a font drawn as one SVG path, for the font list's preview.  The
 // bundled fonts are three.js typeface JSON, not installed families, so CSS
 // cannot render them -- their preview has to come from the same outlines the
@@ -273,12 +362,25 @@ export function measureText(text, size, fontId) {
 // only the stored contours are simplified to `tolerance`.
 function relContours(text, height, font, tolerance = 0) {
   const full = textToContours(text, height, font);
-  if (full.length === 0) return { contours: [], w: 0, h: 0 };
+  if (full.length === 0) return { contours: [], contourCurves: [], w: 0, h: 0 };
   const b = bboxOf(full);
-  const contours = textToContours(text, height, font, tolerance).map((c) =>
-    c.map((p) => ({ x: p.x - b.minX, y: p.y - b.maxY })),
-  );
-  return { contours, w: b.maxX - b.minX, h: b.maxY - b.minY };
+  const at = (p) => ({ x: p.x - b.minX, y: p.y - b.maxY });
+  const loops = textToLoops(text, height, font, tolerance);
+  return {
+    contours: loops.map((l) => l.pts.map(at)),
+    // Each contour's curve runs, the same anchor-relative frame.
+    contourCurves: loops.map((l) =>
+      l.runs.map((r) => ({
+        ...r,
+        p0: at(r.p0),
+        p1: at(r.p1),
+        p2: at(r.p2),
+        p3: at(r.p3),
+      })),
+    ),
+    w: b.maxX - b.minX,
+    h: b.maxY - b.minY,
+  };
 }
 
 // Absolute contours for a committed text shape (anchor = top-left).  Uses the
@@ -297,7 +399,12 @@ export function textShapeContours(shape) {
 // deviation in sketch units (cached as contourTol so a resolution change can
 // detect staleness and re-simplify).
 export function makeTextShape({ text, height, font, x, y, tolerance = 0 }) {
-  const { contours, w, h } = relContours(text, height, font, tolerance);
+  const { contours, contourCurves, w, h } = relContours(
+    text,
+    height,
+    font,
+    tolerance,
+  );
   return {
     type: "text",
     text,
@@ -308,6 +415,7 @@ export function makeTextShape({ text, height, font, x, y, tolerance = 0 }) {
     w,
     h,
     contours,
+    contourCurves,
     contourTol: tolerance,
   };
 }

@@ -1057,6 +1057,12 @@ Established landmines (each was a real bug — extend this list, never shrink it
   only since the upgrade has the profiles under it pinned back to facets
   (`curves2D: null`, never upgraded again) and the pass re-run
   (`upgradeProfileCurves.test.js`). Keep `null` distinct from `undefined`.
+  Cogs and text carry runs too: a cog's arcs and its involute flanks (run
+  type `interp`, a B-spline through the run's own vertices -- OCC has no
+  involute), built fresh from its parameters; a text shape caches its glyphs'
+  beziers as `contourCurves` beside `contours`, so glyph loops are sampled per
+  font curve and never simplified afterwards (that would drop vertices the
+  runs index).
 - **A Split's pieces are re-cut from their source, not kept as baked
   meshes.** They used to carry no recipe, so a resolution change (or an
   upstream edit) never reached them -- MultiSystem2's extruded circles stayed
