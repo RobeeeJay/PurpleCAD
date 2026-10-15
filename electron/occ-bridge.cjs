@@ -89,12 +89,19 @@ function windLoopForOcc(poly, runs, wantCcw) {
 // World-space packing for BuildWorldCurveWire (mirrors polygonUtil.js).
 const WORLD_RUN_WIDTH = 15;
 function packWorldCurveRuns(runs, toWorld) {
-  const kept = (runs || []).filter(r => r.type !== "ellipse");
+  const kept = runs || [];
+  const w3 = (p) => { const w = toWorld(p); return [w.x, w.y, w.z]; };
   const out = new Float64Array(kept.length * WORLD_RUN_WIDTH);
   kept.forEach((run, i) => {
-    const poles = run.type === "bezier"
-      ? [run.p0, run.p1, run.p2, run.p3].flatMap(p => { const w = toWorld(p); return [w.x, w.y, w.z]; })
-      : [];
+    let poles = [];
+    if (run.type === "bezier") poles = [run.p0, run.p1, run.p2, run.p3].flatMap(w3);
+    else if (run.type === "ellipse") {
+      // Centre, world axis directions and radii: three points don't fix one.
+      const c = w3({ x: run.cx, y: run.cy });
+      const ax = w3({ x: run.cx + 1, y: run.cy }).map((v, k) => v - c[k]);
+      const ay = w3({ x: run.cx, y: run.cy + 1 }).map((v, k) => v - c[k]);
+      poles = [...c, ...ax, ...ay, run.rx, run.ry];
+    }
     out.set([run.start, run.count, CURVE_KIND[run.type], ...poles], i * WORLD_RUN_WIDTH);
   });
   return out;
@@ -218,7 +225,39 @@ function bezierSegments(p0, p1, p2, p3, precision) {
   return Math.max(8, Math.min(256, Math.ceil(Math.PI / halfTheta)));
 }
 
+
+// Segments for a path arc of radius r sweeping `angle`, by the same sagitta
+// rule as bezierSegments (mirrors occOps.js); preview (precision null) keeps 24 a half turn.
+function arcPathSegments(r, angle, precision) {
+  if (precision == null || !(r > 0))
+    return Math.max(4, Math.ceil((24 * angle) / Math.PI));
+  const sUnits = precision / MM_PER_UNIT;
+  const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
+  if (!isFinite(halfTheta) || halfTheta <= 0) return 24;
+  return Math.max(4, Math.min(512, Math.ceil(angle / (2 * halfTheta))));
+}
+
+// Points round a circle arc from angle a0 through `sweep`, n segments.
+function arcPathPoints(cx, cy, r, a0, sweep, n) {
+  const out = [];
+  for (let k = 0; k <= n; k++) {
+    const a = a0 + (sweep * k) / n;
+    out.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  }
+  return out;
+}
+
 function pathSegment(shape, i, precision) {
+  if (shape && (shape.type === "arc" || shape.type === "circle")) {
+    const closed = shape.type === "circle";
+    const a0 = closed ? 0 : shape.startAngle;
+    let sweep = closed ? 2 * Math.PI : shape.endAngle - shape.startAngle;
+    if (!closed && sweep <= 0) sweep += 2 * Math.PI;
+    const n = arcPathSegments(shape.r, sweep, precision);
+    const pts = arcPathPoints(shape.cx, shape.cy, shape.r, a0, sweep, n);
+    if (closed) pts[n] = pts[0];
+    return { i, shape, closed, a: pts[0], b: pts[n], sample: (rev) => (rev ? pts.slice().reverse() : pts.slice()) };
+  }
   if (shape && shape.type === "line") {
     const a = { x: shape.x1, y: shape.y1 };
     const b = { x: shape.x2, y: shape.y2 };
@@ -250,13 +289,14 @@ function orderPath(sketch, startShapeIdx, precision) {
   const used = new Set([startShapeIdx]);
   let pts = startSeg.sample(false);
   const pieces = [{ shape: startSeg.shape, edges: pts.length - 1 }];
+  if (startSeg.closed) return { pts, runs: [{ type: "arc", start: 0, count: pts.length - 1 }] };
   const extend = (atEnd) => {
     let changed = true;
     while (changed) {
       changed = false;
       const tip = atEnd ? pts[pts.length - 1] : pts[0];
       for (const seg of segs) {
-        if (used.has(seg.i)) continue;
+        if (used.has(seg.i) || seg.closed) continue;
         const segPts = near(seg.a, tip)
           ? seg.sample(false)
           : near(seg.b, tip)
@@ -281,6 +321,8 @@ function orderPath(sketch, startShapeIdx, precision) {
     if (shape.type === "bezier") {
       const { p0, p1, p2, p3 } = shape;
       runs.push({ start, count: edges, type: "bezier", p0, p1, p2, p3 });
+    } else if (shape.type === "arc") {
+      runs.push({ start, count: edges, type: "arc" });
     }
     start += edges;
   }

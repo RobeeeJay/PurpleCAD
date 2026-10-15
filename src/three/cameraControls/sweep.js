@@ -19,7 +19,8 @@ import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 const PREVIEW_DEBOUNCE_MS = 350;
 const AXIS_HIGHLIGHT = 0x44aaff;
 // Sketch shapes a pipe path can follow (matches occOps.js#orderPathPoints).
-const PATH_TYPES = ["line", "bezier"];
+// A circle is a closed path on its own.
+const PATH_TYPES = ["line", "bezier", "arc", "circle"];
 
 // An extrude-like source snapshot whose live polygon re-derives from the sketch
 // (so the sweep tracks sketch edits, like chamfer/push-pull).  Used as the

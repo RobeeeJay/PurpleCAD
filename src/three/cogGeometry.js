@@ -188,9 +188,6 @@ function arcPoints(c, from, to, samples) {
 }
 
 const ORIGIN = { x: 0, y: 0 };
-// A flank's curve: an involute, which OCC has no exact type for -- it is
-// built as a smooth curve through its sampled points, which lie on it.
-const INTERP = { type: "interp" };
 // A circle-arc piece's curve run, its centre turned into place.
 const curveRunAt = (curve, c, start, count) => ({
   type: "arc",
@@ -237,7 +234,13 @@ export function cogOutline(p, tol = null) {
     const { r, a } = involute[i];
     if (r > flankStart + 1e-12) invPts.push(polar(r, a));
   }
-  const left = [{ pts: invPts, curve: invPts.length >= 3 ? INTERP : null }];
+  // The involute flank stays its sampled segments.  Built as one smooth curve
+  // (a B-spline through the samples, within 0.03 um of the involute) it made
+  // OCC's chamfer erratic on the cog's top rim: 0.2, 0.3 and 1 mm took but
+  // 0.1, 0.5 and 0.7 mm failed, where the segments take 0.1-0.3 mm and refuse
+  // 0.4 mm and up, as before.  Snapping the spline's end tangents to the
+  // radial line, or approximating instead of interpolating, was worse still.
+  const left = [{ pts: invPts, curve: null }];
   const lastInv = invPts[invPts.length - 1];
   // Below the base circle the flank is radial: the involute's last point (on
   // the base circle) runs straight down to the fillet or the root, so it needs

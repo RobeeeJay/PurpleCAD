@@ -266,9 +266,48 @@ function bezierSegments(p0, p1, p2, p3, precision) {
   return Math.max(8, Math.min(256, Math.ceil(Math.PI / halfTheta)));
 }
 
+// Segments for a path arc of radius r sweeping `angle`, by the same sagitta
+// rule as bezierSegments; preview (precision null) keeps 24 a half turn.
+function arcPathSegments(r, angle, precision) {
+  if (precision == null || !(r > 0))
+    return Math.max(4, Math.ceil((24 * angle) / Math.PI));
+  const sUnits = precision / MM_PER_UNIT;
+  const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
+  if (!isFinite(halfTheta) || halfTheta <= 0) return 24;
+  return Math.max(4, Math.min(512, Math.ceil(angle / (2 * halfTheta))));
+}
+
+// Points round a circle arc from angle a0 through `sweep`, n segments.
+function arcPathPoints(cx, cy, r, a0, sweep, n) {
+  const out = [];
+  for (let k = 0; k <= n; k++) {
+    const a = a0 + (sweep * k) / n;
+    out.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  }
+  return out;
+}
+
 // A path-eligible shape as { a, b, sample(reverse) } — its endpoints plus an
 // ordered point list (a→b, or reversed) used to thread it into the polyline.
+// A circle is a closed path on its own: `closed`, a == b.
 function pathSegment(shape, i, precision) {
+  if (shape?.type === "arc" || shape?.type === "circle") {
+    const closed = shape.type === "circle";
+    const a0 = closed ? 0 : shape.startAngle;
+    let sweep = closed ? 2 * Math.PI : shape.endAngle - shape.startAngle;
+    if (!closed && sweep <= 0) sweep += 2 * Math.PI;
+    const n = arcPathSegments(shape.r, sweep, precision);
+    const pts = arcPathPoints(shape.cx, shape.cy, shape.r, a0, sweep, n);
+    if (closed) pts[n] = pts[0];
+    return {
+      i,
+      shape,
+      closed,
+      a: pts[0],
+      b: pts[n],
+      sample: (rev) => (rev ? pts.slice().reverse() : pts.slice()),
+    };
+  }
   if (shape?.type === "line") {
     const a = { x: shape.x1, y: shape.y1 };
     const b = { x: shape.x2, y: shape.y2 };
@@ -314,13 +353,19 @@ function orderPath(sketch, startShapeIdx, precision) {
   let pts = startSeg.sample(false);
   // Each piece's shape and edge count, in path order.
   const pieces = [{ shape: startSeg.shape, edges: pts.length - 1 }];
+  // A circle is the whole path: it ends where it starts.
+  if (startSeg.closed)
+    return {
+      pts,
+      runs: [{ type: "arc", start: 0, count: pts.length - 1 }],
+    };
   const extend = (atEnd) => {
     let changed = true;
     while (changed) {
       changed = false;
       const tip = atEnd ? pts[pts.length - 1] : pts[0];
       for (const seg of segs) {
-        if (used.has(seg.i)) continue;
+        if (used.has(seg.i) || seg.closed) continue;
         // Sample so the new segment's points START at the shared tip.
         const segPts = near(seg.a, tip)
           ? seg.sample(false)
@@ -351,6 +396,9 @@ function orderPath(sketch, startShapeIdx, precision) {
     if (shape.type === "bezier") {
       const { p0, p1, p2, p3 } = shape;
       runs.push({ start, count: edges, type: "bezier", p0, p1, p2, p3 });
+    } else if (shape.type === "arc") {
+      // Built in world space through its own vertices: no centre needed.
+      runs.push({ start, count: edges, type: "arc" });
     }
     start += edges;
   }

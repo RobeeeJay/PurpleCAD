@@ -1057,9 +1057,13 @@ Established landmines (each was a real bug — extend this list, never shrink it
   only since the upgrade has the profiles under it pinned back to facets
   (`curves2D: null`, never upgraded again) and the pass re-run
   (`upgradeProfileCurves.test.js`). Keep `null` distinct from `undefined`.
-  Cogs and text carry runs too: a cog's arcs and its involute flanks (run
-  type `interp`, a B-spline through the run's own vertices -- OCC has no
-  involute), built fresh from its parameters; a text shape caches its glyphs'
+  Cogs and text carry runs too: a cog's root, fillet and tip arcs, built
+  fresh from its parameters -- NOT its involute flanks, which stay segments:
+  as a B-spline through the samples (run type `interp`, still in the addon)
+  they made OCC's rim chamfer erratic (0.1, 0.5, 0.7 mm failed while 0.2,
+  0.3, 1 mm took), snapping the spline's end tangents or approximating
+  instead were worse, and segments bevel exactly as the old facets did. A
+  text shape caches its glyphs'
   beziers as `contourCurves` beside `contours`, so glyph loops are sampled per
   font curve and never simplified afterwards (that would drop vertices the
   runs index).

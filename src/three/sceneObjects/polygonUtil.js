@@ -151,20 +151,27 @@ export function windLoop(poly, runs, wantCcw) {
 
 // The addon's packing of curves in WORLD space (BuildWorldCurveWire): 15
 // numbers a run.  An arc and an interp need none -- each is built through its
-// own vertices -- and a bezier's poles are mapped by `toWorld`.  An ellipse is
-// left out and keeps its sampled segments.
+// own vertices -- and a bezier's poles are mapped by `toWorld`.  An ellipse
+// carries its centre, the world directions of its axes and its radii, since
+// three points don't fix one.
 const WORLD_RUN_WIDTH = 15;
 export function packWorldCurveRuns(runs, toWorld) {
-  const kept = (runs || []).filter((r) => r.type !== "ellipse");
+  const kept = runs || [];
+  const w3 = (p) => {
+    const w = toWorld(p);
+    return [w.x, w.y, w.z];
+  };
   const out = new Float64Array(kept.length * WORLD_RUN_WIDTH);
   kept.forEach((run, i) => {
-    const poles =
-      run.type === "bezier"
-        ? [run.p0, run.p1, run.p2, run.p3].flatMap((p) => {
-            const w = toWorld(p);
-            return [w.x, w.y, w.z];
-          })
-        : [];
+    let poles = [];
+    if (run.type === "bezier")
+      poles = [run.p0, run.p1, run.p2, run.p3].flatMap(w3);
+    else if (run.type === "ellipse") {
+      const c = w3({ x: run.cx, y: run.cy });
+      const ax = w3({ x: run.cx + 1, y: run.cy }).map((v, k) => v - c[k]);
+      const ay = w3({ x: run.cx, y: run.cy + 1 }).map((v, k) => v - c[k]);
+      poles = [...c, ...ax, ...ay, run.rx, run.ry];
+    }
     out.set(
       [run.start, run.count, CURVE_KIND[run.type], ...poles],
       i * WORLD_RUN_WIDTH,

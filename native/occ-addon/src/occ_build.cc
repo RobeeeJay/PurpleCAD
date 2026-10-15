@@ -1,6 +1,8 @@
 #include "occ_core.h"
 
+#include <BRepAdaptor_CompCurve.hxx>
 #include <ElCLib.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
 #include <GC_MakeArcOfCircle.hxx>
@@ -399,8 +401,10 @@ Val MakeExtrude(Js& js) {
 // its exact curves where `runs` gives them -- packed 15 numbers a run:
 // start, count, kind, then 12.  kind 1 = circle arc, built through three of
 // its own vertices (three points fix a circle, so no centre is needed in 3D);
-// kind 2 = cubic bezier, its four poles in world space; kind 4 = a smooth
-// curve through its own vertices.  Anything else, and a
+// kind 2 = cubic bezier, its four poles in world space; kind 3 = an ellipse
+// round a whole closed loop -- its centre, the world directions of its local
+// x and y axes, and its two radii (three points don't fix an ellipse); kind
+// 4 = a smooth curve through its own vertices.  Anything else, and a
 // curve that can't be built, keeps its sampled segments.
 static constexpr size_t kWorldRunWidth = 15;
 static TopoDS_Wire BuildWorldCurveWire(const double* pts, size_t n,
@@ -448,6 +452,31 @@ static TopoDS_Wire BuildWorldCurveWire(const double* pts, size_t n,
     if (mk.IsDone()) {
       Handle(Geom_Circle) circ = mk.Value();
       wireMk.Add(BRepBuilderAPI_MakeEdge(circ).Edge());
+      if (wireMk.IsDone()) return wireMk.Wire();
+    }
+  }
+  // An ellipse round a whole closed loop: one closed edge, run the loop's way.
+  if (closed && owner[0] >= 0 &&
+      runs[owner[0] * kWorldRunWidth + 2] == 3 &&
+      std::all_of(owner.begin(), owner.end(),
+                  [&](int o) { return o == owner[0]; })) {
+    const double* q = runs + owner[0] * kWorldRunWidth + 3;
+    gp_Pnt c(q[0], q[1], q[2]);
+    gp_Vec ex(q[3], q[4], q[5]), ey(q[6], q[7], q[8]);
+    const double rx = q[9], ry = q[10];
+    gp_Vec nrm = ex.Crossed(ey);
+    if (nrm.Magnitude() > 1e-12 && rx > 0 && ry > 0) {
+      const bool wide = rx >= ry;
+      gp_Elips el(gp_Ax2(c, gp_Dir(nrm), gp_Dir(wide ? ex : ey)),
+                  wide ? rx : ry, wide ? ry : rx);
+      TopoDS_Edge e = BRepBuilderAPI_MakeEdge(el).Edge();
+      // The ellipse runs counter-clockwise about its normal; turn it when
+      // the loop runs the other way.
+      double turn = 0;
+      for (size_t i = 0; i < n; i++)
+        turn += gp_Vec(c, P(i)).Crossed(gp_Vec(c, P(i + 1))).Dot(nrm);
+      if (turn < 0) e.Reverse();
+      wireMk.Add(e);
       if (wireMk.IsDone()) return wireMk.Wire();
     }
   }
@@ -658,15 +687,46 @@ Val MakePipe(Js& js) {
   if (nPath < 2) throw std::runtime_error("pipe path needs at least 2 points");
 
   const bool custom = std::abs(twistTurns) > 1e-9 || autoRotate;
+  // A path given its exact curves is swept along them, not along its points.
+  const bool exactPath = pathCurves != nullptr && js.isTypedArray(pathCurves);
+  // A path that ends where it starts (a circle) is a closed spine.
+  const gp_Pnt pathEnd(path[3 * (nPath - 1)], path[3 * (nPath - 1) + 1],
+                       path[3 * (nPath - 1) + 2]);
+  const bool closedPath =
+      nPath >= 4 && gp_Pnt(path[0], path[1], path[2]).Distance(pathEnd) < 1e-9;
+  auto spineWire = [&]() {
+    F64 packed;
+    const double* runs = nullptr;
+    size_t nRuns = 0;
+    if (exactPath) {
+      packed = js.f64(pathCurves);
+      runs = packed.Data();
+      nRuns = packed.ElementLength() / kWorldRunWidth;
+    }
+    return BuildWorldCurveWire(path.Data(), closedPath ? nPath - 1 : nPath,
+                               closedPath, runs, nRuns);
+  };
+  // The spine's start point and true tangent there (a chord to the first
+  // sample would tilt the profile off a curved spine).
+  auto spineStart = [&](const TopoDS_Wire& spine, gp_Pnt& p, gp_Dir& d) {
+    BRepAdaptor_CompCurve cc(spine);
+    gp_Vec v;
+    cc.D1(cc.FirstParameter(), p, v);
+    if (v.Magnitude() < 1e-12) return false;
+    d = gp_Dir(v);
+    return true;
+  };
 
   if (!custom) {
     // Plain pipe: spine + a single start-oriented profile.
-    TopoDS_Wire spine = WorldWireArg(js, path, pathCurves, false);
+    TopoDS_Wire spine =
+        exactPath ? spineWire() : WorldWireArg(js, path, pathCurves, false);
     if (spine.IsNull()) throw std::runtime_error("pipe path wire failed");
     TopoDS_Face face =
         BuildProfileFace(js, outer, holes, cx, cy, outerCurves, holeCurves);
     gp_Pnt p0(path[0], path[1], path[2]);
     gp_Dir tangent(path[3] - path[0], path[4] - path[1], path[5] - path[2]);
+    if (exactPath) spineStart(spine, p0, tangent);
     gp_Trsf place;
     place.SetTransformation(gp_Ax3(p0, tangent));
     place.Invert();
@@ -678,9 +738,14 @@ Val MakePipe(Js& js) {
     return js.makeNumber(StoreShape(pipe.Shape()));
   }
 
+  // Auto-rotate or twist: a loft through sections square to the path.  An
+  // exact sweep (MakePipeShell, corrected Frenet) was tried for auto-rotate
+  // alone and measured WORSE: its wall strayed 1.4e-4 mm from the true path
+  // against 1.1e-5 mm for this loft with its sections on the exact spine.
   // Twist / auto-rotate: loft the profile through many sections, each placed
   // and oriented along the path (with a rotation-minimizing frame when
-  // auto-rotating) and twisted progressively.
+  // auto-rotating) and twisted progressively.  Along an exact path the
+  // sections sit on the spine itself, with its true tangents.
 
   // De-dup the raw path points.
   std::vector<gp_Pnt> raw;
@@ -714,7 +779,33 @@ Val MakePipe(Js& js) {
                     raw[i - 1].Z() + (raw[i].Z() - raw[i - 1].Z()) * t);
   }
 
+  std::vector<gp_Dir> exactTangent;
+  if (exactPath) {
+    TopoDS_Wire spine = spineWire();
+    if (!spine.IsNull()) {
+      BRepAdaptor_CompCurve cc(spine);
+      const double len = GCPnts_AbscissaPoint::Length(cc);
+      // All or nothing: a section the curve can't place keeps the sampled
+      // path for every section, never a mix of the two.
+      std::vector<gp_Pnt> onSpine;
+      for (int k = 0; k < n && len > 1e-12; k++) {
+        GCPnts_AbscissaPoint at(cc, len * k / (n - 1), cc.FirstParameter());
+        if (!at.IsDone()) break;
+        gp_Pnt p;
+        gp_Vec v;
+        cc.D1(at.Parameter(), p, v);
+        onSpine.push_back(p);
+        exactTangent.push_back(v.Magnitude() > 1e-12 ? gp_Dir(v)
+                                                     : gp_Dir(1, 0, 0));
+      }
+      if ((int)onSpine.size() == n)
+        pts = onSpine;
+      else
+        exactTangent.clear();
+    }
+  }
   auto tangentAt = [&](int i) -> gp_Dir {
+    if ((int)exactTangent.size() == n) return exactTangent[i];
     gp_Pnt a = pts[i > 0 ? i - 1 : 0];
     gp_Pnt b = pts[i < n - 1 ? i + 1 : n - 1];
     gp_Vec v(a, b);
@@ -731,6 +822,11 @@ Val MakePipe(Js& js) {
   gp_Dir Zprev = Z0;
 
   BRepOffsetAPI_ThruSections loft(Standard_True, Standard_False);
+  // An exact profile can be one closed edge (a circle) whose single vertex
+  // the compatibility pass can't match between sections -- the twisted loft
+  // failed outright.  The sections are copies of one wire, already matched.
+  if (outerCurves != nullptr && js.isTypedArray(outerCurves))
+    loft.CheckCompatibility(Standard_False);
   for (int k = 0; k < n; k++) {
     gp_Dir Z = autoRotate ? tangentAt(k) : Z0;
     if (autoRotate && k > 0) {

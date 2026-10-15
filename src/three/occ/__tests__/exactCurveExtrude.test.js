@@ -331,6 +331,134 @@ describe("revolve, sweep and loft built from exact curves", () => {
       expect(c.faces, JSON.stringify(c)).toBe(3);
   }, 30000);
 
+  // A path sketch standing upright, so the sweep leaves the profile's plane.
+  const pathOf = (shape) => ({
+    id: 42,
+    type: "sketch",
+    position: O,
+    rotation: { x: Math.PI / 2, y: 0, z: 0 },
+    shapes: [shape],
+  });
+  const pipeOf = (profile, extra = {}) =>
+    recipeItem({
+      kind: "pipe",
+      profileSource: sourceOf(profile, true),
+      pathRef: { sketchId: 42, shapeIdx: 0 },
+      twistTurns: 0,
+      autoRotate: false,
+      ...extra,
+    });
+
+  it("a circle swept along an arc is one wall and two caps", async () => {
+    const profile = circleSketch(41, 0, 0, 0.3);
+    const path = pathOf({
+      type: "arc",
+      cx: 2,
+      cy: 0,
+      r: 2,
+      startAngle: Math.PI / 2,
+      endAngle: Math.PI,
+    });
+    for (const c of await countBoth(pipeOf(profile), [profile, path]))
+      expect(c.faces, JSON.stringify(c)).toBe(3);
+  }, 30000);
+
+  it("a circle swept round a circle is one closed face, a torus", async () => {
+    const profile = circleSketch(41, 0, 0, 0.3);
+    const path = pathOf({ type: "circle", cx: 0, cy: 3, r: 2 });
+    for (const c of await countBoth(pipeOf(profile), [profile, path]))
+      expect(c.faces, JSON.stringify(c)).toBe(1);
+  }, 30000);
+
+  const BEZ = {
+    type: "bezier",
+    p0: { x: 0, y: 0 },
+    p1: { x: 0, y: 2 },
+    p2: { x: 2, y: 3 },
+    p3: { x: 4, y: 3 },
+  };
+
+  it("an auto-rotated sweep follows the true path, not its samples", async () => {
+    // Every wall vertex sits at the profile's radius from the TRUE bezier.
+    // Measured: lofted between sections on the sampled path, 5e-3 mm; swept
+    // by OCC's pipe shell along the exact spine, 1.4e-4 mm; lofted through
+    // sections placed on the exact spine (what it does), 1.1e-5 mm.
+    const profile = circleSketch(41, 0, 0, 0.3);
+    const path = pathOf(BEZ);
+    const res = await ops.pipeItem({
+      profileSource: sourceOf(profile, true),
+      pathRef: { sketchId: 42, shapeIdx: 0 },
+      twistTurns: 0,
+      autoRotate: true,
+      allItems: [profile, path],
+      printPrecision: 0.005,
+    });
+    const bez = (t) => {
+      const u = 1 - t;
+      const f = (k) =>
+        u * u * u * BEZ.p0[k] +
+        3 * u * u * t * BEZ.p1[k] +
+        3 * u * t * t * BEZ.p2[k] +
+        t * t * t * BEZ.p3[k];
+      return { x: f("x"), y: f("y") };
+    };
+    const dense = Array.from({ length: 4001 }, (_, i) => bez(i / 4000));
+    const P = res.geometryData.positions;
+    const at = res.position;
+    let worst = 0;
+    for (let i = 0; i < P.length; i += 3) {
+      // The path sketch is turned +90 deg about X: its (x, y) is world (x, z).
+      const lx = P[i] + at.x;
+      const ly = P[i + 2] + at.z;
+      const lz = -(P[i + 1] + at.y);
+      let d = Infinity;
+      for (const q of dense)
+        d = Math.min(d, Math.hypot(lx - q.x, ly - q.y, lz));
+      if (Math.abs(d - 0.3) < 0.05) worst = Math.max(worst, Math.abs(d - 0.3));
+    }
+    expect(worst * 10, "worst wall vertex off, mm").toBeLessThan(1e-4);
+  }, 60000);
+
+  it("a twisted sweep of a curved profile builds", async () => {
+    // A circle's exact profile is one closed edge; lofting twisted copies of
+    // it failed outright ("pipe sweep (twist) failed") until the loft stopped
+    // trying to re-match its single vertex between sections.
+    const profile = circleSketch(41, 0, 0, 0.3);
+    const path = pathOf(BEZ);
+    const item = pipeOf(profile, { autoRotate: true, twistTurns: 0.5 });
+    for (const c of await countBoth(item, [profile, path]))
+      expect(c.faces, JSON.stringify(c)).toBe(3);
+  }, 30000);
+
+  it("a loft from a tilted ellipse to a circle is one wall and two caps", async () => {
+    // The ellipse is packed by its world centre, axes and radii; three points
+    // on it would not fix it.
+    const tilt = { x: 0.3, y: 0, z: 0.2 };
+    const a = {
+      id: 45,
+      type: "sketch",
+      position: O,
+      rotation: tilt,
+      shapes: [{ type: "ellipse", cx: 0.2, cy: -0.1, rx: 1.2, ry: 0.6 }],
+    };
+    const b = circleSketch(46, 0, 0, 0.5, [], { x: 0, y: 0, z: 4 });
+    const src = sourceOf(a, true);
+    src.profile.rotation = tilt;
+    src.profile.profileCentroid = { x: 0.2, y: -0.1 };
+    const item = recipeItem({
+      kind: "loft",
+      profileSource: src,
+      secondProfileSource: sourceOf(b, true),
+    });
+    const args = { items: [item], allItems: [a, b], precision: 0.05 };
+    for (const impl of [ops, bridge]) {
+      const step = await impl.exportSTEP(JSON.parse(JSON.stringify(args)));
+      const c = faceCounts(step);
+      expect(c.faces, JSON.stringify(c)).toBe(3);
+      expect((step.match(/= ELLIPSE\(/g) || []).length).toBeGreaterThan(0);
+    }
+  }, 30000);
+
   it("a loft between two circles is one wall and two caps", async () => {
     const a = circleSketch(43, 0, 0, 1);
     const b = circleSketch(44, 0, 0, 0.5, [], { x: 0, y: 0, z: 4 });
@@ -403,12 +531,11 @@ describe("an exact extrude's face names", () => {
   });
 });
 
-// A cog is arcs (root, fillets, tip) and involute flanks, which OCC has no
-// exact type for: each flank is a B-spline through its sampled points, which
-// lie on it (measured within 0.03 um of the true involute at the mesh's float
-// precision).  One face per curve, not one per sample.
+// A cog's root, fillet and tip arcs are true arcs; its involute flanks stay
+// their sampled segments (built as splines they made OCC's rim chamfer
+// erratic -- see cogGeometry.js).  One face per arc, not one per sample.
 describe("an extruded cog", () => {
-  it("has a face per tooth curve, in both OCC implementations", async () => {
+  it("has a face per tooth arc, in both OCC implementations", async () => {
     const cog = makeCogShape({
       x: 0.5,
       y: -0.3,
@@ -443,13 +570,21 @@ describe("an extruded cog", () => {
       },
     };
     const args = { items: [item], allItems: [sk, item], precision: 0.05 };
+    // One face per arc run and per straight edge, then top and bottom.
+    const runs = g.curves.outer;
+    const expected =
+      runs.length +
+      g.polygon.length -
+      runs.reduce((n, r) => n + r.count, 0) +
+      2;
     for (const impl of [ops, bridge]) {
       const c = faceCounts(
         await impl.exportSTEP(JSON.parse(JSON.stringify(args))),
       );
-      // Per tooth: tip, two flanks, two radial lines, two fillets and two
-      // root arcs; then top and bottom.
-      expect(c.faces, JSON.stringify(c)).toBe(9 * 20 + 2);
+      expect(c.faces, JSON.stringify(c)).toBe(expected);
+      // Tip, two fillets and two root arcs per tooth are cylinders.
+      expect(c.cylinders).toBe(5 * 20);
+      expect(c.faces).toBeLessThan((g.polygon.length + 2) * 0.75);
     }
   }, 30000);
 });
@@ -512,4 +647,25 @@ describe("extruded text", () => {
       expect(c.faces).toBeLessThan(sampled / 2);
     }
   }, 30000);
+});
+
+// With exact curves, Resolution only decides how finely a curved face is
+// drawn -- so every setting Settings offers must draw finer than the one
+// above it.  The mesher's floor was 0.01 mm: 0.01, 0.005, 0.002 and 0.001 mm
+// all gave a cylinder the same 396 triangles.
+describe("the Resolution's reach", () => {
+  it("meshes a curved face finer at every setting down to 0.001 mm", () => {
+    const occ = createRequire(import.meta.url)(
+      "../../../../native/occ-addon/build/Release/occ_addon.node",
+    );
+    const id = occ.makeCylinder(-1, 1, 2);
+    const tris = [0.05, 0.01, 0.005, 0.002, 0.001].map(
+      (mm) => occ.tessellate(id, mm).indices.length / 3,
+    );
+    occ.releaseShape(id);
+    for (let i = 1; i < tris.length; i++)
+      expect(tris[i], `triangles by setting: ${tris}`).toBeGreaterThan(
+        tris[i - 1],
+      );
+  });
 });

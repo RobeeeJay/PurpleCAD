@@ -23,7 +23,10 @@ static Val MeshResult(Js& js, const std::vector<float>& positions,
 Val TessellateShape(Js& js) {
   int id         = js.int32(js[0]);
   double prec    = js.num(js[1], 0.5);
-  double linDefl = std::max(0.001, prec / 10.0);
+  // `prec` is the Resolution in mm; a tenth of it in scene units (1 = 10 mm)
+  // is that many mm.  Floored at the finest Resolution Settings offers
+  // (0.001 mm): the floor was 0.01 mm, so every finer setting meshed the same.
+  double linDefl = std::max(0.0001, prec / 10.0);
 
   TopoDS_Shape shape = FetchShape(id);
   std::vector<float> positions;
@@ -477,7 +480,7 @@ Val MakeCubeTessellated(Js& js) {
   BRepPrimAPI_MakeBox boxMaker(p1, p2);
   TopoDS_Shape shape = boxMaker.Shape();
 
-  double linDefl = std::max(0.001, precision / 10.0);
+  double linDefl = std::max(0.0001, precision / 10.0);
   std::vector<float> positions;
   std::vector<uint32_t> indices;
   TessellateInto(shape, linDefl, positions, indices);
