@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitTexture } from "../three/cameraControls/texture.js";
@@ -79,8 +78,8 @@ const TextureDialog = () => {
   };
 
   const toggleStyle = (on) => ({ ...toggleBtn(on), marginRight: 4 });
-  const num = (label, key, step = "1", extra) => (
-    <Field label={label} style={{ marginLeft: 8 }}>
+  const num = (label, key, step = "1", extra, hint) => (
+    <Field label={label} style={{ marginLeft: 8 }} hint={hint}>
       <NumberInput
         step={step}
         value={params[key]}
@@ -117,12 +116,48 @@ const TextureDialog = () => {
             : `Faces${faceCount > 0 ? ` (${faceCount})` : ""} ${facesValid ? "✓" : "⚠"}`}
         </button>
 
-        {num("Offset H", "offsetHMm")}
-        {num("Offset V", "offsetVMm")}
-        {num("Rot°", "rotationDeg", "15")}
-        {num("Size", "sizeMm")}
-        {num("Depth", "depthMm", "0.5")}
-        {num("Res", "resolutionMm", "0.5")}
+        {num(
+          "Offset H",
+          "offsetHMm",
+          "1",
+          undefined,
+          "Slides the pattern sideways across the surface. Moves where it sits, not how big it is.",
+        )}
+        {num(
+          "Offset V",
+          "offsetVMm",
+          "1",
+          undefined,
+          "Slides the pattern up and down the surface.",
+        )}
+        {num(
+          "Rot°",
+          "rotationDeg",
+          "15",
+          undefined,
+          "Turns the pattern on the surface, so the image runs at an angle.",
+        )}
+        {num(
+          "Size",
+          "sizeMm",
+          "1",
+          undefined,
+          "Width of one tile of the image in mm. Smaller means a finer, more repeated pattern; with Wrap off it simply scales the single stamp.",
+        )}
+        {num(
+          "Depth",
+          "depthMm",
+          "0.5",
+          undefined,
+          "How far white in the image pushes the surface out. Bigger gives a more pronounced relief; deeper than the wall cuts through it.",
+        )}
+        {num(
+          "Res",
+          "resolutionMm",
+          "0.5",
+          undefined,
+          "Spacing of the displacement grid in mm. Smaller captures finer detail but multiplies the triangle count and the rebuild time.",
+        )}
 
         <button
           type="button"

@@ -1,5 +1,6 @@
-import React from "react";
+import { useState } from "react";
 import { useStore } from "../store";
+import LicenseDialog from "./LicenseDialog.jsx";
 import "../styles/VariablesDialog.css";
 import "../styles/AboutDialog.css";
 
@@ -15,10 +16,16 @@ const DEPENDENCIES =
 const AboutDialog = () => {
   const open = useStore((s) => s.aboutDialogOpen);
   const setOpen = useStore((s) => s.setAboutDialogOpen);
+  // Above the early return: a hook after it changes the hook count when the
+  // dialog opens, and React blanks the whole app.
+  const [licenseOpen, setLicenseOpen] = useState(false);
 
   if (!open) return null;
 
-  const close = () => setOpen(false);
+  const close = () => {
+    setLicenseOpen(false);
+    setOpen(false);
+  };
   const stop = (e) => e.stopPropagation();
 
   return (
@@ -41,6 +48,17 @@ const AboutDialog = () => {
             v{VERSION}
             <span className="about-commit">{COMMIT}</span>
           </div>
+          <div className="about-license">
+            License:{" "}
+            <button
+              type="button"
+              className="about-license-link"
+              onClick={() => setLicenseOpen(true)}
+              title="Show the full license, the trademark policy and third-party licenses"
+            >
+              PolyForm Noncommercial 1.0.0
+            </button>
+          </div>
           <table className="about-deps">
             <tbody>
               {Object.entries(DEPENDENCIES).map(([name, version]) => (
@@ -53,6 +71,7 @@ const AboutDialog = () => {
           </table>
         </div>
       </div>
+      {licenseOpen && <LicenseDialog onClose={() => setLicenseOpen(false)} />}
     </div>
   );
 };

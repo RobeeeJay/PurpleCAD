@@ -4,8 +4,17 @@
 // replace their inputs with a single CSG item.
 
 import { useStore } from "../../store";
+import { maxItemId } from "../../store/internals.js";
 import { activePrecision } from "../resolution.js";
-import { hostFaceExtentAlongNormal } from "../csgUtils.js";
+import { cutStartInsetFor } from "../csgUtils.js";
+import { openMeshNotice } from "../importWeld.js";
+
+// Once a cut or fuse is committed, warn if a body it went into was an open
+// mesh: the result may have holes where that surface was open.
+async function warnIfOpen(bodies) {
+  const notice = await openMeshNotice(bodies);
+  if (notice) useStore.getState().showNotification(notice);
+}
 
 // Determine the solids a cut-extrusion subtracts from.  In priority order:
 //   1. sourceItemId from the extrude profile (face-profile path — the user
@@ -67,12 +76,7 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
         allItems: items,
       });
       if (!result) continue;
-      let maxId = 0;
-      useStore.getState().history.forEach((e) => {
-        if (e.instruction?.type === "create" && e.instruction.item.id > maxId)
-          maxId = e.instruction.item.id;
-      });
-      const id = maxId + 1;
+      const id = maxItemId(useStore.getState().history) + 1;
       useStore.getState().addItem({
         id,
         name: `Cut ${id}`,
@@ -97,8 +101,12 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
     useStore
       .getState()
       .consumeItems([extrudeItemId, ...targets.map((t) => t.id)]);
+    await warnIfOpen(targets);
   } catch (err) {
     console.error("Cut extrusion failed:", err);
+    useStore
+      .getState()
+      .showNotification(`The cut couldn't be made: ${err.message}`);
   }
 }
 
@@ -128,23 +136,9 @@ export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
     // re-anchors the cut to the host's live face + this inset each regen, so a
     // variable that resizes the body keeps the cut on the face it was started
     // from.  Measured against the pre-cut target.
-    const ref = extrudeDefs.find((d) => (d.startOffset || 0) !== 0)?.profile;
     let id = cutId;
     for (const target of targets) {
-      const cutStartInset =
-        ref?.normalWorld && ref.position
-          ? (() => {
-              const top = hostFaceExtentAlongNormal(
-                [target],
-                ref.normalWorld,
-                ref.position,
-              );
-              return top == null
-                ? 0
-                : (extrudeDefs.find((d) => (d.startOffset || 0) !== 0)
-                    ?.startOffset || 0) - top;
-            })()
-          : 0;
+      const cutStartInset = cutStartInsetFor([target], extrudeDefs);
       // One difference with every prism as a tool — BooleanOp takes the first
       // input as the argument and the rest as tools.
       const result = await performCsg({
@@ -177,8 +171,12 @@ export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
       id += 1;
     }
     useStore.getState().consumeItems(targets.map((t) => t.id));
+    await warnIfOpen(targets);
   } catch (err) {
     console.error("Cut extrusion failed:", err);
+    useStore
+      .getState()
+      .showNotification(`The cut couldn't be made: ${err.message}`);
   }
 }
 
@@ -198,6 +196,17 @@ export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
 // `hostIds` are existing solids (a boss) fused in and consumed.  Falls back to
 // adding the prisms as separate items if the union can't be produced.
 export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
+  // The prisms exist ONLY inside the union's recipe until it is committed, so a
+  // failed fuse must add them separately or the extrude produces nothing.
+  let committed = false;
+  const keepSeparately = (reason) => {
+    useStore.getState().addItems(extrudeDefs, "Extruded");
+    useStore
+      .getState()
+      .showNotification(
+        `The extrusion couldn't be merged with the body it starts on, so it was added as a separate body.${reason ? ` ${reason}` : ""}`,
+      );
+  };
   try {
     const { performCsg } = await import("../occClient.js");
     const store = useStore.getState();
@@ -223,10 +232,12 @@ export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
     });
     if (!result) {
       // Couldn't fuse — keep the geometry by adding the prisms separately.
-      useStore.getState().addItems(extrudeDefs, "Extruded");
+      committed = true;
+      keepSeparately();
       return;
     }
     const material = (hosts[0] ?? extrudeDefs[0])?.material;
+    committed = true;
     useStore.getState().addItem({
       id: unionId,
       name: `Extruded ${unionId}`,
@@ -246,8 +257,14 @@ export async function runExtrudeUnion(extrudeDefs, hostIds = [], unionId) {
       },
     });
     if (hosts.length) useStore.getState().consumeItems(hosts.map((h) => h.id));
+    await warnIfOpen(hosts);
   } catch (err) {
+    // The fuse can THROW, not only come back empty -- OCC refuses a host it
+    // can't boolean, such as an imported mesh too dense to turn into a solid.
+    // That used to skip the fallback above and only log: a backward extrude
+    // into an imported STL produced no body and no message at all.
     console.error("Extrude union failed:", err);
+    if (!committed) keepSeparately(err.message);
   }
 }
 
@@ -298,7 +315,11 @@ export async function runUnionExtrudes(extrudeIds, solidIds = [], unionId) {
       },
     });
     useStore.getState().consumeItems(inputs.map((i) => i.id));
+    await warnIfOpen(solids);
   } catch (err) {
     console.error("Union extrude batch failed:", err);
+    useStore
+      .getState()
+      .showNotification(`The extrusions couldn't be merged: ${err.message}`);
   }
 }

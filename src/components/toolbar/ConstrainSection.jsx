@@ -1,6 +1,17 @@
-import React from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import CentreConstraintButton from "./CentreConstraintButton";
+import {
+  CoincidentArt,
+  MidpointArt,
+  DistanceArt,
+  HorizontalArt,
+  VerticalArt,
+  ParallelArt,
+  ColinearArt,
+  TangentArt,
+  EqualArt,
+} from "../icons/constraintIconArt.jsx";
 
 // In sketch mode this is the "Constrain" group (coincident / distance / H / V);
 // in 3D it's the "Move" group (drop-to-ground, point-to-point).  Snap is shared.
@@ -130,133 +141,22 @@ const ConstrainSection = ({ isSketchMode }) => {
             title="Coincident — make two points share the same position"
             onClick={handleCoincidentConstraint}
           >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <circle
-                stroke="#c4c2b8"
-                fill="none"
-                strokeWidth="1.5"
-                cx="8"
-                cy="12"
-                r="5"
-              />
-              <circle
-                stroke="#c4c2b8"
-                fill="none"
-                strokeWidth="1.5"
-                cx="16"
-                cy="12"
-                r="5"
-              />
-              <circle fill="#6C3FD4" stroke="#6C3FD4" r="2" cx="12" cy="12" />
-              <line
-                stroke="#D4A33F"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="8"
-                y1="12"
-                x2="10"
-                y2="12"
-              />
-              <line
-                stroke="#D4A33F"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="14"
-                y1="12"
-                x2="16"
-                y2="12"
-              />
-            </svg>
+            <CoincidentArt />
           </button>
           <button
             className={`toolbar-btn ${sketchConstraintMode === "midpoint" ? "active" : ""}`}
             title="Midpoint — pin a point to the middle of a line, arc or curve (click the point, then the target)"
             onClick={handleMidpointConstraint}
           >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <line
-                stroke="#6C3FD4"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="4"
-                y1="17"
-                x2="20"
-                y2="7"
-              />
-              <circle cx="12" cy="12" r="2.6" fill="#D4A33F" />
-            </svg>
+            <MidpointArt />
           </button>
+          <CentreConstraintButton />
           <button
             className={`toolbar-btn ${sketchConstraintMode === "distance" ? "active" : ""}`}
             title="Distance — set a fixed distance between two points"
             onClick={handleDistanceConstraint}
           >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <line
-                stroke="#c4c2b8"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="4"
-                y1="6"
-                x2="4"
-                y2="19"
-              />
-              <line
-                stroke="#c4c2b8"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="20"
-                y1="6"
-                x2="20"
-                y2="19"
-              />
-              <line
-                stroke="#6C3FD4"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="4"
-                y1="12"
-                x2="20"
-                y2="12"
-              />
-              <polygon
-                fill="#6C3FD4"
-                stroke="#6C3FD4"
-                strokeWidth="0.5"
-                points="4,12 7,10.5 7,13.5"
-              />
-              <polygon
-                fill="#6C3FD4"
-                stroke="#6C3FD4"
-                strokeWidth="0.5"
-                points="20,12 17,10.5 17,13.5"
-              />
-              <line
-                stroke="#D4A33F"
-                fill="none"
-                strokeWidth="1"
-                strokeDasharray="2 2"
-                x1="4"
-                y1="6"
-                x2="20"
-                y2="6"
-              />
-              <text
-                x="10"
-                y="20"
-                fontSize="7"
-                fontFamily="monospace"
-                fill="#D4A33F"
-                fontWeight="500"
-              >
-                dim
-              </text>
-            </svg>
+            <DistanceArt />
           </button>
           <button
             className="toolbar-btn"
@@ -276,40 +176,7 @@ const ConstrainSection = ({ isSketchMode }) => {
               }
             }}
           >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <line
-                stroke="#6C3FD4"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="3"
-                y1="12"
-                x2="21"
-                y2="12"
-              />
-              <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="12" />
-              <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="12" />
-              <line
-                stroke="#D4A33F"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="9"
-                y1="9"
-                x2="9"
-                y2="15"
-              />
-              <line
-                stroke="#D4A33F"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="15"
-                y1="9"
-                x2="15"
-                y2="15"
-              />
-            </svg>
+            <HorizontalArt />
           </button>
           <button
             className="toolbar-btn"
@@ -328,40 +195,7 @@ const ConstrainSection = ({ isSketchMode }) => {
               }
             }}
           >
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <line
-                stroke="#6C3FD4"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="12"
-                y1="3"
-                x2="12"
-                y2="21"
-              />
-              <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="3" />
-              <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="21" />
-              <line
-                stroke="#D4A33F"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="9"
-                y1="9"
-                x2="15"
-                y2="9"
-              />
-              <line
-                stroke="#D4A33F"
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="square"
-                x1="9"
-                y1="15"
-                x2="15"
-                y2="15"
-              />
-            </svg>
+            <VerticalArt />
           </button>
           {(() => {
             const ready = (multiSelectedIndices?.length || 0) === 2;
@@ -385,35 +219,7 @@ const ConstrainSection = ({ isSketchMode }) => {
                   disabled={!ready}
                   onClick={() => applyPair("parallel")}
                 >
-                  <svg viewBox="0 0 24 24" width="20" height="20">
-                    <line
-                      stroke="#6C3FD4"
-                      strokeWidth="1.5"
-                      strokeLinecap="square"
-                      x1="5"
-                      y1="19"
-                      x2="13"
-                      y2="5"
-                    />
-                    <line
-                      stroke="#6C3FD4"
-                      strokeWidth="1.5"
-                      strokeLinecap="square"
-                      x1="11"
-                      y1="19"
-                      x2="19"
-                      y2="5"
-                    />
-                    <line
-                      stroke="#D4A33F"
-                      strokeWidth="1"
-                      strokeDasharray="2 2"
-                      x1="8"
-                      y1="14"
-                      x2="14"
-                      y2="14"
-                    />
-                  </svg>
+                  <ParallelArt />
                 </button>
                 <button
                   className="toolbar-btn"
@@ -421,40 +227,7 @@ const ConstrainSection = ({ isSketchMode }) => {
                   disabled={!ready}
                   onClick={() => applyPair("colinear")}
                 >
-                  <svg viewBox="0 0 24 24" width="20" height="20">
-                    <line
-                      stroke="#6C3FD4"
-                      strokeWidth="1.5"
-                      strokeLinecap="square"
-                      x1="3"
-                      y1="12"
-                      x2="10"
-                      y2="12"
-                    />
-                    <line
-                      stroke="#6C3FD4"
-                      strokeWidth="1.5"
-                      strokeLinecap="square"
-                      x1="14"
-                      y1="12"
-                      x2="21"
-                      y2="12"
-                    />
-                    <circle
-                      fill="#D4A33F"
-                      stroke="#D4A33F"
-                      r="1.4"
-                      cx="3"
-                      cy="12"
-                    />
-                    <circle
-                      fill="#D4A33F"
-                      stroke="#D4A33F"
-                      r="1.4"
-                      cx="21"
-                      cy="12"
-                    />
-                  </svg>
+                  <ColinearArt />
                 </button>
                 <button
                   className="toolbar-btn"
@@ -462,25 +235,7 @@ const ConstrainSection = ({ isSketchMode }) => {
                   disabled={!ready}
                   onClick={() => applyPair("tangent")}
                 >
-                  <svg viewBox="0 0 24 24" width="20" height="20">
-                    <circle
-                      stroke="#6C3FD4"
-                      fill="none"
-                      strokeWidth="1.5"
-                      cx="9"
-                      cy="13"
-                      r="5.5"
-                    />
-                    <line
-                      stroke="#D4A33F"
-                      strokeWidth="1.5"
-                      strokeLinecap="square"
-                      x1="3"
-                      y1="4.5"
-                      x2="21"
-                      y2="11"
-                    />
-                  </svg>
+                  <TangentArt />
                 </button>
                 <button
                   className="toolbar-btn"
@@ -488,26 +243,7 @@ const ConstrainSection = ({ isSketchMode }) => {
                   disabled={!ready}
                   onClick={() => applyPair("equal")}
                 >
-                  <svg viewBox="0 0 24 24" width="20" height="20">
-                    <line
-                      stroke="#6C3FD4"
-                      strokeWidth="2"
-                      strokeLinecap="square"
-                      x1="5"
-                      y1="9"
-                      x2="19"
-                      y2="9"
-                    />
-                    <line
-                      stroke="#6C3FD4"
-                      strokeWidth="2"
-                      strokeLinecap="square"
-                      x1="5"
-                      y1="15"
-                      x2="19"
-                      y2="15"
-                    />
-                  </svg>
+                  <EqualArt />
                 </button>
               </>
             );

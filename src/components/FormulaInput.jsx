@@ -1,5 +1,16 @@
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, {
+  useRef,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+} from "react";
+import { createPortal } from "react-dom";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
+import {
+  placeSuggestions,
+  VIEWPORT_MARGIN,
+} from "./formulaSuggestPlacement.js";
 import "../styles/FormulaInput.css";
 
 // A drop-in <input> replacement that pops up a list of matching variable
@@ -46,6 +57,35 @@ function applyValueWithEvent(input, newText) {
 }
 
 const MAX_SUGGESTIONS = 8;
+const LIST_MAX_WIDTH = 280;
+
+// The list is rendered into document.body with fixed positioning, NOT inside
+// the input's wrapper.  Inside, any ancestor with overflow: hidden clipped it,
+// any ancestor's stacking context could bury it under a sibling however high
+// its own z-index, and in the bars docked at the bottom of the viewport it ran
+// off the screen.  Out here it sits above everything, and is placed from the
+// input's on-screen rectangle -- below it, or above when below won't fit
+// (formulaSuggestPlacement.js).
+function positionList(list, input) {
+  // Measure at natural height (clear the cap a previous placement set) and at
+  // the width it will actually be drawn.
+  list.style.maxHeight = "";
+  list.style.maxWidth = `${Math.min(
+    LIST_MAX_WIDTH,
+    window.innerWidth - 2 * VIEWPORT_MARGIN,
+  )}px`;
+  list.style.minWidth = `${input.offsetWidth}px`;
+  const rect = input.getBoundingClientRect();
+  const p = placeSuggestions({
+    input: rect,
+    list: { width: list.offsetWidth, height: list.offsetHeight },
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+  });
+  list.style.top = `${p.top}px`;
+  list.style.left = `${p.left}px`;
+  list.style.maxHeight = p.maxHeight == null ? "" : `${p.maxHeight}px`;
+  list.dataset.placement = p.placement;
+}
 
 const FormulaInput = React.forwardRef(function FormulaInput(
   { variables, onChange, onKeyDown, onBlur, ...rest },
@@ -61,8 +101,49 @@ const FormulaInput = React.forwardRef(function FormulaInput(
     [forwardedRef],
   );
 
-  const [suggestions, setSuggestions] = useState([]);
+  const [suggestions, setSuggestionsState] = useState([]);
   const [highlighted, setHighlighted] = useState(0);
+  // The names on show, to tell a new list from a re-run of the same match.
+  const shownRef = useRef("");
+  const setSuggestions = useCallback((list) => {
+    const key = list.map((s) => s.name).join("\n");
+    // The match re-runs on a click in the field, and on the selection event
+    // React sends with the first key after the value changes -- which used to
+    // swallow that key's ArrowDown.  Only a DIFFERENT list starts again from
+    // the top.
+    if (key !== shownRef.current) {
+      shownRef.current = key;
+      setHighlighted(0);
+    }
+    setSuggestionsState(list);
+  }, []);
+  const listRef = useRef(null);
+
+  // Place the list before it is painted, and keep it with the input while the
+  // page scrolls (any scrolling ancestor, hence capture) or the window resizes.
+  const open = suggestions.length > 0;
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      if (listRef.current && innerRef.current)
+        positionList(listRef.current, innerRef.current);
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, suggestions]);
+
+  // A list capped to the room available scrolls; keep the arrow-key choice in
+  // view.
+  useEffect(() => {
+    listRef.current?.children[highlighted]?.scrollIntoView?.({
+      block: "nearest",
+    });
+  }, [highlighted]);
 
   const recompute = useCallback(() => {
     const input = innerRef.current;
@@ -90,8 +171,7 @@ const FormulaInput = React.forwardRef(function FormulaInput(
       )
       .slice(0, MAX_SUGGESTIONS);
     setSuggestions(matches);
-    setHighlighted(0);
-  }, [variables]);
+  }, [variables, setSuggestions]);
 
   // When the parent flips the controlled value (eg mouse-drag rewrites the
   // depth field), refresh the suggestion list against the new content.
@@ -159,12 +239,24 @@ const FormulaInput = React.forwardRef(function FormulaInput(
 
   const handleSelect = () => recompute();
   const handleClick = () => recompute();
-  const handleFocus = () => recompute();
+  // Closing on blur waits a tick (below).  Coming back to the field inside
+  // that tick used to let the stale close fire on the FOCUSED field: its list
+  // opened, then vanished and did not come back until the next keystroke.
+  const blurTimer = useRef(null);
+  useEffect(() => () => clearTimeout(blurTimer.current), []);
+
+  const handleFocus = () => {
+    clearTimeout(blurTimer.current);
+    recompute();
+  };
 
   const handleBlur = (e) => {
     // Allow mousedown on a suggestion to fire (it preventDefaults the
-    // blur).  Then close the popup after a tick.
-    setTimeout(() => setSuggestions([]), 100);
+    // blur).  Then close the popup after a tick -- unless focus is back.
+    clearTimeout(blurTimer.current);
+    blurTimer.current = setTimeout(() => {
+      if (document.activeElement !== innerRef.current) setSuggestions([]);
+    }, 100);
     if (onBlur) onBlur(e);
   };
 
@@ -182,35 +274,37 @@ const FormulaInput = React.forwardRef(function FormulaInput(
         onFocus={handleFocus}
         onBlur={handleBlur}
       />
-      {suggestions.length > 0 && (
-        <div className="formula-suggestions" role="listbox">
-          {suggestions.map((s, i) => {
-            const v = evaluateFormula(s.formula, map);
-            return (
-              <div
-                key={s.name}
-                role="option"
-                aria-selected={i === highlighted}
-                className={
-                  "formula-suggestion" + (i === highlighted ? " active" : "")
-                }
-                onMouseDown={(e) => {
-                  // preventDefault so the input doesn't blur (which would
-                  // race the suggestion-accept timer).
-                  e.preventDefault();
-                  setHighlighted(i);
-                  acceptSuggestion(s);
-                }}
-              >
-                <span className="formula-suggestion-name">{s.name}</span>
-                <span className="formula-suggestion-value">
-                  = {Number.isFinite(v) ? v : "—"}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div className="formula-suggestions" role="listbox" ref={listRef}>
+            {suggestions.map((s, i) => {
+              const v = evaluateFormula(s.formula, map);
+              return (
+                <div
+                  key={s.name}
+                  role="option"
+                  aria-selected={i === highlighted}
+                  className={
+                    "formula-suggestion" + (i === highlighted ? " active" : "")
+                  }
+                  onMouseDown={(e) => {
+                    // preventDefault so the input doesn't blur (which would
+                    // race the suggestion-accept timer).
+                    e.preventDefault();
+                    setHighlighted(i);
+                    acceptSuggestion(s);
+                  }}
+                >
+                  <span className="formula-suggestion-name">{s.name}</span>
+                  <span className="formula-suggestion-value">
+                    = {Number.isFinite(v) ? v : "—"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
     </span>
   );
 });

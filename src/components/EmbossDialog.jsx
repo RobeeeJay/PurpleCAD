@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitEmboss } from "../three/cameraControls/emboss.js";
@@ -130,7 +130,11 @@ const EmbossDialog = () => {
           Deboss
         </button>
 
-        <Field label="Mirror" style={{ marginLeft: 10 }}>
+        <Field
+          label="Mirror"
+          style={{ marginLeft: 10 }}
+          hint="Flips the stamp on the face. Use it when the geometry lands mirrored, e.g. on the far side of a wall."
+        >
           <button
             type="button"
             style={toggleStyle(!!params.mirrorH)}
@@ -149,7 +153,11 @@ const EmbossDialog = () => {
           </button>
         </Field>
 
-        <Field label="Angle°" style={{ marginLeft: 10 }}>
+        <Field
+          label="Angle°"
+          style={{ marginLeft: 10 }}
+          hint="Rotates the stamp within the face, about the picked point."
+        >
           <NumberInput
             step="5"
             value={params.angleDeg}
@@ -161,7 +169,10 @@ const EmbossDialog = () => {
             style={barInput(true)}
           />
         </Field>
-        <Field label="Offset H(mm)">
+        <Field
+          label="Offset H(mm)"
+          hint="Slides the stamp across the face, at right angles to Offset V. Moves where it lands, not its size."
+        >
           <NumberInput
             step="0.5"
             value={params.offsetMm}
@@ -173,7 +184,10 @@ const EmbossDialog = () => {
             style={barInput(true)}
           />
         </Field>
-        <Field label="Offset V(mm)">
+        <Field
+          label="Offset V(mm)"
+          hint="Slides the stamp up and down the face."
+        >
           <NumberInput
             step="0.5"
             value={params.offsetVMm}
@@ -185,7 +199,10 @@ const EmbossDialog = () => {
             style={barInput(true)}
           />
         </Field>
-        <Field label="Scale">
+        <Field
+          label="Scale"
+          hint="Multiplies the stamp's size on the face. 2 is twice as wide and tall; it does not change the depth."
+        >
           <NumberInput
             min="0.01"
             step="0.1"
@@ -198,7 +215,10 @@ const EmbossDialog = () => {
             style={barInput(true)}
           />
         </Field>
-        <Field label="Depth(mm)">
+        <Field
+          label="Depth(mm)"
+          hint="How far the relief stands out of the face, or is sunk into it with Deboss on. Deeper than the wall cuts through."
+        >
           <NumberInput
             min="0"
             step="0.5"

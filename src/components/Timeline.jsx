@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
 import { beginChamferEdit } from "../three/cameraControls/chamferCommit.js";
 import { anyToolActive } from "../store/selectionMode.js";
@@ -22,6 +22,7 @@ import {
   ChamferIcon,
   FilletIcon,
   ShellIcon,
+  SimplifyIcon,
   HoleIcon,
   EmbossIcon,
   TextureIcon,
@@ -35,17 +36,8 @@ import {
   RectangularPatternIcon,
 } from "./toolbar/timelineIcons.jsx";
 import "../styles/Timeline.css";
-
-// Detect chamfer / fillet entries by looking at the instruction payload —
-// covers both newly-labelled entries ("Chamfered" / "Filleted") and old
-// "Modified" entries written before the label change.
-const chamferInfo = (entry) => {
-  const inst = entry?.instruction;
-  if (inst?.type !== "modify") return null;
-  const r = inst.patches?.regenerator;
-  if (r?.kind !== "chamfer") return null;
-  return { isFillet: r.segments !== 1 };
-};
+import ExtrudeActions from "./TimelineExtrudeActions.jsx";
+import { chamferInfo, getDisplayLabel } from "./timelineLabels.js";
 
 // Detect push/pull entries — a modify whose regenerator is a push/pull op.
 const pushPullInfo = (entry) => {
@@ -63,6 +55,13 @@ const shellInfo = (entry) => {
   const r = inst.patches?.regenerator;
   if (r?.kind !== "shell") return null;
   return { thickness: r.thickness ?? 0 };
+};
+
+// Detect simplify entries — a modify whose regenerator is a simplify op.
+const simplifyInfo = (entry) => {
+  const inst = entry?.instruction;
+  if (inst?.type !== "modify") return null;
+  return inst.patches?.regenerator?.kind === "simplify" ? {} : null;
 };
 
 // Detect hole entries — a modify whose regenerator is a hole op.
@@ -157,6 +156,7 @@ const entryIcon = (entry) => {
   const ci = chamferInfo(entry);
   if (ci) return ci.isFillet ? <FilletIcon /> : <ChamferIcon />;
   if (shellInfo(entry)) return <ShellIcon />;
+  if (simplifyInfo(entry)) return <SimplifyIcon />;
   if (holeInfo(entry)) return <HoleIcon />;
   if (embossInfo(entry)) return <EmbossIcon />;
   if (textureInfo(entry)) return <TextureIcon />;
@@ -189,90 +189,6 @@ const entryIcon = (entry) => {
   return "◆";
 };
 
-const getItemName = (history, itemId) => {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const inst = history[i].instruction;
-    if (inst.type === "create" && inst.item && inst.item.id === itemId) {
-      return inst.item.name;
-    }
-    if (inst.type === "createGroup" && inst.items) {
-      const m = inst.items.find((it) => it.id === itemId);
-      if (m) return m.name;
-    }
-  }
-  return `#${itemId}`;
-};
-
-const getDisplayLabel = (entry, history) => {
-  // Promote legacy "Modified" entries that contain a chamfer regenerator
-  // to "Chamfered" / "Filleted" so the label matches the entry's actual
-  // operation regardless of when it was recorded.
-  const ci = chamferInfo(entry);
-  const label =
-    ci && entry.label === "Modified"
-      ? ci.isFillet
-        ? "Filleted"
-        : "Chamfered"
-      : entry.label;
-  // A createGroup step makes several items at once (a multi-area extrude's
-  // prisms); name it by count rather than one arbitrary member.
-  if (entry.instruction?.type === "createGroup") {
-    const n = entry.instruction.items?.length || 0;
-    return `${label} ${n} extrusions`;
-  }
-  if (entry.itemId != null) {
-    return `${label} ${getItemName(history, entry.itemId)}`;
-  }
-  return label;
-};
-
-// Edit control for an extrude entry.  Editing re-enters profile-select mode
-// seeded with the extrude's current profile, so the user can change the profile
-// AND the length and Confirm edits the entry in place (retargetExtrude).  With
-// `groupIds` it acts on a whole multi-area group as one unit; otherwise on the
-// single `itemId`.
-function ExtrudeActions({ itemId, groupIds, fusedId }) {
-  const extrudeSelectMode = useStore((s) => s.extrudeSelectMode);
-  const extrudeRetargetId = useStore((s) => s.extrudeRetargetId);
-  const extrudeRetargetGroup = useStore((s) => s.extrudeRetargetGroup);
-  const extrudeRetargetFusedId = useStore((s) => s.extrudeRetargetFusedId);
-  const setExtrudeRetargetId = useStore((s) => s.setExtrudeRetargetId);
-  const setExtrudeRetargetGroup = useStore((s) => s.setExtrudeRetargetGroup);
-  const setExtrudeRetargetFusedId = useStore(
-    (s) => s.setExtrudeRetargetFusedId,
-  );
-  const setExtrudeSelectMode = useStore((s) => s.setExtrudeSelectMode);
-  const isGroup = !!groupIds;
-  const isFused = fusedId != null;
-  const editActive =
-    extrudeSelectMode === "profile" &&
-    (isFused
-      ? extrudeRetargetFusedId === fusedId
-      : isGroup
-        ? !!extrudeRetargetGroup && extrudeRetargetGroup[0] === groupIds[0]
-        : !extrudeRetargetGroup && extrudeRetargetId === itemId);
-  return (
-    <button
-      className={`timeline-action-btn${editActive ? " active" : ""}`}
-      title="Edit extrusion — change the profile and length, then Confirm"
-      onClick={(e) => {
-        e.stopPropagation();
-        // Enter profile mode FIRST: setExtrudeSelectMode spreads
-        // TOOL_RESET_PATCH when freshly entering extrude, which nulls
-        // extrudeRetargetId/Group/Fused — so arming the edit target before it
-        // would be wiped, and Confirm would build a NEW extrude instead of
-        // editing.
-        setExtrudeSelectMode("profile");
-        setExtrudeRetargetGroup(isGroup ? groupIds : null);
-        setExtrudeRetargetFusedId(isFused ? fusedId : null);
-        setExtrudeRetargetId(isFused ? null : isGroup ? groupIds[0] : itemId);
-      }}
-    >
-      <EditIcon />
-    </button>
-  );
-}
-
 const Timeline = () => {
   const history = useStore((state) => state.history);
   const activeHistoryId = useStore((state) => state.activeHistoryId);
@@ -283,6 +199,7 @@ const Timeline = () => {
     (state) => state.setPushPullEditTarget,
   );
   const setShellTarget = useStore((state) => state.setShellTarget);
+  const setSimplifyTarget = useStore((state) => state.setSimplifyTarget);
   const beginHoleEdit = useStore((state) => state.beginHoleEdit);
   const beginEmbossEdit = useStore((state) => state.beginEmbossEdit);
   const beginTextureEdit = useStore((state) => state.beginTextureEdit);
@@ -581,12 +498,20 @@ const Timeline = () => {
               )}
               {entry.instruction?.type === "create" &&
                 entry.instruction.item?.type === "extrude" && (
-                  <ExtrudeActions itemId={entry.instruction.item.id} />
+                  <ExtrudeActions
+                    itemId={entry.instruction.item.id}
+                    entryId={entry.id}
+                  />
                 )}
               {entry.instruction?.type === "create" &&
                 ["extrudeUnion", "extrudeCut"].includes(
                   entry.instruction.item?.regenerator?.kind,
-                ) && <ExtrudeActions fusedId={entry.instruction.item.id} />}
+                ) && (
+                  <ExtrudeActions
+                    fusedId={entry.instruction.item.id}
+                    entryId={entry.id}
+                  />
+                )}
               {entry.instruction?.type === "create" &&
                 ["cube", "sphere", "cylinder", "torus", "cone"].includes(
                   entry.instruction.item?.type,
@@ -607,7 +532,9 @@ const Timeline = () => {
                   const ids = entry.instruction.items
                     .filter((p) => p.type === "extrude")
                     .map((p) => p.id);
-                  return ids.length ? <ExtrudeActions groupIds={ids} /> : null;
+                  return ids.length ? (
+                    <ExtrudeActions groupIds={ids} entryId={entry.id} />
+                  ) : null;
                 })()}
               {chamferInfo(entry) && (
                 <button
@@ -687,6 +614,21 @@ const Timeline = () => {
                   onClick={(e) => {
                     e.stopPropagation();
                     setShellTarget({ itemId: entry.itemId, entryId: entry.id });
+                  }}
+                >
+                  <EditIcon />
+                </button>
+              )}
+              {simplifyInfo(entry) && (
+                <button
+                  className="timeline-action-btn"
+                  title="Edit simplify — deviation or triangle count"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSimplifyTarget({
+                      itemId: entry.itemId,
+                      entryId: entry.id,
+                    });
                   }}
                 >
                   <EditIcon />

@@ -1,30 +1,25 @@
 import * as THREE from "three";
 import { useStore } from "../store";
+import { constraintIconScreenPos } from "./sceneObjects/constraintIconSprites.js";
 import { createHighlightHelpers } from "./cameraControls/highlights.js";
 import { createExtrudeHelpers } from "./cameraControls/extrude.js";
 import { createChamferPreviewHelpers } from "./cameraControls/chamferPreview.js";
+import { createComponentMotionHelpers } from "./cameraControls/componentMotionTool.js";
 import { createPushPullPreviewHelpers } from "./cameraControls/pushPull.js";
 import { createShellPreviewHelpers } from "./cameraControls/shell.js";
+import { createSimplifyPreviewHelpers } from "./cameraControls/simplify.js";
 import { createHolePreviewHelpers } from "./cameraControls/hole.js";
 import { createEmbossPreviewHelpers } from "./cameraControls/emboss.js";
 import { createTexturePreviewHelpers } from "./cameraControls/texture.js";
 import { createDraftPreviewHelpers } from "./cameraControls/draft.js";
 import { createSweepHelpers } from "./cameraControls/sweep.js";
-import { meshBoolean, meshSplit } from "./meshBoolean.js";
-import { fitPointsToView, meshFitPoints, boxCorners } from "./cameraFit.js";
-import { MM_PER_UNIT } from "./sceneObjects.js";
-import { textShapeContours, makeTextShape } from "./sketchText.js";
+import { meshSplit } from "./meshSplit.js";
 import { bboxCenterOf, massCentroidOf } from "./objectOrigin.js";
 import { getCamera, saveCamera } from "../store/db.js";
-import { frameFromPoints, frameFromPointNormal } from "./planeFrame.js";
-import { createMaterialPreviewHelpers } from "./cameraControls/materialPreview.js";
 import {
   createAnimateLoop,
   requestRender,
 } from "./cameraControls/animateLoop.js";
-import { primitiveDimensions } from "./sceneObjects/dimensions.js";
-import { createMaterial } from "./objectMaterials.js";
-import { DEFAULT_MESH_COLOR } from "./theme.js";
 import { createSnapHelpers } from "./cameraControls/snap.js";
 import { createSketchHoverHelpers } from "./cameraControls/sketchHover.js";
 import { createNavigationHandlers } from "./cameraControls/navigation.js";
@@ -32,7 +27,10 @@ import { createTransformHandleDrag } from "./cameraControls/transformHandleDrag.
 import { createViewInteraction } from "./cameraControls/viewInteraction.js";
 import { createEmbossInteraction } from "./cameraControls/embossPick.js";
 import { createSketchInteraction } from "./cameraControls/sketchInteraction.js";
-import { createProjectTool } from "./cameraControls/projectTool.js";
+import { attachTouchInput } from "./cameraControls/touchInput.js";
+import { createToolPreviews } from "./cameraControls/toolPreviews.js";
+import { createMeasureAndPrimitivePreviews } from "./cameraControls/measurePrimitivePreviews.js";
+import { createMaterialAndFitHelpers } from "./cameraControls/materialFitHelpers.js";
 
 export function loadCameraState() {
   try {
@@ -184,6 +182,12 @@ export function attachCameraControls(ctx) {
 
   const controls = cameraControlsRef.current;
   const isMac = /Mac|iPhone|iPad/i.test(navigator.platform);
+
+  // True while a camera tween (Home, orientation change, sketch fly-in) is
+  // still running.  e2e needs this: the tweens advance per FRAME, so a fixed
+  // wall-clock wait lands mid-flight wherever the frame rate happens to put
+  // it -- under software rendering that is a different camera pose entirely.
+  controls.isCameraAnimating = () => !!cameraAnimRef.current;
 
   const save = () => saveCameraState(cameraRef, targetRef, cameraControlsRef);
 
@@ -348,6 +352,8 @@ export function attachCameraControls(ctx) {
     syncEmbossFills,
     handleTextureHover,
     handleTextureClick,
+    handleStressHover,
+    handleStressClick,
   } = createEmbossInteraction({
     renderer,
     raycasterRef,
@@ -364,222 +370,18 @@ export function attachCameraControls(ctx) {
   // Clear the persistent multi-face selection highlight (on tool cancel/confirm).
   controls.clearEmbossSelectedFaces = () => highlights.clearSelectedFaces();
 
-  // Measure tool markers: a coloured sphere at each picked point and a dashed
-  // line between two picks, so the user sees what was picked and what's measured.
-  let measureGroup = null;
-  controls.clearMeasureMarkers = () => {
-    if (!measureGroup) return;
-    scene.remove(measureGroup);
-    measureGroup.traverse((o) => {
-      o.geometry?.dispose?.();
-      o.material?.dispose?.();
-    });
-    measureGroup = null;
-  };
-  controls.updateMeasureMarkers = (picks) => {
-    controls.clearMeasureMarkers();
-    const list = (picks || []).filter((p) => p && p.at);
-    if (list.length === 0) return;
-    // Size the markers off the PICKED objects, not the whole scene — the scene
-    // bbox includes the 1000-unit sketch reference plane, which made a giant
-    // sphere.  Fall back to a small fixed size if no object is under the pick.
-    let refSize = 0;
-    for (const pick of list) {
-      const mesh = objectsRef.current[pick.itemId];
-      if (!mesh || !mesh.geometry) continue;
-      mesh.geometry.computeBoundingSphere?.();
-      const br = mesh.geometry.boundingSphere?.radius || 0;
-      const ws = Math.abs(mesh.getWorldScale(new THREE.Vector3()).x) || 1;
-      refSize = Math.max(refSize, br * ws);
-    }
-    const r = Math.max(0.02, (refSize || 1) * 0.04);
-    const g = new THREE.Group();
-    const colors = [0xffaa33, 0x33ddff];
-    list.forEach((pick, i) => {
-      const color = colors[i % colors.length];
-      // Highlight the actual clicked face (translucent overlay) so it stays lit.
-      if (pick.kind === "face" && pick.pts && pick.pts.length >= 3) {
-        const flat = new Float32Array(pick.pts.length * 3);
-        pick.pts.forEach((p, k) => {
-          flat[k * 3] = p[0];
-          flat[k * 3 + 1] = p[1];
-          flat[k * 3 + 2] = p[2];
-        });
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(flat, 3));
-        const face = new THREE.Mesh(
-          geo,
-          new THREE.MeshBasicMaterial({
-            color,
-            transparent: true,
-            opacity: 0.35,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-            polygonOffset: true,
-            polygonOffsetFactor: -1,
-            polygonOffsetUnits: -1,
-          }),
-        );
-        face.renderOrder = 999;
-        g.add(face);
-      }
-      // A sphere on the exact clicked point / vertex.
-      const m = new THREE.Mesh(
-        new THREE.SphereGeometry(r, 16, 12),
-        new THREE.MeshBasicMaterial({ color, depthTest: false }),
-      );
-      m.position.set(pick.at[0], pick.at[1], pick.at[2]);
-      m.renderOrder = 1000;
-      g.add(m);
-    });
-    if (list.length >= 2) {
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(...list[0].at),
-          new THREE.Vector3(...list[1].at),
-        ]),
-        new THREE.LineDashedMaterial({
-          color: 0xffffff,
-          dashSize: r * 2.5,
-          gapSize: r * 1.5,
-          depthTest: false,
-        }),
-      );
-      line.computeLineDistances();
-      line.renderOrder = 1000;
-      g.add(line);
-    }
-    scene.add(g);
-    measureGroup = g;
-  };
-
-  // Live primitive-dimensions preview (the dialog's dimensions, WITHOUT a store
-  // rebuild, so resizing is instant).  A box (real geometry) scales in place so
-  // its edges follow; a raymarched sphere/cylinder/torus/cone updates its shader
-  // dimension uniforms and re-sizes its box hull.  The commit (modifyItem)
-  // rebuilds from the store; clearBoxPreview reverts to the stored dimensions.
-  const primHull = (type, d) => {
-    if (type === "cube")
-      return new THREE.BoxGeometry(d.width, d.height, d.depth);
-    if (type === "sphere") {
-      const r = d.radius * 2;
-      return new THREE.BoxGeometry(r, r, r);
-    }
-    if (type === "cylinder")
-      return new THREE.BoxGeometry(2 * d.radius, d.height, 2 * d.radius);
-    if (type === "torus") {
-      const o = 2 * (d.major + d.minor);
-      return new THREE.BoxGeometry(o, 2 * d.minor, o);
-    }
-    if (type === "cone") {
-      const o = 2 * Math.max(d.radiusBottom, d.radiusTop);
-      return new THREE.BoxGeometry(o, d.height, o);
-    }
-    return null;
-  };
-  // Unscaled geometry size (mm) of an item's mesh, so the transform dialog can
-  // derive per-axis lengths (localSize * item.scale) and convert an edited
-  // length back to a scale.  Independent of item.scale, so it's stable to read.
-  controls.getItemLocalSizeMm = (id) => {
-    const mesh = objectsRef.current[id];
-    if (!mesh?.geometry) return null;
-    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-    const bb = mesh.geometry.boundingBox;
-    return {
-      x: (bb.max.x - bb.min.x) * MM_PER_UNIT,
-      y: (bb.max.y - bb.min.y) * MM_PER_UNIT,
-      z: (bb.max.z - bb.min.z) * MM_PER_UNIT,
-    };
-  };
-  controls.previewBoxDimensions = (id, dims) => {
-    const mesh = objectsRef.current[id];
-    const item = itemsRef.current.find((i) => i.id === id);
-    if (!mesh || !item) return;
-    if (item.type === "cube") {
-      const st = item.dimensions || { width: 2, height: 2, depth: 2 };
-      const sc = item.scale || { x: 1, y: 1, z: 1 };
-      mesh.scale.set(
-        (sc.x ?? 1) * (dims.width / (st.width || 2)),
-        (sc.y ?? 1) * (dims.height / (st.height || 2)),
-        (sc.z ?? 1) * (dims.depth / (st.depth || 2)),
-      );
-      return;
-    }
-    const u = mesh.material?.uniforms;
-    if (u) {
-      if (u.uRadius && dims.radius != null) u.uRadius.value = dims.radius;
-      if (u.uHalfH && dims.height != null) u.uHalfH.value = dims.height / 2;
-      if (u.uMajor && dims.major != null) u.uMajor.value = dims.major;
-      if (u.uMinor && dims.minor != null) u.uMinor.value = dims.minor;
-      if (u.uRb && dims.radiusBottom != null) u.uRb.value = dims.radiusBottom;
-      if (u.uRt && dims.radiusTop != null) u.uRt.value = dims.radiusTop;
-    }
-    const hull = primHull(item.type, dims);
-    if (hull) {
-      mesh.geometry.dispose();
-      mesh.geometry = hull;
-      mesh.userData.hullGeometry = hull;
-    }
-  };
-  controls.clearBoxPreview = (id) => {
-    const item = itemsRef.current.find((i) => i.id === id);
-    if (item) controls.previewBoxDimensions(id, primitiveDimensions(item));
-  };
-
-  // Ghost preview for CREATING a primitive: a translucent copy of the actual
-  // shape (real shader, so a sphere reads as a sphere) at the spawn point, before
-  // anything is committed to the timeline.  Updated live as the dialog changes.
-  let primGhost = null;
-  controls.clearPrimitivePreview = () => {
-    if (!primGhost) return;
-    scene.remove(primGhost);
-    primGhost.geometry?.dispose();
-    primGhost.material?.dispose();
-    primGhost = null;
-  };
-  controls.showPrimitivePreview = ({ type, dimensions, position }) => {
-    const geo = primHull(type, dimensions);
-    if (!geo) return;
-    const mat = createMaterial({ type, dimensions }, DEFAULT_MESH_COLOR);
-    if (mat.uniforms?.uOpacity) {
-      mat.uniforms.uOpacity.value = 0.55;
-      mat.transparent = true;
-    } else {
-      mat.opacity = 0.55;
-      mat.transparent = true;
-    }
-    controls.clearPrimitivePreview();
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(position.x, position.y, position.z);
-    mesh.renderOrder = 5;
-    scene.add(mesh);
-    primGhost = mesh;
-  };
-
-  // Expose extrude-overlay control to the React layer:
-  //   • finalizeExtrudeWithDepth(d)         — commit at numeric depth `d`.
-  //   • finalizeExtrudeWithFormula(f, d)    — commit storing formula `f`
-  //                                           and using its resolved depth
-  //                                           `d` for the preview/profile.
-  //   • updateExtrudePreview(d)             — re-render the live preview
-  //                                           mesh at depth `d`.
-  controls.finalizeExtrudeWithDepth = (depth) => finalizeExtrude(depth);
-  controls.finalizeExtrudeWithFormula = (formula, depth) =>
-    finalizeExtrude(depth, formula);
-  controls.cancelExtrude = () => cancelExtrude();
-  controls.updateExtrudePreview = (depth) => {
-    if (!extrude.hasProfiles) return;
-    // Preserve the sign so a negative (backward) depth previews in the -Z
-    // direction; makeExtrudePreviewMesh clamps the magnitude to ≥ 0.05.
-    rebuildPreviews(depth);
-  };
-  // Enter the "pick a face / sketch plane to offset the extrude start" mode.
-  controls.beginExtrudeStartPick = () => beginExtrudeStartPick();
-  // Extrude the selected solid face directly (the React extrude button calls
-  // this when a face is selected).  Returns true if a face extrude started.
-  controls.extrudeSelectedFace = () => extrude.startFaceExtrudeFromSelection();
-  // Pre-select the original profile region when retargeting an extrude.
-  controls.preselectRetargetProfile = () => preselectRetargetProfile();
+  createMeasureAndPrimitivePreviews({
+    controls,
+    scene,
+    itemsRef,
+    objectsRef,
+    extrude,
+    beginExtrudeStartPick,
+    cancelExtrude,
+    finalizeExtrude,
+    preselectRetargetProfile,
+    rebuildPreviews,
+  });
 
   // Live preview for ChamferOverlay: re-runs the chamfer/fillet recipe
   // against the current selectedSubGeometry + distance/angle and overlays
@@ -592,6 +394,16 @@ export function attachCameraControls(ctx) {
   controls.updateChamferPreview = (distanceMm, angleDeg) =>
     chamferPreview.updateChamferPreview(distanceMm, angleDeg);
   controls.clearChamferPreview = () => chamferPreview.clearChamferPreview();
+
+  // Component motion: the dialog's reference pick and axis, and playing a
+  // component's motion with collision checks.
+  const componentMotion = createComponentMotionHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    cameraRef,
+  });
+  controls.componentMotionState = () => componentMotion.inspect();
 
   // Live preview for PushPullOverlay: re-runs the push/pull recipe against the
   // current selectedSubGeometry faces + distance and overlays the result.
@@ -613,6 +425,15 @@ export function attachCameraControls(ctx) {
   });
   controls.updateShellPreview = (args) => shellPreview.updateShellPreview(args);
   controls.clearShellPreview = () => shellPreview.clearShellPreview();
+
+  const simplifyPreview = createSimplifyPreviewHelpers({
+    scene,
+    itemsRef,
+    objectsRef,
+  });
+  controls.updateSimplifyPreview = (args) =>
+    simplifyPreview.updateSimplifyPreview(args);
+  controls.clearSimplifyPreview = () => simplifyPreview.clearSimplifyPreview();
 
   const holePreview = createHolePreviewHelpers({ scene, itemsRef, objectsRef });
   controls.updateHolePreview = () => holePreview.updateHolePreview();
@@ -698,15 +519,8 @@ export function attachCameraControls(ctx) {
   controls.clearSweepPreview = () => sweep.clearSweepPreview();
   controls.commitSweep = () => sweep.commitSweep();
   controls.cancelSweep = () => sweep.cancelSweep();
-  // Triangle-mesh boolean over the live scene meshes (used when an imported
-  // mesh is an operand, where OCC's solid boolean is infeasible).
-  controls.meshBoolean = (itemIds, operation) =>
-    meshBoolean(
-      itemIds.map((id) => objectsRef.current[id]).filter(Boolean),
-      operation,
-    );
-  // Renderer-side mesh split (target ∩/− a half-space box at the cut plane) —
-  // the fallback when OCC can't rebuild a baked-mesh target as a solid.
+  // Renderer-side mesh split at the cut plane -- the fallback when OCC can't
+  // rebuild a baked-mesh target as a solid.
   controls.meshSplit = (itemId, plane) => {
     const mesh = objectsRef.current[itemId];
     if (!mesh) return null;
@@ -715,6 +529,193 @@ export function attachCameraControls(ctx) {
   };
   // World position + triangle/vertex counts of a selected object's live mesh,
   // for the status line.
+  // The surface of a body that has no BAKED mesh.
+  //
+  // Extrudes and primitives are built analytically in the renderer, so
+  // geometryData is empty for them and anything reading it alone sees no body
+  // at all -- which is why Stress refused to open on an extrude. What is drawn
+  // is a perfectly good watertight surface, in the same local frame the face
+  // picks come back in, so the analysis can read it straight off the scene.
+  controls.hasSurfaceMesh = (itemId) => {
+    const p = objectsRef.current[itemId]?.geometry?.attributes?.position;
+    return !!p && p.count >= 12;
+  };
+  controls.meshSurface = (itemId) => {
+    const geom = objectsRef.current[itemId]?.geometry;
+    const pos = geom?.attributes?.position;
+    if (!pos) return null;
+    return {
+      positions: Array.from(pos.array),
+      indices: geom.index ? Array.from(geom.index.array) : null,
+    };
+  };
+
+  // A body's own surface for the agent API to measure: local positions and
+  // indices plus the world matrix.  A mesh wearing a stress field or an
+  // optimisation preview has had its geometry swapped, so it is the geometry
+  // kept aside in userData that describes the body, not what is on screen.
+  controls.meshWorldData = (itemId) => {
+    const mesh = objectsRef.current[itemId];
+    if (!mesh?.isMesh) return null;
+    const geom = mesh.userData?.stressGeometry ?? mesh.geometry;
+    const pos = geom?.attributes?.position;
+    if (!pos) return null;
+    mesh.updateMatrixWorld(true);
+    return {
+      positions: pos.array,
+      indices: geom.index ? geom.index.array : null,
+      matrix: Array.from(mesh.matrixWorld.elements),
+      hull: !!mesh.userData?.hullGeometry,
+    };
+  };
+
+  // What a body's mesh is currently WEARING: whether a per-vertex field is on
+  // it and how varied it is.  The e2e suite's only way to see a stress plot --
+  // the colours live in a BufferAttribute in the three.js scene, and no part
+  // of that reaches the DOM.
+  controls.meshDisplayInfo = (itemId) => {
+    const mesh = objectsRef.current[itemId];
+    if (!mesh?.isMesh) return null;
+    const attr = mesh.geometry?.attributes?.color;
+    const seen = new Set();
+    if (attr)
+      for (let i = 0; i < attr.count; i++)
+        seen.add(
+          [0, 1, 2].map((c) => attr.array[i * 3 + c].toFixed(3)).join(","),
+        );
+    return {
+      hasVertexColors: !!attr && !!mesh.material?.vertexColors,
+      colorCount: attr?.count ?? 0,
+      distinctColors: seen.size,
+      // Whether the mesh currently on screen is the body's own or something
+      // swapped in over it (a stress field, an optimisation preview).
+      vertexCount: mesh.geometry?.attributes?.position?.count ?? 0,
+      swapped: !!mesh.userData?.stressGeometry,
+      // What the view draws the body WITH.  `finish` lists any metalness /
+      // roughness / clearcoat / specular settings the material carries; the
+      // raster views should carry none.
+      material: mesh.material
+        ? {
+            type: mesh.material.type,
+            color: mesh.material.color?.getHexString() ?? null,
+            opacity: mesh.material.opacity,
+            transparent: mesh.material.transparent,
+            finish: [
+              "metalness",
+              "roughness",
+              "clearcoat",
+              "specularIntensity",
+              "shininess",
+            ].filter((k) => k in mesh.material),
+          }
+        : null,
+    };
+  };
+
+  // The colours the open sketch's constraint annotations are currently drawn
+  // in, as { [constraintIdx]: ["#rrggbb", ...] } — used by the e2e suite to
+  // see that a dimension is highlighted.  Nothing else can: the annotations
+  // live in the three.js scene, and a label's text is baked into a canvas
+  // texture rather than sitting in the DOM.
+  controls.sketchAnnotationColors = () => {
+    const out = {};
+    sketchShapesGroupRef.current?.traverse((o) => {
+      const idx = o.userData?.constraintIdx;
+      if (idx == null || !o.material?.color) return;
+      (out[idx] ??= []).push("#" + o.material.color.getHexString());
+    });
+    return out;
+  };
+
+  // Dash sizes of every construction line on screen -- the sketch being edited
+  // and sketches drawn in the 3D view alike. They are world lengths that the
+  // render loop re-sizes every frame to hold a constant size on screen, which
+  // is what the e2e suite reads them to check.
+  controls.constructionDashSizes = () => {
+    const out = [];
+    scene.traverse((o) => {
+      if (o.material?.userData?.screenDash)
+        out.push({
+          dashSize: o.material.dashSize,
+          gapSize: o.material.gapSize,
+        });
+    });
+    return out;
+  };
+
+  // Every toolbar-icon constraint marker in the sketch being edited: where its
+  // anchor and its middle are on screen, and how big it is drawn.  The size is
+  // measured independently of the render loop that set it (world scale over
+  // world-per-pixel), so the e2e suite can check the loop got it right.
+  controls.constraintMarkers = () => {
+    const mesh = objectsRef.current[selectedIdRef.current];
+    const cam = cameraRef.current;
+    const group = sketchShapesGroupRef.current;
+    if (!mesh || !cam || !group) return [];
+    const rect = renderer.domElement.getBoundingClientRect();
+    const out = [];
+    group.traverse((o) => {
+      const icon = o.userData.screenIcon;
+      if (!icon) return;
+      const anchor = constraintIconScreenPos(
+        {
+          userData: {
+            constraintIconLocalPos: o.userData.constraintIconLocalPos,
+          },
+        },
+        mesh,
+        cam,
+        rect,
+      );
+      const visibleHeight = cam.isOrthographicCamera
+        ? (cam.top - cam.bottom) / cam.zoom
+        : 2 *
+          cam.position.distanceTo(o.getWorldPosition(new THREE.Vector3())) *
+          Math.tan((cam.fov * Math.PI) / 360);
+      out.push({
+        type: o.userData.constraintType,
+        constraintIdx: o.userData.constraintIdx,
+        anchor,
+        middle: constraintIconScreenPos(o, mesh, cam, rect),
+        sizePx: (o.scale.x * rect.height) / visibleHeight,
+        selected: !!icon.selected,
+        // Opacity of the marker's picture at a point that is background, not
+        // artwork: just inside its left edge, half-way down.
+        backgroundAlpha: (() => {
+          const img = o.material.map?.image;
+          const ctx = img?.getContext?.("2d");
+          if (!ctx) return null;
+          const x = Math.round(img.width * 0.08);
+          const y = Math.round(img.height * 0.5);
+          return ctx.getImageData(x, y, 1, 1).data[3] / 255;
+        })(),
+        // For a marker tied to a value label: where that label's TEXT is.
+        label: icon.label
+          ? (() => {
+              const at = icon.label
+                .getWorldPosition(new THREE.Vector3())
+                .project(cam);
+              return {
+                x: rect.left + ((at.x + 1) / 2) * rect.width,
+                y: rect.top + ((1 - at.y) / 2) * rect.height,
+                halfWidthPx:
+                  (icon.label.scale.x *
+                    (icon.label.userData.textWidthFraction ?? 1) *
+                    rect.height) /
+                  visibleHeight /
+                  2,
+                // The whole label sprite's height (the text sits inside it).
+                halfHeightPx:
+                  (icon.label.scale.y * rect.height) / visibleHeight / 2,
+                text: icon.label.userData.labelText,
+              };
+            })()
+          : null,
+      });
+    });
+    return out;
+  };
+
   // Project a world-space point to CSS pixel coordinates in the canvas —
   // used by the e2e suite to aim REAL mouse clicks at faces/edges (raycast
   // targets aren't DOM-addressable any other way).
@@ -761,794 +762,43 @@ export function attachCameraControls(ctx) {
     };
   };
 
-  // Live preview of a Plane object while the creation dialog adjusts its
-  // rotation/offset.  Pass null to clear.
-  let planePreviewMesh = null;
-  controls.previewPlane = (frame) => {
-    if (!frame) {
-      if (planePreviewMesh) {
-        scene.remove(planePreviewMesh);
-        planePreviewMesh.geometry.dispose();
-        planePreviewMesh.material.dispose();
-        planePreviewMesh = null;
-      }
-      return;
-    }
-    if (!planePreviewMesh) {
-      planePreviewMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(6, 6),
-        new THREE.MeshBasicMaterial({
-          color: 0x4488ff,
-          transparent: true,
-          opacity: 0.22,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
-      );
-      planePreviewMesh.renderOrder = 999;
-      scene.add(planePreviewMesh);
-    }
-    planePreviewMesh.position.set(
-      frame.position.x,
-      frame.position.y,
-      frame.position.z,
-    );
-    planePreviewMesh.rotation.set(
-      frame.rotation.x || 0,
-      frame.rotation.y || 0,
-      frame.rotation.z || 0,
-    );
-  };
-  controls.clearPlanePreview = () => controls.previewPlane(null);
-
-  // Live preview of a 3D pattern (circular/rectangular) or a mirror while its
-  // dialog adjusts parameters / picks.  Accepts a single result or an array of
-  // results (Mirror can mirror several objects at once).  Pass null to clear.
-  let patternPreviewGroup = null;
-  controls.previewPattern3d = (result) => {
-    if (patternPreviewGroup) {
-      patternPreviewGroup.children.forEach((m) => {
-        m.geometry.dispose();
-        m.material.dispose();
-      });
-      scene.remove(patternPreviewGroup);
-      patternPreviewGroup = null;
-    }
-    if (!result) return;
-    const list = (Array.isArray(result) ? result : [result]).filter(
-      (r) => r?.geometryData,
-    );
-    if (list.length === 0) return;
-    const group = new THREE.Group();
-    for (const r of list) {
-      const { positions, indices } = r.geometryData;
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute(
-        "position",
-        new THREE.BufferAttribute(new Float32Array(positions), 3),
-      );
-      if (indices)
-        geom.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
-      geom.computeVertexNormals();
-      const mesh = new THREE.Mesh(
-        geom,
-        new THREE.MeshStandardMaterial({
-          color: 0x6c3fd4,
-          roughness: 0.55,
-          metalness: 0,
-          transparent: true,
-          opacity: 0.65,
-        }),
-      );
-      const p = r.position || { x: 0, y: 0, z: 0 };
-      mesh.position.set(p.x, p.y, p.z);
-      mesh.renderOrder = 998;
-      group.add(mesh);
-    }
-    scene.add(group);
-    patternPreviewGroup = group;
-  };
-  controls.clearPattern3dPreview = () => controls.previewPattern3d(null);
-
-  // Boolean/Cut preview: fade the input bodies to 15% opacity so the translucent
-  // result ghost reads clearly through them, then show the ghost.  Restored by
-  // clearBooleanPreview.  Handles both the primitive shader materials (uOpacity
-  // uniform) and the standard mesh materials (material.opacity).
-  let booleanDimmed = [];
-  const BOOLEAN_DIM_OPACITY = 0.15;
-  controls.previewBoolean = (result, inputIds) => {
-    controls.clearBooleanPreview();
-    for (const id of inputIds || []) {
-      const mesh = objectsRef.current[id];
-      const m = mesh?.material;
-      if (!m) continue;
-      const u = m.uniforms?.uOpacity;
-      booleanDimmed.push({
-        m,
-        u,
-        prevTransparent: m.transparent,
-        prevOpacity: m.opacity,
-        prevDepthWrite: m.depthWrite,
-        prevU: u ? u.value : null,
-      });
-      m.transparent = true;
-      m.depthWrite = false;
-      if (u) u.value = BOOLEAN_DIM_OPACITY;
-      else m.opacity = BOOLEAN_DIM_OPACITY;
-      m.needsUpdate = true;
-    }
-    controls.previewPattern3d(result);
-  };
-  controls.clearBooleanPreview = () => {
-    for (const d of booleanDimmed) {
-      d.m.transparent = d.prevTransparent;
-      d.m.opacity = d.prevOpacity;
-      d.m.depthWrite = d.prevDepthWrite;
-      if (d.u && d.prevU != null) d.u.value = d.prevU;
-      d.m.needsUpdate = true;
-    }
-    booleanDimmed = [];
-    controls.previewPattern3d(null);
-  };
-
-  // Pick 3 points (snapping to object vertices) to define a new Plane.  Markers
-  // mark each pick; the 3rd derives a frame and opens the creation dialog.
-  let planePickPoints = [];
-  let planePickMarkers = [];
-  controls.clearPlanePick = () => {
-    planePickMarkers.forEach((m) => {
-      scene.remove(m);
-      m.geometry.dispose();
-      m.material.dispose();
-    });
-    planePickMarkers = [];
-    planePickPoints = [];
-  };
-  controls.planePickClick = (screenX, screenY) => {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
-    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
-    const meshes = Object.values(objectsRef.current).filter(
-      (m) => m.visible !== false,
-    );
-    const hit = ray.intersectObjects(meshes, false)[0];
-    if (!hit) return;
-    // Snap to the nearest vertex of the hit triangle (real geometry only);
-    // primitives raycast against a hull/sphere, so fall back to the hit point.
-    let p = hit.point.clone();
-    const posAttr = hit.face && hit.object.geometry?.getAttribute("position");
-    if (posAttr) {
-      let best = p,
-        bd = Infinity;
-      [hit.face.a, hit.face.b, hit.face.c].forEach((idx) => {
-        const v = new THREE.Vector3()
-          .fromBufferAttribute(posAttr, idx)
-          .applyMatrix4(hit.object.matrixWorld);
-        const d = v.distanceTo(hit.point);
-        if (d < bd) {
-          bd = d;
-          best = v;
-        }
-      });
-      p = best;
-    }
-    planePickPoints.push({ x: p.x, y: p.y, z: p.z });
-    const marker = new THREE.Mesh(
-      new THREE.SphereGeometry(0.12, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0x44aaff, depthTest: false }),
-    );
-    marker.position.copy(p);
-    marker.renderOrder = 1011;
-    scene.add(marker);
-    planePickMarkers.push(marker);
-
-    if (planePickPoints.length >= 3) {
-      const base = frameFromPoints(
-        planePickPoints[0],
-        planePickPoints[1],
-        planePickPoints[2],
-      );
-      controls.clearPlanePick();
-      useStore.getState().setPlanePickActive(false);
-      if (base) useStore.getState().startPlaneTool(base);
-      else
-        useStore
-          .getState()
-          .showNotification?.("Pick three non-collinear points.");
-    }
-  };
-
-  // Pick an object face: its world plane (click point + face normal) seeds a
-  // new Plane and reopens the creation dialog.
-  controls.planeFacePickClick = (screenX, screenY) => {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
-    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
-    const meshes = Object.values(objectsRef.current).filter(
-      (m) => m.visible !== false,
-    );
-    const hit = ray.intersectObjects(meshes, false)[0];
-    if (!hit || !hit.face) {
-      useStore.getState().showNotification?.("Click a face to define a plane.");
-      return;
-    }
-    const nm = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
-    const worldN = hit.face.normal.clone().applyMatrix3(nm).normalize();
-    const base = frameFromPointNormal(hit.point, worldN);
-    useStore.getState().setPlanePickActive(false);
-    if (base) useStore.getState().startPlaneTool(base);
-  };
-
-  // Pick the circular pattern's rotation axis: the nearest sketch line or solid
-  // face edge under the cursor.  Stores it as { origin, dir } (world) on the
-  // pattern tool, highlights it, and ends the pick.
-  let circularAxisHL = null;
-  controls.clearCircularAxisHighlight = () => {
-    if (!circularAxisHL) return;
-    scene.remove(circularAxisHL);
-    circularAxisHL.geometry.dispose();
-    circularAxisHL.material.dispose();
-    circularAxisHL = null;
-  };
-  controls.pickCircularAxis = (screenX, screenY) => {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const toScreen = (w) => {
-      const ndc = w.clone().project(cameraRef.current);
-      return {
-        x: ((ndc.x + 1) / 2) * rect.width + rect.left,
-        y: ((-ndc.y + 1) / 2) * rect.height + rect.top,
-      };
-    };
-    const segDist = (px, py, a, b) => {
-      const dx = b.x - a.x,
-        dy = b.y - a.y;
-      const l2 = dx * dx + dy * dy || 1e-9;
-      let t = ((px - a.x) * dx + (py - a.y) * dy) / l2;
-      t = Math.max(0, Math.min(1, t));
-      return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
-    };
-    let best = null;
-    let bestD = 14;
-    const consider = (wa, wb) => {
-      const d = segDist(screenX, screenY, toScreen(wa), toScreen(wb));
-      if (d < bestD) {
-        bestD = d;
-        best = { a: wa.clone(), b: wb.clone() };
-      }
-    };
-    // Sketch lines (a clean straight axis the user can draw on purpose).
-    itemsRef.current.forEach((sk) => {
-      if (sk.type !== "sketch") return;
-      const mesh = objectsRef.current[sk.id];
-      if (!mesh || mesh.visible === false) return;
-      (sk.shapes || []).forEach((s) => {
-        if (s.type !== "line") return;
-        const wa = new THREE.Vector3(s.x1, s.y1, 0)
-          .applyQuaternion(mesh.quaternion)
-          .add(mesh.position);
-        const wb = new THREE.Vector3(s.x2, s.y2, 0)
-          .applyQuaternion(mesh.quaternion)
-          .add(mesh.position);
-        consider(wa, wb);
-      });
-    });
-    // Face edges: the edges of the triangle hit under the cursor (a model edge
-    // of a box/extrude face is the nearest of the three to the click).
-    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
-    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
-    const meshes = Object.values(objectsRef.current).filter(
-      (m) => m.visible !== false,
-    );
-    const hit = ray.intersectObjects(meshes, false)[0];
-    if (hit && hit.face) {
-      const posAttr = hit.object.geometry.getAttribute("position");
-      const v = (i) =>
-        new THREE.Vector3()
-          .fromBufferAttribute(posAttr, i)
-          .applyMatrix4(hit.object.matrixWorld);
-      const va = v(hit.face.a),
-        vb = v(hit.face.b),
-        vc = v(hit.face.c);
-      consider(va, vb);
-      consider(vb, vc);
-      consider(vc, va);
-    }
-    if (!best) {
-      useStore
-        .getState()
-        .showNotification?.("Click a sketch line or a face edge for the axis.");
-      return;
-    }
-    const dir = best.b.clone().sub(best.a).normalize();
-    controls.clearCircularAxisHighlight();
-    const geo = new THREE.BufferGeometry().setFromPoints([best.a, best.b]);
-    const line = new THREE.Line(
-      geo,
-      new THREE.LineBasicMaterial({ color: 0x44aaff, depthTest: false }),
-    );
-    line.renderOrder = 1011;
-    scene.add(line);
-    circularAxisHL = line;
-    useStore.getState().setCircularAxisPick(false);
-    useStore.getState().updatePattern3d({
-      axis: {
-        origin: { x: best.a.x, y: best.a.y, z: best.a.z },
-        dir: { x: dir.x, y: dir.y, z: dir.z },
-      },
-    });
-  };
-
-  // Split tool picks (plain clicks): first an object to split, then a cut — a
-  // Plane/sketch item, or any solid face (its plane).  Shows a translucent
-  // preview of the cut plane.  Mirrors the plane face-pick raycast.
-  const splitRaycast = (screenX, screenY) => {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
-    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
-    const meshes = Object.values(objectsRef.current).filter(
-      (m) => m.visible !== false,
-    );
-    return ray.intersectObjects(meshes, false)[0] || null;
-  };
-  const SPLIT_SOLIDS = [
-    "cube",
-    "sphere",
-    "cylinder",
-    "torus",
-    "extrude",
-    "csg",
-  ];
-  controls.pickSplitObject = (screenX, screenY) => {
-    const hit = splitRaycast(screenX, screenY);
-    const item = hit
-      ? itemsRef.current.find((i) => i.id === hit.object.userData.itemId)
-      : null;
-    if (!item || !SPLIT_SOLIDS.includes(item.type)) {
-      useStore.getState().showNotification?.("Click an object to split.");
-      return;
-    }
-    useStore
-      .getState()
-      .updateSplit3d({ objectId: item.id, objectName: item.name });
-    // Guide the user straight on to picking the cut.
-    useStore.getState().setSplitPick("cut");
-  };
-  controls.pickSplitCut = (screenX, screenY) => {
-    const hit = splitRaycast(screenX, screenY);
-    const item = hit
-      ? itemsRef.current.find((i) => i.id === hit.object.userData.itemId)
-      : null;
-    if (!item) {
-      useStore
-        .getState()
-        .showNotification?.("Click a plane, a sketch, or a face to cut along.");
-      return;
-    }
-    let frame, label;
-    if (item.type === "plane" || item.type === "sketch") {
-      frame = { position: item.position, rotation: item.rotation };
-      label = item.name;
-    } else if (hit.face) {
-      const nm = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
-      const worldN = hit.face.normal.clone().applyMatrix3(nm).normalize();
-      frame = frameFromPointNormal(hit.point, worldN);
-      label = `face of ${item.name}`;
-    }
-    if (!frame) return;
-    useStore.getState().updateSplit3d({ cutFrame: frame, cutLabel: label });
-    useStore.getState().setSplitPick(null);
-    controls.previewPlane(frame);
-  };
-
-  // The active sketch + its mesh, or null.  Shared by the Project tool and the
-  // Text-tool preview (both draw onto the active sketch plane).
-  const activeSketchForProject = () => {
-    const sketch = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current && i.type === "sketch",
-    );
-    const sketchMesh = sketch ? objectsRef.current[sketch.id] : null;
-    return sketch && sketchMesh ? { sketch, sketchMesh } : null;
-  };
-
-  // ── Project tool ── (edge/marquee projection; see projectTool.js)
-  createProjectTool({
+  // Plane / pattern / boolean / split / project / text previews -- they attach
+  // themselves onto `controls`, so nothing here needs the return value.
+  createToolPreviews({
+    controls,
+    extrude,
+    highlights,
     scene,
     renderer,
     cameraRef,
-    objectsRef,
+    cameraAnimRef,
+    cameraControlsRef,
+    targetRef,
     itemsRef,
+    objectsRef,
+    selectedIdRef,
+    setRotationState,
+  });
+
+  createMaterialAndFitHelpers({
     controls,
-    activeSketchForProject,
-  });
-
-  // Live Text-tool preview: draw the draft text's glyph outlines on the active
-  // sketch plane while the Text dialog is open (driven by its inputs).
-  let textPreviewGroup = null;
-  controls.clearTextPreview = () => {
-    if (!textPreviewGroup) return;
-    scene.remove(textPreviewGroup);
-    textPreviewGroup.traverse((o) => {
-      o.geometry?.dispose();
-      o.material?.dispose();
-    });
-    textPreviewGroup = null;
-  };
-  controls.updateTextPreview = (draft) => {
-    controls.clearTextPreview();
-    const ctx = activeSketchForProject();
-    if (!ctx || !draft) return;
-    const shape = makeTextShape({
-      text: draft.text,
-      height: (draft.heightMm || 0) / MM_PER_UNIT,
-      font: draft.font,
-      x: draft.x,
-      y: draft.y,
-    });
-    const { sketchMesh } = ctx;
-    const toW = (lx, ly) =>
-      new THREE.Vector3(lx, ly, 0.004)
-        .applyQuaternion(sketchMesh.quaternion)
-        .add(sketchMesh.position);
-    const group = new THREE.Group();
-    for (const contour of textShapeContours(shape)) {
-      if (contour.length < 2) continue;
-      const pts = [...contour, contour[0]].map((p) => toW(p.x, p.y));
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({
-          color: 0x6c3fd4,
-          depthTest: false,
-          transparent: true,
-          opacity: 0.9,
-        }),
-      );
-      line.renderOrder = 1011;
-      line.frustumCulled = false;
-      group.add(line);
-    }
-    scene.add(group);
-    textPreviewGroup = group;
-  };
-
-  // Snapshot / restore the camera view (used by the Objects-list Solo button so
-  // toggling solo off returns to where the user was).
-  controls.captureView = () => {
-    if (!cameraRef.current || !cameraControlsRef.current) return null;
-    return {
-      positionX: cameraRef.current.position.x,
-      positionY: cameraRef.current.position.y,
-      positionZ: cameraRef.current.position.z,
-      targetX: targetRef.current.x,
-      targetY: targetRef.current.y,
-      targetZ: targetRef.current.z,
-      rotationX: cameraControlsRef.current.targetRotationX,
-      rotationY: cameraControlsRef.current.targetRotationY,
-      up: cameraRef.current.up.clone(),
-    };
-  };
-  // Tween the camera to frame a single object (its world bounding box), keeping
-  // the current view direction.  Used by Solo so the soloed object fills the
-  // view.
-  controls.frameObject = (itemId) => {
-    const mesh = objectsRef.current?.[itemId];
-    const camera = cameraRef.current;
-    if (!mesh || !camera) return;
-    mesh.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(mesh);
-    if (box.isEmpty()) return;
-    const center = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(
-      box.getBoundingSphere(new THREE.Sphere()).radius,
-      0.001,
-    );
-    // Preserve the current orbit direction (camera → target), just change how
-    // far back the camera sits so the bbox sphere fits the frustum.
-    const dir = camera.position.clone().sub(targetRef.current);
-    if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1);
-    dir.normalize();
-    let dist;
-    if (camera.isPerspectiveCamera) {
-      const vFov = (camera.fov * Math.PI) / 180;
-      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (camera.aspect || 1));
-      dist = (radius / Math.sin(Math.min(vFov, hFov) / 2)) * 1.2;
-    } else {
-      dist = radius * 3;
-    }
-    cameraAnimRef.current = {
-      startPos: camera.position.clone(),
-      endPos: center.clone().add(dir.multiplyScalar(dist)),
-      startTarget: targetRef.current.clone(),
-      endTarget: center.clone(),
-      startUp: camera.up.clone(),
-      endUp: camera.up.clone(),
-      startTime: Date.now(),
-      duration: 400,
-    };
-  };
-
-  controls.restoreView = (saved) => {
-    if (!saved || !cameraRef.current || !cameraControlsRef.current) return;
-    const camera = cameraRef.current;
-    const cc = cameraControlsRef.current;
-    cameraAnimRef.current = {
-      startPos: camera.position.clone(),
-      endPos: new THREE.Vector3(
-        saved.positionX,
-        saved.positionY,
-        saved.positionZ,
-      ),
-      startTarget: targetRef.current.clone(),
-      endTarget: new THREE.Vector3(saved.targetX, saved.targetY, saved.targetZ),
-      startUp: camera.up.clone(),
-      endUp: saved.up ? saved.up.clone() : new THREE.Vector3(0, 1, 0),
-      startTime: Date.now(),
-      duration: 400,
-      onComplete: () => {
-        cc.targetRotationX = saved.rotationX;
-        cc.targetRotationY = saved.rotationY;
-        setRotationState(cameraRef.current.quaternion.clone());
-      },
-    };
-  };
-
-  // Live preview for MaterialDialog: instantly applies in-progress
-  // color/finish edits to the live mesh(es) without a store write.
-  const materialPreview = createMaterialPreviewHelpers({
-    objectsRef,
+    scene,
+    renderer,
+    cameraRef,
+    targetRef,
     itemsRef,
+    objectsRef,
+    handlesRef,
+    boundingBoxRef,
+    axisGroupRef,
+    planeRef,
+    sketchGridGroupRef,
+    gridMaterial,
+    rulerGroup,
   });
-  controls.previewMaterial = (target, materialProps) =>
-    materialPreview.previewMaterial(target, materialProps);
-  controls.restoreMaterialPreview = (target) =>
-    materialPreview.restoreMaterialPreview(target);
-
-  // The current view centre (camera orbit target) in world coords — the
-  // toolbar reads this so a newly created primitive spawns where the user is
-  // looking instead of always at the world origin.
-  controls.getViewTarget = () => targetRef.current.clone();
-
-  // Capture the current viewport canvas as a PNG blob, for the Save menu's
-  // "Save image" option.  Relies on preserveDrawingBuffer (sceneSetup.js) so
-  // the buffer is still readable after the frame has been composited.
-  controls.captureScreenshot = () =>
-    new Promise((resolve) => renderer.domElement.toBlob(resolve, "image/png"));
-
-  // Capture a clean thumbnail of the project (a small JPEG data URL): reset-view
-  // (isometric fit-all) framing, geometry shaded, with the ground plane / ruler
-  // labels / sketches hidden.  When there are no solid objects, keep the sketch
-  // plane and frame the origin instead.  Synchronous (render → toDataURL →
-  // restore, all in one tick) so it also works during an unload/quit.
-  controls.captureThumbnailDataUrl = () => {
-    const cam = cameraRef.current;
-    if (!cam) return null;
-
-    // Solid (non-sketch, visible) meshes + the fit-point cloud (analytic
-    // silhouette for round primitives, AABB corners otherwise) so the thumbnail
-    // frames exactly like the Reset-view button.
-    let any = false;
-    const solidMeshes = [];
-    const fitPts = [];
-    for (const item of itemsRef.current) {
-      if (item.type === "sketch" || item.visible === false) continue;
-      const mesh = objectsRef.current[item.id];
-      if (!mesh) continue;
-      mesh.updateMatrixWorld(true);
-      const b = new THREE.Box3().setFromObject(mesh);
-      if (b.isEmpty()) continue;
-      any = true;
-      solidMeshes.push(mesh);
-      meshFitPoints(item, mesh, fitPts);
-    }
-
-    // Hide overlays (restored after the capture).
-    const hidden = [];
-    const hide = (o) => {
-      if (o && o.visible) {
-        o.visible = false;
-        hidden.push(o);
-      }
-    };
-    let gridMesh = null;
-    scene.traverse((o) => {
-      if (o.isMesh && o.material === gridMaterial) gridMesh = o;
-      if (o.userData?.isShadowGround) hide(o);
-      // Sketch line overlays: hide when there's a solid to show (they'd clutter
-      // an object thumbnail); kept — and framed — when the project is sketch-only.
-      if (o.userData?.isSketchOverlay) {
-        if (any) hide(o);
-        else if (o.visible) {
-          o.updateWorldMatrix(true, true);
-          const b = new THREE.Box3().setFromObject(o);
-          if (!b.isEmpty()) boxCorners(b, fitPts);
-        }
-      }
-    });
-    hide(gridMesh);
-    hide(rulerGroup);
-    hide(sketchGridGroupRef?.current);
-    hide(axisGroupRef?.current);
-    handlesRef?.current?.forEach((h) => hide(h.mesh));
-    const bb = boundingBoxRef?.current;
-    if (bb) {
-      hide(bb.boxMesh);
-      hide(bb.labelX?.sprite);
-      hide(bb.labelY?.sprite);
-      hide(bb.labelZ?.sprite);
-    }
-    // The sketch plane is the fallback subject when the project has no objects.
-    if (any) hide(planeRef?.current);
-
-    // Force each solid to its shaded (analytic) material, opaque, for the shot.
-    const matRestore = [];
-    for (const mesh of solidMeshes) {
-      const rec = { mesh, mat: mesh.material, geo: mesh.geometry };
-      if (
-        mesh.userData.hullGeometry &&
-        mesh.geometry !== mesh.userData.hullGeometry
-      )
-        mesh.geometry = mesh.userData.hullGeometry;
-      if (mesh.userData.shaderMat && mesh.material !== mesh.userData.shaderMat)
-        mesh.material = mesh.userData.shaderMat;
-      const m = mesh.material;
-      if (m && "opacity" in m) {
-        rec.opMat = m;
-        rec.op = { t: m.transparent, o: m.opacity, d: m.depthWrite };
-        m.transparent = false;
-        m.opacity = 1;
-        m.depthWrite = true;
-        m.needsUpdate = true;
-      }
-      matRestore.push(rec);
-    }
-
-    // Isometric fit-all pose — the exact same fit as the Reset-view / Home
-    // button, so a thumbnail frames identically to the default view.  The full
-    // frame (no left-panel offset) is used since the shot has no overlay.
-    const saved = {
-      pos: cam.position.clone(),
-      quat: cam.quaternion.clone(),
-      zoom: cam.zoom,
-    };
-    const rotX = Math.asin(Math.sqrt(1 / 3));
-    const rotY = Math.PI / 4;
-    const dir = new THREE.Vector3(
-      Math.sin(rotY) * Math.cos(rotX),
-      Math.sin(rotX),
-      Math.cos(rotY) * Math.cos(rotX),
-    ).normalize();
-    let center;
-    if (fitPts.length > 0) {
-      const fit = fitPointsToView(fitPts, dir, cam, 0.9);
-      center = fit.target;
-      cam.position.copy(fit.target).addScaledVector(dir, fit.distance);
-      if (fit.endZoom != null) cam.zoom = fit.endZoom;
-    } else {
-      center = new THREE.Vector3();
-      cam.position.copy(center).addScaledVector(dir, 15);
-    }
-    cam.up.set(0, 1, 0);
-    cam.lookAt(center);
-    cam.updateProjectionMatrix();
-    cam.updateMatrixWorld(true);
-
-    // Render one clean frame (no bloom composer), read it, downscale to the
-    // project card's display size, then restore camera / overlays / materials.
-    renderer.render(scene, cam);
-    const src = renderer.domElement;
-    // Match the card thumbnail (4:3, ~240 CSS px wide) at the device pixel ratio
-    // so it's crisp on hi-DPI; cap at 2× to keep the stored data URL small.
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const tw = Math.round(240 * dpr);
-    const th = Math.round(180 * dpr);
-    // Stepped halving keeps large minifications from aliasing, then a final
-    // high-quality cover-crop into the 4:3 box.
-    let cur = src;
-    let cw = src.width;
-    let ch = src.height;
-    const cap = Math.max(tw, th) * 2;
-    while (Math.min(cw, ch) > cap) {
-      const nw = Math.max(tw, Math.round(cw / 2));
-      const nh = Math.max(th, Math.round(ch / 2));
-      const half = document.createElement("canvas");
-      half.width = nw;
-      half.height = nh;
-      const hx = half.getContext("2d");
-      hx.imageSmoothingEnabled = true;
-      hx.imageSmoothingQuality = "high";
-      hx.drawImage(cur, 0, 0, nw, nh);
-      cur = half;
-      cw = nw;
-      ch = nh;
-    }
-    const thumb = document.createElement("canvas");
-    thumb.width = tw;
-    thumb.height = th;
-    const ctx = thumb.getContext("2d");
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    const cover = Math.max(tw / cw, th / ch);
-    ctx.drawImage(
-      cur,
-      (tw - cw * cover) / 2,
-      (th - ch * cover) / 2,
-      cw * cover,
-      ch * cover,
-    );
-    const dataUrl = thumb.toDataURL("image/jpeg", 0.72);
-
-    cam.position.copy(saved.pos);
-    cam.quaternion.copy(saved.quat);
-    cam.zoom = saved.zoom;
-    cam.updateProjectionMatrix();
-    cam.updateMatrixWorld(true);
-    for (const o of hidden) o.visible = true;
-    for (const r of matRestore) {
-      r.mesh.geometry = r.geo;
-      if (r.op) {
-        r.opMat.transparent = r.op.t;
-        r.opMat.opacity = r.op.o;
-        r.opMat.depthWrite = r.op.d;
-        r.opMat.needsUpdate = true;
-      }
-      r.mesh.material = r.mat;
-    }
-    return dataUrl;
-  };
-
-  // Drop the selected non-sketch objects so their lowest world-Y point
-  // sits on the ground plane (Y=0).  Computes the min Y across all
-  // selected meshes' world-space bounding boxes, then dispatches a
-  // single setItemsTransform with each item's new Y position.
-  controls.dropSelectedToGround = () => {
-    const store = useStore.getState();
-    const selected = (
-      store.selectedIds && store.selectedIds.length > 0
-        ? store.selectedIds
-        : store.selectedId != null
-          ? [store.selectedId]
-          : []
-    )
-      .map((id) => ({ id, item: store.items.find((i) => i.id === id) }))
-      .filter(({ item }) => item && item.type !== "sketch");
-    if (selected.length === 0) return;
-    let minY = Infinity;
-    const box = new THREE.Box3();
-    for (const { id } of selected) {
-      const mesh = objectsRef.current?.[id];
-      if (!mesh) continue;
-      mesh.updateMatrixWorld(true);
-      box.setFromObject(mesh);
-      if (Number.isFinite(box.min.y) && box.min.y < minY) minY = box.min.y;
-    }
-    if (!Number.isFinite(minY)) return;
-    const shift = -minY;
-    if (Math.abs(shift) < 1e-6) return;
-    const updates = selected.map(({ id, item }) => ({
-      id,
-      position: {
-        x: item.position?.x ?? 0,
-        y: (item.position?.y ?? 0) + shift,
-        z: item.position?.z ?? 0,
-      },
-    }));
-    store.setItemsTransform(updates);
-    // Persist as undoable history entries so the move survives a replay
-    // / reload (setItemsTransform alone only touches `items`).
-    for (const u of updates) {
-      useStore.getState().recordTransformHistory(u.id, "Moved");
-    }
-  };
 
   // ── Transform-handle (gizmo) drag — 3D view mode ──────────────────────────
-  const { tryBeginHandleDrag, updateHandleDrag, commitHandleDrag } =
+  const { handleAt, tryBeginHandleDrag, updateHandleDrag, commitHandleDrag } =
     createTransformHandleDrag({
       renderer,
       cameraRef,
@@ -1600,12 +850,15 @@ export function attachCameraControls(ctx) {
     onSketchMouseMove,
     onSketchMouseUp,
     onKeyDown,
+    openLongPressMenuAt,
     clearSketchVisualsFor3D,
     refreshSketchSelectionOverlay,
     unsubItems,
     unsubMirror,
     unsubCircularPattern,
     unsubRectangularPattern,
+    unsubCentre,
+    unsubCog,
   } = createSketchInteraction(
     {
       scene,
@@ -1678,7 +931,6 @@ export function attachCameraControls(ctx) {
       controls.mouseDownY = e.clientY;
     } else if (e.button === 2) {
       if (!sketchModeRef.current) {
-        controls.isRotating = true;
         setOrbitAnchor(
           getOrbitAnchor(
             cameraRef,
@@ -1703,7 +955,11 @@ export function attachCameraControls(ctx) {
     if (!currentCamera) return;
 
     if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
-      if (extrudeSelectModeRef.current === "start")
+      // "start" and "to" both pick a face (extrudeFacePick.js).
+      if (
+        extrudeSelectModeRef.current === "start" ||
+        extrudeSelectModeRef.current === "to"
+      )
         handleExtrudeStartHover(e.clientX, e.clientY);
       else {
         // Any non-start extrude mode (the unified "profile" phase, or the legacy
@@ -1727,27 +983,22 @@ export function attachCameraControls(ctx) {
           );
         else handleExtrudeHover(e.clientX, e.clientY, e.shiftKey);
       }
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
     }
     if (sweepSelectModeRef && sweepSelectModeRef.current) {
       handleSweepHover(e.clientX, e.clientY);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
     }
     if (useStore.getState().embossTool?.picking) {
       handleEmbossHover(e.clientX, e.clientY);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
     }
     if (useStore.getState().textureTool?.picking) {
       handleTextureHover(e.clientX, e.clientY);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return;
+    }
+    if (useStore.getState().stressTool || useStore.getState().optimiseTool) {
+      if (handleStressHover(e.clientX, e.clientY)) return;
     }
     if (onSketchMouseMove(e)) return;
 
@@ -1767,10 +1018,16 @@ export function attachCameraControls(ctx) {
       const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5) {
-        if (extrudeSelectModeRef.current === "start")
+        if (
+          extrudeSelectModeRef.current === "start" ||
+          extrudeSelectModeRef.current === "to"
+        )
           handleExtrudeStartClick(e.clientX, e.clientY);
         else handleExtrudeProfileClick(e.clientX, e.clientY, e.shiftKey);
-      } else if (extrudeSelectModeRef.current !== "start") {
+      } else if (
+        extrudeSelectModeRef.current !== "start" &&
+        extrudeSelectModeRef.current !== "to"
+      ) {
         // Drag-select: add the boxed regions, or remove them with Alt held.
         // Shift restricts text to the single glyph instead of the whole word.
         handleExtrudeProfileBox(
@@ -1806,6 +1063,15 @@ export function attachCameraControls(ctx) {
       if (Math.hypot(dx, dy) < 5) handleTextureClick(e.clientX, e.clientY);
       return;
     }
+    if (
+      (useStore.getState().stressTool || useStore.getState().optimiseTool) &&
+      e.button === 0
+    ) {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5 && handleStressClick(e.clientX, e.clientY))
+        return;
+    }
 
     if (onSketchMouseUp(e)) return;
 
@@ -1814,14 +1080,8 @@ export function attachCameraControls(ctx) {
     onViewMouseUp(e);
   };
 
-  // ── Camera navigation (wheel + touch) ─────────────────────────────────────
-  const {
-    onMouseWheel,
-    onTouchStart,
-    onTouchMove,
-    onTouchEnd,
-    disposeNavigation,
-  } = createNavigationHandlers(
+  // ── Camera navigation (wheel; touch through touchInput.js) ──────────────────
+  const { onMouseWheel, zoomBy, disposeNavigation } = createNavigationHandlers(
     {
       cameraRef,
       targetRef,
@@ -1899,9 +1159,32 @@ export function attachCameraControls(ctx) {
   el.addEventListener("wheel", onMouseWheel, { passive: false });
   const onContextMenu = (e) => e.preventDefault();
   el.addEventListener("contextmenu", onContextMenu);
-  el.addEventListener("touchstart", onTouchStart, { passive: true });
-  el.addEventListener("touchmove", onTouchMove, { passive: false });
-  el.addEventListener("touchend", onTouchEnd);
+  // Fingers and the Pencil, as clicks, drags and wheel gestures.
+  const detachTouch = attachTouchInput(el, {
+    onMouseDown,
+    onMouseMove,
+    onMouseUp,
+    onMouseWheel,
+    zoomBy,
+    sketchModeRef,
+    handleAt,
+    bodyAt: (x, y) => {
+      const rect = el.getBoundingClientRect();
+      raycasterRef.current.setFromCamera(
+        {
+          x: ((x - rect.left) / rect.width) * 2 - 1,
+          y: -((y - rect.top) / rect.height) * 2 + 1,
+        },
+        cameraRef.current,
+      );
+      const bodies = Object.values(objectsRef.current).filter(
+        (o) => o?.visible,
+      );
+      return raycasterRef.current.intersectObjects(bodies, true).length > 0;
+    },
+    openLongPressMenuAt,
+    home: () => controls.home?.(),
+  });
   document.addEventListener("keyup", onModifierUp);
   document.addEventListener("keydown", onKeyDown);
 
@@ -1914,13 +1197,14 @@ export function attachCameraControls(ctx) {
     el.removeEventListener("mouseup", onMouseUp);
     el.removeEventListener("wheel", onMouseWheel);
     el.removeEventListener("contextmenu", onContextMenu);
-    el.removeEventListener("touchstart", onTouchStart);
-    el.removeEventListener("touchmove", onTouchMove);
-    el.removeEventListener("touchend", onTouchEnd);
+    detachTouch();
     document.removeEventListener("keyup", onModifierUp);
     document.removeEventListener("keydown", onKeyDown);
     unsubItems();
     unsubMirror();
+    unsubCentre();
+    unsubCog();
+    componentMotion.dispose();
     unsubCircularPattern();
     unsubRectangularPattern();
   };

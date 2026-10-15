@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import "../styles/TooltipLayer.css";
 
 // App-drawn tooltips for every [title] element.  Electron/macOS native title

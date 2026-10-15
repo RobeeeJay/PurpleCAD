@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 let app;
 let page;
@@ -7,6 +7,10 @@ const securityWarnings = [];
 test.beforeAll(async () => {
   app = await launchApp();
   page = await app.firstWindow();
+  // Ready before any test runs, not only before the first: a failure restarts
+  // the worker, and the next test then meets a fresh app still loading its
+  // database (the store doesn't exist until that load finishes).
+  await expect(page.locator(".toolbar")).toBeVisible({ timeout: 30000 });
   // Surface renderer console errors in the test output for easier debugging,
   // and collect Electron's security warnings (they only print in unpackaged
   // runs — exactly what this suite is).
@@ -160,9 +164,7 @@ test("the corner tag shows scene totals and memory beside the version", async ()
   });
   await expect
     .poll(() =>
-      page
-        .locator(".version-tag")
-        .evaluate((el) => getComputedStyle(el).color),
+      page.locator(".version-tag").evaluate((el) => getComputedStyle(el).color),
     )
     .toBe("rgb(0, 0, 0)");
   await page.mouse.move(400, 300);
@@ -178,7 +180,7 @@ test("the store test hook is exposed for state-driven assertions", async () => {
 });
 
 test("duplicating a project copies its timeline and data", async () => {
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
     const s = window.__store.getState();
     s.addItem({
       id: 7,
@@ -191,7 +193,7 @@ test("duplicating a project copies its timeline and data", async () => {
     const before = window.__store.getState();
     const srcId = before.activeProjectId;
     const src = before.projects.find((p) => p.id === srcId);
-    before.duplicateProject(srcId);
+    await before.duplicateProject(srcId);
     const after = window.__store.getState();
     const copy = after.projects.find(
       (p) => p.id !== srcId && p.name === `${src.name} copy`,
@@ -217,4 +219,77 @@ test("duplicating a project copies its timeline and data", async () => {
     return items.some((i) => i.name === "Cube 7");
   });
   expect(inCopy).toBe(true);
+});
+
+test("the About box names the license and opens its full text", async () => {
+  await page.evaluate(() => window.__store.getState().setAboutDialogOpen(true));
+  await expect(page.locator(".about-license")).toHaveText(
+    "License: PolyForm Noncommercial 1.0.0",
+  );
+  await page
+    .getByRole("button", { name: "PolyForm Noncommercial 1.0.0" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "License" });
+  // The repository's own LICENSE.md, Required Notice lines first.
+  await expect(dialog).toContainText(
+    "Required Notice: Copyright (c) 2026 Robeena Shepherd",
+  );
+  await expect(dialog).toContainText("PolyForm Noncommercial License 1.0.0");
+  await dialog.getByRole("tab", { name: "Trademarks" }).click();
+  await expect(dialog).toContainText("Takes its own name, logo and icons.");
+  await dialog.getByRole("tab", { name: "Open CASCADE" }).click();
+  await expect(dialog).toContainText("GNU LESSER GENERAL PUBLIC LICENSE");
+  // Closing the license leaves the About box open behind it.
+  await dialog.getByTitle("Close").click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".about-license")).toBeVisible();
+  await page.evaluate(() =>
+    window.__store.getState().setAboutDialogOpen(false),
+  );
+});
+
+test("license links open in the system browser, never in the app window", async () => {
+  // Stand in for the browser: record what main would hand to it.
+  await app.evaluate(({ shell }) => {
+    globalThis.__opened = [];
+    shell.openExternal = async (url) => {
+      globalThis.__opened.push(url);
+    };
+  });
+  const opened = () => app.evaluate(() => globalThis.__opened);
+  const appUrl = page.url();
+
+  await page.evaluate(() => window.__store.getState().setAboutDialogOpen(true));
+  await page
+    .getByRole("button", { name: "PolyForm Noncommercial 1.0.0" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "License" });
+  const polyform = "https://polyformproject.org/licenses/noncommercial/1.0.0";
+  await dialog.getByRole("link", { name: polyform }).click();
+  await expect.poll(opened).toEqual([polyform]);
+  // The app stayed where it was, dialog and all.
+  expect(page.url()).toBe(appUrl);
+  await expect(dialog).toBeVisible();
+
+  // Only web addresses: main refuses to hand anything else to the system.
+  expect(
+    await page.evaluate(() =>
+      window.electronAPI.openExternal("file:///etc/passwd"),
+    ),
+  ).toBe(false);
+  await dialog.getByTitle("Close").click();
+  await page.evaluate(() =>
+    window.__store.getState().setAboutDialogOpen(false),
+  );
+
+  // A page that tries to navigate itself away is stopped, and the address
+  // goes to the browser instead.  Last on purpose: Playwright keeps waiting
+  // for the navigation the app cancelled, and won't click anything after it
+  // (Electron itself reports it isn't loading, and the page works).
+  await page.evaluate(() => {
+    window.location.href = "https://example.com/";
+  });
+  await expect.poll(opened).toEqual([polyform, "https://example.com/"]);
+  expect(page.url()).toBe(appUrl);
+  expect(await page.evaluate(() => document.title)).toMatch(/PurpleCAD/);
 });

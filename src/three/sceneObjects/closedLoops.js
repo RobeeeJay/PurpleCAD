@@ -14,7 +14,15 @@ import {
   arcSegsN,
   sampleShapeForPoly,
 } from "./loopIntersect.js";
-import { polyContainsPoint, polyCentroid, polyArea } from "./polygonUtil.js";
+import {
+  polyContainsPoint,
+  polyCentroid,
+  polyArea,
+  signedPolyAreaXY,
+  reverseEdgeCurves,
+} from "./polygonUtil.js";
+import { cogShapeLoops } from "../cogGeometry.js";
+import { MM_PER_UNIT } from "./dimensions.js";
 
 export {
   signedPolyAreaXY,
@@ -23,7 +31,174 @@ export {
   polyCentroid,
   polyAreaCentroid,
   polyArea,
+  profileAnchor,
+  reverseEdgeCurves,
+  windLoopForOcc,
+  windLoop,
+  packWorldCurveRuns,
 } from "./polygonUtil.js";
+
+// Enumerating every simple cycle is exact for a small sketch -- and existing
+// documents' extrudes are matched against what it returns, so small sketches
+// keep it -- but beyond this many cycles the sketch is an overlapping
+// arrangement, and its regions are the faces below.
+const MAX_ENUMERATED_CYCLES = 128;
+
+// A loop's polygon is sampled from its curves, and OCC can only rebuild a
+// curved face from the curve itself: a polygon makes N flat faces, which every
+// later boolean keeps.  So each loop also records which of its edges lie on
+// which exact curve -- edge k runs from vertex k to vertex k+1 (mod n), and a
+// run covers `count` edges from `start`.  Straight edges carry no run.
+function curveRun(shape, start, count) {
+  if (count === 0) return null;
+  if (shape.type === "arc")
+    return {
+      start,
+      count,
+      type: "arc",
+      cx: shape.cx,
+      cy: shape.cy,
+      r: shape.r,
+    };
+  if (shape.type === "bezier") {
+    const { p0, p1, p2, p3 } = shape;
+    return {
+      start,
+      count,
+      type: "bezier",
+      p0: { x: p0.x, y: p0.y },
+      p1: { x: p1.x, y: p1.y },
+      p2: { x: p2.x, y: p2.y },
+      p3: { x: p3.x, y: p3.y },
+    };
+  }
+  return null;
+}
+
+// Sample `shape` onto the end of `polygon`, recording its curve run.
+function appendSamples(polygon, runs, shape, startIsA, N) {
+  const pts = sampleShapeForPoly(shape, startIsA, N);
+  const run = curveRun(shape, polygon.length, pts.length);
+  if (run) runs.push(run);
+  for (const p of pts) polygon.push(p);
+}
+
+// The bounded faces of a planar arrangement, plus each connected piece's outer
+// outline: the regions you can see, not every union of them.  Linear in the
+// edge count: every directed edge borders exactly one face, and walking "take
+// the sharpest right turn" from it goes round that face.
+function arrangementFaces(
+  shapeNodes,
+  subEntries,
+  nodes,
+  curveSegments,
+  precision,
+) {
+  const live = shapeNodes.map((sn) => !!sn && sn.a !== sn.b);
+  // A dangling edge (a node of degree 1) bounds no region; tracing round it
+  // would put a zero-width spike in a face that OCC's wire builder rejects.
+  const degree = new Map();
+  const bump = (n, d) => degree.set(n, (degree.get(n) || 0) + d);
+  shapeNodes.forEach((sn, si) => {
+    if (live[si]) {
+      bump(sn.a, 1);
+      bump(sn.b, 1);
+    }
+  });
+  for (let pruned = true; pruned;) {
+    pruned = false;
+    shapeNodes.forEach((sn, si) => {
+      if (live[si] && (degree.get(sn.a) === 1 || degree.get(sn.b) === 1)) {
+        live[si] = false;
+        bump(sn.a, -1);
+        bump(sn.b, -1);
+        pruned = true;
+      }
+    });
+  }
+
+  const segsOf = (sh) =>
+    arcSegsN(
+      sh,
+      sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI,
+      curveSegments,
+      precision,
+    );
+  // Half-edge h = 2*si (a -> b) or 2*si + 1 (b -> a).  Its direction as it
+  // leaves its node is taken from the curve's first sample, not the far end,
+  // so two arcs leaving one point (circles crossing there) sort by where
+  // they actually go.
+  const tail = (h) => (h & 1 ? shapeNodes[h >> 1].b : shapeNodes[h >> 1].a);
+  const head = (h) => (h & 1 ? shapeNodes[h >> 1].a : shapeNodes[h >> 1].b);
+  const samples = (h) => {
+    const sh = subEntries[h >> 1].shape;
+    return sampleShapeForPoly(sh, (h & 1) === 0, Math.max(2, segsOf(sh)));
+  };
+  const out = new Map();
+  shapeNodes.forEach((sn, si) => {
+    if (!live[si]) return;
+    for (const h of [si * 2, si * 2 + 1]) {
+      const from = nodes[tail(h)];
+      const pts = samples(h);
+      const to = pts.length > 1 ? pts[1] : nodes[head(h)];
+      const list = out.get(tail(h)) || [];
+      list.push({ h, ang: Math.atan2(to.y - from.y, to.x - from.x) });
+      out.set(tail(h), list);
+    }
+  });
+  const slot = new Map();
+  out.forEach((list) => {
+    list.sort((p, q) => p.ang - q.ang);
+    list.forEach((e, i) => slot.set(e.h, i));
+  });
+  // The face on h's left continues along the edge just clockwise of h's twin.
+  const next = (h) => {
+    const list = out.get(head(h));
+    return list[(slot.get(h ^ 1) - 1 + list.length) % list.length].h;
+  };
+
+  const faces = [];
+  const seen = new Set();
+  out.forEach((list) => {
+    for (const { h: start } of list) {
+      if (seen.has(start)) continue;
+      const walk = [];
+      let h = start;
+      while (!seen.has(h)) {
+        seen.add(h);
+        walk.push(h);
+        h = next(h);
+      }
+      if (h !== start) continue;
+      const polygon = [];
+      const curves = [];
+      for (const e of walk) {
+        const pts = samples(e);
+        const run = curveRun(
+          subEntries[e >> 1].shape,
+          polygon.length,
+          pts.length,
+        );
+        if (run) curves.push(run);
+        for (const p of pts) polygon.push(p);
+      }
+      const area = signedPolyAreaXY(polygon);
+      const shapeIndices = [
+        ...new Set(walk.map((e) => subEntries[e >> 1].origIdx)),
+      ];
+      // Counter-clockwise: a bounded face.  Clockwise: a piece's outline, kept
+      // (reversed) when it is a simple loop, as the cycle search offered it.
+      if (area > 1e-12) faces.push({ polygon, shapeIndices, curves });
+      else if (area < -1e-12 && new Set(walk.map(tail)).size === walk.length)
+        faces.push({
+          polygon: polygon.slice().reverse(),
+          shapeIndices,
+          curves: reverseEdgeCurves(curves, polygon.length),
+        });
+    }
+  });
+  return faces;
+}
 
 export function findClosedLoopsWithShapes(
   shapes,
@@ -42,18 +217,29 @@ export function findClosedLoopsWithShapes(
     // trimmed legs, so a filleted corner only closes if the arc participates.
     // Construction (dashed) geometry is excluded; text is handled separately
     // below (its stored glyph contours are already closed loops).
-    if (!s.dashed && s.type !== "text")
+    if (!s.dashed && s.type !== "text" && s.type !== "cog")
       solidEntries.push({ shape: s, origIdx: i });
   });
 
-  // Text: each stored glyph contour is already a closed loop positioned at the
-  // shape's anchor.  Feed them in directly — NOT through the pairwise-intersect
-  // + cycle DFS, which dense glyph geometry would choke — so filled/extruded
-  // text works.  groupLoopsWithHoles nests the counters (e.g. the hole in "o").
+  // Text and cogs: each stored contour is already a closed loop positioned at
+  // the shape's anchor.  Feed them in directly — NOT through the pairwise-
+  // intersect + cycle DFS, which dense glyph or tooth geometry would choke — so
+  // filled/extruded text and cogs work.  groupLoopsWithHoles nests the counters
+  // (the hole in "o", a cog's centre hole).
   const textLoops = [];
   shapes.forEach((s, i) => {
+    if (s.type === "cog") {
+      // At the active resolution, like the circles and arcs around it -- the
+      // cached outline is a fixed coarse one, and an extruded cog made from
+      // it never got finer with the resolution.
+      const tol = precision != null ? precision / MM_PER_UNIT : null;
+      for (const { polygon, curves } of cogShapeLoops(s, tol))
+        if (polygon.length >= 3)
+          textLoops.push({ polygon, shapeIndices: [i], curves });
+      return;
+    }
     if (s.type !== "text" || !Array.isArray(s.contours)) return;
-    for (const c of s.contours) {
+    s.contours.forEach((c, ci) => {
       // Drop a duplicated closing point (font glyph contours repeat the start
       // point) so the loop is a clean polygon — a zero-length closing segment
       // makes OCC's extrude wire-builder reject the profile.
@@ -63,12 +249,25 @@ export function findClosedLoopsWithShapes(
           b = pts[pts.length - 1];
         if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) pts = pts.slice(0, -1);
       }
-      if (pts.length < 3) continue;
+      if (pts.length < 3) return;
+      // Its glyph curves, when the shape caches them (text made or refreshed
+      // since exact curves), placed at the anchor like the points.
+      const at = (p) => ({ x: p.x + s.x, y: p.y + s.y });
       textLoops.push({
-        polygon: pts.map((p) => ({ x: p.x + s.x, y: p.y + s.y })),
+        polygon: pts.map(at),
         shapeIndices: [i],
+        curves:
+          pts === c
+            ? (s.contourCurves?.[ci] || []).map((r) => ({
+                ...r,
+                p0: at(r.p0),
+                p1: at(r.p1),
+                p2: at(r.p2),
+                p3: at(r.p3),
+              }))
+            : [],
       });
-    }
+    });
   });
 
   // ── Expand rects to 4 line segments so they participate in intersection
@@ -311,24 +510,25 @@ export function findClosedLoopsWithShapes(
             ? Math.abs(sh2.endAngle - sh2.startAngle)
             : Math.PI;
         const poly = [];
+        const curves = [];
         const idxSet = new Set();
-        poly.push(
-          ...sampleShapeForPoly(
-            sh1,
-            sn1.a === N1,
-            arcSegsN(sh1, ang1, curveSegments, precision),
-          ),
+        appendSamples(
+          poly,
+          curves,
+          sh1,
+          sn1.a === N1,
+          arcSegsN(sh1, ang1, curveSegments, precision),
         );
         idxSet.add(subEntries[si1].origIdx);
-        poly.push(
-          ...sampleShapeForPoly(
-            sh2,
-            sn2.a === N2,
-            arcSegsN(sh2, ang2, curveSegments, precision),
-          ),
+        appendSamples(
+          poly,
+          curves,
+          sh2,
+          sn2.a === N2,
+          arcSegsN(sh2, ang2, curveSegments, precision),
         );
         idxSet.add(subEntries[si2].origIdx);
-        results.push({ polygon: poly, shapeIndices: [...idxSet] });
+        results.push({ polygon: poly, shapeIndices: [...idxSet], curves });
       }
     }
     // Keep all edges (including arc edges that have a parallel line
@@ -346,8 +546,14 @@ export function findClosedLoopsWithShapes(
   // the budget runs out we keep the regions found so far rather than hang.
   const cycles = [];
   let dfsBudget = 150000;
+  // Enumerating every cycle also returns every UNION of adjacent regions, so
+  // the count explodes with overlap: six overlapping circles gave 6211 loops
+  // (1.28M points), and grouping them into regions took 142 s on the main
+  // thread -- the window froze while a copy was nudged over its original.
+  // Past this many, stop and take the arrangement's faces instead.
+  let overflow = results.length > MAX_ENUMERATED_CYCLES;
   const dfs = (start, cur, path, visited) => {
-    if (path.length > 24 || dfsBudget <= 0) return;
+    if (path.length > 24 || dfsBudget <= 0 || overflow) return;
     dfsBudget--;
     for (const { si, otherNode } of adj[cur] || []) {
       if (path.some((e) => e.si === si)) continue;
@@ -356,6 +562,10 @@ export function findClosedLoopsWithShapes(
         if (!cycleKeys.has(key)) {
           cycleKeys.add(key);
           cycles.push([...path, { si, fromNode: cur, toNode: otherNode }]);
+          if (results.length + cycles.length > MAX_ENUMERATED_CYCLES) {
+            overflow = true;
+            return;
+          }
         }
         continue;
       }
@@ -373,24 +583,41 @@ export function findClosedLoopsWithShapes(
     if ((adj[ni] || []).length >= 2) dfs(ni, ni, [], new Set([ni]));
   });
 
+  if (overflow) {
+    // The faces replace BOTH the enumerated cycles and the parallel-edge pairs
+    // above -- those pairs are faces too, and would come back twice.
+    results.length = 0;
+    cycles.length = 0;
+    results.push(
+      ...arrangementFaces(
+        shapeNodes,
+        subEntries,
+        nodes,
+        curveSegments,
+        precision,
+      ),
+    );
+  }
+
   cycles.forEach((path) => {
     const poly = [];
+    const curves = [];
     const idxSet = new Set();
     for (const edge of path) {
       const sn = shapeNodes[edge.si];
       const sh = subEntries[edge.si].shape;
       const arcAngle =
         sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI;
-      poly.push(
-        ...sampleShapeForPoly(
-          sh,
-          sn.a === edge.fromNode,
-          arcSegsN(sh, arcAngle, curveSegments, precision),
-        ),
+      appendSamples(
+        poly,
+        curves,
+        sh,
+        sn.a === edge.fromNode,
+        arcSegsN(sh, arcAngle, curveSegments, precision),
       );
       idxSet.add(subEntries[edge.si].origIdx);
     }
-    results.push({ polygon: poly, shapeIndices: [...idxSet] });
+    results.push({ polygon: poly, shapeIndices: [...idxSet], curves });
   });
 
   // ── Direct loops for self-closing shapes that were NOT split ─────────
@@ -409,6 +636,16 @@ export function findClosedLoopsWithShapes(
           };
         }),
         shapeIndices: [origIdx],
+        curves: [
+          {
+            start: 0,
+            count: segs,
+            type: "arc",
+            cx: shape.cx,
+            cy: shape.cy,
+            r: shape.r,
+          },
+        ],
       });
     } else if (shape.type === "ellipse") {
       const segs =
@@ -429,6 +666,17 @@ export function findClosedLoopsWithShapes(
           };
         }),
         shapeIndices: [origIdx],
+        curves: [
+          {
+            start: 0,
+            count: segs,
+            type: "ellipse",
+            cx: shape.cx,
+            cy: shape.cy,
+            rx: shape.rx,
+            ry: shape.ry,
+          },
+        ],
       });
     }
     // rects are always expanded to 4 lines; the DFS finds the rectangular
@@ -526,4 +774,82 @@ export function groupLoopsWithHoles(loops) {
   return loops
     .map((_, i) => (parents[i] === -1 ? buildEntry(i) : null))
     .filter(Boolean);
+}
+
+// Every region of a sketch — roots and nested alike — each tagged with the
+// sketch shapes its boundary came from.  A text / cog / SVG profile records
+// WHICH shape it was extruded from (`textShapeIdx`), and that survives the
+// shape being moved or resized, which neither the stored outline nor the
+// stored click anchor does; the rebuild matches on it so a shape drawn where
+// the old one used to be can't capture the extrude.
+export function regionsWithShapes(
+  shapes,
+  curveSegments = 32,
+  precision = null,
+) {
+  const loops = findClosedLoopsWithShapes(shapes, curveSegments, precision);
+  const byPolygon = new Map(loops.map((l) => [l.polygon, l.shapeIndices]));
+  const curvesBy = new Map(loops.map((l) => [l.polygon, l.curves]));
+  const all = [];
+  const collect = (e) => {
+    all.push({
+      ...e,
+      shapeIndices: byPolygon.get(e.polygon) || [],
+      loopShapes: loopShapesOf(e.polygon, e.holes, byPolygon),
+      curves: loopCurvesOf(e.polygon, e.holes, curvesBy),
+    });
+    e.entries.forEach(collect);
+  };
+  groupLoopsWithHoles(loops.map((l) => l.polygon)).forEach(collect);
+  return all;
+}
+
+// A region's identity in its sketch: the shapes its outer loop runs along and
+// those of each hole, as sorted indices.  Unlike its outline, area or a click
+// point, this survives the shapes being moved or resized -- concentric rings
+// share a centre, and once grown a ring's old area can be nearer its
+// neighbour's than its own.  `shapesOf` maps a loop polygon to its indices.
+export function loopShapesOf(polygon, holes, shapesOf) {
+  const norm = (ids) => [...new Set(ids || [])].sort((a, b) => a - b);
+  return {
+    outer: norm(shapesOf.get(polygon)),
+    holes: (holes || [])
+      .filter((h) => h.length >= 3)
+      .map((h) => norm(shapesOf.get(h)))
+      .sort((a, b) => String(a).localeCompare(String(b))),
+  };
+}
+
+// A region's exact curves, as a profile stores them (`curves2D`): the outer
+// loop's runs and each hole's, holes in the order and filtering the profile's
+// own `holes` uses.  `curvesOf` maps a loop polygon to its runs.
+export function loopCurvesOf(polygon, holes, curvesOf) {
+  return {
+    outer: curvesOf.get(polygon) || [],
+    holes: (holes || [])
+      .filter((h) => h.length >= 3)
+      .map((h) => curvesOf.get(h) || []),
+  };
+}
+
+export const loopShapesKey = (ls) =>
+  ls
+    ? `${ls.outer.join(",")}|${ls.holes.map((h) => h.join(",")).join(";")}`
+    : "";
+
+// Narrow a sketch's regions to the profile's own: the ones bounded by the
+// shapes it was picked from (loopShapes), or else built from its text / cog
+// shape (textShapeIdx).  Returns the full set when nothing matches (a shape
+// was deleted and the indices renumbered), so matching degrades to geometry
+// rather than failing.
+export function regionsForProfile(regions, profile) {
+  const key = loopShapesKey(profile?.loopShapes);
+  if (key && profile.loopShapes.outer.length) {
+    const same = regions.filter((g) => loopShapesKey(g.loopShapes) === key);
+    if (same.length > 0) return same;
+  }
+  const idx = profile?.textShapeIdx;
+  if (idx == null) return regions;
+  const own = regions.filter((g) => g.shapeIndices.includes(idx));
+  return own.length > 0 ? own : regions;
 }

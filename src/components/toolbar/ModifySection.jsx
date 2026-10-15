@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { countGeometryComponents } from "../../three/geometryComponents.js";

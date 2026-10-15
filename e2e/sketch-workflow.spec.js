@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 // The 2D sketch workflow with REAL mouse input: enter sketch mode, draw a
@@ -191,9 +191,7 @@ test.describe.serial("2D sketch workflow", () => {
     // Click the corner: a chamfer bridge appears at the typed setback.
     await page.mouse.click(B.x, B.y);
     await expect
-      .poll(async () =>
-        (await shapes()).some((sh) => sh.kind === "chamfer"),
-      )
+      .poll(async () => (await shapes()).some((sh) => sh.kind === "chamfer"))
       .toBe(true);
     const bridge = (await shapes()).find((sh) => sh.kind === "chamfer");
     expect(bridge.chamferData?.dist).toBeCloseTo(0.4, 2); // 4 mm
@@ -221,18 +219,17 @@ test.describe.serial("2D sketch workflow", () => {
     await rfield.fill("6");
     await rfield.press("Enter");
     await expect
-      .poll(async () =>
-        (await shapes()).find((sh) => sh.kind === "chamfer")?.chamferData
-          ?.dist ?? null,
+      .poll(
+        async () =>
+          (await shapes()).find((sh) => sh.kind === "chamfer")?.chamferData
+            ?.dist ?? null,
       )
       .toBeCloseTo(0.6, 2);
   });
 
   test("bevel dialog accepts a variable formula for the radius", async () => {
     await page.evaluate(() =>
-      window.__store
-        .getState()
-        .setVariables([{ name: "br", formula: "5" }]),
+      window.__store.getState().setVariables([{ name: "br", formula: "5" }]),
     );
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool("line"),
@@ -258,8 +255,9 @@ test.describe.serial("2D sketch workflow", () => {
     // The formula lands in the store and drives the corner click: 5 mm.
     await page.mouse.click(B.x, B.y);
     await expect
-      .poll(async () =>
-        (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
+      .poll(
+        async () =>
+          (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
       )
       .toBeCloseTo(0.5, 2);
     await page.getByTitle("Done — leave the bevel tool").click();
@@ -282,13 +280,12 @@ test.describe.serial("2D sketch workflow", () => {
 
     // Changing the variable re-cuts the corner to the new radius.
     await page.evaluate(() =>
-      window.__store
-        .getState()
-        .setVariables([{ name: "br", formula: "8" }]),
+      window.__store.getState().setVariables([{ name: "br", formula: "8" }]),
     );
     await expect
-      .poll(async () =>
-        (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
+      .poll(
+        async () =>
+          (await shapes()).find((sh) => sh.kind === "bevel")?.r ?? null,
       )
       .toBeCloseTo(0.8, 2);
     // The formula survives the re-cut.
@@ -516,9 +513,7 @@ test.describe.serial("2D sketch workflow", () => {
         ),
       )
       .toBe(1);
-    await page
-      .getByTitle("Confirm — create the mirrored geometry")
-      .click();
+    await page.getByTitle("Confirm — create the mirrored geometry").click();
 
     await expect.poll(async () => (await shapes()).length).toBe(before + 1);
     const circles = (await shapes()).filter((sh) => sh.type === "circle");
@@ -596,9 +591,7 @@ test.describe.serial("2D sketch workflow", () => {
 
   test("rectangular pattern dialog takes formula offsets and tracks the variable", async () => {
     await page.evaluate(() =>
-      window.__store
-        .getState()
-        .setVariables([{ name: "gap", formula: "30" }]),
+      window.__store.getState().setVariables([{ name: "gap", formula: "30" }]),
     );
     // A circle to pattern.
     await page.evaluate(() =>
@@ -626,9 +619,7 @@ test.describe.serial("2D sketch workflow", () => {
     await inputs.nth(1).fill("gap"); // Offset X — a variable formula
     await inputs.nth(2).fill("1"); // Count Y
     await inputs.nth(3).fill("0"); // Offset Y
-    await page
-      .getByTitle("Confirm — create the patterned geometry")
-      .click();
+    await page.getByTitle("Confirm — create the patterned geometry").click();
 
     // The copy sits 30 mm (3 units) right of the source; the constraint
     // remembers the formula.
@@ -640,8 +631,7 @@ test.describe.serial("2D sketch workflow", () => {
             window.__store
               .getState()
               .items.find((i) => i.id === 300)
-              .constraints.find((c) => c.type === "rectangularPattern") ??
-            null,
+              .constraints.find((c) => c.type === "rectangularPattern") ?? null,
         ),
       )
       .toMatchObject({ dxFormula: "gap" });
@@ -650,9 +640,7 @@ test.describe.serial("2D sketch workflow", () => {
 
     // Changing the variable re-spaces the copies.
     await page.evaluate(() =>
-      window.__store
-        .getState()
-        .setVariables([{ name: "gap", formula: "50" }]),
+      window.__store.getState().setVariables([{ name: "gap", formula: "50" }]),
     );
     await expect
       .poll(async () => (await shapes())[copyIdx].cx)
@@ -683,6 +671,167 @@ test.describe.serial("2D sketch workflow", () => {
     expect(added[0].text).toBe("OK");
     expect(added[0].x).toBeCloseTo(-4, 0);
     expect(added[0].y).toBeCloseTo(4, 0);
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+  });
+
+  // Pasted copies used to land unselected beside the originals, which stayed
+  // selected -- so the obvious next move, dragging the copy into place, moved
+  // the original instead.  Nudging had one resolution, 1mm per press.
+  test("pasted geometry is selected, drags, and nudges finely with Shift", async () => {
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(2, -3);
+    const B = toScreen(4, -3);
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+    const orig = (await shapes()).length - 1;
+    const original = { ...(await shapes())[orig] };
+
+    const mid = toScreen(3, -3);
+    await page.mouse.click(mid.x, mid.y);
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.__store.getState().selectedSketchElement),
+      )
+      .toMatchObject({ type: "line", shapeIdx: orig });
+
+    await page.keyboard.press("ControlOrMeta+c");
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect.poll(async () => (await shapes()).length).toBe(orig + 2);
+    const copy = orig + 1;
+
+    // The copy is now the selection, and the original is not -- selected just
+    // as a click would select it, so single-line tools take it.
+    const sel = () =>
+      page.evaluate(() => {
+        const s = window.__store.getState();
+        return {
+          multi: s.sketchMultiSelectedIndices,
+          single: s.selectedSketchElement,
+        };
+      });
+    await expect
+      .poll(sel)
+      .toEqual({ multi: [], single: { type: "line", shapeIdx: copy } });
+
+    // Drag the copy (pasted half a unit up and right of the original).
+    const pasted = (await shapes())[copy];
+    const grab = toScreen((pasted.x1 + pasted.x2) / 2, pasted.y1);
+    const drop = toScreen((pasted.x1 + pasted.x2) / 2, pasted.y1 + 1);
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    await page.mouse.move(drop.x, drop.y, { steps: 8 });
+    await page.mouse.up();
+    const dragged = (await shapes())[copy];
+    expect(dragged.y1 - pasted.y1, "the copy moved up").toBeGreaterThan(0.5);
+    expect((await shapes())[orig], "the original stayed put").toMatchObject(
+      original,
+    );
+
+    // Still selected after the drag.  A plain arrow nudges 1mm (0.1 scene
+    // units); with Shift, 0.1mm.
+    await expect
+      .poll(sel)
+      .toEqual({ multi: [], single: { type: "line", shapeIdx: copy } });
+    const x0 = (await shapes())[copy].x1;
+    await page.keyboard.press("ArrowRight");
+    await expect
+      .poll(async () => (await shapes())[copy].x1 - x0)
+      .toBeCloseTo(0.1, 6);
+    await page.keyboard.press("Shift+ArrowRight");
+    await expect
+      .poll(async () => (await shapes())[copy].x1 - x0)
+      .toBeCloseTo(0.11, 6);
+    // The original never moved through any of it.
+    expect((await shapes())[orig]).toMatchObject(original);
+
+    await page.keyboard.press("Escape");
+  });
+
+  // The font list was a <datalist>: the browser filtered it by whatever was
+  // already in the field (so opening it on the current font showed almost
+  // nothing), capped its own height with no scrolling, and could not show what
+  // each face looks like.  It is a real list now.
+  test("the font list scrolls, filters, and shows each face", async () => {
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("text"),
+    );
+    const at = toScreen(-4, 1);
+    await page.mouse.click(at.x, at.y);
+    const dialog = page.locator(".variables-dialog");
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    const field = dialog.getByLabel("Font");
+    await field.click();
+    const list = dialog.locator(".font-picker-list");
+    await expect(list).toBeVisible();
+    // Every bundled face is offered, each with a sample drawn beside its name.
+    // Installed families are listed too where the platform allows it, so the
+    // count is a floor, not an equality.
+    const rows = list.locator(".font-row");
+    expect(await rows.count()).toBeGreaterThanOrEqual(4);
+    await expect(rows.first().locator(".font-row-name")).not.toBeEmpty();
+    expect(await rows.first().locator(".font-row-sample").count()).toBe(1);
+
+    // The list scrolls on its own rather than running off the dialog.
+    const scrolls = await list.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        overflowY: s.overflowY,
+        maxHeight: parseFloat(s.maxHeight),
+        height: el.getBoundingClientRect().height,
+      };
+    });
+    expect(scrolls.overflowY).toBe("auto");
+    expect(scrolls.maxHeight).toBeGreaterThan(0);
+    expect(scrolls.height).toBeLessThanOrEqual(scrolls.maxHeight + 1);
+
+    // The dialog is anchored to the bottom of the window, so the list has to
+    // sit fully on screen rather than dropping off the bottom edge.
+    const box = await list.boundingBox();
+    const viewport = await page.evaluate(() => ({
+      h: window.innerHeight,
+      w: window.innerWidth,
+    }));
+    expect(box.y, "top edge on screen").toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height, "bottom edge on screen").toBeLessThanOrEqual(
+      viewport.h + 1,
+    );
+
+    // Typing narrows it, and the name is matched anywhere in the family.
+    await field.fill("genti");
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText("Gentilis");
+
+    // Picking sets the draft's font, and the field shows what was picked.
+    await rows.first().click();
+    await expect(list).toBeHidden();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => window.__store.getState().textDraft.font),
+      )
+      .toBe("gentilis");
+    await expect(field).toHaveValue("Gentilis");
+
+    // Clicking the field opens the list again.  Focus stays on it after a
+    // pick, so there is no second focus event to rely on.
+    await field.click();
+    await expect(list).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(list).toBeHidden();
+
+    // Only once the list is out of the way does Escape close the dialog --
+    // and it has to work at all, which needs the field to still hold focus
+    // after a row was clicked.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
     await page.evaluate(() =>
       window.__store.getState().setActiveSketchTool(null),
     );
@@ -760,9 +909,7 @@ test.describe.serial("2D sketch workflow", () => {
       .toBe(true);
     // The mode exits after applying, and the point sits on the middle.
     expect(
-      await page.evaluate(
-        () => window.__store.getState().sketchConstraintMode,
-      ),
+      await page.evaluate(() => window.__store.getState().sketchConstraintMode),
     ).toBe(null);
     let pt = (await shapes())[pointIdx];
     expect(pt.x).toBeCloseTo(-2, 1);
@@ -1023,10 +1170,22 @@ test.describe.serial("2D sketch workflow", () => {
     await page.keyboard.up("Shift");
     await expect(tag).toContainText("1 pts · 1 lines selected");
 
-    // Click the midpoint icon from the earlier pair test: constraint counts.
+    // Click the midpoint marker from the earlier pair test: constraint counts.
     // (The LINE was picked first there, so it travelled to the point — the
-    // icon sits at the line's middle = the point's position.)
-    const icon = toScreen(-7, -9.5);
+    // marker's anchor is the line's middle = the point's position, and the
+    // marker itself sits beside it, clear of the point.)
+    const anchor = toScreen(-7, -9.5);
+    const icon = (
+      await page.evaluate(() =>
+        window.__store.getState()._cameraControls.constraintMarkers(),
+      )
+    )
+      .filter((m) => m.type === "midpoint")
+      .sort(
+        (a, b) =>
+          Math.hypot(a.anchor.x - anchor.x, a.anchor.y - anchor.y) -
+          Math.hypot(b.anchor.x - anchor.x, b.anchor.y - anchor.y),
+      )[0].middle;
     await page.mouse.click(icon.x, icon.y);
     await expect(tag).toContainText("1 constraints selected");
 
@@ -1038,6 +1197,178 @@ test.describe.serial("2D sketch workflow", () => {
       s.setSelectedSketchElement(null);
     });
     await expect(tag).toContainText("faces");
+  });
+
+  test("coincident carries a midpoint-bound point's SHAPE with it", async () => {
+    // The bug this pins: with a point held at a line's midpoint, making that
+    // point coincident with another point moved the POINT alone. It tore off
+    // the line it belonged to, and the sketch was left breaking its own
+    // midpoint constraint. The line has to travel with its midpoint.
+    const drawLineWithMidpoint = async (x1, y1, x2, y2, px, py) => {
+      await page.evaluate(() =>
+        window.__store.getState().setActiveSketchTool("line"),
+      );
+      const a = toScreen(x1, y1);
+      const b = toScreen(x2, y2);
+      await page.mouse.click(a.x, a.y);
+      await page.mouse.click(b.x, b.y);
+      await page.keyboard.press("Escape");
+      await page.evaluate(() =>
+        window.__store.getState().setActiveSketchTool("point"),
+      );
+      const p = toScreen(px, py);
+      await page.mouse.click(p.x, p.y);
+      await page.evaluate(() => {
+        window.__store.getState().setActiveSketchTool(null);
+        window.__store.getState().setSelectedSketchElement(null);
+      });
+      const idxLine = (await shapes()).length - 2;
+      const idxPoint = idxLine + 1;
+      await page
+        .getByTitle("Midpoint — pin a point to the middle", { exact: false })
+        .click();
+      await page.mouse.click(p.x, p.y);
+      const onLine = toScreen((x1 + x2) / 2, (y1 + y2) / 2);
+      await page.mouse.click(onLine.x, onLine.y);
+      await expect
+        .poll(async () => {
+          const all = await shapes();
+          const ln = all[idxLine];
+          const pt = all[idxPoint];
+          return Math.hypot(
+            pt.x - (ln.x1 + ln.x2) / 2,
+            pt.y - (ln.y1 + ln.y2) / 2,
+          );
+        })
+        .toBeLessThan(0.05);
+      return { idxLine, idxPoint };
+    };
+
+    // An empty corner of this shared sketch: by now it is crowded, and a pick
+    // that lands on earlier geometry picks the wrong thing.
+    const first = await drawLineWithMidpoint(-8, -2.5, -5, -2.5, -6.5, -3.4);
+    const second = await drawLineWithMidpoint(-8, -6.5, -5, -6.5, -6.5, -7.4);
+
+    const before = await shapes();
+    const firstLineBefore = before[first.idxLine];
+    const secondLineBefore = before[second.idxLine];
+    const target = before[second.idxPoint];
+
+    // Coincident, first pick then second: the FIRST travels to the second.
+    await page
+      .getByTitle("Coincident — make two points share the same position", {
+        exact: false,
+      })
+      .click();
+    const pick = (pt) => toScreen(pt.x, pt.y);
+    let p1 = pick(before[first.idxPoint]);
+    await page.mouse.click(p1.x, p1.y);
+    const p2 = pick(target);
+    await page.mouse.click(p2.x, p2.y);
+
+    await expect
+      .poll(async () => {
+        const all = await shapes();
+        const pt = all[first.idxPoint];
+        return Math.hypot(pt.x - target.x, pt.y - target.y);
+      })
+      .toBeLessThan(0.05);
+
+    const after = await shapes();
+    // The line came too: its own midpoint is where the point now is, so the
+    // point never left the line it is pinned to.
+    const line = after[first.idxLine];
+    expect((line.x1 + line.x2) / 2).toBeCloseTo(target.x, 1);
+    expect((line.y1 + line.y2) / 2).toBeCloseTo(target.y, 1);
+    // It moved as one piece, keeping its length.
+    expect(Math.hypot(line.x2 - line.x1, line.y2 - line.y1)).toBeCloseTo(
+      Math.hypot(
+        firstLineBefore.x2 - firstLineBefore.x1,
+        firstLineBefore.y2 - firstLineBefore.y1,
+      ),
+      2,
+    );
+    // The second pick, and the line it belongs to, stayed put.
+    expect(after[second.idxLine].x1).toBeCloseTo(secondLineBefore.x1, 3);
+    expect(after[second.idxLine].x2).toBeCloseTo(secondLineBefore.x2, 3);
+    expect(after[second.idxPoint].x).toBeCloseTo(target.x, 3);
+  });
+
+  test("a construction line's dashes hold their size on screen", async () => {
+    // Dash sizes are WORLD lengths. Left fixed, a construction line stops
+    // reading as dashed as the view changes -- zoomed in, one dash swallows
+    // the whole line and it looks like ordinary geometry. The render loop
+    // re-sizes them every frame from the world-per-pixel measure, so a dash
+    // covers the same number of PIXELS however the view is set up. Resizing
+    // the window moves that measure directly (sketch-mode wheel zoom is
+    // macOS-only, so it is no use inside the Linux container).
+    const lineIdx = await page.evaluate(() => {
+      const sketch = window.__store.getState().items.find((i) => i.id === 300);
+      const idx = sketch.shapes.findIndex((sh) => sh.type === "line");
+      window.__store.getState().toggleSketchShapesDashed(300, [idx]);
+      return idx;
+    });
+    expect(lineIdx).toBeGreaterThanOrEqual(0);
+
+    // dashSize x canvas height is the dash's size in pixels, up to the
+    // constant world height the camera shows.
+    const reading = () =>
+      page.evaluate(() => {
+        const dashes = window.__store
+          .getState()
+          ._cameraControls.constructionDashSizes();
+        return {
+          dashes,
+          heightPx: document.querySelector("canvas").clientHeight,
+        };
+      });
+    await expect
+      .poll(async () => (await reading()).dashes.length)
+      .toBeGreaterThan(0);
+
+    const before = await reading();
+    expect(before.dashes[0].dashSize).toBeGreaterThan(0);
+    expect(before.dashes[0].gapSize).toBeGreaterThan(0);
+
+    const [w, h] = await app.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      const [width, height] = win.getSize();
+      win.setSize(width, Math.round(height * 0.6));
+      return [width, height];
+    });
+    await expect
+      .poll(async () => (await reading()).heightPx)
+      .toBeLessThan(before.heightPx);
+    await page.waitForTimeout(400);
+    const after = await reading();
+
+    // Fewer pixels of canvas for the same world height: each pixel now covers
+    // MORE of the model, so a dash that holds its size on screen must measure
+    // larger in the model. Before this was fixed the size never moved.
+    expect(after.dashes[0].dashSize).toBeGreaterThan(
+      before.dashes[0].dashSize * 1.1,
+    );
+    // The dash is the same number of pixels either way -- that is the point.
+    const px = (r) => r.dashes[0].dashSize * r.heightPx;
+    expect(px(after)).toBeCloseTo(px(before), 1);
+    // Still a dash and a gap in the same rhythm, so it reads as construction
+    // geometry rather than a solid line.
+    expect(after.dashes[0].dashSize / after.dashes[0].gapSize).toBeCloseTo(
+      before.dashes[0].dashSize / before.dashes[0].gapSize,
+      6,
+    );
+
+    await app.evaluate(
+      async ({ BrowserWindow }, size) =>
+        BrowserWindow.getAllWindows()[0].setSize(size[0], size[1]),
+      [w, h],
+    );
+    // Put it back, so the extrude below still sees a closed region.
+    await page.evaluate(
+      (idx) => window.__store.getState().toggleSketchShapesDashed(300, [idx]),
+      lineIdx,
+    );
+    await page.waitForTimeout(300);
   });
 
   test("extrude the drawn rectangle through the profile-pick flow", async () => {
@@ -1053,9 +1384,9 @@ test.describe.serial("2D sketch workflow", () => {
     // The depth overlay appears once a profile is selected.
     const overlay = page.locator(".sketch-distance-input-overlay");
     await expect(overlay).toBeVisible({ timeout: 5000 });
-    // The bar holds two formula fields: start-offset first, DEPTH second
-    // (autofocused).
-    const depth = overlay.locator("input").nth(1);
+    // The distance field, by id: the bar also holds the offset field and the
+    // Combine checkbox, so counting inputs picks the wrong one.
+    const depth = page.locator("#extrude-distance");
     await depth.fill("8");
     await depth.press("Enter");
 
@@ -1072,9 +1403,9 @@ test.describe.serial("2D sketch workflow", () => {
       )
       .toBeTruthy();
     const extrude = await page.evaluate(() => {
-      const it = window.__store.getState().items.find(
-        (i) => i.type === "extrude",
-      );
+      const it = window.__store
+        .getState()
+        .items.find((i) => i.type === "extrude");
       return {
         depth: it.depth,
         poly: it.profile?.polygon2D?.length ?? 0,

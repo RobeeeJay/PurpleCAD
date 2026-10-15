@@ -60,12 +60,18 @@ const typesIn = (group) =>
 
 describe("independent constraint / dimension visibility", () => {
   it("dimensions hidden: constraint icons stay, dimension objects gone", () => {
-    const types = typesIn(build(false, true));
+    const group = build(false, true);
+    const types = typesIn(group);
     expect(types.has("horizontal")).toBe(true);
     expect(types.has("midpoint")).toBe(true);
     expect(types.has("onLine")).toBe(true);
     expect(types.has("pointLineDistance")).toBe(false);
-    expect(types.has("distance")).toBe(false);
+    // A distance keeps its constraint MARKER (the toolbar icon, a constraint
+    // icon like any other) while its dimension line and label go.
+    const distance = group.children.filter(
+      (o) => o.userData.constraintType === "distance",
+    );
+    expect(distance.map((o) => !!o.userData.screenIcon)).toEqual([true]);
   });
 
   it("both hidden: nothing renders", () => {

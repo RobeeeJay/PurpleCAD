@@ -52,6 +52,34 @@ Imported bodies join the Objects list and the timeline like any other body, so
 you can boolean, fillet, or pattern against them. (A round-trip STEP export →
 import reproduces the solid.)
 
+An STL that isn't a closed solid — one with holes in its surface — is still
+imported, with a warning saying how many open edges it has. A boolean with such
+a body goes ahead but warns too: where the surface is open, the result can have
+holes.
+
+### Simplifying a mesh
+
+A detailed STL can carry far more triangles than its shape needs, and every one
+of them slows booleans on it. **Simplify** (in Modify, with a mesh body
+selected) removes triangles in one of two ways:
+
+- **Deviation** — as many as possible while no point of the new surface lies
+  further than the distance you set (default 0.05 mm) from the original, or the
+  other way round. The distance is measured over the whole surface, not
+  estimated, so it holds.
+- **Triangle count** — down to the number you give. The dialog then tells you
+  how far that moved the surface.
+
+The preview shows the result's triangles over the body and the count before and
+after. Simplify keeps the body closed if it was, and never joins two separate
+parts of its surface. It adds a step to the timeline; **Edit** on that step
+reopens the dialog.
+
+A mesh over 50,000 triangles is too detailed to go into a boolean, and the
+message saying so offers **Simplify to fit**: it opens Simplify on that mesh,
+set to triangle count just under the limit. Simplify, then repeat the
+operation.
+
 ## Projects
 
 The **Projects** button (Document group) manages multiple documents and switches

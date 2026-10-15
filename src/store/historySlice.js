@@ -7,27 +7,79 @@ import {
   withOrphanFlags,
   saveTimeline,
   withUndo,
-  markCsgDirty,
-  rewriteCreatedItem,
-  commitEntryEdit,
   relinkSourceChain,
   dirtyEntriesFrom,
-  dirtyAllEntries,
   maxItemId,
   inheritedHiddenIds,
   hideIdsFrom,
 } from "./internals.js";
 import { createHistoryNavSlice } from "./historyNavSlice.js";
 import { createItemFlagsSlice } from "./itemFlagsSlice.js";
-import {
-  buildBrushTransform,
-  shiftUnionAnchorForRetarget,
-} from "../three/csgUtils.js";
+import { createHistoryEntryEditsSlice } from "./historyEntryEditsSlice.js";
+import { createHistoryExtrudeSlice } from "./historyExtrudeSlice.js";
 import { splitGeometryComponents } from "../three/geometryComponents.js";
+
+// Record a split as ONE "Split" step: the pieces are created in a createGroup
+// entry and the original is hidden from that same step on, so the timeline
+// shows the body before and its pieces after, and one undo reverses the lot.
+// Shared by both kinds of split -- by connected pieces, and by a cut plane.
+function commitSplit(state, id, parts) {
+  const newEntry = makeEntry("Split", parts[0].id, {
+    type: "createGroup",
+    items: parts,
+    // So the timeline can name the body that was cut rather than count pieces.
+    splitFrom: id,
+  });
+
+  let insertIdx;
+  let newActiveId;
+  if (state.activeHistoryId !== null) {
+    const activeIdx = state.history.findIndex(
+      (h) => h.id === state.activeHistoryId,
+    );
+    insertIdx = activeIdx + 1;
+    newActiveId = newEntry.id;
+  } else {
+    insertIdx = state.history.length;
+    newActiveId = null;
+  }
+  newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
+
+  const inserted = [
+    ...state.history.slice(0, insertIdx),
+    newEntry,
+    ...state.history.slice(insertIdx),
+  ];
+  // Hide the original from the split step onward so a timeline replay
+  // shows the source before, the pieces after.  Forward-invalidate later
+  // steps too (a mid-timeline split shifts the chain — see modifyItem).
+  const rawHistory = dirtyEntriesFrom(
+    hideIdsFrom(inserted, insertIdx, [id]),
+    insertIdx,
+  );
+  const items = replayUpTo(rawHistory, insertIdx);
+
+  saveTimeline(rawHistory, newActiveId);
+  return Object.assign(
+    {
+      items,
+      history: withOrphanFlags(rawHistory),
+      activeHistoryId: newActiveId,
+      selectedId: parts[0].id,
+      selectedIds: parts.map((p) => p.id),
+    },
+    withUndo(state),
+  );
+}
 
 export const createHistorySlice = (set) => ({
   ...createHistoryNavSlice(set),
   ...createItemFlagsSlice(set),
+  // Per-tool timeline entry edits (chamfer/hole/emboss/… updated in place) and
+  // the extrude retarget/depth mutations — split out to keep this file to the
+  // core item lifecycle.
+  ...createHistoryEntryEditsSlice(set),
+  ...createHistoryExtrudeSlice(set),
 
   reparentItem: (itemId, newParentId) =>
     set((state) => {
@@ -196,6 +248,63 @@ export const createHistorySlice = (set) => ({
       );
     }),
 
+  // Store welded copies of meshes that earlier steps created: `byId` maps an
+  // item id to its new geometryData.  The surface is identical -- only how the
+  // mesh is stored changes -- so this is neither a timeline step nor undoable,
+  // and nothing downstream needs rebuilding.  Covers both a single "create"
+  // and the pieces of a "createGroup" (a split).  An item a later step has
+  // rebuilt (it carries a regenerator) keeps its own geometry.
+  replaceCreatedGeometry: (byId) =>
+    set((state) => {
+      const has = (id) => Object.prototype.hasOwnProperty.call(byId, id);
+      let changed = false;
+      const history = state.history.map((entry) => {
+        const inst = entry.instruction;
+        if (inst?.type === "create" && has(inst.item?.id)) {
+          changed = true;
+          return {
+            ...entry,
+            instruction: {
+              ...inst,
+              item: { ...inst.item, geometryData: byId[inst.item.id] },
+            },
+          };
+        }
+        if (
+          inst?.type === "createGroup" &&
+          inst.items?.some((i) => has(i.id))
+        ) {
+          changed = true;
+          return {
+            ...entry,
+            instruction: {
+              ...inst,
+              items: inst.items.map((i) =>
+                has(i.id) ? { ...i, geometryData: byId[i.id] } : i,
+              ),
+            },
+          };
+        }
+        return entry;
+      });
+      if (!changed) return {};
+      const items = state.items.map((i) =>
+        has(i.id) && !i.regenerator ? { ...i, geometryData: byId[i.id] } : i,
+      );
+      saveTimeline(history, state.activeHistoryId);
+      return { history: withOrphanFlags(history), items };
+    }),
+
+  // Record a plane cut: the pieces the Split dialog cut from `id` (already
+  // built, with ids).  Each keeps the original's material.  It used to add each
+  // half as its own "Added" step and hide the original with no step at all, so
+  // the timeline showed no split -- only an ordinary-looking new body.
+  splitIntoParts: (id, parts) =>
+    set((state) => {
+      if (!parts?.length || !state.items.some((i) => i.id === id)) return {};
+      return commitSplit(state, id, parts);
+    }),
+
   // Separate a solid into its geometrically-disconnected pieces.  Each
   // connected component (a lump sharing no welded vertices with the others)
   // becomes its own standalone item; the original is consumed (hidden from
@@ -225,50 +334,7 @@ export const createHistorySlice = (set) => ({
         geometryData,
       }));
 
-      const newEntry = makeEntry("Split", parts[0].id, {
-        type: "createGroup",
-        items: parts,
-      });
-
-      let insertIdx;
-      let newActiveId;
-      if (state.activeHistoryId !== null) {
-        const activeIdx = state.history.findIndex(
-          (h) => h.id === state.activeHistoryId,
-        );
-        insertIdx = activeIdx + 1;
-        newActiveId = newEntry.id;
-      } else {
-        insertIdx = state.history.length;
-        newActiveId = null;
-      }
-      newEntry.hiddenIds = inheritedHiddenIds(state.history, insertIdx);
-
-      const inserted = [
-        ...state.history.slice(0, insertIdx),
-        newEntry,
-        ...state.history.slice(insertIdx),
-      ];
-      // Hide the original from the split step onward so a timeline replay
-      // shows the source before, the pieces after.  Forward-invalidate later
-      // steps too (a mid-timeline split shifts the chain — see modifyItem).
-      const rawHistory = dirtyEntriesFrom(
-        hideIdsFrom(inserted, insertIdx, [id]),
-        insertIdx,
-      );
-      const items = replayUpTo(rawHistory, insertIdx);
-
-      saveTimeline(rawHistory, newActiveId);
-      return Object.assign(
-        {
-          items,
-          history: withOrphanFlags(rawHistory),
-          activeHistoryId: newActiveId,
-          selectedId: parts[0].id,
-          selectedIds: parts.map((p) => p.id),
-        },
-        withUndo(state),
-      );
+      return commitSplit(state, id, parts);
     }),
 
   modifyItem: (id, patches, label = "Modified") =>
@@ -540,842 +606,6 @@ export const createHistorySlice = (set) => ({
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         items: newItems,
-        history: withOrphanFlags(newHistory),
-      };
-    }),
-
-  // Update the amount / angleRad on an existing chamfer-or-fillet history
-  // entry, then replay history so the regenerator reflects the new values.
-  // `regeneratedAt` is reset (different from any valid printPrecision) and
-  // `geometryData` is cleared so regenerateItemsForResolution's skip-check
-  // misses, forcing a fresh tessellation with the new parameters.
-  // Replace a committed chamfer/fillet entry's FULL payload in place — the
-  // overlay Edit flow's commit (re-picked selection and/or new params, with the
-  // freshly computed geometry).  Downstream sources relink; the entry itself
-  // stays clean (its payload is fresh — see commitEntryEdit).
-  updateChamferEntry: (entryId, patches) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        if (inst.patches?.regenerator?.kind !== "chamfer") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches,
-          },
-        };
-      });
-      const relinked = commitEntryEdit(newHistory, entryId);
-      // Editing views the PRE-chamfer step (beginChamferEdit) — land back on
-      // the edited entry so the freshly committed result is what's on screen
-      // (null = the tip, matching restoreToHistory's convention).
-      const activeIdx = relinked.findIndex((h) => h.id === entryId);
-      const newActive = activeIdx === relinked.length - 1 ? null : entryId;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, newActive);
-      return Object.assign(
-        {
-          items,
-          history: withOrphanFlags(relinked),
-          activeHistoryId: newActive,
-        },
-        withUndo(state),
-      );
-    }),
-
-  updateChamferParams: (entryId, params) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        const r = inst.patches?.regenerator;
-        if (r?.kind !== "chamfer") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              regenerator: {
-                ...r,
-                ...params,
-                regeneratedAt: "dirty",
-              },
-              geometryData: null,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        {
-          items,
-          history: withOrphanFlags(relinked),
-        },
-        withUndo(state),
-      );
-    }),
-
-  // Update the distance on an existing push/pull history entry, then replay so
-  // the regenerator rebuilds with the new value.  Mirrors updateChamferParams:
-  // `regeneratedAt` is reset and `geometryData` cleared so the skip-check in
-  // regenerateItemsForResolution misses and re-tessellates.
-  updatePushPullParams: (entryId, params) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        const r = inst.patches?.regenerator;
-        if (r?.kind !== "pushpull") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              regenerator: {
-                ...r,
-                ...params,
-                regeneratedAt: "dirty",
-              },
-              geometryData: null,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  // Edit a committed shell's wall thickness from its timeline step.  Mirrors
-  // updatePushPullParams: mark the regenerator dirty + clear geometry so the
-  // regen orchestrator rebuilds it at the new thickness.
-  updateShellParams: (entryId, params) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        const r = inst.patches?.regenerator;
-        if (r?.kind !== "shell") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              regenerator: { ...r, ...params, regeneratedAt: "dirty" },
-              geometryData: null,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  // Update a committed hole step in place with re-edited params (geometry
-  // already rebuilt by commitHole).  `patch` = { hole, position, centerOffset,
-  // geometryData, regeneratedAt }.
-  updateHoleEntry: (entryId, patch) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        const r = inst.patches?.regenerator;
-        if (r?.kind !== "hole") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              position: patch.position,
-              geometryData: patch.geometryData,
-              regenerator: {
-                ...r,
-                hole: patch.hole,
-                centerOffset: patch.centerOffset,
-                basePosition: patch.basePosition,
-                regeneratedAt: patch.regeneratedAt,
-              },
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  // Update a committed emboss step in place with re-edited params (geometry +
-  // stamp already rebuilt by commitEmboss).  `patch` = { regenerator, position,
-  // geometryData }.
-  updateEmbossEntry: (entryId, patch) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        if (inst.patches?.regenerator?.kind !== "emboss") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              position: patch.position,
-              geometryData: patch.geometryData,
-              regenerator: patch.regenerator,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      // Editing views the PRE-emboss step (beginEmbossEdit) — land back on the
-      // edited entry so the freshly committed result is what's on screen (null
-      // = the tip, matching restoreToHistory's convention).
-      const activeIdx = relinked.findIndex((h) => h.id === entryId);
-      const newActive = activeIdx === relinked.length - 1 ? null : entryId;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, newActive);
-      return Object.assign(
-        {
-          items,
-          history: withOrphanFlags(relinked),
-          activeHistoryId: newActive,
-        },
-        withUndo(state),
-      );
-    }),
-
-  // Replace a committed texture entry's payload in place — the tool's edit
-  // commit.  Mirrors updateEmbossEntry.
-  updateTextureEntry: (entryId, patch) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        if (inst.patches?.regenerator?.kind !== "texture") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              position: patch.position,
-              geometryData: patch.geometryData,
-              regenerator: patch.regenerator,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      // Editing views the PRE-texture step (beginTextureEdit) — land back on the
-      // edited entry so the freshly committed result is what's on screen (null
-      // = the tip, matching restoreToHistory's convention).
-      const activeIdx = relinked.findIndex((h) => h.id === entryId);
-      const newActive = activeIdx === relinked.length - 1 ? null : entryId;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, newActive);
-      return Object.assign(
-        {
-          items,
-          history: withOrphanFlags(relinked),
-          activeHistoryId: newActive,
-        },
-        withUndo(state),
-      );
-    }),
-
-  // Edit a committed draft step in place (angle/flip/faces changed, geometry
-  // already rebuilt).  Mirrors updateEmbossEntry.
-  updateDraftEntry: (entryId, patch) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        if (inst.patches?.regenerator?.kind !== "draft") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            patches: {
-              ...inst.patches,
-              position: patch.position,
-              geometryData: patch.geometryData,
-              regenerator: patch.regenerator,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  // Update an existing push/pull history entry's patches in place — used by
-  // PushPullOverlay's retarget confirm (geometry already rebuilt against the
-  // new face selection).
-  retargetPushPullEntry: (entryId, patches) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "modify") return entry;
-        if (inst.patches?.regenerator?.kind !== "pushpull") return entry;
-        return { ...entry, instruction: { ...inst, patches } };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  // Update a revolve (sweep) step's parameters.  A revolve is a CREATE entry
-  // (it adds a new solid), so its recipe lives on inst.item, not inst.patches.
-  updateRevolveParams: (entryId, params) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "create") return entry;
-        const r = inst.item?.regenerator;
-        if (r?.kind !== "revolve") return entry;
-        return {
-          ...entry,
-          instruction: {
-            ...inst,
-            item: {
-              ...inst.item,
-              regenerator: { ...r, ...params, regeneratedAt: "dirty" },
-              geometryData: null,
-            },
-          },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  // Replace a revolve step's item recipe in place (re-picked profile/axis) —
-  // used by the sweep retarget confirm.  `patches` carries the new regenerator,
-  // geometryData and position to merge onto the CREATE entry's item.
-  retargetRevolveEntry: (entryId, patches) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "create") return entry;
-        if (inst.item?.regenerator?.kind !== "revolve") return entry;
-        return {
-          ...entry,
-          instruction: { ...inst, item: { ...inst.item, ...patches } },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  // Pipe and loft are CREATE entries like revolve, but with no editable
-  // parameters — only re-picking their inputs.  Mirrors retargetRevolveEntry.
-  retargetPipeEntry: (entryId, patches) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "create") return entry;
-        if (inst.item?.regenerator?.kind !== "pipe") return entry;
-        return {
-          ...entry,
-          instruction: { ...inst, item: { ...inst.item, ...patches } },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  retargetLoftEntry: (entryId, patches) =>
-    set((state) => {
-      const newHistory = state.history.map((entry) => {
-        if (entry.id !== entryId) return entry;
-        const inst = entry.instruction;
-        if (inst?.type !== "create") return entry;
-        if (inst.item?.regenerator?.kind !== "loft") return entry;
-        return {
-          ...entry,
-          instruction: { ...inst, item: { ...inst.item, ...patches } },
-        };
-      });
-      // Editing an upstream op must re-point downstream sources (an emboss on a
-      // chamfer rebuilds against the edited chamfer, not its stale snapshot).
-      const relinked = commitEntryEdit(newHistory, entryId);
-      const activeIdx =
-        state.activeHistoryId != null
-          ? relinked.findIndex((h) => h.id === state.activeHistoryId)
-          : relinked.length - 1;
-      const items = replayUpTo(
-        relinked,
-        activeIdx !== -1 ? activeIdx : relinked.length - 1,
-      );
-      saveTimeline(relinked, state.activeHistoryId);
-      return Object.assign(
-        { items, history: withOrphanFlags(relinked) },
-        withUndo(state),
-      );
-    }),
-
-  // Update an existing chamfer-or-fillet history entry's patches in place
-  // (position/regenerator/geometryData), without inserting a new entry —
-  // used by BevelSection's retarget(), which has already rebuilt the
-  // geometry and just needs the timeline step to point at the new result.
-
-  retargetExtrude: (extrudeId, newProfile, newDepth, startOffset = 0) =>
-    set((state) => {
-      const apply = (item) =>
-        Object.assign({}, item, {
-          profile: newProfile,
-          depth: newDepth,
-          // A zero offset is the default; persist it so retargeting can also
-          // clear a previously-set start offset.
-          startOffset: startOffset || undefined,
-          position: newProfile.position,
-          rotation: newProfile.rotation,
-        });
-      // If this prism anchors a union (it's `inputIds[0]` of a boolean
-      // regenerator), the union's re-localisation anchor must move with it —
-      // see shiftUnionAnchorForRetarget.
-      const oldExtrude = state.items.find((item) => item.id === extrudeId);
-      const delta =
-        oldExtrude?.type === "extrude"
-          ? (() => {
-              const before = buildBrushTransform(oldExtrude).position;
-              const after = buildBrushTransform(apply(oldExtrude)).position;
-              return {
-                x: after.x - before.x,
-                y: after.y - before.y,
-                z: after.z - before.z,
-              };
-            })()
-          : null;
-      const shiftAnchors = (item) =>
-        delta ? shiftUnionAnchorForRetarget(item, extrudeId, delta) : item;
-      // markCsgDirty: a retargeted prism may feed a union (a boss, or one of a
-      // multi-area extrude's prisms), which must rebuild against the new profile.
-      const updatedItems = markCsgDirty(
-        state.items.map((item) =>
-          item.id === extrudeId ? apply(item) : shiftAnchors(item),
-        ),
-      );
-      const newHistory = dirtyAllEntries(
-        state.history.map((entry) => {
-          const rewritten = rewriteCreatedItem(entry, extrudeId, apply);
-          if (rewritten !== entry) return rewritten;
-          const inst = entry.instruction;
-          if (inst?.type === "create" && inst.item?.regenerator) {
-            const next = shiftAnchors(inst.item);
-            if (next !== inst.item)
-              return { ...entry, instruction: { ...inst, item: next } };
-          }
-          if (inst?.type === "modify" && inst.patches?.regenerator) {
-            const next = shiftAnchors(inst.patches);
-            if (next !== inst.patches)
-              return { ...entry, instruction: { ...inst, patches: next } };
-          }
-          return entry;
-        }),
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
-      return {
-        ...withUndo(state),
-        items: updatedItems,
-        history: withOrphanFlags(newHistory),
-      };
-    }),
-
-  // Edit an extrude's depth in place: rewrite its CREATE entry rather than
-  // appending a "Modified" step, and dirty downstream CSG so the regen pass
-  // recalculates the timeline at the new depth (mirrors how setVariables
-  // edits a sketch's create entry).
-  setExtrudeDepth: (id, depth) =>
-    set((state) => {
-      const updatedItems = markCsgDirty(
-        state.items.map((item) =>
-          item.id === id ? Object.assign({}, item, { depth }) : item,
-        ),
-      );
-      const newHistory = dirtyAllEntries(
-        state.history.map((entry) =>
-          rewriteCreatedItem(entry, id, (item) =>
-            Object.assign({}, item, { depth }),
-          ),
-        ),
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
-      return {
-        ...withUndo(state),
-        items: updatedItems,
-        history: withOrphanFlags(newHistory),
-      };
-    }),
-
-  // Set ONE distance on every prism of a multi-area extrude group at once —
-  // the group is resized as a unit, not per-prism.
-  setExtrudeGroupDepth: (ids, depth) =>
-    set((state) => {
-      const idSet = new Set(ids);
-      const updatedItems = markCsgDirty(
-        state.items.map((item) =>
-          idSet.has(item.id) ? Object.assign({}, item, { depth }) : item,
-        ),
-      );
-      const newHistory = dirtyAllEntries(
-        state.history.map((entry) => {
-          const inst = entry.instruction;
-          if (
-            inst?.type === "createGroup" &&
-            inst.items?.some((it) => idSet.has(it.id))
-          ) {
-            return Object.assign({}, entry, {
-              instruction: Object.assign({}, inst, {
-                items: inst.items.map((it) =>
-                  idSet.has(it.id) ? Object.assign({}, it, { depth }) : it,
-                ),
-              }),
-            });
-          }
-          return entry;
-        }),
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
-      return {
-        ...withUndo(state),
-        items: updatedItems,
-        history: withOrphanFlags(newHistory),
-      };
-    }),
-
-  // Retarget a whole multi-area extrude group to a new set of profiles.  The
-  // group's createGroup step is rebuilt to one prism per new profile (reusing
-  // the old prism ids where possible, allocating fresh ones for added regions),
-  // and the downstream union's inputIds are swapped to the new prisms (host
-  // solids in its inputs are kept).  Marking it dirty makes the regen pass
-  // rebuild the fused body.  Replaying the rewritten history reconciles
-  // added/removed prisms in the live scene without leaving orphans.
-  retargetGroup: (oldPrismIds, newProfiles, depth, startOffset = 0) =>
-    set((state) => {
-      const oldSet = new Set(oldPrismIds);
-      let maxId = maxItemId(state.history);
-      const newPrisms = newProfiles.map((profile, i) => {
-        const id = i < oldPrismIds.length ? oldPrismIds[i] : ++maxId;
-        return {
-          id,
-          name: `Extrude ${id}`,
-          type: "extrude",
-          children: [],
-          parentId: null,
-          profile,
-          depth,
-          ...(startOffset ? { startOffset } : null),
-          position: profile.position,
-          rotation: profile.rotation,
-          scale: { x: 1, y: 1, z: 1 },
-        };
-      });
-      const newIds = newPrisms.map((p) => p.id);
-      // Swap the dropped prism ids for the kept set inside ANY boolean inputIds
-      // reachable from a regenerator — the union itself, but also the boolean
-      // buried in a chamfer / fillet's frozen `source` snapshot (and chained
-      // chamfers, which nest source-within-source).  Without this a chamfer on
-      // the union rebuilds its source at the OLD region count and keeps showing
-      // the dropped region.  Returns the same ref when nothing changed.
-      const rewriteRegen = (regen) => {
-        if (!regen) return regen;
-        let next = regen;
-        if (
-          regen.kind === "boolean" &&
-          (regen.inputIds || []).some((id) => oldSet.has(id))
-        ) {
-          const hosts = (regen.inputIds || []).filter((id) => !oldSet.has(id));
-          next = {
-            ...next,
-            inputIds: [...newIds, ...hosts],
-            regeneratedAt: "dirty",
-          };
-        }
-        if (next.source?.regenerator) {
-          const srcRegen = rewriteRegen(next.source.regenerator);
-          if (srcRegen !== next.source.regenerator) {
-            next = {
-              ...next,
-              source: { ...next.source, regenerator: srcRegen },
-              regeneratedAt: "dirty",
-            };
-          }
-        }
-        return next;
-      };
-      const newHistory = state.history.map((entry) => {
-        const inst = entry.instruction;
-        if (
-          inst?.type === "createGroup" &&
-          inst.items?.some((it) => oldSet.has(it.id))
-        ) {
-          return Object.assign({}, entry, {
-            instruction: Object.assign({}, inst, { items: newPrisms }),
-          });
-        }
-        if (inst?.type === "create" && inst.item?.regenerator) {
-          const nr = rewriteRegen(inst.item.regenerator);
-          if (nr !== inst.item.regenerator)
-            return Object.assign({}, entry, {
-              instruction: Object.assign({}, inst, {
-                item: Object.assign({}, inst.item, { regenerator: nr }),
-              }),
-            });
-        }
-        if (inst?.type === "modify" && inst.patches?.regenerator) {
-          const nr = rewriteRegen(inst.patches.regenerator);
-          if (nr !== inst.patches.regenerator)
-            return Object.assign({}, entry, {
-              instruction: Object.assign({}, inst, {
-                patches: Object.assign({}, inst.patches, { regenerator: nr }),
-              }),
-            });
-        }
-        return entry;
-      });
-      // Old prism ids may appear in later entries' hiddenIds (the union step
-      // onward, since the union consumes them) — swap them for the new ids
-      // so the retargeted prisms stay hidden from the same step.
-      const finalHistory = newHistory.map((entry) => {
-        const hidden = entry.hiddenIds || [];
-        if (!hidden.some((id) => oldSet.has(id))) return entry;
-        const kept = hidden.filter((id) => !oldSet.has(id));
-        return { ...entry, hiddenIds: [...new Set([...kept, ...newIds])] };
-      });
-      const dirtied = dirtyAllEntries(finalHistory);
-      const activeIdx =
-        state.activeHistoryId !== null
-          ? dirtied.findIndex((h) => h.id === state.activeHistoryId)
-          : dirtied.length - 1;
-      const items = markCsgDirty(replayUpTo(dirtied, activeIdx));
-      saveTimeline(dirtied, state.activeHistoryId);
-      return {
-        ...withUndo(state),
-        items,
-        history: withOrphanFlags(dirtied),
-      };
-    }),
-
-  // Edit a FUSED extrude (extrudeUnion / extrudeCut csg item) in place: rebuild
-  // its embedded prism recipes (regenerator.extrudeDefs) from a new set of
-  // profiles + depth, keeping the same csg item and timeline entry.  Unlike
-  // retargetGroup the prisms aren't store items, so there are no createGroup /
-  // hiddenId / inputId swaps — just rewrite the defs and dirty downstream.
-  retargetFusedExtrude: (itemId, newProfiles, depth, startOffset = 0) =>
-    set((state) => {
-      const target = state.items.find((i) => i.id === itemId);
-      const oldRegen = target?.regenerator;
-      if (!oldRegen?.extrudeDefs?.length) return {};
-      const isCut = oldRegen.kind === "extrudeCut";
-      const oldDefs = oldRegen.extrudeDefs;
-      // Reuse the old defs' ids where the count matches; allocate fresh ids for
-      // any added profiles so downstream references stay stable.
-      let maxId = maxItemId(state.history);
-      const newDefs = newProfiles.map((profile, i) => {
-        const id = i < oldDefs.length ? oldDefs[i].id : ++maxId;
-        return {
-          id,
-          name: `${isCut ? "Extrude Cut" : "Extrude"} ${id}`,
-          type: "extrude",
-          children: [],
-          profile,
-          depth,
-          ...(startOffset ? { startOffset } : null),
-          ...(isCut ? { isCut: true } : null),
-          position: profile.position,
-          rotation: profile.rotation,
-          scale: { x: 1, y: 1, z: 1 },
-        };
-      });
-      const setDefs = (regen) => ({
-        ...regen,
-        extrudeDefs: newDefs,
-        regeneratedAt: "dirty",
-      });
-      const updatedItems = markCsgDirty(
-        state.items.map((item) =>
-          item.id === itemId
-            ? { ...item, regenerator: setDefs(item.regenerator) }
-            : item,
-        ),
-      );
-      const newHistory = dirtyAllEntries(
-        state.history.map((entry) => {
-          const inst = entry.instruction;
-          if (
-            inst?.type === "create" &&
-            inst.item?.id === itemId &&
-            inst.item.regenerator?.extrudeDefs
-          )
-            return {
-              ...entry,
-              instruction: {
-                ...inst,
-                item: {
-                  ...inst.item,
-                  regenerator: setDefs(inst.item.regenerator),
-                },
-              },
-            };
-          return entry;
-        }),
-      );
-      saveTimeline(newHistory, state.activeHistoryId);
-      return {
-        ...withUndo(state),
-        items: updatedItems,
         history: withOrphanFlags(newHistory),
       };
     }),

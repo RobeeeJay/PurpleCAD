@@ -405,6 +405,40 @@ export const ChamferIcon = () => (
   </svg>
 );
 
+// A triangle whose left half is finely meshed and right half is one facet:
+// the same surface in fewer triangles.
+export const SimplifyIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <polygon
+      points="3,20 12,4 21,20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="miter"
+    />
+    <polyline
+      points="12,20 7.5,12 12,4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1"
+    />
+    <polyline
+      points="7.5,20 5.25,16 9.75,16 7.5,20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1"
+    />
+    <line
+      x1="7.5"
+      y1="12"
+      x2="9.75"
+      y2="16"
+      stroke="currentColor"
+      strokeWidth="1"
+    />
+  </svg>
+);
+
 export const ShellIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14">
     <polygon

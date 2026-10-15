@@ -220,6 +220,14 @@ export const commitChamferResult = (
       ...regenBase,
       source,
       subGeo: storedSubGeo,
+      // The frame subGeo is in: its source's centring.  A relink can later
+      // bind a source centred differently, and the rebuild shifts the
+      // selection by the difference (regenerateChamfer).
+      sourceCenterOffset: source.regenerator?.centerOffset ?? {
+        cx: 0,
+        cy: 0,
+        cz: 0,
+      },
       // bbox-centre offset in the source's LOCAL frame.
       centerOffset,
       // The SOURCE brush position we anchored this op to.  Recalc shifts the

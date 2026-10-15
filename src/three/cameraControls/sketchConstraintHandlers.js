@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { useStore } from "../../store";
 import { projectOntoLine } from "../sketchConstraints.js";
+import { solveJoinPoints } from "../sketchSolver.js";
 import {
   getShapePoint,
   getSnapPoints,
@@ -337,8 +338,45 @@ export function createSketchConstraintHandlers(
             newFirstShape,
             firstPt.pointKey,
           );
-          if (propagated.size > 1)
-            store.updateSketchShapes(selectedIdRef.current, propagated);
+          // Did the first point actually get there? The propagation rules put
+          // a point that is pinned to its OWN shape -- a midpoint -- straight
+          // back where it was. Writing the moved point regardless tore it off
+          // that shape and left the sketch breaking its own midpoint
+          // constraint, so hand those to the solver, which moves the shape
+          // along with the point.
+          const landed = getShapePoint(
+            propagated.get(firstPt.shapeIdx) ?? newFirstShape,
+            firstPt.pointKey,
+          );
+          const arrived =
+            landed &&
+            Math.hypot(landed.x - firstPos.x, landed.y - firstPos.y) <= 1e-6;
+          const joined = arrived
+            ? null
+            : solveJoinPoints(
+                shapes,
+                selItem.constraints || [],
+                { shapeIdx: firstPt.shapeIdx, pointKey: firstPt.pointKey },
+                { shapeIdx: snap.shapeIdx, pointKey: snap.pointKey },
+              );
+          if (!arrived && (!joined || joined.size === 0)) {
+            // Nothing can satisfy the join: say so and leave the sketch as it
+            // was, rather than moving the point somewhere that lies about it.
+            useStore.setState({
+              notification:
+                "Can't make those points coincident — it would break another constraint",
+            });
+            store.setSketchConstraintMode(null);
+            store.setSketchConstraintFirstPoint(null);
+            clearCoincidentFirstOverlay();
+            clearSketchSelection();
+            return;
+          }
+          const updates = joined ?? propagated;
+          if (updates.size > 1)
+            store.updateSketchShapes(selectedIdRef.current, updates);
+          else if (joined)
+            store.updateSketchShapes(selectedIdRef.current, updates);
           else
             store.updateSketchShape(
               selectedIdRef.current,
@@ -347,7 +385,7 @@ export function createSketchConstraintHandlers(
             );
           // Build updated snapshot so we can detect which points landed at the junction
           currentShapes = shapes.slice();
-          propagated.forEach((s, i) => {
+          updates.forEach((s, i) => {
             currentShapes[i] = s;
           });
         }

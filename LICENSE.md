@@ -1,65 +1,101 @@
-# Third-party licenses
+Required Notice: Copyright (c) 2026 Robeena Shepherd (https://github.com/RobeeeJay/PurpleCAD)
 
-Licenses of PurpleCAD's dependencies, as recorded in each installed
-package's manifest. Regenerate the version numbers after a dependency
-update (`node_modules/<name>/package.json` is the source of truth).
+Required Notice: This software is, or is derived from, PurpleCAD (https://github.com/RobeeeJay/PurpleCAD).
 
-## Runtime dependencies
+Required Notice: The PurpleCAD name, logo, application icons and toolbar icons are not licensed under these terms. See TRADEMARKS.md.
 
-| Package | Version | License | Source |
-| --- | --- | --- | --- |
-| better-sqlite3 | 12.11.1 | MIT | https://github.com/WiseLibs/better-sqlite3 |
-| decimal.js | 10.6.0 | MIT | https://github.com/MikeMcl/decimal.js |
-| opentype.js | 1.3.4 | MIT | https://github.com/opentypejs/opentype.js |
-| react | 19.2.7 | MIT | https://react.dev/ |
-| react-dom | 19.2.7 | MIT | https://react.dev/ |
-| three | 0.185.1 | MIT | https://threejs.org/ |
-| three-bvh-csg | 0.0.18 | MIT | https://github.com/gkjohnson/three-bvh-csg |
-| three-gpu-pathtracer | 0.0.24 | MIT | https://github.com/gkjohnson/three-gpu-pathtracer |
-| zustand | 5.0.14 | MIT | https://github.com/pmndrs/zustand |
+PurpleCAD is licensed under the PolyForm Noncommercial License 1.0.0, below.
+These terms cover everything in this repository except:
 
-## Native geometry kernel
+- the PurpleCAD logo and icons, which are covered by `TRADEMARKS.md`: the
+  application icons (`app-icons/`, `public/favicon.png`), the toolbar icon
+  set (`cad-icons/`), and every icon drawing in the application's source —
+  the `<svg>` icons in `src/components/`, including `src/components/icons/`
+  and `src/components/toolbar/timelineIcons.jsx`. Where such a drawing sits
+  inside a source file, the rest of that file is covered by these terms and
+  the drawing is not; and
+- the third-party components listed in `THIRD_PARTY_LICENSES.md`, which remain
+  under their own licenses.
 
-| Component | Version | License | Source |
-| --- | --- | --- | --- |
-| Open CASCADE Technology (OCCT) | 8.0.0 (7.9.0 supported) | LGPL-2.1-only, with the OCCT LGPL exception | https://github.com/Open-Cascade-SAS/OCCT |
-| node-addon-api | ^8.3.1 | MIT | https://github.com/nodejs/node-addon-api |
-| cmake-js (build only) | ^7.3.0 | MIT | https://github.com/cmake-js/cmake-js |
+In short, and not in place of the terms: you may use, study, change and share
+PurpleCAD for any noncommercial purpose. You may not sell it, sell a product
+or service it is bundled with, or use it for commercial work. Forks must take
+a new name, logo and icons — toolbar icons included — and must keep the
+Required Notice lines above,
+which say where they came from.
 
-OCCT is dynamically linked by the native addon (`native/occ-addon`), which
-satisfies the LGPL's relinking requirement; the OCCT exception additionally
-permits use in proprietary applications. See
-https://dev.opencascade.org/resources/licensing for the exception text.
+---
 
-## Vendored code and assets
+# PolyForm Noncommercial License 1.0.0
 
-| Item | Origin | License |
-| --- | --- | --- |
-| `src/three/vendor/TTFLoader.js` | three.js examples (adapted: local opentype.js import) | MIT |
-| `src/assets/fonts/helvetiker_*.typeface.json` | three.js examples fonts (Helvetiker) | MIT-style (typeface conversion of the Helvetiker font) |
-| `src/assets/fonts/optimer_regular.typeface.json` | three.js examples fonts (Optimer) | MIT-style (three.js examples distribution) |
-| `src/assets/fonts/gentilis_regular.typeface.json` | three.js examples fonts (Gentilis / Gentium-derived) | SIL Open Font License 1.1 |
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
 
-## Development dependencies
+## Acceptance
 
-| Package | Version | License | Source |
-| --- | --- | --- | --- |
-| @electron/rebuild | 4.2.0 | MIT | https://github.com/electron/rebuild |
-| @playwright/test | 1.61.1 | Apache-2.0 | https://playwright.dev |
-| @vitejs/plugin-react | 6.0.3 | MIT | https://github.com/vitejs/vite-plugin-react |
-| @vitest/coverage-v8 | 4.1.10 | MIT | https://vitest.dev |
-| concurrently | 10.0.3 | MIT | https://github.com/open-cli-tools/concurrently |
-| electron | 43.1.0 | MIT | https://github.com/electron/electron |
-| electron-builder | 26.15.3 | MIT | https://github.com/electron-userland/electron-builder |
-| electron-reloader | 1.2.3 | MIT | https://github.com/sindresorhus/electron-reloader |
-| prettier | 3.9.5 | MIT | https://github.com/prettier/prettier |
-| vite | 8.1.4 | MIT | https://vite.dev |
-| vitest | 4.1.10 | MIT | https://vitest.dev |
-| wait-on | 9.0.10 | MIT | https://github.com/jeffbski/wait-on |
+In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
 
-Electron itself bundles Chromium and Node.js; their licenses ship inside the
-packaged app (`LICENSES.chromium.html` et al. in the Electron distribution).
+## Copyright License
 
-Transitive npm dependencies carry their own licenses — enumerate them with
-`npx license-checker --summary` against the installed tree when a full
-manifest is needed (e.g. for a packaged release).
+The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose.  However, you may only distribute the software according to [Distribution License](#distribution-license) and make changes or new works based on the software according to [Changes and New Works License](#changes-and-new-works-license).
+
+## Distribution License
+
+The licensor grants you an additional copyright license to distribute copies of the software.  Your license to distribute covers distributing the software with changes and new works permitted by [Changes and New Works License](#changes-and-new-works-license).
+
+## Notices
+
+You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
+
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+
+## Changes and New Works License
+
+The licensor grants you an additional copyright license to make changes and new works based on the software for any permitted purpose.
+
+## Patent License
+
+The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
+
+## Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose.
+
+## Personal Uses
+
+Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
+
+## Noncommercial Organizations
+
+Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
+
+## Fair Use
+
+You may have "fair use" rights for the software under the law. These terms do not limit them.
+
+## No Other Rights
+
+These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
+
+## Patent Defense
+
+If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
+
+## Violations
+
+The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
+
+## No Liability
+
+***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
+
+## Definitions
+
+The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
+
+**You** refers to the individual or entity agreeing to these terms.
+
+**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
+
+**Your licenses** are all the licenses granted to you for the software under these terms.
+
+**Use** means anything you do with the software requiring one of your licenses.

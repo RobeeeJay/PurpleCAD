@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { buildExtrudeSelectGroup } from "../sceneObjects/sketchOverlays.js";
 import { makeTextShape } from "../sketchText.js";
 import { withLivePolygons } from "../csgUtils.js";
+import { polyAreaCentroid } from "../sceneObjects/polygonUtil.js";
 
 const fillsFor = (shapes) => {
   const item = { id: 1, type: "sketch", shapes, visible: true };
@@ -14,7 +15,10 @@ const fillsFor = (shapes) => {
   return g ? g.children : [];
 };
 
-const profileCx = (poly) => poly.reduce((s, p) => s + p.x, 0) / poly.length;
+// A region's x position: its AREA centroid.  A plain mean of the vertices
+// moves with the sampling (the glyph loops are sampled per font curve, densely
+// on the bowls and once along a straight stem), not with the letter.
+const profileCx = (poly) => polyAreaCentroid(poly).x;
 
 describe("text extrude profiles", () => {
   it("a glyph counter stays a hole, not a separate region (o = 1 ring)", () => {

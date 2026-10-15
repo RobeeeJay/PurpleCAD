@@ -3,7 +3,7 @@
 // had no test of any kind — this drives the real store phase machine and the
 // real OCC revolve through the bridge.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 let app;
@@ -110,19 +110,21 @@ test.describe.serial("revolve", () => {
 
     // Spinning a profile that starts 2 units off-axis leaves a bore, so the
     // body spans roughly ±3 in the revolve plane and 2 tall.
-    const bbox = await page.evaluate((id) => {
-      const p = window.__store
-        .getState()
-        .items.find((i) => i.id === id).geometryData.positions;
-      const lo = [Infinity, Infinity, Infinity];
-      const hi = [-Infinity, -Infinity, -Infinity];
-      for (let i = 0; i < p.length; i += 3)
-        for (let k = 0; k < 3; k++) {
-          lo[k] = Math.min(lo[k], p[i + k]);
-          hi[k] = Math.max(hi[k], p[i + k]);
-        }
-      return { size: hi.map((v, k) => +(v - lo[k]).toFixed(2)) };
-    }, made[made.length - 1].id);
+    const bbox = await page.evaluate(
+      (id) => {
+        const p = window.__store.getState().items.find((i) => i.id === id)
+          .geometryData.positions;
+        const lo = [Infinity, Infinity, Infinity];
+        const hi = [-Infinity, -Infinity, -Infinity];
+        for (let i = 0; i < p.length; i += 3)
+          for (let k = 0; k < 3; k++) {
+            lo[k] = Math.min(lo[k], p[i + k]);
+            hi[k] = Math.max(hi[k], p[i + k]);
+          }
+        return { size: hi.map((v, k) => +(v - lo[k]).toFixed(2)) };
+      },
+      made[made.length - 1].id,
+    );
     const sorted = [...bbox.size].sort((a, b) => b - a);
     expect(sorted[0]).toBeGreaterThan(5); // ~6 across the swept diameter
     expect(sorted[2]).toBeGreaterThan(1.5); // ~2 tall

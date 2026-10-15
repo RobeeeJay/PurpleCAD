@@ -47,8 +47,7 @@ describe("high-res chamfer selection", () => {
     console.log("preview 0.1:", JSON.stringify(before));
 
     // Switch to high-quality print resolution (0.01) — dirties every entry.
-    useStore.setState({ printPrecisionMm: 0.01 });
-    useStore.getState().toggleCurveResolution();
+    useStore.getState().setResolutionMm(0.01);
     await recalculateTimeline();
     item = useStore.getState().items.find((i) => i.regenerator);
     const after = topRadii(item);

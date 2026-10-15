@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import fs from "node:fs";
 
@@ -37,12 +37,11 @@ test("cancelling a forced recalculation leaves the app healthy", async () => {
   await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
   await expect(page.getByText(/Recalculating/)).toBeHidden({ timeout: 60000 });
 
-  // Switch to high-quality print resolution: dirties every entry and makes
+  // Switch to a fine resolution: dirties every entry and makes
   // the rebuild slow enough (dense emboss at 0.01) that the cancel provably
   // lands while the native op is in flight.
   await page.evaluate(() => {
-    window.__store.setState({ printPrecisionMm: 0.01 });
-    window.__store.getState().toggleCurveResolution();
+    window.__store.getState().setResolutionMm(0.01);
   });
   await page.locator(".timeline-recalc-btn").click();
   await expect(page.locator(".busy-indicator")).toBeVisible({
@@ -79,10 +78,10 @@ test("cancelling a forced recalculation leaves the app healthy", async () => {
   expect(next.tris).toBeGreaterThan(0);
 
   // And a re-run recalculation completes (cancel didn't wedge the regen
-  // loop).  Back at preview resolution so it finishes quickly; poll the
+  // loop).  Back at the default resolution so it finishes quickly; poll the
   // store rather than the indicator (which never appears for a fast pass).
   await page.evaluate(() => {
-    window.__store.getState().toggleCurveResolution();
+    window.__store.getState().setResolutionMm(0.05);
   });
   await page.locator(".timeline-recalc-btn").click();
   await expect
@@ -94,9 +93,13 @@ test("cancelling a forced recalculation leaves the app healthy", async () => {
             (s.regenProgress != null && s.regenProgress.total > 0) ||
             s.pendingOperations > 0;
           const item = s.items.find((i) => i.regenerator);
-          return { busy, settled: item?.regenerator?.regeneratedAt ?? null };
+          return {
+            busy,
+            // Settled at the resolution now set.
+            settled: item?.regenerator?.regeneratedAt === s.resolutionMm,
+          };
         }),
       { timeout: 120000 },
     )
-    .toEqual({ busy: false, settled: 0.1 });
+    .toEqual({ busy: false, settled: true });
 });

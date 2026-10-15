@@ -2,7 +2,7 @@
 // drag (handled in sketchInteraction) and scale here before confirming.  Commit
 // appends the transformed shapes to the sketch; cancel discards them.
 
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useStore } from "../../store";
 import FormulaInput from "../FormulaInput";
 import { evalValue } from "../inputs.jsx";
@@ -70,10 +70,14 @@ export default function SvgPlacementOverlay() {
         Drag the SVG to move · set the scale · Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay">
-        <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+        <span
+          title="Multiplies the imported outline's size on the sketch plane. It scales about the placement point, so the drawing stays where you dragged it."
+          style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+        >
           Scale:
         </span>
         <FormulaInput
+          title="Multiplies the imported outline's size on the sketch plane. It scales about the placement point, so the drawing stays where you dragged it."
           variables={variables}
           autoFocus
           value={scale}

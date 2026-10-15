@@ -101,7 +101,6 @@ describe("editing a push/pull distance rebuilds the body", () => {
       activeHistoryId: "h3",
       items: [],
       variables: [],
-      curveResolution: "preview",
       undoStack: [],
       redoStack: [],
     });

@@ -3,7 +3,7 @@
 // artwork so its LONGEST side is 200 mm regardless of the source file's own
 // dimensions, and the Scale field multiplies that — this pins both.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import { assertDocumentIntegrity } from "./integrity.js";
 

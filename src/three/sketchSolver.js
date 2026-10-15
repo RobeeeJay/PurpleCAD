@@ -8,8 +8,13 @@
 // rigid-motion gauge freedom so the result is the valid configuration nearest
 // the current one (and fixed points stay put).
 
-import { resolveConstraintDistance } from "./geometryParams.js";
-import { shapeMidpoint, sharpLineExtra } from "./sketchGeometry.js";
+import { resolveConstraintDistance, resolveValue } from "./geometryParams.js";
+import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
+import {
+  shapeMidpoint,
+  shapeSetCentre,
+  sharpLineExtra,
+} from "./sketchGeometry.js";
 import { rederiveAllCorners, extractCorners } from "./sketchGeometry.js";
 
 // Which scalar fields of a shape the solver may move, in a stable order.
@@ -25,6 +30,7 @@ export function varFields(s) {
     case "arc":
       return ["cx", "cy", "r", "startAngle", "endAngle"];
     case "point":
+    case "cog": // its centre; the outline follows it
       return ["x", "y"];
     default:
       return []; // bezier & unknowns: treated as fixed
@@ -50,6 +56,7 @@ export function fieldsForPoint(shape, key) {
   )
     return key === "center" ? ["cx", "cy"] : [];
   if (shape.type === "point") return ["x", "y"];
+  if (shape.type === "cog") return key === "center" ? ["x", "y"] : [];
   return [];
 }
 
@@ -84,6 +91,8 @@ function pointOf(s, key) {
     if (key === "p3") return { x: s.p3.x, y: s.p3.y };
   } else if (s.type === "point") {
     return { x: s.x, y: s.y };
+  } else if (s.type === "cog") {
+    if (key === "center") return { x: s.x, y: s.y };
   }
   return null;
 }
@@ -147,6 +156,17 @@ function residuals(shapes, constraints, variables) {
       const p = pointOf(shapes[c.pointShapeIdx], c.pointKey ?? "point");
       const m = shapeMidpoint(shapes[c.targetShapeIdx]);
       if (p && m) out.push(p.x - m.x, p.y - m.y);
+      else out.push(0, 0);
+    } else if (c.type === "centre") {
+      // The centre of one connected shape held on the centre of another, plus
+      // an offset.  Offsets are mm formulas, like every other dimension.
+      const a = shapeSetCentre(shapes, c.shapesA);
+      const b = shapeSetCentre(shapes, c.shapesB);
+      if (a && b)
+        out.push(
+          a.x - b.x - resolveValue(c.offsetX, 0, variables),
+          a.y - b.y - resolveValue(c.offsetY, 0, variables),
+        );
       else out.push(0, 0);
     } else if (c.type === "offset") {
       // Parametric offset of a NEW line from its ORIGINAL: keep them parallel
@@ -324,6 +344,9 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
     else if (c.type === "pointLineDistance")
       link(c.lineShapeIdx, c.pointShapeIdx);
     else if (c.type === "midpoint") link(c.targetShapeIdx, c.pointShapeIdx);
+    else if (c.type === "centre")
+      for (const a of c.shapesA || [])
+        for (const b of c.shapesB || []) link(a, b);
     else if (c.type === "offset") link(c.shapeIdx, c.origIdx);
   }
   const dist = new Array(numShapes).fill(Infinity);
@@ -364,6 +387,17 @@ function solveLinear(A, b) {
   const x = new Array(n);
   for (let i = 0; i < n; i++) x[i] = M[i][n] / M[i][i];
   return x;
+}
+
+// How far a configuration is from satisfying ONE constraint, in scene units.
+// Evaluating a constraint on its own is what lets a failed solve be attributed
+// to the individual dimensions that could not be met -- the solver's own
+// residual vector is a flat list whose entries-per-constraint vary by type.
+export function constraintResidual(shapes, constraint, variables = null) {
+  let m = 0;
+  for (const v of residuals(shapes, [constraint], variables))
+    m = Math.max(m, Math.abs(v));
+  return m;
 }
 
 // Virtual-corner solve.  Chamfers and fillets are DERIVED, applied after the
@@ -608,4 +642,58 @@ function solveCore(inputShapes, constraints, options = {}) {
   const finalShapes = shapesAt(x);
   const maxResidual = realResidual(x);
   return { shapes: finalShapes, ok: maxResidual < successTol, maxResidual };
+}
+
+// Join two points with a coincident constraint by SOLVING the whole sketch.
+//
+// The coincident tool normally moves the first-picked point with the fast
+// propagation rules, which walk coincident chains. A point that is pinned to
+// its OWN shape -- the midpoint of a line, say -- cannot move that way: the
+// rules put it straight back on its line, and writing the moved point anyway
+// tore the point off the shape it belongs to and left the sketch breaking its
+// own midpoint constraint. The shape has to travel WITH the point, which only
+// the solver can work out.
+//
+// Both points are pinned -- the first pick at the second pick's position, the
+// second where it already is, so the second pick and everything hanging off it
+// stay put -- and the solver moves whatever else it must to keep the rest of
+// the constraints true. Returns a Map<idx, shape> of what changed, or null if
+// the join cannot be satisfied (the caller then leaves the sketch alone).
+export function solveJoinPoints(shapes, constraints, a, b, options = {}) {
+  const shapeA = shapes[a.shapeIdx];
+  const shapeB = shapes[b.shapeIdx];
+  if (!shapeA || !shapeB) return null;
+  const target = getShapePoint(shapeB, b.pointKey);
+  if (!target) return null;
+
+  const input = shapes.slice();
+  input[a.shapeIdx] = moveShapePoint(shapeA, a.pointKey, target) ?? shapeA;
+  const fixed = new Set();
+  for (const f of fieldsForPoint(input[a.shapeIdx], a.pointKey))
+    fixed.add(`${a.shapeIdx}:${f}`);
+  for (const f of fieldsForPoint(shapeB, b.pointKey))
+    fixed.add(`${b.shapeIdx}:${f}`);
+
+  const res = solveConstraints(
+    input,
+    constraints.concat([
+      {
+        type: "coincident",
+        shapeAIdx: a.shapeIdx,
+        pointA: a.pointKey,
+        shapeBIdx: b.shapeIdx,
+        pointB: b.pointKey,
+      },
+    ]),
+    { ...options, fixed },
+  );
+  if (!res.ok) return null;
+
+  const changed = new Map();
+  res.shapes.forEach((shape, i) => {
+    const before = shapes[i];
+    if (varFields(shape).some((f) => shape[f] !== before[f]))
+      changed.set(i, shape);
+  });
+  return changed;
 }

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { evaluateFormula, variablesToMap } from "../formulas.js";
+import {
+  diameterToRadiusFormula,
+  evaluateFormula,
+  radiusToDiameterFormula,
+  variablesToMap,
+} from "../formulas.js";
 
 describe("evaluateFormula", () => {
   it("evaluates bare numbers", () => {
@@ -87,5 +92,67 @@ describe("evaluateFormula", () => {
     expect(evaluateFormula("1.005 * 100")).toBe(100.5);
     const map = variablesToMap([{ name: "w", formula: "0.1" }]);
     expect(evaluateFormula("w + 0.2", map)).toBe(0.3);
+  });
+});
+
+// A circle's dimension is stored as a radius but shown and typed as a
+// diameter.  The conversion is display-only, so it must never change the value
+// a constraint resolves to, and re-opening then re-confirming a field must give
+// back exactly what was stored -- otherwise every edit would wrap the formula
+// in another "* 2" and "/ 2".
+describe("circle dimensions: radius stored, diameter shown", () => {
+  const vars = { a: 3, b: 4, Width: 40, Dia: 10, x: 7 };
+
+  it("doubles a plain number exactly, in decimal", () => {
+    expect(radiusToDiameterFormula("5")).toBe("10");
+    expect(radiusToDiameterFormula("0.1")).toBe("0.2");
+    expect(diameterToRadiusFormula("0.3")).toBe("0.15");
+    expect(diameterToRadiusFormula("25")).toBe("12.5");
+  });
+
+  it("shows a formula radius as twice that formula", () => {
+    expect(radiusToDiameterFormula("R")).toBe("2 * R");
+    expect(radiusToDiameterFormula("a + b")).toBe("2 * (a + b)");
+  });
+
+  it("stores a typed diameter formula as half of it", () => {
+    expect(diameterToRadiusFormula("Dia")).toBe("Dia / 2");
+    expect(diameterToRadiusFormula("Dia - 2")).toBe("(Dia - 2) / 2");
+    // "2 * a + b" is not 2 * (a + b): it must not be unwrapped.
+    expect(diameterToRadiusFormula("2 * a + b")).toBe("(2 * a + b) / 2");
+  });
+
+  it("round-trips whatever was stored, so edits never accumulate", () => {
+    for (const r of [
+      "5",
+      "2.5",
+      "R",
+      "Width / 4",
+      "a + b",
+      "Dia / 2",
+      "(Dia - 2) / 2",
+      "2 * x",
+    ])
+      expect(diameterToRadiusFormula(radiusToDiameterFormula(r)), r).toBe(r);
+    for (const d of ["20", "Dia", "Dia - 2", "2 * a + b"])
+      expect(radiusToDiameterFormula(diameterToRadiusFormula(d)), d).toBe(d);
+  });
+
+  it("never changes the value: shown diameter is exactly twice the radius", () => {
+    for (const r of [
+      "5",
+      "a + b",
+      "Width / 4",
+      "(Dia - 2) / 2",
+      "2 * x",
+      "(a + b)",
+    ])
+      expect(evaluateFormula(radiusToDiameterFormula(r), vars), r).toBe(
+        evaluateFormula(r, vars) * 2,
+      );
+    for (const d of ["20", "Dia", "Dia - 2", "2 * a + b"])
+      expect(evaluateFormula(diameterToRadiusFormula(d), vars) * 2, d).toBe(
+        evaluateFormula(d, vars),
+      );
   });
 });

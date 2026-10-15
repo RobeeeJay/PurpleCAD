@@ -1,4 +1,4 @@
-import React from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { effectiveSelectionTypes } from "../store/selectionMode.js";
 import VisibilityToggles, { useShiftHeld } from "./VisibilityToggles";
@@ -118,26 +118,11 @@ const SelectionWidget = () => {
     return it?.type === "sketch";
   });
   const selObject = useStore((s) => s.selObject);
-  const selFace = useStore((s) => s.selFace);
-  const selEdge = useStore((s) => s.selEdge);
-  const selPoint = useStore((s) => s.selPoint);
-  const selectionOverride = useStore((s) => s.selectionOverride);
-  // Tool states the derived lock (Split / Plane) reads.
-  const splitTool = useStore((s) => s.splitTool);
-  const planeTool = useStore((s) => s.planeTool);
-  const planePickActive = useStore((s) => s.planePickActive);
-  const holeTool = useStore((s) => s.holeTool);
-  const state = {
-    selObject,
-    selFace,
-    selEdge,
-    selPoint,
-    selectionOverride,
-    splitTool,
-    planeTool,
-    planePickActive,
-    holeTool,
-  };
+  // Derived from the WHOLE store, not a hand-kept list of the fields the tool
+  // locks read.  That list fell behind the locks: it had no splitPick, so the
+  // Split tool's cut phase kept showing Object while hover picked faces, and no
+  // emboss / draft / point-to-point state, so their locks never showed at all.
+  const eff = useStore(useShallow(effectiveSelectionTypes));
   const selChain = useStore((s) => s.selChain);
   const curveDetectionAngleDeg = useStore((s) => s.curveDetectionAngleDeg);
   const setCurveDetectionAngleDeg = useStore(
@@ -157,7 +142,6 @@ const SelectionWidget = () => {
   // While Shift is held, swap for the constraint/dimension visibility toggles.
   if (shiftHeld) return <VisibilityToggles className="selection-widget" />;
 
-  const eff = effectiveSelectionTypes(state);
   const locked = eff.overridden; // a tool controls the set
   const btns = [
     {
@@ -200,7 +184,7 @@ const SelectionWidget = () => {
       {btns.map(({ key, Icon, on, toggle, title }) => {
         // Sub-types are greyed while Object mode is on; everything is greyed
         // (locked) while a tool forces a set.
-        const greyed = locked ? !on : key !== "object" && state.selObject;
+        const greyed = locked ? !on : key !== "object" && selObject;
         return (
           <button
             key={key}
@@ -238,7 +222,7 @@ const SelectionWidget = () => {
       {chainOn && (
         <label
           className="selection-widget-angle"
-          title="Maximum bend angle (degrees) still treated as one smooth face/edge"
+          title="Largest bend between neighbouring faces/edges still followed as one surface. Raise it to carry a selection round a tighter curve; lower it to stop at a crease."
         >
           <NumberInput
             value={curveDetectionAngleDeg}

@@ -1,7 +1,8 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
-// Full push/pull lifecycle against the real app: create → push/pull (overlay
-// Confirm) → edit distance (Timeline + dialog) → retarget (Timeline + overlay).
+// Full push/pull lifecycle against the real app: create → push/pull (the
+// bottom-bar dialog's Confirm) → edit distance (Timeline Edit, the same bar) →
+// retarget (Timeline + the same bar) → Flip.
 // Geometry/IPC work is driven and asserted through window.__store; the UI
 // surfaces (overlay, dialog, timeline buttons) are exercised as real DOM.  The
 // face selection is seeded into the store the way the viewport's Alt+click
@@ -21,6 +22,22 @@ test.describe.serial("push/pull lifecycle", () => {
 
   test.afterAll(async () => {
     await app?.close();
+  });
+
+  test("the dialog opens with the tool, before any face is picked", async () => {
+    await page.evaluate(() =>
+      window.__store.getState().setPushPullSelectMode("pushpull"),
+    );
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toBeVisible();
+    await expect(
+      overlay.getByRole("button", { name: "Faces (0)" }),
+    ).toBeVisible();
+    await expect(
+      overlay.getByRole("button", { name: "Confirm" }),
+    ).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(overlay).toBeHidden();
   });
 
   test("push/pull a cube's +Y face via the overlay", async () => {
@@ -69,14 +86,16 @@ test.describe.serial("push/pull lifecycle", () => {
     ).toBeCloseTo(0.5, 5);
   });
 
+  // Edit reopens the tool's own bar (it used to be a separate floating "Edit
+  // push/pull" panel with a Save button), seeded with the step's distance.
   test("edit the push/pull distance from the Timeline", async () => {
     await page.getByTitle("Edit push/pull distance").click();
-    const dialog = page.locator(".variables-dialog", {
-      hasText: "Edit push/pull",
-    });
-    await expect(dialog).toBeVisible();
-    await dialog.locator("input").first().fill("12");
-    await dialog.getByRole("button", { name: "Save" }).click();
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toBeVisible();
+    await expect(overlay.locator("input").first()).toHaveValue("5");
+    await overlay.locator("input").first().fill("12");
+    await page.getByTitle("Confirm — apply the push/pull").click();
+    await expect(overlay).toBeHidden();
 
     // 12 mm → 1.2 scene units; updatePushPullParams writes it synchronously.
     await expect
@@ -123,5 +142,37 @@ test.describe.serial("push/pull lifecycle", () => {
     expect(
       await page.evaluate(() => window.__store.getState().history.length),
     ).toBe(beforeLen);
+  });
+
+  test("Flip pushes the faces in instead of pulling them out", async () => {
+    const before = await page.evaluate(
+      () => window.__store.getState().history.length,
+    );
+    await page.evaluate((id) => {
+      const s = window.__store.getState();
+      s.setSelectedSubGeometry({
+        itemId: id,
+        edges: [],
+        faces: [{ nx: 0, ny: 1, nz: 0 }],
+      });
+      s.setPushPullSelectMode("pushpull");
+    }, CUBE_ID);
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay).toBeVisible();
+    await overlay.locator("input").first().fill("3");
+    await overlay.getByRole("button", { name: "Flip" }).click();
+    await page.getByTitle("Confirm — apply the push/pull").click();
+    await expect(overlay).toBeHidden();
+    // A new "Pushed" step, 3 mm in.
+    await expect
+      .poll(() => page.evaluate(() => window.__store.getState().history.length))
+      .toBe(before + 1);
+    const step = await page.evaluate(() => {
+      const h = window.__store.getState().history;
+      const e = h[h.length - 1];
+      return { label: e.label, d: e.instruction.patches.regenerator.distance };
+    });
+    expect(step.label).toMatch(/Pushed/);
+    expect(step.d).toBeCloseTo(-0.3, 5);
   });
 });

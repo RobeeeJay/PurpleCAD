@@ -11,7 +11,7 @@ import { createHighlightHelpers } from "../cameraControls/highlights.js";
 
 vi.mock("../../store", () => {
   const useStore = () => null;
-  useStore.getState = () => ({ curveResolution: null, variables: [] });
+  useStore.getState = () => ({ variables: [] });
   return { useStore };
 });
 

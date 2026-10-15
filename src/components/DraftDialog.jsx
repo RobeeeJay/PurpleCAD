@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { commitDraft } from "../three/cameraControls/draft.js";
@@ -88,7 +88,11 @@ const DraftDialog = () => {
           {`Faces (${nFaces})`}
         </button>
 
-        <Field label="Angle°" style={{ marginLeft: 10 }}>
+        <Field
+          label="Angle°"
+          style={{ marginLeft: 10 }}
+          hint="How far each picked face is tapered away from the main face. Bigger angles give more mould-release taper; use Flip to lean the other way."
+        >
           <NumberInput
             step="1"
             value={draftTool.angleDeg}

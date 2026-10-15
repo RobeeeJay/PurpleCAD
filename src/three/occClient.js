@@ -113,7 +113,37 @@ const clock = () => {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 };
 
+// OCC calls are SERIALISED. Two ops must never be in flight at once: they
+// share the native shape store and the item-keyed solid cache, and the
+// preview-supersede path (inputs.jsx) calls cancelOcc + clearSolids, which
+// releases cached shapes out from under whatever else is running. A live
+// preview that outlives its debounce therefore used to pull the source shape
+// away from the COMMIT that followed it, and the commit came back with an
+// empty mesh -- no error, the item still recorded. It only showed up on ops
+// slow enough to still be running at Confirm: a threaded M3 hole at 8mm did
+// it every time, the same hole at 4mm never did.
+let opChain = Promise.resolve();
+
 async function callOp(op, args) {
+  const run = opChain.then(
+    () => invokeOp(op, args),
+    () => invokeOp(op, args),
+  );
+  // Keep the chain alive regardless of this call's outcome.
+  opChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+export const ipcErrorMessage = (message) =>
+  String(message ?? "").replace(
+    /^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/,
+    "",
+  );
+
+async function invokeOp(op, args) {
   // Debug timing: log every OCC op's start + end wall-clock time + duration
   // (round-trip, including IPC to the worker).  Grep the console for "[OCC]".
   const t0 = now();
@@ -137,6 +167,10 @@ async function callOp(op, args) {
     console.log(
       `[OCC] ${op} FAILED ${clock()} (${(now() - t0).toFixed(1)}ms): ${e.message}`,
     );
+    // Electron wraps a worker error as "Error invoking remote method
+    // 'occ:<op>': Error: <message>" -- the user needs only the message.
+    const clean = ipcErrorMessage(e.message);
+    if (clean !== e.message) throw new Error(clean);
     throw e;
   }
   /* eslint-enable no-console */
@@ -189,13 +223,45 @@ export function solidFromMesh(geometryData) {
   return callOp("solidFromMesh", geometryData);
 }
 
+// Weld a mesh by exact position and report its open / non-manifold edges.
+// Direct route, like solidFromMesh: it runs on import and while a document
+// loads, and must not be discarded by a cancel aimed at some other op.
+export function weldMesh(geometryData) {
+  return callOp("weldMesh", geometryData);
+}
+
 // Genuine cancel: ask the main process to flip the shared cancel flag, so the
 // worker's in-flight native OCC op aborts (UserBreak) and frees the CPU — no
 // process/worker kill, so nothing shared is corrupted.  Electron-only; a no-op
 // elsewhere.  The op still rejects/returns null via the soft-cancel epoch, and
 // the caller clears the solid cache (a half-built shape was never stored).
+// A COMMIT must not be abortable by a preview supersede. Cancel is a shared
+// native flag: the worker clears it between ops, so a cancel fired while an op
+// is RUNNING aborts that op wherever it has got to -- and an abort during
+// meshing returns an EMPTY tessellation rather than throwing. A tool's live
+// preview debounce fires cancelOcc whenever something is in flight, so a
+// commit slower than the debounce got shot in the back by its own preview and
+// wrote an empty body, with no error and the timeline step still recorded.
+// Measured: a threaded M3 hole at 8mm (~450ms) hit this every time, the same
+// hole at 4mm (~200ms) never did.
+let commitDepth = 0;
+
+export async function withCommitGuard(fn) {
+  commitDepth += 1;
+  try {
+    return await fn();
+  } finally {
+    commitDepth -= 1;
+  }
+}
+
 export function cancelOcc() {
   if (!isElectron) return Promise.resolve(null);
+  if (commitDepth > 0) {
+    // eslint-disable-next-line no-console
+    console.log("[OCC] cancel suppressed — a commit is in flight");
+    return Promise.resolve(null);
+  }
   // eslint-disable-next-line no-console
   console.log("[OCC] requesting cancel (worker abort)");
   return window.electronAPI.invokeOcc("cancel");
@@ -211,6 +277,12 @@ export function pushPullFaces(args) {
 
 export function shellItem(args) {
   return runOp("shellItem", args);
+}
+
+// Simplify a mesh body's triangles, held to a measured deviation or a triangle
+// count (occOps.js#simplifyMesh).
+export function simplifyMesh(args) {
+  return runOp("simplifyMesh", args);
 }
 
 export function holeItem(args) {

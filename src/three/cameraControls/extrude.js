@@ -6,16 +6,20 @@
 //             the selection (live preview), types a distance in the overlay,
 //             and presses Confirm/Enter.  The mouse never sets the distance.
 //   start   → optional sub-mode to pick a face/plane the extrude starts from.
+//   to      → optional sub-mode to pick a face the extrude should reach; it
+//             fills in the distance (extrudeFacePick.js).
 //   commit  → finalizeExtrude writes the extrude item(s) to the store (and,
 //             for cut/boss/multi-area, runs a CSG boolean asynchronously).
 
 import * as THREE from "three";
 import { useStore } from "../../store";
+import { maxItemId } from "../../store/internals.js";
 import { resolveItemDepth, formatAsFormula } from "../geometryParams.js";
-import { polyArea, polyCentroid } from "../sceneObjects.js";
+import { polyArea, polyContainsPoint } from "../sceneObjects.js";
 import {
   makeExtrudePreviewMesh,
   extractFaceProfile,
+  bestProfileMatchIndex,
 } from "./extrudeGeometry.js";
 import {
   runCutExtrusion,
@@ -23,43 +27,36 @@ import {
   runUnionExtrudes,
   runExtrudeUnion,
 } from "./extrudeBoolean.js";
-import {
-  EXTRUDE_FACE_HIGHLIGHT,
-  EXTRUDE_FACE_HIGHLIGHT_ALT,
-} from "../theme.js";
+import { EXTRUDE_FACE_HIGHLIGHT } from "../theme.js";
+import { createExtrudeFacePick } from "./extrudeFacePick.js";
 
-// Which candidate region profile is the one an extrude was built from?
-//
-// Matches on the stored profile's POLYGON — relative area, centroid, and hole
-// count — rather than "the smallest region containing the stored centroid".
-// A ring-shaped profile's centroid sits inside its own hole, so a containment
-// test skips the real region and matches a nested one instead, which made
-// editing an extrude start on the wrong geometry.  Returns the index of the
-// best candidate in `candidates`, or -1 when nothing matches the sketch.
-export function bestProfileMatchIndex(sp, candidates) {
-  if (!sp?.polygon2D) return -1;
-  const spArea = polyArea(sp.polygon2D);
-  const spC = polyCentroid(sp.polygon2D);
-  const spHoles = (sp.holes || []).length;
-  let bestIdx = -1;
-  let bestErr = Infinity;
-  candidates.forEach((fp, i) => {
-    if (!fp?.polygon2D || fp.sketchId !== sp.sketchId) return;
-    const fC = polyCentroid(fp.polygon2D);
-    // Relative area error tolerates a curve tessellated at a different
-    // resolution; the centroid term separates same-area regions; a hole-count
-    // mismatch is a strong (but not fatal) penalty.
-    const err =
-      Math.abs(polyArea(fp.polygon2D) - spArea) / Math.max(spArea, 1e-9) +
-      Math.hypot(fC.x - spC.x, fC.y - spC.y) * 0.1 +
-      ((fp.holes || []).length === spHoles ? 0 : 0.5);
-    if (err < bestErr) {
-      bestErr = err;
-      bestIdx = i;
-    }
-  });
-  return bestIdx;
-}
+// The extrude item a profile commits to.  Module-level and exported because
+// the agent API commits extrudes too, and has to write exactly the item this
+// tool writes -- two hand-kept copies of this shape would drift.
+export const buildExtrudeDef = (
+  profile,
+  depthStored,
+  isCut,
+  startOffset,
+  id,
+) => ({
+  id,
+  name: `${isCut ? "Extrude Cut" : "Extrude"} ${id}`,
+  type: "extrude",
+  children: [],
+  profile,
+  depth: depthStored,
+  // Slides the prism's base along the profile normal so the extrude can begin
+  // from a picked face/plane instead of the sketch plane.  Omit when zero to
+  // keep item diffs clean.
+  ...(startOffset ? { startOffset } : null),
+  // `isCut` flips the prism direction in resolveItemDepth so the OCC shape +
+  // rendered mesh extend INTO the source regardless of the sign on `depth`.
+  ...(isCut ? { isCut: true } : null),
+  position: profile.position,
+  rotation: profile.rotation,
+  scale: { x: 1, y: 1, z: 1 },
+});
 
 export function createExtrudeHelpers(
   { scene, renderer, objectsRef, itemsRef, extrudeSelectGroupRef },
@@ -303,8 +300,20 @@ export function createExtrudeHelpers(
         fills.map((f) => f.userData.extrudeProfile),
       );
       const best = i >= 0 ? fills[i] : null;
+      // Keep the original click anchor only while it still lies inside the
+      // matched region.  Carrying a stale one forward is how an edited extrude
+      // ends up anchored on empty sketch space, which a shape drawn there
+      // later then captures.
+      const live = best?.userData.extrudeProfile;
+      const keep =
+        sp.profileCentroid &&
+        live &&
+        polyContainsPoint(live.polygon2D, sp.profileCentroid);
       if (best && !picked.some((p) => p.fill === best))
-        picked.push({ fill: best, pc: sp.profileCentroid });
+        picked.push({
+          fill: best,
+          pc: keep ? sp.profileCentroid : live.profileCentroid,
+        });
     }
     if (!picked.length) return;
     extrudeProfileList = picked.map(({ fill, pc }) => ({
@@ -552,25 +561,6 @@ export function createExtrudeHelpers(
   // The extrude item definition for a profile.  Used both for items added to the
   // store and as the EMBEDDED prism recipes inside a multi-area union (so the
   // whole multi-area extrude is one timeline entry, not N prisms + a union).
-  const buildExtrudeDef = (profile, depthStored, isCut, startOffset, id) => ({
-    id,
-    name: `${isCut ? "Extrude Cut" : "Extrude"} ${id}`,
-    type: "extrude",
-    children: [],
-    profile,
-    depth: depthStored,
-    // Slides the prism's base along the profile normal so the extrude can begin
-    // from a picked face/plane instead of the sketch plane.  Omit when zero to
-    // keep item diffs clean.
-    ...(startOffset ? { startOffset } : null),
-    // `isCut` flips the prism direction in resolveItemDepth so the OCC shape +
-    // rendered mesh extend INTO the source regardless of the sign on `depth`.
-    ...(isCut ? { isCut: true } : null),
-    position: profile.position,
-    rotation: profile.rotation,
-    scale: { x: 1, y: 1, z: 1 },
-  });
-
   // Create one extrude item from a profile and, for a cut, run its per-target
   // difference.  (Multi-area non-cut prisms are created together via addItems
   // and fused by a separate union; this path handles cuts and lone extrudes.)
@@ -597,6 +587,15 @@ export function createExtrudeHelpers(
     }
   };
 
+  // After a timeline edit, go back to the step the user was on.
+  const returnFromEdit = () => {
+    const back = useStore.getState().extrudeEditReturn;
+    if (!back) return;
+    useStore.setState({ extrudeEditReturn: null });
+    const target = back.to ?? useStore.getState().history.at(-1)?.id;
+    if (target != null) useStore.getState().restoreToHistory(target);
+  };
+
   const finalizeExtrude = (depthOverride = null, formulaOverride = null) => {
     if (!extrudeProfileList.length) return;
     // Allow negative depths so the user can extrude backwards from the
@@ -616,6 +615,13 @@ export function createExtrudeHelpers(
     // profiles fuse into one body.  When off, pure-sketch multi-profile
     // extrudes stay separate; a boss still merges into its host.
     const combineSingle = store.alwaysExtrudeSingleObject !== false;
+    // The dialog's Combine (default on): merge into the body the extrusion
+    // is attached to -- a face boss's source, the solid the sketch sits on,
+    // the Start-from solid.  Off, it is always a new object.  A cut is always
+    // a difference, so the option doesn't apply to it.
+    const combine = store.extrudeDepthInput?.combine !== false;
+    const hostsFor = (items) =>
+      combine ? unionTargetIdsFor(profiles, items) : [];
     // Persist the depth signed — the sign controls direction (positive =
     // along face normal, negative = opposite) for both cut and non-cut
     // extrudes.
@@ -633,6 +639,19 @@ export function createExtrudeHelpers(
       // embedded prism recipes from the new selection + depth, no new entry.
       store.retargetFusedExtrude(fusedId, profiles, depthStored, startOffset);
       store.setExtrudeRetargetFusedId(null);
+      // Combine, as the dialog now has it: keep or find the body to merge
+      // into, or none -- the extrusion then stands alone.
+      if (!isCut && !store.extrudeDepthInput?.combineLocked) {
+        const items = useStore.getState().items;
+        const current =
+          items.find((i) => i.id === fusedId)?.regenerator?.inputIds ?? [];
+        const hosts = !combine
+          ? []
+          : current.length
+            ? current
+            : hostsFor(items).filter((id) => id !== fusedId);
+        store.setExtrudeUnionHosts(fusedId, hosts);
+      }
     } else if (retargetGroup) {
       // Retarget a whole multi-area group: rebuild its prisms from the new
       // selection and re-point the union — the group is edited as one unit.
@@ -643,20 +662,26 @@ export function createExtrudeHelpers(
       // Retarget the original extrude to the first selected profile.
       store.retargetExtrude(retargetId, profiles[0], depthStored, startOffset);
       store.setExtrudeRetargetId(null);
+      // Combine ticked on a standalone extrusion: merge it into the body it
+      // is attached to.  One region only -- several go through the extra-
+      // regions path below.
+      if (
+        !isCut &&
+        combine &&
+        profiles.length === 1 &&
+        !store.extrudeDepthInput?.combineLocked
+      ) {
+        const hosts = hostsFor(useStore.getState().items).filter(
+          (id) => id !== retargetId,
+        );
+        if (hosts.length) store.fuseExtrudeIntoHosts(retargetId, hosts);
+      }
       // Extra regions picked during retarget aren't dropped: each becomes a new
       // extrude, and (non-cut) the whole set — the retargeted original, the new
       // prisms, and any host solids — fuses into one body, like the multi-area
       // extrude flow.  Cut keeps its per-region difference.
       if (profiles.length > 1) {
-        let maxId = 0;
-        useStore.getState().history.forEach((e) => {
-          if (
-            e.instruction &&
-            e.instruction.type === "create" &&
-            e.instruction.item.id > maxId
-          )
-            maxId = e.instruction.item.id;
-        });
+        const maxId = maxItemId(useStore.getState().history);
         if (!isCut && combineSingle) {
           // The extra regions become new prisms in ONE timeline step; a separate
           // Union step then fuses them with the retargeted original (by id) and
@@ -675,10 +700,7 @@ export function createExtrudeHelpers(
           if (defs.length > 1) store.addItems(defs, "Extruded");
           else store.addItem(defs[0]);
           store.selectItem(null);
-          const unionTargets = unionTargetIdsFor(
-            profiles,
-            useStore.getState().items,
-          );
+          const unionTargets = hostsFor(useStore.getState().items);
           store.setCutExtrudeInProgress(true);
           void runUnionExtrudes(
             [retargetId, ...defs.map((d) => d.id)],
@@ -701,24 +723,17 @@ export function createExtrudeHelpers(
         }
       }
     } else {
-      let maxId = 0;
-      store.history.forEach((e) => {
-        if (
-          e.instruction &&
-          e.instruction.type === "create" &&
-          e.instruction.item.id > maxId
-        )
-          maxId = e.instruction.item.id;
-      });
+      // Every id ever created, a Split's pieces included: counting single
+      // "create" steps alone gave a merged extrude the id of the split piece
+      // it merged into -- two objects with one id (MultiSystem2).
+      const maxId = maxItemId(store.history);
       // A non-cut extrude fuses into the body it's attached to: union all the
       // prisms with each other AND with their host solid(s) — the source of a
       // face boss, the solid the sketch sits on, or the "Start from" solid.
       // Union when there's more than one prism OR a host to merge with;
       // otherwise the lone prism stands alone.  Cut keeps its per-target
       // difference (unioning subtractions makes no sense).
-      const unionTargets = isCut
-        ? []
-        : unionTargetIdsFor(profiles, store.items);
+      const unionTargets = isCut ? [] : hostsFor(store.items);
       const willUnion =
         !isCut &&
         (unionTargets.length > 0 || (profiles.length > 1 && combineSingle));
@@ -796,119 +811,33 @@ export function createExtrudeHelpers(
     store.setExtrudeRetargetFusedId(null);
     store.setExtrudeSelectMode(null);
     store.setExtrudeDepthInput(null);
+    returnFromEdit();
     renderer.domElement.style.cursor = "";
   };
 
-  // --- Offset start-point picking ----------------------------------------
-  // The user taps "Set start" in the depth overlay, then clicks a solid face
-  // or sketch plane; the prism's base slides along the extrude normal to sit
-  // at that surface.  The offset is the signed projection of the picked point
-  // onto the normal, measured from the primary profile's base.
-
-  // Solid faces are the meaningful offset targets.  They're tested BEFORE the
-  // sketch-region fills because those fills are invisible (opacity 0) yet still
-  // raycastable, and they sit right on the sketch plane — when you sketch on an
-  // object's face the fill is coincident with that face and would otherwise
-  // intercept every ray, so the face under the cursor never lights up.
-  // Mirror the Alt/Option face-pick target set (onViewHover faceMode): every
-  // visible non-sketch mesh.  Crucially this INCLUDES extrude / csg solids —
-  // those are exactly the bodies you want to start an offset from, and
-  // excluding them was why their faces couldn't be picked.
-  const solidStartTargets = () =>
-    Object.values(objectsRef.current).filter((m) => {
-      if (m.visible === false) return false;
-      const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
-      return it && it.type !== "sketch";
-    });
-
-  // The picked point + whether it was a face (vs a sketch-plane fill).  Faces
-  // win; a fill is only used when no solid face is under the cursor.
-  const startPickHit = (ray) => {
-    const solidHits = ray.intersectObjects(solidStartTargets(), false);
-    if (solidHits.length > 0) return { hit: solidHits[0], isFace: true };
-    const fills = extrudeSelectGroupRef?.current?.children ?? [];
-    const fillHits = fills.length ? ray.intersectObjects(fills, false) : [];
-    if (fillHits.length > 0) return { hit: fillHits[0], isFace: false };
-    return null;
-  };
-
-  const beginExtrudeStartPick = () => {
-    // The start offset is measured from the selected profile's plane, so a
-    // profile must exist first — otherwise there's nothing to offset and face
-    // clicks would no-op (origin/normal still null).
-    if (!extrudeProfileList.length) {
-      useStore
-        .getState()
-        .showNotification?.("Select geometry to extrude first");
-      return;
-    }
-    useStore.getState().setExtrudeSelectMode("start");
-    renderer.domElement.style.cursor = "crosshair";
-  };
-
-  // Clear any transient start-pick highlight (fill opacity + face overlay).
-  const clearStartHighlight = () => {
-    const fills = extrudeSelectGroupRef?.current?.children ?? [];
-    fills.forEach((m) => {
-      m.material.opacity = 0;
-    });
-    clearFaceHighlight();
-  };
-
-  const handleExtrudeStartHover = (screenX, screenY) => {
-    clearStartHighlight();
-    const picked = startPickHit(makeRay(screenX, screenY));
-    if (!picked) {
-      renderer.domElement.style.cursor = "crosshair";
-      return;
-    }
-    // Light up the surface under the cursor so the user sees what the extrude
-    // will start from: the face-overlay highlight for a solid face, a
-    // translucent fill for a sketch plane.
-    if (picked.isFace)
-      applyFaceHighlight(picked.hit, EXTRUDE_FACE_HIGHLIGHT_ALT);
-    else picked.hit.object.material.opacity = 0.3;
-    renderer.domElement.style.cursor = "pointer";
-  };
-
-  const handleExtrudeStartClick = (screenX, screenY) => {
-    // Measure the offset from the (live) first profile's plane, so it's correct
-    // even if the cached origin/normal lag the selection.
-    const primary = extrudeProfileList[0];
-    if (!primary) return;
-    const picked = startPickHit(makeRay(screenX, screenY));
-    if (!picked) return;
-    clearStartHighlight();
-    const origin = new THREE.Vector3(
-      primary.position.x,
-      primary.position.y,
-      primary.position.z,
-    );
-    const normal = new THREE.Vector3(
-      primary.normalWorld.x,
-      primary.normalWorld.y,
-      primary.normalWorld.z,
-    );
-    const offset = picked.hit.point.clone().sub(origin).dot(normal);
-    // Remember the solid the start was taken from so the extrude fuses into it.
-    extrudeStartSolidId = picked.isFace
-      ? (picked.hit.object.userData.itemId ?? null)
-      : null;
-    const store = useStore.getState();
-    const current = store.extrudeDepthInput || {};
-    // Clear any typed offset buffer so the Offset field reflects the picked
-    // face distance rather than a stale formula the user typed earlier.
-    store.setExtrudeDepthInput({
-      ...current,
-      startOffset: offset,
-      offsetFormula: undefined,
-    });
-    store.setExtrudeSelectMode("profile");
-    rebuildPreviews(
-      current.currentDepth ?? current.defaultDepth ?? DEFAULT_DEPTH,
-    );
-    renderer.domElement.style.cursor = "crosshair";
-  };
+  // Picking a face for the extrude to start from, or to reach
+  // (extrudeFacePick.js).
+  const {
+    beginExtrudeStartPick,
+    beginExtrudeToPick,
+    clearStartHighlight,
+    handleExtrudeStartHover,
+    handleExtrudeStartClick,
+  } = createExtrudeFacePick({
+    renderer,
+    objectsRef,
+    itemsRef,
+    extrudeSelectGroupRef,
+    makeRay,
+    applyFaceHighlight,
+    clearFaceHighlight,
+    getProfiles: () => extrudeProfileList,
+    setStartSolidId: (id) => {
+      extrudeStartSolidId = id;
+    },
+    rebuildPreviews,
+    defaultDepth: DEFAULT_DEPTH,
+  });
 
   const cancelExtrude = () => {
     clearExtrudePreview();
@@ -932,6 +861,7 @@ export function createExtrudeHelpers(
     store.setExtrudeRetargetGroup(null);
     store.setExtrudeRetargetFusedId(null);
     store.setExtrudeDepthInput(null);
+    returnFromEdit();
     store.setCutExtrudeInProgress(false);
   };
 
@@ -946,6 +876,7 @@ export function createExtrudeHelpers(
     startFaceExtrudeFromSelection,
     preselectRetargetProfile,
     beginExtrudeStartPick,
+    beginExtrudeToPick,
     handleExtrudeStartHover,
     handleExtrudeStartClick,
     clearStartHighlight,

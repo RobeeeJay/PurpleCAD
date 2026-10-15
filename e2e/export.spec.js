@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 // STL/STEP export round-trip through the real IPC + bridge.  The export path
@@ -121,9 +121,7 @@ test("chamfered body exports its BAKED mesh, not a recipe rebuild", async () => 
         verts.push([x, y, z]);
       }
     }
-    const onEdge = verts.some(
-      ([, y, z]) => z > zMax - 0.01 && y < yMin + 0.01,
-    );
+    const onEdge = verts.some(([, y, z]) => z > zMax - 0.01 && y < yMin + 0.01);
     return { triCount, onEdge };
   }, groundedCube);
 

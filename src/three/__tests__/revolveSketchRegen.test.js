@@ -97,7 +97,6 @@ describe("revolve follows an upstream sketch edit", () => {
       activeHistoryId: "h2",
       items: [],
       variables: [],
-      curveResolution: "preview",
     });
     await recalculateTimeline();
     const before = useStore.getState().items.find((i) => i.id === 2);
@@ -124,7 +123,6 @@ describe("revolve follows an upstream sketch edit", () => {
       activeHistoryId: "h2",
       items: [],
       variables: [],
-      curveResolution: "preview",
     });
     await recalculateTimeline();
     const heightY = (g) => {

@@ -1,11 +1,10 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import TooltipLayer from "./components/TooltipLayer";
 import Toolbar from "./components/Toolbar";
 import Viewport from "./components/Viewport";
 import TreeView from "./components/TreeView";
 import Timeline from "./components/Timeline";
 import VariablesDialog from "./components/VariablesDialog";
-import PushPullEditDialog from "./components/PushPullEditDialog";
 import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
@@ -36,6 +35,7 @@ function App() {
   const redoSketch = useStore((state) => state.redoSketch);
   const notification = useStore((state) => state.notification);
   const clearNotification = useStore((state) => state.clearNotification);
+  const notificationAction = useStore((state) => state.notificationAction);
 
   // Prefix the window/tab title with the active project's name.  Refresh the
   // list once on mount too: at store-init the DB bridge may not have returned
@@ -58,8 +58,16 @@ function App() {
       const s = useStore.getState();
       s.refreshThumbnail?.(s.activeProjectId);
     };
+    // The iPad never unloads; going to the background is its way of leaving.
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") onLeave();
+    };
     window.addEventListener("beforeunload", onLeave);
-    return () => window.removeEventListener("beforeunload", onLeave);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.removeEventListener("beforeunload", onLeave);
+      document.removeEventListener("visibilitychange", onHidden);
+    };
   }, []);
   useEffect(() => {
     const name = projects.find((p) => p.id === activeProjectId)?.name;
@@ -79,6 +87,7 @@ function App() {
           (s) =>
             s.type === "text" &&
             (!Array.isArray(s.contours) ||
+              !Array.isArray(s.contourCurves) ||
               s.contourTol !== textSimplifyTol(state)),
         ),
     ),
@@ -103,9 +112,10 @@ function App() {
 
   useEffect(() => {
     if (!notification) return;
-    const t = setTimeout(clearNotification, 4000);
+    // Long enough to read the message AND reach its button.
+    const t = setTimeout(clearNotification, notificationAction ? 12000 : 4000);
     return () => clearTimeout(t);
-  }, [notification, clearNotification]);
+  }, [notification, notificationAction, clearNotification]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -156,7 +166,6 @@ function App() {
         <Viewport />
       </div>
       <VariablesDialog />
-      <PushPullEditDialog />
       <RevolveEditDialog />
       <MaterialDialog />
       <SettingsDialog />
@@ -182,11 +191,42 @@ function App() {
             maxWidth: 340,
             textAlign: "center",
             zIndex: 9999,
-            pointerEvents: "none",
+            pointerEvents: notificationAction ? "auto" : "none",
             lineHeight: 1.45,
           }}
         >
           {notification}
+          {notificationAction?.kind === "simplifyToFit" && (
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                title="Open Simplify on this mesh, set to fit under the limit"
+                onClick={() => {
+                  const s = useStore.getState();
+                  s.clearNotification();
+                  s.selectItem(notificationAction.itemId);
+                  s.setSimplifyTarget({
+                    itemId: notificationAction.itemId,
+                    preset: {
+                      mode: "triangles",
+                      targetTriangles: notificationAction.targetTriangles,
+                    },
+                  });
+                }}
+                style={{
+                  fontSize: 12,
+                  padding: "4px 12px",
+                  borderRadius: 3,
+                  border: "1px solid var(--accent, #4488ff)",
+                  background: "var(--accent, #4488ff)",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Simplify to fit
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

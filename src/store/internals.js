@@ -12,6 +12,8 @@
 import * as db from "./db.js";
 import { packHistory } from "./geometryPack.js";
 import { pruneNestedSourceGeometry } from "../three/textureDisplace.js";
+import { backfillSplitRecipes } from "../three/splitRecipe.js";
+import { backfillLoopShapes } from "../three/profileBackfill.js";
 
 // ---------------------------------------------------------------------------
 // Instruction application
@@ -360,7 +362,11 @@ export const loadTimeline = () => {
       setNextHistoryId(maxId + 1);
       return {
         ...parsed,
-        history: pruneTextureSourceChains(backfillEmbossFrames(parsed.history)),
+        history: pruneTextureSourceChains(
+          backfillLoopShapes(
+            backfillSplitRecipes(backfillEmbossFrames(parsed.history)),
+          ),
+        ),
       };
     }
   } catch (e) {
@@ -439,10 +445,12 @@ export const rewriteCreatedItem = (entry, id, apply) => {
   return entry;
 };
 
-export const markCsgDirty = (items) => {
+// Mark live CSG bodies stale -- every one, or only those `ids` names.
+export const markCsgDirty = (items, ids = null) => {
   let changed = false;
   const out = items.map((item) => {
     if (item.type !== "csg" || !item.regenerator) return item;
+    if (ids && !ids.has(item.id)) return item;
     if (item.regenerator.regeneratedAt === "dirty") return item;
     changed = true;
     return {
@@ -453,6 +461,45 @@ export const markCsgDirty = (items) => {
   return changed ? out : items;
 };
 
+// The earliest entry an edit rewrote, comparing the history before and after
+// it (an untouched entry keeps its identity); -1 if none changed.  Nothing
+// earlier can depend on what an edit rewrote -- a step only references what
+// came before it -- so this is where invalidation starts.
+export const firstChangedIndex = (prev, next) => {
+  const n = Math.min(prev.length, next.length);
+  for (let i = 0; i < n; i++) if (prev[i] !== next[i]) return i;
+  return prev.length === next.length ? -1 : n;
+};
+
+// The bodies the entries from `from` onward build or reshape.
+const bodiesBuiltFrom = (history, from) => {
+  const ids = new Set();
+  for (let i = Math.max(0, from); i < history.length; i++) {
+    const inst = history[i].instruction;
+    if (inst?.type === "create" && inst.item) ids.add(inst.item.id);
+    else if (inst?.type === "createGroup")
+      for (const it of inst.items || []) ids.add(it.id);
+    else if (inst?.type === "modify") ids.add(inst.itemId);
+  }
+  return ids;
+};
+
+// Mark stale only the live bodies an edit at step `from` can reach.
+export const markCsgDirtyFrom = (items, history, from) =>
+  from < 0 ? items : markCsgDirty(items, bodiesBuiltFrom(history, from));
+
+// Invalidate what an edit can affect, and nothing else: from the first entry
+// it rewrote, flag the entries for the recalc and mark the bodies they build
+// stale.  An edit to the last step rebuilds that step alone -- it used to
+// mark every entry and body, so editing the last extrude re-sewed the import
+// and re-ran every boolean before it.
+export const invalidateEdit = (prevHistory, newHistory, items) => {
+  const from = firstChangedIndex(prevHistory, newHistory);
+  if (from < 0) return { history: newHistory, items };
+  const history = dirtyEntriesFrom(newHistory, from);
+  return { history, items: markCsgDirtyFrom(items, history, from) };
+};
+
 // Viewport + snap preferences (the Settings dialog).  `fov` is the perspective
 // camera's vertical field of view in degrees — lower = flatter / less
 // perspective.  Persisted alongside snap under the same `cad-snap` key.
@@ -461,18 +508,16 @@ export const markCsgDirty = (items) => {
 // perspective.  `curveDetectionAngleDeg` is the max bend between consecutive
 // connected lines for them to be treated as one smooth curve when highlighting.
 // Persisted alongside snap under the same `cad-snap` key.
-// previewPrecisionMm / printPrecisionMm are the tessellation deviation (sagitta,
-// mm) for the two resolution modes — lower = denser/smoother, more triangles.
-// Preview is the interactive/editing density; print ("Normal/High") is the
-// final density used when the resolution toggle is on.
+// resolutionMm is the tessellation deviation (sagitta, mm) everything is built
+// at -- lower = denser/smoother, more triangles.  It was previewPrecisionMm (the
+// "Normal" of a Normal/High pair); a saved value of that carries over.
 export const SNAP_DEFAULTS = {
   snapEnabled: false,
   snapDistanceMm: 5,
   snapAngleDeg: 9,
   fov: 35,
   curveDetectionAngleDeg: 5,
-  previewPrecisionMm: 0.1,
-  printPrecisionMm: 0.01,
+  resolutionMm: 0.05,
   alwaysExtrudeSingleObject: true,
   axisVisible: false,
 };
@@ -489,10 +534,12 @@ export const loadSnapSettings = () => {
       fov: parsed.fov > 0 ? parsed.fov : 35,
       curveDetectionAngleDeg:
         parsed.curveDetectionAngleDeg >= 0 ? parsed.curveDetectionAngleDeg : 5,
-      previewPrecisionMm:
-        parsed.previewPrecisionMm > 0 ? parsed.previewPrecisionMm : 0.5,
-      printPrecisionMm:
-        parsed.printPrecisionMm > 0 ? parsed.printPrecisionMm : 0.01,
+      resolutionMm:
+        parsed.resolutionMm > 0
+          ? parsed.resolutionMm
+          : parsed.previewPrecisionMm > 0
+            ? parsed.previewPrecisionMm
+            : 0.05,
       // Default on (combine) — only an explicit false turns it off.
       alwaysExtrudeSingleObject: parsed.alwaysExtrudeSingleObject !== false,
       // Combined-axis indicator defaults off — only an explicit true shows it.
@@ -513,8 +560,7 @@ export const saveSnapSettings = (snap) => {
         snapAngleDeg: snap.snapAngleDeg,
         fov: snap.fov,
         curveDetectionAngleDeg: snap.curveDetectionAngleDeg,
-        previewPrecisionMm: snap.previewPrecisionMm,
-        printPrecisionMm: snap.printPrecisionMm,
+        resolutionMm: snap.resolutionMm,
         alwaysExtrudeSingleObject: snap.alwaysExtrudeSingleObject,
         axisVisible: snap.axisVisible,
       }),
@@ -611,4 +657,63 @@ export const getInitialItems = () => {
     persisted.history,
     targetIdx !== -1 ? targetIdx : persisted.history.length - 1,
   );
+};
+
+// Every field on a constraint that references a shape by index, across all
+// constraint types (coincident/distance/angle use A/B; onLine uses
+// point/line; H/V and the copy ops use shapeIdx; mirror/offset/pattern carry
+// a source origIdx; mirror adds lineIdx; circularPattern adds centerShapeIdx).
+// `i`, `j`, `index`, `count`, `offsetGroup` are NOT shape indices.
+export const SHAPE_INDEX_FIELDS = [
+  "shapeAIdx",
+  "shapeBIdx",
+  "shapeIdx",
+  "origIdx",
+  "pointShapeIdx",
+  "lineShapeIdx",
+  "lineIdx",
+  "centerShapeIdx",
+];
+
+// Fields holding a LIST of shape indices: a centre constraint names each of
+// its two shapes as every piece of connected geometry that makes it up.
+export const SHAPE_INDEX_LIST_FIELDS = ["shapesA", "shapesB"];
+
+// The constraints of `types` that tie the shapes at `indices` only to each other,
+// renumbered to positions within `indices` -- what a copy of those shapes
+// carries.  One that reaches a shape outside the set is left behind.
+export const constraintsAmong = (constraints, indices, types) => {
+  const indexMap = new Map(indices.map((orig, i) => [orig, i]));
+  return constraints
+    .filter((c) => types.has(c.type))
+    .map((c) => remapConstraintShapeIndices(c, indexMap))
+    .filter(Boolean);
+};
+
+// Remap a constraint's shape-index fields through `indexMap` (old index → new
+// index, or -1 for a removed shape).  Returns null when the constraint
+// references any removed shape, so the caller can drop it.  Used when deleting
+// shapes (e.g. replacing a rectangular pattern's copies) so every surviving
+// constraint keeps pointing at the right geometry.
+export const remapConstraintShapeIndices = (constraint, indexMap) => {
+  const out = { ...constraint };
+  for (const f of SHAPE_INDEX_FIELDS) {
+    if (typeof constraint[f] === "number") {
+      const next = indexMap.get(constraint[f]);
+      if (next == null || next === -1) return null;
+      out[f] = next;
+    }
+  }
+  // A list names a whole shape, so losing one of its pieces leaves the rest of
+  // the shape -- still worth keeping.  Only a list emptied entirely takes the
+  // constraint with it.
+  for (const f of SHAPE_INDEX_LIST_FIELDS) {
+    if (!Array.isArray(constraint[f])) continue;
+    const kept = constraint[f]
+      .map((i) => indexMap.get(i))
+      .filter((i) => i != null && i !== -1);
+    if (kept.length === 0) return null;
+    out[f] = kept;
+  }
+  return out;
 };

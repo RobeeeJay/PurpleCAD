@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import { weldForImport, openMeshWarning } from "../../three/importWeld.js";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
@@ -20,8 +21,8 @@ const DocumentSection = () => {
   const loadDocument = useStore((s) => s.loadDocument);
   const createProject = useStore((s) => s.createProject);
   const items = useStore((s) => s.items);
-  const curveResolution = useStore((s) => s.curveResolution);
   const variables = useStore((s) => s.variables);
+  const folders = useStore((s) => s.folders);
   const setVariablesDialogOpen = useStore((s) => s.setVariablesDialogOpen);
   const cameraControls = useStore((s) => s._cameraControls);
   const selectedId = useStore((s) => s.selectedId);
@@ -95,6 +96,9 @@ const DocumentSection = () => {
             history: packHistory(history),
             activeHistoryId,
             variables,
+            // Components (tree folders) and their motions: not part of the
+            // timeline, but a reopened file without them has lost its setup.
+            folders,
           },
           null,
           2,
@@ -121,22 +125,10 @@ const DocumentSection = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Exports tessellate at the ACTIVE resolution; in preview mode that's the
-  // coarse mesh, which pits/facets a printed part.  Warn before exporting so
-  // the user can switch on high-res print mode first.  Returns false to abort.
-  const confirmExportResolution = (kind) => {
-    if (curveResolution === "print") return true;
-    return window.confirm(
-      `High-resolution print mode is OFF, so this ${kind} will export at the ` +
-        `coarser preview tessellation (curved surfaces will look faceted).\n\n` +
-        `Turn on print mode (the resolution toggle) for a smooth mesh, then ` +
-        `export again.\n\nExport at preview resolution anyway?`,
-    );
-  };
-
-  // Export the selected objects (single or multi) in their current cached
-  // timeline state, or the whole scene when nothing is selected.
-  const exportItems = () => {
+  // What an export takes: the whole scene, or only the selected objects
+  // (single or multi) -- the menu offers both, rather than quietly exporting
+  // the selection whenever there is one.
+  const selectedItems = () => {
     const ids = new Set(
       selectedIds?.length
         ? selectedIds
@@ -144,7 +136,19 @@ const DocumentSection = () => {
           ? [selectedId]
           : [],
     );
-    return ids.size ? items.filter((i) => ids.has(i.id)) : items;
+    return items.filter((i) => ids.has(i.id));
+  };
+  const nSelected = selectedItems().length;
+  // The file is named for what it holds: "scene", one object's name, or
+  // "selection" for several.
+  const exportScope = (scope) => {
+    if (scope === "scene") return { list: items, name: "scene" };
+    const list = selectedItems();
+    const name =
+      list.length === 1
+        ? (list[0].name || "selection").replace(/[\\/:*?"<>|]+/g, "_")
+        : "selection";
+    return { list, name };
   };
 
   // Export payload: the chosen items, the whole scene (so a selected body's
@@ -157,22 +161,27 @@ const DocumentSection = () => {
     precision: activePrecision(useStore.getState()),
   });
 
-  const handleExportSTL = async () => {
+  const nothingToExport = (scope) =>
+    scope === "scene"
+      ? "No exportable objects in the scene."
+      : "Nothing in the selection can be exported -- select a solid body.";
+
+  const handleExportSTL = async (scope) => {
     setSaveMenuOpen(false);
-    if (items.length === 0) {
+    const { list, name } = exportScope(scope);
+    if (list.length === 0) {
       alert("No objects to export.");
       return;
     }
-    if (!confirmExportResolution("STL")) return;
     try {
-      const buffer = await exportSTL(exportPayload(exportItems()));
+      const buffer = await exportSTL(exportPayload(list));
       if (!buffer) {
-        alert("No exportable objects in the scene.");
+        alert(nothingToExport(scope));
         return;
       }
       download(
         new Blob([buffer], { type: "application/octet-stream" }),
-        "scene.stl",
+        `${name}.stl`,
       );
     } catch (err) {
       console.error("STL export failed:", err);
@@ -180,20 +189,23 @@ const DocumentSection = () => {
     }
   };
 
-  const handleExportSTEP = async () => {
+  const handleExportSTEP = async (scope) => {
     setSaveMenuOpen(false);
-    if (items.length === 0) {
+    const { list, name } = exportScope(scope);
+    if (list.length === 0) {
       alert("No objects to export.");
       return;
     }
-    if (!confirmExportResolution("STEP")) return;
     try {
-      const content = await exportSTEP(exportPayload(exportItems()));
+      const content = await exportSTEP(exportPayload(list));
       if (!content) {
-        alert("No exportable objects in the scene.");
+        alert(nothingToExport(scope));
         return;
       }
-      download(new Blob([content], { type: "application/step" }), "scene.step");
+      download(
+        new Blob([content], { type: "application/step" }),
+        `${name}.step`,
+      );
     } catch (err) {
       console.error("STEP export failed:", err);
       alert("STEP export failed: " + err.message);
@@ -226,24 +238,35 @@ const DocumentSection = () => {
     fileInputRef.current.value = "";
     fileInputRef.current.click();
   };
+  // A .pcad's text, opened as a new project.  The file input uses it, and so
+  // does the iPad host when the Files app opens a .pcad in PurpleCAD (a
+  // purplecad:open-document event, below).
+  const openDocumentText = async (fileName, text) => {
+    const baseName = fileName.replace(/\.(pcad|cad\.json|json)$/i, "");
+    try {
+      const data = JSON.parse(text);
+      if (!data.history || !Array.isArray(data.history)) {
+        alert("Invalid document file.");
+        return;
+      }
+      await createProject(baseName || "Imported");
+      loadDocument(data);
+    } catch (err) {
+      alert("Failed to read document: " + err.message);
+    }
+  };
+  const openDocumentRef = useRef(openDocumentText);
+  openDocumentRef.current = openDocumentText;
+  useEffect(() => {
+    const onOpen = (e) => openDocumentRef.current(e.detail.name, e.detail.text);
+    window.addEventListener("purplecad:open-document", onOpen);
+    return () => window.removeEventListener("purplecad:open-document", onOpen);
+  }, []);
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const baseName = file.name.replace(/\.(pcad|cad\.json|json)$/i, "");
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!data.history || !Array.isArray(data.history)) {
-          alert("Invalid document file.");
-          return;
-        }
-        await createProject(baseName || "Imported");
-        loadDocument(data);
-      } catch (err) {
-        alert("Failed to read document: " + err.message);
-      }
-    };
+    reader.onload = (ev) => openDocumentText(file.name, ev.target.result);
     reader.readAsText(file);
   };
 
@@ -320,10 +343,13 @@ const DocumentSection = () => {
           useStore.getState()._cameraControls?.updateSvgPreview?.(),
         );
       } else if (ext === "stl") {
-        addImportedSolid(
+        const name = `${baseName} (STL)`;
+        const { geometryData, report } = await weldForImport(
           parseStl(await file.arrayBuffer()).geometryData,
-          `${baseName} (STL)`,
         );
+        addImportedSolid(geometryData, name);
+        const warning = openMeshWarning(name, report);
+        if (warning) useStore.getState().showNotification(warning);
       } else if (ext === "step" || ext === "stp") {
         const res = await importStep({ stepText: await file.text() });
         addImportedSolid(
@@ -439,20 +465,32 @@ const DocumentSection = () => {
             >
               Save document (.pcad)
             </button>
-            <button
-              className="toolbar-dropdown-item"
-              title="Export the visible bodies as a 3D-printable STL mesh"
-              onClick={handleExportSTL}
-            >
-              Export as STL
-            </button>
-            <button
-              className="toolbar-dropdown-item"
-              title="Export the visible bodies as a STEP file for other CAD tools"
-              onClick={handleExportSTEP}
-            >
-              Export as STEP
-            </button>
+            {[
+              ["STL", "a 3D-printable STL mesh", handleExportSTL],
+              ["STEP", "a STEP file for other CAD tools", handleExportSTEP],
+            ].map(([fmt, what, handler]) => (
+              <Fragment key={fmt}>
+                <button
+                  className="toolbar-dropdown-item"
+                  title={`Export every visible body as ${what}`}
+                  onClick={() => handler("scene")}
+                >
+                  {`Export scene as ${fmt}`}
+                </button>
+                <button
+                  className="toolbar-dropdown-item"
+                  title={
+                    nSelected
+                      ? `Export only the selected ${nSelected === 1 ? "object" : `${nSelected} objects`} as ${what}`
+                      : "Select the objects to export first"
+                  }
+                  disabled={nSelected === 0}
+                  onClick={() => handler("selection")}
+                >
+                  {`Export selected as ${fmt}`}
+                </button>
+              </Fragment>
+            ))}
             <button
               className="toolbar-dropdown-item"
               title="Save a PNG screenshot of the viewport"

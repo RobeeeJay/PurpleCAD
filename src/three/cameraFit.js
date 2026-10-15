@@ -123,6 +123,18 @@ export function fitPointsToView(
   fill,
   frame = { cx: 0, cy: 0, halfW: 1, halfH: 1 },
 ) {
+  // Drop any non-finite point before it reaches the maths. One NaN coordinate
+  // poisons the whole fit -- the centre, the zoom and the target all go NaN,
+  // the camera matrix follows, and the renderer simply stops presenting frames.
+  // No error is raised and JS stays responsive, so it reads as a frozen
+  // viewport rather than bad data. An item whose position was set through the
+  // store API with a malformed value is enough to do it.
+  pts = pts.filter(
+    (p) =>
+      p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z),
+  );
+  if (pts.length === 0) return null;
+
   const zAxis = dir.clone().normalize();
   const xAxis = new THREE.Vector3()
     .crossVectors(new THREE.Vector3(0, 1, 0), zAxis)

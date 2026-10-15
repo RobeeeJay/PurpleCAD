@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 // Texture tool lifecycle against the real app: start the tool from the
@@ -80,9 +80,8 @@ test.describe.serial("texture lifecycle", () => {
 
     // The displaced top rises above the original cube: local height > 2.
     const height = await page.evaluate((id) => {
-      const p = window.__store
-        .getState()
-        .items.find((i) => i.id === id).geometryData.positions;
+      const p = window.__store.getState().items.find((i) => i.id === id)
+        .geometryData.positions;
       let min = Infinity,
         max = -Infinity;
       for (let i = 1; i < p.length; i += 3) {
@@ -111,8 +110,7 @@ test.describe.serial("texture lifecycle", () => {
       );
       return {
         armed: !!s.textureTool?.editEntryId,
-        viewingPrev:
-          idx > 0 && s.activeHistoryId === s.history[idx - 1].id,
+        viewingPrev: idx > 0 && s.activeHistoryId === s.history[idx - 1].id,
         itemType: s.items.find((i) => i.id === id)?.type,
       };
     }, CUBE_ID);

@@ -15,8 +15,7 @@ import {
   shiftSelectionToSource,
 } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
-
-const GHOST_OPACITY = 0.12;
+import { createGhost } from "./ghostSource.js";
 
 // Arm a push/pull retarget: pre-select the faces the original op used (shifted
 // from the source frame back into this item's rendered, bbox-centred frame)
@@ -70,7 +69,7 @@ export async function commitPushPull({
   distanceMm,
   printPrecision,
 }) {
-  const { pushPullFaces } = await import("../occClient.js");
+  const { pushPullFaces, withCommitGuard } = await import("../occClient.js");
   const store = useStore.getState();
   const distance = distanceMm / MM_PER_UNIT;
 
@@ -103,13 +102,15 @@ export async function commitPushPull({
   }
   if (subGeo.faces.length === 0) return false;
 
-  const result = await pushPullFaces({
-    source,
-    subGeo,
-    distance,
-    allItems: items,
-    printPrecision,
-  });
+  const result = await withCommitGuard(() =>
+    pushPullFaces({
+      source,
+      subGeo,
+      distance,
+      allItems: items,
+      printPrecision,
+    }),
+  );
   if (!result) return false;
 
   const { geometryData, centerOffset } = result;
@@ -142,7 +143,8 @@ export async function commitPushPull({
 
 export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
   let previewGroup = null;
-  let ghosted = null;
+  const { ghost: ghostSource, unghost: unghostSource } =
+    createGhost(objectsRef);
   let requestId = 0;
 
   const removePreview = () => {
@@ -153,50 +155,6 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
       obj.material?.dispose();
     });
     previewGroup = null;
-  };
-
-  // Dim the source mesh (keeping it pickable) so the result reads on top of it.
-  const ghostSource = (itemId) => {
-    const mesh = objectsRef.current[itemId];
-    if (!mesh || (ghosted && ghosted.mesh === mesh)) return;
-    unghostSource();
-    const mat = mesh.material;
-    ghosted = {
-      mesh,
-      opacity: mat.opacity,
-      transparent: mat.transparent,
-      depthWrite: mat.depthWrite,
-      uOpacity: mat.uniforms?.uOpacity ? mat.uniforms.uOpacity.value : null,
-      edges: mesh.children.map((c) => ({ child: c, visible: c.visible })),
-    };
-    mat.transparent = true;
-    mat.depthWrite = false;
-    if (mat.uniforms?.uOpacity) mat.uniforms.uOpacity.value = GHOST_OPACITY;
-    else mat.opacity = GHOST_OPACITY;
-    mat.needsUpdate = true;
-    mesh.children.forEach((c) => {
-      c.visible = false;
-    });
-    mesh.userData.ghosted = true;
-  };
-
-  const unghostSource = () => {
-    if (!ghosted) return;
-    const { mesh, opacity, transparent, depthWrite, uOpacity, edges } = ghosted;
-    const mat = mesh.material;
-    if (mat) {
-      mat.transparent = transparent;
-      mat.depthWrite = depthWrite;
-      if (uOpacity != null && mat.uniforms?.uOpacity)
-        mat.uniforms.uOpacity.value = uOpacity;
-      else mat.opacity = opacity;
-      mat.needsUpdate = true;
-    }
-    edges.forEach(({ child, visible }) => {
-      child.visible = visible;
-    });
-    delete mesh.userData.ghosted;
-    ghosted = null;
   };
 
   const clearPushPullPreview = () => {
@@ -219,6 +177,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     ghostItemId,
   }) => {
     let result;
+    let failure = null;
     try {
       const { pushPullFaces } = await import("../occClient.js");
       result = await pushPullFaces({
@@ -228,12 +187,16 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
         allItems: items,
         printPrecision,
       });
-    } catch {
+    } catch (e) {
       result = null;
+      failure = e.message;
     }
-    // A newer request superseded this one, or the geometry was unworkable —
-    // leave whatever preview is currently shown rather than flickering it away.
-    if (myRequest !== requestId || !result) return;
+    if (myRequest !== requestId) return; // a newer request superseded this one
+    // An unworkable distance says so on the tool error line (as chamfer,
+    // emboss and draft do) and keeps the last good preview rather than
+    // flickering it away.
+    useStore.setState({ toolError: result ? null : failure });
+    if (!result) return;
 
     const { positions, normals, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();
@@ -331,7 +294,7 @@ export function createPushPullPreviewHelpers({ scene, itemsRef, objectsRef }) {
     });
   };
 
-  // Live preview for PushPullEditDialog: replays a committed push/pull's stored
+  // Live preview for a timeline Edit (PushPullOverlay): replays a committed push/pull's stored
   // recipe (source + subGeo) with the new distance the user is typing, ghosting
   // the existing result mesh so the change is visible before Save.
   const updatePushPullEditPreview = async (regenerator, distanceMm, itemId) => {

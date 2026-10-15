@@ -43,11 +43,28 @@ import {
   chamferOrFilletItem,
   deepResolveDepth,
   bakeArgPolygons,
+  ipcErrorMessage,
 } from "../occClient.js";
 
 beforeAll(async () => {
   await ensureOcc();
 }, 60_000);
+
+// An op's error reaches the user as a notification or the chamfer dialog's
+// error line; Electron's IPC wrapper is noise there.
+describe("ipcErrorMessage", () => {
+  it("keeps only the op's own message", () => {
+    expect(
+      ipcErrorMessage(
+        "Error invoking remote method 'occ:chamferOrFilletItem': Error: Chamfer failed — try a smaller distance.",
+      ),
+    ).toBe("Chamfer failed — try a smaller distance.");
+  });
+
+  it("leaves a message without the wrapper alone", () => {
+    expect(ipcErrorMessage("Chamfer failed")).toBe("Chamfer failed");
+  });
+});
 
 describe("deepResolveDepth (formula -> scene units before the IPC boundary)", () => {
   const vars = { height: 60, width: 5 };

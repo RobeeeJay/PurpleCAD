@@ -13,6 +13,8 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { effectiveSketchSelTypes } from "../../store/selectionMode.js";
 import { getShapeLength, polyArea } from "../sceneObjects.js";
+import { getSketchShapePoints } from "../sceneObjects/sketchShapes.js";
+import { measurePicksVertex } from "../measure.js";
 import { SKETCH_HOVER_POINT_LINE_COLOR } from "../theme.js";
 import { DEFAULT_FONT_ID as TEXT_DEFAULT_FONT_ID } from "../sketchText.js";
 import { createSketchSelectionOverlays } from "./sketchSelectionOverlays.js";
@@ -20,6 +22,8 @@ import { createSketchModifyHelpers } from "./sketchModify.js";
 import { createSketchMirrorHelpers } from "./sketchMirrorTool.js";
 import { createSketchCircularPatternHelpers } from "./sketchCircularPatternTool.js";
 import { createSketchRectangularPatternHelpers } from "./sketchRectangularPatternTool.js";
+import { createSketchCentreHelpers } from "./sketchCentreTool.js";
+import { createSketchCogHelpers } from "./sketchCogTool.js";
 import { MIRRORABLE_TYPES } from "../sketchMirror.js";
 import { CIRCULAR_PATTERNABLE_TYPES } from "../sketchCircularPattern.js";
 import { RECTANGULAR_PATTERNABLE_TYPES } from "../sketchRectangularPattern.js";
@@ -359,6 +363,63 @@ export function createSketchInteraction(
     handleRectangularPatternClick,
   } = sketchRectangularPattern;
 
+  // ── Centre tool ────────────────────────────────────────────────────────────
+  const {
+    clearCentrePreview,
+    updateCentrePreview,
+    centreHoverAt,
+    handleCentreClick,
+    resetCentreHover,
+  } = createSketchCentreHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    sketchShapesGroupRef,
+    renderer,
+  });
+  const unsubCentre = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchCentreState === prev.sketchCentreState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "centre") updateCentrePreview();
+    else {
+      resetCentreHover();
+      clearCentrePreview();
+    }
+  });
+
+  // ── Cog tool ───────────────────────────────────────────────────────────────
+  const {
+    clearCogPreview,
+    updateCogPreview,
+    cogHoverAt,
+    handleCogClick,
+    resetCogHover,
+  } = createSketchCogHelpers({
+    scene,
+    objectsRef,
+    itemsRef,
+    selectedIdRef,
+    renderer,
+  });
+  const unsubCog = useStore.subscribe((state, prev) => {
+    if (
+      state.activeSketchTool === prev.activeSketchTool &&
+      state.sketchCogState === prev.sketchCogState &&
+      state.items === prev.items
+    )
+      return;
+    if (state.activeSketchTool === "cog") updateCogPreview();
+    else {
+      resetCogHover();
+      clearCogPreview();
+    }
+  });
+
   // Whenever sketch shapes are mutated (any store items change while in sketch
   // mode), the selection overlay drawn at the old position becomes a ghost.
   // Clear it so the user sees the updated geometry without stale highlights.
@@ -421,6 +482,33 @@ export function createSketchInteraction(
     else clearRectangularPatternPreview();
   });
 
+  // The sketch shape index of the line under a screen point, or null --
+  // the same lines, and the same test, as a line click below.
+  const lineUnder = (screenX, screenY) => {
+    const group = sketchShapesGroupRef?.current;
+    if (!group) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(
+      {
+        x: ((screenX - rect.left) / rect.width) * 2 - 1,
+        y: -((screenY - rect.top) / rect.height) * 2 + 1,
+      },
+      cameraRef.current,
+    );
+    const lineObjs = group.children.filter(
+      (c) =>
+        c.userData.shapeIdx != null &&
+        !c.userData.isOffset &&
+        !c.userData.isMirror &&
+        !c.userData.isCircularPattern &&
+        !c.userData.isRectangularPattern &&
+        !c.userData.isCornerBridge,
+    );
+    const hits = hitTestSketchLines(ray, lineObjs);
+    return hits.length > 0 ? (hits[0].object.userData.shapeIdx ?? null) : null;
+  };
+
   const trySelectSketchElement = (screenX, screenY) => {
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
@@ -431,9 +519,39 @@ export function createSketchInteraction(
     // The top-right selection-type widget gates which kinds a click resolves to.
     const { eff } = effectiveSketchSelTypes(useStore.getState());
     // Point hit first (ignore offset-copy points — they're inert).
-    const snap = eff.point
+    let snap = eff.point
       ? findSnap(screenX, screenY, shapes, sketchMesh)
       : null;
+    // Measuring, a line under the click beats a nearby end unless the click
+    // is close to the end relative to the line (see measurePicksVertex).
+    if (snap && eff.line && useStore.getState().measureTool) {
+      const hit = lineUnder(screenX, screenY);
+      const shape = hit != null ? shapes[hit] : null;
+      if (shape) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const toPx = (w) => {
+          const n = w.clone().project(cameraRef.current);
+          return [
+            ((n.x + 1) / 2) * rect.width + rect.left,
+            ((-n.y + 1) / 2) * rect.height + rect.top,
+          ];
+        };
+        const px = getSketchShapePoints(shape, sketchMesh).map(toPx);
+        let lengthPx = 0;
+        for (let i = 1; i < px.length; i++)
+          lengthPx += Math.hypot(
+            px[i][0] - px[i - 1][0],
+            px[i][1] - px[i - 1][1],
+          );
+        const at = toPx(
+          new THREE.Vector3(snap.x, snap.y, 0.003)
+            .applyQuaternion(sketchMesh.quaternion)
+            .add(sketchMesh.position),
+        );
+        const dist = Math.hypot(screenX - at[0], screenY - at[1]);
+        if (!measurePicksVertex(dist, lengthPx)) snap = null;
+      }
+    }
     if (
       snap &&
       !isOffsetShapeIdx(selItem, snap.shapeIdx) &&
@@ -661,6 +779,23 @@ export function createSketchInteraction(
   const { updateSketchPreview, handleSketchClick } = sketchDraw;
 
   // ── Sketch-mode pointer dispatch (return true when handled) ───────────────
+  // The element list for a press held still: from a mouse held down, or a
+  // finger held on the glass (touchInput.js, which never sends the press).
+  const openLongPressMenuAt = (x, y) => {
+    const items = buildLongPressItems(x, y);
+    if (items.length === 0) return;
+    sketchDragRef.current = null;
+    renderer.domElement.style.cursor = "";
+    longPressMenuRef.current = true;
+    // Cancel the pending marquee armed on mouse-down — a long press opens
+    // the element list, it must not also start a selection box if the
+    // cursor drifts while held.
+    marqueeStartRef.current = null;
+    marqueeActiveRef.current = false;
+    clearMarqueeRect();
+    useStore.getState().setSketchLongPressMenu({ x, y, items });
+  };
+
   const onSketchMouseDown = (e) => {
     if (!sketchModeRef.current || e.button !== 0) return false;
     // SVG placement: start dragging the pending import to move it.
@@ -705,12 +840,12 @@ export function createSketchInteraction(
     if (
       activeSketchToolRef.current === "mirror" ||
       activeSketchToolRef.current === "circularPattern" ||
-      activeSketchToolRef.current === "rectangularPattern"
+      activeSketchToolRef.current === "rectangularPattern" ||
+      activeSketchToolRef.current === "centre" ||
+      activeSketchToolRef.current === "cog"
     ) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     // Project: arm a marquee so a drag box-selects edges, a click projects all
@@ -733,8 +868,6 @@ export function createSketchInteraction(
     if (activeSketchToolRef.current) {
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     controls.mouseDownX = e.clientX;
@@ -744,21 +877,7 @@ export function createSketchInteraction(
         downY = e.clientY;
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
-        const items = buildLongPressItems(downX, downY);
-        if (items.length > 0) {
-          sketchDragRef.current = null;
-          renderer.domElement.style.cursor = "";
-          longPressMenuRef.current = true;
-          // Cancel the pending marquee armed on mouse-down — a long press opens
-          // the element list, it must not also start a selection box if the
-          // cursor drifts while held.
-          marqueeStartRef.current = null;
-          marqueeActiveRef.current = false;
-          clearMarqueeRect();
-          useStore
-            .getState()
-            .setSketchLongPressMenu({ x: downX, y: downY, items });
-        }
+        openLongPressMenuAt(downX, downY);
       }, 500);
       const didDrag = startSketchDrag(e.clientX, e.clientY, e.shiftKey);
       if (!didDrag) {
@@ -872,8 +991,6 @@ export function createSketchInteraction(
       renderer.domElement.style.cursor = svgDragRef.current
         ? "grabbing"
         : "grab";
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     // Underlay placement: drag moves the pending image's offset.  The scene
@@ -900,16 +1017,12 @@ export function createSketchInteraction(
       renderer.domElement.style.cursor = underlayDragRef.current
         ? "grabbing"
         : "grab";
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     // While the long-press element list is open, ignore canvas motion — no
     // marquee, no hover repaint underneath it.
     if (longPressMenuRef.current) return true;
     if (activeSketchToolRef.current === "project") {
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       if (marqueeStartRef.current) {
         const dx = e.clientX - marqueeStartRef.current.x;
         const dy = e.clientY - marqueeStartRef.current.y;
@@ -930,23 +1043,33 @@ export function createSketchInteraction(
       activeSketchToolRef.current === "rectangularPattern"
     ) {
       updateSketchToolHover(e.clientX, e.clientY, activeSketchToolRef.current);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
+      return true;
+    }
+    if (activeSketchToolRef.current === "cog") {
+      clearAllSketchHover();
+      cogHoverAt(e.clientX, e.clientY, findSnap, screenToSketchLocal);
+      return true;
+    }
+    if (activeSketchToolRef.current === "centre") {
+      clearAllSketchHover();
+      centreHoverAt(
+        e.clientX,
+        e.clientY,
+        hitTestSketchLines,
+        makeRay,
+        findSnap,
+      );
       return true;
     }
     if (activeSketchToolRef.current === "trim") {
       clearAllSketchHover();
       if (trimming) tryTrimAt(e.clientX, e.clientY);
       else trimHoverAt(e.clientX, e.clientY);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     if (activeSketchToolRef.current) {
       clearAllSketchHover();
       updateSketchPreview(e.clientX, e.clientY, e.shiftKey);
-      controls.mouseX = e.clientX;
-      controls.mouseY = e.clientY;
       return true;
     }
     if (longPressTimer) {
@@ -979,8 +1102,6 @@ export function createSketchInteraction(
         updateSketchHover(e.clientX, e.clientY);
       }
     }
-    controls.mouseX = e.clientX;
-    controls.mouseY = e.clientY;
     return true;
   };
 
@@ -1112,6 +1233,26 @@ export function createSketchInteraction(
       const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
       if (Math.hypot(dx, dy) < 5)
         handleMirrorClick(e.clientX, e.clientY, hitTestSketchLines, makeRay);
+      return true;
+    }
+    if (activeSketchToolRef.current === "cog") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleCogClick(e.clientX, e.clientY, findSnap, screenToSketchLocal);
+      return true;
+    }
+    if (activeSketchToolRef.current === "centre") {
+      const dx = e.clientX - (controls.mouseDownX ?? e.clientX);
+      const dy = e.clientY - (controls.mouseDownY ?? e.clientY);
+      if (Math.hypot(dx, dy) < 5)
+        handleCentreClick(
+          e.clientX,
+          e.clientY,
+          hitTestSketchLines,
+          makeRay,
+          findSnap,
+        );
       return true;
     }
     if (activeSketchToolRef.current === "circularPattern") {
@@ -1263,6 +1404,7 @@ export function createSketchInteraction(
     {
       sketchModeRef,
       itemsRef,
+      objectsRef,
       selectedIdRef,
       extrudeSelectModeRef,
       sketchPlacementModeRef,
@@ -1281,6 +1423,7 @@ export function createSketchInteraction(
       clearMultiSelectOverlays,
       clearCoincidentFirstOverlay,
       clearSketchSelection,
+      sketchSelectLine,
       cancelSketchDraw,
       clearMarqueeRect,
       clearModifyPreview,
@@ -1306,11 +1449,14 @@ export function createSketchInteraction(
     onSketchMouseMove,
     onSketchMouseUp,
     onKeyDown,
+    openLongPressMenuAt,
     clearSketchVisualsFor3D,
     refreshSketchSelectionOverlay,
     unsubItems,
     unsubMirror,
     unsubCircularPattern,
     unsubRectangularPattern,
+    unsubCentre,
+    unsubCog,
   };
 }

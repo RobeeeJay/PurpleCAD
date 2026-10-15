@@ -1,6 +1,6 @@
 // Camera navigation: mouse-wheel (sketch pan / ctrl-zoom / meta-pan / shift-
-// orbit / scroll-pan) and two-finger touch pinch-zoom.  Shared by both sketch
-// and 3D view modes.  Split out of cameraControls.js.
+// orbit / scroll-pan), and zoomBy for a pinch (touchInput.js).  Shared by
+// both sketch and 3D view modes.  Split out of cameraControls.js.
 
 import * as THREE from "three";
 import { panelAwareLookAt } from "../sceneSetup.js";
@@ -233,25 +233,11 @@ export function createNavigationHandlers(
     save();
   };
 
-  // ── Touch pinch-to-zoom ────────────────────────────────────────────────────
-
-  let pinchDist = null;
-  const getPinchDist = (touches) => {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
-  const onTouchStart = (e) => {
-    if (e.touches.length === 2) pinchDist = getPinchDist(e.touches);
-  };
-  const onTouchMove = (e) => {
-    if (e.touches.length !== 2 || pinchDist === null) return;
-    e.preventDefault();
-    const newDist = getPinchDist(e.touches);
-    const scale = newDist / pinchDist;
-    pinchDist = newDist;
+  // Zoom about the pivot by a factor (> 1 closer): a pinch (touchInput.js).
+  const zoomBy = (scale) => {
     const cam = cameraRef.current;
     const tgt = targetRef.current;
+    if (!cam) return;
     if (cam instanceof THREE.OrthographicCamera) {
       cam.zoom = Math.max(0.05, Math.min(50, cam.zoom * scale));
       cam.updateProjectionMatrix();
@@ -262,18 +248,14 @@ export function createNavigationHandlers(
       lookAtView(cam, tgt);
     }
     setRotationState(cam.quaternion.clone());
-  };
-  const onTouchEnd = (e) => {
-    if (e.touches.length < 2) pinchDist = null;
+    save();
   };
 
   const disposeNavigation = () => clearTimeout(shiftScrollSessionTimer);
 
   return {
     onMouseWheel,
-    onTouchStart,
-    onTouchMove,
-    onTouchEnd,
+    zoomBy,
     disposeNavigation,
   };
 }

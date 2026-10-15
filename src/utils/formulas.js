@@ -170,3 +170,52 @@ export function variablesToMap(variables) {
   }
   return m;
 }
+
+// Whether a stored dimension value is a formula / variable reference rather
+// than a bare number.  A bare-number STRING ("10.5") is not a formula -- it is
+// how the older documents stored plain values.
+export function isFormulaValue(v) {
+  return typeof v === "string" && !/^-?\d+(\.\d+)?$/.test(v.trim());
+}
+
+// A circle's dimension is stored as its RADIUS (centre to edge) but shown and
+// typed as its DIAMETER.  These convert the formula text both ways, and are
+// exact inverses of each other on anything they produced, so re-opening and
+// re-confirming a value never piles up "* 2" and "/ 2" around it.
+const NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)$/;
+
+// True when the whole string is one bracketed group: "(a + b)" but not
+// "(a) + (b)".
+function isWrapped(s) {
+  if (!s.startsWith("(") || !s.endsWith(")")) return false;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(") depth++;
+    else if (s[i] === ")") depth--;
+    if (depth === 0 && i < s.length - 1) return false;
+  }
+  return depth === 0;
+}
+
+// A number, a bare variable name, or one bracketed group: safe to multiply or
+// divide without adding brackets.
+const isAtom = (s) =>
+  NUMBER.test(s) || /^[A-Za-z_]\w*$/.test(s) || isWrapped(s);
+const group = (s) => (isAtom(s) ? s : `(${s})`);
+const unwrap = (s) => (isWrapped(s) ? s.slice(1, -1).trim() : s);
+
+export function radiusToDiameterFormula(radius) {
+  const s = String(radius).trim();
+  if (NUMBER.test(s)) return new Decimal(s).times(2).toString();
+  const halved = s.match(/^(.+?)\s*\/\s*2$/);
+  if (halved && isAtom(halved[1].trim())) return unwrap(halved[1].trim());
+  return `2 * ${group(s)}`;
+}
+
+export function diameterToRadiusFormula(diameter) {
+  const s = String(diameter).trim();
+  if (NUMBER.test(s)) return new Decimal(s).dividedBy(2).toString();
+  const doubled = s.match(/^2\s*\*\s*(.+)$/);
+  if (doubled && isAtom(doubled[1].trim())) return unwrap(doubled[1].trim());
+  return `${group(s)} / 2`;
+}

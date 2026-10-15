@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../store";
 import "../styles/Toolbar.css";
 
@@ -13,6 +12,8 @@ import ModifySection from "./toolbar/ModifySection";
 import ConstrainSection from "./toolbar/ConstrainSection";
 import RenderSection from "./toolbar/RenderSection";
 import TextureSection from "./toolbar/TextureSection";
+import StressSection from "./toolbar/StressSection";
+import OptimiseSection from "./toolbar/OptimiseSection";
 import MaterialSection from "./toolbar/MaterialSection";
 import OptionsSection from "./toolbar/OptionsSection";
 import ToolbarSection from "./toolbar/ToolbarSection";
@@ -38,6 +39,8 @@ const Toolbar = () => {
           <SplitSection bare />
           <ModifySection bare />
           <TextureSection bare />
+          <StressSection bare />
+          <OptimiseSection bare />
           <MaterialSection bare />
         </ToolbarSection>
       )}

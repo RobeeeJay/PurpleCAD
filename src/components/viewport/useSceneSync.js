@@ -15,6 +15,10 @@ import {
   buildExtrudeSelectGroup,
   applyRenderMode,
 } from "../../three/sceneObjects.js";
+import {
+  applyOptimisePreview,
+  applyStressDisplay,
+} from "../../three/sceneObjects/stressDisplay.js";
 import { buildSketchUnderlayGroup } from "../../three/sceneObjects/sketchUnderlay.js";
 import { requestRender } from "../../three/cameraControls/animateLoop.js";
 import {
@@ -97,6 +101,9 @@ export function useSceneSync({
   const defaultMaterial = useStore((s) => s.defaultMaterial);
   const materialDialogTarget = useStore((s) => s.materialDialogTarget);
   const soloItemId = useStore((s) => s.soloItemId);
+  const stressResult = useStore((s) => s.stressResult);
+  const optimisePreview = useStore((s) => s.optimisePreview);
+  const optimiseTool = useStore((s) => s.optimiseTool);
   const booleanTool = useStore((s) => s.booleanTool);
   const booleanCutIds = useStore((s) => s.booleanCutIds);
   const pattern3dTool = useStore((s) => s.pattern3dTool);
@@ -286,7 +293,11 @@ export function useSceneSync({
     // every downstream step on each point drag is wasteful (and the 3D solids
     // are hidden behind the sketch anyway).  Runs in the sketch-close effect.
     if (sketchMode) {
-      pendingRecalcRef.current = true;
+      // Keep a pending forced pass forced (see the Resolution note below).
+      pendingRecalcRef.current =
+        precisionChanged || pendingRecalcRef.current === "force"
+          ? "force"
+          : true;
       return;
     }
 
@@ -296,18 +307,22 @@ export function useSceneSync({
     // is now incremental (JIT) — it rebuilds only stale/dirty steps up to the
     // viewed one and stamps the result back into history, so navigating to an
     // already-built step is free and a first visit caches the step.
+    // A new Resolution re-tessellates every step: force the full pass (as the
+    // Timeline's Recalculate does), so the steps after the one in view are
+    // rebuilt now rather than when next visited.
     import("../../three/regenerateOrchestrator.js").then((m) => {
       pendingRecalcRef.current = false;
-      m.recalculateTimeline();
+      m.recalculateTimeline(precisionChanged);
     });
   }, [items, printPrecision, variables]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run a sketch edit's deferred timeline recalc once the sketch is closed.
   useEffect(() => {
     if (sketchMode || !pendingRecalcRef.current) return;
+    const force = pendingRecalcRef.current === "force";
     pendingRecalcRef.current = false;
     import("../../three/regenerateOrchestrator.js").then((m) =>
-      m.recalculateTimeline(),
+      m.recalculateTimeline(force),
     );
   }, [sketchMode]);
 
@@ -352,6 +367,23 @@ export function useSceneSync({
     // applyRenderMode reapplies materials, then finalizeVisibility applies or
     // releases the solo override.
   }, [items, printPrecision, variables, defaultMaterial, soloItemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stress field: painted over the built meshes rather than built into them,
+  // and dropped the moment the body it was solved for is rebuilt -- the
+  // colours are per-vertex and would otherwise land on different vertices.
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    const ok = applyStressDisplay(objectsRef, stressResult, items);
+    if (stressResult && !ok) useStore.getState().clearStressResult();
+    // An optimisation result previews on the body it came from, until it is
+    // applied as one of its own or the tool is closed.
+    if (!stressResult && optimisePreview?.positions?.length && optimiseTool)
+      applyOptimisePreview(objectsRef, {
+        itemId: optimiseTool.itemId,
+        positions: optimisePreview.positions,
+        indices: optimisePreview.indices,
+      });
+  }, [stressResult, optimisePreview, optimiseTool, items, renderMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // End solo if the soloed item is gone (deleted, or the timeline moved past
   // it), restoring the saved view so the user isn't left staring at a blank
@@ -681,11 +713,28 @@ export function useSceneSync({
       return;
     }
     if (!extrudeSelectGroupRef.current) {
+      // Editing an extrude: its own sketches are offered even if hidden.
+      const st = useStore.getState();
+      const editedIds =
+        st.extrudeRetargetGroup ??
+        (st.extrudeRetargetId != null ? [st.extrudeRetargetId] : []);
+      const fused =
+        st.extrudeRetargetFusedId != null
+          ? items.find((i) => i.id === st.extrudeRetargetFusedId)
+          : null;
+      const editedProfiles = [
+        ...editedIds.map((id) => items.find((i) => i.id === id)?.profile),
+        ...(fused?.regenerator?.extrudeDefs || []).map((d) => d.profile),
+      ];
+      const sourceSketches = new Set(
+        editedProfiles.map((p) => p?.sketchId).filter((id) => id != null),
+      );
       const group = buildExtrudeSelectGroup(
         items,
         objectsRef,
         curveSegments,
         printPrecision,
+        sourceSketches,
       );
       if (group) {
         scene.add(group);
@@ -729,11 +778,32 @@ export function useSceneSync({
       fusedDef ??
       (retargetId != null ? items.find((i) => i.id === retargetId) : null);
     const depth = retarget ? resolveItemDepth(retarget) : 1.0;
+    // Combine starts as the edited extrusion is: ticked if it merged into a
+    // body, unticked if it stands alone; a new one starts ticked.  Locked for
+    // a multi-region group, and for an extrusion merged by a SEPARATE union
+    // step (the older multi-region path) -- toggling either would need a
+    // conversion that isn't built, and merging the latter again would merge
+    // it twice.
+    const fusedItem =
+      fusedId != null ? items.find((i) => i.id === fusedId) : null;
+    const mergedElsewhere =
+      retargetId != null &&
+      st.history.some((e) => {
+        const r = e.instruction?.item?.regenerator;
+        return (
+          (r?.kind === "boolean" || r?.kind === "extrudeUnion") &&
+          (r.inputIds || []).includes(retargetId)
+        );
+      });
     st.setExtrudeDepthInput({
       defaultDepth: depth,
       currentDepth: depth,
       cut: !!retarget?.isCut,
       startOffset: retarget?.startOffset ?? 0,
+      combine: fusedItem
+        ? (fusedItem.regenerator?.inputIds?.length ?? 0) > 0
+        : retargetId == null,
+      combineLocked: !!st.extrudeRetargetGroup || mergedElsewhere,
     });
   }, [extrudeSelectMode]); // eslint-disable-line react-hooks/exhaustive-deps
 

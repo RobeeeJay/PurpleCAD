@@ -1,0 +1,212 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A1000000000000000000B001 /* spike.mm in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F001 /* spike.mm */; };
+		A1000000000000000000B002 /* ms2.bin in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F002 /* ms2.bin */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A1000000000000000000F001 /* spike.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = spike.mm; sourceTree = "<group>"; };
+		A1000000000000000000F002 /* ms2.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = ms2.bin; sourceTree = "<group>"; };
+		A1000000000000000000F003 /* SpikeApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SpikeApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A1000000000000000000P001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A1000000000000000000G001 = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000F001 /* spike.mm */,
+				A1000000000000000000F002 /* ms2.bin */,
+				A1000000000000000000G002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000F003 /* SpikeApp.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A1000000000000000000T001 /* SpikeApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000C002 /* Build configuration list for PBXNativeTarget "SpikeApp" */;
+			buildPhases = (
+				A1000000000000000000P002 /* Sources */,
+				A1000000000000000000P001 /* Frameworks */,
+				A1000000000000000000P003 /* Resources */,
+				A1000000000000000000P004 /* Embed OCCT */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SpikeApp;
+			productName = SpikeApp;
+			productReference = A1000000000000000000F003 /* SpikeApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1000000000000000000R001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 2700;
+			};
+			buildConfigurationList = A1000000000000000000C001 /* Build configuration list for PBXProject "SpikeApp" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A1000000000000000000G001;
+			productRefGroup = A1000000000000000000G002 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A1000000000000000000T001 /* SpikeApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1000000000000000000P003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000B002 /* ms2.bin in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A1000000000000000000P004 /* Embed OCCT */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed OCCT";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\ndest=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\nmkdir -p \"$dest\"\nfor l in TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKShHealing TKBool TKBO TKMesh; do\n  cp -L \"$OCCT_IOS/lib/lib$l.8.0.dylib\" \"$dest/lib$l.8.0.dylib\"\n  codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --timestamp=none \"$dest/lib$l.8.0.dylib\"\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1000000000000000000P002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000B001 /* spike.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A1000000000000000000D001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				OCCT_IOS = "$(HOME)/occ-8.0.1-ios";
+			};
+			name = Release;
+		};
+		A1000000000000000000D002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 7K4FM2CS29;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_OPTIMIZATION_LEVEL = 2;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(OCCT_IOS)/include/opencascade";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				MARKETING_VERSION = 0.1;
+				CURRENT_PROJECT_VERSION = 1;
+				OTHER_LDFLAGS = (
+					"-L$(OCCT_IOS)/lib",
+					"-lTKernel",
+					"-lTKMath",
+					"-lTKG2d",
+					"-lTKG3d",
+					"-lTKGeomBase",
+					"-lTKBRep",
+					"-lTKGeomAlgo",
+					"-lTKTopAlgo",
+					"-lTKPrim",
+					"-lTKShHealing",
+					"-lTKBool",
+					"-lTKBO",
+					"-lTKMesh",
+					"-framework",
+					JavaScriptCore,
+					"-framework",
+					Foundation,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.robeesworld.purplecad.spike;
+				PRODUCT_NAME = SpikeApp;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				WARNING_CFLAGS = (
+					"-Wno-deprecated-declarations",
+					"-Wno-#pragma-messages",
+				);
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000C001 /* Build configuration list for PBXProject "SpikeApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000D001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000C002 /* Build configuration list for PBXNativeTarget "SpikeApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000D002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A1000000000000000000R001 /* Project object */;
+}

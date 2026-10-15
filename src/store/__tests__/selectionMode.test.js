@@ -124,10 +124,29 @@ describe("effectiveSelectionTypes", () => {
     expect(eff.object).toBe(false);
   });
 
-  it("the Split tool derives an object lock", () => {
-    const s = { ...base, selObject: false, selFace: true, splitTool: {} };
+  it("the Split tool locks to objects while picking the body", () => {
+    const s = {
+      ...base,
+      selObject: false,
+      selFace: true,
+      splitTool: {},
+      splitPick: "object",
+    };
     expect(effectiveSelectionTypes(s)).toMatchObject({
       object: true,
+      face: false,
+      overridden: true,
+    });
+  });
+
+  // It used to hold the object lock through the cut phase too: the widget
+  // greyed out faces and hover lit whole bodies, so a face never looked
+  // pickable even though a click on one was accepted.
+  it("the Split tool locks to faces while picking the cut", () => {
+    const s = { ...base, selObject: true, splitTool: {}, splitPick: "cut" };
+    expect(effectiveSelectionTypes(s)).toMatchObject({
+      object: false,
+      face: true,
       overridden: true,
     });
   });

@@ -7,7 +7,8 @@ import {
   withOrphanFlags,
   saveTimeline,
   saveVariables,
-  markCsgDirty,
+  markCsgDirtyFrom,
+  firstChangedIndex,
   relinkSourceChain,
   dirtyEntriesFrom,
   UNDO_LIMIT,
@@ -53,11 +54,13 @@ export const createHistoryNavSlice = (set) => ({
         state.activeHistoryId !== null
           ? rawHistory.findIndex((h) => h.id === state.activeHistoryId)
           : rawHistory.length - 1;
-      const items = markCsgDirty(
+      const items = markCsgDirtyFrom(
         replayUpTo(
           rawHistory,
           activeIdx !== -1 ? activeIdx : rawHistory.length - 1,
         ),
+        rawHistory,
+        firstAffected,
       );
 
       saveTimeline(rawHistory, state.activeHistoryId);
@@ -104,7 +107,11 @@ export const createHistoryNavSlice = (set) => ({
         newActiveId !== null
           ? rawHistory.findIndex((h) => h.id === newActiveId)
           : rawHistory.length - 1;
-      const items = markCsgDirty(replayUpTo(rawHistory, activeIdx));
+      const items = markCsgDirtyFrom(
+        replayUpTo(rawHistory, activeIdx),
+        rawHistory,
+        deletedIndex,
+      );
 
       saveTimeline(rawHistory, newActiveId);
       return Object.assign(
@@ -125,11 +132,15 @@ export const createHistoryNavSlice = (set) => ({
         snapshot.activeHistoryId !== null
           ? snapshot.history.findIndex((h) => h.id === snapshot.activeHistoryId)
           : snapshot.history.length - 1;
-      const items = markCsgDirty(
+      // The restored timeline carries its own geometry; only the bodies from
+      // the first step it differs at can be stale.
+      const items = markCsgDirtyFrom(
         replayUpTo(
           snapshot.history,
           idx !== -1 ? idx : snapshot.history.length - 1,
         ),
+        snapshot.history,
+        firstChangedIndex(state.history, snapshot.history),
       );
       saveTimeline(snapshot.history, snapshot.activeHistoryId);
       // Older snapshots (pre-variable-undo) have no `variables` — keep current.
@@ -162,11 +173,15 @@ export const createHistoryNavSlice = (set) => ({
         snapshot.activeHistoryId !== null
           ? snapshot.history.findIndex((h) => h.id === snapshot.activeHistoryId)
           : snapshot.history.length - 1;
-      const items = markCsgDirty(
+      // The restored timeline carries its own geometry; only the bodies from
+      // the first step it differs at can be stale.
+      const items = markCsgDirtyFrom(
         replayUpTo(
           snapshot.history,
           idx !== -1 ? idx : snapshot.history.length - 1,
         ),
+        snapshot.history,
+        firstChangedIndex(state.history, snapshot.history),
       );
       saveTimeline(snapshot.history, snapshot.activeHistoryId);
       const variables = snapshot.variables ?? state.variables;

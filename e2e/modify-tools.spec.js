@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 // The remaining modify tools driven end-to-end through their REAL dialogs:
@@ -27,19 +27,16 @@ const addCube = (id, x = 0) =>
   );
 
 const item = (id) =>
-  page.evaluate(
-    (id) => {
-      const it = window.__store.getState().items.find((i) => i.id === id);
-      return it
-        ? {
-            type: it.type,
-            kind: it.regenerator?.kind ?? null,
-            tris: it.geometryData ? it.geometryData.indices.length / 3 : 0,
-          }
-        : null;
-    },
-    id,
-  );
+  page.evaluate((id) => {
+    const it = window.__store.getState().items.find((i) => i.id === id);
+    return it
+      ? {
+          type: it.type,
+          kind: it.regenerator?.kind ?? null,
+          tris: it.geometryData ? it.geometryData.indices.length / 3 : 0,
+        }
+      : null;
+  }, id);
 
 test.describe.serial("modify tools through their dialogs", () => {
   test.beforeAll(async () => {
@@ -121,9 +118,9 @@ test.describe.serial("modify tools through their dialogs", () => {
     });
     await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible();
     await page.getByTitle("Cut the hole").click();
-    await expect.poll(() => item(12).then((i) => i.kind), { timeout: 30000 }).toBe(
-      "hole",
-    );
+    await expect
+      .poll(() => item(12).then((i) => i.kind), { timeout: 30000 })
+      .toBe("hole");
     expect((await item(12)).tris).toBeGreaterThan(20); // bore wall added
   });
 
@@ -138,9 +135,9 @@ test.describe.serial("modify tools through their dialogs", () => {
     const overlay = page.locator(".sketch-distance-input-overlay");
     await expect(overlay).toBeVisible();
     await page.getByTitle("Apply the draft").click();
-    await expect.poll(() => item(13).then((i) => i.kind), { timeout: 30000 }).toBe(
-      "draft",
-    );
+    await expect
+      .poll(() => item(13).then((i) => i.kind), { timeout: 30000 })
+      .toBe("draft");
   });
 
   test("material dialog applies a colour to the selected body", async () => {
@@ -208,5 +205,341 @@ test.describe.serial("modify tools through their dialogs", () => {
     expect(
       await page.evaluate(() => window.__store.getState().items.length),
     ).toBeGreaterThan(countBefore);
+    // Recorded as ONE Split step.  It used to add each half as its own "Added"
+    // step and hide the cube with no step at all, so nothing said it was split.
+    // (The old path ended on "Added" for the second half.)  The step holds both
+    // halves and names the cube it came from.
+    const last = await page.evaluate(() => {
+      const h = window.__store.getState().history.at(-1);
+      return {
+        label: h.label,
+        pieces: h.instruction.items?.length,
+        splitFrom: h.instruction.splitFrom,
+      };
+    });
+    expect(last).toEqual({ label: "Split", pieces: 2, splitFrom: 14 });
+  });
+
+  // A Split's halves used to be stored as finished meshes, so a resolution
+  // change left them as blocky as when they were cut while the rest of the
+  // model went fine.  They now carry a recipe the recalculation re-cuts.
+  test("split halves follow a change of resolution", async () => {
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.newDocument();
+      s.addItem({
+        id: 60,
+        name: "Post",
+        type: "cylinder",
+        children: [],
+        parentId: null,
+        position: { x: 0, y: 1, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      s.startSplit3d({ objectId: 60, objectName: "Post" });
+      // Across the post's middle: normal +y.
+      s.updateSplit3d({
+        cutFrame: {
+          position: { x: 0, y: 1, z: 0 },
+          rotation: { x: -Math.PI / 2, y: 0, z: 0 },
+        },
+        cutLabel: "plane",
+      });
+    });
+    await page.getByTitle("Split the object").click();
+    const halves = () =>
+      page.evaluate(() =>
+        window.__store
+          .getState()
+          .items.filter((i) => /^Post \(/.test(i.name))
+          .map((i) => ({
+            kind: i.regenerator?.kind ?? null,
+            tris: i.geometryData.indices.length / 3,
+          })),
+      );
+    await expect.poll(async () => (await halves()).length).toBe(2);
+    const before = await halves();
+    expect(before.map((h) => h.kind)).toEqual(["split", "split"]);
+
+    await page.evaluate(() => {
+      window.__store.getState().setResolutionMm(0.01);
+    });
+    await page.locator(".timeline-recalc-btn").click();
+    // How many times over the half that grew least has its triangles.
+    const growth = async () => {
+      const after = await halves();
+      return Math.min(...after.map((h, k) => h.tris / before[k].tris));
+    };
+    await expect
+      .poll(growth, {
+        timeout: 60000,
+        message: `halves had ${before.map((h) => h.tris)} triangles`,
+      })
+      .toBeGreaterThan(2);
+    await page.evaluate(() => window.__store.getState().setResolutionMm(0.05));
+  });
+
+  // The test above sets the cut directly, which is how a face-pick problem went
+  // unseen: the cut phase stayed locked to whole objects, so the widget greyed
+  // out faces and hover lit whole bodies, and clicking the body's own face --
+  // the natural first try -- "worked" but cut nothing and returned a copy.
+  // Everything here is picked with real clicks.
+  test("split takes its cut from a face picked in the view", async ({}, testInfo) => {
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.newDocument();
+      const box = (id, name, x, y, sy) => ({
+        id,
+        name,
+        type: "cube",
+        children: [],
+        parentId: null,
+        position: { x, y, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: sy, z: 1 },
+      });
+      s.addItem(box(40, "Block", 0, 1, 1)); // spans y 0..2
+      s.addItem(box(41, "Step", 3, 0.5, 0.5)); // spans y 0..1: top face is y = 1
+      s.selectItem(null);
+    });
+    await page.waitForTimeout(800);
+    const at = (x, y, z) =>
+      page.evaluate(
+        ([x, y, z]) =>
+          window.__store.getState()._cameraControls.worldToScreen(x, y, z),
+        [x, y, z],
+      );
+    const tool = () =>
+      page.evaluate(() => {
+        const s = window.__store.getState();
+        return {
+          pick: s.splitPick,
+          cut: s.splitTool?.cutLabel ?? null,
+          error: s.toolError,
+        };
+      });
+    const widgetOn = (title) =>
+      page
+        .locator(`.selection-widget-btn[title^="${title}"]`)
+        .evaluate((b) => b.classList.contains("active"));
+
+    await page.getByTitle(/^Split object/).click();
+    expect(await widgetOn("Select objects")).toBe(true);
+    let p = await at(0, 1, 1);
+    await page.mouse.click(p.x, p.y);
+    await expect.poll(async () => (await tool()).pick).toBe("cut");
+
+    // Picking the cut: the widget now offers faces, not whole objects.
+    expect(await widgetOn("Select faces")).toBe(true);
+    expect(await widgetOn("Select objects")).toBe(false);
+
+    // The block's own top face lies on its surface and cuts nothing: refused,
+    // with the reason on the tool's error line, and the pick stays live.
+    p = await at(0.3, 2, 0.3);
+    await page.mouse.click(p.x, p.y);
+    await expect
+      .poll(async () => (await tool()).error)
+      .toMatch(/doesn't pass through Block/);
+    expect((await tool()).cut).toBeNull();
+    await expect(page.locator(".tool-error-line")).toContainText(
+      "doesn't pass through Block",
+    );
+    const file = testInfo.outputPath("split-refused.png");
+    await page.screenshot({ path: file, timeout: 15_000 });
+    await testInfo.attach("split-refused", {
+      path: file,
+      contentType: "image/png",
+    });
+
+    // The step's top face runs through the block's middle: accepted.
+    p = await at(3, 1, 0);
+    await page.mouse.click(p.x, p.y);
+    await expect.poll(async () => (await tool()).cut).toBe("face of Step");
+    expect((await tool()).error).toBeNull();
+
+    await page.getByTitle("Split the object").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => window.__store.getState().history.at(-1).label),
+        { timeout: 30000 },
+      )
+      .toBe("Split");
+    // Named by the body it cut -- it used to read "Split 2 extrusions".
+    await expect(page.getByText("Split Block", { exact: true })).toBeVisible();
+    // Cut at y = 1: one half above, one below.
+    const halves = await page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.filter((i) => /^Block \(/.test(i.name))
+        .map((i) => i.position.y)
+        .sort(),
+    );
+    expect(halves).toHaveLength(2);
+    expect(halves[0]).toBeCloseTo(0.5, 2);
+    expect(halves[1]).toBeCloseTo(1.5, 2);
+  });
+
+  test("simplify reduces a mesh body, and its timeline Edit re-runs it", async () => {
+    // A dense closed sphere standing in for an imported STL, selected, in a
+    // new document: the split test before this one uses ids 40 and 41.
+    await page.evaluate(() => {
+      window.__store.getState().newDocument();
+      const seg = 48;
+      const positions = [0, 1, 0];
+      for (let i = 1; i < seg; i++)
+        for (let j = 0; j < seg; j++) {
+          const v = (i / seg) * Math.PI;
+          const u = (j / seg) * 2 * Math.PI;
+          positions.push(
+            Math.sin(v) * Math.cos(u),
+            Math.cos(v),
+            Math.sin(v) * Math.sin(u),
+          );
+        }
+      positions.push(0, -1, 0);
+      const south = positions.length / 3 - 1;
+      const at = (i, j) =>
+        i === 0 ? 0 : i === seg ? south : 1 + (i - 1) * seg + (j % seg);
+      const indices = [];
+      for (let i = 0; i < seg; i++)
+        for (let j = 0; j < seg; j++) {
+          if (i !== 0) indices.push(at(i, j), at(i + 1, j), at(i, j + 1));
+          if (i !== seg - 1)
+            indices.push(at(i, j + 1), at(i + 1, j), at(i + 1, j + 1));
+        }
+      const s = window.__store.getState();
+      s.addItem({
+        id: 60,
+        name: "Ball (STL)",
+        type: "csg",
+        children: [],
+        position: { x: 0, y: 1, z: -6 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        geometryData: { positions, indices, normals: null, flat: true },
+      });
+      window.__store.setState({ selectedId: 60, selectedIds: [60] });
+    });
+    const tris = () =>
+      page.evaluate(() => {
+        const it = window.__store.getState().items.find((i) => i.id === 60);
+        return it.geometryData ? it.geometryData.indices.length / 3 : null;
+      });
+    const before = await tris();
+
+    await page
+      .getByTitle("Simplify — fewer triangles", { exact: false })
+      .click();
+    await page.locator("#simplify-tolerance").fill("0.2");
+    // The preview runs the op through IPC and reports what it would do.
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "triangles, within",
+      { timeout: 30000 },
+    );
+    await page.getByTitle("Apply the simplify").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => window.__store.getState().history.at(-1).label),
+        { timeout: 30000 },
+      )
+      .toBe("Simplified");
+    const first = await tris();
+    expect(first, `${before} triangles before`).toBeLessThan(before / 2);
+
+    // Edit re-opens the same dialog on the step, and saving re-runs it.
+    const steps = await page.evaluate(
+      () => window.__store.getState().history.length,
+    );
+    await page
+      .getByTitle("Edit simplify — deviation or triangle count")
+      .click();
+    await page
+      .getByRole("button", { name: "Triangle count", exact: true })
+      .click();
+    await page.locator("#simplify-triangles").fill("300");
+    await page.getByTitle("Apply the simplify").click();
+    await expect.poll(tris, { timeout: 60000 }).toBeLessThanOrEqual(300);
+    expect(
+      await page.evaluate(() => window.__store.getState().history.length),
+    ).toBe(steps);
+
+    // The simplified body still booleans: the app's OCC bridge sews its mesh.
+    // A cube over half the ball, so the union keeps the other half's surface.
+    await page.evaluate(() => {
+      window.__store.getState().addItem({
+        id: 61,
+        name: "Cube 61",
+        type: "cube",
+        children: [],
+        position: { x: 1, y: 1, z: -6 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      window.__store.getState().startBooleanTool("union");
+      window.__store.setState({ selectedIds: [60, 61] });
+    });
+    await page.getByTitle("Apply Union").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const r = window.__store
+              .getState()
+              .items.find(
+                (i) =>
+                  i.regenerator?.kind === "boolean" &&
+                  i.regenerator.inputIds?.includes(60),
+              );
+            return r?.geometryData ? r.geometryData.indices.length / 3 : 0;
+          }),
+        { timeout: 30000 },
+      )
+      // Far more than a cube's 12: the ball's half is in it.
+      .toBeGreaterThan(60);
+  });
+
+  test("a too-detailed refusal offers to simplify the mesh to fit", async () => {
+    // The refusal names the mesh by its triangle count; the offer opens
+    // Simplify on that body, set a tenth under the boolean limit.
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.newDocument();
+      // A closed tetrahedron is enough: only its count is matched.
+      s.addItem({
+        id: 62,
+        name: "Dense part (STL)",
+        type: "csg",
+        children: [],
+        position: { x: 0, y: 1, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        geometryData: {
+          positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+          indices: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3],
+          normals: null,
+          flat: true,
+        },
+      });
+      s.selectItem(null);
+      s.showNotification(
+        "The extrusion couldn't be merged with the body it starts on, so it was added as a separate body. Imported mesh is too detailed (4 triangles) to use in a boolean. Simplify or decimate it first.",
+      );
+    });
+    await page.getByRole("button", { name: "Simplify to fit" }).click();
+    await expect(page.locator("#simplify-triangles")).toHaveValue("45000");
+    expect(
+      await page.evaluate(() => {
+        const s = window.__store.getState();
+        return {
+          target: s.simplifyTarget?.itemId,
+          selected: s.selectedId,
+          note: s.notification,
+        };
+      }),
+    ).toEqual({ target: 62, selected: 62, note: null });
+    await page.getByTitle("Cancel").click();
   });
 });

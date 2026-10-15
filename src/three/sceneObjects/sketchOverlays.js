@@ -14,13 +14,24 @@ import {
 } from "./constraintIcons.js";
 import { getSketchShapePoints, getSnapPoints } from "./sketchShapes.js";
 import { shapeMidpoint } from "../sketchGeometry.js";
+import { trackScreenDash } from "../screenDash.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 import { textShapeContours } from "../sketchText.js";
+import { cogShapeContours } from "../cogGeometry.js";
+
+// Text and cogs are drawn from their cached outline contours -- several closed
+// loops per shape (glyph counters, a cog's centre hole) -- not from one
+// polyline like the other shapes.
+const contourShape = (s) => s.type === "text" || s.type === "cog";
+const shapeContours = (s) =>
+  s.type === "cog" ? cogShapeContours(s) : textShapeContours(s);
 import { useStore } from "../../store";
 import {
   findClosedLoopsWithShapes,
   groupLoopsWithHoles,
   polyCentroid,
+  loopShapesOf,
+  loopCurvesOf,
 } from "./closedLoops.js";
 import {
   SKETCH_FACE_HIGHLIGHT,
@@ -116,12 +127,12 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
     const circularPatternIdxs = circularPatternShapeIdxSet(item);
     const rectangularPatternIdxs = rectangularPatternShapeIdxSet(item);
     item.shapes.forEach((shape, shapeIdx) => {
-      if (shape.type === "text") {
+      if (contourShape(shape)) {
         const toW = (lx, ly) =>
           new THREE.Vector3(lx, ly, 0.003)
             .applyQuaternion(sketchMesh.quaternion)
             .add(sketchMesh.position);
-        for (const contour of textShapeContours(shape)) {
+        for (const contour of shapeContours(shape)) {
           if (contour.length < 2) continue;
           const wpts = [...contour, contour[0]].map((p) => toW(p.x, p.y));
           const tgeo = new LineGeometry();
@@ -161,9 +172,9 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
         depthTest: false,
         resolution: res,
         dashed: !!shape.dashed,
-        dashSize: shape.dashed ? 0.1 : 0,
-        gapSize: shape.dashed ? 0.06 : 0,
       });
+      // Construction lines: the dash size is set per frame, in screen pixels.
+      if (shape.dashed) trackScreenDash(mat);
       const line = new Line2(geo, mat);
       line.computeLineDistances();
       line.renderOrder = 1001;
@@ -176,14 +187,22 @@ export function buildAllSketchShapesGroup(items, objectsRef, renderer) {
 
 // ── Extrude profile selection fills (one fill mesh per closed sketch loop) ───
 
+// `alsoSketchIds`: sketches to offer even while hidden -- the ones an extrude
+// being edited was built from.  Making an extrude can hide its sketch, and
+// the edit shows the scene as of the extrude's own step, so without this the
+// edit opened with no region to pick and Confirm stayed disabled.
 export function buildExtrudeSelectGroup(
   items,
   objectsRef,
   curveSegments = 32,
   precision = null,
+  alsoSketchIds = null,
 ) {
   const sketchItems = items.filter(
-    (i) => i.type === "sketch" && i.shapes?.length > 0 && i.visible !== false,
+    (i) =>
+      i.type === "sketch" &&
+      i.shapes?.length > 0 &&
+      (i.visible !== false || alsoSketchIds?.has(i.id)),
   );
   if (sketchItems.length === 0) return null;
   const group = new THREE.Group();
@@ -199,10 +218,11 @@ export function buildExtrudeSelectGroup(
     // in "o") stay holes of the glyph rather than separately-selectable regions.
     const textIdxs = new Set();
     (item.shapes || []).forEach((s, i) => {
-      if (s.type === "text") textIdxs.add(i);
+      if (contourShape(s)) textIdxs.add(i);
     });
     const isTextPoly = new Map();
     const polyShapeIndices = new Map();
+    const polyCurves = new Map();
     const allLoops = loopsWithShapes.map((l) => {
       isTextPoly.set(
         l.polygon,
@@ -210,6 +230,7 @@ export function buildExtrudeSelectGroup(
           l.shapeIndices.every((si) => textIdxs.has(si)),
       );
       polyShapeIndices.set(l.polygon, l.shapeIndices);
+      polyCurves.set(l.polygon, l.curves);
       return l.polygon;
     });
     const grouped = groupLoopsWithHoles(allLoops);
@@ -254,6 +275,11 @@ export function buildExtrudeSelectGroup(
         profileCentroid: polyCentroid(polygon),
         polygon2D: polygon,
         holes: holes.filter((h) => h.length >= 3),
+        // Which sketch shapes bound it: how a rebuild finds it again after
+        // the sketch is edited (regionsForProfile).
+        loopShapes: loopShapesOf(polygon, holes, polyShapeIndices),
+        // The exact curves under the polygon, for an OCC rebuild.
+        curves2D: loopCurvesOf(polygon, holes, polyCurves),
         position: { x: pos.x, y: pos.y, z: pos.z },
         rotation: { x: euler.x, y: euler.y, z: euler.z },
         normalWorld: { x: normal.x, y: normal.y, z: normal.z },
@@ -355,10 +381,10 @@ export function buildSketchShapesGroup(
   const dotWorldPts = [];
   shapes.forEach((shape, shapeIdx) => {
     if (editHidden.has(shapeIdx)) return;
-    if (shape.type === "text") {
-      // Locked text: draw each glyph contour as its own loop, all tagged with
-      // the same shapeIdx so a click selects (and whole-shape drags) the text.
-      for (const contour of textShapeContours(shape)) {
+    if (contourShape(shape)) {
+      // Locked text / a cog: draw each contour as its own loop, all tagged with
+      // the same shapeIdx so a click selects (and whole-shape drags) the shape.
+      for (const contour of shapeContours(shape)) {
         if (contour.length < 2) continue;
         const wpts = [...contour, contour[0]].map((p) =>
           toWorld(p.x, p.y, 0.003),
@@ -377,7 +403,7 @@ export function buildSketchShapesGroup(
         tline.computeLineDistances();
         tline.renderOrder = 1001;
         tline.userData.shapeIdx = shapeIdx;
-        tline.userData.isText = true;
+        tline.userData.isText = shape.type === "text";
         group.add(tline);
       }
       return;
@@ -429,9 +455,8 @@ export function buildSketchShapesGroup(
       transparent: isDashed,
       opacity: isDashed ? 0.75 : 1.0,
       dashed: isDashed,
-      dashSize: isDashed ? 0.1 : 0,
-      gapSize: isDashed ? 0.06 : 0,
     });
+    if (isDashed) trackScreenDash(mat);
     const line = new Line2(geo, mat);
     line.computeLineDistances();
     line.renderOrder = 1001;

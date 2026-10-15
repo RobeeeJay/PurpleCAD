@@ -1,10 +1,12 @@
 // Selection lock derived from the Split / Plane tools, which own their own
-// picking — the widget just reflects what they're after.  Split operates on
-// whole objects (its cut can be a plane/sketch object or a face); Plane is built
-// from a face, or vertices in its 3-point mode.  Derived (not stored) so the
-// lock can't get stuck through these tools' multi-phase open/close paths.
+// picking — the widget just reflects what they're after.  Split picks a whole
+// object first, then its cut: a face (a Plane object's face included).  The cut
+// phase used to stay locked to objects, so the widget greyed out faces and hover
+// lit whole bodies -- nothing said a face could be picked.  Plane is built from
+// a face, or vertices in its 3-point mode.  Derived (not stored) so the lock
+// can't get stuck through these tools' multi-phase open/close paths.
 function toolSelectionLock(s) {
-  if (s.splitTool) return ["object"];
+  if (s.splitTool) return s.splitPick === "cut" ? ["face"] : ["object"];
   if (s.planeTool || s.planePickActive)
     return s.planePickActive === "points" ? ["point"] : ["face"];
   // Hole: pick a face, then a point (vertex / spot on the face).
@@ -38,6 +40,7 @@ export function anyToolActive(s) {
     s.pushPullRetargetTarget ||
     s.pushPullEditTarget ||
     s.shellTarget ||
+    s.simplifyTarget ||
     s.holeTool ||
     s.embossTool ||
     s.draftTool ||

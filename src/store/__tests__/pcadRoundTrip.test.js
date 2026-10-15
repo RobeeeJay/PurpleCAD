@@ -16,6 +16,7 @@ const save = () => {
       history: s.history,
       activeHistoryId: s.activeHistoryId,
       variables: s.variables,
+      folders: s.folders,
     },
     null,
     2,
@@ -51,4 +52,42 @@ describe("pcad round-trip", () => {
       expect(a.activeHistoryId).toBe(original.activeHistoryId ?? null);
     });
   }
+});
+
+describe("components in a .pcad", () => {
+  const base = () =>
+    JSON.parse(
+      fs.readFileSync("test-files/reorder-timeline-before.pcad", "utf8"),
+    );
+
+  it("are saved and come back on load, with their motion", () => {
+    const doc = base();
+    doc.folders = [
+      {
+        id: "folder-1",
+        name: "Lid",
+        parentId: null,
+        expanded: true,
+        motion: {
+          type: "rotation",
+          axis: { origin: { x: 0, y: 1, z: 0 }, dir: { x: 1, y: 0, z: 0 } },
+          positive: "90",
+          negative: "0",
+          speed: "45",
+          detectCollisions: true,
+        },
+      },
+    ];
+    useStore.getState().loadDocument(doc);
+    expect(useStore.getState().folders).toEqual(doc.folders);
+    const saved = JSON.parse(save());
+    expect(saved.folders).toEqual(doc.folders);
+  });
+
+  it("a file saved before components were written into it loads with none", () => {
+    const doc = base();
+    delete doc.folders;
+    useStore.getState().loadDocument(doc);
+    expect(useStore.getState().folders).toEqual([]);
+  });
 });

@@ -6,21 +6,15 @@
 
 import React from "react";
 import FormulaInput from "../FormulaInput";
-import { DebouncedNumberField } from "../inputs.jsx";
 import SketchRulers from "./SketchRulers";
 import SketchLongPressMenu from "./SketchLongPressMenu";
+import SketchDistanceOverlay from "./SketchDistanceOverlay";
+import SketchPatternOverlays from "./SketchPatternOverlays";
+import SketchCentreOverlay from "./SketchCentreOverlay";
+import SketchCogOverlay from "./SketchCogOverlay";
 import { useStore } from "../../store";
 import { evaluateFormula, variablesToMap } from "../../utils/formulas.js";
-import {
-  MM_PER_UNIT,
-  getShapePoint,
-  moveShapePoint,
-} from "../../three/sceneObjects.js";
-import {
-  solveConstraints,
-  fieldsForPoint,
-  varFields,
-} from "../../three/sketchSolver.js";
+import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 
 export default function SketchOverlays({
   // store-derived state
@@ -53,24 +47,6 @@ export default function SketchOverlays({
 }) {
   // Tracks which pattern-overlay fields currently hold an invalid / blank
   // value, so Confirm can be disabled until every field parses again.  Keyed
-  // by field name; a field reports true (valid) on unmount so a closed tool
-  // never leaves a stale block.
-  const [patternInvalid, setPatternInvalid] = React.useState({});
-  const reportPatternValid = React.useCallback(
-    (key) => (valid) =>
-      setPatternInvalid((prev) => {
-        const blocked = !!prev[key];
-        if (valid && blocked) {
-          const next = { ...prev };
-          delete next[key];
-          return next;
-        }
-        if (!valid && !blocked) return { ...prev, [key]: true };
-        return prev;
-      }),
-    [],
-  );
-  const anyPatternInvalid = Object.keys(patternInvalid).length > 0;
 
   // Commit the extrude at the typed distance (shared by Enter and the Confirm
   // button).  Distance is read from the input state — never from the mouse.
@@ -94,62 +70,25 @@ export default function SketchOverlays({
     else cameraControlsRef.current?.finalizeExtrudeWithFormula?.(raw, depth);
   };
 
-  // Offset confirm/cancel — shared by the overlay buttons and Enter/Escape.
-  // The latest typed value is tracked here so the Confirm button (which has no
-  // event) can read it; onChange already live-previews it via the store.
-  const offsetDraftRef = React.useRef(null);
   const sketchModifyDistMm = useStore((s) => s.sketchModifyDistMm);
   // Live draft of the chamfer/bevel value while typing (may be an incomplete
   // formula); the store only receives values that evaluate.
   const [modifyDraft, setModifyDraft] = React.useState(null);
 
-  const confirmOffset = () => {
-    const di = useStore.getState().sketchDistanceInput;
-    if (!di || di.offsetConstraintIdx == null) return;
-    const raw = (offsetDraftRef.current ?? String(di.defaultDistance)).trim();
-    const mm = evaluateFormula(
-      raw,
-      variablesToMap(useStore.getState().variables),
-    );
-    if (Number.isFinite(mm) && mm !== 0) {
-      useStore
-        .getState()
-        .updateSketchOffsetDistance(
-          selectedId,
-          di.offsetGroup,
-          di.offsetConstraintIdx,
-          raw,
-        );
-      cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
-    }
-    offsetDraftRef.current = null;
-    useStore.getState().setSketchDistanceInput(null);
-    useStore.getState().setSketchConstraintMode(null);
-  };
-
-  // Cancel.  For a freshly created offset, discard the whole thing via the
-  // per-sketch undo (matching the extrude/chamfer "Cancel removes it" flow).
-  // For an edit of an existing offset, the typed value was only live-previewed
-  // (no history), so restore the prior distance instead of undoing.
-  const cancelOffset = () => {
-    const di = useStore.getState().sketchDistanceInput;
-    offsetDraftRef.current = null;
-    if (di?.created) {
-      useStore.getState().undoSketch(selectedId);
-    } else if (di) {
-      useStore
-        .getState()
-        .previewSketchOffsetDistance(
-          selectedId,
-          di.offsetGroup,
-          di.offsetConstraintIdx,
-          di.defaultDistance,
-        );
-    }
-    cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
-    useStore.getState().setSketchDistanceInput(null);
-    useStore.getState().setSketchConstraintMode(null);
-  };
+  // The extrude distance, focused with its text selected as the bar opens --
+  // and it opens at once when geometry was picked before the tool started --
+  // so typing replaces the default length rather than adding to it.
+  const extrudeDistanceRef = React.useRef(null);
+  const extrudeBarOpen = extrudeSelectMode === "profile" && !!extrudeDepthInput;
+  React.useEffect(() => {
+    if (!extrudeBarOpen) return;
+    // A frame later: the toolbar click that opened the bar is done with focus.
+    const raf = requestAnimationFrame(() => {
+      extrudeDistanceRef.current?.focus();
+      extrudeDistanceRef.current?.select();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [extrudeBarOpen]);
 
   return (
     <>
@@ -167,6 +106,11 @@ export default function SketchOverlays({
       {extrudeSelectMode === "start" && (
         <div className="sketch-placement-hint">
           Click a face or sketch plane to start the extrude from · Esc to cancel
+        </div>
+      )}
+      {extrudeSelectMode === "to" && (
+        <div className="sketch-placement-hint">
+          Click a face for the extrude to reach · Esc to cancel
         </div>
       )}
       {extrudeSelectMode === "profile" && extrudeDepthInput && (
@@ -189,6 +133,7 @@ export default function SketchOverlays({
             style={{
               fontSize: 11,
               padding: "2px 8px",
+              // 16px to Combine: this 8 plus the bar's own 8px gap.
               marginRight: 8,
               borderRadius: 3,
               border: `1px solid ${
@@ -203,6 +148,63 @@ export default function SketchOverlays({
           >
             Cut
           </button>
+          {/* Combine: merge into the body the extrusion is attached to (on),
+              or always make a new object (off) -- editing an extrusion can
+              switch it either way.  Not for a cut, which is always a
+              difference; locked where the change would need a conversion
+              that isn't built (combineLocked, set in useSceneSync). */}
+          <label
+            htmlFor="extrude-combine"
+            title={
+              extrudeDepthInput.cut
+                ? "A cut always subtracts from the body — Combine doesn't apply"
+                : extrudeDepthInput.combineLocked
+                  ? "Combine can't be changed for this extrusion: it was made as several objects, or merged by a separate Union step"
+                  : "Combine — merge the extrusion into the body it's attached to. Off: always make a new object"
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              fontSize: 11,
+              marginRight: 8,
+              // The bar is dark in BOTH themes (--panel-bg-rgb isn't themed),
+              // so a bare label can't use --text-primary: that is near-black
+              // in the light theme -- black on black.  The same grey as the
+              // Offset / Distance labels.
+              color: "#aaa",
+              opacity:
+                extrudeDepthInput.cut || extrudeDepthInput.combineLocked
+                  ? 0.5
+                  : 1,
+            }}
+          >
+            <input
+              id="extrude-combine"
+              type="checkbox"
+              // The bar styles every input as an 80px text field (padding,
+              // border, background): undo that for a checkbox, which then sits
+              // close to its label.
+              style={{
+                width: "auto",
+                margin: 0,
+                padding: 0,
+                border: "none",
+                background: "none",
+              }}
+              checked={extrudeDepthInput.combine !== false}
+              disabled={
+                !!extrudeDepthInput.cut || !!extrudeDepthInput.combineLocked
+              }
+              onChange={(e) =>
+                useStore.getState().setExtrudeDepthInput({
+                  ...useStore.getState().extrudeDepthInput,
+                  combine: e.target.checked,
+                })
+              }
+            />
+            Combine
+          </label>
           <button
             type="button"
             onClick={() => cameraControlsRef.current?.beginExtrudeStartPick?.()}
@@ -234,6 +236,7 @@ export default function SketchOverlays({
           <FormulaInput
             type="text"
             variables={variables}
+            id="extrude-offset"
             title="Offset the extrude start ± from the sketch plane (or the picked Start-from face)"
             // ± distance the prism base is slid along the profile normal.  A
             // bare number or a formula; negative slides the opposite way, 0
@@ -270,12 +273,35 @@ export default function SketchOverlays({
             }}
             style={{ width: 64, marginRight: 8 }}
           />
-          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+          <button
+            type="button"
+            onClick={() => cameraControlsRef.current?.beginExtrudeToPick?.()}
+            title="To… — click a face and the distance is set so the extrude reaches it"
+            style={{
+              fontSize: 11,
+              padding: "2px 6px",
+              marginRight: 8,
+              borderRadius: 3,
+              border: "1px solid var(--border-color)",
+              background: "var(--bg-tertiary)",
+              color: "var(--text-primary)",
+              cursor: "pointer",
+            }}
+          >
+            To…
+          </button>
+          <span
+            title="How far the profile is extruded along its normal. Negative extrudes backwards through the sketch plane; the prism starts at the plane either way."
+            style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+          >
             Distance (mm):
           </span>
           <FormulaInput
+            ref={extrudeDistanceRef}
             type="text"
             autoFocus
+            id="extrude-distance"
+            title="How far the profile is extruded along its normal. Negative extrudes backwards through the sketch plane; the prism starts at the plane either way."
             variables={variables}
             // Accept either a bare number or a formula like "width * 2".
             value={
@@ -339,6 +365,8 @@ export default function SketchOverlays({
         activeSketchTool !== "rectangularPattern" &&
         activeSketchTool !== "project" &&
         activeSketchTool !== "trim" &&
+        activeSketchTool !== "centre" &&
+        activeSketchTool !== "cog" &&
         sketchDrawPhase !== "second" && (
           <div className="sketch-placement-hint">
             Click to set the start point
@@ -355,381 +383,21 @@ export default function SketchOverlays({
           project everything inside · Esc to cancel
         </div>
       )}
-      {sketchMode && activeSketchTool === "mirror" && sketchMirrorState && (
-        <>
-          {sketchMirrorState.lineIdx == null ? (
-            <div className="sketch-placement-hint">
-              Click a line to use as the mirror line · Esc to cancel
-            </div>
-          ) : (
-            <>
-              <div className="sketch-placement-hint">
-                Click geometry to mirror, click again to remove · Esc to cancel
-              </div>
-              <div className="sketch-distance-input-overlay">
-                <span>
-                  Mirroring {sketchMirrorState.shapeIndices.length} item
-                  {sketchMirrorState.shapeIndices.length === 1 ? "" : "s"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => useStore.getState().reselectMirrorLine()}
-                  title="Reselect — pick a different mirror line"
-                  style={{
-                    fontSize: 11,
-                    padding: "3px 10px",
-                    marginLeft: 8,
-                    borderRadius: 3,
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                    cursor: "pointer",
-                  }}
-                >
-                  Reselect line
-                </button>
-                <button
-                  type="button"
-                  onClick={() => useStore.getState().cancelMirrorTool()}
-                  title="Cancel — discard the mirror"
-                  style={{
-                    fontSize: 11,
-                    padding: "3px 10px",
-                    marginLeft: 8,
-                    borderRadius: 3,
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={sketchMirrorState.shapeIndices.length === 0}
-                  onClick={() => useStore.getState().confirmMirror(selectedId)}
-                  title="Confirm — create the mirrored geometry"
-                  style={{
-                    fontSize: 11,
-                    padding: "3px 10px",
-                    marginLeft: 8,
-                    borderRadius: 3,
-                    border: "1px solid var(--accent, #4488ff)",
-                    background: "var(--accent, #4488ff)",
-                    color: "#fff",
-                    cursor: "pointer",
-                    opacity:
-                      sketchMirrorState.shapeIndices.length === 0 ? 0.5 : 1,
-                  }}
-                >
-                  Confirm
-                </button>
-              </div>
-            </>
-          )}
-        </>
-      )}
-      {sketchMode &&
-        activeSketchTool === "circularPattern" &&
-        sketchCircularPatternState && (
-          <>
-            {sketchCircularPatternState.centerShapeIdx == null ? (
-              <div className="sketch-placement-hint">
-                Click a point to use as the pattern centre · Esc to cancel
-              </div>
-            ) : (
-              <>
-                <div className="sketch-placement-hint">
-                  Click geometry to pattern, click again to remove · Esc to
-                  cancel
-                </div>
-                <div className="sketch-distance-input-overlay">
-                  <span>
-                    Patterning {sketchCircularPatternState.shapeIndices.length}{" "}
-                    item
-                    {sketchCircularPatternState.shapeIndices.length === 1
-                      ? ""
-                      : "s"}
-                  </span>
-                  <label
-                    style={{
-                      marginLeft: 8,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
-                    Instances per 360°
-                    <DebouncedNumberField
-                      min={2}
-                      step={1}
-                      storeValue={sketchCircularPatternState.count}
-                      validate={(v) => Number.isFinite(v) && v >= 2}
-                      onValidChange={reportPatternValid("circCount")}
-                      commit={(v) =>
-                        useStore.getState().setCircularPatternCount(v)
-                      }
-                      style={{
-                        width: 48,
-                        fontSize: 11,
-                        padding: "2px 4px",
-                        borderRadius: 3,
-                        background: "var(--bg-tertiary)",
-                        color: "var(--text-primary)",
-                      }}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      useStore.getState().reselectCircularPatternCenter()
-                    }
-                    title="Reselect — pick a different centre point"
-                    style={{
-                      fontSize: 11,
-                      padding: "3px 10px",
-                      marginLeft: 8,
-                      borderRadius: 3,
-                      border: "1px solid var(--border-color)",
-                      background: "var(--bg-tertiary)",
-                      color: "var(--text-primary)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Reselect point
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      useStore.getState().cancelCircularPatternTool()
-                    }
-                    title="Cancel — discard the circular pattern"
-                    style={{
-                      fontSize: 11,
-                      padding: "3px 10px",
-                      marginLeft: 8,
-                      borderRadius: 3,
-                      border: "1px solid var(--border-color)",
-                      background: "var(--bg-tertiary)",
-                      color: "var(--text-primary)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  {(() => {
-                    const blocked =
-                      sketchCircularPatternState.shapeIndices.length === 0 ||
-                      anyPatternInvalid;
-                    return (
-                      <button
-                        type="button"
-                        disabled={blocked}
-                        onClick={() =>
-                          useStore.getState().confirmCircularPattern(selectedId)
-                        }
-                        title="Confirm — create the patterned geometry"
-                        style={{
-                          fontSize: 11,
-                          padding: "3px 10px",
-                          marginLeft: 8,
-                          borderRadius: 3,
-                          border: "1px solid var(--accent, #4488ff)",
-                          background: "var(--accent, #4488ff)",
-                          color: "#fff",
-                          cursor: blocked ? "not-allowed" : "pointer",
-                          opacity: blocked ? 0.5 : 1,
-                        }}
-                      >
-                        Confirm
-                      </button>
-                    );
-                  })()}
-                </div>
-              </>
-            )}
-          </>
-        )}
-      {sketchMode &&
-        activeSketchTool === "rectangularPattern" &&
-        sketchRectangularPatternState && (
-          <>
-            <div className="sketch-placement-hint">
-              Click geometry to pattern, click again to remove · Esc to cancel
-            </div>
-            <div className="sketch-distance-input-overlay">
-              <span>
-                Patterning {sketchRectangularPatternState.shapeIndices.length}{" "}
-                item
-                {sketchRectangularPatternState.shapeIndices.length === 1
-                  ? ""
-                  : "s"}
-              </span>
-              <label
-                style={{
-                  marginLeft: 8,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                Count X
-                <DebouncedNumberField
-                  min={1}
-                  step={1}
-                  variables={variables}
-                  storeValue={sketchRectangularPatternState.countX}
-                  validate={(v) => Number.isFinite(v) && v >= 1}
-                  onValidChange={reportPatternValid("rectCountX")}
-                  commit={(v, raw) =>
-                    useStore.getState().setRectangularPatternCountX(raw ?? v)
-                  }
-                  style={{
-                    width: 44,
-                    fontSize: 11,
-                    padding: "2px 4px",
-                    borderRadius: 3,
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                  }}
-                />
-              </label>
-              <label
-                style={{
-                  marginLeft: 8,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                Offset X (mm)
-                <DebouncedNumberField
-                  step="any"
-                  variables={variables}
-                  storeValue={sketchRectangularPatternState.offsetX}
-                  validate={(v) => Number.isFinite(v)}
-                  onValidChange={reportPatternValid("rectOffsetX")}
-                  commit={(v, raw) =>
-                    useStore.getState().setRectangularPatternOffsetX(raw ?? v)
-                  }
-                  style={{
-                    width: 56,
-                    fontSize: 11,
-                    padding: "2px 4px",
-                    borderRadius: 3,
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                  }}
-                />
-              </label>
-              <label
-                style={{
-                  marginLeft: 8,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                Count Y
-                <DebouncedNumberField
-                  min={1}
-                  step={1}
-                  variables={variables}
-                  storeValue={sketchRectangularPatternState.countY}
-                  validate={(v) => Number.isFinite(v) && v >= 1}
-                  onValidChange={reportPatternValid("rectCountY")}
-                  commit={(v, raw) =>
-                    useStore.getState().setRectangularPatternCountY(raw ?? v)
-                  }
-                  style={{
-                    width: 44,
-                    fontSize: 11,
-                    padding: "2px 4px",
-                    borderRadius: 3,
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                  }}
-                />
-              </label>
-              <label
-                style={{
-                  marginLeft: 8,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                Offset Y (mm)
-                <DebouncedNumberField
-                  step="any"
-                  variables={variables}
-                  storeValue={sketchRectangularPatternState.offsetY}
-                  validate={(v) => Number.isFinite(v)}
-                  onValidChange={reportPatternValid("rectOffsetY")}
-                  commit={(v, raw) =>
-                    useStore.getState().setRectangularPatternOffsetY(raw ?? v)
-                  }
-                  style={{
-                    width: 56,
-                    fontSize: 11,
-                    padding: "2px 4px",
-                    borderRadius: 3,
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() =>
-                  useStore.getState().cancelRectangularPatternTool()
-                }
-                title="Cancel — discard the rectangular pattern"
-                style={{
-                  fontSize: 11,
-                  padding: "3px 10px",
-                  marginLeft: 8,
-                  borderRadius: 3,
-                  border: "1px solid var(--border-color)",
-                  background: "var(--bg-tertiary)",
-                  color: "var(--text-primary)",
-                  cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
-              {(() => {
-                const blocked =
-                  sketchRectangularPatternState.shapeIndices.length === 0 ||
-                  anyPatternInvalid;
-                return (
-                  <button
-                    type="button"
-                    disabled={blocked}
-                    onClick={() =>
-                      useStore.getState().confirmRectangularPattern(selectedId)
-                    }
-                    title="Confirm — create the patterned geometry"
-                    style={{
-                      fontSize: 11,
-                      padding: "3px 10px",
-                      marginLeft: 8,
-                      borderRadius: 3,
-                      border: "1px solid var(--accent, #4488ff)",
-                      background: "var(--accent, #4488ff)",
-                      color: "#fff",
-                      cursor: blocked ? "not-allowed" : "pointer",
-                      opacity: blocked ? 0.5 : 1,
-                    }}
-                  >
-                    Confirm
-                  </button>
-                );
-              })()}
-            </div>
-          </>
-        )}
+      <SketchPatternOverlays
+        sketchMode={sketchMode}
+        activeSketchTool={activeSketchTool}
+        sketchMirrorState={sketchMirrorState}
+        sketchCircularPatternState={sketchCircularPatternState}
+        sketchRectangularPatternState={sketchRectangularPatternState}
+        selectedId={selectedId}
+        variables={variables}
+      />
+      <SketchCentreOverlay
+        sketchMode={sketchMode}
+        selectedId={selectedId}
+        variables={variables}
+      />
+      <SketchCogOverlay sketchMode={sketchMode} selectedId={selectedId} />
       {sketchMode && sketchConstraintMode === "midpoint" && (
         <div className="sketch-placement-hint">
           {sketchMidpointFirst?.kind === "point"
@@ -768,324 +436,14 @@ export default function SketchOverlays({
             Set the length, or click a parallel line for the gap between them
           </div>
         )}
-      {sketchMode && sketchDistanceInput && (
-        <div className="sketch-distance-input-overlay">
-          <span>
-            {sketchDistanceInput.cornerResize
-              ? sketchDistanceInput.cornerResize.mode === "bevel"
-                ? "Radius (mm):"
-                : "Setback (mm):"
-              : sketchDistanceInput.offsetConstraintIdx != null
-                ? "Offset (mm):"
-                : sketchDistanceInput.constraintIdx != null
-                  ? "Edit distance (mm):"
-                  : "Distance (mm):"}
-          </span>
-          <FormulaInput
-            type="text"
-            autoFocus
-            variables={variables}
-            // Remount when the target changes (e.g. line-length → parallel-line
-            // gap) so the shown default reflects the new measurement.
-            key={
-              sketchDistanceInput.pointLine
-                ? `pl-${sketchDistanceInput.pointLine.pointShapeIdx}-${sketchDistanceInput.pointLine.lineShapeIdx}`
-                : sketchDistanceInput.cornerResize
-                  ? `cr-${sketchDistanceInput.cornerResize.shapeIdx}`
-                  : `d-${sketchDistanceInput.shapeAIdx}-${sketchDistanceInput.shapeBIdx}-${sketchDistanceInput.constraintIdx ?? "new"}`
-            }
-            defaultValue={
-              typeof sketchDistanceInput.defaultDistance === "string"
-                ? sketchDistanceInput.defaultDistance
-                : (sketchDistanceInput.defaultDistance * MM_PER_UNIT).toFixed(2)
-            }
-            onChange={(e) => {
-              // Offset edits update live as you type: re-solve the copies (no
-              // history/undo churn) so the geometry follows the typed value.
-              if (sketchDistanceInput.offsetConstraintIdx == null) return;
-              const raw = e.target.value.trim();
-              offsetDraftRef.current = raw;
-              const mm = evaluateFormula(
-                raw,
-                variablesToMap(useStore.getState().variables),
-              );
-              if (Number.isFinite(mm) && mm !== 0)
-                useStore
-                  .getState()
-                  .previewSketchOffsetDistance(
-                    selectedId,
-                    sketchDistanceInput.offsetGroup,
-                    sketchDistanceInput.offsetConstraintIdx,
-                    raw,
-                  );
-            }}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") {
-                const raw = e.target.value.trim();
-                // Quick validation: evaluate the formula against the current
-                // variable map to ensure it produces a positive number; if not,
-                // bail without committing so the user can fix their input.
-                const variablesMap = variablesToMap(
-                  useStore.getState().variables,
-                );
-                const mm = evaluateFormula(raw, variablesMap);
-                // Offset edit: Enter confirms (matching the Confirm button).
-                if (sketchDistanceInput.offsetConstraintIdx != null) {
-                  offsetDraftRef.current = raw;
-                  confirmOffset();
-                  return;
-                }
-                // Chamfer/bevel resize: apply the new setback / radius.  A
-                // negative bevel radius is allowed (flips the arc); a chamfer
-                // stays positive.
-                if (sketchDistanceInput.cornerResize) {
-                  const allowNeg =
-                    sketchDistanceInput.cornerResize.mode === "bevel";
-                  if (Number.isFinite(mm) && (allowNeg ? mm !== 0 : mm > 0)) {
-                    const { sketchId, shapeIdx } =
-                      sketchDistanceInput.cornerResize;
-                    useStore
-                      .getState()
-                      .resizeSketchCorner(sketchId, shapeIdx, mm, raw);
-                    cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
-                  }
-                  useStore.getState().setSketchDistanceInput(null);
-                  useStore.getState().setSketchConstraintMode(null);
-                  return;
-                }
-                // Point-to-line perpendicular distance.  Staged solve in pick
-                // order: the point's shape moves first, then also the line,
-                // then the whole sketch.
-                if (sketchDistanceInput.pointLine) {
-                  if (Number.isFinite(mm) && mm > 0) {
-                    const { pointShapeIdx, pointKey, lineShapeIdx } =
-                      sketchDistanceInput.pointLine;
-                    const { constraintIdx } = sketchDistanceInput;
-                    const formula = raw;
-                    const store = useStore.getState();
-                    const freshItem = store.items.find(
-                      (i) => i.id === selectedId,
-                    );
-                    if (freshItem) {
-                      const newC = {
-                        type: "pointLineDistance",
-                        pointShapeIdx,
-                        pointKey,
-                        lineShapeIdx,
-                        distance: formula,
-                      };
-                      const proposed =
-                        constraintIdx != null
-                          ? (freshItem.constraints || []).map((c, i) =>
-                              i === constraintIdx &&
-                              c.type === "pointLineDistance"
-                                ? { ...c, distance: formula }
-                                : c,
-                            )
-                          : [...(freshItem.constraints || []), newC];
-                      const stagedFixed = (freeIdxs) => {
-                        const freeSet = new Set(freeIdxs);
-                        const fixed = new Set();
-                        freshItem.shapes.forEach((sh, i) => {
-                          if (freeSet.has(i)) return;
-                          for (const f of varFields(sh)) fixed.add(`${i}:${f}`);
-                        });
-                        return fixed;
-                      };
-                      let solved = null;
-                      for (const free of [
-                        [pointShapeIdx],
-                        [pointShapeIdx, lineShapeIdx],
-                        null,
-                      ]) {
-                        const res = solveConstraints(
-                          freshItem.shapes,
-                          proposed,
-                          {
-                            variables: variablesMap,
-                            ...(free ? { fixed: stagedFixed(free) } : {}),
-                          },
-                        );
-                        if (res.ok) {
-                          solved = res.shapes;
-                          break;
-                        }
-                      }
-                      if (solved) {
-                        if (constraintIdx != null)
-                          store.updateSketchConstraintDistance(
-                            selectedId,
-                            constraintIdx,
-                            formula,
-                          );
-                        else store.addSketchConstraints(selectedId, [newC]);
-                        const map = new Map();
-                        solved.forEach((sh, i) => map.set(i, sh));
-                        store.updateSketchShapes(selectedId, map);
-                        itemsRef.current = useStore.getState().items;
-                      } else {
-                        store.showNotification(
-                          "Can't apply that dimension — it would break another constraint",
-                        );
-                      }
-                    }
-                  }
-                  cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
-                  useStore.getState().setSketchDistanceInput(null);
-                  useStore.getState().setSketchConstraintMode(null);
-                  return;
-                }
-                if (Number.isFinite(mm) && mm > 0) {
-                  const {
-                    shapeAIdx,
-                    pointA,
-                    shapeBIdx,
-                    pointB,
-                    constraintIdx,
-                  } = sketchDistanceInput;
-                  // Store the formula string so future edits can reference
-                  // variables; the solver resolves it to scene units.
-                  const formula = raw;
-                  const store = useStore.getState();
-                  const freshItem = store.items.find(
-                    (i) => i.id === selectedId,
-                  );
-                  const newDistC = {
-                    type: "distance",
-                    shapeAIdx,
-                    pointA,
-                    shapeBIdx,
-                    pointB,
-                    distance: formula,
-                  };
-                  // Resolve the change in-memory FIRST and only commit it if the
-                  // result keeps every constraint satisfied — otherwise the
-                  // transformation is rejected rather than distorting geometry.
-                  const proposed =
-                    constraintIdx != null
-                      ? (freshItem?.constraints || []).map((c, i) =>
-                          i === constraintIdx && c.type === "distance"
-                            ? { ...c, distance: formula }
-                            : c,
-                        )
-                      : [...(freshItem?.constraints || []), newDistC];
-                  if (freshItem) {
-                    // Numerically solve the WHOLE constraint system for the new
-                    // dimension.  Anchor the dimension's endpoints so the change
-                    // grows from the reference point WITHOUT rotating: for a
-                    // line-length the far end is pinned along the current
-                    // direction (pins translation + orientation); a two-point
-                    // distance pins only the reference end.  Reject if the result
-                    // can't satisfy every constraint.
-                    const d = mm / MM_PER_UNIT;
-                    const fixedSet = new Set();
-                    const aShape = freshItem.shapes[shapeAIdx];
-                    for (const f of fieldsForPoint(aShape, pointA))
-                      fixedSet.add(`${shapeAIdx}:${f}`);
-                    let inputShapes = freshItem.shapes;
-                    if (shapeAIdx === shapeBIdx) {
-                      const pA = getShapePoint(aShape, pointA);
-                      const pB = getShapePoint(aShape, pointB);
-                      if (pA && pB) {
-                        const dx = pB.x - pA.x,
-                          dy = pB.y - pA.y;
-                        const cur = Math.hypot(dx, dy) || 1;
-                        inputShapes = freshItem.shapes.slice();
-                        inputShapes[shapeBIdx] = moveShapePoint(
-                          aShape,
-                          pointB,
-                          {
-                            x: pA.x + (dx / cur) * d,
-                            y: pA.y + (dy / cur) * d,
-                          },
-                        );
-                        for (const f of fieldsForPoint(aShape, pointB))
-                          fixedSet.add(`${shapeBIdx}:${f}`);
-                      }
-                    }
-                    const { shapes: solved, ok } = solveConstraints(
-                      inputShapes,
-                      proposed,
-                      { variables: variablesMap, fixed: fixedSet },
-                    );
-                    if (ok) {
-                      if (constraintIdx != null)
-                        store.updateSketchConstraintDistance(
-                          selectedId,
-                          constraintIdx,
-                          formula,
-                        );
-                      else store.addSketchConstraints(selectedId, [newDistC]);
-                      const map = new Map();
-                      solved.forEach((s, i) => map.set(i, s));
-                      store.updateSketchShapes(selectedId, map);
-                      itemsRef.current = useStore.getState().items;
-                    } else {
-                      store.showNotification(
-                        "Can't apply that dimension — it would break another constraint",
-                      );
-                    }
-                  }
-                }
-                // The line just moved to satisfy the new dimension; re-anchor
-                // the green selection highlight (a standalone scene mesh) so it
-                // doesn't linger at the old position.
-                cameraControlsRef.current?.refreshSketchSelectionOverlay?.();
-                useStore.getState().setSketchDistanceInput(null);
-                useStore.getState().setSketchConstraintMode(null);
-              } else if (e.key === "Escape") {
-                // Offset: Escape cancels the whole offset (matching Cancel);
-                // a plain dimension edit just closes.
-                if (sketchDistanceInput.offsetConstraintIdx != null) {
-                  cancelOffset();
-                  return;
-                }
-                useStore.getState().setSketchDistanceInput(null);
-                useStore.getState().setSketchConstraintMode(null);
-              }
-            }}
-          />
-          {sketchDistanceInput.offsetConstraintIdx != null && (
-            <>
-              <button
-                type="button"
-                onClick={cancelOffset}
-                title="Cancel — discard the offset"
-                style={{
-                  fontSize: 11,
-                  padding: "3px 10px",
-                  marginLeft: 8,
-                  borderRadius: 3,
-                  border: "1px solid var(--border-color)",
-                  background: "var(--bg-tertiary)",
-                  color: "var(--text-primary)",
-                  cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmOffset}
-                title="Confirm — keep the offset at this distance"
-                style={{
-                  fontSize: 11,
-                  padding: "3px 10px",
-                  marginLeft: 8,
-                  borderRadius: 3,
-                  border: "1px solid var(--accent, #4488ff)",
-                  background: "var(--accent, #4488ff)",
-                  color: "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                Confirm
-              </button>
-            </>
-          )}
-        </div>
-      )}
+      <SketchDistanceOverlay
+        sketchMode={sketchMode}
+        sketchDistanceInput={sketchDistanceInput}
+        selectedId={selectedId}
+        variables={variables}
+        itemsRef={itemsRef}
+        cameraControlsRef={cameraControlsRef}
+      />
       {sketchMode &&
         sketchDistanceInput &&
         sketchDistanceInput.offsetConstraintIdx != null && (
@@ -1117,6 +475,11 @@ export default function SketchOverlays({
                 {sketchModifyMode === "chamfer" ? "Chamfer" : "Bevel"}
               </span>
               <label
+                title={
+                  sketchModifyMode === "chamfer"
+                    ? "How far back from the corner each edge is cut. Bigger takes more off both lines; larger than a line's length is refused."
+                    : "Radius of the arc replacing the corner. Bigger rounds it more; negative curves the arc the other way."
+                }
                 style={{
                   marginLeft: 8,
                   display: "inline-flex",

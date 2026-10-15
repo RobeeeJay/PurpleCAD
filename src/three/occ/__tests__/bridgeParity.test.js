@@ -193,6 +193,70 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     });
   }, 60000);
 
+  it("weldMesh welds identically in both implementations", async () => {
+    // An STL-style triangle soup: a cube with three private vertices per
+    // triangle.  Both impls must return the same welded mesh and topology.
+    const soup = [];
+    const g = { positions: [], indices: null };
+    const box = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ];
+    const faces = [
+      [0, 2, 1],
+      [0, 3, 2],
+      [4, 5, 6],
+      [4, 6, 7],
+      [0, 1, 5],
+      [0, 5, 4],
+      [2, 3, 7],
+      [2, 7, 6],
+      [1, 2, 6],
+      [1, 6, 5],
+      [3, 0, 4],
+      [3, 4, 7],
+    ];
+    for (const f of faces) for (const v of f) soup.push(...box[v]);
+    g.positions = soup;
+    const a = await ops.weldMesh(JSON.parse(JSON.stringify(g)));
+    const b = bridge.weldMesh(JSON.parse(JSON.stringify(g)));
+    expect(a).toEqual(b);
+    expect(a.verticesAfter).toBe(8);
+    expect(a.openEdges).toBe(0);
+  });
+
+  it("simplifyMesh simplifies identically in both implementations", async () => {
+    // A flat 24x24 grid: detail both impls must collapse the same way, to the
+    // same bound.
+    const positions = [];
+    const indices = [];
+    const n = 24;
+    const at = (i, j) => i * (n + 1) + j;
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++) positions.push(i / n, 1, j / n);
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++)
+        indices.push(
+          at(i, j),
+          at(i, j + 1),
+          at(i + 1, j + 1),
+          at(i, j),
+          at(i + 1, j + 1),
+          at(i + 1, j),
+        );
+    const g = { positions, indices, mode: "deviation", value: 0.001 };
+    const a = await ops.simplifyMesh(JSON.parse(JSON.stringify(g)));
+    const b = bridge.simplifyMesh(JSON.parse(JSON.stringify(g)));
+    expect(a).toEqual(b);
+    expect(a.trianglesAfter).toBeLessThan(a.trianglesBefore);
+  });
+
   it("solidFromMesh retains identical solids", async () => {
     // Baked-mesh sew: both impls must produce the same solid from the same
     // mesh.  Compare via tessellation of the retained shapes.
@@ -259,6 +323,46 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     expect(summarize(b.partB.geometryData)).toEqual(
       summarize(a.partB.geometryData),
     );
+  }, 30000);
+
+  it("chamfer on a Split piece, re-cut from its recipe", async () => {
+    const c = cube(14);
+    const plane = { position: O, rotation: O };
+    const halves = await ops.splitItem({
+      target: c,
+      plane,
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+    const piece = {
+      id: 15,
+      type: "csg",
+      position: halves.partA.position,
+      rotation: O,
+      scale: S,
+      geometryData: halves.partA.geometryData,
+      regenerator: {
+        kind: "split",
+        sourceId: 14,
+        plane,
+        side: "a",
+        center: halves.partA.position,
+        regeneratedAt: 0.1,
+      },
+    };
+    // The piece's top edge along X, in its own (centred) frame.
+    const z = 1 - halves.partA.position.z;
+    await parity("chamferOrFilletItem", {
+      source: piece,
+      subGeo: {
+        edges: [{ ax: -1, ay: 1, az: z, bx: 1, by: 1, bz: z }],
+        faces: [],
+      },
+      amount: 0.2,
+      segments: 1,
+      allItems: [c, piece],
+      printPrecision: 0.1,
+    });
   }, 30000);
 
   it("revolve", async () => {
@@ -447,4 +551,62 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     const b = await bridge.exportSTL(JSON.parse(JSON.stringify(args)));
     expect(Buffer.from(b).equals(Buffer.from(a))).toBe(true);
   }, 30000);
+
+  it("importStep round-trips an exported solid identically", async () => {
+    // No STEP fixture is needed: export one, then read it back through both
+    // implementations.  importStep returns a raw {positions, indices} rather
+    // than a geometryData wrapper, so it can't use the parity() helper.
+    const item = cube(16, { position: { x: 0, y: 1, z: 0 } });
+    const stepText = await ops.exportSTEP({
+      items: [item],
+      allItems: [item],
+      precision: 0.1,
+    });
+    const args = { stepText, printPrecision: 0.1 };
+    const a = await ops.importStep(JSON.parse(JSON.stringify(args)));
+    const b = await bridge.importStep(JSON.parse(JSON.stringify(args)));
+    expect(summarize(b)).toEqual(summarize(a));
+  }, 30000);
+
+  it("releaseShape frees a retained id and tolerates an unknown one", async () => {
+    const occ = createRequire(import.meta.url)(
+      "../../../../native/occ-addon/build/Release/occ_addon.node",
+    );
+    // A chamfered cube's baked mesh -- a raw cube tessellation won't sew.
+    const gd = (
+      await ops.chamferOrFilletItem({
+        source: cube(17),
+        subGeo: edgeYZ,
+        amount: 0.2,
+        segments: 1,
+        allItems: [cube(17)],
+        printPrecision: 0.1,
+      })
+    ).geometryData;
+    // One retained shape per implementation, each released by its own impl.
+    const a = await ops.solidFromMesh(JSON.parse(JSON.stringify(gd)));
+    const b = bridge.solidFromMesh(JSON.parse(JSON.stringify(gd)));
+    expect(await ops.releaseShape({ id: a.shapeId })).toBeNull();
+    expect(bridge.releaseShape({ id: b.shapeId })).toBeNull();
+    // The id is gone afterwards, identically on both sides.
+    expect(() => occ.tessellate(a.shapeId, 0.1)).toThrow();
+    expect(() => occ.tessellate(b.shapeId, 0.1)).toThrow();
+    // Releasing an unknown / null id is a no-op, never a throw.
+    for (const id of [987654321, null]) {
+      expect(await ops.releaseShape({ id })).toBeNull();
+      expect(bridge.releaseShape({ id })).toBeNull();
+    }
+  }, 30000);
+
+  // Guards a future split of occOps.js: if an op is dropped, renamed or added
+  // on one side only, the two surfaces diverge and every parity test above
+  // would still pass while the app lost an operation.
+  it("both implementations expose the same op surface", () => {
+    const bridgeOps = Object.keys(bridge)
+      .filter((k) => typeof bridge[k] === "function")
+      // Cancellation plumbing is native-only and has no occOps counterpart.
+      .filter((k) => k !== "setCancelBuffer")
+      .sort();
+    expect(bridgeOps).toEqual(Object.keys(ops).sort());
+  });
 });

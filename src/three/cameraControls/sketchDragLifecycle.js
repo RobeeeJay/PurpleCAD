@@ -23,12 +23,13 @@ import {
   allConstraintsSatisfied,
 } from "../sketchConstraints.js";
 import { variablesToMap } from "../../utils/formulas.js";
-import { translateShape, rotateShape } from "../sketchGeometry.js";
+import { translateShape, rotateShape, lockToAxis } from "../sketchGeometry.js";
 import {
   solveConstraints,
   fieldsForPoint,
   varFields,
 } from "../sketchSolver.js";
+import { constraintIconScreenPos } from "../sceneObjects/constraintIconSprites.js";
 
 // An offset copy is inert while its offset constraint exists — driven by its
 // original, it must not be selectable/draggable on its own.
@@ -215,8 +216,30 @@ export function createSketchDragLifecycle(
     return out;
   };
 
+  // Shift pressed or released mid-drag re-locks at once, rather than on the
+  // next mouse move.  Listening starts with a drag's first move and stops the
+  // next time Shift changes with no drag live.
+  let shiftListening = false;
+  const onShiftKey = (e) => {
+    if (e.key !== "Shift") return;
+    const last = sketchDragRef.current?.lastScreen;
+    if (!last) {
+      document.removeEventListener("keydown", onShiftKey);
+      document.removeEventListener("keyup", onShiftKey);
+      shiftListening = false;
+      return;
+    }
+    applySketchDragMove(last.x, last.y, e.type === "keydown");
+  };
+
   const applySketchDragMove = (screenX, screenY, shiftKey) => {
     if (!sketchDragRef.current) return;
+    sketchDragRef.current.lastScreen = { x: screenX, y: screenY };
+    if (!shiftListening) {
+      document.addEventListener("keydown", onShiftKey);
+      document.addEventListener("keyup", onShiftKey);
+      shiftListening = true;
+    }
     const { kind, sketchMesh, selItemId, anchorLocal } = sketchDragRef.current;
     const selItem = itemsRef.current.find((i) => i.id === selItemId);
     if (!selItem) return;
@@ -288,13 +311,16 @@ export function createSketchDragLifecycle(
       const { multiIndices, multiOrigShapes } = sketchDragRef.current;
       // Snap the dragged anchor to the grid so the whole group lands on it.
       const snapCfg = useStore.getState();
-      const anchorNow =
+      const snapped =
         snapCfg.snapEnabled && snapCfg.snapDistanceMm > 0
           ? {
               x: snapUnitToIntervalMm(localPt.x, snapCfg.snapDistanceMm),
               y: snapUnitToIntervalMm(localPt.y, snapCfg.snapDistanceMm),
             }
           : localPt;
+      // Shift: slide along one axis only.  After the grid snap, so the locked
+      // coordinate stays exactly where the drag started.
+      const anchorNow = shiftKey ? lockToAxis(anchorLocal, snapped) : snapped;
       const dx = anchorNow.x - anchorLocal.x;
       const dy = anchorNow.y - anchorLocal.y;
       const pendingShapes = new Map();
@@ -371,6 +397,11 @@ export function createSketchDragLifecycle(
         y: snapUnitToIntervalMm(localPt.y, snapCfg.snapDistanceMm),
       };
     }
+
+    // Shift: slide along one axis only (geometry snapping is already off, so
+    // nothing pulls the point off it).  After the grid snap, so the locked
+    // coordinate stays exactly where the drag started.
+    if (shiftKey) localPt = lockToAxis(anchorLocal, localPt);
 
     let newShape;
     let draggedPointKey = null;
@@ -586,15 +617,14 @@ export function createSketchDragLifecycle(
         if (!cObj.userData.isConstraint) continue;
         const ci = cObj.userData.constraintIdx;
         if (seenConstraints.has(ci)) continue;
-        const lp = cObj.userData.constraintIconLocalPos;
-        if (!lp) continue;
-        const worldPt = new THREE.Vector3(lp.x, lp.y, 0.005)
-          .applyQuaternion(sketchMesh.quaternion)
-          .add(sketchMesh.position);
-        const ndc = worldPt.clone().project(cameraRef.current);
-        const sx = ((ndc.x + 1) / 2) * rect.width + rect.left;
-        const sy = ((-ndc.y + 1) / 2) * rect.height + rect.top;
-        if (Math.hypot(screenX - sx, screenY - sy) < 20) {
+        const at = constraintIconScreenPos(
+          cObj,
+          sketchMesh,
+          cameraRef.current,
+          rect,
+        );
+        if (!at) continue;
+        if (Math.hypot(screenX - at.x, screenY - at.y) < 20) {
           seenConstraints.add(ci);
           result.push({
             kind: "constraint",

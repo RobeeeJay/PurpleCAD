@@ -6,7 +6,7 @@
 // flagged: that combination is the signature of a structural edit that
 // renumbered shapes without remapping the constraints.
 
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../store";
 import {

@@ -1,20 +1,35 @@
-// Select-mode + confirmation overlay for push/pull, mirroring ChamferOverlay.
-// Toggled by the Modify toolbar's Push/Pull button via pushPullSelectMode.
-// The selectedSubGeometry highlight shows which faces are picked; a debounced
-// call into pushPull.js swaps in a translucent preview of the moved result as
-// the selection or distance changes.  A positive distance pulls each face
-// outward (growing the solid); a negative distance pushes it inward.
+// Push/pull: the bottom-bar dialog the other Modify tools use (overlayBar.js),
+// for all three ways in -- the toolbar button (pushPullSelectMode), Retarget
+// from the timeline (the prior faces pre-selected, pushPullRetargetTarget) and
+// Edit from the timeline (pushPullEditTarget: the step's distance, saved in
+// place).  The picked faces are highlighted in the viewport; a debounced call
+// into pushPull.js swaps in a translucent preview of the result.
 //
-// The distance accepts variable formulas, may be cleared to blank while typing,
-// and gates the live preview + Confirm on a valid (non-zero) value.
+// The distance is how far the faces move along their own normals: out (a
+// pull, growing the body) unless Flip pushes them in.  A negative distance
+// pushes too.  A preview or commit that fails says why on the tool error line.
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
 import { commitPushPull } from "../../three/cameraControls/pushPull.js";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 import { activePrecision } from "../../three/resolution.js";
 import FormulaInput from "../FormulaInput";
-import { evalValue, useDebouncedPreview } from "../inputs.jsx";
+import ToolErrorLine from "../ToolErrorLine.jsx";
+import { evalValue, useDebouncedPreview, useEscapeKey } from "../inputs.jsx";
+import {
+  BAR_STYLE,
+  Field,
+  barInput,
+  barBtn,
+  pickBtn,
+  toggleBtn,
+} from "./overlayBar.js";
+
+const DISTANCE_HINT =
+  "How far the faces move along their own normals: out, growing the body, or in with Flip (or a negative value).";
+
+const setToolError = (toolError) => useStore.setState({ toolError });
 
 export default function PushPullOverlay() {
   const pushPullSelectMode = useStore((s) => s.pushPullSelectMode);
@@ -22,55 +37,103 @@ export default function PushPullOverlay() {
   const selectedSubGeometry = useStore((s) => s.selectedSubGeometry);
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
   const items = useStore((s) => s.items);
+  const history = useStore((s) => s.history);
   const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
-  const showNotification = useStore((s) => s.showNotification);
-  const pushPullRetargetTarget = useStore((s) => s.pushPullRetargetTarget);
-  const setPushPullRetargetTarget = useStore(
-    (s) => s.setPushPullRetargetTarget,
-  );
+  const retargetTarget = useStore((s) => s.pushPullRetargetTarget);
+  const setRetargetTarget = useStore((s) => s.setPushPullRetargetTarget);
+  const editTarget = useStore((s) => s.pushPullEditTarget);
+  const setEditTarget = useStore((s) => s.setPushPullEditTarget);
+  const updatePushPullParams = useStore((s) => s.updatePushPullParams);
+
+  const editEntry =
+    editTarget?.entryId != null
+      ? history.find((h) => h.id === editTarget.entryId)
+      : null;
+  const editRegen = editEntry?.instruction?.patches?.regenerator;
+  const editing = editRegen?.kind === "pushpull";
+  const open = !!pushPullSelectMode || editing;
 
   const [distanceMm, setDistanceMm] = useState("1");
+  const [flip, setFlip] = useState(false);
 
-  // Retarget pre-selects the prior faces and arms pushPullRetargetTarget —
-  // seed the distance from that op's recipe so Confirm reproduces it by default.
+  // Edit and Retarget start from the step's own distance, so Confirm with no
+  // change reproduces it; a fresh push/pull starts at 1 mm out.
+  const seed = (distance) => {
+    const mm = (distance ?? 0.1) * MM_PER_UNIT;
+    setDistanceMm(String(Math.abs(mm)));
+    setFlip(mm < 0);
+  };
   useEffect(() => {
-    if (!pushPullRetargetTarget) return;
-    const item = items.find((i) => i.id === pushPullRetargetTarget.itemId);
-    const prior = item?.regenerator;
-    if (prior?.kind !== "pushpull") return;
-    setDistanceMm(String((prior.distance ?? 0.1) * MM_PER_UNIT));
-  }, [pushPullRetargetTarget]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (editing) seed(editRegen.distance);
+  }, [editTarget?.entryId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!retargetTarget) return;
+    const prior = items.find(
+      (i) => i.id === retargetTarget.itemId,
+    )?.regenerator;
+    if (prior?.kind === "pushpull") seed(prior.distance);
+  }, [retargetTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hasSelection = (selectedSubGeometry?.faces?.length ?? 0) > 0;
-  const distVal = evalValue(distanceMm, variables); // mm (signed)
-  const valid = Number.isFinite(distVal) && distVal !== 0;
+  const nFaces = editing
+    ? (editRegen.subGeo?.faces?.length ?? 0)
+    : (selectedSubGeometry?.faces?.length ?? 0);
+  const typed = evalValue(distanceMm, variables); // mm
+  const valid = Number.isFinite(typed) && typed !== 0;
+  const distance = flip ? -typed : typed; // signed mm, + = out
+  const ready = valid && nFaces > 0;
 
-  // Live preview: debounced re-run while a valid distance and a face selection
-  // exist; cleared the moment the value goes blank/invalid.
   useDebouncedPreview(
-    !!pushPullSelectMode && hasSelection && valid,
-    () => useStore.getState()._cameraControls?.updatePushPullPreview?.(distVal),
+    open && ready,
+    () => {
+      const cc = useStore.getState()._cameraControls;
+      if (editing)
+        cc?.updatePushPullEditPreview?.(editRegen, distance, editEntry.itemId);
+      else cc?.updatePushPullPreview?.(distance);
+    },
     () => useStore.getState()._cameraControls?.clearPushPullPreview?.(),
-    [distVal, selectedSubGeometry],
+    [distance, selectedSubGeometry, editing, editRegen],
   );
 
-  // Clear any preview mesh on unmount (mode toggled off, item deselected).
+  // The distance, focused with its text selected as the bar opens, so typing
+  // replaces the default (as Extrude's does).
+  const distanceRef = useRef(null);
   useEffect(() => {
-    return () => useStore.getState()._cameraControls?.clearPushPullPreview?.();
-  }, []);
+    if (!open) return;
+    const raf = requestAnimationFrame(() => {
+      distanceRef.current?.focus();
+      distanceRef.current?.select();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, editTarget?.entryId]);
 
-  if (!pushPullSelectMode) return null;
+  useEffect(
+    () => () => useStore.getState()._cameraControls?.clearPushPullPreview?.(),
+    [],
+  );
 
-  const cancel = () => {
+  const close = () => {
     useStore.getState()._cameraControls?.clearPushPullPreview?.();
+    setToolError(null);
+    if (editing) {
+      setEditTarget(null);
+      return;
+    }
     clearSelectedSubGeometry();
     setPushPullSelectMode(null);
-    setPushPullRetargetTarget(null);
+    setRetargetTarget(null);
   };
+  useEscapeKey(open, close);
 
-  const applyPushPull = async () => {
-    if (!valid) return;
+  if (!open) return null;
+
+  const confirm = async () => {
+    if (!ready) return;
+    if (editing) {
+      updatePushPullParams(editEntry.id, { distance: distance / MM_PER_UNIT });
+      close();
+      return;
+    }
     const item = items.find((i) => i.id === selectedSubGeometry.itemId);
     if (!item) return;
     try {
@@ -78,93 +141,96 @@ export default function PushPullOverlay() {
         item,
         items,
         selectedSubGeometry,
-        distanceMm: distVal,
+        distanceMm: distance,
         printPrecision,
       });
       if (!ok) {
-        showNotification(
-          "Could not push/pull — the distance may be too large for the selected face.",
+        setToolError(
+          "Push/pull made nothing — try a smaller distance, or other faces.",
         );
         return;
       }
+      setToolError(null);
       setPushPullSelectMode(null);
     } catch (err) {
-      console.error("Push/pull operation failed:", err);
-      showNotification(err.message);
+      setToolError(err.message);
     }
   };
 
-  const handleKeyDown = (e) => {
+  const onKey = (e) => {
     e.stopPropagation();
-    if (e.key === "Enter") {
-      if (valid) applyPushPull();
-    } else if (e.key === "Escape") cancel();
+    if (e.key === "Enter") confirm();
+    else if (e.key === "Escape") close();
   };
+
+  const hint = editing
+    ? "Change the distance, then Confirm · Esc to cancel"
+    : nFaces === 0
+      ? "Alt+click the faces to push or pull · Shift+Alt+click adds more · Esc to cancel"
+      : "Set the distance, then Confirm · Shift+Alt+click adds or removes faces · Esc to cancel";
 
   return (
     <>
-      <div className="sketch-placement-hint">
-        {hasSelection
-          ? "Set the distance below, then Confirm (positive pulls out, negative pushes in) · Esc to cancel"
-          : "Alt+click faces to select geometry to push/pull · Esc to cancel"}
-      </div>
-      {hasSelection && (
-        <div className="sketch-distance-input-overlay">
-          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
-            Distance (mm):
-          </span>
+      <div className="sketch-placement-hint">{hint}</div>
+      <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
+        <button
+          type="button"
+          style={pickBtn(!editing, editing)}
+          disabled={editing}
+          onClick={clearSelectedSubGeometry}
+          title={
+            editing
+              ? "Use Retarget on the timeline step to change the faces"
+              : nFaces > 0
+                ? "The picked faces · click to clear them and start again"
+                : "Alt+click the faces to push or pull"
+          }
+        >
+          {`Faces (${nFaces})`}
+        </button>
+        <Field
+          label="Distance (mm)"
+          style={{ marginLeft: 10 }}
+          hint={DISTANCE_HINT}
+        >
           <FormulaInput
+            ref={distanceRef}
             variables={variables}
-            autoFocus
             value={distanceMm}
             onChange={(e) => setDistanceMm(e.target.value)}
-            onKeyDown={handleKeyDown}
-            style={{
-              width: 64,
-              marginRight: 8,
-              border: `1px solid ${valid ? "var(--border-color)" : "#e87575"}`,
-            }}
+            onKeyDown={onKey}
+            style={barInput(valid)}
           />
-          <button
-            type="button"
-            onClick={cancel}
-            title="Cancel"
-            style={{
-              fontSize: 11,
-              padding: "3px 10px",
-              marginLeft: 8,
-              borderRadius: 3,
-              border: "1px solid var(--border-color)",
-              background: "var(--bg-tertiary)",
-              color: "var(--text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={applyPushPull}
-            disabled={!valid}
-            title={
-              valid ? "Confirm — apply the push/pull" : "Enter a valid value"
-            }
-            style={{
-              fontSize: 11,
-              padding: "3px 10px",
-              marginLeft: 8,
-              borderRadius: 3,
-              border: "1px solid var(--accent, #4488ff)",
-              background: "var(--accent, #4488ff)",
-              color: "#fff",
-              cursor: valid ? "pointer" : "not-allowed",
-              opacity: valid ? 1 : 0.5,
-            }}
-          >
-            Confirm
-          </button>
-        </div>
-      )}
+        </Field>
+        <button
+          type="button"
+          style={{ ...toggleBtn(flip), marginLeft: 4 }}
+          aria-pressed={flip}
+          onClick={() => setFlip(!flip)}
+          title="Flip: push the faces in instead of pulling them out"
+        >
+          Flip
+        </button>
+        <button type="button" onClick={close} title="Cancel" style={barBtn()}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={!ready}
+          title={
+            ready
+              ? "Confirm — apply the push/pull"
+              : nFaces === 0
+                ? "Pick the faces first"
+                : "Enter a valid distance"
+          }
+          style={barBtn(true, !ready)}
+        >
+          Confirm
+        </button>
+      </div>
+      <ToolErrorLine />
     </>
   );
 }

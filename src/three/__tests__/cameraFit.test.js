@@ -76,3 +76,35 @@ describe("fitPointsToView", () => {
     }
   });
 });
+
+describe("non-finite fit points", () => {
+  // A NaN coordinate used to propagate straight through: centre, zoom and
+  // target all became NaN, the camera matrix followed, and the renderer
+  // stopped presenting frames -- a frozen viewport with no error and JS still
+  // responsive. Reachable by setting an item's position through the store API
+  // with a malformed value.
+  const dir = new THREE.Vector3(1, 1, 1).normalize();
+  const cam = () => {
+    const c = new THREE.PerspectiveCamera(50, 1.6, 0.1, 1000);
+    c.updateProjectionMatrix();
+    return c;
+  };
+
+  it("ignores NaN points and frames the finite ones", () => {
+    const pts = [
+      new THREE.Vector3(-1, -1, -1),
+      new THREE.Vector3(1, 1, 1),
+      new THREE.Vector3(NaN, NaN, NaN),
+      new THREE.Vector3(0, undefined, 0),
+    ];
+    const fit = fitPointsToView(pts, dir, cam(), 0.9);
+    expect(fit).not.toBeNull();
+    for (const v of [fit.target.x, fit.target.y, fit.target.z, fit.distance])
+      expect(Number.isFinite(v)).toBe(true);
+  });
+
+  it("returns null when nothing finite is left, rather than NaN", () => {
+    const pts = [new THREE.Vector3(NaN, 0, 0), new THREE.Vector3(0, NaN, 0)];
+    expect(fitPointsToView(pts, dir, cam(), 0.9)).toBeNull();
+  });
+});

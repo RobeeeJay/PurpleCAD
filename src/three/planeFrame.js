@@ -54,12 +54,54 @@ export function frameFromPointNormal(point, normal) {
   };
 }
 
+// A plane frame lying exactly on a clicked triangle (world corners a, b, c),
+// through the click point projected onto it.  The raycast's hit point sits a
+// float32 hair off the face -- about 1e-6 on a real STL -- and a split plane
+// that close to a face grazes it inside OCC's tolerances: on mms2_base the
+// difference half came back empty, 1e-6 from a face where the exact plane
+// split cleanly.  `towards` orients the normal (the face normal the pick
+// already computed, which accounts for mirrored transforms).  Null when the
+// triangle is degenerate.
+export function frameFromFaceHit(point, a, b, c, towards) {
+  const n = new THREE.Vector3()
+    .subVectors(b, a)
+    .cross(new THREE.Vector3().subVectors(c, a));
+  if (n.lengthSq() < 1e-24) return null;
+  n.normalize();
+  if (towards && n.dot(towards) < 0) n.negate();
+  const p = new THREE.Vector3(point.x, point.y, point.z);
+  p.addScaledVector(n, -new THREE.Vector3().subVectors(p, a).dot(n));
+  return frameFromPointNormal(p, n);
+}
+
 const eul = (r) => new THREE.Euler(r.x || 0, r.y || 0, r.z || 0);
 
 // The unit normal (+Z) of a frame's rotation.
 export function normalOf(rotation) {
   const n = new THREE.Vector3(0, 0, 1).applyEuler(eul(rotation));
   return { x: n.x, y: n.y, z: n.z };
+}
+
+// Does a frame's plane pass THROUGH a body, given the body's world vertices as a
+// flat [x,y,z,...] array?  True only when vertices lie clearly on both sides.
+// A face of the body itself has every vertex on one side or in the plane, so it
+// cuts nothing -- the split tool used to accept it and hand back a renamed copy.
+// `tol` absorbs float noise in vertices that sit on the plane.
+export function planeCrossesPoints(frame, positions, tol = 1e-6) {
+  const n = normalOf(frame.rotation);
+  const o = frame.position;
+  let above = false;
+  let below = false;
+  for (let i = 0; i < positions.length; i += 3) {
+    const d =
+      (positions[i] - o.x) * n.x +
+      (positions[i + 1] - o.y) * n.y +
+      (positions[i + 2] - o.z) * n.z;
+    if (d > tol) above = true;
+    else if (d < -tol) below = true;
+    if (above && below) return true;
+  }
+  return false;
 }
 
 // Apply the dialog's per-axis rotation (degrees, in the plane's local frame) and

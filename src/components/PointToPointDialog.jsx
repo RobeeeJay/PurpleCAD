@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useStore } from "../store";
 import { useEscapeKey } from "./inputs.jsx";
 import { BAR_STYLE, Field, barBtn, pickBtn } from "./viewport/overlayBar.js";
@@ -58,7 +58,10 @@ const PointToPointDialog = () => {
     <>
       <div className="sketch-placement-hint">{hint}</div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <Field label="Move">
+        <Field
+          label="Move"
+          hint="The object owning Point A is moved so that A lands exactly on B. Nothing rotates or resizes."
+        >
           <button
             type="button"
             style={pickBtn(tool.picking === "A")}

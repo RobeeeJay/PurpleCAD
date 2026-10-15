@@ -28,7 +28,28 @@
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   font-family: var(--font-mono);
+  margin-bottom: 8px;
+}
+
+.about-license {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
   margin-bottom: 12px;
+}
+
+.about-license-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent, #6c3fd4);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.about-license-link:focus-visible {
+  outline: 2px solid var(--accent, #6c3fd4);
+  outline-offset: 2px;
 }
 
 .about-commit {
@@ -55,4 +76,115 @@
   font-family: var(--font-mono);
   text-align: right;
   color: var(--text-primary);
+}
+
+/* Licence dialog, opened from the About box, above it. */
+.license-backdrop {
+  z-index: 9001;
+}
+
+.license-dialog {
+  width: min(760px, 90vw);
+  height: 80vh;
+}
+
+.license-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.license-tab {
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  padding: 6px 12px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.license-tab.active {
+  border-color: var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  margin-bottom: -1px;
+}
+
+.license-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px 20px;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  user-select: text;
+}
+
+.license-heading {
+  margin: 16px 0 6px;
+  color: var(--text-primary);
+}
+
+.license-para,
+.license-quote,
+.license-list {
+  margin: 0 0 10px;
+  max-width: 68ch;
+}
+
+.license-quote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.license-list {
+  padding-left: 22px;
+}
+
+.license-list .license-list {
+  margin: 4px 0 0;
+}
+
+.license-rule {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 14px 0;
+}
+
+.license-body code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+.license-link {
+  color: var(--accent, #6c3fd4);
+  overflow-wrap: anywhere;
+}
+
+.license-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+
+.license-table {
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.license-table th,
+.license-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+}
+
+.license-plain {
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  margin: 0;
 }

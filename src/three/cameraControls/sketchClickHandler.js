@@ -13,6 +13,20 @@ import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { collectConnectedShapes } from "../sketchGeometry.js";
 import { effectiveSketchSelTypes } from "../../store/selectionMode.js";
+import { nearestConstraintMarker } from "../sceneObjects/constraintIconSprites.js";
+
+// Constraints whose marker re-opens an editor on double-click.
+const EDITABLE_CONSTRAINTS = new Set([
+  "distance",
+  "pointLineDistance",
+  "offset",
+  "rectangularPattern",
+  "mirror",
+  "circularPattern",
+  "centre",
+  "text",
+  "cog",
+]);
 
 export function createSketchClickHandler(
   {
@@ -81,97 +95,99 @@ export function createSketchClickHandler(
       const dblMesh = dblSel ? objectsRef.current[dblSel.id] : null;
       if (dblG && dblMesh) {
         const rect2 = renderer.domElement.getBoundingClientRect();
-        for (const cObj of dblG.children) {
-          if (
-            !cObj.userData.isConstraint ||
-            (cObj.userData.constraintType !== "distance" &&
-              cObj.userData.constraintType !== "pointLineDistance" &&
-              cObj.userData.constraintType !== "offset" &&
-              cObj.userData.constraintType !== "rectangularPattern" &&
-              cObj.userData.constraintType !== "mirror" &&
-              cObj.userData.constraintType !== "circularPattern" &&
-              cObj.userData.constraintType !== "text")
-          )
-            continue;
-          const lp = cObj.userData.constraintIconLocalPos;
-          if (!lp) continue;
-          const wp = new THREE.Vector3(lp.x, lp.y, 0.005)
-            .applyQuaternion(dblMesh.quaternion)
-            .add(dblMesh.position);
-          const ndc2 = wp.clone().project(cameraRef.current);
-          const cpx = ((ndc2.x + 1) / 2) * rect2.width + rect2.left;
-          const cpy = ((-ndc2.y + 1) / 2) * rect2.height + rect2.top;
-          if (Math.hypot(sx - cpx, sy - cpy) < 18) {
-            const c = (dblSel.constraints || [])[cObj.userData.constraintIdx];
-            if (c && c.type === "pointLineDistance") {
-              useStore.getState().setSketchDistanceInput({
-                pointLine: {
-                  pointShapeIdx: c.pointShapeIdx,
-                  pointKey: c.pointKey,
-                  lineShapeIdx: c.lineShapeIdx,
-                },
-                defaultDistance: c.distance,
-                constraintIdx: cObj.userData.constraintIdx,
+        const cObj = nearestConstraintMarker(
+          dblG.children,
+          dblMesh,
+          cameraRef.current,
+          rect2,
+          sx,
+          sy,
+          18,
+          (o) => EDITABLE_CONSTRAINTS.has(o.userData.constraintType),
+        );
+        if (cObj) {
+          const c = (dblSel.constraints || [])[cObj.userData.constraintIdx];
+          if (c && c.type === "pointLineDistance") {
+            useStore.getState().setSketchDistanceInput({
+              pointLine: {
+                pointShapeIdx: c.pointShapeIdx,
+                pointKey: c.pointKey,
+                lineShapeIdx: c.lineShapeIdx,
+              },
+              defaultDistance: c.distance,
+              constraintIdx: cObj.userData.constraintIdx,
+            });
+            useStore.getState().setSketchConstraintMode("distance");
+          } else if (c && c.type === "distance") {
+            useStore.getState().setSketchDistanceInput({
+              shapeAIdx: c.shapeAIdx,
+              pointA: c.pointA,
+              shapeBIdx: c.shapeBIdx,
+              pointB: c.pointB,
+              // Preserve the raw distance (string formula or legacy
+              // number) so the input shows what the user typed.
+              defaultDistance: c.distance,
+              constraintIdx: cObj.userData.constraintIdx,
+            });
+            useStore.getState().setSketchConstraintMode("distance");
+          } else if (c && c.type === "offset") {
+            useStore.getState().setSketchDistanceInput({
+              offsetConstraintIdx: cObj.userData.constraintIdx,
+              offsetGroup: c.offsetGroup,
+              defaultDistance: c.distance,
+            });
+            useStore.getState().setSketchConstraintMode("distance");
+          } else if (c && c.type === "rectangularPattern") {
+            // Re-open the Rectangular Pattern tool seeded from this pattern
+            // so its counts/offsets can be edited and re-confirmed.
+            useStore
+              .getState()
+              .beginRectangularPatternEdit(
+                selectedIdRef.current,
+                cObj.userData.constraintIdx,
+              );
+          } else if (c && c.type === "mirror") {
+            useStore
+              .getState()
+              .beginMirrorEdit(
+                selectedIdRef.current,
+                cObj.userData.constraintIdx,
+              );
+          } else if (c && c.type === "cog") {
+            // Re-open the Cog dialog on this cog to edit it in place.
+            useStore
+              .getState()
+              .beginCogEdit(selectedIdRef.current, cObj.userData.constraintIdx);
+          } else if (c && c.type === "centre") {
+            // Re-open the Centre dialog on this constraint to edit it.
+            useStore
+              .getState()
+              .beginCentreEdit(
+                selectedIdRef.current,
+                cObj.userData.constraintIdx,
+              );
+          } else if (c && c.type === "circularPattern") {
+            useStore
+              .getState()
+              .beginCircularPatternEdit(
+                selectedIdRef.current,
+                cObj.userData.constraintIdx,
+              );
+          } else if (c && c.type === "text") {
+            // Re-open the Text dialog seeded from this text shape so its
+            // contents / height / font can be edited and re-committed.
+            const ts = (dblSel.shapes || [])[c.shapeIdx];
+            if (ts && ts.type === "text")
+              useStore.getState().setTextDraft({
+                x: ts.x,
+                y: ts.y,
+                text: ts.text,
+                heightMm: ts.height * MM_PER_UNIT,
+                font: ts.font,
+                editIdx: c.shapeIdx,
               });
-              useStore.getState().setSketchConstraintMode("distance");
-            } else if (c && c.type === "distance") {
-              useStore.getState().setSketchDistanceInput({
-                shapeAIdx: c.shapeAIdx,
-                pointA: c.pointA,
-                shapeBIdx: c.shapeBIdx,
-                pointB: c.pointB,
-                // Preserve the raw distance (string formula or legacy
-                // number) so the input shows what the user typed.
-                defaultDistance: c.distance,
-                constraintIdx: cObj.userData.constraintIdx,
-              });
-              useStore.getState().setSketchConstraintMode("distance");
-            } else if (c && c.type === "offset") {
-              useStore.getState().setSketchDistanceInput({
-                offsetConstraintIdx: cObj.userData.constraintIdx,
-                offsetGroup: c.offsetGroup,
-                defaultDistance: c.distance,
-              });
-              useStore.getState().setSketchConstraintMode("distance");
-            } else if (c && c.type === "rectangularPattern") {
-              // Re-open the Rectangular Pattern tool seeded from this pattern
-              // so its counts/offsets can be edited and re-confirmed.
-              useStore
-                .getState()
-                .beginRectangularPatternEdit(
-                  selectedIdRef.current,
-                  cObj.userData.constraintIdx,
-                );
-            } else if (c && c.type === "mirror") {
-              useStore
-                .getState()
-                .beginMirrorEdit(
-                  selectedIdRef.current,
-                  cObj.userData.constraintIdx,
-                );
-            } else if (c && c.type === "circularPattern") {
-              useStore
-                .getState()
-                .beginCircularPatternEdit(
-                  selectedIdRef.current,
-                  cObj.userData.constraintIdx,
-                );
-            } else if (c && c.type === "text") {
-              // Re-open the Text dialog seeded from this text shape so its
-              // contents / height / font can be edited and re-committed.
-              const ts = (dblSel.shapes || [])[c.shapeIdx];
-              if (ts && ts.type === "text")
-                useStore.getState().setTextDraft({
-                  x: ts.x,
-                  y: ts.y,
-                  text: ts.text,
-                  heightMm: ts.height * MM_PER_UNIT,
-                  font: ts.font,
-                  editIdx: c.shapeIdx,
-                });
-            }
-            return;
           }
+          return;
         }
       }
 
@@ -326,22 +342,20 @@ export function createSketchClickHandler(
       const cMesh = cSelItem ? objectsRef.current[cSelItem.id] : null;
       if (cg && cMesh) {
         const cRect = renderer.domElement.getBoundingClientRect();
-        for (const cObj of cg.children) {
-          if (!cObj.userData.isConstraint) continue;
-          const lp = cObj.userData.constraintIconLocalPos;
-          if (!lp) continue;
-          const wp = new THREE.Vector3(lp.x, lp.y, 0.005)
-            .applyQuaternion(cMesh.quaternion)
-            .add(cMesh.position);
-          const ndc = wp.clone().project(cameraRef.current);
-          const cpx = ((ndc.x + 1) / 2) * cRect.width + cRect.left;
-          const cpy = ((-ndc.y + 1) / 2) * cRect.height + cRect.top;
-          if (Math.hypot(sx - cpx, sy - cpy) < 14) {
-            clearMultiSelectOverlays();
-            multiSelectedRef.current = [];
-            selectConstraint(cObj.userData.constraintIdx);
-            return;
-          }
+        const cObj = nearestConstraintMarker(
+          cg.children,
+          cMesh,
+          cameraRef.current,
+          cRect,
+          sx,
+          sy,
+          14,
+        );
+        if (cObj) {
+          clearMultiSelectOverlays();
+          multiSelectedRef.current = [];
+          selectConstraint(cObj.userData.constraintIdx);
+          return;
         }
       }
     }

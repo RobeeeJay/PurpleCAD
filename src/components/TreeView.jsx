@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
 import { getDescendantFolderIds, nextFolderId } from "../store/folderSlice.js";
+import { ComponentIcon, NewComponentIcon } from "./icons/componentIcons.jsx";
+import ComponentMotionButtons from "./ComponentMotionButtons.jsx";
 import "../styles/TreeView.css";
 
 const SketchObjectIcon = () => (
@@ -187,58 +189,6 @@ const SoloIcon = () => (
   </svg>
 );
 
-const FolderIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24">
-    <rect
-      stroke="#c4c2b8"
-      fill="none"
-      strokeWidth="1.5"
-      strokeLinejoin="miter"
-      x="2"
-      y="8"
-      width="20"
-      height="13"
-    />
-    <polyline
-      stroke="#c4c2b8"
-      fill="none"
-      strokeWidth="1.5"
-      strokeLinejoin="miter"
-      points="2,8 2,5 8,5 10,8"
-    />
-    <line
-      stroke="#6C3FD4"
-      fill="none"
-      strokeWidth="1.5"
-      strokeLinecap="square"
-      x1="2"
-      y1="11"
-      x2="22"
-      y2="11"
-    />
-    <line
-      stroke="#D4A33F"
-      fill="none"
-      strokeWidth="1"
-      strokeLinecap="square"
-      x1="6"
-      y1="15"
-      x2="18"
-      y2="15"
-    />
-    <line
-      stroke="#D4A33F"
-      fill="none"
-      strokeWidth="1"
-      strokeLinecap="square"
-      x1="6"
-      y1="18"
-      x2="14"
-      y2="18"
-    />
-  </svg>
-);
-
 const InspectorIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24">
     <line stroke="#c4c2b8" strokeWidth="1.5" x1="3" y1="6" x2="13" y2="6" />
@@ -260,58 +210,6 @@ const InspectorIcon = () => (
       y1="18.6"
       x2="21.5"
       y2="21.5"
-    />
-  </svg>
-);
-
-const NewFolderIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24">
-    <rect
-      stroke="#c4c2b8"
-      fill="none"
-      strokeWidth="1.5"
-      strokeLinejoin="miter"
-      x="2"
-      y="8"
-      width="20"
-      height="13"
-    />
-    <polyline
-      stroke="#c4c2b8"
-      fill="none"
-      strokeWidth="1.5"
-      strokeLinejoin="miter"
-      points="2,8 2,5 8,5 10,8"
-    />
-    <line
-      stroke="#6C3FD4"
-      fill="none"
-      strokeWidth="1.5"
-      strokeLinecap="square"
-      x1="2"
-      y1="11"
-      x2="22"
-      y2="11"
-    />
-    <line
-      stroke="#6C3FD4"
-      fill="none"
-      strokeWidth="1.5"
-      strokeLinecap="square"
-      x1="12"
-      y1="14"
-      x2="12"
-      y2="20"
-    />
-    <line
-      stroke="#6C3FD4"
-      fill="none"
-      strokeWidth="1.5"
-      strokeLinecap="square"
-      x1="9"
-      y1="17"
-      x2="15"
-      y2="17"
     />
   </svg>
 );
@@ -435,7 +333,7 @@ const TreeViewItem = ({
       clearItemSolo();
     } else if (state.soloItemId == null) {
       // First solo: remember where we are, then frame the soloed object.
-      setItemSolo(node.id, cc?.captureView?.() ?? null);
+      setItemSolo(node.id, cc?.snapshotView?.() ?? null);
       cc?.frameObject?.(node.id);
     } else {
       // Switching solo: keep the original snapshot, frame the new object.
@@ -557,7 +455,7 @@ const TreeViewItem = ({
         )}
 
         <span className="tree-icon">
-          {isFolder ? <FolderIcon /> : getIcon(node.type)}
+          {isFolder ? <ComponentIcon /> : getIcon(node.type)}
         </span>
 
         {editing ? (
@@ -586,6 +484,7 @@ const TreeViewItem = ({
 
         {!editing && (
           <>
+            {isFolder && <ComponentMotionButtons folder={node} />}
             {!isFolder && (
               <button
                 className={`tree-action-btn visibility-btn ${isHidden ? "always-visible" : ""}`}
@@ -607,7 +506,7 @@ const TreeViewItem = ({
             </button>
             <button
               className="tree-action-btn delete-btn"
-              title={isFolder ? "Delete folder" : "Delete"}
+              title={isFolder ? "Delete component (its parts stay)" : "Delete"}
               onClick={() =>
                 isFolder ? deleteFolder(node.id) : deleteItem(node.id)
               }
@@ -770,10 +669,10 @@ const TreeView = ({ items }) => {
           </button>
           <button
             className="tree-header-btn"
-            title="New folder"
+            title="New component — a group of parts that can be given a motion"
             onClick={handleAddFolder}
           >
-            <NewFolderIcon />
+            <NewComponentIcon />
           </button>
           <button
             className={`tree-header-btn ${hideHiddenItems ? "active" : ""}`}

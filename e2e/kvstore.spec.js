@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,4 +130,63 @@ test("settings round-trip and active project tracking", async () => {
   expect(result.got).toBe("42");
   expect(result.removed).toBe(null);
   expect(result.active).toBe(result.pid);
+});
+
+// Through the renderer: it loads the database once, reads its cache and writes
+// through asynchronously.  A change has to survive a project switch, and one
+// made the moment before a reload -- still waiting out the timeline save's
+// coalescing delay -- has to survive it too: the unload flush sends it
+// synchronously, as an async message could be lost with the page.
+test("the renderer's writes survive a project switch and an immediate reload", async () => {
+  const page = await app.firstWindow();
+  const items = () =>
+    page.evaluate(() =>
+      window.__store
+        .getState()
+        .items.filter((i) => i.name?.startsWith("KV probe"))
+        .map((i) => i.name),
+    );
+  const add = (name) =>
+    page.evaluate((name) => {
+      window.__store.getState().addItem({
+        id: 9000 + Math.floor(Math.random() * 999),
+        name,
+        type: "cube",
+        children: [],
+        parentId: null,
+        position: { x: 0, y: 1, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+    }, name);
+
+  const home = await page.evaluate(
+    () => window.__store.getState().activeProjectId,
+  );
+  await add("KV probe A");
+  // Away to a new project and back: the first project's change is still there.
+  await page.evaluate(() =>
+    window.__store.getState().createProject("KV renderer"),
+  );
+  const other = await page.evaluate(
+    () => window.__store.getState().activeProjectId,
+  );
+  expect(other).not.toBe(home);
+  expect(await items()).toEqual([]);
+  await page.evaluate(
+    (id) => window.__store.getState().switchProject(id),
+    home,
+  );
+  expect(await items()).toEqual(["KV probe A"]);
+
+  // A change and an immediate reload.
+  await add("KV probe B");
+  await page.reload();
+  await page.locator(".toolbar").waitFor();
+  await expect.poll(items).toEqual(["KV probe A", "KV probe B"]);
+
+  await page.evaluate(
+    (id) => window.__store.getState().deleteProject(id),
+    other,
+  );
 });

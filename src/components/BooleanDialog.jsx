@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { useEscapeKey, useDebouncedPreview } from "./inputs.jsx";
 import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";
-import { performCsg } from "../three/occClient.js";
+import { performCsg, withCommitGuard } from "../three/occClient.js";
+import { openMeshNotice } from "../three/importWeld.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 
@@ -16,10 +17,6 @@ const SOLID_TYPES = [
   "csg",
 ];
 const isSolid = (item) => item && SOLID_TYPES.includes(item.type);
-// An imported solid is a csg item carrying only a mesh (no recipe).  OCC can't
-// boolean a dense one without freezing, so those go through a mesh boolean.
-const isImportedMesh = (item) =>
-  item.type === "csg" && !item.regenerator && item.geometryData;
 
 // User-facing name of each operation (the OCC op key "difference" reads as
 // "Cut").  Used for the hint, the Confirm tooltip and the result item's name.
@@ -133,18 +130,19 @@ const BooleanDialog = () => {
   useEscapeKey(open, close);
 
   // Live ghost of the boolean result, debounced (each rebuild is a full OCC
-  // op).  Imported dense meshes take a separate JS boolean at confirm time, so
-  // skip previewing those.  Reuses the pattern ghost renderer (a generic
-  // translucent {geometryData, position} overlay).
+  // op).  Reuses the pattern ghost renderer (a generic translucent
+  // {geometryData, position} overlay).
   useDebouncedPreview(
     open && valid,
     async () => {
       const cc = useStore.getState()._cameraControls;
       const ordered = orderedItems();
-      if (ordered.length === 0 || ordered.some(isImportedMesh)) {
+      if (ordered.length === 0) {
         cc?.clearBooleanPreview?.();
         return;
       }
+      // Dropped if the dialog closes, or a newer preview starts, first.
+      const token = cc?.beginToolPreview?.();
       try {
         const result = await performCsg({
           selectedItems: ordered,
@@ -156,6 +154,7 @@ const BooleanDialog = () => {
           cc?.previewBoolean?.(
             result,
             ordered.map((i) => i.id),
+            token,
           );
         else cc?.clearBooleanPreview?.();
       } catch {
@@ -199,42 +198,31 @@ const BooleanDialog = () => {
     // the object being cut from).  Omitted when it uses the default material.
     const primaryMaterial = ordered[0]?.material;
     const opLabel = OP_NAME[operation];
+    // Checked before the boolean, shown once its result is committed.
+    const notice = await openMeshNotice(ordered);
+    const warn = () => notice && useStore.getState().showNotification(notice);
     try {
-      if (ordered.some(isImportedMesh)) {
-        const cc = useStore.getState()._cameraControls;
-        const result = cc?.meshBoolean?.(
-          ordered.map((i) => i.id),
+      // Imported meshes go through OCC too.  They used to take a three-bvh-
+      // csg mesh boolean, 30-100x faster but never closed: two overlapping
+      // spheres came back with 700-3,200 open edges along the intersection
+      // curve, where OCC's result had none -- and with no recipe, so it never
+      // rebuilt.  A mesh too dense for OCC is refused with an offer to
+      // simplify it (the notification below).
+      // Guarded: this dialog previews on a debounce, and a preview that
+      // supersedes mid-commit calls cancelOcc, which aborts the REAL op and
+      // hands back an empty mesh.  A slow fuse (a swept handle onto a spun cup)
+      // landed a 0-triangle body that way, with no error anywhere -- the same
+      // failure the hole/shell/emboss commits are guarded against.
+      const result = await withCommitGuard(() =>
+        performCsg({
+          selectedItems: ordered,
           operation,
-        );
-        if (!result) {
-          alert("Couldn't combine the selected meshes.");
-          return;
-        }
-        const meshId = maxItemId(useStore.getState().history) + 1;
-        addItem({
-          id: meshId,
-          name: `${opLabel} ${meshId}`,
-          type: "csg",
-          children: [],
-          position: result.position,
-          scale: { x: 1, y: 1, z: 1 },
-          rotation: { x: 0, y: 0, z: 0 },
-          geometryData: result.geometryData,
-          ...(primaryMaterial && { material: primaryMaterial }),
-        });
-        consumeItems(ordered.map((i) => i.id));
-        finish(meshId);
-        return;
-      }
-
-      const result = await performCsg({
-        selectedItems: ordered,
-        operation,
-        printPrecision,
-        allItems: items,
-      });
+          printPrecision,
+          allItems: items,
+        }),
+      );
       if (!result) {
-        alert(`${opLabel} produced nothing.`);
+        useStore.getState().showNotification(`${opLabel} produced nothing.`);
         return;
       }
       const id = maxItemId(useStore.getState().history) + 1;
@@ -259,9 +247,10 @@ const BooleanDialog = () => {
       });
       consumeItems(ordered.map((i) => i.id));
       finish(id);
+      warn();
     } catch (err) {
       console.error("CSG operation failed:", err);
-      alert("Boolean operation failed: " + err.message);
+      useStore.getState().showNotification(`${opLabel} failed: ${err.message}`);
     }
   };
 

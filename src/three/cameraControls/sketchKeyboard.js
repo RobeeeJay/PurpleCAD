@@ -10,6 +10,15 @@ import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { translateShape } from "../sketchGeometry.js";
 import {
+  constraintsAmong,
+  remapConstraintShapeIndices,
+} from "../../store/internals.js";
+
+// What a copy carries besides the shapes: the joins between them, and the lock
+// that keeps a cog or a text a single editable shape -- without it a pasted
+// cog was plain outline that its editor would no longer open on.
+const CLIPBOARD_CONSTRAINTS = new Set(["coincident", "cog", "text"]);
+import {
   selectedSketchLineIndices,
   offsetSelectedSketchGeometry,
 } from "../sketchModifyActions.js";
@@ -18,6 +27,7 @@ export function createSketchKeyboardHandler(
   {
     sketchModeRef,
     itemsRef,
+    objectsRef,
     selectedIdRef,
     extrudeSelectModeRef,
     sketchPlacementModeRef,
@@ -36,6 +46,7 @@ export function createSketchKeyboardHandler(
     clearMultiSelectOverlays,
     clearCoincidentFirstOverlay,
     clearSketchSelection,
+    sketchSelectLine,
     cancelSketchDraw,
     clearMarqueeRect,
     clearModifyPreview,
@@ -57,8 +68,9 @@ export function createSketchKeyboardHandler(
       return;
 
     // Arrow keys nudge the selected sketch geometry by 1mm (one grid step in
-    // scene units).  Translates the whole selection rigidly, then solves the
-    // rest of the system around it — same path a body drag uses.
+    // scene units), or 0.1mm with Shift held, for fine placement.  Translates
+    // the whole selection rigidly, then solves the rest of the system around
+    // it — same path a body drag uses.
     const nudge = {
       ArrowUp: [0, 1],
       ArrowDown: [0, -1],
@@ -84,7 +96,7 @@ export function createSketchKeyboardHandler(
       );
       if (indices && selItem) {
         e.preventDefault();
-        const step = 1 / MM_PER_UNIT;
+        const step = (e.shiftKey ? 0.1 : 1) / MM_PER_UNIT;
         const dx = nudge[0] * step;
         const dy = nudge[1] * step;
         const placed = new Map();
@@ -198,22 +210,14 @@ export function createSketchKeyboardHandler(
             : [];
       if (indices.length === 0) return;
       e.preventDefault();
-      const indexSet = new Set(indices);
-      const idxMap = new Map(indices.map((origIdx, i) => [origIdx, i]));
+      const present = indices.filter((i) => shapes[i]);
       sketchClipboard = {
-        shapes: indices.map((i) => shapes[i]).filter(Boolean),
-        constraints: constraints
-          .filter(
-            (c) =>
-              c.type === "coincident" &&
-              indexSet.has(c.shapeAIdx) &&
-              indexSet.has(c.shapeBIdx),
-          )
-          .map((c) => ({
-            ...c,
-            shapeAIdx: idxMap.get(c.shapeAIdx),
-            shapeBIdx: idxMap.get(c.shapeBIdx),
-          })),
+        shapes: present.map((i) => shapes[i]),
+        constraints: constraintsAmong(
+          constraints,
+          present,
+          CLIPBOARD_CONSTRAINTS,
+        ),
       };
       return;
     }
@@ -231,23 +235,40 @@ export function createSketchKeyboardHandler(
       e.preventDefault();
       const baseIdx = (selItem.shapes || []).length;
       const PASTE_OFFSET = 0.5;
-      const newShapes = sketchClipboard.shapes
-        .map((s) => translateShape(s, PASTE_OFFSET, PASTE_OFFSET))
-        .filter(Boolean)
+      // Clipboard position -> new sketch index, or -1 for a shape that could
+      // not be moved.  Dropping one used to shift every later shape down while
+      // the constraints kept the old numbering, joining the wrong shapes.
+      const newShapes = [];
+      const pasteMap = new Map();
+      sketchClipboard.shapes.forEach((s, i) => {
+        const moved = translateShape(s, PASTE_OFFSET, PASTE_OFFSET);
+        if (!moved) return pasteMap.set(i, -1);
         // Pasted copies start ungrouped (don't inherit the source's group).
-        .map((s) => {
-          if (s.group == null) return s;
-          const { group, ...rest } = s;
-          return rest;
-        });
-      const newConstraints = sketchClipboard.constraints.map((c) => ({
-        ...c,
-        shapeAIdx: c.shapeAIdx + baseIdx,
-        shapeBIdx: c.shapeBIdx + baseIdx,
-      }));
+        const { group, ...ungrouped } = moved;
+        pasteMap.set(i, baseIdx + newShapes.length);
+        newShapes.push(group == null ? moved : ungrouped);
+      });
+      const newConstraints = sketchClipboard.constraints
+        .map((c) => remapConstraintShapeIndices(c, pasteMap))
+        .filter(Boolean);
       useStore
         .getState()
         .addSketchShapes(selectedIdRef.current, newShapes, newConstraints);
+      // The copies become the selection, so they can be dragged or nudged
+      // straight away -- they used to land unselected beside the originals,
+      // which stayed selected, so a drag moved the wrong geometry.  One shape
+      // is selected exactly as a click would select it, so the tools that act
+      // on a single selected line (Horizontal, Offset, ...) take it; several
+      // become a multi-selection, as a marquee makes.
+      const pasted = newShapes.map((_, i) => baseIdx + i);
+      clearSketchSelection();
+      if (pasted.length === 1) {
+        const sketchMesh = objectsRef.current[selectedIdRef.current];
+        if (sketchMesh) sketchSelectLine(pasted[0], newShapes[0], sketchMesh);
+      } else {
+        multiSelectedRef.current = pasted;
+        showMultiSelectOverlays(pasted);
+      }
       return;
     }
 
@@ -347,7 +368,10 @@ export function createSketchKeyboardHandler(
         // (keeping the captured profiles + depth) rather than cancelling the
         // whole extrude — so geometry stays selectable.  (Returning to the
         // legacy "depth" state left every click unhandled: selection was dead.)
-        if (extrudeSelectModeRef.current === "start") {
+        if (
+          extrudeSelectModeRef.current === "start" ||
+          extrudeSelectModeRef.current === "to"
+        ) {
           clearStartHighlight();
           useStore.getState().setExtrudeSelectMode("profile");
           return;
@@ -451,11 +475,6 @@ export function createSketchKeyboardHandler(
         store.toggleCrossSectionView();
         return;
       }
-      if (e.key === "8") {
-        e.preventDefault();
-        store.toggleCurveResolution();
-        return;
-      }
     }
 
     if (sketchModeRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -472,7 +491,7 @@ export function createSketchKeyboardHandler(
         clearCoincidentFirstOverlay();
         return;
       }
-      // I toggles dashed on the selected line(s); O offsets them.  Both are
+      // I toggles construction on the selected line(s); O offsets them.  Both are
       // no-ops without a line selection, mirroring the disabled toolbar
       // buttons.
       if (key === "i") {

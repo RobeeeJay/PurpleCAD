@@ -17,6 +17,8 @@ export const createSketchUiStateSlice = (set) => ({
       ...(tool !== "rectangularPattern"
         ? { sketchRectangularPatternState: null }
         : null),
+      ...(tool !== "centre" ? { sketchCentreState: null } : null),
+      ...(tool !== "cog" ? { sketchCogState: null } : null),
     }),
 
   selectedSketchElement: null, // { type:'point'|'line', shapeIdx, pointKey? }

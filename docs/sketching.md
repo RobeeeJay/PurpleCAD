@@ -58,6 +58,14 @@ vertical, it automatically gets the matching
 [horizontal/vertical constraint](constraints-and-dimensions.md) so it stays that
 way — no need to add it by hand.
 
+## Axis lock while dragging (Shift)
+
+Hold **Shift** while **dragging** sketch geometry to slide it along one axis
+only: whichever of left/right or up/down it has moved further since you picked
+it up. Drag 10 mm right and then 11 mm up, and it moves 11 mm up and nothing
+across. Press or release Shift at any point in the drag and it re-locks
+straight away; while Shift is held it also stops snapping to other geometry.
+
 ## Construction (dashed) geometry
 
 Toggle a line to **dashed** with the **Toggle Dashed** button (in the Modify

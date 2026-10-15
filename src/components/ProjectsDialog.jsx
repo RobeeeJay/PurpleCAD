@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../store";
 import "../styles/ProjectsDialog.css";
@@ -31,8 +31,8 @@ const ProjectsDialog = () => {
 
   // Electron has no window.prompt, so create with a default name and drop the
   // new (now-active) card straight into inline rename instead of prompting.
-  const create = () => {
-    createProject("Untitled");
+  const create = async () => {
+    await createProject("Untitled");
     const id = useStore.getState().activeProjectId;
     setRenamingId(id);
     setDraftName("Untitled");

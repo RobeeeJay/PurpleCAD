@@ -12,6 +12,7 @@ import * as THREE from "three";
 import { Line2 } from "three/addons/lines/Line2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
+import { trackScreenDash } from "../screenDash.js";
 import { getSketchShapePoints } from "../sceneObjects.js";
 import { SKETCH_SELECTION_BLUE } from "../theme.js";
 
@@ -20,7 +21,7 @@ const resolutionOf = (renderer) =>
     ? renderer.getSize(new THREE.Vector2())
     : new THREE.Vector2(window.innerWidth, window.innerHeight);
 
-function makeLine(pts, opts) {
+export function makeLine(pts, opts) {
   const {
     color,
     linewidth,
@@ -39,9 +40,8 @@ function makeLine(pts, opts) {
     transparent: opacity < 1,
     opacity,
     dashed: !!dashed,
-    dashSize: dashed ? 0.12 : 0,
-    gapSize: dashed ? 0.08 : 0,
   });
+  if (dashed) trackScreenDash(mat);
   const line = new Line2(geo, mat);
   line.computeLineDistances();
   line.renderOrder = renderOrder;

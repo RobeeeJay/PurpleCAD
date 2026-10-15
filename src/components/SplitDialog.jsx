@@ -1,8 +1,9 @@
-import React from "react";
 import { useStore } from "../store";
 import { useEscapeKey } from "./inputs.jsx";
+import ToolErrorLine from "./ToolErrorLine.jsx";
 import { BAR_STYLE, barBtn, pickBtn } from "./viewport/overlayBar.js";
 import { splitItem } from "../three/occClient.js";
+import { splitWithFallback } from "../three/meshSplit.js";
 import { activePrecision } from "../three/resolution.js";
 import { maxItemId } from "../store/internals.js";
 
@@ -16,8 +17,8 @@ const SplitDialog = () => {
   const setSplitPick = useStore((s) => s.setSplitPick);
   const cancelSplit3d = useStore((s) => s.cancelSplit3d);
   const items = useStore((s) => s.items);
-  const addItem = useStore((s) => s.addItem);
-  const consumeItems = useStore((s) => s.consumeItems);
+  const splitIntoParts = useStore((s) => s.splitIntoParts);
+  const setToolError = useStore((s) => s.setToolError);
   const printPrecision = useStore(activePrecision);
 
   const open = !!splitTool;
@@ -35,28 +36,22 @@ const SplitDialog = () => {
     const target = items.find((i) => i.id === objectId);
     if (!target || !cutFrame) return;
     const plane = { position: cutFrame.position, rotation: cutFrame.rotation };
-    let result;
-    try {
-      result = await splitItem({
-        target,
-        plane,
-        allItems: items,
-        printPrecision,
-      });
-    } catch (err) {
-      // OCC couldn't rebuild the target as a solid (imported dense mesh, a
-      // pattern, or a sweep whose recipe won't re-resolve) — cut the baked mesh
-      // directly instead.
-      result =
+    const { result, error, viaMesh } = await splitWithFallback(
+      () => splitItem({ target, plane, allItems: items, printPrecision }),
+      () =>
         useStore.getState()._cameraControls?.meshSplit?.(target.id, plane) ??
-        null;
-      if (!result) {
-        alert("Split failed: " + err.message);
-        return;
-      }
-    }
-    if (!result || (!result.partA && !result.partB)) {
-      alert("Split produced nothing — does the cut cross the object?");
+        null,
+    );
+    if (!result?.partA || !result?.partB) {
+      // Nothing came back at all: say why OCC failed.  One side only: the cut
+      // misses the body -- a plane that clips only a primitive's box hull gets
+      // past the pick-time check.  Going ahead used to replace the body with
+      // a renamed copy.
+      setToolError(
+        !result && error
+          ? `Split failed: ${error.message}`
+          : `That cut doesn't pass through ${target.name} — pick a face or plane that cuts across it.`,
+      );
       return;
     }
     // The halves inherit the body's EFFECTIVE material.  A pattern clone carries
@@ -67,24 +62,39 @@ const SplitDialog = () => {
       r?.kind === "pattern3d" && r.sourceId != null
         ? items.find((i) => i.id === r.sourceId)?.material
         : target.material;
-    const add = (part, suffix) => {
-      if (!part) return;
-      const id = maxItemId(useStore.getState().history) + 1;
-      addItem({
-        id,
-        name: `${target.name} ${suffix}`,
-        type: "csg",
-        children: [],
-        position: part.position,
-        rotation: { x: 0, y: 0, z: 0 },
-        scale: { x: 1, y: 1, z: 1 },
-        geometryData: part.geometryData,
-        ...(bodyMaterial && { material: bodyMaterial }),
-      });
-    };
-    add(result.partA, "(1)");
-    add(result.partB, "(2)");
-    consumeItems([target.id]);
+    const firstId = maxItemId(useStore.getState().history) + 1;
+    // The recipe a recalc re-cuts the piece from, so it follows the source's
+    // resolution and edits -- and a later op on the piece builds it the same
+    // way, centred where its mesh is.  None for a mesh-fallback split: OCC
+    // couldn't build that body, so it couldn't re-cut it either.
+    const recipe = (side, center) =>
+      viaMesh
+        ? null
+        : {
+            regenerator: {
+              kind: "split",
+              sourceId: target.id,
+              plane,
+              side,
+              center,
+              regeneratedAt: printPrecision,
+            },
+          };
+    const part = (p, i) => ({
+      id: firstId + i,
+      name: `${target.name} (${i + 1})`,
+      type: "csg",
+      children: [],
+      parentId: target.parentId ?? null,
+      position: p.position,
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      geometryData: p.geometryData,
+      ...recipe(i === 0 ? "a" : "b", p.position),
+      ...(bodyMaterial && { material: bodyMaterial }),
+    });
+    // One "Split" step: both halves, with the original hidden from it on.
+    splitIntoParts(target.id, [part(result.partA, 0), part(result.partB, 1)]);
     close();
   };
 
@@ -124,6 +134,7 @@ const SplitDialog = () => {
           Split
         </button>
       </div>
+      <ToolErrorLine />
     </>
   );
 };

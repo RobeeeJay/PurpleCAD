@@ -70,6 +70,21 @@ describe("projectSlice", () => {
     expect(g().cameraResetTrigger).toBeGreaterThan(t);
   });
 
+  it("switching drops a playing motion and its collision ring", async () => {
+    // Folder ids restart per project, so "folder-1" playing in one project
+    // would carry straight onto a different component in the next.
+    await g().createProject("A");
+    store.setState({
+      motionPlaying: { "folder-1": true },
+      motionCollision: { folderId: "folder-1", point: { x: 1, y: 2, z: 3 } },
+      motionTool: { folderId: "folder-1" },
+    });
+    await g().createProject("B");
+    expect(g().motionPlaying).toEqual({});
+    expect(g().motionCollision).toBeNull();
+    expect(g().motionTool).toBeNull();
+  });
+
   it("renames a project", async () => {
     await g().createProject("Old");
     const id = g().activeProjectId;
@@ -81,16 +96,17 @@ describe("projectSlice", () => {
     await g().createProject("A");
     await g().createProject("B");
     const b = g().activeProjectId;
-    g().deleteProject(b);
+    // Async: switching to another project loads its data first.
+    await g().deleteProject(b);
     expect(g().activeProjectId).not.toBe(b);
     expect(g().projects.some((p) => p.id === b)).toBe(false);
   });
 
-  it("refuses to delete the last remaining project", () => {
+  it("refuses to delete the last remaining project", async () => {
     // Collapse to a single project first.
-    while (g().projects.length > 1) g().deleteProject(g().projects[0].id);
+    while (g().projects.length > 1) await g().deleteProject(g().projects[0].id);
     const only = g().projects[0].id;
-    g().deleteProject(only);
+    await g().deleteProject(only);
     expect(g().projects.length).toBe(1);
     expect(g().projects[0].id).toBe(only);
   });

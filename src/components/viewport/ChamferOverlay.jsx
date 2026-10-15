@@ -9,10 +9,10 @@
 // Inputs accept variable formulas, may be cleared to blank while typing, and
 // gate the live preview + Confirm on a valid value (see ../inputs.js).
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../store";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
-import { chamferOrFilletItem } from "../../three/occClient.js";
+import { chamferOrFilletItem, withCommitGuard } from "../../three/occClient.js";
 import { activePrecision } from "../../three/resolution.js";
 import {
   buildChamferSourceAndSubGeo,
@@ -21,6 +21,9 @@ import {
   takeChamferPreview,
 } from "../../three/cameraControls/chamferCommit.js";
 import FormulaInput from "../FormulaInput";
+import ToolErrorLine from "../ToolErrorLine.jsx";
+import { rimBevelLimit } from "../../three/bevelLimit.js";
+import { withLivePolygons } from "../../three/csgUtils.js";
 import { evalValue, useDebouncedPreview } from "../inputs.jsx";
 import { pickBtn } from "./overlayBar.js";
 
@@ -38,7 +41,7 @@ export default function ChamferOverlay() {
   const items = useStore((s) => s.items);
   const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
-  const showNotification = useStore((s) => s.showNotification);
+  const setToolError = useStore((s) => s.setToolError);
   const chamferEditTarget = useStore((s) => s.chamferEditTarget);
   const setChamferEditTarget = useStore((s) => s.setChamferEditTarget);
 
@@ -93,6 +96,33 @@ export default function ChamferOverlay() {
     return () => useStore.getState()._cameraControls?.clearChamferPreview?.();
   }, []);
 
+  // The largest bevel the selected face could take, when the selection is the
+  // flat top or bottom of an extrude (whose outline we know): an upper bound
+  // only -- anything bigger cannot exist, smaller is not promised to work.
+  // Computed before the early return below: it is a hook, so it must run on
+  // every render, open or closed.
+  const limitMm = useMemo(() => {
+    if (!chamferSelectMode) return null;
+    const faces = selectedSubGeometry?.faces || [];
+    if (!faces.length || (selectedSubGeometry?.edges?.length ?? 0) > 0)
+      return null;
+    if (!faces.every((f) => Math.abs(f.nz ?? 0) > 0.999)) return null;
+    const item = items.find((i) => i.id === selectedSubGeometry.itemId);
+    // Re-opening a committed bevel edits the chamfered item, whose recipe
+    // still carries the extrude it was cut from.
+    const extrude =
+      item?.type === "extrude"
+        ? item
+        : item?.regenerator?.source?.type === "extrude"
+          ? item.regenerator.source
+          : null;
+    if (!extrude) return null;
+    const live = withLivePolygons(extrude, items, printPrecision);
+    const outer = live?.profile?.polygon2D;
+    if (!outer?.length) return null;
+    const limit = rimBevelLimit(outer, live.profile.holes || []);
+    return Number.isFinite(limit) ? limit * MM_PER_UNIT : null;
+  }, [chamferSelectMode, selectedSubGeometry, items, printPrecision]);
   if (!chamferSelectMode) return null;
 
   const cancel = () => {
@@ -148,21 +178,35 @@ export default function ChamferOverlay() {
         segments,
         printPrecision,
       });
+      // Guarded: this overlay previews on a debounce, and a preview that
+      // supersedes mid-commit calls cancelOcc, which aborts the REAL op. The
+      // chamfer then comes back empty and the dialog just sits there -- the
+      // medal's bevel timed out that way in the container, dialog still open
+      // and no chamfer step in the timeline.
+      // The preview already tried these exact values and OCC refused them:
+      // report that now rather than spending the same run to fail again.
+      const stashed = takeChamferPreview(key);
+      if (stashed?.error) {
+        setToolError(stashed.error);
+        return;
+      }
       const result =
-        takeChamferPreview(key) ??
-        (await chamferOrFilletItem({
-          source,
-          subGeo,
-          amount,
-          angleRad,
-          segments,
-          allItems: items,
-          printPrecision,
-        }));
+        stashed ??
+        (await withCommitGuard(() =>
+          chamferOrFilletItem({
+            source,
+            subGeo,
+            amount,
+            angleRad,
+            segments,
+            allItems: items,
+            printPrecision,
+          }),
+        ));
       if (!result) {
         // A null result from a user-cancelled op isn't a failure — stay quiet.
         if (!useStore.getState().operationCancelled)
-          showNotification(
+          setToolError(
             "Could not apply — the distance may be too large for the selected geometry.",
           );
         return;
@@ -187,7 +231,7 @@ export default function ChamferOverlay() {
       if (editEntryId) setChamferEditTarget(null);
     } catch (err) {
       console.error("Chamfer operation failed:", err);
-      showNotification(err.message);
+      setToolError(err.message);
     }
   };
 
@@ -204,11 +248,22 @@ export default function ChamferOverlay() {
 
   const confirmOk = valid && hasSelection;
 
+  // Kept short: the hint line is centred at the top and runs under the view
+  // buttons when it's long.
+  const limitHint =
+    limitMm == null
+      ? null
+      : distValid && distVal > limitMm
+        ? `${+distVal.toFixed(3)} mm won't fit this face — at most ${limitMm.toFixed(2)} mm`
+        : `This face takes at most ${limitMm.toFixed(2)} mm`;
+
   return (
     <>
       <div className="sketch-placement-hint">
         {hasSelection
-          ? "Set the distance below, then Confirm · Esc to cancel"
+          ? limitHint
+            ? `${limitHint} · Esc to cancel`
+            : "Set the distance below, then Confirm · Esc to cancel"
           : "Alt+click faces (chained) or Ctrl+click edges to select geometry to chamfer/fillet · Esc to cancel"}
       </div>
       <div className="sketch-distance-input-overlay">
@@ -220,26 +275,40 @@ export default function ChamferOverlay() {
         >
           {hasSelection ? `Geometry: ${selCount}` : "Select geometry"}
         </button>
-        <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+        <span
+          title="Size of the chamfer or fillet on each selected edge. Bigger eats further into the body; larger than the adjacent face and the operation is rejected."
+          style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+        >
           Distance (mm):
         </span>
         <FormulaInput
+          title="Size of the chamfer or fillet on each selected edge. Bigger eats further into the body; larger than the adjacent face and the operation is rejected."
           variables={variables}
           autoFocus
           value={distanceMm}
-          onChange={(e) => setDistanceMm(e.target.value)}
+          onChange={(e) => {
+            setDistanceMm(e.target.value);
+            setToolError(null);
+          }}
           onKeyDown={handleKeyDown}
           style={fieldStyle(distValid)}
         />
         {isChamfer && (
           <>
-            <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+            <span
+              title="Slope of the chamfer. 45 gives an equal cut on both faces; other angles bias it towards one of them."
+              style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+            >
               Angle (°):
             </span>
             <FormulaInput
+              title="Slope of the chamfer. 45 gives an equal cut on both faces; other angles bias it towards one of them."
               variables={variables}
               value={angleDeg}
-              onChange={(e) => setAngleDeg(e.target.value)}
+              onChange={(e) => {
+                setAngleDeg(e.target.value);
+                setToolError(null);
+              }}
               onKeyDown={handleKeyDown}
               style={fieldStyle(angValid)}
             />
@@ -288,6 +357,7 @@ export default function ChamferOverlay() {
           Confirm
         </button>
       </div>
+      <ToolErrorLine />
     </>
   );
 }

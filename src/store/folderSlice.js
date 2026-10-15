@@ -1,4 +1,5 @@
-// Tree-view folders: purely organizational groupings for the Objects list.
+// Tree-view folders -- shown in the UI as Components: groupings of parts for
+// the Objects list, which can also carry a motion (see motionSlice.js).
 // Folders have no geometry and aren't part of the undo/redo timeline —
 // they're persisted to the kv store on their own. Folder ids are
 // "folder-N" strings so they never collide with numeric item ids when
@@ -30,7 +31,7 @@ export const createFolderSlice = (set) => ({
     set((state) => {
       const folder = {
         id: nextFolderId(state.folders),
-        name: "New Folder",
+        name: "New Component",
         parentId: parentId ?? null,
         expanded: true,
       };
@@ -94,7 +95,26 @@ export const createFolderSlice = (set) => ({
       }
 
       saveFolders(folders);
-      return { folders, items, history: withOrphanFlags(history) };
+      // The component is gone, so anything the motion tools still hold about
+      // it goes too -- otherwise its red collision ring stays in the view with
+      // nothing to explain it, and its entry keeps the animation loop running.
+      const { [id]: _wasPlaying, ...motionPlaying } = state.motionPlaying;
+      const editingThis = state.motionTool?.folderId === id;
+      return {
+        folders,
+        items,
+        history: withOrphanFlags(history),
+        motionPlaying,
+        motionCollision:
+          state.motionCollision?.folderId === id ? null : state.motionCollision,
+        ...(editingThis
+          ? {
+              motionTool: null,
+              selectionOverride: null,
+              selectedSubGeometry: null,
+            }
+          : null),
+      };
     }),
 
   // Drag-and-drop reparenting of a folder into another folder (or to root

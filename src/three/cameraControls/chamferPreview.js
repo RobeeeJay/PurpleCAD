@@ -21,12 +21,12 @@ import {
   stashChamferPreview,
 } from "./chamferCommit.js";
 import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
-
-const GHOST_OPACITY = 0.12;
+import { createGhost } from "./ghostSource.js";
 
 export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
   let previewGroup = null;
-  let ghosted = null; // { mesh, opacity, transparent, depthWrite, uOpacity, edges }
+  const { ghost: ghostSource, unghost: unghostSource } =
+    createGhost(objectsRef);
   let requestId = 0;
 
   const removePreview = () => {
@@ -37,52 +37,6 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
       obj.material?.dispose();
     });
     previewGroup = null;
-  };
-
-  // Dim the source mesh so the chamfered result reads clearly on top of it.
-  // Keeps `visible` true (raycasting/picking ignores opacity) so the user can
-  // still add/remove faces during a create/retarget preview.
-  const ghostSource = (itemId) => {
-    const mesh = objectsRef.current[itemId];
-    if (!mesh || (ghosted && ghosted.mesh === mesh)) return;
-    unghostSource();
-    const mat = mesh.material;
-    ghosted = {
-      mesh,
-      opacity: mat.opacity,
-      transparent: mat.transparent,
-      depthWrite: mat.depthWrite,
-      uOpacity: mat.uniforms?.uOpacity ? mat.uniforms.uOpacity.value : null,
-      edges: mesh.children.map((c) => ({ child: c, visible: c.visible })),
-    };
-    mat.transparent = true;
-    mat.depthWrite = false;
-    if (mat.uniforms?.uOpacity) mat.uniforms.uOpacity.value = GHOST_OPACITY;
-    else mat.opacity = GHOST_OPACITY;
-    mat.needsUpdate = true;
-    // Hide the object's own edge lines so they don't reinforce the original
-    // (pre-chamfer) silhouette and compete with the preview outline.
-    mesh.children.forEach((c) => {
-      c.visible = false;
-    });
-  };
-
-  const unghostSource = () => {
-    if (!ghosted) return;
-    const { mesh, opacity, transparent, depthWrite, uOpacity, edges } = ghosted;
-    const mat = mesh.material;
-    if (mat) {
-      mat.transparent = transparent;
-      mat.depthWrite = depthWrite;
-      if (uOpacity != null && mat.uniforms?.uOpacity)
-        mat.uniforms.uOpacity.value = uOpacity;
-      else mat.opacity = opacity;
-      mat.needsUpdate = true;
-    }
-    edges.forEach(({ child, visible }) => {
-      child.visible = visible;
-    });
-    ghosted = null;
   };
 
   const clearChamferPreview = () => {
@@ -107,6 +61,7 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
     ghostItemId,
   }) => {
     let result;
+    let failure = null;
     try {
       const { chamferOrFilletItem } = await import("../occClient.js");
       result = await chamferOrFilletItem({
@@ -118,29 +73,39 @@ export function createChamferPreviewHelpers({ scene, itemsRef, objectsRef }) {
         allItems: items,
         printPrecision,
       });
-    } catch {
+    } catch (err) {
       result = null;
+      failure = err?.message || "The chamfer couldn't be built at this size.";
     }
     // A newer request superseded this one (params changed again while we were
     // awaiting OCC) — drop this result.
     if (myRequest !== requestId) return;
-    // Leave whatever preview is currently shown when the geometry is
-    // unworkable (eg distance too large) — better than flickering it away.
+    const key = chamferPreviewKey({
+      source,
+      subGeo,
+      amount,
+      angleRad,
+      segments,
+      printPrecision,
+    });
+    if (failure) {
+      // Say so now, in the dialog, and stop showing a preview of some OTHER
+      // size as if it were this one.  The failure is stashed like a result so
+      // Confirm on these same values reports it at once instead of spending
+      // the same long OCC run to fail again.
+      removePreview();
+      unghostSource();
+      stashChamferPreview(key, { error: failure });
+      useStore.getState().setToolError(failure);
+      return;
+    }
+    // Cancelled (no result, no error): leave the current preview alone.
     if (!result) return;
+    useStore.getState().setToolError(null);
 
     // Remember this result so Confirm can commit it directly — it will build
     // the identical recipe, so re-running the OCC op there is pure waste.
-    stashChamferPreview(
-      chamferPreviewKey({
-        source,
-        subGeo,
-        amount,
-        angleRad,
-        segments,
-        printPrecision,
-      }),
-      result,
-    );
+    stashChamferPreview(key, result);
 
     const { positions, normals, indices } = result.geometryData;
     const geometry = new THREE.BufferGeometry();

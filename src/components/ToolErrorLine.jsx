@@ -1,4 +1,3 @@
-import React from "react";
 import { useStore } from "../store";
 
 // One-line error surfaced under a tool dialog (emboss / draft / …).  The active

@@ -1,6 +1,10 @@
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
-import { shapeMidpoint, sharpLineExtra } from "./sketchGeometry.js";
-import { resolveConstraintDistance } from "./geometryParams.js";
+import {
+  shapeMidpoint,
+  shapeSetCentre,
+  sharpLineExtra,
+} from "./sketchGeometry.js";
+import { resolveConstraintDistance, resolveValue } from "./geometryParams.js";
 // Used by the solver internals (onLine projection + bevel recompute); also
 // re-exported below for consumers that import them from this module.
 import { norm2, projectOntoLine, buildBevelArc } from "./sketchGeometry.js";
@@ -56,6 +60,13 @@ export function allConstraintsSatisfied(shapes, constraints, variables = null) {
       if (len < 1e-9) return false;
       const d = Math.abs((p.x - line.x1) * dy - (p.y - line.y1) * dx) / len;
       if (Math.abs(d - target) > POS_TOL) return false;
+    } else if (c.type === "centre") {
+      const a = shapeSetCentre(shapes, c.shapesA);
+      const b = shapeSetCentre(shapes, c.shapesB);
+      if (!a || !b) return false;
+      const ox = resolveValue(c.offsetX, 0, variables);
+      const oy = resolveValue(c.offsetY, 0, variables);
+      if (Math.hypot(a.x - b.x - ox, a.y - b.y - oy) > POS_TOL) return false;
     } else if (c.type === "midpoint") {
       const p = getShapePoint(shapes[c.pointShapeIdx], c.pointKey ?? "point");
       const m = shapeMidpoint(shapes[c.targetShapeIdx]);

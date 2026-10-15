@@ -3,7 +3,7 @@
 // invariant that matters most: the image is a GUIDE, never geometry, so it must
 // not appear in `shapes` or affect anything that reads them.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import { assertDocumentIntegrity } from "./integrity.js";
 

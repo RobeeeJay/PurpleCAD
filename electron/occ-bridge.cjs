@@ -52,6 +52,61 @@ function withWinding(poly, wantCcw) {
   return isCcw === wantCcw ? poly : [...poly].reverse();
 }
 
+// A loop's exact curve runs, wound and packed for the addon's BuildCurveWire
+// (mirrors polygonUtil.js reverseEdgeCurves / packCurveRuns / windLoopForOcc).
+const CURVE_RUN_WIDTH = 11;
+const CURVE_KIND = { arc: 1, bezier: 2, ellipse: 3, interp: 4 };
+function packCurveRuns(runs) {
+  const out = new Float64Array(runs.length * CURVE_RUN_WIDTH);
+  runs.forEach((run, i) => {
+    const params =
+      run.type === "arc" ? [run.cx, run.cy, run.r]
+        : run.type === "ellipse" ? [run.cx, run.cy, run.rx, run.ry]
+          : run.type === "bezier" ? [run.p0, run.p1, run.p2, run.p3].flatMap(p => [p.x, p.y])
+            : [];
+    out.set([run.start, run.count, CURVE_KIND[run.type], ...params], i * CURVE_RUN_WIDTH);
+  });
+  return out;
+}
+function windLoop(poly, runs, wantCcw) {
+  const n = poly.length;
+  const flip = signedPolyAreaXY(poly) > 0 !== wantCcw;
+  return {
+    pts: flip ? [...poly].reverse() : poly,
+    // Reversed, old edge k becomes edge n-2-k.
+    runs: runs && flip
+      ? runs.map(r => ({ ...r, start: (((n - 1 - r.start - r.count) % n) + n) % n }))
+      : runs,
+  };
+}
+function windLoopForOcc(poly, runs, wantCcw) {
+  const wound = windLoop(poly, runs, wantCcw);
+  return {
+    flat: new Float64Array(wound.pts.flatMap(p => [p.x, p.y])),
+    curves: wound.runs ? packCurveRuns(wound.runs) : null,
+  };
+}
+// World-space packing for BuildWorldCurveWire (mirrors polygonUtil.js).
+const WORLD_RUN_WIDTH = 15;
+function packWorldCurveRuns(runs, toWorld) {
+  const kept = runs || [];
+  const w3 = (p) => { const w = toWorld(p); return [w.x, w.y, w.z]; };
+  const out = new Float64Array(kept.length * WORLD_RUN_WIDTH);
+  kept.forEach((run, i) => {
+    let poles = [];
+    if (run.type === "bezier") poles = [run.p0, run.p1, run.p2, run.p3].flatMap(w3);
+    else if (run.type === "ellipse") {
+      // Centre, world axis directions and radii: three points don't fix one.
+      const c = w3({ x: run.cx, y: run.cy });
+      const ax = w3({ x: run.cx + 1, y: run.cy }).map((v, k) => v - c[k]);
+      const ay = w3({ x: run.cx, y: run.cy + 1 }).map((v, k) => v - c[k]);
+      poles = [...c, ...ax, ...ay, run.rx, run.ry];
+    }
+    out.set([run.start, run.count, CURVE_KIND[run.type], ...poles], i * WORLD_RUN_WIDTH);
+  });
+  return out;
+}
+
 // Resolve a revolve axis ({ sketchId, shapeIdx }) to its live 2D endpoints by
 // reading the referenced line from the current sketch (mirrors occOps.js).
 // Resolve a revolve axis to endpoints in the PROFILE sketch's local 3D frame
@@ -92,13 +147,21 @@ function revolveArgs(source, axis, allItems) {
   if (!ax) return null;
   const holes = (source.profile.holes || []).filter((h) => h && h.length >= 3);
   const c = polyCentroid(poly);
-  const outerFlat = new Float64Array(
-    withWinding(poly, true).flatMap((p) => [p.x, p.y]),
-  );
-  const holesFlat = holes.map(
-    (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
-  );
-  return { outerFlat, holesFlat, cx: c.x, cy: c.y, ax };
+  return { ...profileLoopsForOcc(source.profile, poly, holes), cx: c.x, cy: c.y, ax };
+}
+
+// A profile's loops wound and flattened for the addon, with their exact
+// curves when the profile was made with them (mirrors occOps.js).
+function profileLoopsForOcc(profile, poly, holes) {
+  const curves = profile.curves2D;
+  const outer = windLoopForOcc(poly, curves?.outer, true);
+  const holeLoops = holes.map((h, i) => windLoopForOcc(h, curves?.holes?.[i], false));
+  return {
+    outerFlat: outer.flat,
+    holesFlat: holeLoops.map(h => h.flat),
+    outerCurves: outer.curves,
+    holeCurves: holeLoops.map(h => h.curves),
+  };
 }
 
 // XYZ Euler rotation of a 3D vector, matching THREE.js applyEuler('XYZ').
@@ -162,23 +225,57 @@ function bezierSegments(p0, p1, p2, p3, precision) {
   return Math.max(8, Math.min(256, Math.ceil(Math.PI / halfTheta)));
 }
 
+
+// Segments for a path arc of radius r sweeping `angle`, by the same sagitta
+// rule as bezierSegments (mirrors occOps.js); preview (precision null) keeps 24 a half turn.
+function arcPathSegments(r, angle, precision) {
+  if (precision == null || !(r > 0))
+    return Math.max(4, Math.ceil((24 * angle) / Math.PI));
+  const sUnits = precision / MM_PER_UNIT;
+  const halfTheta = Math.acos(Math.max(-1, Math.min(1, 1 - sUnits / r)));
+  if (!isFinite(halfTheta) || halfTheta <= 0) return 24;
+  return Math.max(4, Math.min(512, Math.ceil(angle / (2 * halfTheta))));
+}
+
+// Points round a circle arc from angle a0 through `sweep`, n segments.
+function arcPathPoints(cx, cy, r, a0, sweep, n) {
+  const out = [];
+  for (let k = 0; k <= n; k++) {
+    const a = a0 + (sweep * k) / n;
+    out.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  }
+  return out;
+}
+
 function pathSegment(shape, i, precision) {
+  if (shape && (shape.type === "arc" || shape.type === "circle")) {
+    const closed = shape.type === "circle";
+    const a0 = closed ? 0 : shape.startAngle;
+    let sweep = closed ? 2 * Math.PI : shape.endAngle - shape.startAngle;
+    if (!closed && sweep <= 0) sweep += 2 * Math.PI;
+    const n = arcPathSegments(shape.r, sweep, precision);
+    const pts = arcPathPoints(shape.cx, shape.cy, shape.r, a0, sweep, n);
+    if (closed) pts[n] = pts[0];
+    return { i, shape, closed, a: pts[0], b: pts[n], sample: (rev) => (rev ? pts.slice().reverse() : pts.slice()) };
+  }
   if (shape && shape.type === "line") {
     const a = { x: shape.x1, y: shape.y1 };
     const b = { x: shape.x2, y: shape.y2 };
-    return { i, a, b, sample: (rev) => (rev ? [b, a] : [a, b]) };
+    return { i, shape, a, b, sample: (rev) => (rev ? [b, a] : [a, b]) };
   }
   if (shape && shape.type === "bezier") {
     const a = { x: shape.p0.x, y: shape.p0.y };
     const b = { x: shape.p3.x, y: shape.p3.y };
     const n = bezierSegments(shape.p0, shape.p1, shape.p2, shape.p3, precision);
     const pts = sampleCubic(shape.p0, shape.p1, shape.p2, shape.p3, n);
-    return { i, a, b, sample: (rev) => (rev ? pts.slice().reverse() : pts.slice()) };
+    return { i, shape, a, b, sample: (rev) => (rev ? pts.slice().reverse() : pts.slice()) };
   }
   return null;
 }
 
-function orderPathPoints(sketch, startShapeIdx, precision) {
+// The ordered path and its curve runs: a bezier piece's edges lie on it
+// (mirrors occOps.js orderPath).
+function orderPath(sketch, startShapeIdx, precision) {
   const shapes = (sketch && sketch.shapes) || [];
   const segs = [];
   shapes.forEach((s, i) => {
@@ -191,13 +288,15 @@ function orderPathPoints(sketch, startShapeIdx, precision) {
   const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < eps;
   const used = new Set([startShapeIdx]);
   let pts = startSeg.sample(false);
+  const pieces = [{ shape: startSeg.shape, edges: pts.length - 1 }];
+  if (startSeg.closed) return { pts, runs: [{ type: "arc", start: 0, count: pts.length - 1 }] };
   const extend = (atEnd) => {
     let changed = true;
     while (changed) {
       changed = false;
       const tip = atEnd ? pts[pts.length - 1] : pts[0];
       for (const seg of segs) {
-        if (used.has(seg.i)) continue;
+        if (used.has(seg.i) || seg.closed) continue;
         const segPts = near(seg.a, tip)
           ? seg.sample(false)
           : near(seg.b, tip)
@@ -205,8 +304,9 @@ function orderPathPoints(sketch, startShapeIdx, precision) {
             : null;
         if (segPts) {
           used.add(seg.i);
-          if (atEnd) pts = pts.concat(segPts.slice(1));
-          else pts = segPts.slice(1).reverse().concat(pts);
+          const piece = { shape: seg.shape, edges: segPts.length - 1 };
+          if (atEnd) { pts = pts.concat(segPts.slice(1)); pieces.push(piece); }
+          else { pts = segPts.slice(1).reverse().concat(pts); pieces.unshift(piece); }
           changed = true;
           break;
         }
@@ -215,7 +315,18 @@ function orderPathPoints(sketch, startShapeIdx, precision) {
   };
   extend(true);
   extend(false);
-  return pts;
+  const runs = [];
+  let start = 0;
+  for (const { shape, edges } of pieces) {
+    if (shape.type === "bezier") {
+      const { p0, p1, p2, p3 } = shape;
+      runs.push({ start, count: edges, type: "bezier", p0, p1, p2, p3 });
+    } else if (shape.type === "arc") {
+      runs.push({ start, count: edges, type: "arc" });
+    }
+    start += edges;
+  }
+  return { pts, runs };
 }
 
 function pipePathWorld(pathRef, allItems, precision) {
@@ -223,9 +334,10 @@ function pipePathWorld(pathRef, allItems, precision) {
     (i) => i.id === (pathRef && pathRef.sketchId) && i.type === "sketch",
   );
   if (!sketch) return null;
-  const pts2d = orderPathPoints(sketch, pathRef.shapeIdx, precision);
-  if (!pts2d || pts2d.length < 2) return null;
-  return pts2d.map((p) => sketchPointToWorld(sketch, p.x, p.y));
+  const path = orderPath(sketch, pathRef.shapeIdx, precision);
+  if (!path || path.pts.length < 2) return null;
+  const toWorld = (p) => sketchPointToWorld(sketch, p.x, p.y);
+  return { pts: path.pts.map(toWorld), curves: packWorldCurveRuns(path.runs, toWorld) };
 }
 
 // The renderer pre-bakes the live profile polygon into source.profile.polygon2D
@@ -240,14 +352,13 @@ function pipeArgs(profileSource, pathRef, allItems, precision) {
     (h) => h && h.length >= 3,
   );
   const c = polyCentroid(poly);
-  const outerFlat = new Float64Array(
-    withWinding(poly, true).flatMap((p) => [p.x, p.y]),
-  );
-  const holesFlat = holes.map(
-    (h) => new Float64Array(withWinding(h, false).flatMap((p) => [p.x, p.y])),
-  );
-  const pathFlat = new Float64Array(pathWorld.flatMap((p) => [p.x, p.y, p.z]));
-  return { outerFlat, holesFlat, cx: c.x, cy: c.y, pathFlat };
+  const pathFlat = new Float64Array(pathWorld.pts.flatMap((p) => [p.x, p.y, p.z]));
+  return {
+    ...profileLoopsForOcc(profileSource.profile, poly, holes),
+    cx: c.x, cy: c.y, pathFlat,
+    // The path's curves too, for a sweep made since exact curves.
+    pathCurves: profileSource.profile.curves2D ? pathWorld.curves : null,
+  };
 }
 
 // ── Loft helpers (mirror occOps.js) ──────────────────────────────────────
@@ -263,22 +374,22 @@ function polyToWorld(poly, position, rotation) {
 
 // The renderer pre-bakes both live profile polygons into profile.polygon2D.
 function loftArgs(profileSource, secondSource) {
-  const pa = profileSource && profileSource.profile && profileSource.profile.polygon2D;
-  const pb = secondSource && secondSource.profile && secondSource.profile.polygon2D;
-  if (!pa || pa.length < 3 || !pb || pb.length < 3) return null;
-  const worldA = polyToWorld(
-    withWinding(pa, true),
-    profileSource.profile.position,
-    profileSource.profile.rotation,
-  );
-  const worldB = polyToWorld(
-    withWinding(pb, true),
-    secondSource.profile.position,
-    secondSource.profile.rotation,
-  );
+  const a = loftLoop(profileSource && profileSource.profile);
+  const b = loftLoop(secondSource && secondSource.profile);
+  if (!a || !b) return null;
+  return { aFlat: a.flat, bFlat: b.flat, aCurves: a.curves, bCurves: b.curves };
+}
+
+// One loft section, wound CCW on its world plane, with its exact curves when
+// it was made with them (mirrors occOps.js loftLoop).
+function loftLoop(profile) {
+  const poly = profile && profile.polygon2D;
+  if (!poly || poly.length < 3) return null;
+  const { pts, runs } = windLoop(poly, profile.curves2D?.outer, true);
+  const toWorld = (p) => polyToWorld([p], profile.position, profile.rotation)[0];
   return {
-    aFlat: new Float64Array(worldA.flatMap((p) => [p.x, p.y, p.z])),
-    bFlat: new Float64Array(worldB.flatMap((p) => [p.x, p.y, p.z])),
+    flat: new Float64Array(pts.map(toWorld).flatMap((p) => [p.x, p.y, p.z])),
+    curves: runs ? packWorldCurveRuns(runs, toWorld) : null,
   };
 }
 
@@ -404,7 +515,7 @@ function finishSolidResult(resultId, precision, retainResult, extra) {
     : null;
   if (retainResult) occ.releaseShape(resultId);
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     ...(retainResult ? { shapeId } : null),
     ...extra,
@@ -454,13 +565,16 @@ function buildItemShapeLocal(item, allItems, precision) {
     // buildBrushTransform and the solid doesn't drift when a curved profile
     // re-tessellates at a different resolution (mirrors occOps.js).
     const c = polyAreaCentroid(poly);
-    const outerFlat = new Float64Array(
-      withWinding(poly, true).flatMap(p => [p.x, p.y]),
-    );
-    const holesFlat = holes
+    // Exact curves only for a profile made with them (mirrors occOps.js).
+    const curves = item.profile.curves2D;
+    const outer = windLoopForOcc(poly, curves?.outer, true);
+    const holeLoops = holes
       .filter(h => h && h.length >= 3)
-      .map(h => new Float64Array(withWinding(h, false).flatMap(p => [p.x, p.y])));
-    const prismId = occ.makeExtrude(outerFlat, holesFlat, c.x, c.y, depth);
+      .map((h, i) => windLoopForOcc(h, curves?.holes?.[i], false));
+    const prismId = occ.makeExtrude(
+      outer.flat, holeLoops.map(h => h.flat), c.x, c.y, depth,
+      outer.curves, holeLoops.map(h => h.curves),
+    );
     // startOffset slides the prism base along the extrude normal (local +Z) so
     // the OCC shape matches the rendered mesh (mirrors occOps.js).
     const startOffset = item.startOffset || 0;
@@ -484,6 +598,103 @@ function buildItemShapeLocal(item, allItems, precision) {
 
   if (item.type === "csg" && item.regenerator) {
     const regen = item.regenerator;
+
+    // A Split piece is re-cut from its source (mirrors occOps.js): sewn from
+    // its mesh, its "flat" faces weren't, and chamfers on it failed.
+    if (regen.kind === "split" && regen.center && !regen.regenFailed) {
+      try {
+        const id = splitPieceLocal(regen, allItems, precision);
+        if (id != null) return id;
+      } catch {
+        // the mesh below
+      }
+    }
+    // A simplified mesh IS its baked mesh -- the op's whole output -- (mirrors
+    // occOps.js) so a later op sews that, as does a Split piece that can't be
+    // re-cut.
+    if (regen.kind === "simplify" || regen.kind === "split") {
+      const g = item.geometryData;
+      if (!g?.positions || g.positions.length < 9) return null;
+      return occ.makeSolidFromMesh(
+        new Float64Array(g.positions),
+        g.indices?.length ? new Uint32Array(g.indices) : null,
+      );
+    }
+
+    // A 3D PATTERN rebuilds its copies in OCC when its source can be rebuilt.
+    // Sewing the baked mesh instead (the fallback below) produces a shell whose
+    // face count is its TRIANGLE count -- a ring of eight spikes came to 8.4k
+    // faces and the fuse onto the body had not finished after five minutes.
+    // Replicating the source SOLID keeps a handful of faces per copy.
+    //
+    // patternInstances returns the COPIES only: the object the pattern was made
+    // from stays its own item, so the recipe's geometry is the copies alone and
+    // the rebuild must match it.
+    if (regen.kind === "pattern3d") {
+      const src = (allItems || []).find((i) => i.id === regen.sourceId);
+      const params =
+        regen.patternType === "circular"
+          ? {
+              origin: regen.axisOrigin,
+              axis: regen.axisDir,
+              count: regen.count,
+              angleRad: regen.angleRad,
+              axialOffset: regen.axialOffset,
+            }
+          : regen;
+      const srcWorld = src ? buildWorldSolid(src, allItems, precision) : null;
+      if (srcWorld) {
+        let ids;
+        try {
+          ids = patternInstances(srcWorld, regen.patternType, params);
+        } finally {
+          occ.releaseShape(srcWorld);
+        }
+        if (ids && ids.length) {
+          let worldId;
+          if (ids.length === 1) worldId = ids[0];
+          else {
+            try {
+              worldId = occ.booleanOp(ids, "union");
+            } finally {
+              ids.forEach((id) => occ.releaseShape(id));
+            }
+          }
+          if (worldId) {
+            // The stored mesh is centred on the pattern's own centre, so the
+            // rebuild has to be shifted the same way. centerOffset is {cx,cy,cz};
+            // a position is {x,y,z}.
+            const c = regen.centerOffset;
+            const ox = c ? (c.cx ?? 0) : (item.position?.x ?? 0);
+            const oy = c ? (c.cy ?? 0) : (item.position?.y ?? 0);
+            const oz = c ? (c.cz ?? 0) : (item.position?.z ?? 0);
+            const localId = occ.transformShape(
+              worldId,
+              -ox,
+              -oy,
+              -oz,
+              0,
+              0,
+              0,
+            );
+            occ.releaseShape(worldId);
+            return localId;
+          }
+        }
+      }
+      // No rebuildable source (an imported mesh, say): sew the baked mesh
+      // instead. That shell's face count is its triangle count, so a dense
+      // pattern can exceed the boolean caps and be refused -- which is why the
+      // rebuild above is tried first.
+      const g = item.geometryData;
+      if (g && g.positions && g.positions.length >= 9) {
+        const positions = new Float64Array(g.positions);
+        const indices =
+          g.indices && g.indices.length ? new Uint32Array(g.indices) : null;
+        return occ.makeSolidFromMesh(positions, indices);
+      }
+      return null;
+    }
 
     if (regen.kind === "chamfer") {
       const sourceId = buildItemShapeLocal(regen.source, allItems, precision);
@@ -623,7 +834,7 @@ function buildItemShapeLocal(item, allItems, precision) {
         args.outerFlat, args.holesFlat, args.cx, args.cy,
         args.ax.x1, args.ax.y1, args.ax.z1, args.ax.x2, args.ax.y2, args.ax.z2,
         regen.angleRad ?? 2 * Math.PI, regen.prismSides ?? 0,
-        regen.offsetPerRotation ?? 0,
+        regen.offsetPerRotation ?? 0, args.outerCurves, args.holeCurves,
       );
       if (!resultId) return null;
       const off = regen.centerOffset;
@@ -640,7 +851,7 @@ function buildItemShapeLocal(item, allItems, precision) {
       if (!args) return null;
       const resultId = occ.makePipe(
         args.outerFlat, args.holesFlat, args.cx, args.cy, args.pathFlat,
-        regen.twistTurns ?? 0, !!regen.autoRotate,
+        regen.twistTurns ?? 0, !!regen.autoRotate, args.outerCurves, args.holeCurves, args.pathCurves,
       );
       if (!resultId) return null;
       const off = regen.centerOffset;
@@ -655,7 +866,7 @@ function buildItemShapeLocal(item, allItems, precision) {
     if (regen.kind === "loft") {
       const args = loftArgs(regen.profileSource, regen.secondProfileSource);
       if (!args) return null;
-      const resultId = occ.makeLoft(args.aFlat, args.bFlat);
+      const resultId = occ.makeLoft(args.aFlat, args.bFlat, args.aCurves, args.bCurves);
       if (!resultId) return null;
       const off = regen.centerOffset;
       if (off) {
@@ -833,7 +1044,7 @@ function performCsg({ selectedItems, allItems, operation, printPrecision }) {
     geometryData: {
       positions,
       normals: null,
-      indices: Array.from(tess.indices),
+      indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null,
     },
   };
 }
@@ -902,7 +1113,7 @@ function chamferOrFilletItem({ source, sourceShapeId, retainResult, subGeo, amou
   if (retainResult) occ.releaseShape(resultId);
 
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo,
     ...(retainResult ? { shapeId } : null),
@@ -1093,11 +1304,44 @@ function buildEmbossStampShape(stamp) {
 
 // See occOps.js embossResultShape: conform booleans the wrapped mesh; center
 // intersects a deep prism with the body (clipping to faces) then raises/lowers.
+// Whether an emboss result's volume is one these two solids can produce: a
+// raised emboss holds at least the body and at most body + stamp; a deboss at
+// most the body and at least body - stamp.  (A sliver of tolerance for the
+// stamp's sewn surface.)
+function embossVolumeHolds(bodyId, stampId, resultId, deboss) {
+  const vb = Math.abs(occ.shapeVolume(bodyId));
+  const vs = Math.abs(occ.shapeVolume(stampId));
+  const vr = occ.shapeVolume(resultId);
+  const eps = 1e-3 * vb + 1e-9;
+  return deboss
+    ? vr <= vb + eps && vr >= vb - vs - eps
+    : vr >= vb - eps && vr <= vb + vs + eps;
+}
+
 function embossResultShape(targetId, stamp, printPrecision) {
   if (!stamp) return 0;
   if (stamp.mode === "conform") {
     const s = buildEmbossStampShape(stamp);
     if (!s) return 0;
+    // First onto the body as it is, so its exact surfaces stay exact: against
+    // a faceted copy, an embossed cylinder came back as hundreds of flat faces
+    // after every recalculation.  That boolean is the fragile one -- on a
+    // sphere it silently DROPPED the body for text turned 90 or 270 degrees --
+    // but a dropped body shows as a volume no emboss of these two solids can
+    // have, so a result outside that range falls through to the faceted copy
+    // below, which booleans robustly.
+    const op = stamp.deboss ? "difference" : "union";
+    let exact = 0;
+    try {
+      exact = occ.booleanOp([targetId, s], op);
+    } catch {
+      exact = 0;
+    }
+    if (exact && embossVolumeHolds(targetId, s, exact, stamp.deboss)) {
+      occ.releaseShape(s);
+      return exact;
+    }
+    if (exact) occ.releaseShape(exact);
     // Boolean the wrapped mesh against a FACETED copy of the body, not the
     // analytic primitive: OCC's fuse/cut of an analytic sphere vs a faceted stamp
     // is fragile and silently drops the sphere for some stamp orientations (text
@@ -1179,7 +1423,7 @@ function embossItem({ source, sourceShapeId, retainResult, stamp, allItems, prin
   // No bbox-centring — anchor to the body's frame so the offset doesn't drag the
   // object (see occOps.js embossItem).
   return {
-    geometryData: { positions: Array.from(tess.positions), normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: Array.from(tess.positions), normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx: 0, cy: 0, cz: 0 },
     ...(retainResult ? { shapeId: resultId } : null),
   };
@@ -1372,7 +1616,7 @@ function importStep({ stepText, printPrecision }) {
   if (!tess) throw new Error("STEP import produced no geometry.");
   return {
     positions: Array.from(tess.positions),
-    indices: Array.from(tess.indices),
+    indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null,
   };
 }
 
@@ -1387,7 +1631,7 @@ function revolveItem({ source, axis, angleRad, prismSides, offsetPerRotation, al
   const resultId = occ.makeRevolve(
     args.outerFlat, args.holesFlat, args.cx, args.cy,
     args.ax.x1, args.ax.y1, args.ax.z1, args.ax.x2, args.ax.y2, args.ax.z2,
-    angleRad ?? 2 * Math.PI, prismSides ?? 0, offsetPerRotation ?? 0,
+    angleRad ?? 2 * Math.PI, prismSides ?? 0, offsetPerRotation ?? 0, args.outerCurves, args.holeCurves,
   );
   if (!resultId) throw new Error("Revolve produced no geometry.");
 
@@ -1407,7 +1651,7 @@ function revolveItem({ source, axis, angleRad, prismSides, offsetPerRotation, al
     centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
   }
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo: { axis },
   };
@@ -1423,7 +1667,7 @@ function pipeItem({ profileSource, pathRef, twistTurns, autoRotate, allItems, pr
   }
   const resultId = occ.makePipe(
     args.outerFlat, args.holesFlat, args.cx, args.cy, args.pathFlat,
-    twistTurns ?? 0, !!autoRotate,
+    twistTurns ?? 0, !!autoRotate, args.outerCurves, args.holeCurves, args.pathCurves,
   );
   if (!resultId) throw new Error("Pipe produced no geometry.");
 
@@ -1443,7 +1687,7 @@ function pipeItem({ profileSource, pathRef, twistTurns, autoRotate, allItems, pr
     centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
   }
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     position: { x: cx, y: cy, z: cz },
     resolvedSubGeo: { pathRef },
@@ -1454,7 +1698,7 @@ function pipeItem({ profileSource, pathRef, twistTurns, autoRotate, allItems, pr
 function loftItem({ profileSource, secondProfileSource, printPrecision }) {
   const args = loftArgs(profileSource, secondProfileSource);
   if (!args) throw new Error("Loft needs two closed profile loops.");
-  const resultId = occ.makeLoft(args.aFlat, args.bFlat);
+  const resultId = occ.makeLoft(args.aFlat, args.bFlat, args.aCurves, args.bCurves);
   if (!resultId) throw new Error("Loft produced no geometry.");
 
   let tess;
@@ -1473,7 +1717,7 @@ function loftItem({ profileSource, secondProfileSource, printPrecision }) {
     centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
   }
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     position: { x: cx, y: cy, z: cz },
     resolvedSubGeo: {},
@@ -1481,7 +1725,9 @@ function loftItem({ profileSource, secondProfileSource, printPrecision }) {
 }
 
 // Slice a solid into two parts along a plane (mirrors occOps.js#splitItem).
-function splitItem({ target, plane, allItems, printPrecision }) {
+// Both sides of `target` cut along `plane`, as world solids { aId, bId }
+// (mirrors occOps.js#splitHalvesWorld).  The caller releases them.
+function splitHalvesWorld(target, plane, allItems, printPrecision) {
   const localId = buildItemShapeLocal(target, allItems, printPrecision);
   if (localId == null) throw new Error("Couldn't build the object to split.");
   const t = buildBrushTransform(target);
@@ -1502,14 +1748,35 @@ function splitItem({ target, plane, allItems, printPrecision }) {
   );
   occ.releaseShape(boxLocal);
 
-  let aId, bId;
   try {
-    aId = occ.booleanOp([solidId, box], "intersection");
-    bId = occ.booleanOp([solidId, box], "difference");
+    return {
+      aId: occ.booleanOp([solidId, box], "intersection"),
+      bId: occ.booleanOp([solidId, box], "difference"),
+    };
   } finally {
     occ.releaseShape(solidId);
     occ.releaseShape(box);
   }
+}
+
+// A Split piece re-cut from its source, in its mesh's frame (mirrors
+// occOps.js#splitPieceLocal).
+function splitPieceLocal(r, allItems, precision) {
+  const source = (allItems || []).find((i) => i.id === r.sourceId);
+  if (!source) return null;
+  const { aId, bId } = splitHalvesWorld(source, r.plane, allItems, precision);
+  const keep = r.side === "a" ? aId : bId;
+  const drop = r.side === "a" ? bId : aId;
+  if (drop) occ.releaseShape(drop);
+  if (!keep) return null;
+  const c = r.center;
+  const localId = occ.transformShape(keep, -c.x, -c.y, -c.z, 0, 0, 0);
+  occ.releaseShape(keep);
+  return localId;
+}
+
+function splitItem({ target, plane, allItems, printPrecision }) {
+  const { aId, bId } = splitHalvesWorld(target, plane, allItems, printPrecision);
 
   const part = (id) => {
     if (!id) return null;
@@ -1528,7 +1795,7 @@ function splitItem({ target, plane, allItems, printPrecision }) {
     }
     return {
       position: { x: cx, y: cy, z: cz },
-      geometryData: { positions, normals: null, indices: Array.from(tess.indices) },
+      geometryData: { positions, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     };
   };
 
@@ -1784,6 +2051,49 @@ function solidFromMesh({ positions, indices }) {
   return id ? { shapeId: id } : null;
 }
 
+// Weld a mesh by exact position (native meshoptimizer) and report whether it
+// is closed -- mirrors occOps.js#weldMesh.
+function weldMesh({ positions, indices }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.weldMesh(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+  );
+  return {
+    positions: Array.from(r.positions),
+    indices: Array.from(r.indices),
+    openEdges: r.openEdges,
+    nonManifoldEdges: r.nonManifoldEdges,
+    degenerateTriangles: r.degenerateTriangles,
+    verticesBefore: r.verticesBefore,
+    verticesAfter: r.verticesAfter,
+  };
+}
+
+// Simplify a mesh natively (meshoptimizer) -- mirrors occOps.js#simplifyMesh.
+// Held to a MEASURED maximum
+// deviation or a triangle budget.  `value` is the deviation in scene units, or
+// the triangle count.  The result is welded, closed wherever the input was,
+// and adds no pinched edges; the op throws with a reason when it can't be.
+function simplifyMesh({ positions, indices, mode, value }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.simplifyMesh(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    mode,
+    value,
+  );
+  return {
+    positions: Array.from(r.positions),
+    indices: Array.from(r.indices),
+    trianglesBefore: r.trianglesBefore,
+    trianglesAfter: r.trianglesAfter,
+    maxDeviation: r.maxDeviation,
+    openEdges: r.openEdges,
+    nonManifoldEdges: r.nonManifoldEdges,
+  };
+}
+
 // Release a cached OCC solid (JIT-timeline cache); no-op if already gone.
 function releaseShape({ id }) {
   if (id != null) {
@@ -1794,9 +2104,12 @@ function releaseShape({ id }) {
 
 // Register the shared cancel flag (an Int32Array over a SharedArrayBuffer).  The
 // native builders poll it via UserBreak and abort mid-op when another thread
-// flips it — see binding.cc's CancelIndicator.
+// flips it — see occ_kernel.cc's CancelIndicator.
 function setCancelBuffer(view) {
   occ.setCancelBuffer(view);
 }
 
-module.exports = { performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, setCancelBuffer };
+module.exports = {
+  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, setCancelBuffer };
+// Internals the unit tests check against occOps.js's copies.
+module.exports.__test = { embossVolumeHolds };

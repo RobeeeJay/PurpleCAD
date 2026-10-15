@@ -1,0 +1,362 @@
+// Generative design, end to end in the real app: hold a face, load another,
+// run SIMP, and keep the result as a body.
+//
+// The optimiser itself is pinned against the canonical cantilever in the unit
+// tests (src/three/fea/__tests__/topology.test.js).  What this covers is the
+// part those cannot: the toolbar, the picks, the worker, the preview, and the
+// body that comes out the far end.
+import { test, expect } from "./fixtures.js";
+import { launchApp } from "./launch.js";
+
+let app;
+let page;
+let bodyId;
+
+const settled = async () =>
+  await expect(page.getByText(/Recalculating/)).toBeHidden({ timeout: 240000 });
+
+test.describe.serial("generative design", () => {
+  test.beforeAll(async () => {
+    app = await launchApp();
+    page = await app.firstWindow();
+    page.on("pageerror", (e) => console.log(`[pageerror] ${e.message}`));
+    await expect(page.locator(".toolbar")).toBeVisible();
+
+    // A plate to carve: an extrude, which also proves the tool works on a body
+    // with no baked mesh.
+    bodyId = await page.evaluate(() => {
+      const s = window.__store.getState();
+      const pts = [
+        { x: -2, y: -1 },
+        { x: 2, y: -1 },
+        { x: 2, y: 1 },
+        { x: -2, y: 1 },
+      ];
+      s.addItem(
+        {
+          id: 760,
+          type: "extrude",
+          name: "Bracket blank",
+          children: [],
+          parentId: null,
+          profile: {
+            type: "sketchLoop",
+            sketchId: null,
+            textShapeIdx: null,
+            profileCentroid: { x: 0, y: 0 },
+            polygon2D: pts,
+            holes: [],
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+            normalWorld: { x: 0, y: 0, z: 1 },
+          },
+          depth: 0.6,
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+        },
+        "Added",
+      );
+      s.selectItem(760);
+      return 760;
+    });
+    await settled();
+    await page.waitForTimeout(600);
+  });
+
+  test.afterAll(async () => {
+    await app?.close();
+  });
+
+  test("says on its face that it is experimental", async () => {
+    // The maths is checked against closed-form answers, but a result is a
+    // voxel model at whatever detail was affordable, carries no factor of
+    // safety, and has never been next to a physical test. That has to be
+    // visible where the tool is used, not only in a commit message.
+    await page.evaluate(
+      (id) => window.__store.getState().selectItem(id),
+      bodyId,
+    );
+    await expect(
+      page.getByTitle(/Generative design \(experimental\)/),
+    ).toBeVisible();
+    await page.getByTitle(/Generative design \(experimental\)/).click();
+    const bar = page.locator(".sketch-distance-input-overlay");
+    await expect(bar).toBeVisible();
+    await expect(bar.getByText("Experimental")).toBeVisible();
+    await expect(bar.getByTitle(/no factor of safety/)).toBeVisible();
+    await page.evaluate(() => window.__store.getState().cancelOptimiseTool());
+  });
+
+  test("the toolbar offers it for a selected body", async () => {
+    const button = page.getByTitle(/^Generative design \(experimental\)/);
+    await expect(button).toBeVisible();
+    await expect(button).toBeEnabled();
+    await page.evaluate(() => window.__store.getState().selectItem(null));
+    await expect(button).toBeDisabled();
+    await page.evaluate(
+      (id) => window.__store.getState().selectItem(id),
+      bodyId,
+    );
+    await expect(button).toBeEnabled();
+  });
+
+  test("carves the body down to a load path and keeps it as a new body", async () => {
+    test.setTimeout(600_000);
+    await page.getByTitle(/^Generative design \(experimental\)/).click();
+    const bar = page.locator(".sketch-distance-input-overlay");
+    await expect(bar).toBeVisible();
+
+    // Pick by driving the tool's own selection, so this test is about the
+    // optimisation rather than about aiming a click at a face -- which the
+    // stress spec already covers, and which picks whichever face happens to
+    // point at the camera.
+    await page.evaluate((id) => {
+      const s = window.__store.getState();
+      const surf = s._cameraControls.meshSurface(id);
+      const p = surf.positions;
+      let lo = Infinity,
+        hi = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        lo = Math.min(lo, p[i]);
+        hi = Math.max(hi, p[i]);
+      }
+      const cap = (want) => {
+        const soup = [];
+        const tris = surf.indices ? surf.indices.length / 3 : p.length / 9;
+        for (let t = 0; t < tris; t++) {
+          const vs = [0, 1, 2].map((c) =>
+            surf.indices ? surf.indices[t * 3 + c] * 3 : (t * 3 + c) * 3,
+          );
+          if (!vs.every((v) => Math.abs(p[v] - want) < 1e-6)) continue;
+          for (const v of vs) soup.push(p[v], p[v + 1], p[v + 2]);
+        }
+        return soup;
+      };
+      s.setOptimisePhase("fixtures");
+      s.setOptimiseFaceSelection({ itemId: id, faceTris: cap(lo) });
+      s.setOptimisePhase("loads");
+      s.setOptimiseFaceSelection({ itemId: id, faceTris: cap(hi) });
+      s.setOptimiseParams({ resolution: 20, iterations: 12, forceN: 400 });
+    }, bodyId);
+    await expect(bar.getByTitle(/faces that are HELD/)).not.toContainText(
+      "none",
+    );
+    await expect(bar.getByTitle(/force is applied to/)).not.toContainText(
+      "none",
+    );
+
+    const before = await page.evaluate(
+      () => window.__store.getState().items.length,
+    );
+    await page.getByTitle(/^Run the optimisation/).click();
+    await expect
+      .poll(
+        () => page.evaluate(() => !!window.__store.getState().optimiseResult),
+        { timeout: 600000 },
+      )
+      .toBe(true);
+
+    const result = await page.evaluate(() => {
+      const r = window.__store.getState().optimiseResult;
+      return {
+        kept: r.keptElements,
+        design: r.designElements,
+        tris: r.indices.length / 3,
+        verts: r.positions.length / 3,
+        axisAligned: (() => {
+          // The surface follows the density field rather than wrapping cubes,
+          // so it must NOT be all axis-aligned faces the way the blocky
+          // wrapper was.
+          const p = r.positions,
+            idx = r.indices;
+          let flat = 0,
+            total = 0;
+          for (let t = 0; t < idx.length / 3; t++) {
+            const v = [0, 1, 2].map((c) => idx[t * 3 + c] * 3);
+            const a = [p[v[0]], p[v[0] + 1], p[v[0] + 2]];
+            const b = [p[v[1]], p[v[1] + 1], p[v[1] + 2]];
+            const c2 = [p[v[2]], p[v[2] + 1], p[v[2] + 2]];
+            const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            const w = [c2[0] - a[0], c2[1] - a[1], c2[2] - a[2]];
+            const n = [
+              u[1] * w[2] - u[2] * w[1],
+              u[2] * w[0] - u[0] * w[2],
+              u[0] * w[1] - u[1] * w[0],
+            ];
+            const len = Math.hypot(...n);
+            if (len < 1e-12) continue;
+            total++;
+            if (n.some((q) => Math.abs(Math.abs(q) / len - 1) < 1e-6)) flat++;
+          }
+          return flat / total;
+        })(),
+        steps: r.history.length,
+        first: r.history[0].compliance,
+        last: r.history.at(-1).compliance,
+      };
+    });
+    // Material was actually removed, and the part got stiffer for the volume.
+    expect(result.kept).toBeGreaterThan(0);
+    expect(result.kept).toBeLessThan(result.design * 0.75);
+    expect(result.tris).toBeGreaterThan(50);
+    expect(
+      result.axisAligned,
+      `${(result.axisAligned * 100).toFixed(0)}% of faces are axis-aligned`,
+    ).toBeLessThan(0.25);
+    expect(
+      result.last / result.first,
+      `compliance ${result.first.toExponential(2)} -> ${result.last.toExponential(2)}`,
+    ).toBeLessThan(1);
+
+    // It previews on the body before anything is committed: the blank's own
+    // mesh is swapped for the optimised surface, so what is on screen is the
+    // result rather than the block it came from.
+    const preview = await page.evaluate(
+      (id) => window.__store.getState()._cameraControls.meshDisplayInfo(id),
+      bodyId,
+    );
+    expect(preview.swapped).toBe(true);
+    expect(preview.vertexCount).toBeGreaterThan(20);
+
+    // Apply keeps it as a NEW body, leaving the blank alone.
+    await page.getByTitle(/Keep the optimised shape/).click();
+    await expect
+      .poll(() => page.evaluate(() => window.__store.getState().items.length))
+      .toBe(before + 1);
+    const made = await page.evaluate((id) => {
+      const s = window.__store.getState();
+      const it = s.items.find((i) => i.id !== id && i.type === "csg");
+      return {
+        name: it?.name,
+        verts: it?.geometryData?.positions?.length / 3,
+        blankStillThere: !!s.items.find((i) => i.id === id),
+        blankHidden: (s.history.at(-1).hiddenIds ?? []).includes(id),
+        toolClosed: !s.optimiseTool,
+      };
+    }, bodyId);
+    expect(made.name).toMatch(/optimised/i);
+    expect(made.verts).toBeGreaterThan(50);
+    expect(made.blankStillThere).toBe(true);
+    // The blank is hidden, not deleted: the two sit in the same space, so
+    // leaving both on screen shows the block and none of the result.
+    expect(made.blankHidden).toBe(true);
+    expect(made.toolClosed).toBe(true);
+  });
+
+  test("shows the shape after every step, and can stop on one", async () => {
+    test.setTimeout(600_000);
+    // A run is minutes at any useful detail, so the shape has to be visible
+    // while it works: a step counter alone cannot tell a good load case from a
+    // bad one, since a wrong answer counts up just as steadily.
+    await page.evaluate((id) => {
+      const s = window.__store.getState();
+      s.selectItem(id);
+      s.startOptimiseTool(id);
+      const surf = s._cameraControls.meshSurface(id);
+      const p = surf.positions;
+      let lo = Infinity,
+        hi = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        lo = Math.min(lo, p[i]);
+        hi = Math.max(hi, p[i]);
+      }
+      const cap = (want) => {
+        const soup = [];
+        const tris = surf.indices ? surf.indices.length / 3 : p.length / 9;
+        for (let t = 0; t < tris; t++) {
+          const vs = [0, 1, 2].map((c) =>
+            surf.indices ? surf.indices[t * 3 + c] * 3 : (t * 3 + c) * 3,
+          );
+          if (!vs.every((v) => Math.abs(p[v] - want) < 1e-6)) continue;
+          for (const v of vs) soup.push(p[v], p[v + 1], p[v + 2]);
+        }
+        return soup;
+      };
+      s.setOptimisePhase("fixtures");
+      s.setOptimiseFaceSelection({ itemId: id, faceTris: cap(lo) });
+      s.setOptimisePhase("loads");
+      s.setOptimiseFaceSelection({ itemId: id, faceTris: cap(hi) });
+      s.setOptimiseParams({ resolution: 20, iterations: 40, forceN: 400 });
+      // Watch every frame the run publishes.
+      window.__frames = [];
+      window.__unwatch = window.__store.subscribe((st) => {
+        const p2 = st.optimisePreview;
+        if (p2?.positions?.length)
+          window.__frames.push({
+            verts: p2.positions.length / 3,
+            step: st.optimiseProgress?.iteration ?? null,
+            checksum: p2.positions[0] + p2.positions[p2.positions.length - 1],
+          });
+      });
+    }, bodyId);
+
+    await page.getByTitle(/^Run the optimisation/).click();
+    // Several distinct shapes arrive before the run is anywhere near done.
+    await expect
+      .poll(() => page.evaluate(() => window.__frames.length), {
+        timeout: 300000,
+      })
+      .toBeGreaterThan(3);
+    const midRun = await page.evaluate(() => ({
+      frames: window.__frames.length,
+      distinct: new Set(window.__frames.map((f) => f.checksum)).size,
+      steps: window.__frames.map((f) => f.step).filter((v) => v != null),
+      running: !!window.__store.getState().optimiseProgress,
+    }));
+    // The shape really CHANGES between frames rather than being republished.
+    expect(midRun.distinct).toBeGreaterThan(1);
+    expect(midRun.steps[midRun.steps.length - 1]).toBeGreaterThan(
+      midRun.steps[0],
+    );
+    expect(midRun.running).toBe(true);
+
+    // Stop keeps what is on screen rather than throwing the run away.
+    await page.getByTitle(/Stop here and keep/).click();
+    const stopped = await page.evaluate(() => {
+      window.__unwatch?.();
+      const st = window.__store.getState();
+      return {
+        running: !!st.optimiseProgress,
+        result: st.optimiseResult
+          ? {
+              verts: st.optimiseResult.positions.length / 3,
+              early: st.optimiseResult.stoppedEarly,
+            }
+          : null,
+      };
+    });
+    expect(stopped.running).toBe(false);
+    expect(stopped.result).not.toBeNull();
+    expect(stopped.result.early).toBe(true);
+    expect(stopped.result.verts).toBeGreaterThan(20);
+    await page.evaluate(() => window.__store.getState().cancelOptimiseTool());
+  });
+
+  test("the optimised body survives a reload", async ({}, testInfo) => {
+    test.setTimeout(300_000);
+    await page.evaluate(() => window.__store.getState().selectItem(null));
+    await page
+      .locator("button.home-button")
+      .click()
+      .catch(() => {});
+    await page.waitForTimeout(2000);
+    const shot = testInfo.outputPath("generative-design.png");
+    await page.screenshot({ path: shot });
+    await testInfo.attach("generative-design", {
+      path: shot,
+      contentType: "image/png",
+    });
+
+    const doc = await page.evaluate(() =>
+      JSON.stringify(window.__store.getState().buildDocument?.() ?? null),
+    );
+    if (!doc || doc === "null") return; // no document builder exposed
+    const back = await page.evaluate((d) => {
+      const s = window.__store.getState();
+      s.loadDocument(JSON.parse(d));
+      return s.items.filter((i) => /optimised/i.test(i.name ?? "")).length;
+    }, doc);
+    expect(back).toBeGreaterThan(0);
+  });
+});

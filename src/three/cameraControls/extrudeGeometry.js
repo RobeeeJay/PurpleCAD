@@ -5,6 +5,8 @@
 
 import * as THREE from "three";
 import { CUT_FACE_HIGHLIGHT, EXTRUDE_FACE_HIGHLIGHT } from "../theme.js";
+import { polyArea, polyCentroid } from "../sceneObjects.js";
+import { loopShapesKey } from "../sceneObjects/closedLoops.js";
 
 // Build the translucent preview prism for a profile + depth.  Returns the mesh
 // (positioned/oriented in world space); the caller owns adding/removing it from
@@ -152,4 +154,54 @@ export function extractFaceProfile(hit) {
     // cut-extrusion when one is requested via the depth-overlay toggle.
     sourceItemId: hitMesh.userData?.itemId ?? null,
   };
+}
+
+// Which candidate region profile is the one an extrude was built from?
+//
+// Matches on the stored profile's POLYGON — relative area, centroid, and hole
+// count — rather than "the smallest region containing the stored centroid".
+// A ring-shaped profile's centroid sits inside its own hole, so a containment
+// test skips the real region and matches a nested one instead, which made
+// editing an extrude start on the wrong geometry.  Returns the index of the
+// best candidate in `candidates`, or -1 when nothing matches the sketch.
+export function bestProfileMatchIndex(sp, candidates) {
+  if (!sp?.polygon2D) return -1;
+  // The region bounded by the same sketch shapes is the profile's own, however
+  // the sketch has been edited since (regionsForProfile); geometry decides
+  // only between regions that share those shapes, or when none does.
+  const key = loopShapesKey(sp.loopShapes);
+  if (key && sp.loopShapes.outer.length) {
+    const same = candidates
+      .map((fp, i) => (loopShapesKey(fp?.loopShapes) === key ? i : -1))
+      .filter((i) => i >= 0);
+    if (same.length === 1) return same[0];
+    if (same.length > 1) {
+      const sub = bestProfileMatchIndex(
+        { ...sp, loopShapes: null },
+        same.map((i) => candidates[i]),
+      );
+      return sub >= 0 ? same[sub] : -1;
+    }
+  }
+  const spArea = polyArea(sp.polygon2D);
+  const spC = polyCentroid(sp.polygon2D);
+  const spHoles = (sp.holes || []).length;
+  let bestIdx = -1;
+  let bestErr = Infinity;
+  candidates.forEach((fp, i) => {
+    if (!fp?.polygon2D || fp.sketchId !== sp.sketchId) return;
+    const fC = polyCentroid(fp.polygon2D);
+    // Relative area error tolerates a curve tessellated at a different
+    // resolution; the centroid term separates same-area regions; a hole-count
+    // mismatch is a strong (but not fatal) penalty.
+    const err =
+      Math.abs(polyArea(fp.polygon2D) - spArea) / Math.max(spArea, 1e-9) +
+      Math.hypot(fC.x - spC.x, fC.y - spC.y) * 0.1 +
+      ((fp.holes || []).length === spHoles ? 0 : 0.5);
+    if (err < bestErr) {
+      bestErr = err;
+      bestIdx = i;
+    }
+  });
+  return bestIdx;
 }

@@ -65,7 +65,7 @@ let occNextId = 1;
 // a long op mid-flight — genuine cancel that frees the CPU, without killing the
 // worker (which shares OCC's non-thread-safe globals and crashes on terminate).
 // We flip element 0 to 1 from THIS (main) thread while the worker is blocked in
-// the synchronous native call; UserBreak in binding.cc sees it and throws.
+// the synchronous native call; UserBreak in occ_kernel.cc sees it and throws.
 const occCancelBuffer = new SharedArrayBuffer(4);
 const occCancelView = new Int32Array(occCancelBuffer);
 
@@ -121,7 +121,7 @@ try {
     "performCsg", "chamferOrFilletItem", "pushPullFaces", "shellItem",
     "holeItem", "embossItem", "draftItem", "revolveItem", "pipeItem",
     "loftItem", "exportSTL", "exportSTEP", "importStep", "splitItem", "tessellateItem",
-    "pattern3dItem", "releaseShape", "solidFromMesh",
+    "pattern3dItem", "releaseShape", "solidFromMesh", "weldMesh", "simplifyMesh",
   ];
   for (const op of OCC_OPS)
     ipcMain.handle(`occ:${op}`, (_e, args) => callOcc(op, args));
@@ -138,44 +138,89 @@ try {
 }
 
 // SQLite-backed persistence for renderer settings/data (replaces localStorage).
-// Synchronous IPC keeps the renderer's load-at-init code path unchanged.
+// The renderer loads what it needs once (db:bootstrap, db:loadProject), reads
+// from that cache, and writes through asynchronously (db:call).  It used to
+// call every one of these synchronously (sendSync), which an iPad web view has
+// no equivalent of; the one synchronous channel left, db:callSync, is for the
+// writes made while the window unloads, which an async message could lose.
 const kvStore = require("./kvStore.cjs");
-// Synchronous DB bridge (sendSync): settings, project CRUD, and per-project
-// data.  sendSync returns event.returnValue, which Electron structured-clones,
-// so structured objects/arrays come back to the renderer intact.
-const syncHandlers = {
-  "db:settingGet": (a) => kvStore.settingGet(a),
-  "db:settingSet": (a) => (kvStore.settingSet(a.key, a.value), true),
-  "db:settingRemove": (a) => (kvStore.settingRemove(a), true),
-  "db:listProjects": () => kvStore.listProjects(),
-  "db:createProject": (a) => kvStore.createProject(a),
-  "db:duplicateProject": (a) => kvStore.duplicateProject(a),
-  "db:renameProject": (a) => (kvStore.renameProject(a.id, a.name), true),
-  "db:deleteProject": (a) => (kvStore.deleteProject(a), true),
-  "db:setThumbnail": (a) => (kvStore.setThumbnail(a.id, a.thumbnail), true),
-  "db:getActiveProjectId": () => kvStore.getActiveProjectId(),
-  "db:setActiveProjectId": (a) => (kvStore.setActiveProjectId(a), true),
-  "db:getTimeline": (a) => kvStore.getTimeline(a),
-  "db:saveTimeline": (a) => (kvStore.saveTimeline(a.pid, a.data), true),
-  "db:getVariables": (a) => kvStore.getVariables(a),
-  "db:saveVariables": (a) => (kvStore.saveVariables(a.pid, a.data), true),
-  "db:getFolders": (a) => kvStore.getFolders(a),
-  "db:saveFolders": (a) => (kvStore.saveFolders(a.pid, a.data), true),
-  "db:getMaterial": (a) => kvStore.getMaterial(a),
-  "db:saveMaterial": (a) => (kvStore.saveMaterial(a.pid, a.data), true),
-  "db:getCamera": (a) => kvStore.getCamera(a),
-  "db:saveCamera": (a) => (kvStore.saveCamera(a.pid, a.state), true),
-  "db:clearCamera": (a) => (kvStore.clearCamera(a), true),
-};
-for (const [channel, fn] of Object.entries(syncHandlers)) {
-  ipcMain.on(channel, (e, arg) => {
-    e.returnValue = fn(arg);
+ipcMain.handle("db:bootstrap", () => kvStore.bootstrap());
+ipcMain.handle("db:loadProject", (_e, pid) => kvStore.projectData(pid));
+ipcMain.handle("db:call", (_e, call) => kvStore.call(call));
+ipcMain.on("db:callSync", (e, call) => {
+  e.returnValue = kvStore.call(call);
+});
+// ── Agent API transport ─────────────────────────────────────────────────────
+// Requests arriving on the API socket (apiServer.cjs) are forwarded to the
+// renderer, where the commands run against the live store and scene, and the
+// reply comes back on "api:reply" with the same id.
+const { startApiServer } = require("./apiServer.cjs");
+let apiServer = null;
+let apiSeq = 0;
+const apiPending = new Map();
+// webContents that have registered their API handler.  A request that arrives
+// while the page is still loading -- or reloading -- would otherwise be sent
+// to nobody and wait out the whole timeout.
+const apiReady = new Set();
+
+// Commands can legitimately take minutes (a boolean on a dense body, a solve),
+// so this is a backstop against a page that died, not a performance budget.
+const API_REPLY_TIMEOUT_MS = 15 * 60 * 1000;
+
+const apiFailure = (code, message) =>
+  Object.assign(new Error(message), { code });
+
+function invokeRenderer(method, params) {
+  const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+  if (!win || !apiReady.has(win.webContents.id))
+    return Promise.reject(
+      apiFailure(
+        "APP_NOT_READY",
+        "PurpleCAD is still starting; try again in a moment.",
+      ),
+    );
+  const id = ++apiSeq;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      apiPending.delete(id);
+      reject(apiFailure("APP_TIMEOUT", "PurpleCAD did not reply."));
+    }, API_REPLY_TIMEOUT_MS);
+    apiPending.set(id, { resolve, reject, timer });
+    win.webContents.send("api:request", { id, method, params });
   });
 }
-// Async timeline save (invoke): the hot path — a mouseup commit on a big
-// document must not block the renderer on the IPC round-trip + SQLite write.
-ipcMain.handle("db:saveTimelineAsync", (_e, a) => {
-  kvStore.saveTimeline(a.pid, a.data);
+
+ipcMain.on("api:ready", (e) => {
+  const wc = e.sender;
+  apiReady.add(wc.id);
+  wc.once("did-start-loading", () => apiReady.delete(wc.id));
+  wc.once("destroyed", () => apiReady.delete(wc.id));
+});
+
+ipcMain.on("api:reply", (_e, { id, reply }) => {
+  const pending = apiPending.get(id);
+  if (!pending) return;
+  apiPending.delete(id);
+  clearTimeout(pending.timer);
+  if (reply?.error)
+    pending.reject(apiFailure(reply.error.code, reply.error.message));
+  else pending.resolve(reply?.result);
+});
+
+// Links in the app (the license dialog's) open in the system browser.  Only
+// http(s): the renderer must not be able to hand shell.openExternal a file://
+// path or an application scheme.  Called through `electron.shell` each time,
+// not a destructured copy, so the e2e suite can stand in for the browser.
+const isWebUrl = (url) => {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+};
+ipcMain.handle("shell:openExternal", async (_e, url) => {
+  if (!isWebUrl(url)) return false;
+  await electron.shell.openExternal(url);
   return true;
 });
 
@@ -201,6 +246,13 @@ function createWindow() {
   session.defaultSession.setPermissionRequestHandler(
     (_wc, permission, callback) => callback(permission === "local-fonts"),
   );
+  // Chromium also asks SYNCHRONOUSLY whether a permission is held, and the
+  // default answer for a page served from file:// is no -- so queryLocalFonts
+  // could resolve empty in the packaged app while working in dev, which read
+  // as the font list "sometimes" being incomplete.
+  session.defaultSession.setPermissionCheckHandler(
+    (_wc, permission) => permission === "local-fonts",
+  );
 
   const win = new BrowserWindow({
     width: 1400,
@@ -223,6 +275,23 @@ function createWindow() {
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error(`Renderer failed to load ${url}: ${desc} (${code})`);
+  });
+  // The app window only ever shows the app.  A link that tries to navigate it
+  // or open a new window goes to the system browser instead (web links only);
+  // anything else is dropped.  Same-origin navigation -- a dev-server reload
+  // -- is left alone.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isWebUrl(url)) electron.shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (e, url) => {
+    let same = false;
+    try {
+      same = new URL(url).origin === new URL(win.webContents.getURL()).origin;
+    } catch {}
+    if (same) return;
+    e.preventDefault();
+    if (isWebUrl(url)) electron.shell.openExternal(url);
   });
 
   if (DEV_URL) {
@@ -307,11 +376,23 @@ function buildAppMenu() {
 
 app.whenReady().then(() => {
   buildAppMenu();
-  // BrowserWindow's `icon` option doesn't reach the Dock on macOS; packaged
-  // builds get their Dock icon from `build.icon`, but dev runs (launched as
-  // a bare Electron binary) still show Electron's default unless set here.
+  // BrowserWindow's `icon` option doesn't reach the Dock on macOS, so the
+  // Dock icon is set here -- in packaged builds too. A packaged build does
+  // carry its own icon.icns, but recent macOS shrinks a bundle icon that
+  // wasn't made with Apple's newer icon tooling into a grey rounded square in
+  // the Dock; an icon set at runtime is shown as it is. (Making this dev-only,
+  // on the untested assumption that the bundle's icon would look better, was
+  // a visible regression.)
+  // Behind its own try: this runs at the top of the whenReady handler, and a
+  // throw here rejects that handler and skips everything below it INCLUDING
+  // createWindow(). That happened once, when app-icons/ was missing from
+  // `build.files` -- the packaged app ran with no window and said nothing.
   if (process.platform === "darwin" && app.dock) {
-    app.dock.setIcon(APP_ICON);
+    try {
+      app.dock.setIcon(APP_ICON);
+    } catch (err) {
+      console.warn("[main] could not set the Dock icon:", err.message);
+    }
   }
 
   // Open the database before the window loads so the renderer's first
@@ -344,9 +425,37 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // --api-socket=<path> moves the agent API socket.  The e2e suite gives every
+  // launch its own, so a test never collides with a PurpleCAD the user has
+  // open -- which, sharing userData, would otherwise own the default one.
+  const apiSocket =
+    app.commandLine.getSwitchValue("api-socket") ||
+    path.join(app.getPath("userData"), "purplecad-api.sock");
+  if (process.platform === "win32") {
+    console.warn("[api] the agent API socket is not available on Windows yet");
+  } else {
+    startApiServer({ socketPath: apiSocket, invoke: invokeRenderer })
+      .then((server) => {
+        apiServer = server;
+        if (server) console.log(`[api] listening on ${server.socketPath}`);
+        else
+          console.warn(
+            `[api] ${apiSocket} belongs to another running PurpleCAD`,
+          );
+      })
+      .catch((err) => console.warn("[api] could not start:", err.message));
+  }
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// The socket file is removed on the way out, so the next launch finds it free
+// rather than having to probe a stale one.
+app.on("will-quit", () => {
+  void apiServer?.close();
 });
 
 app.on("window-all-closed", () => {

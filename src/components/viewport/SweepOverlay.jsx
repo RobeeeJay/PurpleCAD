@@ -6,7 +6,7 @@
 // like the chamfer/push-pull overlays.  Pipe shows Rotations (twist) + an
 // Auto-rotate toggle; Loft has no parameters (just Confirm/Cancel).
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
 import FormulaInput from "../FormulaInput";
 import { evalValue } from "../inputs.jsx";
@@ -156,10 +156,14 @@ export default function SweepOverlay() {
           Set the sweep options, then Confirm · Esc to cancel
         </div>
         <div className="sketch-distance-input-overlay">
-          <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+          <span
+            title="Turns the profile makes as it travels along the path. 0 sweeps it flat; 1 twists it through a full turn."
+            style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+          >
             Rotations:
           </span>
           <FormulaInput
+            title="Turns the profile makes as it travels along the path. 0 sweeps it flat; 1 twists it through a full turn."
             variables={variables}
             autoFocus
             value={twist}
@@ -294,10 +298,14 @@ export default function SweepOverlay() {
         Set the revolve options, then Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay">
-        <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+        <span
+          title="Turns the profile is spun through around the axis. 1 is a full solid of revolution; 0.5 gives a half."
+          style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+        >
           Rotations:
         </span>
         <FormulaInput
+          title="Turns the profile is spun through around the axis. 1 is a full solid of revolution; 0.5 gives a half."
           variables={variables}
           autoFocus
           value={rotations}
@@ -312,10 +320,14 @@ export default function SweepOverlay() {
             border: `1px solid ${rotationsValid ? "var(--border-color)" : "#e87575"}`,
           }}
         />
-        <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+        <span
+          title="Rise along the axis per full turn. Non-zero turns the revolve into a helix, which is how a thread is cut."
+          style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+        >
           Offset/turn (mm):
         </span>
         <FormulaInput
+          title="Rise along the axis per full turn. Non-zero turns the revolve into a helix, which is how a thread is cut."
           variables={variables}
           value={offset}
           onChange={(e) => setOffset(e.target.value)}
@@ -348,10 +360,14 @@ export default function SweepOverlay() {
         </label>
         {params.prism && (
           <>
-            <span style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}>
+            <span
+              title="Number of flat sides in the swept prism. Higher looks rounder; 3 gives a triangular section."
+              style={{ fontSize: 11, color: "#aaa", marginRight: 4 }}
+            >
               Sides:
             </span>
             <FormulaInput
+              title="Number of flat sides in the swept prism. Higher looks rounder; 3 gives a triangular section."
               variables={variables}
               value={sides}
               onChange={(e) => setSides(e.target.value)}

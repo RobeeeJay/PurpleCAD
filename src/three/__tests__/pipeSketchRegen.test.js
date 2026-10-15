@@ -119,7 +119,6 @@ describe("pipe follows an upstream sketch edit", () => {
       activeHistoryId: "h3",
       items: [],
       variables: [],
-      curveResolution: "preview",
     });
     await recalculateTimeline();
     const before = useStore.getState().items.find((i) => i.id === 3);

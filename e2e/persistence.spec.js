@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp, makeDataDir } from "./launch.js";
 
 // Relaunch persistence: everything the user built must survive an app

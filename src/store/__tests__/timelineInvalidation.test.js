@@ -134,9 +134,13 @@ describe("timeline forward invalidation", () => {
     expect(dirty(s)).toEqual([true, true, true]);
   });
 
-  it("toggling the resolution dirties the whole timeline", () => {
+  // A new Resolution re-tessellates every step: the one edit that marks the
+  // whole timeline.  Committing the value it already has changes nothing.
+  it("a new resolution dirties the whole timeline; the same one nothing", () => {
     const s = makeStore();
-    s.getState().toggleCurveResolution();
+    s.getState().setResolutionMm(s.getState().resolutionMm);
+    expect(dirty(s)).toEqual([false, false, false]);
+    s.getState().setResolutionMm(0.02);
     expect(dirty(s)).toEqual([true, true, true]);
   });
 });

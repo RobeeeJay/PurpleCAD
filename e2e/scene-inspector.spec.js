@@ -3,7 +3,7 @@
 // that's its whole reason for existing, and it's the same check the e2e
 // integrity helper relies on.
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 import fs from "node:fs";
 

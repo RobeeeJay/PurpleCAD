@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../store";
 import FormulaInput from "./FormulaInput";
 import { evalValue, useEscapeKey } from "./inputs.jsx";
@@ -121,7 +121,10 @@ const PlaneDialog = () => {
         Set the plane options, then Confirm · Esc to cancel
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
-        <Field label="Base:">
+        <Field
+          label="Base:"
+          hint="Starting orientation for the plane. XY/XZ/YZ align it to a world plane; 3 points or Face derive it from geometry you pick."
+        >
           {/* Labels are the Z-up display frame: XY is the ground plane
               (internal xz), XZ the vertical internal-xy plane; YZ is the same
               plane in both frames. */}
@@ -161,7 +164,10 @@ const PlaneDialog = () => {
             Face
           </button>
         </Field>
-        <Field label="Rot X°">
+        <Field
+          label="Rot X°"
+          hint="Tilts the plane about the display X axis, on top of the base orientation."
+        >
           <FormulaInput
             variables={variables}
             autoFocus
@@ -171,7 +177,10 @@ const PlaneDialog = () => {
             style={barInput(Number.isFinite(rxv))}
           />
         </Field>
-        <Field label="Y°">
+        <Field
+          label="Y°"
+          hint="Tilts the plane about the display Y axis, on top of the base orientation."
+        >
           <FormulaInput
             variables={variables}
             value={ry}
@@ -180,7 +189,10 @@ const PlaneDialog = () => {
             style={barInput(Number.isFinite(ryv))}
           />
         </Field>
-        <Field label="Z°">
+        <Field
+          label="Z°"
+          hint="Spins the plane about the display Z axis, on top of the base orientation."
+        >
           <FormulaInput
             variables={variables}
             value={rz}
@@ -189,7 +201,10 @@ const PlaneDialog = () => {
             style={barInput(Number.isFinite(rzv))}
           />
         </Field>
-        <Field label="Offset(mm)">
+        <Field
+          label="Offset(mm)"
+          hint="Shifts the plane along its own normal, away from the base. Use it to sketch a set distance off a face."
+        >
           <FormulaInput
             variables={variables}
             value={offset}

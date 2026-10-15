@@ -91,6 +91,11 @@ a shared `occ_common.h`.
 **Risk:** moderate. Needs a CMakeLists change; no JS behaviour change, and the
 addon smoke test plus `bridgeParity` cover the surface.
 
+**Done (2026-10-08)**, for the iPad port rather than for size: the ops now sit
+in `occ_kernel/select/build/modify/io.cc` behind an engine interface
+(`occ_js.h`), with N-API and JavaScriptCore adapters. See CLAUDE.md, "Native
+OCC addon".
+
 ### Option D — Component-level splits (UI)
 
 `Timeline.jsx` (912), `TreeView.jsx` (820), `ConstrainSection.jsx` (914),

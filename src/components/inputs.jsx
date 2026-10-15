@@ -7,7 +7,7 @@
 //   • while the field has no valid value, Confirm is disabled and the preview
 //     is cleared — no live update fires until it parses again.
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { evaluateFormula, variablesToMap } from "../utils/formulas.js";
 import { useStore } from "../store";
 import { cancelOcc } from "../three/occClient.js";

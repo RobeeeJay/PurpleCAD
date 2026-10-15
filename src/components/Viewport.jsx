@@ -1,3 +1,4 @@
+import { weldExistingMeshes } from "../three/importWeld.js";
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import RotationWidget from "./RotationWidget";
@@ -6,8 +7,12 @@ import MeasureOverlay from "./MeasureOverlay";
 import PathTraceProgress from "./PathTraceProgress";
 import SketchOverlays from "./viewport/SketchOverlays";
 import ChamferOverlay from "./viewport/ChamferOverlay";
+import ComponentMotionOverlay from "./viewport/ComponentMotionOverlay";
 import PushPullOverlay from "./viewport/PushPullOverlay";
 import SweepOverlay from "./viewport/SweepOverlay";
+import StressOverlay from "./viewport/StressOverlay";
+import OptimiseOverlay from "./viewport/OptimiseOverlay";
+import StressLegend from "./viewport/StressLegend";
 import SvgPlacementOverlay from "./viewport/SvgPlacementOverlay";
 import UnderlayPlacementOverlay from "./viewport/UnderlayPlacementOverlay";
 import PlaneDialog from "./PlaneDialog";
@@ -16,6 +21,7 @@ import BooleanDialog from "./BooleanDialog";
 import Pattern3dDialog from "./Pattern3dDialog";
 import SplitDialog from "./SplitDialog";
 import ShellDialog from "./ShellDialog";
+import SimplifyDialog from "./SimplifyDialog";
 import OriginDialog from "./OriginDialog";
 import HoleDialog from "./HoleDialog";
 import EmbossDialog from "./EmbossDialog";
@@ -34,6 +40,7 @@ import { useViewportInit } from "./viewport/useViewportInit";
 import { useViewportCamera } from "./viewport/useViewportCamera";
 import { useSceneSync } from "./viewport/useSceneSync";
 import "../styles/Viewport.css";
+import TouchModifiers from "./viewport/TouchModifiers";
 import { useStore } from "../store";
 import { activePrecision } from "../three/resolution.js";
 import { clearSolids } from "../three/solidCache.js";
@@ -53,10 +60,6 @@ const Viewport = () => {
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
   const cameraControlsRef = useRef({
-    isRotating: false,
-    isPanning: false,
-    mouseX: 0,
-    mouseY: 0,
     targetRotationX: 0,
     targetRotationY: 0,
   });
@@ -297,6 +300,8 @@ const Viewport = () => {
   // the next document.  Clearing is always safe: a miss just rebuilds.
   useEffect(() => {
     clearSolids();
+    // Weld imported meshes this document still stores as triangle soups.
+    weldExistingMeshes();
   }, [cameraResetTrigger]);
 
   // On Cancel (cancelEpoch bump), tell the OCC worker to abort its in-flight
@@ -356,14 +361,19 @@ const Viewport = () => {
         selectItem={selectItem}
       />
       <ChamferOverlay />
+      <ComponentMotionOverlay />
       <PushPullOverlay />
       <SweepOverlay />
+      <StressOverlay />
+      <OptimiseOverlay />
+      <StressLegend />
       <PlaneDialog />
       <MirrorDialog />
       <BooleanDialog />
       <Pattern3dDialog />
       <SplitDialog />
       <ShellDialog />
+      <SimplifyDialog />
       <OriginDialog />
       <HoleDialog />
       <EmbossDialog />
@@ -380,6 +390,7 @@ const Viewport = () => {
       <SvgPlacementOverlay />
       <UnderlayPlacementOverlay />
       <PlanePickHint />
+      <TouchModifiers />
       {widgetVisible && (
         <RotationWidget
           rotationState={rotationState}

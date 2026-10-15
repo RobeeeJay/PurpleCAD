@@ -1,7 +1,13 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import * as THREE from "three";
 import { useStore } from "../store";
-import { measure, shapeMetrics, loopArea } from "../three/measure.js";
+import {
+  measure,
+  shapeMetrics,
+  loopArea,
+  chainsOf,
+  circleOf,
+} from "../three/measure.js";
 import { getSketchShapePoints } from "../three/sceneObjects/sketchShapes.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
 import "../styles/MeasureOverlay.css";
@@ -27,23 +33,36 @@ function sketchSelectionResult(sketch, sel, multi) {
     for (let i = 1; i < pts.length; i++) total += pts[i].distanceTo(pts[i - 1]);
   }
   const res = { type: "length", value: total, count: sel2.length };
-  // A single circle / arc also reports its radius; a single closed primitive its
-  // area.  Several shapes that chain into a closed loop report the loop's area;
-  // exactly two open pieces (e.g. two lines) report the gap between them.
+  // Lines joined end to end are ONE thing: their length, and -- closed -- the
+  // area they enclose, and the diameter when they go round a circle.  Only a
+  // second, separate line or chain turns the reading into the distance
+  // between the two.  A single circle / arc reports its radius (and a circle
+  // its diameter); a single closed primitive its area.
+  const chains = chainsOf(polys);
   if (sel2.length === 1) {
     const { radius, area } = shapeMetrics(sel2[0]);
     if (radius != null) res.radius = radius;
+    if (sel2[0].type === "circle") res.diameter = 2 * sel2[0].r;
     if (area != null) res.area = area;
-  } else {
-    const area = loopArea(polys);
-    if (area != null) res.area = area;
-    else if (sel2.length === 2) {
-      const d = measure([
-        { kind: "polyline", pts: polys[0] },
-        { kind: "polyline", pts: polys[1] },
-      ]);
-      if (d) res.distance = d.value;
+  }
+  if (chains.length === 1) {
+    if (sel2.length > 1) {
+      const area = loopArea(polys);
+      if (area != null) res.area = area;
     }
+    if (res.radius == null) {
+      const circle = circleOf(chains[0]);
+      if (circle) res.diameter = 2 * circle.r;
+    }
+  } else if (chains.length === 2) {
+    const d = measure(
+      chains.map((c) => ({
+        kind: "polyline",
+        pts: c.pts.map(([x, y]) => [x, y, 0]),
+        closed: c.closed,
+      })),
+    );
+    if (d) res.distance = d.value;
   }
   return res;
 }
@@ -62,6 +81,7 @@ function describe(result) {
         ? `Length (${result.count})  ${mm(result.value)}`
         : `Length  ${mm(result.value)}`;
     if (result.radius != null) s += `   ·   Radius  ${mm(result.radius)}`;
+    if (result.diameter != null) s += `   ·   Diameter  ${mm(result.diameter)}`;
     if (result.area != null) s += `   ·   Area  ${mm2(result.area)}`;
     if (result.distance != null) s += `   ·   Distance  ${mm(result.distance)}`;
     return s;

@@ -2,7 +2,7 @@
 // local X, left = sketch local Y) pinned to the viewport edges; labels show the
 // mm offset from the sketch origin and update live as the user pans / zooms.
 
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { MM_PER_UNIT } from "../../three/sceneObjects.js";
 import { useStore } from "../../store";

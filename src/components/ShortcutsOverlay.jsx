@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import "../styles/ShortcutsOverlay.css";
 
@@ -23,7 +23,6 @@ const VIEW_3D = [
   { keys: ["4"], label: "Path-traced render" },
   { keys: ["5"], label: "Toggle shadows" },
   { keys: ["6"], label: "Toggle cross-section" },
-  { keys: ["8"], label: "Toggle curve resolution" },
   { keys: ["Z"], label: "Select objects" },
   { keys: ["X"], label: "Select faces" },
   { keys: ["C"], label: "Select edges" },
@@ -38,7 +37,7 @@ const SKETCH = [
   { keys: ["E"], label: "Ellipse" },
   { keys: ["A"], label: "Arc" },
   { keys: ["D"], label: "Distance dimension" },
-  { keys: ["I"], label: "Toggle construction (dashed)" },
+  { keys: ["I"], label: "Toggle construction line" },
   { keys: ["O"], label: "Offset (Shift: other side)" },
   { keys: ["Z"], label: "Select objects" },
   { keys: ["X"], label: "Select shapes (regions)" },

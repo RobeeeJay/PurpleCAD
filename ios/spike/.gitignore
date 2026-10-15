@@ -1,0 +1,4 @@
+ms2.bin
+build/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/

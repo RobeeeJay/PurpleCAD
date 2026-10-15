@@ -205,9 +205,10 @@ export function createSketchSelectionOverlays({
       scene.add(sketchSelectionOverlay);
     }
     useStore.getState().setSelectedSketchElement({ type: "line", shapeIdx });
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
+    // The store, not itemsRef: a just-pasted shape is not in itemsRef yet.
+    const selItem = useStore
+      .getState()
+      .items.find((i) => i.id === selectedIdRef.current);
     if (selItem)
       buildRotationHandleFor(selItem.shapes || [], [shapeIdx], sketchMesh);
     renderBezierHandles(shape, sketchMesh);
@@ -227,9 +228,13 @@ export function createSketchSelectionOverlays({
   const showMultiSelectOverlays = (indices) => {
     clearMultiSelectOverlays();
     useStore.getState().setSketchMultiSelectedIndices([...indices]);
-    const selItem = itemsRef.current.find(
-      (i) => i.id === selectedIdRef.current,
-    );
+    // Read items from the store, not itemsRef, as refreshSketchSelectionOverlay
+    // does: a caller that has just added shapes (paste) runs before React
+    // re-syncs itemsRef, which would not have them yet -- and the new
+    // selection would be set with nothing drawn to show it.
+    const selItem = useStore
+      .getState()
+      .items.find((i) => i.id === selectedIdRef.current);
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     const shapes = selItem.shapes || [];

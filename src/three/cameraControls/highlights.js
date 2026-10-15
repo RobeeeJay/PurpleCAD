@@ -49,15 +49,15 @@ export function createHighlightHelpers({
     // Hover & selection highlights are DISPLAY overlays on the smooth shader
     // render — they must visually match the shader, not the (potentially
     // coarse) CSG/bevel resolution.  Always tessellate at DISPLAY_PRECISION_MM,
-    // or finer if the user has print mode enabled.  Dimensions MUST come from
+    // or finer if the Resolution setting is finer.  Dimensions MUST come from
     // the item's actual primitiveDimensions (matching the shaders) — hardcoded
     // defaults leave the highlight the wrong size once the primitive is resized.
     const type = item?.type;
     const d = primitiveDimensions(item);
-    const printPrecisionMm = activePrecision();
+    const resolutionMm = activePrecision();
     const displayPrecision =
-      printPrecisionMm != null
-        ? Math.min(printPrecisionMm, DISPLAY_PRECISION_MM)
+      resolutionMm != null
+        ? Math.min(resolutionMm, DISPLAY_PRECISION_MM)
         : DISPLAY_PRECISION_MM;
     if (type === "sphere") {
       const w = fullCircleSegments(d.radius, displayPrecision, 32);
@@ -367,6 +367,10 @@ export function createHighlightHelpers({
         cx: centroidSample.x,
         cy: centroidSample.y,
         cz: centroidSample.z,
+        // The angle this highlight grew by: the native face matcher grows the
+        // pick by the same rule, so a click on a bore's wall takes the whole
+        // wall that lit up, not just the facet under the cursor.
+        smoothDeg: selectionChainAngle(useStore.getState?.()),
       };
     }
   };

@@ -14,6 +14,7 @@ import { applyRectangularPatternConstraints } from "../three/sketchRectangularPa
 import { applyMirrorConstraints } from "../three/sketchMirror.js";
 import { applyCircularPatternConstraints } from "../three/sketchCircularPattern.js";
 import { MM_PER_UNIT } from "../three/sceneObjects/dimensions.js";
+import { conflictingDimensions } from "../three/sketchDimensionConflicts.js";
 
 // Whether two shape arrays differ beyond floating-point noise.
 const shapesDiffer = (a, b) => {
@@ -31,13 +32,65 @@ import {
   saveTimeline,
   withOrphanFlags,
   withUndo,
-  dirtyAllEntries,
+  dirtyEntriesFrom,
+  firstChangedIndex,
+  markCsgDirtyFrom,
 } from "./internals.js";
 
 export const variablesInitial = {
   variables: loadVariables(),
   variablesDialogOpen: false,
+  // Constraint OBJECTS (not indices) whose variable-driven value the geometry
+  // refused to take on the last variable change, so the sketch view can show
+  // them in red.  Identity rather than an index because editing a constraint
+  // replaces the object, which clears the flag by itself -- an index would
+  // survive an insert or delete and point at some other dimension.
+  dimensionConflicts: new Set(),
 };
+
+// Identifiers in a formula (or any string).
+const namesIn = (text) =>
+  new Set(String(text ?? "").match(/[A-Za-z_][A-Za-z0-9_]*/g) || []);
+
+// The variables whose value a change alters: those added, removed or
+// redefined, and then every variable computed from one of them (Area = Width *
+// Depth changes with Width), to a fixed point.
+function changedVariableNames(before = [], after = []) {
+  const def = (v) => String(v.formula ?? v.value ?? "");
+  const was = new Map(before.map((v) => [v.name, def(v)]));
+  const now = new Map(after.map((v) => [v.name, def(v)]));
+  const changed = new Set();
+  for (const [name, f] of now) if (was.get(name) !== f) changed.add(name);
+  for (const name of was.keys()) if (!now.has(name)) changed.add(name);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, f] of now)
+      if (!changed.has(name) && [...namesIn(f)].some((n) => changed.has(n))) {
+        changed.add(name);
+        grew = true;
+      }
+  }
+  return changed;
+}
+
+// The first entry with a string naming one of `names` -- a depth "Thick", a
+// dimension "Width / 2", a chamfer "Edge".  Whole identifiers only, in string
+// values only; packed meshes are skipped.  -1 if none does.
+const MESH_KEYS = new Set(["geometryData", "positions", "normals", "indices"]);
+function firstEntryNaming(history, names) {
+  if (names.size === 0) return -1;
+  const names_ = (v) => {
+    if (typeof v === "string") {
+      for (const n of namesIn(v)) if (names.has(n)) return true;
+      return false;
+    }
+    if (Array.isArray(v)) return v.some(names_);
+    if (v && typeof v === "object")
+      return Object.entries(v).some(([k, x]) => !MESH_KEYS.has(k) && names_(x));
+    return false;
+  };
+  return history.findIndex((e) => names_(e.instruction));
+}
 
 export const createVariablesSlice = (set) => ({
   setVariablesDialogOpen: (open) => set({ variablesDialogOpen: open }),
@@ -52,6 +105,9 @@ export const createVariablesSlice = (set) => ({
       // returns.
       const newVarsMap = variablesToMap(variables);
       let anyFailed = false;
+      // Rebuilt from scratch on every variable change, so a dimension that now
+      // solves stops being flagged without any separate clearing pass.
+      const dimensionConflicts = new Set();
       // Re-cut chamfer/bevel corners whose size is a formula so they track
       // the new variable values (the bridge geometry is shape-level — the
       // constraint solver doesn't drive it).
@@ -160,21 +216,23 @@ export const createVariablesSlice = (set) => ({
             (shapesDiffer(orig, final) || finalConstraints !== item.constraints)
           )
             return { ...item, shapes: final, constraints: finalConstraints };
-          if (!ok) anyFailed = true;
+          if (!ok) {
+            anyFailed = true;
+            // Attribute the failure: the sketch keeps its OLD shapes, so the
+            // dimensions to highlight are the variable-driven ones that those
+            // shapes don't satisfy under the NEW values.
+            for (const c of conflictingDimensions(
+              orig,
+              item.constraints,
+              newVarsMap,
+            ))
+              dimensionConflicts.add(c);
+          }
           return item;
         }
-        // Booleans and chamfers cache their tessellated `geometryData`
-        // keyed by `regeneratedAt`.  Their inputs (extrude depths,
-        // dimension distances) may now resolve to new values, but the
-        // regen-skip check would otherwise keep the stale geometry.
-        // Force a rebuild on the next regenerateForResolution pass by
-        // clearing the flag.
-        if (item.type === "csg" && item.regenerator) {
-          return {
-            ...item,
-            regenerator: { ...item.regenerator, regeneratedAt: "dirty" },
-          };
-        }
+        // Bodies the change reaches are marked stale below, from the first
+        // step it reaches -- not every body here (which also made each one
+        // look like a changed sketch, and rewrote its create entry).
         return item;
       });
       // Persist any sketch-shape changes into the matching create-history
@@ -206,22 +264,36 @@ export const createVariablesSlice = (set) => ({
               }
               return entry;
             });
-      // A variable can drive any extrude depth / dimension / sketch shape, so
-      // forward-invalidate the WHOLE timeline: the JIT recalc reads each entry's
-      // `dirty` flag (not the live items), and would otherwise skip every step as
-      // clean and keep the stale geometry.  (dirty is a transient flag; saveTimeline
-      // strips it — persistence only sees the rewritten sketch shapes.)
-      const newHistory = dirtyAllEntries(rewritten);
+      // Forward-invalidate from the first step the change reaches: the JIT
+      // recalc reads each entry's `dirty` flag (not the live items), and would
+      // otherwise skip every step as clean and keep the stale geometry.  A step
+      // is reached when it names a changed variable (or one computed from it),
+      // or when re-solving rewrote it (a sketch).  Nothing earlier can see the
+      // change.  (dirty is a transient flag; saveTimeline strips it --
+      // persistence only sees the rewritten sketch shapes.)
+      const reached = [
+        firstEntryNaming(
+          rewritten,
+          changedVariableNames(state.variables, variables),
+        ),
+        firstChangedIndex(state.history, rewritten),
+      ].filter((i) => i >= 0);
+      const from = reached.length ? Math.min(...reached) : -1;
+      const newHistory = dirtyEntriesFrom(
+        rewritten,
+        from < 0 ? Infinity : from,
+      );
       saveTimeline(newHistory, state.activeHistoryId);
       return {
         ...withUndo(state),
         variables,
-        items: updatedItems,
+        dimensionConflicts,
+        items: markCsgDirtyFrom(updatedItems, newHistory, from),
         history: withOrphanFlags(newHistory),
         ...(anyFailed
           ? {
               notification:
-                "Some sketch dimensions couldn't update to the new value without breaking a constraint",
+                "Some sketch dimensions couldn't update to the new value without breaking a constraint - they are highlighted in red",
             }
           : {}),
       };

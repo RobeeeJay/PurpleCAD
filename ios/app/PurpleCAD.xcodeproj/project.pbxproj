@@ -1,0 +1,216 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		E6A4E94330A044E85A97D397 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 045758955B255E8A3574C553 /* AppDelegate.swift */; };
+		3106876BE5FB12C4BF38CAFA /* WebViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C61CB00264A3C3F0AB7C610 /* WebViewController.swift */; };
+		8EEA0ED0ECCA99609373FE53 /* AppSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9253D2A8E5BAEE29A842C8F3 /* AppSchemeHandler.swift */; };
+		5195058C5AD21AB02A81617F /* ScriptThread.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E78B6DE2915382841A1327 /* ScriptThread.swift */; };
+		EDC6FCC671937E7E59C7184E /* OccHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2506A74CC44B378CF3DD5EA4 /* OccHost.swift */; };
+		52B0B6F046119DDE05C8239A /* DbHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 799C554D689972F2F0362144 /* DbHost.swift */; };
+		BC3FCA1E974C65958D65082A /* occ_kernel.cc in Sources */ = {isa = PBXBuildFile; fileRef = CCF43FAA4881CF4AECFBF1A6 /* occ_kernel.cc */; };
+		DCB2138D0DB564BB9EADA4C1 /* occ_select.cc in Sources */ = {isa = PBXBuildFile; fileRef = E1B5C78AEEDCB31EC3B7267E /* occ_select.cc */; };
+		87B7351F8141DD095D6753C5 /* occ_build.cc in Sources */ = {isa = PBXBuildFile; fileRef = F86FCF390DE6F1A1EBF2776E /* occ_build.cc */; };
+		C8F27E1ADD63D8D7D7480D65 /* occ_modify.cc in Sources */ = {isa = PBXBuildFile; fileRef = 9DC46CABBBC311308CC88842 /* occ_modify.cc */; };
+		7824789DEEE9DF96F8EDBC60 /* occ_io.cc in Sources */ = {isa = PBXBuildFile; fileRef = 81D57DB37C0A5E283E3015CD /* occ_io.cc */; };
+		A5E1DFE44C87E4FBA37C9E67 /* mesh_tools.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E470C4EF329CBFED286C9EA8 /* mesh_tools.cpp */; };
+		E513912DD1F7354E35F799D7 /* allocator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = CDE9805A15F9D9E54F7066A0 /* allocator.cpp */; };
+		E197077ECAC98C3FD85E2AB5 /* indexgenerator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 023B419F2CABBE0F9DA9B14F /* indexgenerator.cpp */; };
+		C80C9ED187C0AC3D48216CB2 /* simplifier.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1F896651BF8AABC3029B856 /* simplifier.cpp */; };
+		267C23715513E73D4D10669F /* jsc_binding.cc in Sources */ = {isa = PBXBuildFile; fileRef = DE0E5851EA3DC8F402A13A46 /* jsc_binding.cc */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		045758955B255E8A3574C553 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AppDelegate.swift"; path = "AppDelegate.swift"; sourceTree = "<group>"; };
+		5C61CB00264A3C3F0AB7C610 /* WebViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "WebViewController.swift"; path = "WebViewController.swift"; sourceTree = "<group>"; };
+		9253D2A8E5BAEE29A842C8F3 /* AppSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AppSchemeHandler.swift"; path = "AppSchemeHandler.swift"; sourceTree = "<group>"; };
+		D5E78B6DE2915382841A1327 /* ScriptThread.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "ScriptThread.swift"; path = "ScriptThread.swift"; sourceTree = "<group>"; };
+		2506A74CC44B378CF3DD5EA4 /* OccHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "OccHost.swift"; path = "OccHost.swift"; sourceTree = "<group>"; };
+		799C554D689972F2F0362144 /* DbHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "DbHost.swift"; path = "DbHost.swift"; sourceTree = "<group>"; };
+		CCF43FAA4881CF4AECFBF1A6 /* occ_kernel.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "occ_kernel.cc"; path = "../../native/occ-addon/src/occ_kernel.cc"; sourceTree = "SOURCE_ROOT"; };
+		E1B5C78AEEDCB31EC3B7267E /* occ_select.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "occ_select.cc"; path = "../../native/occ-addon/src/occ_select.cc"; sourceTree = "SOURCE_ROOT"; };
+		F86FCF390DE6F1A1EBF2776E /* occ_build.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "occ_build.cc"; path = "../../native/occ-addon/src/occ_build.cc"; sourceTree = "SOURCE_ROOT"; };
+		9DC46CABBBC311308CC88842 /* occ_modify.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "occ_modify.cc"; path = "../../native/occ-addon/src/occ_modify.cc"; sourceTree = "SOURCE_ROOT"; };
+		81D57DB37C0A5E283E3015CD /* occ_io.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "occ_io.cc"; path = "../../native/occ-addon/src/occ_io.cc"; sourceTree = "SOURCE_ROOT"; };
+		E470C4EF329CBFED286C9EA8 /* mesh_tools.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "mesh_tools.cpp"; path = "../../native/occ-addon/src/mesh_tools.cpp"; sourceTree = "SOURCE_ROOT"; };
+		CDE9805A15F9D9E54F7066A0 /* allocator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "allocator.cpp"; path = "../../native/occ-addon/third_party/meshoptimizer/src/allocator.cpp"; sourceTree = "SOURCE_ROOT"; };
+		023B419F2CABBE0F9DA9B14F /* indexgenerator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "indexgenerator.cpp"; path = "../../native/occ-addon/third_party/meshoptimizer/src/indexgenerator.cpp"; sourceTree = "SOURCE_ROOT"; };
+		E1F896651BF8AABC3029B856 /* simplifier.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "simplifier.cpp"; path = "../../native/occ-addon/third_party/meshoptimizer/src/simplifier.cpp"; sourceTree = "SOURCE_ROOT"; };
+		DE0E5851EA3DC8F402A13A46 /* jsc_binding.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "jsc_binding.cc"; path = "../../native/occ-addon/src/jsc_binding.cc"; sourceTree = "SOURCE_ROOT"; };
+		4F4EA3C82D254BA72C7CB241 /* Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Bridging-Header.h"; path = "Bridging-Header.h"; sourceTree = "<group>"; };
+		F5BF48AA40CAD7891EB709FC /* PurpleCAD.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PurpleCAD.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C18F88D444D8FE65E18D39E9 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (
+			); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		FAD58DE7366495DB4650CFEF = {isa = PBXGroup; children = (
+				D8DBA3F9900DD17689CA0C4D /* PurpleCAD */,
+				6181C844C135BE67318DCF39 /* OCC core */,
+				86024CAD1E83101D97359D73 /* Products */,
+			); sourceTree = "<group>"; };
+		D8DBA3F9900DD17689CA0C4D /* PurpleCAD */ = {isa = PBXGroup; children = (
+				045758955B255E8A3574C553 /* AppDelegate.swift */,
+				5C61CB00264A3C3F0AB7C610 /* WebViewController.swift */,
+				9253D2A8E5BAEE29A842C8F3 /* AppSchemeHandler.swift */,
+				D5E78B6DE2915382841A1327 /* ScriptThread.swift */,
+				2506A74CC44B378CF3DD5EA4 /* OccHost.swift */,
+				799C554D689972F2F0362144 /* DbHost.swift */,
+				4F4EA3C82D254BA72C7CB241 /* Bridging-Header.h */,
+			); path = PurpleCAD; sourceTree = "<group>"; };
+		6181C844C135BE67318DCF39 /* OCC core */ = {isa = PBXGroup; children = (
+				CCF43FAA4881CF4AECFBF1A6 /* occ_kernel.cc */,
+				E1B5C78AEEDCB31EC3B7267E /* occ_select.cc */,
+				F86FCF390DE6F1A1EBF2776E /* occ_build.cc */,
+				9DC46CABBBC311308CC88842 /* occ_modify.cc */,
+				81D57DB37C0A5E283E3015CD /* occ_io.cc */,
+				E470C4EF329CBFED286C9EA8 /* mesh_tools.cpp */,
+				CDE9805A15F9D9E54F7066A0 /* allocator.cpp */,
+				023B419F2CABBE0F9DA9B14F /* indexgenerator.cpp */,
+				E1F896651BF8AABC3029B856 /* simplifier.cpp */,
+				DE0E5851EA3DC8F402A13A46 /* jsc_binding.cc */,
+			); name = "OCC core"; sourceTree = "<group>"; };
+		86024CAD1E83101D97359D73 /* Products */ = {isa = PBXGroup; children = (
+				F5BF48AA40CAD7891EB709FC /* PurpleCAD.app */,
+			); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		42AEFBAE01D2DFD981F7DA7D /* PurpleCAD */ = {isa = PBXNativeTarget; buildConfigurationList = 1FE0E75410BBBB0E5DE5E9B5; buildPhases = (
+				C4D5163706E5908DC9E032F3 /* Sources */,
+				C18F88D444D8FE65E18D39E9 /* Frameworks */,
+				D8209A1E8D640B8F2DA46EBB /* Bundle renderer and bridge */,
+				371AE3AE1F4D3E3C0D762104 /* Embed OCCT */,
+			); buildRules = (
+			); dependencies = (
+			); name = PurpleCAD; productName = PurpleCAD; productReference = F5BF48AA40CAD7891EB709FC /* PurpleCAD.app */; productType = "com.apple.product-type.application"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		46F86FAA6BBF9AC94A7E4595 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 2700; }; buildConfigurationList = 4DC842AFD6F1146FD0D47CEA; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (
+				en,
+				Base,
+			); mainGroup = FAD58DE7366495DB4650CFEF; productRefGroup = 86024CAD1E83101D97359D73 /* Products */; projectDirPath = ""; projectRoot = ""; targets = (
+				42AEFBAE01D2DFD981F7DA7D /* PurpleCAD */,
+			); };
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		D8209A1E8D640B8F2DA46EBB /* Bundle renderer and bridge */ = {isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (
+			); inputPaths = (
+			); name = "Bundle renderer and bridge"; outputPaths = (
+			); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; shellScript = "set -e\n# The renderer bundle, the OCC bridge and the host scripts.  dist/ is built by\n# ios/app/build.sh (vite build); Xcode has no node to run it.\ndist=\"$SRCROOT/../../dist\"\nif [ ! -f \"$dist/index.html\" ]; then\n  echo \"error: $dist/index.html missing -- run ios/app/build.sh, or npx vite build\"\n  exit 1\nfi\nres=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nrm -rf \"$res/web\" \"$res/js\" \"$res/occ\"\nmkdir -p \"$res/web\" \"$res/js\" \"$res/occ\"\ncp -R \"$dist/\" \"$res/web/\"\ncp \"$SRCROOT/PurpleCAD/js/\"*.js \"$res/js/\"\ncp \"$SRCROOT/../../electron/occ-bridge.cjs\" \"$SRCROOT/../../electron/kvStore.cjs\" \"$res/occ/\"\n"; };
+		371AE3AE1F4D3E3C0D762104 /* Embed OCCT */ = {isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (
+			); inputPaths = (
+			); name = "Embed OCCT"; outputPaths = (
+			); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; shellScript = "set -e\n# The OCCT libraries the app links, and everything they link in turn, into\n# Frameworks/ under the names their install names give (libTKx.8.0.dylib).\n# Dynamic, as OCCT's LGPL requires (CLAUDE.md, \"Licensing\").\ndest=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\nmkdir -p \"$dest\"\ntodo=\"TKernel TKMath TKG2d TKG3d TKGeomBase TKGeomAlgo TKBRep TKTopAlgo TKPrim TKBO TKBool TKOffset TKFillet TKShHealing TKMesh TKXSBase TKDESTEP\"\nseen=\" \"\nwhile [ -n \"$todo\" ]; do\n  set -- $todo\n  lib=$1\n  shift\n  todo=\"$*\"\n  case \"$seen\" in *\" $lib \"*) continue ;; esac\n  seen=\"$seen$lib \"\n  src=\"$OCCT_IOS/lib/lib$lib.8.0.dylib\"\n  cp -L \"$src\" \"$dest/lib$lib.8.0.dylib\"\n  for dep in $(otool -L \"$src\" | sed -nE 's|^[[:space:]]*@rpath/lib(TK[A-Za-z0-9]+)\\.8\\.0\\.dylib.*|\\1|p'); do\n    todo=\"$todo $dep\"\n  done\ndone\nidentity=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\nfor f in \"$dest\"/libTK*.dylib; do\n  codesign --force --sign \"$identity\" --timestamp=none \"$f\"\ndone\n"; };
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C4D5163706E5908DC9E032F3 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+				E6A4E94330A044E85A97D397 /* AppDelegate.swift in Sources */,
+				3106876BE5FB12C4BF38CAFA /* WebViewController.swift in Sources */,
+				8EEA0ED0ECCA99609373FE53 /* AppSchemeHandler.swift in Sources */,
+				5195058C5AD21AB02A81617F /* ScriptThread.swift in Sources */,
+				EDC6FCC671937E7E59C7184E /* OccHost.swift in Sources */,
+				52B0B6F046119DDE05C8239A /* DbHost.swift in Sources */,
+				BC3FCA1E974C65958D65082A /* occ_kernel.cc in Sources */,
+				DCB2138D0DB564BB9EADA4C1 /* occ_select.cc in Sources */,
+				87B7351F8141DD095D6753C5 /* occ_build.cc in Sources */,
+				C8F27E1ADD63D8D7D7480D65 /* occ_modify.cc in Sources */,
+				7824789DEEE9DF96F8EDBC60 /* occ_io.cc in Sources */,
+				A5E1DFE44C87E4FBA37C9E67 /* mesh_tools.cpp in Sources */,
+				E513912DD1F7354E35F799D7 /* allocator.cpp in Sources */,
+				E197077ECAC98C3FD85E2AB5 /* indexgenerator.cpp in Sources */,
+				C80C9ED187C0AC3D48216CB2 /* simplifier.cpp in Sources */,
+				267C23715513E73D4D10669F /* jsc_binding.cc in Sources */,
+			); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		549D6A5A1D6EEDDF6E3E7AA2 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				GCC_OPTIMIZATION_LEVEL = 2;
+				OCCT_IOS = "$(HOME)/occ-8.0.1-ios";
+				"OCCT_IOS[sdk=iphonesimulator*]" = "$(HOME)/occ-8.0.1-iossim";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+			}; name = Release; };
+		82DC075ABA03F58EC0096E4D /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7K4FM2CS29;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(OCCT_IOS)/include/opencascade",
+					"$(SRCROOT)/../../native/occ-addon/src",
+					"$(SRCROOT)/../../native/occ-addon/third_party/meshoptimizer/src",
+				);
+				INFOPLIST_FILE = PurpleCAD/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PurpleCAD;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = (
+					"-L$(OCCT_IOS)/lib",
+					"-lTKernel",
+					"-lTKMath",
+					"-lTKG2d",
+					"-lTKG3d",
+					"-lTKGeomBase",
+					"-lTKGeomAlgo",
+					"-lTKBRep",
+					"-lTKTopAlgo",
+					"-lTKPrim",
+					"-lTKBO",
+					"-lTKBool",
+					"-lTKOffset",
+					"-lTKFillet",
+					"-lTKShHealing",
+					"-lTKMesh",
+					"-lTKXSBase",
+					"-lTKDESTEP",
+					"-lsqlite3",
+					"-framework",
+					JavaScriptCore,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.robeesworld.purplecad;
+				PRODUCT_NAME = PurpleCAD;
+				SWIFT_OBJC_BRIDGING_HEADER = "PurpleCAD/Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+				WARNING_CFLAGS = (
+					"-Wno-deprecated-declarations",
+					"-Wno-#pragma-messages",
+				);
+			}; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4DC842AFD6F1146FD0D47CEA = {isa = XCConfigurationList; buildConfigurations = (
+				549D6A5A1D6EEDDF6E3E7AA2 /* Release */,
+			); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		1FE0E75410BBBB0E5DE5E9B5 = {isa = XCConfigurationList; buildConfigurations = (
+				82DC075ABA03F58EC0096E4D /* Release */,
+			); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+}

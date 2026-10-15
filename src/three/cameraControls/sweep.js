@@ -19,7 +19,8 @@ import { DEFAULT_MESH_COLOR, WIREFRAME_EDGE_COLOR } from "../theme.js";
 const PREVIEW_DEBOUNCE_MS = 350;
 const AXIS_HIGHLIGHT = 0x44aaff;
 // Sketch shapes a pipe path can follow (matches occOps.js#orderPathPoints).
-const PATH_TYPES = ["line", "bezier"];
+// A circle is a closed path on its own.
+const PATH_TYPES = ["line", "bezier", "arc", "circle"];
 
 // An extrude-like source snapshot whose live polygon re-derives from the sketch
 // (so the sweep tracks sketch edits, like chamfer/push-pull).  Used as the
@@ -34,6 +35,8 @@ const buildProfileSource = (profile) => ({
     profileCentroid: profile.profileCentroid,
     polygon2D: profile.polygon2D,
     holes: profile.holes || [],
+    // The exact curves under the polygon: the swept body is built from them.
+    curves2D: profile.curves2D,
     position: profile.position,
     rotation: profile.rotation,
     normalWorld: profile.normalWorld,
@@ -818,17 +821,7 @@ export function beginRevolveEdit(itemId, entryId) {
   store.setSweepSelectMode({
     kind: "revolve",
     editing: true,
-    profile: p
-      ? {
-          sketchId: p.sketchId,
-          profileCentroid: p.profileCentroid,
-          polygon2D: p.polygon2D,
-          holes: p.holes || [],
-          position: p.position,
-          rotation: p.rotation,
-          normalWorld: p.normalWorld,
-        }
-      : null,
+    profile: profileSnapshot(p),
     axis: r.axis,
     secondProfile: null,
     params: {
@@ -851,17 +844,7 @@ export function beginPipeRetarget(itemId, entryId) {
   const p = r.profileSource?.profile;
   store.setSweepSelectMode({
     kind: "pipe",
-    profile: p
-      ? {
-          sketchId: p.sketchId,
-          profileCentroid: p.profileCentroid,
-          polygon2D: p.polygon2D,
-          holes: p.holes || [],
-          position: p.position,
-          rotation: p.rotation,
-          normalWorld: p.normalWorld,
-        }
-      : null,
+    profile: profileSnapshot(p),
     path: r.pathRef,
     axis: null,
     secondProfile: null,
@@ -881,6 +864,7 @@ const profileSnapshot = (p) =>
         profileCentroid: p.profileCentroid,
         polygon2D: p.polygon2D,
         holes: p.holes || [],
+        curves2D: p.curves2D,
         position: p.position,
         rotation: p.rotation,
         normalWorld: p.normalWorld,

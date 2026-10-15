@@ -10,8 +10,6 @@
 const PCAD = {
   dark: {
     bg: 0x1a0d3b,
-    surfaceRgb: "38, 33, 92",
-    planeBorder: 0x6c3fd4,
     planeFill: 0x6c3fd4,
     sketchLine: 0x7f77dd,
     sketchNode: 0xd4a33f,
@@ -21,23 +19,15 @@ const PCAD = {
     sketchCircularPattern: 0x33cc88,
     sketchRectangularPattern: 0xff8844,
     sketchConstruction: 0x3c3489,
-    gridMajor: 0xd4a33f,
     gridMinor: 0xd4a33f,
-    gridNode: 0x6c3fd4,
-    gridOrigin: 0xd4a33f,
     grid3d: 0x6a6a75,
     rulerTick: 0xd4a33f,
     rulerLabel: 0xd4a33f,
-    rulerCursor: 0x6c3fd4,
-    dimLine: 0x6c3fd4,
-    dimExtension: 0xc4c2b8,
     dimValue: 0xd4a33f,
-    dimDriven: 0xba7517,
+    dimConflict: 0xff5566,
   },
   light: {
     bg: 0xf5f3ff,
-    surfaceRgb: "238, 237, 254",
-    planeBorder: 0x534ab7,
     planeFill: 0x534ab7,
     sketchLine: 0x534ab7,
     sketchNode: 0x854f0b,
@@ -47,18 +37,12 @@ const PCAD = {
     sketchCircularPattern: 0x1f8a55,
     sketchRectangularPattern: 0xcc5500,
     sketchConstruction: 0xafa9ec,
-    gridMajor: 0x534ab7,
     gridMinor: 0x534ab7,
-    gridNode: 0x7f77dd,
-    gridOrigin: 0x854f0b,
     grid3d: 0x9a98a5,
     rulerTick: 0x854f0b,
     rulerLabel: 0x633806,
-    rulerCursor: 0x534ab7,
-    dimLine: 0x534ab7,
-    dimExtension: 0xafa9ec,
     dimValue: 0x633806,
-    dimDriven: 0x854f0b,
+    dimConflict: 0xcc2233,
   },
 };
 
@@ -72,7 +56,6 @@ export function sceneBackgroundFor(theme) {
 }
 
 // --- Sketch plane (the translucent plane shown while sketching) ----------
-export const sketchPlaneBorderColorFor = (theme) => pcad("planeBorder", theme);
 export const sketchPlaneFillColorFor = (theme) => pcad("planeFill", theme);
 
 // --- Sketch geometry -------------------------------------------------------
@@ -89,29 +72,20 @@ export const sketchConstructionColorFor = (theme) =>
   pcad("sketchConstruction", theme);
 
 // --- Grid ------------------------------------------------------------------
-export const gridMajorColorFor = (theme) => pcad("gridMajor", theme);
 // The 3D ground grid is neutral grey — the tinted grid colours are for the
 // sketch plane only.
 export const grid3dColorFor = (theme) => pcad("grid3d", theme);
 export const gridMinorColorFor = (theme) => pcad("gridMinor", theme);
-export const gridNodeColorFor = (theme) => pcad("gridNode", theme);
-export const gridOriginColorFor = (theme) => pcad("gridOrigin", theme);
 
 // --- Rulers ------------------------------------------------------------------
 export const rulerTickColorFor = (theme) => pcad("rulerTick", theme);
 export const rulerLabelColorFor = (theme) => pcad("rulerLabel", theme);
-export const rulerCursorColorFor = (theme) => pcad("rulerCursor", theme);
 
 // --- Dimensions --------------------------------------------------------------
-export const dimLineColorFor = (theme) => pcad("dimLine", theme);
-export const dimExtensionColorFor = (theme) => pcad("dimExtension", theme);
 export const dimValueColorFor = (theme) => pcad("dimValue", theme);
-export const dimDrivenColorFor = (theme) => pcad("dimDriven", theme);
-
-// Canvas label background for dimension/constraint annotations — the
-// surface color from the same palette, semi-transparent.
-export const dimLabelBgFor = (theme) =>
-  `rgba(${PCAD[theme === "light" ? "light" : "dark"].surfaceRgb}, 0.85)`;
+// A dimension whose variable resolves to a value the geometry cannot take --
+// red, so it stands apart from every other annotation colour in the sketch.
+export const dimConflictColorFor = (theme) => pcad("dimConflict", theme);
 
 // --- Lighting -----------------------------------------------------------
 export const LIGHT_COLOR = 0xffffff;
