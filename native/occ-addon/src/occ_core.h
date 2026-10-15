@@ -220,7 +220,8 @@ gp_Trsf BuildTransform(double tx, double ty, double tz, double rx, double ry,
                        double rz, double scale = 1.0);
 void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
                     std::vector<float>& positions,
-                    std::vector<uint32_t>& indices);
+                    std::vector<uint32_t>& indices,
+                    std::vector<uint32_t>* edges = nullptr);
 long OpenEdgeCount(const TopoDS_Shape& shape, double deflection);
 
 // ── Selection and naming (occ_select.cc) ────────────────────────────────

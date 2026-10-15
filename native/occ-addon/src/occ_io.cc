@@ -8,8 +8,12 @@ namespace occ {
 
 // {positions, indices, triangleCount} for a tessellation.
 static Val MeshResult(Js& js, const std::vector<float>& positions,
-                      const std::vector<uint32_t>& indices) {
+                      const std::vector<uint32_t>& indices,
+                      const std::vector<uint32_t>* edges = nullptr) {
   Val result = js.makeObject();
+  // The real edges' segments, as index pairs into positions.
+  if (edges)
+    js.set(result, "edges", js.makeUint32Array(edges->data(), edges->size()));
   js.set(result, "positions",
          js.makeFloat32Array(positions.data(), positions.size()));
   js.set(result, "indices", js.makeUint32Array(indices.data(), indices.size()));
@@ -31,9 +35,10 @@ Val TessellateShape(Js& js) {
   TopoDS_Shape shape = FetchShape(id);
   std::vector<float> positions;
   std::vector<uint32_t> indices;
-  TessellateInto(shape, linDefl, positions, indices);
+  std::vector<uint32_t> edges;
+  TessellateInto(shape, linDefl, positions, indices, &edges);
 
-  return MeshResult(js, positions, indices);
+  return MeshResult(js, positions, indices, &edges);
 }
 
 // ════════════════════════════════════════════════════════════════════════

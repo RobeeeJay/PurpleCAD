@@ -515,7 +515,7 @@ function finishSolidResult(resultId, precision, retainResult, extra) {
     : null;
   if (retainResult) occ.releaseShape(resultId);
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     ...(retainResult ? { shapeId } : null),
     ...extra,
@@ -1044,7 +1044,7 @@ function performCsg({ selectedItems, allItems, operation, printPrecision }) {
     geometryData: {
       positions,
       normals: null,
-      indices: Array.from(tess.indices),
+      indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null,
     },
   };
 }
@@ -1113,7 +1113,7 @@ function chamferOrFilletItem({ source, sourceShapeId, retainResult, subGeo, amou
   if (retainResult) occ.releaseShape(resultId);
 
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo,
     ...(retainResult ? { shapeId } : null),
@@ -1390,7 +1390,7 @@ function embossItem({ source, sourceShapeId, retainResult, stamp, allItems, prin
   // No bbox-centring — anchor to the body's frame so the offset doesn't drag the
   // object (see occOps.js embossItem).
   return {
-    geometryData: { positions: Array.from(tess.positions), normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: Array.from(tess.positions), normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx: 0, cy: 0, cz: 0 },
     ...(retainResult ? { shapeId: resultId } : null),
   };
@@ -1583,7 +1583,7 @@ function importStep({ stepText, printPrecision }) {
   if (!tess) throw new Error("STEP import produced no geometry.");
   return {
     positions: Array.from(tess.positions),
-    indices: Array.from(tess.indices),
+    indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null,
   };
 }
 
@@ -1618,7 +1618,7 @@ function revolveItem({ source, axis, angleRad, prismSides, offsetPerRotation, al
     centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
   }
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo: { axis },
   };
@@ -1654,7 +1654,7 @@ function pipeItem({ profileSource, pathRef, twistTurns, autoRotate, allItems, pr
     centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
   }
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     position: { x: cx, y: cy, z: cz },
     resolvedSubGeo: { pathRef },
@@ -1684,7 +1684,7 @@ function loftItem({ profileSource, secondProfileSource, printPrecision }) {
     centered[i] -= cx; centered[i + 1] -= cy; centered[i + 2] -= cz;
   }
   return {
-    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices) },
+    geometryData: { positions: centered, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     centerOffset: { cx, cy, cz },
     position: { x: cx, y: cy, z: cz },
     resolvedSubGeo: {},
@@ -1762,7 +1762,7 @@ function splitItem({ target, plane, allItems, printPrecision }) {
     }
     return {
       position: { x: cx, y: cy, z: cz },
-      geometryData: { positions, normals: null, indices: Array.from(tess.indices) },
+      geometryData: { positions, normals: null, indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null },
     };
   };
 

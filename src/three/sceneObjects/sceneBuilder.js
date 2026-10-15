@@ -161,6 +161,101 @@ export function smoothCurvedWalls(geometry, loops, centre) {
   nrm.needsUpdate = true;
 }
 
+// The outline drawn over a body: its REAL edges.  A crease detector over the
+// triangles (EdgesGeometry at 1 degree) also draws every seam between the
+// triangles of a curved face, so an exact cylinder looked like 45 flat strips.
+// An OCC result carries its edges (geometryData.edges: index pairs into its
+// positions); a primitive's only creases are sharp, so a coarse threshold
+// finds them; anything else -- an older or imported mesh -- keeps the detector.
+const PRIMITIVE_TYPES = new Set([
+  "cube",
+  "sphere",
+  "cylinder",
+  "cone",
+  "torus",
+]);
+export function bodyOutline(item, geometry) {
+  const edges = item.geometryData?.edges;
+  const pos = edges?.length ? geometry.attributes.position : null;
+  if (
+    pos &&
+    geometry.index &&
+    pos.count === item.geometryData.positions.length / 3
+  ) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", pos);
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array(edges), 1));
+    return g;
+  }
+  return new THREE.EdgesGeometry(
+    geometry,
+    PRIMITIVE_TYPES.has(item.type) ? 20 : 1,
+  );
+}
+
+// A plain extrude's outline from its profile: every edge of every loop round
+// the top and the bottom, and an upright line only at a real corner -- not
+// inside a curve run, and not where two pieces meet smoothly (a slot's arc
+// and its flat side), as OCC leaves those out of a body's edges.  `loops` are
+// the profile's loops in sketch coordinates, `centre` what the extrude was
+// shifted by, z0..z1 its extent.
+// A curve run's direction at point q, signed to agree with the chord (cx, cy)
+// beside it; the chord itself for a straight edge or a curve without a
+// closed-form tangent.
+function tangentAt(run, q, cx, cy) {
+  let t = null;
+  if (run?.type === "arc" && run.cx != null)
+    t = [-(q.y - run.cy), q.x - run.cx];
+  else if (run?.type === "bezier") {
+    const near = (u) => Math.hypot(u.x - q.x, u.y - q.y) < 1e-9;
+    if (near(run.p0)) t = [run.p1.x - run.p0.x, run.p1.y - run.p0.y];
+    else if (near(run.p3)) t = [run.p3.x - run.p2.x, run.p3.y - run.p2.y];
+  }
+  if (!t || Math.hypot(t[0], t[1]) < 1e-12) return [cx, cy];
+  return t[0] * cx + t[1] * cy < 0 ? [-t[0], -t[1]] : t;
+}
+
+export function extrudeOutline(loops, centre, z0, z1) {
+  const pts = [];
+  const seg = (a, b, za, zb) =>
+    pts.push(
+      a.x - centre.x,
+      a.y - centre.y,
+      za,
+      b.x - centre.x,
+      b.y - centre.y,
+      zb,
+    );
+  for (const { polygon, runs } of loops) {
+    const n = polygon.length;
+    const owner = new Array(n).fill(-1);
+    (runs || []).forEach((r, ri) => {
+      for (let k = 0; k < r.count; k++) owner[(r.start + k) % n] = ri;
+    });
+    for (let k = 0; k < n; k++) {
+      const a = polygon[k];
+      const b = polygon[(k + 1) % n];
+      seg(a, b, z0, z0);
+      seg(a, b, z1, z1);
+      // Vertex k joins edge k-1 to edge k.
+      const prev = (k + n - 1) % n;
+      if (owner[prev] >= 0 && owner[prev] === owner[k]) continue;
+      const p = polygon[prev];
+      // The directions into and out of vertex k: a curve's exact tangent
+      // there, not its chord (a sampled arc's last chord is half a segment
+      // off it, which would read every smooth join as a corner).
+      const [ux, uy] = tangentAt(runs?.[owner[prev]], a, a.x - p.x, a.y - p.y);
+      const [vx, vy] = tangentAt(runs?.[owner[k]], a, b.x - a.x, b.y - a.y);
+      const turn = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+      if (Math.abs(turn) < 0.02) continue;
+      seg(a, a, z0, z1);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+  return g;
+}
+
 export function buildSceneObjects(
   items,
   scene,
@@ -215,6 +310,8 @@ export function buildSceneObjects(
     }
     let geometry;
     let extrudeLocalOffset = null; // set by the extrude case; used for mesh positioning
+    // The outline drawn over the body, when its real edges are known.
+    let outline = null;
     switch (item.type) {
       case "cube": {
         const d = item.dimensions || {};
@@ -401,6 +498,19 @@ export function buildSceneObjects(
         const baseZ = (depth < 0 ? -absDepth : 0) + startOffset;
         if (baseZ !== 0) geometry.translate(0, 0, baseZ);
         geometry.computeVertexNormals();
+        if (curves)
+          outline = extrudeOutline(
+            [
+              { polygon: poly, runs: curves.outer },
+              ...holePolys.map((h, i) => ({
+                polygon: h,
+                runs: curves.holes?.[i],
+              })),
+            ],
+            profileCentroid2D,
+            baseZ,
+            baseZ + absDepth,
+          );
         if (curves)
           smoothCurvedWalls(
             geometry,
@@ -668,7 +778,7 @@ export function buildSceneObjects(
     } else {
       mesh.add(
         new THREE.LineSegments(
-          new THREE.EdgesGeometry(geometry),
+          outline ?? bodyOutline(item, geometry),
           new THREE.LineBasicMaterial({
             color: WIREFRAME_EDGE_COLOR,
             linewidth: 2,

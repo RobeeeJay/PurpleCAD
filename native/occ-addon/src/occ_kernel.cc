@@ -1,6 +1,8 @@
 // The shape store, cooperative cancel, transforms and tessellation.
 
 #include "occ_core.h"
+#include <Poly_PolygonOnTriangulation.hxx>
+#include <TColStd_Array1OfInteger.hxx>
 
 namespace occ {
 
@@ -134,9 +136,12 @@ gp_Trsf BuildTransform(double tx, double ty, double tz,
 // Tessellate a shape and populate position/index vectors.
 // Mirrors tessellate.js logic exactly (same deflection formula, same
 // REVERSED-orientation winding flip).
+// With `edges`, also the shape's real edges as index pairs into `positions`
+// (see below).
 void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
                             std::vector<float>& positions,
-                            std::vector<uint32_t>& indices) {
+                            std::vector<uint32_t>& indices,
+                            std::vector<uint32_t>* edges) {
   // Mesh via the parameters+range overload so a long tessellation polls the
   // cancel flag (UserBreak) and can be aborted — a high-precision emboss/boolean
   // result is one of the slowest stages.
@@ -147,6 +152,8 @@ void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
   meshParams.InParallel = Standard_False;
   BRepMesh_IncrementalMesh mesher(shape, meshParams, CancelRange());
 
+  // Where each face's mesh nodes start in `positions`, for the edges below.
+  std::vector<std::pair<TopoDS_Face, uint32_t>> faceBase;
   TopExp_Explorer explorer(shape, TopAbs_FACE);
   for (; explorer.More(); explorer.Next()) {
     TopoDS_Face face = TopoDS::Face(explorer.Current());
@@ -159,6 +166,7 @@ void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
     bool reversed = (face.Orientation() == TopAbs_REVERSED);
 
     auto baseVert = static_cast<uint32_t>(positions.size() / 3);
+    if (edges) faceBase.push_back({face, baseVert});
     for (int i = 1; i <= tri->NbNodes(); i++) {
       gp_Pnt p = tri->Node(i).Transformed(trsf);
       positions.push_back(static_cast<float>(p.X()));
@@ -173,6 +181,46 @@ void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
       indices.push_back(baseVert + static_cast<uint32_t>(n1));
       indices.push_back(baseVert + static_cast<uint32_t>(n2));
       indices.push_back(baseVert + static_cast<uint32_t>(n3));
+    }
+  }
+  if (!edges) return;
+
+  // The shape's REAL edges, for the outline the viewport draws: each edge's
+  // polyline as the mesh already has it (its nodes on one adjacent face), so
+  // it lies exactly on the triangles.  A crease detector over the triangles
+  // drew every seam between them on a curved face -- an exact cylinder looked
+  // like 45 flat strips.  Left out: degenerate edges, a face's own seam (a
+  // cylinder's), and edges between faces that meet smoothly (a slot's half
+  // cylinders and its flat sides), which aren't creases.
+  BRepLib::EncodeRegularity(shape, 1.0e-3);
+  TopTools_IndexedDataMapOfShapeListOfShape efMap;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, efMap);
+  for (int i = 1; i <= efMap.Extent(); ++i) {
+    const TopoDS_Edge& edge = TopoDS::Edge(efMap.FindKey(i));
+    if (BRep_Tool::Degenerated(edge)) continue;
+    const TopTools_ListOfShape& adj = efMap.FindFromIndex(i);
+    if (adj.IsEmpty()) continue;
+    const TopoDS_Face& f1 = TopoDS::Face(adj.First());
+    if (BRep_Tool::IsClosed(edge, f1)) continue;
+    if (adj.Extent() >= 2) {
+      const TopoDS_Face& f2 = TopoDS::Face(adj.Last());
+      if (!f1.IsSame(f2) &&
+          BRep_Tool::Continuity(edge, f1, f2) != GeomAbs_C0)
+        continue;
+    }
+    for (const auto& [face, base] : faceBase) {
+      if (!face.IsSame(f1)) continue;
+      TopLoc_Location loc;
+      Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
+      Handle(Poly_PolygonOnTriangulation) poly =
+          BRep_Tool::PolygonOnTriangulation(edge, tri, loc);
+      if (poly.IsNull()) break;
+      const TColStd_Array1OfInteger& nodes = poly->Nodes();
+      for (int k = nodes.Lower(); k < nodes.Upper(); k++) {
+        edges->push_back(base + static_cast<uint32_t>(nodes(k) - 1));
+        edges->push_back(base + static_cast<uint32_t>(nodes(k + 1) - 1));
+      }
+      break;
     }
   }
 }

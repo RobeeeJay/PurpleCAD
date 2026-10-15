@@ -104,6 +104,7 @@ function finishSolidResult(resultId, precision, retainResult, extra) {
       positions: centered,
       normals: null,
       indices: Array.from(tess.indices),
+      edges: tess.edges ? Array.from(tess.edges) : null,
     },
     centerOffset: { cx, cy, cz },
     ...(retainResult ? { shapeId } : null),
@@ -1286,6 +1287,7 @@ async function chamferOrFilletItem({
       positions: centered,
       normals: null,
       indices: Array.from(tess.indices),
+      edges: tess.edges ? Array.from(tess.edges) : null,
     },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo,
@@ -1700,6 +1702,7 @@ async function embossItem({
       positions: Array.from(tess.positions),
       normals: null,
       indices: Array.from(tess.indices),
+      edges: tess.edges ? Array.from(tess.edges) : null,
     },
     centerOffset: { cx: 0, cy: 0, cz: 0 },
     ...(retainResult ? { shapeId: resultId } : null),
@@ -1801,6 +1804,7 @@ async function revolveItem({
       positions: centered,
       normals: null,
       indices: Array.from(tess.indices),
+      edges: tess.edges ? Array.from(tess.edges) : null,
     },
     centerOffset: { cx, cy, cz },
     resolvedSubGeo: { axis },
@@ -1862,6 +1866,7 @@ async function pipeItem({
       positions: centered,
       normals: null,
       indices: Array.from(tess.indices),
+      edges: tess.edges ? Array.from(tess.edges) : null,
     },
     centerOffset: { cx, cy, cz },
     position: { x: cx, y: cy, z: cz },
@@ -1917,6 +1922,7 @@ async function loftItem({
       positions: centered,
       normals: null,
       indices: Array.from(tess.indices),
+      edges: tess.edges ? Array.from(tess.edges) : null,
     },
     centerOffset: { cx, cy, cz },
     position: { x: cx, y: cy, z: cz },
@@ -2027,6 +2033,7 @@ async function performCsg({
       positions,
       normals: null,
       indices: Array.from(tess.indices),
+      edges: tess.edges ? Array.from(tess.edges) : null,
     },
   };
 }
@@ -2129,6 +2136,7 @@ async function splitItem({ target, plane, allItems, printPrecision }) {
         positions,
         normals: null,
         indices: Array.from(tess.indices),
+        edges: tess.edges ? Array.from(tess.edges) : null,
       },
     };
   };
@@ -2587,6 +2595,7 @@ async function importStep({ stepText, printPrecision }) {
   return {
     positions: Array.from(tess.positions),
     indices: Array.from(tess.indices),
+    edges: tess.edges ? Array.from(tess.edges) : null,
   };
 }
 

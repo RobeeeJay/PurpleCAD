@@ -50,7 +50,9 @@ const scrubStep = (t) =>
 // A mesh as its set of triangles: exact coordinates and winding, but not the
 // order OCC emits faces in, which changes from run to run in one engine
 // (shell's face order varied in three of five Node runs, counts unchanged).
-function meshDigest(pos, idx) {
+// Its edges (index pairs into the positions, see TessellateInto) likewise, as
+// a sorted set of coordinate segments: their indices follow the face order.
+function meshDigest(pos, idx, edges) {
   const P = Array.from(pos);
   const n = idx ? idx.length : P.length / 3;
   const at = (k) => `${P[3 * k]},${P[3 * k + 1]},${P[3 * k + 2]}`;
@@ -61,17 +63,22 @@ function meshDigest(pos, idx) {
     tris.push([v[m], v[(m + 1) % 3], v[(m + 2) % 3]].join(";"));
   }
   tris.sort();
+  const segs = [];
+  for (let e = 0; edges && e + 1 < edges.length; e += 2)
+    segs.push([at(edges[e]), at(edges[e + 1])].sort().join(";"));
+  segs.sort();
   return {
     vertices: P.length / 3,
     triangles: tris.length,
     h: fnv(textBytes(tris.join("|"))),
+    ...(edges ? { edges: segs.length, eh: fnv(textBytes(segs.join("|"))) } : {}),
   };
 }
 
 function digest(v) {
   if (v && typeof v === "object" && v.positions && "indices" in v) {
-    const { positions, indices, ...rest } = v;
-    return { mesh: meshDigest(positions, indices), ...digest(rest) };
+    const { positions, indices, edges, ...rest } = v;
+    return { mesh: meshDigest(positions, indices, edges), ...digest(rest) };
   }
   if (ArrayBuffer.isView(v))
     return {

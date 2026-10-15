@@ -51,6 +51,9 @@ export function packGeometryData(g) {
     out.i = toB64(new Uint8Array(new Uint32Array(g.indices).buffer));
   if (g.normals?.length)
     out.n = toB64(new Uint8Array(new Float32Array(g.normals).buffer));
+  // The real edges' segments, as index pairs into positions (the outline).
+  if (g.edges?.length)
+    out.e = toB64(new Uint8Array(new Uint32Array(g.edges).buffer));
   // A welded mesh is drawn with per-triangle normals (see csgDisplayGeometry).
   if (g.flat) out.f = 1;
   packMemo.set(g, out);
@@ -69,6 +72,7 @@ export function unpackGeometryData(g) {
     ? Array.from(new Uint32Array(fromB64(g.i).buffer))
     : g.indices || null;
   out.normals = g.n ? Array.from(new Float32Array(fromB64(g.n).buffer)) : null;
+  if (g.e) out.edges = Array.from(new Uint32Array(fromB64(g.e).buffer));
   if (g.f === 1) out.flat = true;
   unpackMemo.set(g, out);
   packMemo.set(out, g);

@@ -1183,6 +1183,18 @@ sources are picked) that reuses the creation UI.
   objects shared an id (a doubled object-list entry; the extrude Edit opened
   on the piece). `itemIdAfterSplit.test.js` fails if that counting pattern
   reappears anywhere in `src`.
+- **A body's outline is its REAL edges, not a crease detector.** The default
+  `EdgesGeometry` (1 degree) drew every seam between the triangles of a curved
+  face, so an exact cylinder showed 45 lines down its side and looked faceted
+  though its surface was exact and smoothly shaded. OCC results now carry
+  `geometryData.edges` -- index pairs into `positions`, from `TessellateInto`,
+  leaving out seams and edges between faces that meet smoothly -- and
+  `bodyOutline` (sceneBuilder.js) draws exactly those; a plain extrude builds
+  its own from its loops and curve runs (`extrudeOutline`, an upright line
+  only at a real corner). The indices follow the vertex order, so any op that
+  reorders or welds vertices must drop `edges` (the mesh then falls back to
+  the crease detector), and `geometryPack.js` must keep carrying them (`e`).
+  Primitives use a 20-degree crease threshold. `bodyOutline.test.js`.
 - The `_cameraControls` slot on the store is a deliberate non-reactive
   handle for toolbar buttons that need access to viewport helpers (eg
   `dropSelectedToGround`). Don't `useStore.subscribe` to it.
