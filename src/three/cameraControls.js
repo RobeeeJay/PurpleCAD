@@ -1,4 +1,6 @@
 import * as THREE from "three";
+// Patches Mesh.raycast with a cached BVH for large meshes (fastRaycast.js).
+import "./fastRaycast.js";
 import { useStore } from "../store";
 import { constraintIconScreenPos } from "./sceneObjects/constraintIconSprites.js";
 import { createHighlightHelpers } from "./cameraControls/highlights.js";
