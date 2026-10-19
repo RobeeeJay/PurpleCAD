@@ -662,6 +662,21 @@ Fit FitEllipticCylinder(const Mesh& m, const std::vector<uint32_t>& tris,
   return f;
 }
 
+// The surface's tightest radius of curvature near a point (0 for a plane):
+// what a chord's sag on it is measured against.
+double TightestRadius(const Fit& f, const V3& p) {
+  if (f.type == "cylinder" || f.type == "sphere") return f.radius;
+  if (f.type == "torus") return f.minorRadius;
+  // An ellipse curves tightest at the ends of its major axis: b^2 / a.
+  if (f.type == "ellipticCylinder") return f.minorRadius * f.minorRadius / f.radius;
+  if (f.type == "cone") {
+    const V3 d = sub(p, f.point);
+    const double h = dot(d, f.dir);
+    return len(sub(d, mul(f.dir, h))) / std::cos(f.halfAngle);
+  }
+  return 0;
+}
+
 // How far a point is from a fitted surface.
 double Distance(const Fit& f, const V3& p) {
   const V3 d = sub(p, f.point);

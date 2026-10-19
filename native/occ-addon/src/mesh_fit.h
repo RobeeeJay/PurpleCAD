@@ -77,5 +77,7 @@ Fit FitEllipticCylinder(const Mesh& m, const std::vector<uint32_t>& tris,
                         const std::vector<uint32_t>& vs);
 // How far a point is from a fitted surface.
 double Distance(const Fit& f, const V3& p);
+// The surface's tightest radius of curvature near a point (0 for a plane).
+double TightestRadius(const Fit& f, const V3& p);
 
 }  // namespace recog

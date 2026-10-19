@@ -183,6 +183,129 @@ describe("recognising the surfaces of a mesh", () => {
     ).toEqual([1.35, 1.2]);
   });
 
+  for (const res of [0.05, 0.2])
+    it(`keeps a block's flat sides flat beside its corner fillets at Resolution ${res}`, () => {
+      // Each long side is meshed with vertices only at its ends, beside the
+      // fillets' fine strips, and every one of those vertices lies within
+      // 0.01 of some big torus: three tori once took the sides and fillets
+      // together, their facets sitting up to 2.3 off them.
+      const box = occ.makeBox(-18, 0, -3, 18, 6, 3);
+      const edges = [
+        [-18, -3],
+        [18, -3],
+        [18, 3],
+        [-18, 3],
+      ].map(([x, z]) => ({ ax: x, ay: 0, az: z, bx: x, by: 6, bz: z }));
+      const m = occ.tessellate(occ.filletShape(box, { edges }, 0.65), res);
+      const r = ops.recognizeSurfaces({
+        positions: Array.from(m.positions),
+        indices: Array.from(m.indices),
+        tolerance: 0.01,
+      });
+      expect(found(r), "surfaces found").toBe("6 plane, 4 cylinder");
+    });
+
+  it("judges a small curved region by how finely the rest of the mesh is drawn", () => {
+    // An exporter draws every surface to one chord tolerance.  A 20-facet cap
+    // of a coarse sphere (its facets 0.086 inside it, every vertex exactly on
+    // it) is a sphere on its own; beside a cylinder drawn to 0.001 it can't
+    // be one -- on a fin's plug, regions like it were flat walls and the
+    // start of their fillets, and rebuilt as spheres they bulged 15 mm^3.
+    const R = 20;
+    // An icosphere subdivided three times, and the 20 facets nearest its top.
+    const t = (1 + Math.sqrt(5)) / 2;
+    let V = [
+      [-1, t, 0],
+      [1, t, 0],
+      [-1, -t, 0],
+      [1, -t, 0],
+      [0, -1, t],
+      [0, 1, t],
+      [0, -1, -t],
+      [0, 1, -t],
+      [t, 0, -1],
+      [t, 0, 1],
+      [-t, 0, -1],
+      [-t, 0, 1],
+    ];
+    let F = [
+      [0, 11, 5],
+      [0, 5, 1],
+      [0, 1, 7],
+      [0, 7, 10],
+      [0, 10, 11],
+      [1, 5, 9],
+      [5, 11, 4],
+      [11, 10, 2],
+      [10, 7, 6],
+      [7, 1, 8],
+      [3, 9, 4],
+      [3, 4, 2],
+      [3, 2, 6],
+      [3, 6, 8],
+      [3, 8, 9],
+      [4, 9, 5],
+      [2, 4, 11],
+      [6, 2, 10],
+      [8, 6, 7],
+      [9, 8, 1],
+    ];
+    const onSphere = (p) => p.map((x) => (x * R) / Math.hypot(...p));
+    V = V.map(onSphere);
+    for (let level = 0; level < 3; level++) {
+      const mid = new Map();
+      const midOf = (a, b) => {
+        const k = a < b ? `${a},${b}` : `${b},${a}`;
+        if (!mid.has(k)) {
+          mid.set(k, V.length);
+          V.push(onSphere(V[a].map((x, i) => (x + V[b][i]) / 2)));
+        }
+        return mid.get(k);
+      };
+      F = F.flatMap(([a, b, c]) => {
+        const [ab, bc, ca] = [midOf(a, b), midOf(b, c), midOf(c, a)];
+        return [
+          [a, ab, ca],
+          [b, bc, ab],
+          [c, ca, bc],
+          [ab, bc, ca],
+        ];
+      });
+    }
+    const fromTop = (f) =>
+      Math.hypot(
+        ...[0, 1, 2].map(
+          (a) => f.reduce((sum, v) => sum + V[v][a], 0) / 3 - [0, R, 0][a],
+        ),
+      );
+    const cap = [...F].sort((a, b) => fromTop(a) - fromTop(b)).slice(0, 20);
+    const capPositions = cap.flatMap((f) => f.flatMap((v) => V[v]));
+
+    const alone = ops.recognizeSurfaces({
+      positions: capPositions,
+      indices: null,
+      tolerance: 0.01,
+    });
+    expect(found(alone), "the cap on its own").toBe("1 sphere");
+
+    // The fine cylinder well away from the cap, in one mesh.
+    const m = occ.tessellate(occ.makeCylinder(-1, 1, 2), 0.001);
+    const cylPositions = [];
+    for (const i of m.indices)
+      cylPositions.push(
+        m.positions[3 * i] + 100,
+        m.positions[3 * i + 1],
+        m.positions[3 * i + 2],
+      );
+    const both = ops.recognizeSurfaces({
+      positions: [...cylPositions, ...capPositions],
+      indices: null,
+      tolerance: 0.01,
+    });
+    expect(both.counts.cylinder, `regions ${found(both)}`).toBe(1);
+    expect(both.counts.sphere, `regions ${found(both)}`).toBe(0);
+  });
+
   it("keeps every vertex of a region on its surface, freeform included", () => {
     // The promise everything later relies on: a region's surface is never
     // more than the tolerance from any of its vertices.  A bumpy sphere is

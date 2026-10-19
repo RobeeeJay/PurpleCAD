@@ -22,8 +22,15 @@
 
 using namespace recog;
 
-Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
-                      double tol, double creaseDeg, double flatDeg) {
+namespace {
+
+// A region this small is checked against the mesh's own chord tolerance.
+constexpr size_t kWellSupported = 32;
+
+// One segmentation.  `sagCap` is the most a region of fewer than
+// kWellSupported facets may sag (see Recognize).
+Recognition RecognizePass(std::vector<double> pos, const std::vector<uint32_t>& idx,
+                          double tol, double creaseDeg, double flatDeg, double sagCap) {
   const size_t inputTris = (idx.empty() ? pos.size() / 3 : idx.size()) / 3;
   if (inputTris > kMaxSurfaceTriangles)
     throw std::runtime_error("too many triangles to convert (" + std::to_string(inputTris) +
@@ -200,6 +207,34 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
     for (uint32_t t : tris) sag = std::max(sag, Distance(f, centroid[t]));
     return 2 * sag + tol;
   };
+  // A curved fit whose facets sag unevenly isn't that surface.  An exporter
+  // meshes every surface to one chord tolerance, so a surface's facets sag
+  // alike; a flat wall with vertices only at its ends, fitted together with
+  // the start of the fillet above it, holds every vertex within the
+  // tolerance on a big shallow cylinder or cone, while its long facets sit
+  // up to 0.86 off it and the fillet's 0.0005.  Rebuilt, that face bulged
+  // where the mesh was flat.  Of the corpus's 3,291 cylinders and cones, 53
+  // had a facet sagging more than five tolerances; 48 of them more than ten
+  // times their median, every one a strip of this kind.
+  //
+  // Nor is one whose facet sags further than a chord across half the crease
+  // angle of it could: a facet spanning more of a surface than that would
+  // have met its neighbours at a crease.  Facets of a long block's flat sides
+  // and its corner fillets, every vertex within the tolerance of one torus,
+  // sat 0.2 to 2.3 off it where this allows 0.016.
+  const double creaseSag = 1 - std::cos(creaseDeg * M_PI / 360);
+  auto unevenSag = [&](const Fit& f, const std::vector<uint32_t>& tris) {
+    if (f.type == "plane" || f.type == "mesh" || tris.empty()) return false;
+    std::vector<double> sag;
+    for (uint32_t t : tris) {
+      sag.push_back(Distance(f, centroid[t]));
+      const double rho = TightestRadius(f, centroid[t]);
+      if (rho > 0 && sag.back() > rho * creaseSag + tol) return true;
+      if (tris.size() < kWellSupported && sag.back() > sagCap) return true;
+    }
+    std::sort(sag.begin(), sag.end());
+    return sag.back() > 5 * tol && sag.back() > 10 * sag[sag.size() / 2];
+  };
   auto growSurfaces = [&](const std::vector<uint32_t>& piece) {
     const int64_t open = tag++;
     for (uint32_t t : piece) mark[t] = open;
@@ -353,6 +388,9 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
         tried = patch.size();
         grow(s0, patch, curvedOnly, grown);
       }
+      grown.erase(std::remove_if(grown.begin(), grown.end(),
+                                 [&](const Grown& g) { return unevenSag(g.first, g.second); }),
+                  grown.end());
       auto [f, got] = pick(grown);
       if (got.size() >= 4) {
         // The simplest surface that still holds everything grown: a disc
@@ -422,7 +460,7 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
       }
     }
     const Fit f = fitRegion(tris);
-    if (f.type == "mesh")
+    if (f.type == "mesh" || unevenSag(f, tris))
       growSurfaces(tris);
     else
       regions.push_back({tris, f});
@@ -547,6 +585,47 @@ Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
   out.area = std::move(area);
   out.normal = std::move(normal);
   return out;
+}
+
+// The most any facet of a curved region sags off its surface.
+double MaxSag(const Recognition& r, const Region& g) {
+  double sag = 0;
+  for (uint32_t t : g.tris) {
+    const uint32_t* v = &r.mesh.idx[3 * t];
+    const V3 c = mul(add(add(r.mesh.vert(v[0]), r.mesh.vert(v[1])), r.mesh.vert(v[2])), 1.0 / 3);
+    sag = std::max(sag, Distance(g.fit, c));
+  }
+  return sag;
+}
+
+}  // namespace
+
+// An exporter meshes every surface to one chord tolerance, which the mesh's
+// well-supported curved regions show: a small fit that sags far beyond it is
+// a wrong one -- three 10-facet "spheres" on a fin's plug sagged 0.29 to 0.36
+// where its cylinders' facets sagged under 0.003, and rebuilt they bulged
+// 15 mm^3 out of a body the mesh had flat.  So a second pass, only when the
+// first has such a region, with small regions held to three times the
+// largest sag a region of kWellSupported facets or more shows, plus the
+// tolerance.  With no such region there is nothing to judge by.
+Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
+                      double tol, double creaseDeg, double flatDeg) {
+  Recognition first = RecognizePass(pos, idx, tol, creaseDeg, flatDeg, 1e300);
+  double chord = -1;
+  for (const Region& g : first.regions)
+    if (g.fit.type != "plane" && g.fit.type != "mesh" && g.tris.size() >= kWellSupported)
+      chord = std::max(chord, MaxSag(first, g));
+  if (chord < 0) return first;
+  const double cap = 3 * chord + tol;
+  bool offender = false;
+  for (const Region& g : first.regions)
+    if (g.fit.type != "plane" && g.fit.type != "mesh" && g.tris.size() < kWellSupported &&
+        MaxSag(first, g) > cap) {
+      offender = true;
+      break;
+    }
+  if (!offender) return first;
+  return RecognizePass(std::move(pos), idx, tol, creaseDeg, flatDeg, cap);
 }
 
 

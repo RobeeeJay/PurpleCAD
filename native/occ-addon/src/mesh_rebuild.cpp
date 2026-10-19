@@ -59,6 +59,7 @@ namespace {
 
 using recog::Fit;
 using recog::V3;
+using recog::TightestRadius;
 
 gp_Pnt P(const V3& v) { return gp_Pnt(v[0], v[1], v[2]); }
 gp_Dir D(const V3& v) { return gp_Dir(v[0], v[1], v[2]); }
@@ -195,21 +196,6 @@ std::string CheckSummary(const TopoDS_Shape& s) {
   std::string out;
   for (auto& [k, n] : seen) out += (out.empty() ? "" : ", ") + k + " x" + std::to_string(n);
   return out;
-}
-
-// The surface's tightest radius of curvature near a point (0 for a plane):
-// what a chord's sag on it is measured against.
-double TightestRadius(const Fit& f, const V3& p) {
-  if (f.type == "cylinder" || f.type == "sphere") return f.radius;
-  if (f.type == "torus") return f.minorRadius;
-  // An ellipse curves tightest at the ends of its major axis: b^2 / a.
-  if (f.type == "ellipticCylinder") return f.minorRadius * f.minorRadius / f.radius;
-  if (f.type == "cone") {
-    const V3 d = recog::sub(p, f.point);
-    const double h = recog::dot(d, f.dir);
-    return recog::len(recog::sub(d, recog::mul(f.dir, h))) / std::cos(f.halfAngle);
-  }
-  return 0;
 }
 
 // The regions behind the faces a checked solid objects to: faces BRepCheck
