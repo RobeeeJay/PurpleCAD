@@ -65,8 +65,9 @@ const ProjectDialog = () => {
         <div
           style={{ padding: 16, fontSize: 12, color: "var(--text-secondary)" }}
         >
-          Hover a 3D object (its outline highlights), then click it — or drag a
-          box — to add its projected edges. Confirm to add them to the sketch.
+          Hover over a projected edge (it and the edges joined to it highlight),
+          then click it — or drag a box — to add them. Confirm to add them to
+          the sketch.
           <div style={{ marginTop: 8, color: "var(--text-primary)" }}>
             {count === 0
               ? "Nothing selected yet."

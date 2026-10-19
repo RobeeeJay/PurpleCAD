@@ -3,7 +3,6 @@ import * as THREE from "three";
 import {
   fitProjectedShapes,
   featureEdgeGraph,
-  edgePolylineNear,
   decomposeFeatureEdges,
   dedupProjectedShapes,
   worldPolylineToLocal2D,
@@ -47,26 +46,6 @@ describe("fitProjectedShapes", () => {
     const [s] = fitProjectedShapes(pts);
     expect(s.type).toBe("arc");
     expect(s.r).toBeCloseTo(5, 3);
-  });
-});
-
-describe("featureEdgeGraph + edgePolylineNear", () => {
-  it("extracts a straight edge of a box under a point", () => {
-    const geo = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();
-    const pos = Array.from(geo.getAttribute("position").array);
-    const graph = featureEdgeGraph(pos, null);
-    // The top-front edge runs along x at y=1, z=1.
-    const poly = edgePolylineNear(graph, { x: 0, y: 1, z: 1 });
-    expect(poly).toBeTruthy();
-    expect(poly.length).toBeGreaterThanOrEqual(2);
-    // All points share y≈1, z≈1 (it's that one edge), spanning x in [-1,1].
-    const xs = poly.map((p) => p.x);
-    expect(Math.min(...xs)).toBeCloseTo(-1, 5);
-    expect(Math.max(...xs)).toBeCloseTo(1, 5);
-    for (const p of poly) {
-      expect(p.y).toBeCloseTo(1, 5);
-      expect(p.z).toBeCloseTo(1, 5);
-    }
   });
 });
 
