@@ -14,6 +14,7 @@
 #include "mesh_edges.h"
 
 #include <functional>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <map>
 #include <cstdio>
 #include <cstdlib>
@@ -322,25 +323,63 @@ Val RebuildSurfaces(Js& js) {
   // a chord's sag adds a little more on curved faces, and the slack is twice
   // the first.
 
+  // One solid per closed shell, as the mesh import does: an STL can hold
+  // several separate bodies (a surfboard fin and its two plugs), and a single
+  // shell of all their faces is refused as "not connected".  The faces are
+  // turned the way the mesh winds them, so a shell enclosing negative volume
+  // is a cavity, and goes inside the body around it rather than coming out
+  // as a body of its own.
   auto solidFrom = [&](const TopoDS_Shape& shellish) -> TopoDS_Shape {
-    TopoDS_Shape shell;
+    std::vector<std::pair<TopoDS_Shell, double>> shells;
+    double total = 0;
     for (TopExp_Explorer ex(shellish, TopAbs_SHELL); ex.More(); ex.Next()) {
-      if (!shell.IsNull()) return TopoDS_Shape();  // more than one shell
-      shell = ex.Current();
+      ShapeFix_Shell fs(TopoDS::Shell(ex.Current()));
+      fs.FixOrientationMode() = 0;
+      fs.Perform();
+      const TopoDS_Shell sh = TopoDS::Shell(fs.Shell());
+      BRepBuilderAPI_MakeSolid mk(sh);
+      if (!mk.IsDone()) return TopoDS_Shape();
+      GProp_GProps props;
+      BRepGProp::VolumeProperties(mk.Solid(), props);
+      shells.push_back({sh, props.Mass()});
+      total += props.Mass();
     }
-    if (shell.IsNull()) return TopoDS_Shape();
-    ShapeFix_Shell fs(TopoDS::Shell(shell));
-    fs.FixOrientationMode() = 0;
-    fs.Perform();
-    BRepBuilderAPI_MakeSolid mk(TopoDS::Shell(fs.Shell()));
-    if (!mk.IsDone()) return TopoDS_Shape();
-    ShapeFix_Solid fsol(mk.Solid());
-    fsol.Perform();
-    TopoDS_Shape solid = fsol.Solid();
-    GProp_GProps props;
-    BRepGProp::VolumeProperties(solid, props);
-    if (props.Mass() < 0) solid.Reverse();
-    return solid;
+    if (shells.empty()) return TopoDS_Shape();
+    // A mesh wound inside out throughout: every shell the other way.
+    if (total < 0)
+      for (auto& [sh, v] : shells) {
+        sh.Reverse();
+        v = -v;
+      }
+    std::vector<BRepBuilderAPI_MakeSolid> outer;
+    std::vector<TopoDS_Solid> outerSolid;
+    for (auto& [sh, v] : shells)
+      if (v >= 0) {
+        outer.emplace_back(sh);
+        outerSolid.push_back(outer.back().Solid());
+      }
+    for (auto& [sh, v] : shells) {
+      if (v >= 0) continue;
+      // The body this cavity is inside: the one around one of its points.
+      TopExp_Explorer vx(sh, TopAbs_VERTEX);
+      const gp_Pnt q = BRep_Tool::Pnt(TopoDS::Vertex(vx.Current()));
+      size_t k = 0;
+      for (; k < outerSolid.size(); k++)
+        if (BRepClass3d_SolidClassifier(outerSolid[k], q, tol).State() == TopAbs_IN) break;
+      if (k == outerSolid.size()) return TopoDS_Shape();  // a cavity in nothing
+      outer[k].Add(sh);
+    }
+    std::vector<TopoDS_Shape> solids;
+    for (auto& mk : outer) {
+      ShapeFix_Solid fsol(mk.Solid());
+      fsol.Perform();
+      solids.push_back(fsol.Solid());
+    }
+    if (solids.size() == 1) return solids[0];
+    TopoDS_Compound comp;
+    B.MakeCompound(comp);
+    for (const TopoDS_Shape& sol : solids) B.Add(comp, sol);
+    return comp;
   };
   struct Check {
     bool ok = false;
@@ -832,10 +871,37 @@ Val RebuildSurfaces(Js& js) {
         continue;
       }
     }
-    TopoDS_Shell shell;
-    B.MakeShell(shell);
-    for (const TopoDS_Face& f : faces) B.Add(shell, f);
-    solid = solidFrom(shell);
+    // The faces in shells, one per set joined by shared edges.
+    TopoDS_Compound shells;
+    B.MakeCompound(shells);
+    {
+      TopoDS_Compound all;
+      B.MakeCompound(all);
+      for (const TopoDS_Face& f : faces) B.Add(all, f);
+      TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+      TopExp::MapShapesAndAncestors(all, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+      TopTools_IndexedMapOfShape placed;
+      for (const TopoDS_Face& f0 : faces) {
+        if (placed.Contains(f0)) continue;
+        TopoDS_Shell shell;
+        B.MakeShell(shell);
+        std::vector<TopoDS_Shape> stack{f0};
+        placed.Add(f0);
+        while (!stack.empty()) {
+          const TopoDS_Shape f = stack.back();
+          stack.pop_back();
+          B.Add(shell, f);
+          for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next())
+            for (const TopoDS_Shape& g : edgeFaces.FindFromKey(ex.Current()))
+              if (!placed.Contains(g)) {
+                placed.Add(g);
+                stack.push_back(g);
+              }
+        }
+        B.Add(shells, shell);
+      }
+    }
+    solid = solidFrom(shells);
     c = check(solid);
     sewn = false;
     if (!c.ok) {

@@ -238,6 +238,42 @@ describe("rebuilding a mesh as exact faces", () => {
     expect(r.geometryData.indices.length).toBeGreaterThan(0);
   });
 
+  it("gives each separate body in one mesh a solid of its own", () => {
+    // An STL can hold several bodies -- a fin and its two plugs -- and one
+    // shell of all their faces is refused as not connected.
+    const a = meshOf(occ.makeBox(-3, -1, -1, -1, 1, 1));
+    const b = meshOf(occ.makeSphere(1));
+    const n = a.positions.length / 3;
+    const r = rebuild({
+      positions: [
+        ...a.positions,
+        ...b.positions.map((x, i) => (i % 3 === 0 ? x + 3 : x)),
+      ],
+      indices: [...a.indices, ...b.indices.map((i) => i + n)],
+    });
+    expect(faces(r), "faces").toBe("6 plane, 1 sphere");
+    const volume = 8 + (4 / 3) * Math.PI;
+    expect(
+      Math.abs(r.volume - volume),
+      `volume ${r.volume} against ${volume}`,
+    ).toBeLessThan(0.01);
+  });
+
+  it("keeps a cavity inside the body around it", () => {
+    // The cavity's faces face inward, as the mesh winds them: it is taken
+    // out of the box, not added as a second body.
+    const r = rebuild(
+      meshOf(
+        occ.booleanOp(
+          [occ.makeBox(-2, -2, -2, 2, 2, 2), occ.makeBox(-1, -1, -1, 1, 1, 1)],
+          "difference",
+        ),
+      ),
+    );
+    expect(faces(r), "faces").toBe("12 plane");
+    expect(r.volume, "volume").toBeCloseTo(64 - 8, 6);
+  });
+
   it("refuses a mesh with a hole in it", () => {
     // A solid can't be made of an open surface; the caller keeps the mesh.
     const m = meshOf(occ.makeBox(-1, -1, -1, 1, 1, 1));
