@@ -119,83 +119,6 @@ export function featureEdgeGraph(
 // straight, so a smooth rim flows on but a sharp corner ends the edge.
 const STRAIGHT_DOT = 0.4;
 
-// Walk the connected feature edge that passes nearest `world` into one ordered
-// polyline of world points.  Follows the graph from the nearest node, greedily
-// taking the straightest continuation at each step (so a circular rim becomes a
-// single loop, not a tangle).
-export function edgePolylineNear(graph, world) {
-  const { nodes, adj, segments } = graph;
-  if (!segments || segments.length === 0) return null;
-
-  const dirBetween = (k1, k2) => {
-    const a = nodes.get(k1),
-      b = nodes.get(k2);
-    const dx = b.x - a.x,
-      dy = b.y - a.y,
-      dz = b.z - a.z;
-    const l = Math.hypot(dx, dy, dz) || 1;
-    return { x: dx / l, y: dy / l, z: dz / l };
-  };
-
-  // Nearest feature-edge segment to the cursor (point-to-segment distance).
-  let near = null,
-    bestD = Infinity;
-  for (const [k1, k2] of segments) {
-    const a = nodes.get(k1),
-      b = nodes.get(k2);
-    const abx = b.x - a.x,
-      aby = b.y - a.y,
-      abz = b.z - a.z;
-    const len2 = abx * abx + aby * aby + abz * abz || 1e-9;
-    let t =
-      ((world.x - a.x) * abx + (world.y - a.y) * aby + (world.z - a.z) * abz) /
-      len2;
-    t = Math.max(0, Math.min(1, t));
-    const px = a.x + t * abx,
-      py = a.y + t * aby,
-      pz = a.z + t * abz;
-    const d = (px - world.x) ** 2 + (py - world.y) ** 2 + (pz - world.z) ** 2;
-    if (d < bestD) {
-      bestD = d;
-      near = [k1, k2];
-    }
-  }
-  if (!near) return null;
-
-  const visited = new Set(near);
-  // Extend from `from` (having arrived along `inDir`) while the edge stays
-  // straight/smooth, returning the chain of keys past `from`.
-  const extend = (from, inDir) => {
-    const chain = [];
-    let cur = from,
-      dir = inDir;
-    for (;;) {
-      const nexts = [...(adj.get(cur) || [])].filter((k) => !visited.has(k));
-      let best = null,
-        bestDot = STRAIGHT_DOT;
-      for (const nx of nexts) {
-        const d = dirBetween(cur, nx);
-        const dot = d.x * dir.x + d.y * dir.y + d.z * dir.z;
-        if (dot > bestDot) {
-          bestDot = dot;
-          best = nx;
-        }
-      }
-      if (!best) break;
-      visited.add(best);
-      chain.push(best);
-      dir = dirBetween(cur, best);
-      cur = best;
-    }
-    return chain;
-  };
-
-  const fwd = extend(near[1], dirBetween(near[0], near[1]));
-  const back = extend(near[0], dirBetween(near[1], near[0]));
-  const keys = back.reverse().concat([near[0], near[1]], fwd);
-  return keys.map((k) => nodes.get(k));
-}
-
 // Decompose the whole feature-edge graph into ordered chains (maximal smooth
 // runs between junctions / sharp corners), so "project all connected edges"
 // yields one fitted shape per real edge.  Returns an array of world polylines.
@@ -449,4 +372,62 @@ export function fitProjectedShapes(pts, tag = {}) {
       ...tag,
     });
   return out;
+}
+
+// Projected chains (2D polylines on the sketch plane) grouped into connected
+// sets: chains whose ends meet within `eps` belong together, so hovering one
+// side of a projected outline picks up the whole outline.  Returns an array of
+// arrays of chain indices.
+export function connectedChainGroups(chains, eps = 1e-4) {
+  const parent = chains.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const cell = (p) => `${Math.round(p.x / eps)},${Math.round(p.y / eps)}`;
+  const byCell = new Map();
+  chains.forEach((c, i) => {
+    for (const p of [c[0], c[c.length - 1]]) {
+      // An end within eps can round into a neighbouring cell, so look in all
+      // nine round it.
+      const cx = Math.round(p.x / eps),
+        cy = Math.round(p.y / eps);
+      for (let dx = -1; dx <= 1; dx++)
+        for (let dy = -1; dy <= 1; dy++) {
+          const j = byCell.get(`${cx + dx},${cy + dy}`);
+          if (j != null) parent[find(i)] = find(j);
+        }
+      byCell.set(cell(p), i);
+    }
+  });
+  const groups = new Map();
+  chains.forEach((_, i) => {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(i);
+  });
+  return [...groups.values()];
+}
+
+// The chain nearest `pt` on the plane, if one passes within `maxDist`:
+// { index, distance }, or null.
+export function nearestChain(chains, pt, maxDist) {
+  let best = null;
+  chains.forEach((c, i) => {
+    for (let k = 0; k + 1 < c.length; k++) {
+      const a = c[k],
+        b = c[k + 1];
+      const abx = b.x - a.x,
+        aby = b.y - a.y;
+      const L = abx * abx + aby * aby;
+      const t =
+        L > 0
+          ? Math.max(
+              0,
+              Math.min(1, ((pt.x - a.x) * abx + (pt.y - a.y) * aby) / L),
+            )
+          : 0;
+      const d = Math.hypot(pt.x - a.x - abx * t, pt.y - a.y - aby * t);
+      if (d <= maxDist && (!best || d < best.distance))
+        best = { index: i, distance: d };
+    }
+  });
+  return best;
 }
