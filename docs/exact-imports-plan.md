@@ -179,12 +179,44 @@ On the V-Core STLs at 0.01 mm, with all of the above:
 | lead_screw_motor_cage_front | 10,358 | 71 ms | 44 planes, 13 cylinders, 9 cones | 95,465.3 (95,468.8) | 0.010 |
 | xy_motor_cage_top_left | 12,428 | 168 ms | 103 planes, 23 cylinders, 7 cones | 45,685.8 (45,689.1) | 0.010 |
 | pillow_block | 5,316 | 36 ms | 31 planes, 6 cylinders, 6 cones | 11,067.9 (11,068.4) | 0.010 |
-| bed_arm_back | 12,778 | 2,088 ms | 108 planes, 18 cylinders, 89 triangles | 62,039.8 (62,042.6) | 0.010 |
-| bed_arm_right | 11,450 | 1,819 ms | 80 planes, 23 cylinders, 1 cone, 1 torus, 2 oval walls, 699 triangles | 87,526.0 (87,525.9) | 0.120 |
+| bed_arm_back | 12,778 | 2,112 ms | 109 planes, 18 cylinders, 46 triangles | 62,039.6 (62,042.6) | 0.010 |
+| bed_arm_right | 11,450 | 1,533 ms | 84 planes, 23 cylinders, 1 torus, 2 oval walls | 87,526.2 (87,525.9) | 0.120 |
+| lead_screw_motor_cage_back | 5,200 | 281 ms | 74 planes, 18 cylinders, 20 cones, 4 tori, 6 freeform, 12 triangles | 126,233.8 (126,249.0) | 0.016 |
 | xy_joiner_right | 8,826 | 1,190 ms | 100 planes, 26 cylinders, 6 cones, 2 oval walls, 73 triangles | 45,961.8 (45,962.5) | 0.011 |
 | cable_tie | 151,160 | | refused: over the size limit | | |
 
-Eighteen of the nineteen rebuild, all within 0.02% of the mesh's volume; eleven with no triangles left, and the rest keeping from 2 to 721 where regions were put back. (Earlier versions of this section said sixteen of nineteen, with the bed arms refused, and then three with no triangles left and up to 1,440 kept; the follow-ups above are what changed.)
+Eighteen of the nineteen rebuild, all within 0.03% of the mesh's volume; twelve with no triangles left, and the rest keeping from 2 to 73 where regions were put back. (Earlier versions of this section said sixteen of nineteen, with the bed arms refused, then three with no triangles left and up to 1,440 kept, then eleven and up to 721; the follow-ups above and below are what changed.)
+
+### The Bed Arms and Freeform Surfaces
+
+The bed arms kept 699, 721 and 89 triangles. Four separate faults were behind it, each found by tracing which region the rebuild put back and why:
+
+- **A sliver has no normal at the tolerance.** Four flat annuli on bed_arm_right lay within 0.001 of a plane, but each held one or two slivers 0.001 high whose normals float noise tilted 0.5 to 2.4°, and the facets-face-the-plane check refused the plane for them. A near-flat cone round its own apex took each region instead, and the face built on it bounded the wrong area. A facet narrower than the tolerance is now excused from the normal check (its vertices could sit anywhere within it); a fillet's strips, which the check is there for, are many tolerances wide. bed_arm_right went to no triangles.
+- **The way round an intersection curve.** An edge cut from where a plane meets a cone went 210 mm the long way round its ellipse instead of 3.9 mm the short way. The two ways were scored by projecting the run's middle onto each, bounded to its parameters, and a span past the curve's first period ([9.40, 9.51] on a 2π ellipse) projects to nothing. They are sampled now.
+- **One region, one face.** `ShapeFix_Face` split a wire that doubled back past a sliver neighbour 0.01 wide into pieces and kept the sliver's 4-edge loop, losing the annulus round it. Face splitting is off.
+- **Blame the smaller face.** Where an edge is walked the same way by both its faces, one of them is turned wrong and both used to go back to triangles; the smaller now goes first. bed_arm_left went from 224 to 22 triangles, the sliver cone that was the trouble. I couldn't make a synthetic test that needs these last three (a cylinder cut obliquely at 24 rotations and three resolutions rebuilt cleanly without them); the corpus measures them.
+
+**Freeform surfaces** are a seventh kind: a cubic B-spline height field over a plane (`mesh_freeform.cpp`), exact in OCC as a `Geom_BSplineSurface`. After segmentation, what is still triangles or in regions too small to be well supported is gathered across smooth edges into clusters whose facets face within 20° of their mean, so each is one-valued over its plane, and a cluster of 12 or more becomes one freeform face when the surface holds every vertex within the tolerance and every facet's middle within the mesh's chord sag. The net is refined until it holds, but never past one height per two points: a surface that needs more is threading the points, not describing a smooth surface. That limit came from the fins. The two big fins are drawn with 1.6 mm edges and are locally quadric to 0.0035 mm; the mini and knubster fins have 4-6 mm edges and sit 0.08 off any local quadric, so their facets are their shape. Allowed a height per point or so, the coarse fins came out with more faces than before; at one per four, the fine fins gained little. A freeform face that still fails in the rebuild gives its facets back to the regions they came from, rather than to triangles.
+
+Making it hold took three more rebuild fixes, all general:
+
+- **A triangle face's corners end runs.** Where two sides of a triangle border the same region, one curve was fitted round both and the triangle became a two-edge wire bent out of its plane, which wouldn't mesh, and the blame fell on the neighbouring 1,731-facet freeform face.
+- **The other side of a sphere.** A sphere is closed in one direction only; the fix bounded the face by the surface's limits and took the region's wire as a hole in them, so a 102 mm² patch came out as 14,351 mm², the rest of the sphere. When a face's area fails, the wires the fix added are dropped and the region's turned round, and that is kept if its area holds.
+- **No shallow cone round its own apex.** Each hilltop of a smooth surface holds a near-flat cone within the tolerance, apex in the middle, and no face can be built on that; such a fit is refused, and the facets go to a sphere or a freeform face.
+
+On a 40 mm slab whose top is z = 10 + 2 sin(x/5) cos(y/7), sampled at 1 mm, the rebuild kept 299 triangles before and keeps 36 now, within 0.83 mm³ of the true volume; at 0.5 mm, 4,720 before and 194 now. The fins:
+
+| File | Faces before | Faces now | Triangles before | Triangles now |
+| --- | --- | --- | --- | --- |
+| fcs2_fin | 3,672 | 2,050 | 2,594 | 1,123 |
+| futures_fin | 3,662 | 2,048 | 2,585 | 1,123 |
+| fcs_fin_shorter | 2,681 | 2,046 | 1,740 | 1,060 |
+| futures_fin_shorter | 2,678 | 2,043 | 1,740 | 1,060 |
+| futures_knubster_fin | 440 | 406 | 273 | 237 |
+
+The coarse fins change little: futures_mini_center_fin from 887 to 808 faces, fcs_mini_center_fin from 729 to 734 (the one that got worse), the rest by under 10 or not at all. All fourteen rebuild within 0.044% of the mesh's volume. On the V-Core corpus only lead_screw_motor_cage_back changed: its oblique blend became six freeform faces, and it keeps 12 triangles where it kept 238. Faces now come out bigger than the mesh on the convex fins (+10 mm³ on fcs2_fin), as exact surfaces should over chords.
+
+Still not done: a smooth region already covered by local spheres, cones and tori of 32 facets or more keeps them rather than becoming one freeform face (the 0.5 mm slab's top is 13 freeform faces and 175 local fits). Widening the freeform pass to those would let it take real cylinders on mechanical parts, and a way to tell the two apart hasn't been tried.
 
 The **size limit** is 100,000 triangles, in recognition and rebuild alike. The rebuild costs per face, and what recognition leaves as triangles are a face each: the cable tie's ran 105 s and was then refused, while the 13k-triangle parts take under a second or two. 100,000 is *(est)* between those two measurements, not a measurement itself.
 
@@ -208,7 +240,7 @@ The committed body is a `csg` with `regenerator: { kind: "meshToSurfaces", toler
 - **Fillet bands** are found as tori when they have about 128 facets of arc; thinner ones grow as cylinder or cone strips, or stay triangles. Measured on one filleted cylinder and the corpus, not more widely.
 - **Speed** is now measured: see the size limit above. The 50,000-triangle import cap is unchanged.
 - **Recogniser on wires** wasn't needed: run curves are fitted directly as lines, arcs and B-splines.
-- **Still open:** many small faces and kept triangles on freeform parts (a B-spline surface fit, untried); and bodies that keep hundreds of triangles where a region's face wouldn't hold (the bed arms, 699-721).
+- **Still open:** smooth regions covered by local fits stay many faces rather than one freeform face (see "The Bed Arms and Freeform Surfaces"); and the fine fins still keep about a thousand triangles each.
 
 ## Order of Work
 
