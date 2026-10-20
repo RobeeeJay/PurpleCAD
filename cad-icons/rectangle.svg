@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-
-  <rect stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" x="3" y="5" width="18" height="14"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="5"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="5"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="19"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="19"/>
+  <rect stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" x="3" y="5" width="18" height="14" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="5" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="5" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="19" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="19" />
 </svg>

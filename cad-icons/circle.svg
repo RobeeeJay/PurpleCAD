@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-
-  <circle stroke="#6C3FD4" fill="none" stroke-width="1.5" cx="12" cy="12" r="9"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="3" x2="12" y2="5"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="19" x2="12" y2="21"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="3" y1="12" x2="5" y2="12"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="19" y1="12" x2="21" y2="12"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="12"/>
+  <circle stroke="#6C3FD4" fill="none" stroke-width="1.5" cx="12" cy="12" r="9" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="3" x2="12" y2="5" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="19" x2="12" y2="21" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="3" y1="12" x2="5" y2="12" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-linecap="square" x1="19" y1="12" x2="21" y2="12" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="12" />
 </svg>

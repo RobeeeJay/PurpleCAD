@@ -1,6 +1,7 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { isAnalysableBody } from "../../store/stressSlice.js";
+import SvgIcon from "../icons/SvgIcon.jsx";
 
 // Generative design — SIMP topology optimisation: keep the material that
 // carries the load, remove the rest.  One toggle button; OptimiseOverlay's
@@ -37,15 +38,7 @@ const OptimiseSection = ({ bare = false }) => {
       disabled={!ready && !optimiseTool}
       onClick={toggle}
     >
-      <svg viewBox="0 0 24 24" width="20" height="20">
-        {/* A block with its interior optimised away into a truss */}
-        <rect x="3" y="4" width="2" height="16" fill="#c4c2b8" opacity="0.55" />
-        <path d="M5 4 L20 4 L20 7 L5 7 Z" fill="#6C3FD4" opacity="0.85" />
-        <path d="M5 17 L20 17 L20 20 L5 20 Z" fill="#6C3FD4" opacity="0.85" />
-        <path d="M6 7 L12 17 L9 17 L5 9 Z" fill="#6C3FD4" opacity="0.6" />
-        <path d="M18 7 L12 17 L15 17 L19 9 Z" fill="#6C3FD4" opacity="0.6" />
-        <circle cx="20" cy="12" r="1.6" fill="#D4A33F" />
-      </svg>
+      <SvgIcon name="generative-design" size={20} />
     </button>
   );
 

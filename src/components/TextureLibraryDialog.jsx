@@ -8,6 +8,7 @@ import {
   importSizeWarning,
 } from "../three/textureLibrary.js";
 import "../styles/ProjectsDialog.css";
+import SvgIcon from "./icons/SvgIcon.jsx";
 
 // Bump-map library for the Texture tool: built-in procedural maps (animal
 // scales / fabric / industrial) plus user imports.  Imports persist app-wide
@@ -126,23 +127,7 @@ const TextureLibraryDialog = () => {
                 setDraftName(entry.name);
               }}
             >
-              <svg viewBox="0 0 24 24" width="15" height="15">
-                <path
-                  d="M4 20 L4 16 L15 5 L19 9 L8 20 Z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-                <line
-                  x1="13"
-                  y1="7"
-                  x2="17"
-                  y2="11"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                />
-              </svg>
+              <SvgIcon name="rename" size={15} />
             </button>
             <button
               className="project-icon-btn project-danger"
@@ -152,30 +137,7 @@ const TextureLibraryDialog = () => {
                 remove(entry);
               }}
             >
-              <svg viewBox="0 0 24 24" width="15" height="15">
-                <path
-                  d="M6 7 L18 7 L17 20 L7 20 Z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-                <line
-                  x1="4"
-                  y1="7"
-                  x2="20"
-                  y2="7"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                />
-                <path
-                  d="M9 7 L9 4 L15 4 L15 7"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <SvgIcon name="delete" size={15} />
             </button>
           </div>
         )}

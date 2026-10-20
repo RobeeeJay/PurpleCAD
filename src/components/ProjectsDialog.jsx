@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../store";
 import "../styles/ProjectsDialog.css";
+import SvgIcon from "./icons/SvgIcon.jsx";
 
 // Projects manager: a grid of project cards (viewport thumbnail + name + active
 // badge).  Click a card to switch, "New project" to create, rename inline,
@@ -120,23 +121,7 @@ const ProjectsDialog = () => {
                       setDraftName(p.name);
                     }}
                   >
-                    <svg viewBox="0 0 24 24" width="15" height="15">
-                      <path
-                        d="M4 20 L4 16 L15 5 L19 9 L8 20 Z"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinejoin="round"
-                      />
-                      <line
-                        x1="13"
-                        y1="7"
-                        x2="17"
-                        y2="11"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                      />
-                    </svg>
+                    <SvgIcon name="rename" size={15} />
                   </button>
                   <button
                     className="project-icon-btn"
@@ -146,25 +131,7 @@ const ProjectsDialog = () => {
                       duplicateProject(p.id);
                     }}
                   >
-                    <svg viewBox="0 0 24 24" width="15" height="15">
-                      <rect
-                        x="8"
-                        y="8"
-                        width="12"
-                        height="12"
-                        rx="1.5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                      />
-                      <path
-                        d="M16 4 L5.5 4 A1.5 1.5 0 0 0 4 5.5 L4 16"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                      />
-                    </svg>
+                    <SvgIcon name="duplicate" size={15} />
                   </button>
                   {projects.length > 1 && (
                     <button
@@ -180,30 +147,7 @@ const ProjectsDialog = () => {
                           deleteProject(p.id);
                       }}
                     >
-                      <svg viewBox="0 0 24 24" width="15" height="15">
-                        <path
-                          d="M6 7 L18 7 L17 20 L7 20 Z"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinejoin="round"
-                        />
-                        <line
-                          x1="4"
-                          y1="7"
-                          x2="20"
-                          y2="7"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                        />
-                        <path
-                          d="M9 7 L9 4 L15 4 L15 7"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
+                      <SvgIcon name="delete" size={15} />
                     </button>
                   )}
                 </div>

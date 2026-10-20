@@ -1,5 +1,6 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
+import SvgIcon from "../icons/SvgIcon.jsx";
 
 const SOLID_TYPES = [
   "cube",
@@ -39,31 +40,7 @@ const SplitSection = ({ bare = false }) => {
       title="Split object — pick an object, then a face or plane to slice it into two"
       onClick={handleSplit}
     >
-      <svg viewBox="0 0 24 24" width="20" height="20">
-        <polygon
-          points="5,8 11,5 11,19 5,16"
-          fill="rgba(108,63,212,0.3)"
-          stroke="#6C3FD4"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        />
-        <polygon
-          points="13,5 19,8 19,16 13,19"
-          fill="rgba(108,63,212,0.18)"
-          stroke="#6C3FD4"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        />
-        <line
-          x1="12"
-          y1="2"
-          x2="12"
-          y2="22"
-          stroke="#D4A33F"
-          strokeWidth="1.5"
-          strokeDasharray="2 2"
-        />
-      </svg>
+      <SvgIcon name="split-plane" size={20} />
     </button>
   );
 

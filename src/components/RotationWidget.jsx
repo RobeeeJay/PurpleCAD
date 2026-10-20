@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import "../styles/RotationWidget.css";
+import SvgIcon from "./icons/SvgIcon.jsx";
 
 const FACE_CONFIGS = [
   {
@@ -395,54 +396,7 @@ const RotationWidget = ({
         onClick={handleClick}
       />
       <button className="home-button" onClick={handleHome} title="Reset view">
-        <svg viewBox="0 0 24 24" width="19" height="19">
-          <path
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            d="M 18.3,4.6 A 10 10 0 1 0 18.7,19.7"
-          />
-          <polygon
-            fill="#6C3FD4"
-            stroke="#6C3FD4"
-            strokeWidth="0.5"
-            strokeLinejoin="miter"
-            points="18.7,19.7 15.5,18.2 19.8,16.8"
-          />
-          <polygon
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1"
-            strokeLinejoin="miter"
-            points="11,7.5 14.5,9.5 11,11.5 7.5,9.5"
-          />
-          <polygon
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1"
-            strokeLinejoin="miter"
-            points="7.5,9.5 11,11.5 11,15.5 7.5,13.5"
-          />
-          <polygon
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1"
-            strokeLinejoin="miter"
-            points="14.5,9.5 11,11.5 11,15.5 14.5,13.5"
-          />
-          <line
-            x1="11"
-            y1="11.5"
-            x2="11"
-            y2="15.5"
-            stroke="#D4A33F"
-            strokeWidth="0.75"
-            strokeDasharray="1.5 1.5"
-            opacity="0.7"
-          />
-          <circle cx="11" cy="7.5" r="1.2" fill="#D4A33F" />
-        </svg>
+        <SvgIcon name="view-reset" size={19} />
       </button>
     </div>
   );

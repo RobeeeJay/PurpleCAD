@@ -12,6 +12,7 @@ import {
   pickBtn,
   toggleBtn,
 } from "./viewport/overlayBar.js";
+import SvgIcon from "./icons/SvgIcon.jsx";
 
 // Emboss tool overlay.  Pick sketch geometry + a face, then stamp it onto the
 // body as a raised (emboss) or recessed (deboss) relief, with angle / offset /
@@ -249,27 +250,7 @@ const EmbossDialog = () => {
           title="On wraps the geometry around a cylindrical face (conform, falls back to flat on a flat face); off projects from the centre-most face's plane (center)"
           aria-label="Conform"
         >
-          <svg viewBox="0 0 24 24" width="14" height="14">
-            {/* Thin circle: the body being embossed */}
-            <circle
-              cx="12"
-              cy="12"
-              r="6"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              opacity="0.5"
-            />
-            {/* Bold arc wrapping around it: the stamped relief conforming to
-                the surface */}
-            <path
-              d="M18.55 7.41 A8 8 0 1 1 18.55 16.59"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.3"
-              strokeLinecap="round"
-            />
-          </svg>
+          <SvgIcon name="conform" size={14} />
         </button>
 
         <button type="button" onClick={cancel} title="Cancel" style={barBtn()}>
