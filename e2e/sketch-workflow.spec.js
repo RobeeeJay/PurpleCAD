@@ -325,6 +325,47 @@ test.describe.serial("2D sketch workflow", () => {
     expect(line.y1).toBeCloseTo(line.y2, 5);
   });
 
+  test("the same button makes a near-upright line vertical", async () => {
+    // Horizontal and vertical are one button: it applies whichever axis the
+    // selected line lies nearer.
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool("line"),
+    );
+    const A = toScreen(-6.2, 3);
+    const B = toScreen(-5.8, 5.5); // nearer upright than level, but slanted
+    await page.mouse.click(A.x, A.y);
+    await page.mouse.click(B.x, B.y);
+    await page.keyboard.press("Escape");
+    const idx = (await shapes()).length - 1;
+    await page.evaluate(() =>
+      window.__store.getState().setActiveSketchTool(null),
+    );
+    const mid = toScreen(-6, 4.25);
+    await page.mouse.click(mid.x, mid.y);
+    expect(
+      await page.evaluate(
+        () => window.__store.getState().selectedSketchElement?.shapeIdx,
+      ),
+    ).toBe(idx);
+
+    await page
+      .getByTitle("Vertical — force the selected line", { exact: false })
+      .click();
+    const line = (await shapes())[idx];
+    expect(line.x1).toBeCloseTo(line.x2, 5);
+    const constraints = await page.evaluate(
+      (i) =>
+        window.__store
+          .getState()
+          .items.find((it) => it.id === window.__store.getState().selectedId)
+          .constraints.filter((c) => c.shapeIdx === i)
+          .map((c) => c.type),
+      idx,
+    );
+    expect(constraints).toContain("vertical");
+    expect(constraints).not.toContain("horizontal");
+  });
+
   test("offset creates a linked parallel copy of the selected circle", async () => {
     const before = (await shapes()).length;
     const circleIdx = (await shapes()).findIndex((sh) => sh.type === "circle");

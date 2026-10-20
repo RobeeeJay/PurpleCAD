@@ -49,6 +49,7 @@ import {
   isFontAvailable,
 } from "../three/sketchText.js";
 import { computeLineTrim } from "../three/sketchTrim.js";
+import { autoHVConstraints } from "../three/sketchConstraints.js";
 import {
   SHAPE_INDEX_FIELDS,
   SHAPE_INDEX_LIST_FIELDS,
@@ -416,7 +417,15 @@ export const createSketchSlice = (set) => ({
         item.id === sketchId
           ? Object.assign({}, item, {
               shapes: [...(item.shapes || []), ...newShapes],
-              constraints: [...(item.constraints || []), ...newConstraints],
+              constraints: [
+                ...(item.constraints || []),
+                ...newConstraints,
+                ...autoHVConstraints(
+                  newShapes,
+                  (item.shapes || []).length,
+                  newConstraints,
+                ),
+              ],
             })
           : item,
       );
@@ -572,7 +581,15 @@ export const createSketchSlice = (set) => ({
         item.id === sketchId
           ? Object.assign({}, item, {
               shapes: [...(item.shapes || []), shape],
-              constraints: [...(item.constraints || []), ...newConstraints],
+              constraints: [
+                ...(item.constraints || []),
+                ...newConstraints,
+                ...autoHVConstraints(
+                  [shape],
+                  (item.shapes || []).length,
+                  newConstraints,
+                ),
+              ],
             })
           : item,
       );

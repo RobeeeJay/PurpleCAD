@@ -216,6 +216,56 @@ export const VerticalArt = ({ size = 20 }) => (
   </Art>
 );
 
+// The horizontal/vertical button at rest, with no line selected to choose
+// between them: a level line and an upright one, each with its own tick.
+export const HorizontalVerticalArt = ({ size = 20 }) => (
+  <Art size={size}>
+    <line
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="5"
+      y1="3"
+      x2="5"
+      y2="19"
+    />
+    <line
+      stroke="#6C3FD4"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="5"
+      y1="19"
+      x2="21"
+      y2="19"
+    />
+    <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="5" cy="3" />
+    <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="5" cy="19" />
+    <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="19" />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="2"
+      y1="11"
+      x2="8"
+      y2="11"
+    />
+    <line
+      stroke="#D4A33F"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="square"
+      x1="13"
+      y1="16"
+      x2="13"
+      y2="22"
+    />
+  </Art>
+);
+
 export const ParallelArt = ({ size = 20 }) => (
   <Art size={size}>
     <line
