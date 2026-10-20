@@ -2,6 +2,7 @@ import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { offsetSelectedSketchGeometry } from "../../three/sketchModifyActions.js";
 import { CircularPatternArt } from "../icons/constraintIconArt.jsx";
+import SvgIcon from "../icons/SvgIcon.jsx";
 
 const SketchModifySection = () => {
   const selectedId = useStore((s) => s.selectedId);
@@ -120,58 +121,7 @@ const SketchModifySection = () => {
           setSketchModifyMode(sketchModifyMode === "chamfer" ? null : "chamfer")
         }
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="4"
-            y1="20"
-            x2="4"
-            y2="8"
-          />
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="4"
-            y1="8"
-            x2="16"
-            y2="8"
-          />
-          <polyline
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="2"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="4,20 4,13 9,8 16,8"
-          />
-          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="13" />
-          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="9" cy="8" />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="4"
-            y1="8"
-            x2="4"
-            y2="13"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="4"
-            y1="8"
-            x2="9"
-            y2="8"
-          />
-        </svg>
+        <SvgIcon name="chamfer" size={20} />
       </button>
       <button
         className={`toolbar-btn ${sketchModifyMode === "bevel" ? "active" : ""}`}
@@ -180,112 +130,14 @@ const SketchModifySection = () => {
           setSketchModifyMode(sketchModifyMode === "bevel" ? null : "bevel")
         }
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="4"
-            y1="20"
-            x2="4"
-            y2="8"
-          />
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="4"
-            y1="8"
-            x2="16"
-            y2="8"
-          />
-          <path
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="2"
-            strokeLinecap="square"
-            d="M4 20 L4 14 Q4 8 10 8 L16 8"
-          />
-          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="4" cy="14" />
-          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="10" cy="8" />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="4"
-            y1="8"
-            x2="4"
-            y2="14"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="4"
-            y1="8"
-            x2="10"
-            y2="8"
-          />
-        </svg>
+        <SvgIcon name="fillet" size={20} />
       </button>
       <button
         className={`toolbar-btn ${activeSketchTool === "trim" ? "active" : ""}`}
         title="Trim — click or drag over a line or a point; a line is removed up to where it crosses another line"
         onClick={handleTrim}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          {/* scissors: two blades crossing at a pivot, cutting a dashed line */}
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 2"
-            x1="3"
-            y1="12"
-            x2="21"
-            y2="12"
-          />
-          <circle
-            cx="7"
-            cy="8"
-            r="2.4"
-            fill="none"
-            stroke="#6C3FD4"
-            strokeWidth="1.5"
-          />
-          <circle
-            cx="7"
-            cy="16"
-            r="2.4"
-            fill="none"
-            stroke="#6C3FD4"
-            strokeWidth="1.5"
-          />
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            x1="9"
-            y1="9.3"
-            x2="20"
-            y2="15"
-          />
-          <line
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            x1="9"
-            y1="14.7"
-            x2="20"
-            y2="9"
-          />
-        </svg>
+        <SvgIcon name="trim" size={20} />
       </button>
       <button
         className="toolbar-btn"
@@ -296,21 +148,7 @@ const SketchModifySection = () => {
         }
         onClick={handleToggleConstruction}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeDasharray="3 2.5"
-            x1="3"
-            y1="21"
-            x2="21"
-            y2="3"
-          />
-          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="21" />
-          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="3" />
-        </svg>
+        <SvgIcon name="dashed-line" size={20} />
       </button>
       <button
         className="toolbar-btn"
@@ -318,88 +156,14 @@ const SketchModifySection = () => {
         disabled={selectedIndices.length === 0}
         onClick={handleOffset}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            d="M5 17 L5 8 L14 8"
-          />
-          <path
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            d="M8 20 L8 11 L17 11"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="5"
-            y1="8"
-            x2="8"
-            y2="11"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="5"
-            y1="17"
-            x2="8"
-            y2="20"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="14"
-            y1="8"
-            x2="17"
-            y2="11"
-          />
-        </svg>
+        <SvgIcon name="offset" size={20} />
       </button>
       <button
         className={`toolbar-btn ${activeSketchTool === "mirror" ? "active" : ""}`}
         title="Mirror — pick a mirror line, then click geometry to reflect across it"
         onClick={handleMirror}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 2"
-            x1="12"
-            y1="2"
-            x2="12"
-            y2="22"
-          />
-          <path
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            d="M11 4 L11 10 L4 17"
-          />
-          <path
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            d="M13 4 L13 10 L20 17"
-          />
-        </svg>
+        <SvgIcon name="sketch-mirror" size={20} />
       </button>
       <button
         className={`toolbar-btn ${activeSketchTool === "circularPattern" ? "active" : ""}`}
@@ -413,100 +177,14 @@ const SketchModifySection = () => {
         title="Rectangular Pattern — repeat the selected geometry on an X/Y grid"
         onClick={handleRectangularPattern}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect x="3" y="3" width="6" height="6" fill="#6C3FD4" stroke="none" />
-          <rect
-            x="15"
-            y="3"
-            width="6"
-            height="6"
-            fill="#c4c2b8"
-            stroke="none"
-          />
-          <rect
-            x="3"
-            y="15"
-            width="6"
-            height="6"
-            fill="#c4c2b8"
-            stroke="none"
-          />
-          <rect
-            x="15"
-            y="15"
-            width="6"
-            height="6"
-            fill="#c4c2b8"
-            stroke="none"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="9"
-            y1="6"
-            x2="15"
-            y2="6"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="6"
-            y1="9"
-            x2="6"
-            y2="15"
-          />
-        </svg>
+        <SvgIcon name="sketch-pattern-rectangular" size={20} />
       </button>
       <button
         className={`toolbar-btn ${activeSketchTool === "project" ? "active" : ""}`}
         title="Project — click a 3D edge to project it onto the sketch (tracks the source; immovable until released)"
         onClick={handleProject}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          {/* 3D edge above */}
-          <line
-            stroke="#c4c2b8"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            x1="5"
-            y1="5"
-            x2="17"
-            y2="7"
-          />
-          {/* projection rays dropping down */}
-          <line
-            stroke="#D4A33F"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="5"
-            y1="5"
-            x2="5"
-            y2="17"
-          />
-          <line
-            stroke="#D4A33F"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="17"
-            y1="7"
-            x2="17"
-            y2="19"
-          />
-          {/* projected line on the sketch plane */}
-          <line
-            stroke="#6C3FD4"
-            strokeWidth="2"
-            strokeLinecap="round"
-            x1="5"
-            y1="17"
-            x2="17"
-            y2="19"
-          />
-        </svg>
+        <SvgIcon name="project" size={20} />
       </button>
       <button
         className="toolbar-btn"
@@ -515,26 +193,7 @@ const SketchModifySection = () => {
         disabled={!hasProjections}
         style={hasProjections ? undefined : { opacity: 0.45 }}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          {/* an open padlock — unlock the projection */}
-          <rect
-            x="6"
-            y="11"
-            width="12"
-            height="9"
-            rx="1.5"
-            fill="none"
-            stroke="#c4c2b8"
-            strokeWidth="1.5"
-          />
-          <path
-            d="M9 11 V8 a3 3 0 0 1 6 0"
-            fill="none"
-            stroke="#D4A33F"
-            strokeWidth="1.5"
-          />
-          <circle cx="12" cy="15" r="1.5" fill="#6C3FD4" />
-        </svg>
+        <SvgIcon name="release-projection" size={20} />
       </button>
     </ToolbarSection>
   );

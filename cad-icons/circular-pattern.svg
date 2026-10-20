@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <circle cx="12" cy="12" r="8" stroke="#D4A33F" stroke-dasharray="2 2" fill="none" stroke-width="1.5">
+  </circle>
+  <circle cx="12" cy="12" r="1" fill="#D4A33F">
+  </circle>
+  <rect x="10.5" y="2.5" width="3" height="3" fill="#6C3FD4">
+  </rect>
+  <rect x="17.5" y="9.5" width="3" height="3" fill="#c4c2b8">
+  </rect>
+  <rect x="3.5" y="9.5" width="3" height="3" fill="#c4c2b8">
+  </rect>
+</svg>

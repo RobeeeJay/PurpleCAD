@@ -13,6 +13,7 @@ import {
   finalizeImportedMesh,
 } from "../../three/importGeometry.js";
 import { DEFAULT_UNDERLAY } from "../../three/sceneObjects/sketchUnderlay.js";
+import SvgIcon from "../icons/SvgIcon.jsx";
 
 const DocumentSection = () => {
   const history = useStore((s) => s.history);
@@ -390,48 +391,7 @@ const DocumentSection = () => {
         title="Projects — manage and switch between projects"
         onClick={() => setProjectsDialogOpen(true)}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinejoin="miter"
-            x="3"
-            y="4"
-            width="8"
-            height="7"
-          />
-          <rect
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinejoin="miter"
-            x="13"
-            y="4"
-            width="8"
-            height="7"
-          />
-          <rect
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinejoin="miter"
-            x="3"
-            y="13"
-            width="8"
-            height="7"
-          />
-          <rect
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinejoin="miter"
-            x="13"
-            y="13"
-            width="8"
-            height="7"
-          />
-        </svg>
+        <SvgIcon name="projects" size={20} />
       </button>
       <button
         ref={saveBtnRef}
@@ -439,34 +399,7 @@ const DocumentSection = () => {
         title="Save / Export"
         onClick={() => setSaveMenuOpen((open) => !open)}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            d="M4 14 L4 20 L20 20 L20 14"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="12"
-            y1="16"
-            x2="12"
-            y2="4"
-          />
-          <polyline
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="7,9 12,4 17,9"
-          />
-        </svg>
+        <SvgIcon name="save" size={20} />
       </button>
       {saveMenuOpen &&
         saveMenuPos &&
@@ -525,34 +458,7 @@ const DocumentSection = () => {
         title="Load / Import"
         onClick={() => setImportMenuOpen((open) => !open)}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            d="M4 14 L4 20 L20 20 L20 14"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="12"
-            y1="3"
-            x2="12"
-            y2="15"
-          />
-          <polyline
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="7,10 12,15 17,10"
-          />
-        </svg>
+        <SvgIcon name="open" size={20} />
       </button>
       {importMenuOpen &&
         importMenuPos &&
@@ -631,40 +537,7 @@ const DocumentSection = () => {
         title="Variables"
         onClick={() => setVariablesDialogOpen(true)}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            x="2"
-            y="3"
-            width="20"
-            height="18"
-          />
-          <text
-            x="5"
-            y="16"
-            fontSize="13"
-            fontStyle="italic"
-            fontFamily="Georgia, serif"
-            fontWeight="700"
-            fill="#6C3FD4"
-          >
-            f
-          </text>
-          <text
-            x="12"
-            y="16"
-            fontSize="11"
-            fontStyle="italic"
-            fontFamily="Georgia, serif"
-            fill="#D4A33F"
-          >
-            x
-          </text>
-        </svg>
+        <SvgIcon name="variables" size={20} />
       </button>
       <input
         ref={importInputRef}

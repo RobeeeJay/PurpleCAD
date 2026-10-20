@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <line stroke="#c4c2b8" fill="none" stroke-width="1.5" stroke-linecap="square" x1="4" y1="6" x2="4" y2="19">
+  </line>
+  <line stroke="#c4c2b8" fill="none" stroke-width="1.5" stroke-linecap="square" x1="20" y1="6" x2="20" y2="19">
+  </line>
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="4" y1="12" x2="20" y2="12">
+  </line>
+  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="4,12 7,10.5 7,13.5">
+  </polygon>
+  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="20,12 17,10.5 17,13.5">
+  </polygon>
+  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="2 2" x1="4" y1="6" x2="20" y2="6">
+  </line>
+  <text x="10" y="20" font-size="7" font-family="monospace" fill="#D4A33F" font-weight="500">dim</text>
+</svg>

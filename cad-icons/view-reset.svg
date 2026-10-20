@@ -1,18 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-  <!-- Reset arc ~300deg with square-cap arrowhead -->
-  <path stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square"
-    d="M 18.3,4.6 A 10 10 0 1 0 18.7,19.7"/>
-  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" stroke-linejoin="miter"
-    points="18.7,19.7 15.5,18.2 19.8,16.8"/>
-  <!-- Isometric cube centred inside arc -->
-  <polygon stroke="#6C3FD4" fill="none" stroke-width="1" stroke-linejoin="miter"
-    points="11,7.5 14.5,9.5 11,11.5 7.5,9.5"/>
-  <polygon stroke="#6C3FD4" fill="none" stroke-width="1" stroke-linejoin="miter"
-    points="7.5,9.5 11,11.5 11,15.5 7.5,13.5"/>
-  <polygon stroke="#6C3FD4" fill="none" stroke-width="1" stroke-linejoin="miter"
-    points="14.5,9.5 11,11.5 11,15.5 14.5,13.5"/>
-  <!-- Amber hidden edge -->
-  <line x1="11" y1="11.5" x2="11" y2="15.5" stroke="#D4A33F" stroke-width="0.75" stroke-dasharray="1.5 1.5" opacity="0.7"/>
-  <!-- Amber top vertex -->
-  <circle cx="11" cy="7.5" r="1.2" fill="#D4A33F"/>
+  <path stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" d="M 18.3,4.6 A 10 10 0 1 0 18.7,19.7" />
+  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" stroke-linejoin="miter" points="18.7,19.7 15.5,18.2 19.8,16.8" />
+  <polygon stroke="#6C3FD4" fill="none" stroke-width="1" stroke-linejoin="miter" points="11,7.5 14.5,9.5 11,11.5 7.5,9.5" />
+  <polygon stroke="#6C3FD4" fill="none" stroke-width="1" stroke-linejoin="miter" points="7.5,9.5 11,11.5 11,15.5 7.5,13.5" />
+  <polygon stroke="#6C3FD4" fill="none" stroke-width="1" stroke-linejoin="miter" points="14.5,9.5 11,11.5 11,15.5 14.5,13.5" />
+  <line x1="11" y1="11.5" x2="11" y2="15.5" stroke="#D4A33F" stroke-width="0.75" stroke-dasharray="1.5 1.5" opacity="0.7" />
+  <circle cx="11" cy="7.5" r="1.2" fill="#D4A33F" />
 </svg>

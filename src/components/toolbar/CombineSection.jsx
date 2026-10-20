@@ -1,132 +1,13 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import ToolbarDropdown from "./ToolbarDropdown";
+import SvgIcon from "../icons/SvgIcon.jsx";
 
-const UnionIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20">
-    <rect
-      stroke="#D4A33F"
-      fill="none"
-      strokeWidth="1.5"
-      strokeDasharray="2 1.5"
-      x="3"
-      y="3"
-      width="12"
-      height="12"
-    />
-    <rect
-      stroke="#D4A33F"
-      fill="none"
-      strokeWidth="1.5"
-      strokeDasharray="2 1.5"
-      x="9"
-      y="9"
-      width="12"
-      height="12"
-    />
-    <path
-      stroke="#6C3FD4"
-      fill="none"
-      strokeWidth="2"
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-      d="M3 9 L9 9 L9 3 L15 3 L15 9 L21 9 L21 21 L9 21 L9 15 L3 15 Z"
-    />
-  </svg>
-);
+const UnionIcon = () => <SvgIcon name="union" size={20} />;
 
-const DifferenceIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20">
-    <rect
-      stroke="#D4A33F"
-      fill="none"
-      strokeWidth="1.5"
-      x="3"
-      y="3"
-      width="12"
-      height="12"
-    />
-    <rect
-      stroke="#D4A33F"
-      fill="none"
-      strokeWidth="1.5"
-      strokeDasharray="2 1.5"
-      x="9"
-      y="9"
-      width="12"
-      height="12"
-    />
-    <rect
-      stroke="#6C3FD4"
-      fill="rgba(108,63,212,0.15)"
-      strokeWidth="2"
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-      x="3"
-      y="3"
-      width="6"
-      height="6"
-    />
-    <rect
-      stroke="#6C3FD4"
-      fill="rgba(108,63,212,0.15)"
-      strokeWidth="2"
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-      x="9"
-      y="3"
-      width="6"
-      height="6"
-    />
-    <rect
-      stroke="#6C3FD4"
-      fill="rgba(108,63,212,0.15)"
-      strokeWidth="2"
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-      x="3"
-      y="9"
-      width="6"
-      height="6"
-    />
-  </svg>
-);
+const DifferenceIcon = () => <SvgIcon name="subtract" size={20} />;
 
-const IntersectionIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20">
-    <rect
-      stroke="#D4A33F"
-      fill="none"
-      strokeWidth="1.5"
-      strokeDasharray="2 1.5"
-      x="3"
-      y="3"
-      width="12"
-      height="12"
-    />
-    <rect
-      stroke="#D4A33F"
-      fill="none"
-      strokeWidth="1.5"
-      strokeDasharray="2 1.5"
-      x="9"
-      y="9"
-      width="12"
-      height="12"
-    />
-    <rect
-      stroke="#6C3FD4"
-      fill="none"
-      strokeWidth="2"
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-      x="9"
-      y="9"
-      width="6"
-      height="6"
-    />
-  </svg>
-);
+const IntersectionIcon = () => <SvgIcon name="intersect" size={20} />;
 
 // Boolean tools (Union / Difference / Intersection) collapsed into one
 // "Boolean" dropdown triggered by the Difference icon.  Each choice opens the

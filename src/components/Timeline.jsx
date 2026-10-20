@@ -39,6 +39,7 @@ import {
 import "../styles/Timeline.css";
 import ExtrudeActions from "./TimelineExtrudeActions.jsx";
 import { chamferInfo, getDisplayLabel } from "./timelineLabels.js";
+import SvgIcon from "./icons/SvgIcon.jsx";
 
 // Detect push/pull entries — a modify whose regenerator is a push/pull op.
 const pushPullInfo = (entry) => {
@@ -404,39 +405,7 @@ const Timeline = () => {
             });
           }}
         >
-          <svg viewBox="0 0 24 24" width="14" height="14">
-            {/* Circular refresh arrow */}
-            <path
-              d="M4 12 a8 8 0 0 1 14-5.7"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-            <polyline
-              points="18,2 18,7 13,7"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M20 12 a8 8 0 0 1 -14 5.7"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-            <polyline
-              points="6,22 6,17 11,17"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <SvgIcon name="recalculate" size={14} />
         </button>
       </div>
       <div
@@ -576,34 +545,7 @@ const Timeline = () => {
                       beginPushPullRetarget(entry.itemId, entry.id);
                     }}
                   >
-                    <svg viewBox="0 0 24 24" width="14" height="14">
-                      <rect
-                        x="3"
-                        y="14"
-                        width="12"
-                        height="7"
-                        rx="1"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      />
-                      <polygon
-                        points="3,14 6,9 18,9 18,14"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        opacity="0.6"
-                      />
-                      <circle
-                        cx="19"
-                        cy="5"
-                        r="3"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                      />
-                      <circle cx="19" cy="5" r="1" fill="currentColor" />
-                    </svg>
+                    <SvgIcon name="retarget-push-pull" size={14} />
                   </button>
                   <button
                     className="timeline-action-btn"
@@ -742,16 +684,7 @@ const Timeline = () => {
                     beginPipeRetarget(pipeInfo(entry).itemId, entry.id);
                   }}
                 >
-                  <svg viewBox="0 0 24 24" width="14" height="14">
-                    <path
-                      d="M5 19 L5 10 C5 8, 6 7, 8 7 L19 7"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                    />
-                    <circle cx="5" cy="19" r="2" fill="currentColor" />
-                  </svg>
+                  <SvgIcon name="retarget-pipe" size={14} />
                 </button>
               )}
               {loftInfo(entry) && (
@@ -769,42 +702,7 @@ const Timeline = () => {
                     beginLoftRetarget(loftInfo(entry).itemId, entry.id);
                   }}
                 >
-                  <svg viewBox="0 0 24 24" width="14" height="14">
-                    <rect
-                      x="9"
-                      y="3"
-                      width="6"
-                      height="3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    />
-                    <rect
-                      x="4"
-                      y="18"
-                      width="16"
-                      height="3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    />
-                    <line
-                      x1="9"
-                      y1="6"
-                      x2="4"
-                      y2="18"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    />
-                    <line
-                      x1="15"
-                      y1="6"
-                      x2="20"
-                      y2="18"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    />
-                  </svg>
+                  <SvgIcon name="retarget-loft" size={14} />
                 </button>
               )}
               {canDelete(index) && (
@@ -838,33 +736,7 @@ const Timeline = () => {
           containerRef.current?.focus();
         }}
       >
-        <svg viewBox="0 0 24 24" width="13" height="13">
-          <polyline
-            points="6,4 12,10 18,4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <polyline
-            points="6,11 12,17 18,11"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <line
-            x1="6"
-            y1="20"
-            x2="18"
-            y2="20"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
+        <SvgIcon name="timeline-end" size={13} />
         <span>Move to end</span>
       </button>
       <div className="timeline-undo-status">

@@ -1,10 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-
-  <path stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" d="M3 18 C6 6, 18 6, 21 18"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="18"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="18"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="2 2" x1="3" y1="18" x2="6" y2="10"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="2 2" x1="21" y1="18" x2="18" y2="10"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.2" cx="6" cy="10"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="1.2" cx="18" cy="10"/>
+  <path stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" d="M3 18 C6 6, 18 6, 21 18" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="3" cy="18" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="21" cy="18" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="2 2" x1="3" y1="18" x2="6" y2="10" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="2 2" x1="21" y1="18" x2="18" y2="10" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.2" cx="6" cy="10" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="1.2" cx="18" cy="10" />
 </svg>

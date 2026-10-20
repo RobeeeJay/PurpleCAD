@@ -1211,6 +1211,13 @@ sources are picked) that reuses the creation UI.
 
 ## Misc
 
+- **Icons are SVG files in `cad-icons/`, drawn with `<SvgIcon name=... />`.**
+  The owner edits them in Affinity Designer, so a file must work as saved
+  from there: `cleanIconSvg.js` strips the editor's extras and prefixes ids,
+  and pure magenta `#FF00FF` means `currentColor` (a drawing program can't
+  author it). Never hand-write a new `<svg>` icon into a component; add a
+  file. `cad-icons/README.md` is the workflow, and `iconFiles.test.js` fails
+  on a name with no file.
 - **The app window never navigates.** A web link calls
   `window.electronAPI.openExternal(url)` (main opens http(s) only in the system
   browser; anything else is refused). `main.cjs` backs this up: a new-window

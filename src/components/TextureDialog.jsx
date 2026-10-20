@@ -10,6 +10,7 @@ import {
   pickBtn,
   toggleBtn,
 } from "./viewport/overlayBar.js";
+import SvgIcon from "./icons/SvgIcon.jsx";
 
 // Texture tool overlay.  Pick a black-and-white PNG and a connected face set,
 // then displace the surface by the image (a genuine 3D bump map): project
@@ -185,26 +186,7 @@ const TextureDialog = () => {
           title="On conforms the image around a curved face (cylinder / sphere / curved wall); off projects it from the centre-most face's plane"
           aria-label="Conform"
         >
-          <svg viewBox="0 0 24 24" width="14" height="14">
-            {/* Same glyph as the emboss Conform toggle: the body (thin circle)
-                with the applied pattern wrapping around it (bold arc). */}
-            <circle
-              cx="12"
-              cy="12"
-              r="6"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              opacity="0.5"
-            />
-            <path
-              d="M18.55 7.41 A8 8 0 1 1 18.55 16.59"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.3"
-              strokeLinecap="round"
-            />
-          </svg>
+          <SvgIcon name="conform" size={14} />
         </button>
 
         <button type="button" onClick={cancel} title="Cancel" style={barBtn()}>

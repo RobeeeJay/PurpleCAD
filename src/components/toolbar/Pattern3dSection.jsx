@@ -1,6 +1,7 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import ToolbarDropdown from "./ToolbarDropdown";
+import SvgIcon from "../icons/SvgIcon.jsx";
 
 const SOLID_TYPES = [
   "cube",
@@ -12,64 +13,12 @@ const SOLID_TYPES = [
   "csg",
 ];
 
-const MirrorIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20">
-    <line
-      x1="12"
-      y1="2"
-      x2="12"
-      y2="22"
-      stroke="#D4A33F"
-      strokeWidth="1.5"
-      strokeDasharray="2 2"
-    />
-    <polygon
-      points="4,7 10,5 10,17 4,19"
-      fill="rgba(108,63,212,0.3)"
-      stroke="#6C3FD4"
-      strokeWidth="1.5"
-      strokeLinejoin="round"
-    />
-    <polygon
-      points="20,7 14,5 14,17 20,19"
-      fill="rgba(108,63,212,0.12)"
-      stroke="#6C3FD4"
-      strokeWidth="1.5"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+const MirrorIcon = () => <SvgIcon name="mirror-3d" size={20} />;
 
-const CircularIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20">
-    <circle
-      cx="12"
-      cy="12"
-      r="8"
-      fill="none"
-      stroke="#D4A33F"
-      strokeWidth="1.5"
-      strokeDasharray="2 2"
-    />
-    <rect x="10.5" y="2.5" width="3" height="3" fill="#6C3FD4" />
-    <rect x="18.5" y="10.5" width="3" height="3" fill="#6C3FD4" />
-    <rect x="10.5" y="18.5" width="3" height="3" fill="#6C3FD4" />
-    <rect x="2.5" y="10.5" width="3" height="3" fill="#6C3FD4" />
-  </svg>
-);
+const CircularIcon = () => <SvgIcon name="pattern-circular-3d" size={20} />;
 
 const RectangularIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20">
-    <rect x="3" y="3" width="4" height="4" fill="#6C3FD4" />
-    <rect x="10" y="3" width="4" height="4" fill="rgba(108,63,212,0.45)" />
-    <rect x="17" y="3" width="4" height="4" fill="rgba(108,63,212,0.45)" />
-    <rect x="3" y="10" width="4" height="4" fill="rgba(108,63,212,0.45)" />
-    <rect x="10" y="10" width="4" height="4" fill="rgba(108,63,212,0.45)" />
-    <rect x="17" y="10" width="4" height="4" fill="rgba(108,63,212,0.45)" />
-    <rect x="3" y="17" width="4" height="4" fill="rgba(108,63,212,0.45)" />
-    <rect x="10" y="17" width="4" height="4" fill="rgba(108,63,212,0.45)" />
-    <rect x="17" y="17" width="4" height="4" fill="rgba(108,63,212,0.45)" />
-  </svg>
+  <SvgIcon name="pattern-rectangular-3d" size={20} />
 );
 
 // 3D Repeat tools: Mirror / Circular / Rectangular — collapsed into one

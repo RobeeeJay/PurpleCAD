@@ -11,6 +11,7 @@ import {
   ConeIcon,
   TorusIcon,
 } from "./timelineIcons.jsx";
+import SvgIcon from "../icons/SvgIcon.jsx";
 
 const PRIMITIVES = [
   { type: "cube", label: "Box", Icon: CubeIcon },
@@ -103,52 +104,7 @@ const ObjectCreateSection = () => {
         title="Sketch Plane"
         onClick={() => setSketchPlacementMode(true)}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <polygon
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinejoin="miter"
-            points="2,19 8,13 22,13 16,19"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="2"
-            y1="19"
-            x2="22"
-            y2="13"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="8"
-            y1="13"
-            x2="16"
-            y2="19"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="12"
-            y1="16"
-            x2="12"
-            y2="8"
-          />
-          <polygon
-            fill="#6C3FD4"
-            stroke="#6C3FD4"
-            strokeWidth="0.5"
-            points="12,5 10.5,8.5 13.5,8.5"
-          />
-          <circle fill="#D4A33F" stroke="#D4A33F" r="1.5" cx="12" cy="16" />
-        </svg>
+        <SvgIcon name="sketch-plane" size={20} />
       </button>
       <button
         ref={primBtnRef}
@@ -156,35 +112,7 @@ const ObjectCreateSection = () => {
         title="Create a primitive — Box / Sphere / Cylinder / Cone / Torus"
         onClick={() => setPrimMenuOpen((o) => !o)}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <circle
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            cx="12"
-            cy="12"
-            r="9"
-          />
-          <ellipse
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="2"
-            cx="12"
-            cy="12"
-            rx="9"
-            ry="3.5"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="3"
-            y1="12"
-            x2="21"
-            y2="12"
-          />
-        </svg>
+        <SvgIcon name="sphere" size={20} />
       </button>
       {primMenuOpen &&
         primMenuPos &&
@@ -222,70 +150,14 @@ const ObjectCreateSection = () => {
         }
         onClick={handleExtrudeClick}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <polygon
-            stroke="#c4c2b8"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-            points="12,3 21,8 21,16 12,21 3,16 3,8"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="2"
-            strokeLinecap="square"
-            x1="3"
-            y1="8"
-            x2="21"
-            y2="8"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="3"
-            y1="16"
-            x2="21"
-            y2="16"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1.5"
-            strokeDasharray="2 1.5"
-            x1="12"
-            y1="3"
-            x2="12"
-            y2="21"
-          />
-        </svg>
+        <SvgIcon name="prism" size={20} />
       </button>
       <button
         className="toolbar-btn"
         title="Plane — a reference plane to sketch on (from the selected sketch, else pick 3 points)"
         onClick={handlePlane}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <polygon
-            points="3,9 14,5 21,11 10,15"
-            fill="rgba(68,136,255,0.25)"
-            stroke="#4488ff"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-          <line
-            x1="12"
-            y1="10"
-            x2="12"
-            y2="20"
-            stroke="#D4A33F"
-            strokeWidth="1.5"
-            strokeDasharray="2 2"
-          />
-        </svg>
+        <SvgIcon name="plane" size={20} />
       </button>
       {/* Sketch→solid sweeps (Revolve / Pipe / Loft) live here in Create. */}
       <SweepSection bare />

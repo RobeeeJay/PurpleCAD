@@ -1,11 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-
-  <circle stroke="#6C3FD4" fill="rgba(108,63,212,0.35)" stroke-width="1.5" cx="6" cy="12" r="4.5"/>
-  <ellipse stroke="#D4A33F" fill="none" stroke-width="0.75" cx="6" cy="12" rx="4.5" ry="1.6"/>
-  <rect stroke="#6C3FD4" fill="rgba(108,63,212,0.2)" stroke-width="1.5" stroke-linejoin="miter" x="14" y="9" width="7" height="7"/>
-  <polyline stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linejoin="miter" points="14,9 16,7 21,7"/>
-  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" x1="21" y1="7" x2="21" y2="16"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="1.5 1.5" x1="16" y1="7" x2="16" y2="14"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="1.5 1.5" x1="21" y1="7" x2="16" y2="7"/>
-  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-dasharray="2 2" stroke-linecap="square" x1="12" y1="4" x2="12" y2="20"/>
+  <circle stroke="#6C3FD4" fill="rgba(108,63,212,0.35)" stroke-width="1.5" cx="6" cy="12" r="4.5" />
+  <ellipse stroke="#D4A33F" fill="none" stroke-width="0.75" cx="6" cy="12" rx="4.5" ry="1.6" />
+  <rect stroke="#6C3FD4" fill="rgba(108,63,212,0.2)" stroke-width="1.5" stroke-linejoin="miter" x="14" y="9" width="7" height="7" />
+  <polyline stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linejoin="miter" points="14,9 16,7 21,7" />
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" x1="21" y1="7" x2="21" y2="16" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="1.5 1.5" x1="16" y1="7" x2="16" y2="14" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1" stroke-dasharray="1.5 1.5" x1="21" y1="7" x2="16" y2="7" />
+  <line stroke="#D4A33F" fill="none" stroke-width="1.5" stroke-dasharray="2 2" stroke-linecap="square" x1="12" y1="4" x2="12" y2="20" />
 </svg>

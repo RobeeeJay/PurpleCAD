@@ -1,11 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-
-  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="12" x2="12" y2="3"/>
-  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="12" x2="4" y2="17"/>
-  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="12" x2="20" y2="17"/>
-  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="12,3 10.5,6 13.5,6"/>
-  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="4,17 7,16.5 5.5,19"/>
-  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="20,17 18.5,19 21,16.5"/>
-  <circle fill="#D4A33F" stroke="#D4A33F" r="2" cx="12" cy="12"/>
-  <text x="11" y="22" font-size="6" font-family="monospace" fill="#D4A33F" font-weight="600">ISO</text>
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="12" x2="12" y2="3" />
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="12" x2="4" y2="17" />
+  <line stroke="#6C3FD4" fill="none" stroke-width="1.5" stroke-linecap="square" x1="12" y1="12" x2="20" y2="17" />
+  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="12,3 10.5,6 13.5,6" />
+  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="4,17 7,16.5 5.5,19" />
+  <polygon fill="#6C3FD4" stroke="#6C3FD4" stroke-width="0.5" points="20,17 18.5,19 21,16.5" />
+  <circle fill="#D4A33F" stroke="#D4A33F" r="2" cx="12" cy="12" />
+  <text x="11" y="22" font-size="6" font-family="monospace" fill="#D4A33F" font-weight="600">
+                ISO
+                </text>
 </svg>

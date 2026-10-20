@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { effectiveSelectionTypes } from "../store/selectionMode.js";
 import VisibilityToggles, { useShiftHeld } from "./VisibilityToggles";
 import { NumberInput } from "./inputs.jsx";
+import SvgIcon from "./icons/SvgIcon.jsx";
 
 // The selection widget: four toggle icons at the top-left of the 3D view (clear
 // of the Objects/Timeline panel) choosing what a click selects — whole Object,
@@ -11,107 +12,12 @@ import { NumberInput } from "./inputs.jsx";
 // Holding Shift swaps the widget for the Show-Constraints / Show-Dimensions
 // visibility toggles.
 
-const ObjectIcon = () => (
-  <svg viewBox="0 0 24 24" width="18" height="18">
-    <polygon
-      points="12,3 20,7.5 20,16.5 12,21 4,16.5 4,7.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinejoin="miter"
-    />
-    <line
-      x1="4"
-      y1="7.5"
-      x2="12"
-      y2="12"
-      stroke="currentColor"
-      strokeWidth="1.6"
-    />
-    <line
-      x1="20"
-      y1="7.5"
-      x2="12"
-      y2="12"
-      stroke="currentColor"
-      strokeWidth="1.6"
-    />
-    <line
-      x1="12"
-      y1="12"
-      x2="12"
-      y2="21"
-      stroke="currentColor"
-      strokeWidth="1.6"
-    />
-  </svg>
-);
-const FaceIcon = () => (
-  <svg viewBox="0 0 24 24" width="18" height="18">
-    <polygon
-      points="5,8 19,5 19,16 5,19"
-      fill="currentColor"
-      fillOpacity="0.35"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinejoin="miter"
-    />
-  </svg>
-);
-const EdgeIcon = () => (
-  <svg viewBox="0 0 24 24" width="18" height="18">
-    <line
-      x1="4"
-      y1="19"
-      x2="20"
-      y2="5"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-    />
-    <circle cx="4" cy="19" r="1.6" fill="currentColor" />
-    <circle cx="20" cy="5" r="1.6" fill="currentColor" />
-  </svg>
-);
-const PointIcon = () => (
-  <svg viewBox="0 0 24 24" width="18" height="18">
-    <circle cx="12" cy="12" r="3.4" fill="currentColor" />
-    <circle
-      cx="12"
-      cy="12"
-      r="7"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.2"
-      opacity="0.5"
-    />
-  </svg>
-);
+const ObjectIcon = () => <SvgIcon name="select-object" size={18} />;
+const FaceIcon = () => <SvgIcon name="select-face" size={18} />;
+const EdgeIcon = () => <SvgIcon name="select-edge" size={18} />;
+const PointIcon = () => <SvgIcon name="select-point" size={18} />;
 // Two interlocking links — chain the selection along a curve / smooth edge run.
-const ChainIcon = () => (
-  <svg viewBox="0 0 24 24" width="18" height="18">
-    <rect
-      x="3.5"
-      y="8.5"
-      width="10"
-      height="7"
-      rx="3.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-    />
-    <rect
-      x="10.5"
-      y="8.5"
-      width="10"
-      height="7"
-      rx="3.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-    />
-  </svg>
-);
+const ChainIcon = () => <SvgIcon name="select-chain" size={18} />;
 const SelectionWidget = () => {
   const sketchMode = useStore((s) => {
     const it = s.items.find((i) => i.id === s.selectedId);

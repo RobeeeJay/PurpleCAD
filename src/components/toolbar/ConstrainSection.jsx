@@ -14,6 +14,7 @@ import {
   TangentArt,
   EqualArt,
 } from "../icons/constraintIconArt.jsx";
+import SvgIcon from "../icons/SvgIcon.jsx";
 
 // In sketch mode this is the "Constrain" group (coincident / distance / H / V);
 // in 3D it's the "Move" group (drop-to-ground, point-to-point).  Snap is shared.
@@ -263,115 +264,7 @@ const ConstrainSection = ({ isSketchMode }) => {
           disabled={!canDrop}
           onClick={handleDrop}
         >
-          <svg viewBox="0 0 24 24" width="20" height="20">
-            <line
-              stroke="#D4A33F"
-              fill="none"
-              strokeWidth="1.5"
-              strokeLinecap="square"
-              x1="2"
-              y1="21"
-              x2="22"
-              y2="21"
-            />
-            <line
-              stroke="#D4A33F"
-              fill="none"
-              strokeWidth="1"
-              x1="4"
-              y1="22.5"
-              x2="7"
-              y2="21"
-            />
-            <line
-              stroke="#D4A33F"
-              fill="none"
-              strokeWidth="1"
-              x1="9"
-              y1="22.5"
-              x2="12"
-              y2="21"
-            />
-            <line
-              stroke="#D4A33F"
-              fill="none"
-              strokeWidth="1"
-              x1="14"
-              y1="22.5"
-              x2="17"
-              y2="21"
-            />
-            <line
-              stroke="#D4A33F"
-              fill="none"
-              strokeWidth="1"
-              x1="19"
-              y1="22.5"
-              x2="22"
-              y2="21"
-            />
-            <rect
-              stroke="#c4c2b8"
-              fill="none"
-              strokeWidth="1.5"
-              strokeLinejoin="miter"
-              x="7"
-              y="7"
-              width="8"
-              height="8"
-            />
-            <polyline
-              stroke="#c4c2b8"
-              fill="none"
-              strokeWidth="1.5"
-              strokeLinejoin="miter"
-              points="7,7 9.5,4.5 17.5,4.5 17.5,12.5 15,15"
-            />
-            <line
-              stroke="#c4c2b8"
-              fill="none"
-              strokeWidth="1.5"
-              x1="15"
-              y1="7"
-              x2="15"
-              y2="15"
-            />
-            <line
-              stroke="#c4c2b8"
-              fill="none"
-              strokeWidth="1.5"
-              x1="7"
-              y1="7"
-              x2="15"
-              y2="7"
-            />
-            <line
-              stroke="#D4A33F"
-              fill="none"
-              strokeWidth="1"
-              strokeDasharray="1.5 1.5"
-              x1="9.5"
-              y1="4.5"
-              x2="9.5"
-              y2="12.5"
-            />
-            <line
-              stroke="#6C3FD4"
-              fill="none"
-              strokeWidth="1.5"
-              strokeLinecap="square"
-              x1="11"
-              y1="6"
-              x2="11"
-              y2="19"
-            />
-            <polygon
-              fill="#6C3FD4"
-              stroke="#6C3FD4"
-              strokeWidth="0.5"
-              points="11,21 9,18 13,18"
-            />
-          </svg>
+          <SvgIcon name="move-to-ground" size={20} />
         </button>
       )}
       {!isSketchMode && (
@@ -384,34 +277,7 @@ const ConstrainSection = ({ isSketchMode }) => {
               : startPointToPointTool()
           }
         >
-          <svg viewBox="0 0 24 24" width="20" height="20">
-            <circle fill="#D4A33F" stroke="#D4A33F" r="2.5" cx="5" cy="18" />
-            <circle
-              stroke="#6C3FD4"
-              fill="none"
-              strokeWidth="1.5"
-              r="2.5"
-              cx="19"
-              cy="6"
-            />
-            <line
-              stroke="#6C3FD4"
-              fill="none"
-              strokeWidth="1.5"
-              strokeLinecap="square"
-              strokeDasharray="2.5 2"
-              x1="7"
-              y1="16"
-              x2="17"
-              y2="8"
-            />
-            <polygon
-              fill="#6C3FD4"
-              stroke="#6C3FD4"
-              strokeWidth="0.5"
-              points="17,8 13.5,9 15,11.5"
-            />
-          </svg>
+          <SvgIcon name="point-to-point" size={20} />
         </button>
       )}
       {!isSketchMode && (
@@ -420,60 +286,7 @@ const ConstrainSection = ({ isSketchMode }) => {
           title="Change origin — click an object, then pick its rotation/scale pivot (centre of mass, centre of object, or a vertex)"
           onClick={() => setOriginToolActive(!originToolActive)}
         >
-          <svg viewBox="0 0 24 24" width="20" height="20">
-            {/* crosshair pivot over a small cube */}
-            <polygon
-              stroke="#c4c2b8"
-              fill="none"
-              strokeWidth="1.3"
-              strokeLinejoin="miter"
-              points="13,9 18,11 18,17 13,19 8,17 8,11"
-            />
-            <line
-              stroke="#c4c2b8"
-              fill="none"
-              strokeWidth="1.3"
-              x1="8"
-              y1="11"
-              x2="13"
-              y2="13"
-            />
-            <line
-              stroke="#c4c2b8"
-              fill="none"
-              strokeWidth="1.3"
-              x1="18"
-              y1="11"
-              x2="13"
-              y2="13"
-            />
-            <line
-              stroke="#c4c2b8"
-              fill="none"
-              strokeWidth="1.3"
-              x1="13"
-              y1="13"
-              x2="13"
-              y2="19"
-            />
-            <circle fill="#6C3FD4" stroke="#6C3FD4" r="2" cx="8" cy="8" />
-            <line
-              stroke="#D4A33F"
-              strokeWidth="1.3"
-              x1="2"
-              y1="8"
-              x2="14"
-              y2="8"
-            />
-            <line
-              stroke="#D4A33F"
-              strokeWidth="1.3"
-              x1="8"
-              y1="2"
-              x2="8"
-              y2="14"
-            />
-          </svg>
+          <SvgIcon name="change-origin" size={20} />
         </button>
       )}
       <button
@@ -481,174 +294,14 @@ const ConstrainSection = ({ isSketchMode }) => {
         title="Measure — distance between two picks (vertices/edges/faces/objects), a single face's dimensions, or selected line length"
         onClick={() => (measureTool ? cancelMeasureTool() : startMeasureTool())}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <rect
-            x="2"
-            y="9"
-            width="20"
-            height="6"
-            fill="none"
-            stroke="#c4c2b8"
-            strokeWidth="1.5"
-            strokeLinejoin="miter"
-          />
-          <line
-            stroke="#6C3FD4"
-            strokeWidth="1.3"
-            x1="6"
-            y1="9"
-            x2="6"
-            y2="12.5"
-          />
-          <line
-            stroke="#6C3FD4"
-            strokeWidth="1.3"
-            x1="10"
-            y1="9"
-            x2="10"
-            y2="13"
-          />
-          <line
-            stroke="#6C3FD4"
-            strokeWidth="1.3"
-            x1="14"
-            y1="9"
-            x2="14"
-            y2="12.5"
-          />
-          <line
-            stroke="#6C3FD4"
-            strokeWidth="1.3"
-            x1="18"
-            y1="9"
-            x2="18"
-            y2="13"
-          />
-        </svg>
+        <SvgIcon name="measure" size={20} />
       </button>
       <button
         className={`toolbar-btn ${snapEnabled ? "active" : ""}`}
         title={`${snapEnabled ? "Disable" : "Enable"} snap to grid (${snapDistanceMm}mm / ${snapAngleDeg}°) — set values in Settings`}
         onClick={toggleSnap}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="3"
-            y1="6"
-            x2="21"
-            y2="6"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="3"
-            y1="12"
-            x2="21"
-            y2="12"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="3"
-            y1="18"
-            x2="21"
-            y2="18"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="6"
-            y1="3"
-            x2="6"
-            y2="21"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="12"
-            y1="3"
-            x2="12"
-            y2="21"
-          />
-          <line
-            stroke="#D4A33F"
-            fill="none"
-            strokeWidth="1"
-            strokeDasharray="2 2"
-            x1="18"
-            y1="3"
-            x2="18"
-            y2="21"
-          />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.2" cx="6" cy="6" />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.2" cx="12" cy="6" />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.2" cx="18" cy="6" />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.2" cx="6" cy="12" />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.2" cx="18" cy="12" />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.2" cx="6" cy="18" />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.2" cx="12" cy="18" />
-          <circle fill="#6C3FD4" stroke="#6C3FD4" r="1.2" cx="18" cy="18" />
-          <circle
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="2"
-            cx="12"
-            cy="12"
-            r="3"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="12"
-            y1="8"
-            x2="12"
-            y2="9"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="12"
-            y1="15"
-            x2="12"
-            y2="16"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="8"
-            y1="12"
-            x2="9"
-            y2="12"
-          />
-          <line
-            stroke="#6C3FD4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-            x1="15"
-            y1="12"
-            x2="16"
-            y2="12"
-          />
-        </svg>
+        <SvgIcon name="snap-to-grid" size={20} />
       </button>
     </ToolbarSection>
   );
