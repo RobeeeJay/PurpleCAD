@@ -98,6 +98,28 @@ describe("recognising the surfaces of a mesh", () => {
     expect(found(r), "surfaces found").toBe("7 plane");
   });
 
+  it("lets a sliver too thin to have a normal lie in the flat around it", () => {
+    // A 10 x 10 flat with one sliver 0.001 high on its edge, lifted 0.0005:
+    // its normal tilts 26 degrees, though every vertex is within the
+    // tolerance of the plane.  On a bed arm, slivers like it refused four
+    // flat annuli their planes, and the near-flat cones that took them
+    // instead rebuilt into 699 triangles.
+    const positions = [];
+    const indices = [];
+    const id = (i, j) => i * 11 + j;
+    for (let i = 0; i <= 10; i++)
+      for (let j = 0; j <= 10; j++) positions.push(j, i, 0);
+    for (let i = 0; i < 10; i++)
+      for (let j = 0; j < 10; j++)
+        indices.push(id(i, j), id(i, j + 1), id(i + 1, j + 1));
+    for (let i = 0; i < 10; i++)
+      for (let j = 0; j < 10; j++)
+        indices.push(id(i, j), id(i + 1, j + 1), id(i + 1, j));
+    positions.push(2.5, -0.001, 0.0005);
+    indices.push(id(0, 2), positions.length / 3 - 1, id(0, 3));
+    const r = ops.recognizeSurfaces({ positions, indices, tolerance: 0.01 });
+    expect(found(r), "surfaces found").toBe("1 plane");
+  });
   it("fits no curved surface through a handful of vertices", () => {
     // Four triangles across a slight bend: six vertices, which a cylinder or
     // a sphere passes through exactly whatever they are.

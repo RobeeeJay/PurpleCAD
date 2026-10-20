@@ -46,6 +46,14 @@ Recognition RecognizePass(std::vector<double> pos, const std::vector<uint32_t>& 
 
   std::vector<V3> normal(T), centroid(T);
   std::vector<double> area(T);
+  // A facet narrower than the tolerance has no normal worth checking against
+  // a plane: its vertices may each sit anywhere within the tolerance, and a
+  // 0.001-high sliver of a flat annulus, tilted 2.4 degrees by float noise
+  // alone, refused the plane its whole region lay within 0.001 of (four on
+  // a bed arm, which a near-flat cone round its own apex then took, and the
+  // rebuild put back to 699 triangles).  A fillet's strips, which the normal
+  // check is there to keep off planes, are many tolerances wide.
+  std::vector<char> narrow(T, 0);
   for (size_t t = 0; t < T; t++) {
     const V3 a = m.vert(m.idx[3 * t]), b = m.vert(m.idx[3 * t + 1]),
              c = m.vert(m.idx[3 * t + 2]);
@@ -57,6 +65,7 @@ Recognition RecognizePass(std::vector<double> pos, const std::vector<uint32_t>& 
     // a region of its own.
     const double longest = std::max({len(sub(b, a)), len(sub(c, b)), len(sub(a, c))});
     if (longest == 0 || 2 * area[t] / longest < 1e-6 * tol) area[t] = 0;
+    narrow[t] = longest == 0 || 2 * area[t] / longest < tol;
     centroid[t] = mul(add(add(a, b), c), 1.0 / 3);
   }
 
@@ -102,7 +111,7 @@ Recognition RecognizePass(std::vector<double> pos, const std::vector<uint32_t>& 
   // is flat on a plane.
   auto facesPlane = [&](const Fit& f, const std::vector<uint32_t>& tris) {
     for (uint32_t t : tris)
-      if (area[t] > 0 && std::abs(dot(normal[t], f.dir)) < cosFlat) return false;
+      if (area[t] > 0 && !narrow[t] && std::abs(dot(normal[t], f.dir)) < cosFlat) return false;
     return true;
   };
   // An "ellipse" whose axes differ by no more than the tolerance is a circle
@@ -194,7 +203,7 @@ Recognition RecognizePass(std::vector<double> pos, const std::vector<uint32_t>& 
   // it while its vertices sit on it.
   auto onSurface = [&](const Fit& f, uint32_t t, double budget) {
     // A plane also wants the facet facing its way (facesPlane).
-    if (f.type == "plane" && area[t] > 0 && std::abs(dot(normal[t], f.dir)) < cosFlat)
+    if (f.type == "plane" && area[t] > 0 && !narrow[t] && std::abs(dot(normal[t], f.dir)) < cosFlat)
       return false;
     for (int k = 0; k < 3; k++)
       if (Distance(f, m.vert(m.idx[3 * t + k])) > tol) return false;

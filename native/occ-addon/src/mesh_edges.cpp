@@ -208,8 +208,12 @@ Curve IntersectionRun(const Handle(Geom_Surface)& s1, const Handle(Geom_Surface)
         cv.u1 = c->ReversedParameter(hi);
         cv.u2 = c->ReversedParameter(lo);
       }
-      GeomAPI_ProjectPointOnCurve pm(mid, cv.c, cv.u1, cv.u2);
-      const double score = pm.NbPoints() ? pm.LowerDistance() : 1e300;
+      // Sampled rather than projected: a span past the curve's first period
+      // ([9.40, 9.51] on a 2-pi ellipse) projects to nothing, and the long
+      // way round won -- a 3.9 mm run on a bed arm became 210 mm of ellipse.
+      double score = 1e300;
+      for (int k = 0; k <= 64; k++)
+        score = std::min(score, cv.c->Value(cv.u1 + (cv.u2 - cv.u1) * k / 64).Distance(mid));
       if (score < bestScore) {
         bestScore = score;
         best = cv;

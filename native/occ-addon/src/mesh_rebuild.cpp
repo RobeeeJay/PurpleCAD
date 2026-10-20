@@ -723,6 +723,10 @@ Val RebuildSurfaces(Js& js) {
       fix.SetMaxTolerance(4 * tol);
       fix.FixMissingSeamMode() = 1;
       fix.FixOrientationMode() = 1;
+      // One region is one face.  Splitting a wire that doubles back past a
+      // sliver neighbour 0.01 wide kept only the sliver's 4-edge loop, and
+      // the bed arm's flat annulus around it was put back to triangles.
+      fix.FixSplitFaceMode() = 0;
       fix.Perform();
       TopoDS_Face done = fix.Face();
       faces.push_back(done);
@@ -843,6 +847,16 @@ Val RebuildSurfaces(Js& js) {
       for (auto& [E, us] : uses) {
         if (us.size() != 2 || us[0].first == us[1].first || us[0].second != us[1].second)
           continue;
+        // Two exact faces: one of them is turned wrong, and the smaller
+        // goes first -- taking both put a bed arm's 202-facet flat back to
+        // triangles beside the 22-facet sliver that was the trouble.  If
+        // they still disagree, the next pass takes the other.
+        const size_t f0 = us[0].first, f1 = us[1].first;
+        if (triOfFace[f0] < 0 && triOfFace[f1] < 0) {
+          const int64_t r0 = regionOfFace[f0], r1 = regionOfFace[f1];
+          bad.insert(rec.regions[r0].tris.size() <= rec.regions[r1].tris.size() ? r0 : r1);
+          continue;
+        }
         for (auto [f, o] : us) {
           if (triOfFace[f] < 0)
             bad.insert(regionOfFace[f]);
