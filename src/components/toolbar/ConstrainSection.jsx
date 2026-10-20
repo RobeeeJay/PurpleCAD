@@ -1,12 +1,14 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import CentreConstraintButton from "./CentreConstraintButton";
+import { nearestAxis } from "../../three/sketchConstraints.js";
 import {
   CoincidentArt,
   MidpointArt,
   DistanceArt,
   HorizontalArt,
   VerticalArt,
+  HorizontalVerticalArt,
   ParallelArt,
   ColinearArt,
   TangentArt,
@@ -158,45 +160,50 @@ const ConstrainSection = ({ isSketchMode }) => {
           >
             <DistanceArt />
           </button>
-          <button
-            className="toolbar-btn"
-            title="Horizontal — force the selected line to be horizontal"
-            disabled={selectedSketchElement?.type !== "line"}
-            onClick={() => {
-              if (selectedSketchElement?.type === "line") {
-                applySketchHVConstraint(
-                  selectedId,
-                  selectedSketchElement.shapeIdx,
-                  "horizontal",
-                );
-                // The line may have moved; re-anchor the selection highlight.
-                useStore
-                  .getState()
-                  ._cameraControls?.refreshSketchSelectionOverlay?.();
-              }
-            }}
-          >
-            <HorizontalArt />
-          </button>
-          <button
-            className="toolbar-btn"
-            title="Vertical — force the selected line to be vertical"
-            disabled={selectedSketchElement?.type !== "line"}
-            onClick={() => {
-              if (selectedSketchElement?.type === "line") {
-                applySketchHVConstraint(
-                  selectedId,
-                  selectedSketchElement.shapeIdx,
-                  "vertical",
-                );
-                useStore
-                  .getState()
-                  ._cameraControls?.refreshSketchSelectionOverlay?.();
-              }
-            }}
-          >
-            <VerticalArt />
-          </button>
+          {(() => {
+            // One button for both: it applies whichever axis the selected
+            // line already lies nearer, and shows which.
+            const line =
+              selectedSketchElement?.type === "line"
+                ? items.find((i) => i.id === selectedId)?.shapes?.[
+                    selectedSketchElement.shapeIdx
+                  ]
+                : null;
+            const axis = line ? nearestAxis(line) : null;
+            return (
+              <button
+                className="toolbar-btn"
+                title={
+                  axis === "vertical"
+                    ? "Vertical — force the selected line to be vertical (it is nearer upright than level)"
+                    : axis === "horizontal"
+                      ? "Horizontal — force the selected line to be horizontal (it is nearer level than upright)"
+                      : "Horizontal / Vertical — force the selected line level or upright, whichever it is nearer"
+                }
+                disabled={!line}
+                onClick={() => {
+                  if (!line) return;
+                  applySketchHVConstraint(
+                    selectedId,
+                    selectedSketchElement.shapeIdx,
+                    axis,
+                  );
+                  // The line may have moved; re-anchor the selection highlight.
+                  useStore
+                    .getState()
+                    ._cameraControls?.refreshSketchSelectionOverlay?.();
+                }}
+              >
+                {axis === "vertical" ? (
+                  <VerticalArt />
+                ) : axis === "horizontal" ? (
+                  <HorizontalArt />
+                ) : (
+                  <HorizontalVerticalArt />
+                )}
+              </button>
+            );
+          })()}
           {(() => {
             const ready = (multiSelectedIndices?.length || 0) === 2;
             const applyPair = (type) => {

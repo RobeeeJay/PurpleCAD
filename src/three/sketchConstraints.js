@@ -93,6 +93,43 @@ export function allConstraintsSatisfied(shapes, constraints, variables = null) {
 }
 
 // All valid endpoint key names across all sketch shape types.
+// The axis a line is nearer: horizontal when it runs more across than up.
+export function nearestAxis(line) {
+  return Math.abs(line.x2 - line.x1) >= Math.abs(line.y2 - line.y1)
+    ? "horizontal"
+    : "vertical";
+}
+
+// Lines that are exactly level or upright when they are added to a sketch get
+// the matching constraint, so they stay that way when what they join moves.
+// Drawing already snaps a near-level line onto its axis; this covers every
+// other way a line arrives -- pasted, placed from an SVG, or drawn between two
+// existing points that happen to line up, which drawing can't move.  Projected
+// lines are left alone: they follow their source body.  `startIdx` is the
+// index of newShapes[0]; returns the constraints to add.
+const AXIS_EXACT = 1e-9; // relative to the line's length
+export function autoHVConstraints(newShapes, startIdx, newConstraints = []) {
+  const has = new Set(
+    newConstraints
+      .filter((c) => c.type === "horizontal" || c.type === "vertical")
+      .map((c) => c.shapeIdx),
+  );
+  const out = [];
+  newShapes.forEach((sh, k) => {
+    const idx = startIdx + k;
+    if (sh?.type !== "line" || sh.projection || has.has(idx)) return;
+    const dx = sh.x2 - sh.x1,
+      dy = sh.y2 - sh.y1;
+    const len = Math.hypot(dx, dy);
+    if (!(len > 0)) return;
+    if (Math.abs(dy) <= AXIS_EXACT * len)
+      out.push({ type: "horizontal", shapeIdx: idx });
+    else if (Math.abs(dx) <= AXIS_EXACT * len)
+      out.push({ type: "vertical", shapeIdx: idx });
+  });
+  return out;
+}
+
 export const SHAPE_KEYS = [
   "start",
   "end",

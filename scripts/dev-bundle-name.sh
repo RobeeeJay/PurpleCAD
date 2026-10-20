@@ -15,17 +15,26 @@ set -euo pipefail
 
 APP="node_modules/electron/dist/Electron.app"
 NAME="PurpleCAD"
+# Its own identifier too.  Every project's dev Electron is com.github.Electron,
+# and the switcher and the Dock find a running app by identifier: with two
+# other projects' Electron.app registered under that id as "Electron", the
+# renamed bundle still showed as Electron.  userData is unaffected -- Electron
+# names that directory from app.setName(), not the bundle id.
+ID="com.robeesworld.purplecad.dev"
 PLIST="$APP/Contents/Info.plist"
 
 [ -f "$PLIST" ] || exit 0 # no dev Electron installed: nothing to name
 
 current=$(/usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST" 2>/dev/null || echo "")
-[ "$current" = "$NAME" ] && exit 0 # already done; re-signing again costs seconds
+currentId=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST" 2>/dev/null || echo "")
+# already done; re-signing again costs seconds
+[ "$current" = "$NAME" ] && [ "$currentId" = "$ID" ] && exit 0
 
 for key in CFBundleName CFBundleDisplayName; do
   /usr/libexec/PlistBuddy -c "Set :$key $NAME" "$PLIST" 2>/dev/null ||
     /usr/libexec/PlistBuddy -c "Add :$key string $NAME" "$PLIST"
 done
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $ID" "$PLIST"
 
 codesign --force --sign - "$APP" 2>/dev/null ||
   echo "[dev-bundle-name] could not re-sign $APP; it may refuse to launch" >&2
