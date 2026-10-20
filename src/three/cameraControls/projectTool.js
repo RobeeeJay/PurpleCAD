@@ -1,8 +1,9 @@
 // Project tool: project 3D feature edges onto the active sketch plane as
 // sketch geometry, each linked to its source by a projection constraint
-// (tracks the source, immovable until released).  A click projects all
-// connected edges of the body under the cursor; a marquee box projects every
-// edge inside it; hover previews what a click would project.  Split out of
+// (tracks the source, immovable until released).  Every body's visible edges
+// are projected straight onto the plane (no perspective); hovering highlights
+// the projected line under the cursor and the lines connected to it, and a
+// click projects those.  A marquee box projects every edge inside it.  Split out of
 // cameraControls.js — attaches its methods onto the shared `controls` object,
 // the same way the other interaction sub-factories do.
 
@@ -11,8 +12,9 @@ import { useStore } from "../../store";
 import { getSketchShapePoints } from "../sceneObjects.js";
 import {
   featureEdgeGraph,
-  edgePolylineNear,
   decomposeFeatureEdges,
+  connectedChainGroups,
+  nearestChain,
   worldPolylineToLocal2D,
   fitProjectedShapes,
   dedupProjectedShapes,
@@ -134,41 +136,123 @@ export function createProjectTool({
     return { minX, maxX, minY, maxY };
   };
 
-  // Click: project every connected edge of the body under the cursor.
+  // Every body's visible feature edges, projected straight onto the sketch
+  // plane, and grouped into connected sets.  Cached until a body or the
+  // sketch moves or changes shape; rebuilt on the first hover after.
+  let projected = null; // { key, chains: [{ sourceId, mw, chain, pts2d }], groups, groupOf }
+  const projectedChains = (ctx) => {
+    const solids = projectSolidMeshes();
+    ctx.sketchMesh.updateMatrixWorld(true);
+    const sig = (m) =>
+      m.matrixWorld.elements.map((e) => Math.round(e * 1e4)).join(",");
+    const key = [
+      sig(ctx.sketchMesh),
+      ...solids.map((m) => {
+        m.updateMatrixWorld(true);
+        return `${m.userData.itemId}:${m.geometry?.uuid}:${sig(m)}`;
+      }),
+    ].join("|");
+    if (projected?.key === key) return projected;
+    const chains = [];
+    for (const solid of solids) {
+      const built = bodyEdgeGraph(solid);
+      if (!built) continue;
+      for (const chain of decomposeFeatureEdges(built.graph)) {
+        const pts2d = worldPolylineToLocal2D(
+          chain,
+          ctx.sketchMesh.position,
+          ctx.sketchMesh.quaternion,
+        );
+        // An edge square to the plane projects to a point: nothing to draw.
+        let len = 0;
+        for (let i = 1; i < pts2d.length; i++)
+          len += Math.hypot(
+            pts2d[i].x - pts2d[i - 1].x,
+            pts2d[i].y - pts2d[i - 1].y,
+          );
+        if (len < 1e-6) continue;
+        chains.push({
+          sourceId: solid.userData.itemId,
+          mw: built.mw,
+          chain,
+          pts2d,
+        });
+      }
+    }
+    const groups = connectedChainGroups(chains.map((c) => c.pts2d));
+    const groupOf = new Map();
+    groups.forEach((g, gi) => g.forEach((i) => groupOf.set(i, gi)));
+    projected = { key, chains, groups, groupOf };
+    return projected;
+  };
+
+  // The connected set of projected lines under the cursor, or null: the
+  // cursor's point on the sketch plane, and the projected line within a few
+  // pixels of it.
+  const PICK_PX = 8;
+  const pickProjected = (ctx, screenX, screenY) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+      new THREE.Vector3(0, 0, 1).applyQuaternion(ctx.sketchMesh.quaternion),
+      ctx.sketchMesh.position,
+    );
+    const onPlane = (sx, sy) => {
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(
+        {
+          x: ((sx - rect.left) / rect.width) * 2 - 1,
+          y: -((sy - rect.top) / rect.height) * 2 + 1,
+        },
+        cameraRef.current,
+      );
+      const hit = new THREE.Vector3();
+      return ray.ray.intersectPlane(plane, hit) ? hit : null;
+    };
+    const p = onPlane(screenX, screenY);
+    const q = onPlane(screenX + PICK_PX, screenY);
+    if (!p || !q) return null;
+    const set = projectedChains(ctx);
+    const [pt] = worldPolylineToLocal2D(
+      [p],
+      ctx.sketchMesh.position,
+      ctx.sketchMesh.quaternion,
+    );
+    const near = nearestChain(
+      set.chains.map((c) => c.pts2d),
+      pt,
+      p.distanceTo(q),
+    );
+    if (!near) return null;
+    const groupIndex = set.groupOf.get(near.index);
+    return {
+      set,
+      groupIndex,
+      chains: set.groups[groupIndex].map((i) => set.chains[i]),
+    };
+  };
+
+  // Click: project the connected lines under the cursor.
   controls.projectEdgeAt = (screenX, screenY) => {
     const store = useStore.getState();
     const ctx = activeSketchForProject();
     if (!ctx) return;
-    const solids = projectSolidMeshes();
-    const prevVisible = solids.map((m) => m.visible);
-    solids.forEach((m) => (m.visible = true));
-    const rect = renderer.domElement.getBoundingClientRect();
-    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
-    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
-    const hit = ray.intersectObjects(solids, false)[0];
-    solids.forEach((m, i) => (m.visible = prevVisible[i]));
-    if (!hit) {
-      store.showNotification?.("Click a 3D edge to project.");
+    const pick = pickProjected(ctx, screenX, screenY);
+    if (!pick) {
+      store.showNotification?.(
+        "Hover over a projected edge, then click it to project.",
+      );
       return;
     }
-    const built = bodyEdgeGraph(hit.object);
-    if (!built) {
-      store.showNotification?.("That body is too dense to project edges from.");
-      return;
+    // Each source body's chains through its own world matrix.
+    const bySource = new Map();
+    for (const c of pick.chains) {
+      if (!bySource.has(c.sourceId))
+        bySource.set(c.sourceId, { mw: c.mw, chains: [] });
+      bySource.get(c.sourceId).chains.push(c.chain);
     }
-    // The clicked edge's connected component → its smooth chains.  (A body's
-    // feature edges are one component, so this is "all connected lines".)
-    let chains = decomposeFeatureEdges(built.graph);
-    const nearest = edgePolylineNear(built.graph, hit.point);
-    if (!chains.length && nearest) chains = [nearest];
     const shapes = dedupProjectedShapes(
-      chainsToShapes(
-        hit.object.userData.itemId,
-        built.mw,
-        ctx.sketchMesh,
-        chains,
+      [...bySource].flatMap(([sourceId, { mw, chains }]) =>
+        chainsToShapes(sourceId, mw, ctx.sketchMesh, chains),
       ),
     );
     if (shapes.length === 0) {
@@ -176,9 +260,7 @@ export function createProjectTool({
       return;
     }
     if (shapes.length > MAX_PROJECTED) {
-      store.showNotification?.(
-        "That body has too many edges to project at once.",
-      );
+      store.showNotification?.("Those edges are too many to project at once.");
       return;
     }
     store.addProjectShapes(shapes);
@@ -284,11 +366,9 @@ export function createProjectTool({
     projectionPreviewGroup = group;
   };
 
-  // Hover feedback: highlight the connected feature edges of the body under the
-  // cursor (what a click would project).  The body's edge graph is cached so
-  // sweeping across the same body doesn't rebuild it each frame.
+  // Hover feedback: the connected projected lines under the cursor, drawn on
+  // the sketch plane in gold, until the cursor leaves them or they're clicked.
   let projectHoverGroup = null;
-  let projectHoverCache = null; // { bodyId, sig, chains }
   controls.clearProjectHover = () => {
     if (!projectHoverGroup) return;
     scene.remove(projectHoverGroup);
@@ -300,73 +380,37 @@ export function createProjectTool({
   };
   controls.projectHoverAt = (screenX, screenY) => {
     const ctx = activeSketchForProject();
-    if (!ctx) {
+    const pick = ctx ? pickProjected(ctx, screenX, screenY) : null;
+    if (!pick) {
       controls.clearProjectHover();
       return;
     }
-    const solids = projectSolidMeshes();
-    const prevVisible = solids.map((m) => m.visible);
-    solids.forEach((m) => (m.visible = true));
-    const rect = renderer.domElement.getBoundingClientRect();
-    const nx = ((screenX - rect.left) / rect.width) * 2 - 1;
-    const ny = -((screenY - rect.top) / rect.height) * 2 + 1;
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera({ x: nx, y: ny }, cameraRef.current);
-    const hit = ray.intersectObjects(solids, false)[0];
-    solids.forEach((m, i) => (m.visible = prevVisible[i]));
-    if (!hit) {
-      controls.clearProjectHover();
-      return;
-    }
-    const solid = hit.object;
-    const bodyId = solid.userData.itemId;
-    solid.updateMatrixWorld(true);
-    ctx.sketchMesh.updateMatrixWorld(true);
-    const sig = `${solid.matrixWorld.elements.map((e) => Math.round(e * 1e3)).join(",")}|${ctx.sketchMesh.matrixWorld.elements.map((e) => Math.round(e * 1e3)).join(",")}`;
-    const bodyKey = `${bodyId}|${sig}`;
-    // The outline is fixed for a given body+sketch, so only recompute when the
-    // hovered body changes — not on every mouse-move.
-    if (projectHoverGroup && projectHoverGroup.userData.bodyKey === bodyKey)
-      return;
-    if (!projectHoverCache || projectHoverCache.bodyKey !== bodyKey) {
-      const built = bodyEdgeGraph(solid);
-      let shapes = [];
-      if (built) {
-        for (const chain of decomposeFeatureEdges(built.graph)) {
-          const pts2d = worldPolylineToLocal2D(
-            chain,
-            ctx.sketchMesh.position,
-            ctx.sketchMesh.quaternion,
-          );
-          shapes.push(...fitProjectedShapes(pts2d));
-        }
-        shapes = dedupProjectedShapes(shapes);
-      }
-      projectHoverCache = { bodyKey, shapes };
-    }
+    const hoverKey = `${pick.set.key}#${pick.groupIndex}`;
+    if (projectHoverGroup?.userData.hoverKey === hoverKey) return;
     controls.clearProjectHover();
-    if (projectHoverCache.shapes.length === 0) return;
-    // Draw the would-be projection ON the sketch plane (where the user is
-    // looking), in gold to distinguish it from the teal staged preview.
     const group = new THREE.Group();
-    group.userData.bodyKey = bodyKey;
-    for (const shape of projectHoverCache.shapes) {
-      const pts = getSketchShapePoints(shape, ctx.sketchMesh);
-      if (!pts || pts.length < 2) continue;
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({
-          color: 0xffcc44,
-          depthTest: false,
-          transparent: true,
-          opacity: 0.95,
-        }),
-      );
-      line.renderOrder = 1013;
-      line.frustumCulled = false;
-      group.add(line);
-    }
+    group.userData.hoverKey = hoverKey;
+    for (const c of pick.chains)
+      for (const shape of fitProjectedShapes(c.pts2d)) {
+        const pts = getSketchShapePoints(shape, ctx.sketchMesh);
+        if (!pts || pts.length < 2) continue;
+        const line = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({
+            color: 0xffcc44,
+            depthTest: false,
+            transparent: true,
+            opacity: 0.95,
+          }),
+        );
+        line.renderOrder = 1013;
+        line.frustumCulled = false;
+        group.add(line);
+      }
     scene.add(group);
     projectHoverGroup = group;
   };
+  // How many projected lines are highlighted (0 when none), for the tests.
+  controls.projectHoverCount = () =>
+    projectHoverGroup ? projectHoverGroup.children.length : 0;
 }

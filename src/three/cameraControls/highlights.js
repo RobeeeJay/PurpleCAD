@@ -11,6 +11,13 @@ import { fullCircleSegments, DISPLAY_PRECISION_MM } from "../sceneObjects.js";
 import { primitiveDimensions } from "../sceneObjects/dimensions.js";
 import { activePrecision } from "../resolution.js";
 import { computeSegmentChain } from "../segmentChain.js";
+import {
+  meshTopology,
+  growFace,
+  featureEdges,
+  nearestSegment,
+  nearestVertex,
+} from "../meshPickCache.js";
 import { selectionChainAngle } from "../../store/selectionMode.js";
 import { CHAMFER_EDGE_HOVER, CHAMFER_PREVIEW_COLOR } from "../theme.js";
 
@@ -217,21 +224,14 @@ export function createHighlightHelpers({
       // outer + hole tops) even when they're physically disconnected
       // faces.  Connectivity restricts the highlight to the actual face
       // the cursor is on.
-      // Precompute per-triangle normals.
-      const triNormals = new Array(triCount);
-      for (let i = 0; i < triCount; i++) {
-        const [a, b, c] = triIdx(i);
-        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
-        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
-        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
-        const n = new THREE.Vector3()
-          .crossVectors(
-            new THREE.Vector3().subVectors(vB, vA),
-            new THREE.Vector3().subVectors(vC, vA),
-          )
-          .normalize();
-        triNormals[i] = n;
-      }
+      // Normals and adjacency are cached per geometry (meshPickCache.js): built
+      // here on every move they took seconds on a 1M-triangle import.
+      const topo = meshTopology(workGeo);
+      const n = topo.normals;
+      const dotHit = (t) =>
+        n[3 * t] * hitNormal.x +
+        n[3 * t + 1] * hitNormal.y +
+        n[3 * t + 2] * hitNormal.z;
 
       // Seed the BFS from the raycast's reported triangle when it
       // matches the hit normal.  Otherwise (synthetic test hits with no
@@ -240,13 +240,13 @@ export function createHighlightHelpers({
       let seedTri = -1;
       if (
         typeof hit.faceIndex === "number" &&
-        triNormals[hit.faceIndex] &&
-        triNormals[hit.faceIndex].dot(hitNormal) > 0.999
+        hit.faceIndex < topo.triCount &&
+        dotHit(hit.faceIndex) > 0.999
       ) {
         seedTri = hit.faceIndex;
       } else {
-        for (let i = 0; i < triCount; i++) {
-          if (triNormals[i].dot(hitNormal) > 0.999) {
+        for (let i = 0; i < topo.triCount; i++) {
+          if (dotHit(i) > 0.999) {
             seedTri = i;
             break;
           }
@@ -257,65 +257,32 @@ export function createHighlightHelpers({
         return;
       }
 
-      // Build edge → adjacent-triangle map.  Vertex-pair key uses the
-      // POSITION (rounded), not the index, so coplanar triangles that
-      // share an edge via duplicated/welded verts still connect — e.g.
-      // ExtrudeGeometry sometimes splits seam vertices across faces.
-      const round = (v) => Math.round(v * 1000) / 1000;
-      const vertKey = (idx) =>
-        `${round(posAttr.getX(idx))},${round(posAttr.getY(idx))},${round(posAttr.getZ(idx))}`;
-      const edgeKey = (i1, i2) => {
-        const k1 = vertKey(i1),
-          k2 = vertKey(i2);
-        return k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
-      };
-      const edgeToTris = new Map();
-      const triEdges = new Array(triCount);
-      for (let i = 0; i < triCount; i++) {
-        const [a, b, c] = triIdx(i);
-        const e1 = edgeKey(a, b),
-          e2 = edgeKey(b, c),
-          e3 = edgeKey(c, a);
-        triEdges[i] = [e1, e2, e3];
-        for (const k of [e1, e2, e3]) {
-          let list = edgeToTris.get(k);
-          if (!list) {
-            list = [];
-            edgeToTris.set(k, list);
-          }
-          list.push(i);
-        }
-      }
-
-      // BFS from seed across shared edges.  Curve detection applies to faces
-      // just like edges: follow a neighbour when the LOCAL dihedral (this
-      // triangle vs the neighbour) is within the curve-detection angle, so a
-      // tessellated cylinder / fillet / wave selects as one face while a sharp
-      // edge (a larger bend than the setting) stops it.
-      const seedN = triNormals[seedTri];
+      // Grow across shared edges.  Curve detection applies to faces just like
+      // edges: follow a neighbour when the LOCAL dihedral (this triangle vs
+      // the neighbour) is within the curve-detection angle, so a tessellated
+      // cylinder / fillet / wave selects as one face while a sharp edge (a
+      // larger bend than the setting) stops it.
       const maxAngle = selectionChainAngle(useStore.getState?.());
       const cosThr = Math.cos((Math.max(0, maxAngle) * Math.PI) / 180);
-      const visited = new Set([seedTri]);
-      const queue = [seedTri];
-      while (queue.length > 0) {
-        const t = queue.shift();
+      for (const t of growFace(topo, seedTri, cosThr)) {
         const [a, b, c] = triIdx(t);
-        vA.set(posAttr.getX(a), posAttr.getY(a), posAttr.getZ(a));
-        vB.set(posAttr.getX(b), posAttr.getY(b), posAttr.getZ(b));
-        vC.set(posAttr.getX(c), posAttr.getY(c), posAttr.getZ(c));
-        matchVerts.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
-        for (const ek of triEdges[t]) {
-          const adj = edgeToTris.get(ek);
-          if (!adj) continue;
-          for (const nt of adj) {
-            if (visited.has(nt)) continue;
-            if (triNormals[nt].dot(triNormals[t]) > cosThr) {
-              visited.add(nt);
-              queue.push(nt);
-            }
-          }
-        }
+        matchVerts.push(
+          posAttr.getX(a),
+          posAttr.getY(a),
+          posAttr.getZ(a),
+          posAttr.getX(b),
+          posAttr.getY(b),
+          posAttr.getZ(b),
+          posAttr.getX(c),
+          posAttr.getY(c),
+          posAttr.getZ(c),
+        );
       }
+      const seedN = new THREE.Vector3(
+        n[3 * seedTri],
+        n[3 * seedTri + 1],
+        n[3 * seedTri + 2],
+      );
       // `centroidSample` stays as the hit point in mesh-local (set
       // above from hit.point).  We deliberately do NOT use the BFS
       // average of visited vertices: for non-convex faces (L-shapes
@@ -375,18 +342,6 @@ export function createHighlightHelpers({
     }
   };
 
-  const distToSeg = (p, a, b) => {
-    const ab = new THREE.Vector3().subVectors(b, a);
-    const ap = new THREE.Vector3().subVectors(p, a);
-    const t = Math.max(
-      0,
-      Math.min(1, ap.dot(ab) / Math.max(ab.lengthSq(), 1e-10)),
-    );
-    return p.distanceTo(
-      new THREE.Vector3().addVectors(a, ab.multiplyScalar(t)),
-    );
-  };
-
   const applyEdgeHighlight = (hit) => {
     clearEdgeHighlight();
     const hitMesh = hit.object;
@@ -402,48 +357,39 @@ export function createHighlightHelpers({
     const srcGeo = primitiveType
       ? primitiveGeoForHighlight(itemData)
       : hitMesh.geometry;
-    const edgesGeo = new THREE.EdgesGeometry(srcGeo);
+    // Feature edges and their endpoint lookup are cached per geometry
+    // (meshPickCache.js), where this used to rebuild EdgesGeometry -- 2.3 s on
+    // a 1M-triangle import -- on every mouse move.
+    const { segs, near } = featureEdges(srcGeo);
     if (primitiveType) srcGeo.dispose();
-    const posAttr = edgesGeo.getAttribute("position");
-    const segs = [];
-    for (let i = 0; i < posAttr.count; i += 2) {
-      segs.push({
-        ax: posAttr.getX(i),
-        ay: posAttr.getY(i),
-        az: posAttr.getZ(i),
-        bx: posAttr.getX(i + 1),
-        by: posAttr.getY(i + 1),
-        bz: posAttr.getZ(i + 1),
-      });
-    }
-    edgesGeo.dispose();
+    const seg = (i) => ({
+      ax: segs[6 * i],
+      ay: segs[6 * i + 1],
+      az: segs[6 * i + 2],
+      bx: segs[6 * i + 3],
+      by: segs[6 * i + 4],
+      bz: segs[6 * i + 5],
+    });
 
     // Nearest feature-edge segment to the cursor.
-    let minDist = Infinity;
-    let bestIdx = -1;
+    const bestIdx = nearestSegment(
+      segs,
+      localHit.x,
+      localHit.y,
+      localHit.z,
+    ).index;
+    if (bestIdx < 0) return null;
     const va = new THREE.Vector3();
     const vb = new THREE.Vector3();
-    for (let i = 0; i < segs.length; i++) {
-      const s = segs[i];
-      va.set(s.ax, s.ay, s.az);
-      vb.set(s.bx, s.by, s.bz);
-      const d = distToSeg(localHit, va, vb);
-      if (d < minDist) {
-        minDist = d;
-        bestIdx = i;
-      }
-    }
-    if (bestIdx < 0) return null;
 
     // Curve detection: highlight (and select) the whole smooth chain of
     // connected edges, so a tessellated curve reads/selects as one edge.  With
     // the chain toggle off this collapses to just the clicked segment.
     const maxAngle = selectionChainAngle(useStore.getState?.());
-    const chainIdx = computeSegmentChain(segs, bestIdx, maxAngle);
+    const chainIdx = computeSegmentChain(segs, bestIdx, maxAngle, near);
     const positions = [];
     chainIdx.forEach((i) => {
-      const s = segs[i];
-      positions.push(s.ax, s.ay, s.az, s.bx, s.by, s.bz);
+      for (let k = 0; k < 6; k++) positions.push(segs[6 * i + k]);
     });
 
     const hlGeo = new THREE.BufferGeometry();
@@ -468,7 +414,7 @@ export function createHighlightHelpers({
     // Record for click-to-select.  Keep the nearest segment as the primary
     // (ax..bz, for any single-edge consumer) and carry the full chain in
     // `edges` so committing the selection chamfers/fillets the whole curve.
-    const best = segs[bestIdx];
+    const best = seg(bestIdx);
     pendingEdgeSelection = {
       itemId: hitMesh.userData.itemId,
       ax: best.ax,
@@ -478,7 +424,7 @@ export function createHighlightHelpers({
       by: best.by,
       bz: best.bz,
       edges: chainIdx.map((i) => {
-        const s = segs[i];
+        const s = seg(i);
         return {
           ax: s.ax,
           ay: s.ay,
@@ -517,24 +463,15 @@ export function createHighlightHelpers({
       ? primitiveGeoForHighlight(itemData)
       : hitMesh.geometry;
     const posAttr = srcGeo.getAttribute("position");
-    let minDist = Infinity,
-      bestV = null;
-    const seen = new Set();
-    for (let i = 0; i < posAttr.count; i++) {
-      const v = new THREE.Vector3(
-        posAttr.getX(i),
-        posAttr.getY(i),
-        posAttr.getZ(i),
-      );
-      const key = `${v.x.toFixed(5)},${v.y.toFixed(5)},${v.z.toFixed(5)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const d = v.distanceTo(localHit);
-      if (d < minDist) {
-        minDist = d;
-        bestV = v.clone();
-      }
-    }
+    const vi = nearestVertex(posAttr, localHit.x, localHit.y, localHit.z);
+    const bestV =
+      vi < 0
+        ? null
+        : new THREE.Vector3(
+            posAttr.getX(vi),
+            posAttr.getY(vi),
+            posAttr.getZ(vi),
+          );
     if (primitiveType) srcGeo.dispose();
     if (!bestV) return null;
     const worldV = bestV.clone().applyMatrix4(hitMesh.matrixWorld);

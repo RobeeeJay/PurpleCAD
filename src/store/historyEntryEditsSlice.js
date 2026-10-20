@@ -155,6 +155,9 @@ export const createHistoryEntryEditsSlice = (set) => ({
   // step.
   updateSimplifyParams: (entryId, params) =>
     set((state) => withEditedParams(state, entryId, "simplify", params)),
+  // Edit a committed conversion's tolerance from its timeline step.
+  updateConvertParams: (entryId, params) =>
+    set((state) => withEditedParams(state, entryId, "meshToSurfaces", params)),
   // Update a committed hole step in place with re-edited params (geometry
   // already rebuilt by commitHole).  `patch` = { hole, position, centerOffset,
   // geometryData, regeneratedAt }.

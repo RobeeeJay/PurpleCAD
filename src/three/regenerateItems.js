@@ -19,6 +19,7 @@
 // posts to the OCC Web Worker in the browser and runs in-process in node.
 
 import { resolveChainedPosition } from "./regenerators/shared.js";
+import { tessellateItem } from "./occClient.js";
 import {
   regenerateChamfer,
   regeneratePushPull,
@@ -26,6 +27,7 @@ import {
   regenerateDraft,
   regenerateHole,
   regenerateSimplify,
+  regenerateConvert,
 } from "./regenerators/modify.js";
 import {
   regenerateEmboss,
@@ -62,6 +64,28 @@ export { resolveChainedPosition, reviveDevelopable, shiftEmbossFrame };
 // input is recomputed-and-recached before its consumer runs here — stays
 // consistent with the remap.  Absent solidCtx (live preview / resolution
 // sweep), ops release their result as before and nothing is cached.
+// An imported STEP body: its exact shape, stored in the item's own frame, drawn
+// again at this Resolution.  Nothing re-centres it -- the frame is the one the
+// shape was stored in, so a finer mesh lands exactly where the coarse one was.
+async function regenerateImportedShape(item, printPrecision) {
+  const res = await tessellateItem({
+    source: item,
+    allItems: [],
+    printPrecision,
+  });
+  const g = res?.geometryData;
+  if (!g?.positions?.length) return null;
+  return {
+    position: item.position,
+    geometryData: {
+      positions: Array.from(g.positions),
+      normals: null,
+      indices: Array.from(g.indices),
+      edges: g.edges ? Array.from(g.edges) : null,
+    },
+  };
+}
+
 export async function regenerateItemsForResolution(
   items,
   printPrecision,
@@ -128,6 +152,8 @@ export async function regenerateItemsForResolution(
           return regenerateHole(r, out, printPrecision, item.position, opts);
         case "simplify":
           return regenerateSimplify(r, out, printPrecision, item.position);
+        case "meshToSurfaces":
+          return regenerateConvert(r, out, printPrecision, item.position);
         case "emboss":
           return regenerateEmboss(r, out, printPrecision, item.position, opts);
         case "texture":
@@ -148,6 +174,8 @@ export async function regenerateItemsForResolution(
           return regenerateExtrudeUnion(r, out, printPrecision);
         case "extrudeCut":
           return regenerateExtrudeUnion(r, out, printPrecision, true);
+        case "importedShape":
+          return regenerateImportedShape(item, printPrecision);
         default:
           return null;
       }
@@ -173,6 +201,7 @@ export async function regenerateItemsForResolution(
         r.kind === "pushpull" ||
         r.kind === "shell" ||
         r.kind === "simplify" ||
+        r.kind === "meshToSurfaces" ||
         r.kind === "hole" ||
         r.kind === "emboss" ||
         r.kind === "draft" ||
@@ -233,6 +262,11 @@ export async function regenerateItemsForResolution(
     // with the live sketch geometry.
     if (r.kind === "emboss" && result.stamp) nextRegen.stamp = result.stamp;
     if (r.kind === "simplify") nextRegen.stats = result.stats;
+    // A conversion's shape is its BREP: later ops build from it.
+    if (r.kind === "meshToSurfaces") {
+      nextRegen.stats = result.stats;
+      nextRegen.brep = result.brep;
+    }
     out.push({
       ...item,
       position: result.position,

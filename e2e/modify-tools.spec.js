@@ -501,6 +501,138 @@ test.describe.serial("modify tools through their dialogs", () => {
       .toBeGreaterThan(60);
   });
 
+  test("convert to surfaces rebuilds a mesh body as exact faces, and its Edit re-runs it", async () => {
+    // A sixteen-sided cylinder standing in for an imported STL, selected, in a
+    // new document.
+    await page.evaluate(() => {
+      window.__store.getState().newDocument();
+      const SIDES = 16;
+      const positions = [0, -1, 0, 0, 1, 0];
+      for (let i = 0; i < SIDES; i++) {
+        const a = (i / SIDES) * 2 * Math.PI;
+        positions.push(
+          Math.cos(a),
+          -1,
+          Math.sin(a),
+          Math.cos(a),
+          1,
+          Math.sin(a),
+        );
+      }
+      const lo = (i) => 2 + 2 * (i % SIDES),
+        hi = (i) => 3 + 2 * (i % SIDES);
+      const indices = [];
+      for (let i = 0; i < SIDES; i++) {
+        indices.push(0, lo(i), lo(i + 1), 1, hi(i + 1), hi(i));
+        indices.push(lo(i), hi(i), hi(i + 1), lo(i), hi(i + 1), lo(i + 1));
+      }
+      window.__store.getState().addItem({
+        id: 70,
+        name: "Rod (STL)",
+        type: "csg",
+        children: [],
+        position: { x: 0, y: 1, z: -6 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        geometryData: { positions, indices, normals: null, flat: true },
+      });
+      window.__store.setState({ selectedId: 70, selectedIds: [70] });
+    });
+    const recipe = () =>
+      page.evaluate(() => {
+        const r = window.__store
+          .getState()
+          .items.find((i) => i.id === 70)?.regenerator;
+        return r
+          ? {
+              kind: r.kind,
+              tol: r.toleranceMm,
+              faceTypes: r.stats?.faceTypes ?? null,
+              brep: !!r.brep,
+            }
+          : null;
+      });
+
+    await page
+      .getByTitle("Convert to Surfaces — rebuild", { exact: false })
+      .click();
+    await page.locator("#convert-tolerance").fill("0.01");
+    // The preview recognises the surfaces through IPC and says what it found.
+    await expect(page.locator(".sketch-placement-hint")).toContainText(
+      "3 faces: 2 planes, 1 cylinder",
+      { timeout: 30000 },
+    );
+    await page.getByTitle("Rebuild the body as exact faces").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => window.__store.getState().history.at(-1).label),
+        { timeout: 30000 },
+      )
+      .toBe("Converted to surfaces");
+    const first = await recipe();
+    expect(first.kind).toBe("meshToSurfaces");
+    expect(first.brep, "the exact shape kept as the recipe").toBe(true);
+    expect(first.faceTypes).toMatchObject({
+      plane: 2,
+      cylinder: 1,
+      triangle: 0,
+    });
+
+    // Edit re-opens the same dialog on the step, and saving re-runs it in
+    // place.
+    const steps = await page.evaluate(
+      () => window.__store.getState().history.length,
+    );
+    await page.getByTitle("Edit convert to surfaces — tolerance").click();
+    await page.locator("#convert-tolerance").fill("0.02");
+    await page.getByTitle("Rebuild the body as exact faces").click();
+    await expect
+      .poll(async () => (await recipe())?.tol, { timeout: 60000 })
+      .toBe(0.02);
+    await expect
+      .poll(async () => (await recipe())?.faceTypes?.cylinder, {
+        timeout: 60000,
+      })
+      .toBe(1);
+    expect(
+      await page.evaluate(() => window.__store.getState().history.length),
+    ).toBe(steps);
+
+    // The converted body booleans from its BREP through the app's OCC bridge.
+    await page.evaluate(() => {
+      window.__store.getState().addItem({
+        id: 71,
+        name: "Cube 71",
+        type: "cube",
+        children: [],
+        position: { x: 1, y: 1, z: -6 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      window.__store.getState().startBooleanTool("union");
+      window.__store.setState({ selectedIds: [70, 71] });
+    });
+    await page.getByTitle("Apply Union").click();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const r = window.__store
+              .getState()
+              .items.find(
+                (i) =>
+                  i.regenerator?.kind === "boolean" &&
+                  i.regenerator.inputIds?.includes(70),
+              );
+            return r?.geometryData ? r.geometryData.indices.length / 3 : 0;
+          }),
+        { timeout: 30000 },
+      )
+      // Far more than a cube's 12: the rod's exact wall is in it.
+      .toBeGreaterThan(60);
+  });
+
   test("a too-detailed refusal offers to simplify the mesh to fit", async () => {
     // The refusal names the mesh by its triangle count; the offer opens
     // Simplify on that body, set a tenth under the boolean limit.

@@ -27,6 +27,7 @@ const VIEW_3D = [
   { keys: ["X"], label: "Select faces" },
   { keys: ["C"], label: "Select edges" },
   { keys: ["V"], label: "Select points" },
+  { keys: ["B"], label: "Chain selection (with faces or edges on)" },
   { keys: [SHIFT, "Z"], label: "Toggle constraints (hold Shift for widget)" },
   { keys: [SHIFT, "X"], label: "Toggle dimensions" },
 ];

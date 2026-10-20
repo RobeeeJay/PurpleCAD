@@ -587,6 +587,18 @@ function buildItemShapeLocal(item, allItems, precision) {
   }
 
   // Imported solid (mesh only, no recipe) — sew a solid for booleans/chamfers.
+  // An imported STEP body: its exact shape, already in its local frame.
+  if (item.type === "csg" && item.regenerator?.kind === "importedShape")
+    return occ.shapeFromBrep(item.regenerator.brep);
+  // A mesh converted to surfaces -- mirrors occOps.js: its exact shape, unless
+  // its last rebuild was refused, when it is still its mesh (sewn, below).
+  if (
+    item.type === "csg" &&
+    item.regenerator?.kind === "meshToSurfaces" &&
+    item.regenerator.brep &&
+    !item.regenerator.regenFailed
+  )
+    return occ.shapeFromBrep(item.regenerator.brep);
   if (item.type === "csg" && !item.regenerator && item.geometryData) {
     const g = item.geometryData;
     if (!g.positions || g.positions.length < 9) return null;
@@ -612,7 +624,7 @@ function buildItemShapeLocal(item, allItems, precision) {
     // A simplified mesh IS its baked mesh -- the op's whole output -- (mirrors
     // occOps.js) so a later op sews that, as does a Split piece that can't be
     // re-cut.
-    if (regen.kind === "simplify" || regen.kind === "split") {
+    if (regen.kind === "simplify" || regen.kind === "split" || regen.kind === "meshToSurfaces") {
       const g = item.geometryData;
       if (!g?.positions || g.positions.length < 9) return null;
       return occ.makeSolidFromMesh(
@@ -1607,9 +1619,10 @@ function exportSTEP({ items, allItems, precision }) {
 function importStep({ stepText, printPrecision }) {
   const id = occ.importSTEP(stepText);
   if (!id) throw new Error("STEP import produced no shape.");
-  let tess;
+  let tess, brep;
   try {
     tess = occ.tessellate(id, printPrecision ?? 0.5);
+    if (tess) brep = importedShapeBrep(id, tess.positions);
   } finally {
     occ.releaseShape(id);
   }
@@ -1617,7 +1630,22 @@ function importStep({ stepText, printPrecision }) {
   return {
     positions: Array.from(tess.positions),
     indices: Array.from(tess.indices), edges: tess.edges ? Array.from(tess.edges) : null,
+    brep,
   };
+}
+
+// The imported shape in its item's frame, as BREP text (mirrors occOps.js).
+function importedShapeBrep(id, positions) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    const q = [positions[i] / MM_PER_UNIT, positions[i + 2] / MM_PER_UNIT, -positions[i + 1] / MM_PER_UNIT];
+    for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
+  }
+  const c = lo.map((v, k) => (v + hi[k]) / 2);
+  const scaled = occ.scaleShape(id, 1 / MM_PER_UNIT);
+  const placed = occ.transformShape(scaled, -c[0], -c[1], -c[2], -Math.PI / 2, 0, 0);
+  occ.releaseShape(scaled);
+  try { return occ.shapeToBrep(placed); } finally { occ.releaseShape(placed); }
 }
 
 // Revolve a sketch profile around an axis line (mirrors occOps.js#revolveItem).
@@ -2094,6 +2122,78 @@ function simplifyMesh({ positions, indices, mode, value }) {
   };
 }
 
+// Rebuild a mesh as exact faces -- mirrors occOps.js#rebuildSurfaces.
+function rebuildSurfaces({ positions, indices, tolerance, printPrecision }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.rebuildSurfaces(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    tolerance,
+  );
+  try {
+    const tess = occ.tessellate(r.shapeId, printPrecision ?? 0.5);
+    return {
+      brep: occ.shapeToBrep(r.shapeId),
+      geometryData: {
+        positions: Array.from(tess.positions),
+        indices: Array.from(tess.indices),
+        edges: tess.edges ? Array.from(tess.edges) : null,
+      },
+      faces: r.faces,
+      faceTypes: { ...r.faceTypes },
+      volume: r.volume,
+      meshVolume: r.meshVolume,
+      maxEdgeTolerance: r.maxEdgeTolerance,
+      sewn: r.sewn === 1,
+    };
+  } finally {
+    occ.releaseShape(r.shapeId);
+  }
+}
+
+// Find the surfaces a mesh is made of -- mirrors occOps.js#recognizeSurfaces.
+function recognizeSurfaces({ positions, indices, tolerance }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.recognizeSurfaces(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    tolerance,
+  );
+  return {
+    regions: Array.from(r.regions, (g) => ({
+      type: g.type,
+      triangles: g.triangles,
+      area: g.area,
+      deviation: g.deviation,
+      ...(g.type === "mesh"
+        ? {}
+        : {
+            point: Array.from(g.point),
+            dir: Array.from(g.dir),
+            radius: g.radius,
+            halfAngle: g.halfAngle,
+            minorRadius: g.minorRadius,
+            ...(g.xdir ? { xdir: Array.from(g.xdir) } : {}),
+            ...(g.freeform
+              ? {
+                  freeform: {
+                    ex: Array.from(g.freeform.ex),
+                    ey: Array.from(g.freeform.ey),
+                    bounds: Array.from(g.freeform.bounds),
+                    nx: g.freeform.nx,
+                    ny: g.freeform.ny,
+                    heights: Array.from(g.freeform.heights),
+                  },
+                }
+              : {}),
+          }),
+    })),
+    triangleRegion: Array.from(r.triangleRegion),
+    counts: { ...r.counts },
+    triangleCounts: { ...r.triangleCounts },
+  };
+}
+
 // Release a cached OCC solid (JIT-timeline cache); no-op if already gone.
 function releaseShape({ id }) {
   if (id != null) {
@@ -2110,6 +2210,6 @@ function setCancelBuffer(view) {
 }
 
 module.exports = {
-  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, setCancelBuffer };
+  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, recognizeSurfaces, rebuildSurfaces, setCancelBuffer };
 // Internals the unit tests check against occOps.js's copies.
 module.exports.__test = { embossVolumeHolds };

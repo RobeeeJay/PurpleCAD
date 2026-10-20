@@ -162,6 +162,8 @@ void TessellateInto(const TopoDS_Shape& shape, double linearDeflection,
                             std::vector<float>& positions,
                             std::vector<uint32_t>& indices,
                             std::vector<uint32_t>* edges) {
+  // An empty shape has nothing to mesh (and the edge pass below faults on it).
+  if (shape.IsNull()) return;
   // Mesh via the parameters+range overload so a long tessellation polls the
   // cancel flag (UserBreak) and can be aborted — a high-precision emboss/boolean
   // result is one of the slowest stages.

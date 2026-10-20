@@ -16,6 +16,7 @@ import {
   holeItem,
   draftItem,
   simplifyMesh,
+  rebuildSurfaces,
 } from "../occClient.js";
 import { MM_PER_UNIT } from "../sceneObjects.js";
 import { resolveChainedPosition } from "./shared.js";
@@ -482,6 +483,68 @@ export async function regenerateSimplify(
     position,
     basePosition,
     geometryData: result.geometryData,
+    stats: result.stats,
+  };
+}
+
+// Rebuild a mesh body's baked mesh as exact faces: each region recognised as
+// a plane, cylinder, cone, sphere, torus or oval wall becomes one face on it,
+// the rest stay triangles (occOps.js#rebuildSurfaces).  In the body's own
+// frame, like Simplify.  Throws with the reason when the rebuilt solid is
+// refused; the body then stays a mesh.
+export async function convertSource(source, params, printPrecision) {
+  const g = source?.geometryData;
+  if (!g?.positions?.length) return null;
+  const r = await rebuildSurfaces({
+    positions: g.positions,
+    indices: g.indices,
+    tolerance: params.toleranceMm / MM_PER_UNIT,
+    printPrecision,
+  });
+  if (!r) return null;
+  return {
+    geometryData: { ...r.geometryData, normals: null },
+    brep: r.brep,
+    stats: {
+      faces: r.faces,
+      faceTypes: r.faceTypes,
+      volumeMm3: r.volume * MM_PER_UNIT ** 3,
+      meshVolumeMm3: r.meshVolume * MM_PER_UNIT ** 3,
+      maxEdgeToleranceMm: r.maxEdgeTolerance * MM_PER_UNIT,
+    },
+  };
+}
+
+// Rebuild a conversion from its source mesh at the current Resolution, as
+// Simplify does.
+export async function regenerateConvert(
+  regenerator,
+  accumulatedItems,
+  printPrecision,
+  currentPosition,
+) {
+  const source = regenerator.source;
+  let result;
+  try {
+    result = await convertSource(source, regenerator, printPrecision);
+  } catch (err) {
+    console.warn(
+      `Convert to surfaces regen failed (${err.message}); keeping previous geometry.`,
+    );
+    return null;
+  }
+  if (!result) return null;
+  const { position, base: basePosition } = resolveChainedPosition(
+    source,
+    { cx: 0, cy: 0, cz: 0 },
+    currentPosition,
+    regenerator.basePosition,
+  );
+  return {
+    position,
+    basePosition,
+    geometryData: result.geometryData,
+    brep: result.brep,
     stats: result.stats,
   };
 }

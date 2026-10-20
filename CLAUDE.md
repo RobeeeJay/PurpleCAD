@@ -307,7 +307,10 @@ bullet list after shipping, not before.
   options for splitting cohesive functionality into sibling modules (and
   re-export from the original if it's an import hub). Test files are exempt
   from the hard ceiling but still benefit from topic-based splitting when
-  large.
+  large. **`src/three/occOps.js` and `electron/occ-bridge.cjs` are exempt
+  too (owner's decision):** they are the two parallel OCC op tables, kept in
+  lockstep op for op, and splitting either would make that lockstep harder
+  to see and to keep.
 - **Splitting by NAME, not by line range.** Related declarations are rarely
   contiguous -- selection-filter toggles sit in the middle of uiSlice's tool
   phases, and a chamfer helper sits inside sketchInteraction's drag block.
@@ -605,6 +608,18 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   (the addon shares the process via worker_thread). Removing it re-opens
   app-death on any kernel fragility. The faulted op fails like rejected
   geometry; the step settles as `regenFailed`.
+  **That was only half true, and the other half crashed the app.** On Unix
+  OCCT is built with `OCC_CONVERT_SIGNALS`: a fault jumps to the nearest
+  `OCC_CATCH_SIGNALS` handler, and with NONE in scope OCC prints "*** Abort
+  *** an exception was raised, but no catch was found" and EXITS. OCC's own
+  algorithms carry handlers (hence the ChFi3d case above); our code calling
+  OCC did not. Cancelling a recalc mid-emboss killed the app on macOS and
+  Linux alike: a cancelled `BooleanOp` stored the EMPTY shape and returned
+  its id, and meshing it NULL-dereferenced in the edge pass. Now the op table
+  runs every op under `OCC_CATCH_SIGNALS` (`occ_io.cc#Guarded`, with
+  `OCC_CONVERT_SIGNALS` defined for the core in CMakeLists), a cancelled or
+  empty boolean returns 0, and an empty shape meshes to nothing
+  (`cancelSafety.test.js`). Keep all three; check a new op's empty results.
 - **`BRepAlgoAPI_Fuse`'s two-shape constructor silently DROPS a COMPOUND tool.**
   A multi-letter emboss stamp is a compound (one sewn solid per letter); fusing it
   the two-argument way returns just the body — "missing letters", no error.
@@ -1091,6 +1106,22 @@ Established landmines (each was a real bug — extend this list, never shrink it
   beziers as `contourCurves` beside `contours`, so glyph loops are sampled per
   font curve and never simplified afterwards (that would drop vertices the
   runs index).
+- **An imported STEP body's recipe is its exact shape.** `importStep` returns
+  the shape as BREP text, baked into the body's frame (scene units, Y-up,
+  centred on the MESH's bounding box, as `finalizeImportedMesh` centres the
+  mesh), and the body carries `regenerator: { kind: "importedShape", brep }`.
+  `buildItemShapeLocal` reads it back in both OCC implementations instead of
+  sewing the mesh, and the recalc redraws it at the current Resolution with no
+  re-centring. Bodies imported before this have no shape left: re-import.
+  The BREP is the recipe, so it is never pruned from nested sources like
+  `geometryData` is (`importedStepShape.test.js`, `docs/exact-imports-plan.md`).
+- **A mesh converted to surfaces builds from its BREP, too.** Convert to
+  Surfaces (`meshToSurfaces`) stores the rebuilt shape as `regenerator.brep`,
+  refreshed by every recalculation, and `buildItemShapeLocal` reads it back in
+  both OCC implementations; only a body whose last rebuild was refused
+  (`regenFailed`) is sewn from its mesh.  A later op must never sew a
+  converted body's drawing: drawn coarsely it keeps the chords the conversion
+  removed (`convertSurfaces.test.js`).
 - **A Split's pieces are re-cut from their source, not kept as baked
   meshes.** They used to carry no recipe, so a resolution change (or an
   upstream edit) never reached them -- MultiSystem2's extruded circles stayed

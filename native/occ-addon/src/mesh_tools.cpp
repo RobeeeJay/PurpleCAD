@@ -16,6 +16,68 @@
 #include "meshoptimizer.h"
 #include <cstdio>
 
+// Shared with mesh_recognize.cpp (declared in mesh_tools.h).
+// Positions arrive as doubles from the op layer; a Float32Array (straight from
+// an STL) is widened.
+std::vector<double> ReadPositions(occjs::Js& js, occjs::Val v, const char* op) {
+  const occjs::Typed arr = js.typed(v);
+  if (arr.kind == occjs::TypedKind::None)
+    throw std::runtime_error(std::string(op) + ": positions must be a typed array");
+  std::vector<double> pos;
+  if (arr.kind == occjs::TypedKind::Float64) {
+    auto p = static_cast<const double*>(arr.data);
+    pos.assign(p, p + arr.length);
+  } else if (arr.kind == occjs::TypedKind::Float32) {
+    auto p = static_cast<const float*>(arr.data);
+    pos.assign(p, p + arr.length);
+  } else {
+    throw std::runtime_error(std::string(op) + ": positions must be float");
+  }
+  return pos;
+}
+
+// No index buffer: an STL's triangle soup, three private vertices each.
+std::vector<uint32_t> ReadIndices(occjs::Js& js, size_t at,
+                                  size_t vertexCount, const char* op) {
+  std::vector<uint32_t> idx;
+  if (js.argc() > at && js.isTypedArray(js[at])) {
+    auto i = js.u32(js[at]);
+    idx.assign(i.Data(), i.Data() + i.ElementLength());
+  } else {
+    idx.resize(vertexCount);
+    for (size_t i = 0; i < vertexCount; i++) idx[i] = uint32_t(i);
+  }
+  if (idx.size() % 3 != 0)
+    throw std::runtime_error(std::string(op) + ": index count is not a multiple of 3");
+  for (uint32_t i : idx)
+    if (i >= vertexCount)
+      throw std::runtime_error(std::string(op) + ": index out of range");
+  return idx;
+}
+
+
+// Merge vertices at exactly the same position.  The remap compares doubles
+// bit-for-bit, so only EXACT duplicates merge and no point moves.
+Welded Weld(std::vector<double> pos, const std::vector<uint32_t>& idx) {
+  // -0.0 and 0.0 differ in their sign bit though they are the same point;
+  // exporters write both.  Adding +0.0 turns -0.0 into 0.0 and leaves every
+  // other value as it is.
+  for (double& c : pos) c += 0.0;
+  const size_t vertexCount = pos.size() / 3;
+  std::vector<uint32_t> remap(vertexCount);
+  const size_t unique = meshopt_generateVertexRemap(
+      remap.data(), idx.data(), idx.size(), pos.data(), vertexCount,
+      sizeof(double) * 3);
+  Welded w;
+  w.before = vertexCount;
+  w.pos.resize(unique * 3);
+  meshopt_remapVertexBuffer(w.pos.data(), pos.data(), vertexCount,
+                            sizeof(double) * 3, remap.data());
+  w.idx.resize(idx.size());
+  meshopt_remapIndexBuffer(w.idx.data(), idx.data(), idx.size(), remap.data());
+  return w;
+}
+
 namespace {
 
 struct Topology {
@@ -59,71 +121,6 @@ Topology CountEdges(const std::vector<uint32_t>& idx) {
   return t;
 }
 
-// Positions arrive as doubles from the op layer; a Float32Array (straight from
-// an STL) is widened.
-std::vector<double> ReadPositions(occjs::Js& js, occjs::Val v, const char* op) {
-  const occjs::Typed arr = js.typed(v);
-  if (arr.kind == occjs::TypedKind::None)
-    throw std::runtime_error(std::string(op) + ": positions must be a typed array");
-  std::vector<double> pos;
-  if (arr.kind == occjs::TypedKind::Float64) {
-    auto p = static_cast<const double*>(arr.data);
-    pos.assign(p, p + arr.length);
-  } else if (arr.kind == occjs::TypedKind::Float32) {
-    auto p = static_cast<const float*>(arr.data);
-    pos.assign(p, p + arr.length);
-  } else {
-    throw std::runtime_error(std::string(op) + ": positions must be float");
-  }
-  return pos;
-}
-
-// No index buffer: an STL's triangle soup, three private vertices each.
-std::vector<uint32_t> ReadIndices(occjs::Js& js, size_t at,
-                                  size_t vertexCount, const char* op) {
-  std::vector<uint32_t> idx;
-  if (js.argc() > at && js.isTypedArray(js[at])) {
-    auto i = js.u32(js[at]);
-    idx.assign(i.Data(), i.Data() + i.ElementLength());
-  } else {
-    idx.resize(vertexCount);
-    for (size_t i = 0; i < vertexCount; i++) idx[i] = uint32_t(i);
-  }
-  if (idx.size() % 3 != 0)
-    throw std::runtime_error(std::string(op) + ": index count is not a multiple of 3");
-  for (uint32_t i : idx)
-    if (i >= vertexCount)
-      throw std::runtime_error(std::string(op) + ": index out of range");
-  return idx;
-}
-
-struct Welded {
-  std::vector<double> pos;
-  std::vector<uint32_t> idx;
-  size_t before = 0;
-};
-
-// Merge vertices at exactly the same position.  The remap compares doubles
-// bit-for-bit, so only EXACT duplicates merge and no point moves.
-Welded Weld(std::vector<double> pos, const std::vector<uint32_t>& idx) {
-  // -0.0 and 0.0 differ in their sign bit though they are the same point;
-  // exporters write both.  Adding +0.0 turns -0.0 into 0.0 and leaves every
-  // other value as it is.
-  for (double& c : pos) c += 0.0;
-  const size_t vertexCount = pos.size() / 3;
-  std::vector<uint32_t> remap(vertexCount);
-  const size_t unique = meshopt_generateVertexRemap(
-      remap.data(), idx.data(), idx.size(), pos.data(), vertexCount,
-      sizeof(double) * 3);
-  Welded w;
-  w.before = vertexCount;
-  w.pos.resize(unique * 3);
-  meshopt_remapVertexBuffer(w.pos.data(), pos.data(), vertexCount,
-                            sizeof(double) * 3, remap.data());
-  w.idx.resize(idx.size());
-  meshopt_remapIndexBuffer(w.idx.data(), idx.data(), idx.size(), remap.data());
-  return w;
-}
 
 // Distance from p to triangle abc (Ericson, Real-Time Collision Detection
 // 5.1.5: closest point by Voronoi region).

@@ -3,8 +3,29 @@
 // (turn angle) is within `maxAngleDeg`, in both directions.  Used so hovering
 // one segment of a tessellated curved edge highlights (and selects) the whole
 // curve.  Segments are { ax, ay, az, bx, by, bz }; works in 2D by leaving z 0.
-export function computeSegmentChain(segs, startIdx, maxAngleDeg) {
-  const start = segs?.[startIdx];
+//
+// `segs` may also be a flat array (six numbers per segment) -- a big mesh's
+// feature edges, where an object per segment costs too much -- and `near`,
+// when given, returns the indices of the segments with an endpoint at a
+// point, so each step looks at those instead of scanning every segment
+// (meshPickCache.js#featureEdges).
+export function computeSegmentChain(segs, startIdx, maxAngleDeg, near = null) {
+  const flat = ArrayBuffer.isView(segs);
+  const count = flat ? segs.length / 6 : (segs?.length ?? 0);
+  const at = flat
+    ? (i) =>
+        i >= 0 && i < count
+          ? {
+              ax: segs[6 * i],
+              ay: segs[6 * i + 1],
+              az: segs[6 * i + 2],
+              bx: segs[6 * i + 3],
+              by: segs[6 * i + 4],
+              bz: segs[6 * i + 5],
+            }
+          : undefined
+    : (i) => segs?.[i];
+  const start = at(startIdx);
   if (!start) return startIdx == null ? [] : [startIdx];
   const maxAngle = (Math.max(0, maxAngleDeg) * Math.PI) / 180;
   const EPS = 1e-4;
@@ -21,9 +42,12 @@ export function computeSegmentChain(segs, startIdx, maxAngleDeg) {
     for (;;) {
       let best = null;
       let bestAngle = Infinity;
-      for (let i = 0; i < segs.length; i++) {
+      const candidates = near ? near(cx, cy, cz) : null;
+      const n = candidates ? candidates.length : count;
+      for (let k = 0; k < n; k++) {
+        const i = candidates ? candidates[k] : k;
         if (visited.has(i)) continue;
-        const s = segs[i];
+        const s = at(i);
         let ox, oy, oz;
         if (close(s.ax, s.ay, s.az, cx, cy, cz)) {
           ox = s.bx;

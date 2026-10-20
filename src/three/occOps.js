@@ -580,6 +580,18 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
   // An imported solid is a csg item carrying only its mesh (no recipe).  Sew a
   // solid from that mesh so it can take part in booleans/chamfers.
   //
+  // An imported STEP body: its exact shape, already in its local frame.
+  if (item.type === "csg" && item.regenerator?.kind === "importedShape")
+    return occ.shapeFromBrep(item.regenerator.brep);
+  // A mesh converted to surfaces: its exact shape, unless its last rebuild
+  // was refused, when it is still the mesh it was (sewn, below).
+  if (
+    item.type === "csg" &&
+    item.regenerator?.kind === "meshToSurfaces" &&
+    item.regenerator.brep &&
+    !item.regenerator.regenFailed
+  )
+    return occ.shapeFromBrep(item.regenerator.brep);
   if (item.type === "csg" && !item.regenerator && item.geometryData) {
     const g = item.geometryData;
     if (!g.positions || g.positions.length < 9) return null;
@@ -609,7 +621,11 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
     // A simplified mesh IS its baked mesh -- the op's whole output -- so a
     // later op sews that, exactly as for an imported mesh; so does a Split
     // piece that can't be re-cut.
-    if (r.kind === "simplify" || r.kind === "split") {
+    if (
+      r.kind === "simplify" ||
+      r.kind === "split" ||
+      r.kind === "meshToSurfaces"
+    ) {
       const g = item.geometryData;
       if (!g?.positions || g.positions.length < 9) return null;
       return occ.makeSolidFromMesh(
@@ -2614,13 +2630,16 @@ async function exportSTEP({ items, allItems, precision }) {
 }
 
 // Read a STEP file's content into a tessellated mesh (raw mm / Z-up positions —
-// the renderer converts to scene units / Y-up and centres it).
+// the renderer converts to scene units / Y-up and centres it) AND the exact
+// shape, as BREP text in the frame that mesh ends up in: the item's recipe, so
+// an imported part keeps its exact surfaces (see importedShapeBrep).
 async function importStep({ stepText, printPrecision }) {
   const id = occ.importSTEP(stepText);
   if (!id) throw new Error("STEP import produced no shape.");
-  let tess;
+  let tess, brep;
   try {
     tess = occ.tessellate(id, printPrecision ?? 0.5);
+    if (tess) brep = importedShapeBrep(id, tess.positions);
   } finally {
     occ.releaseShape(id);
   }
@@ -2629,7 +2648,45 @@ async function importStep({ stepText, printPrecision }) {
     positions: Array.from(tess.positions),
     indices: Array.from(tess.indices),
     edges: tess.edges ? Array.from(tess.edges) : null,
+    brep,
   };
+}
+
+// An imported shape moved into its item's frame -- what finalizeImportedMesh
+// does to the mesh: file mm and Z-up to scene units and Y-up ((x, y, z) to
+// (x, z, -y), a -pi/2 turn about X), then centred on the MESH's bounding box,
+// the same one the mesh is centred on -- and written as BREP text.
+function importedShapeBrep(id, positions) {
+  const lo = [Infinity, Infinity, Infinity],
+    hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    const q = [
+      positions[i] / MM_PER_UNIT,
+      positions[i + 2] / MM_PER_UNIT,
+      -positions[i + 1] / MM_PER_UNIT,
+    ];
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], q[k]);
+      hi[k] = Math.max(hi[k], q[k]);
+    }
+  }
+  const c = lo.map((v, k) => (v + hi[k]) / 2);
+  const scaled = occ.scaleShape(id, 1 / MM_PER_UNIT);
+  const placed = occ.transformShape(
+    scaled,
+    -c[0],
+    -c[1],
+    -c[2],
+    -Math.PI / 2,
+    0,
+    0,
+  );
+  occ.releaseShape(scaled);
+  try {
+    return occ.shapeToBrep(placed);
+  } finally {
+    occ.releaseShape(placed);
+  }
 }
 
 // Tessellate an item's rebuilt solid in its LOCAL frame — the Texture tool's
@@ -2713,6 +2770,86 @@ function simplifyMesh({ positions, indices, mode, value }) {
   };
 }
 
+// Rebuild a mesh as exact faces: each recognised region one face on its
+// surface, each leftover triangle a flat face, joined along shared edges.
+// Throws, with the reason, when the solid doesn't check out (open mesh,
+// invalid faces, volume off, an edge too loose); the caller keeps the mesh.
+// Returns the body as BREP text and drawn at `printPrecision`, in the mesh's
+// own frame.
+function rebuildSurfaces({ positions, indices, tolerance, printPrecision }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.rebuildSurfaces(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    tolerance,
+  );
+  try {
+    const tess = occ.tessellate(r.shapeId, printPrecision ?? 0.5);
+    return {
+      brep: occ.shapeToBrep(r.shapeId),
+      geometryData: {
+        positions: Array.from(tess.positions),
+        indices: Array.from(tess.indices),
+        edges: tess.edges ? Array.from(tess.edges) : null,
+      },
+      faces: r.faces,
+      faceTypes: { ...r.faceTypes },
+      volume: r.volume,
+      meshVolume: r.meshVolume,
+      maxEdgeTolerance: r.maxEdgeTolerance,
+      sewn: r.sewn === 1,
+    };
+  } finally {
+    occ.releaseShape(r.shapeId);
+  }
+}
+
+// Find the surfaces a mesh is made of: smooth regions split at creases, each
+// fitted with the simplest of plane, cylinder, cone, sphere and torus that
+// every one of its vertices lies within `tolerance` of; the rest stay "mesh".
+// Indexed by the WELDED mesh's triangles, which are the input's in order.
+function recognizeSurfaces({ positions, indices, tolerance }) {
+  if (!positions || positions.length < 9) return null;
+  const r = occ.recognizeSurfaces(
+    new Float64Array(positions),
+    indices && indices.length ? new Uint32Array(indices) : null,
+    tolerance,
+  );
+  return {
+    regions: Array.from(r.regions, (g) => ({
+      type: g.type,
+      triangles: g.triangles,
+      area: g.area,
+      deviation: g.deviation,
+      ...(g.type === "mesh"
+        ? {}
+        : {
+            point: Array.from(g.point),
+            dir: Array.from(g.dir),
+            radius: g.radius,
+            halfAngle: g.halfAngle,
+            minorRadius: g.minorRadius,
+            ...(g.xdir ? { xdir: Array.from(g.xdir) } : {}),
+            ...(g.freeform
+              ? {
+                  freeform: {
+                    ex: Array.from(g.freeform.ex),
+                    ey: Array.from(g.freeform.ey),
+                    bounds: Array.from(g.freeform.bounds),
+                    nx: g.freeform.nx,
+                    ny: g.freeform.ny,
+                    heights: Array.from(g.freeform.heights),
+                  },
+                }
+              : {}),
+          }),
+    })),
+    triangleRegion: Array.from(r.triangleRegion),
+    counts: { ...r.counts },
+    triangleCounts: { ...r.triangleCounts },
+  };
+}
+
 // Release a cached OCC solid held in the native shape store (JIT timeline
 // cache).  Fire-and-forget cleanup; a missing/already-released id is a no-op.
 function releaseShape({ id }) {
@@ -2747,4 +2884,6 @@ export const ops = {
   tessellateItem,
   weldMesh,
   simplifyMesh,
+  recognizeSurfaces,
+  rebuildSurfaces,
 };

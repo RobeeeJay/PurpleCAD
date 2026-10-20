@@ -1,6 +1,7 @@
 import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import { canSimplify } from "../../three/cameraControls/simplify.js";
+import { canConvert } from "../../three/cameraControls/convertSurfaces.js";
 
 const BevelSection = ({ bare = false }) => {
   const clearSelectedSubGeometry = useStore((s) => s.clearSelectedSubGeometry);
@@ -12,6 +13,7 @@ const BevelSection = ({ bare = false }) => {
   const items = useStore((s) => s.items);
   const setShellTarget = useStore((s) => s.setShellTarget);
   const setSimplifyTarget = useStore((s) => s.setSimplifyTarget);
+  const setConvertTarget = useStore((s) => s.setConvertTarget);
   const holeTool = useStore((s) => s.holeTool);
   const startHoleTool = useStore((s) => s.startHoleTool);
   const cancelHoleTool = useStore((s) => s.cancelHoleTool);
@@ -38,6 +40,10 @@ const BevelSection = ({ bare = false }) => {
   // Simplify works on a body's mesh, so only a mesh body qualifies.
   const openSimplify = () => {
     if (canSimplify(selectedBody)) setSimplifyTarget({ itemId: selectedId });
+  };
+  // Convert works on a body's mesh too, and only one that isn't exact already.
+  const openConvert = () => {
+    if (canConvert(selectedBody)) setConvertTarget({ itemId: selectedId });
   };
   // Hole guides its own face + point pick, so it needs no pre-selection.
   const toggleHole = () => {
@@ -342,6 +348,32 @@ const BevelSection = ({ bare = false }) => {
             y2="16"
             stroke="#6C3FD4"
             strokeWidth="1.2"
+          />
+        </svg>
+      </button>
+      <button
+        className="toolbar-btn"
+        title={
+          canConvert(selectedBody)
+            ? "Convert to Surfaces — rebuild the selected mesh body as exact planes, cylinders, cones, spheres, tori and oval walls"
+            : "Convert to Surfaces — select a mesh body (an import or a simplified mesh) first"
+        }
+        disabled={!canConvert(selectedBody)}
+        onClick={openConvert}
+      >
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <path
+            d="M12 3 A9 9 0 0 1 12 21 Z"
+            fill="rgba(108,63,212,0.15)"
+            stroke="#6C3FD4"
+            strokeWidth="1.5"
+          />
+          <polyline
+            points="12,3 6.5,5 3.5,9.5 3.5,14.5 6.5,19 12,21"
+            fill="none"
+            stroke="#c4c2b8"
+            strokeWidth="1.5"
+            strokeLinejoin="miter"
           />
         </svg>
       </button>

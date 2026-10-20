@@ -45,6 +45,12 @@ export const createUiModifyToolsSlice = (set, get) => ({
         ? { ...TOOL_RESET_PATCH, shellTarget: target }
         : { shellTarget: target },
     ),
+  setConvertTarget: (target) =>
+    set((s) =>
+      target && !s.convertTarget
+        ? { ...TOOL_RESET_PATCH, convertTarget: target }
+        : { convertTarget: target, toolError: null },
+    ),
   setSimplifyTarget: (target) =>
     set((s) =>
       target && !s.simplifyTarget

@@ -1,4 +1,5 @@
 #include "occ_core.h"
+#include <Standard_ErrorHandler.hxx>
 
 namespace occ {
 
@@ -147,6 +148,25 @@ Val ExportSTEP(Js& js) {
 // importSTEP(stepText: string) → shapeId
 // Reads a STEP file's content into a single shape (all roots fused into one
 // compound).  The caller tessellates it and must release the shape.
+// shapeToBrep(id) → OCC's BREP text for a stored shape, without its mesh: an
+// imported STEP body keeps its exact surfaces as this, its recipe.
+Val ShapeToBrep(Js& js) {
+  std::ostringstream oss;
+  BRepTools::Write(FetchShape(js.int32(js[0])), oss, false, false,
+                   TopTools_FormatVersion_CURRENT);
+  return js.makeString(oss.str());
+}
+
+// shapeFromBrep(text) → shapeId: a shape read back from BREP text.
+Val ShapeFromBrep(Js& js) {
+  std::istringstream iss(js.string(js[0]));
+  TopoDS_Shape shape;
+  BRep_Builder builder;
+  BRepTools::Read(shape, iss, builder);
+  if (shape.IsNull()) throw std::runtime_error("BREP text produced no shape");
+  return js.makeNumber(StoreShape(shape));
+}
+
 Val ImportSTEP(Js& js) {
   std::string content = js.string(js[0]);
   std::istringstream iss(content);
@@ -503,62 +523,80 @@ Val MakeCubeTessellated(Js& js) {
 
 }  // namespace occ
 
+namespace occ {
+// Every op runs under OCC_CATCH_SIGNALS: a hardware fault inside OCC (a NULL
+// dereference on a shape a cancelled boolean left empty, say) is rethrown as
+// an exception the adapter returns to JS, where without it OCC printed
+// "*** Abort ***" and exited -- taking the whole app with it, since the addon
+// shares the process.  OSD::SetSignal alone does not do this: the fault needs a
+// handler in scope to jump to.
+template <occjs::Val (*F)(occjs::Js&)>
+occjs::Val Guarded(occjs::Js& js) {
+  OCC_CATCH_SIGNALS
+  return F(js);
+}
+}  // namespace occ
+
 const std::vector<occjs::Op>& occjs::Ops() {
   using namespace occ;
   static const std::vector<Op> ops = {
       // Smoke tests
-      {"ping", PingStr},
-      {"makeCubeTessellated", MakeCubeTessellated},
+      {"ping", Guarded<PingStr>},
+      {"makeCubeTessellated", Guarded<MakeCubeTessellated>},
 
       // Primitives → shape ID
-      {"makeBox", MakeBox},
-      {"makeSphere", MakeSphere},
-      {"makeCylinder", MakeCylinder},
-      {"makeCone", MakeCone},
-      {"makeTorus", MakeTorus},
-      {"makeExtrude", MakeExtrude},
-      {"makeRevolve", MakeRevolve},
-      {"makePipe", MakePipe},
-      {"makeLoft", MakeLoft},
+      {"makeBox", Guarded<MakeBox>},
+      {"makeSphere", Guarded<MakeSphere>},
+      {"makeCylinder", Guarded<MakeCylinder>},
+      {"makeCone", Guarded<MakeCone>},
+      {"makeTorus", Guarded<MakeTorus>},
+      {"makeExtrude", Guarded<MakeExtrude>},
+      {"makeRevolve", Guarded<MakeRevolve>},
+      {"makePipe", Guarded<MakePipe>},
+      {"makeLoft", Guarded<MakeLoft>},
 
       // Transforms
-      {"transformShape", TransformShape},
-      {"mirrorShape", MirrorShape},
-      {"rotateShapeAxis", RotateShapeAxis},
-      {"scaleShape", ScaleShape},
-      {"scaleShapeXYZ", ScaleShapeXYZ},
+      {"transformShape", Guarded<TransformShape>},
+      {"mirrorShape", Guarded<MirrorShape>},
+      {"rotateShapeAxis", Guarded<RotateShapeAxis>},
+      {"scaleShape", Guarded<ScaleShape>},
+      {"scaleShapeXYZ", Guarded<ScaleShapeXYZ>},
 
       // Boolean ops
-      {"booleanOp", BooleanOp},
+      {"booleanOp", Guarded<BooleanOp>},
 
       // Chamfer / fillet and the other modify ops
-      {"chamferShape", ChamferShape},
-      {"filletShape", FilletShape},
-      {"pushPullFaces", PushPullFaces},
-      {"draftFaces", DraftFaces},
-      {"makeShell", MakeShell},
-      {"makeHole", MakeHole},
-      {"makeThread", MakeThread},
-      {"enrichSubGeo", EnrichSubGeo},
-      {"faceNames", FaceNames},
-      {"namedFacePoint", NamedFacePoint},
+      {"chamferShape", Guarded<ChamferShape>},
+      {"filletShape", Guarded<FilletShape>},
+      {"pushPullFaces", Guarded<PushPullFaces>},
+      {"draftFaces", Guarded<DraftFaces>},
+      {"makeShell", Guarded<MakeShell>},
+      {"makeHole", Guarded<MakeHole>},
+      {"makeThread", Guarded<MakeThread>},
+      {"enrichSubGeo", Guarded<EnrichSubGeo>},
+      {"faceNames", Guarded<FaceNames>},
+      {"namedFacePoint", Guarded<NamedFacePoint>},
 
       // Tessellation
-      {"tessellate", TessellateShape},
+      {"tessellate", Guarded<TessellateShape>},
 
       // Export / import and mesh tools
-      {"exportSTEP", ExportSTEP},
-      {"importSTEP", ImportSTEP},
-      {"makeSolidFromMesh", MakeSolidFromMesh},
-      {"weldMesh", WeldMesh},
-      {"simplifyMesh", SimplifyMesh},
+      {"exportSTEP", Guarded<ExportSTEP>},
+      {"importSTEP", Guarded<ImportSTEP>},
+      {"makeSolidFromMesh", Guarded<MakeSolidFromMesh>},
+      {"weldMesh", Guarded<WeldMesh>},
+      {"simplifyMesh", Guarded<SimplifyMesh>},
+      {"recognizeSurfaces", Guarded<RecognizeSurfaces>},
+      {"rebuildSurfaces", Guarded<RebuildSurfaces>},
 
       // Shape store management
-      {"releaseShape", ReleaseShape},
-      {"shapeVolume", ShapeVolume},
-      {"clearAll", ClearAll},
-      {"shapeCount", ShapeCount},
-      {"setCancelBuffer", SetCancelBuffer},
+      {"releaseShape", Guarded<ReleaseShape>},
+      {"shapeVolume", Guarded<ShapeVolume>},
+      {"shapeToBrep", Guarded<ShapeToBrep>},
+      {"shapeFromBrep", Guarded<ShapeFromBrep>},
+      {"clearAll", Guarded<ClearAll>},
+      {"shapeCount", Guarded<ShapeCount>},
+      {"setCancelBuffer", Guarded<SetCancelBuffer>},
   };
   return ops;
 }

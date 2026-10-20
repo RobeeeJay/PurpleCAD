@@ -1,8 +1,8 @@
 // The sketch Project tool: pull a solid's feature edges onto the active sketch
 // plane as real sketch geometry, each linked to its source by a projection
-// constraint.  Two paths — a click (all connected edges of the body under the
-// cursor) and a marquee box — plus the REFIT path that runs when the source
-// body later moves.
+// constraint.  Two paths — a click (the projected lines under the cursor and
+// those connected to them) and a marquee box — plus the REFIT path that runs
+// when the source body later moves.
 //
 // That refit is why this spec exists: it removes the projection's old shapes
 // and appends the new ones, renumbering the array.  It used to leave the
@@ -68,6 +68,74 @@ test.describe.serial("sketch Project tool", () => {
 
   test.afterAll(async () => {
     await app?.close();
+  });
+
+  test("hover highlights only the projected lines under the cursor, and a click projects them", async () => {
+    await page.evaluate(() => {
+      window.__store.getState().startProjectTool();
+      window.__store.getState().setActiveSketchTool("project");
+    });
+    // A world point's place on screen, and whether the canvas is what's
+    // there: the tool's dialog sits over the bottom of the view.
+    const onCanvas = (x, y, z) =>
+      page.evaluate(
+        ([x, y, z]) => {
+          const p = window.__store
+            .getState()
+            ._cameraControls.worldToScreen(x, y, z);
+          const hit = document.elementFromPoint(p.x, p.y);
+          return { ...p, visible: hit?.tagName === "CANVAS" };
+        },
+        [x, y, z],
+      );
+    const highlighted = () =>
+      page.evaluate(() =>
+        window.__store.getState()._cameraControls.projectHoverCount(),
+      );
+    // The cube (x and z from -1 to 1) projects straight down onto the ground
+    // sketch as a square: the middle of a side the dialog doesn't cover, and
+    // a point inside the square beside it, over the cube but on no projected
+    // line.
+    let edge, inside;
+    for (const [ex, ez] of [
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+    ]) {
+      const e = await onCanvas(ex, 0, ez);
+      const i = await onCanvas(ex / 2, 0, ez / 2);
+      if (e.visible && i.visible) {
+        edge = e;
+        inside = i;
+        break;
+      }
+    }
+    expect(edge, "a side of the square clear of the dialog").toBeTruthy();
+
+    await page.mouse.move(inside.x, inside.y);
+    expect(await highlighted(), "highlighted inside the square").toBe(0);
+    await page.mouse.move(edge.x, edge.y);
+    await expect.poll(highlighted).toBeGreaterThan(0);
+    // Still highlighted while the cursor stays on it.
+    await page.mouse.move(edge.x, edge.y + 1);
+    expect(await highlighted()).toBeGreaterThan(0);
+
+    await page.mouse.click(edge.x, edge.y + 1);
+    const staged = await page.evaluate(
+      () => window.__store.getState().projectTool?.shapes ?? [],
+    );
+    // The square's four sides: the top and bottom outlines coincide, and the
+    // upright edges project to points.
+    expect(staged.map((s) => s.type)).toEqual(["line", "line", "line", "line"]);
+    expect(staged.every((s) => s.projection?.sourceId === 400)).toBe(true);
+
+    // Put the tool back as the next test expects to start it.
+    await page.evaluate(() => {
+      window.__store.getState().cancelProjectTool();
+      window.__store.getState()._cameraControls.clearProjectionPreview();
+      window.__store.getState().setActiveSketchTool(null);
+    });
   });
 
   test("marquee projects the body's edges into the sketch", async () => {

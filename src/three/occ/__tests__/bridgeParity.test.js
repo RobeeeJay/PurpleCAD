@@ -231,6 +231,132 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     expect(a.openEdges).toBe(0);
   });
 
+  it("recognizeSurfaces reports identically in both implementations", async () => {
+    // A box's soup: six planes, the same regions and labels from both.
+    const box = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ];
+    const faces = [
+      [0, 2, 1],
+      [0, 3, 2],
+      [4, 5, 6],
+      [4, 6, 7],
+      [0, 1, 5],
+      [0, 5, 4],
+      [2, 3, 7],
+      [2, 7, 6],
+      [1, 2, 6],
+      [1, 6, 5],
+      [3, 0, 4],
+      [3, 4, 7],
+    ];
+    const g = {
+      positions: faces.flat().flatMap((v) => box[v]),
+      tolerance: 0.001,
+    };
+    const a = await ops.recognizeSurfaces(JSON.parse(JSON.stringify(g)));
+    const b = bridge.recognizeSurfaces(JSON.parse(JSON.stringify(g)));
+    expect(a).toEqual(b);
+    expect(a.counts.plane).toBe(6);
+  });
+
+  it("rebuildSurfaces rebuilds identically in both implementations", async () => {
+    const box = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ];
+    const faces = [
+      [0, 2, 1],
+      [0, 3, 2],
+      [4, 5, 6],
+      [4, 6, 7],
+      [0, 1, 5],
+      [0, 5, 4],
+      [2, 3, 7],
+      [2, 7, 6],
+      [1, 2, 6],
+      [1, 6, 5],
+      [3, 0, 4],
+      [3, 4, 7],
+    ];
+    const g = {
+      positions: faces.flat().flatMap((v) => box[v]),
+      tolerance: 0.001,
+      printPrecision: 0.1,
+    };
+    const a = await ops.rebuildSurfaces(JSON.parse(JSON.stringify(g)));
+    const b = bridge.rebuildSurfaces(JSON.parse(JSON.stringify(g)));
+    expect({ ...a, brep: null }).toEqual({ ...b, brep: null });
+    expect(a.faceTypes.plane).toBe(6);
+    expect(a.volume).toBeCloseTo(1, 9);
+  });
+
+  it("a converted body builds from its BREP in both implementations", async () => {
+    const g = {
+      positions: [],
+      tolerance: 0.001,
+      printPrecision: 0.1,
+    };
+    const box = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ];
+    const faces = [
+      [0, 2, 1],
+      [0, 3, 2],
+      [4, 5, 6],
+      [4, 6, 7],
+      [0, 1, 5],
+      [0, 5, 4],
+      [2, 3, 7],
+      [2, 7, 6],
+      [1, 2, 6],
+      [1, 6, 5],
+      [3, 0, 4],
+      [3, 4, 7],
+    ];
+    g.positions = faces.flat().flatMap((v) => box[v]);
+    const r = await ops.rebuildSurfaces(g);
+    const item = {
+      id: 1,
+      type: "csg",
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      geometryData: r.geometryData,
+      regenerator: { kind: "meshToSurfaces", brep: r.brep, source: null },
+    };
+    const args = () => ({
+      source: JSON.parse(JSON.stringify(item)),
+      allItems: [],
+      printPrecision: 0.1,
+    });
+    const a = await ops.tessellateItem(args());
+    const b = bridge.tessellateItem(args());
+    expect(Array.from(a.geometryData.positions)).toEqual(
+      Array.from(b.geometryData.positions),
+    );
+  });
+
   it("simplifyMesh simplifies identically in both implementations", async () => {
     // A flat 24x24 grid: detail both impls must collapse the same way, to the
     // same bound.

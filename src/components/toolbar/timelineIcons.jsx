@@ -860,3 +860,31 @@ export const RectangularPatternIcon = () => (
     <rect x="17" y="17" width="4" height="4" fill="currentColor" />
   </svg>
 );
+
+// A circle whose left half is facets and right half a smooth arc: a mesh
+// turned into the curved surface it approximated.
+export const ConvertSurfacesIcon = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14">
+    <polyline
+      points="12,3 6.5,5 3.5,9.5 3.5,14.5 6.5,19 12,21"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="miter"
+    />
+    <path
+      d="M12 3 A9 9 0 0 1 12 21"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <line
+      x1="12"
+      y1="3"
+      x2="12"
+      y2="21"
+      stroke="currentColor"
+      strokeWidth="1"
+    />
+  </svg>
+);

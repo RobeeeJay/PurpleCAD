@@ -379,8 +379,8 @@ export default function SketchOverlays({
       )}
       {activeSketchTool === "project" && (
         <div className="sketch-placement-hint">
-          Click a 3D edge to project its connected edges, or drag a box to
-          project everything inside · Esc to cancel
+          Click a projected edge to add it and the edges joined to it, or drag a
+          box to project everything inside · Esc to cancel
         </div>
       )}
       <SketchPatternOverlays

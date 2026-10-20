@@ -124,6 +124,7 @@
 #include <IFSelect_ReturnStatus.hxx>
 
 #include "mesh_tools.h"
+#include "mesh_recognize.h"
 
 #include <algorithm>
 #include <atomic>
@@ -292,12 +293,15 @@ Val FaceNames(Js& js);
 Val NamedFacePoint(Js& js);
 Val ReleaseShape(Js& js);
 Val ShapeVolume(Js& js);
+Val ShapeToBrep(Js& js);
+Val ShapeFromBrep(Js& js);
 Val ClearAll(Js& js);
 Val ShapeCount(Js& js);
 Val SetCancelBuffer(Js& js);
 Val ExportSTEP(Js& js);
 Val ImportSTEP(Js& js);
 Val MakeSolidFromMesh(Js& js);
+Val RebuildSurfaces(Js& js);
 Val MakeCubeTessellated(Js& js);
 
 }  // namespace occ
