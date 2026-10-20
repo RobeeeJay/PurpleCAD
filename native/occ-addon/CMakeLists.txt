@@ -63,6 +63,7 @@ add_library(occ_core OBJECT
   src/mesh_tools.cpp
   src/mesh_recognize.cpp
   src/mesh_fit.cpp
+  src/mesh_freeform.cpp
   src/mesh_rebuild.cpp
   src/mesh_edges.cpp
   ${MESHOPT_DIR}/allocator.cpp

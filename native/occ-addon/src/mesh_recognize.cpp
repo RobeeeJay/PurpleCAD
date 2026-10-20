@@ -12,12 +12,14 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <queue>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "mesh_freeform.h"
 #include "mesh_tools.h"
 
 using namespace recog;
@@ -232,8 +234,37 @@ Recognition RecognizePass(std::vector<double> pos, const std::vector<uint32_t>& 
   // and its corner fillets, every vertex within the tolerance of one torus,
   // sat 0.2 to 2.3 off it where this allows 0.016.
   const double creaseSag = 1 - std::cos(creaseDeg * M_PI / 360);
+  // Nor is a near-flat cone round its own apex: every hilltop of a smooth
+  // freeform surface fits one, within the tolerance, and a face can't hold a
+  // cone's apex inside it (37 of them on a test surface came out a quarter
+  // of their area).  A pointed cone keeps its apex on its boundary, and a
+  // steep one is left alone.
+  auto aroundApex = [&](const Fit& f, const std::vector<uint32_t>& tris) {
+    if (f.type != "cone" || std::abs(f.halfAngle) < M_PI / 3) return false;
+    const double apex = -f.radius / std::tan(f.halfAngle);
+    const V3 u = unit(std::abs(f.dir[0]) < 0.9 ? cross(f.dir, {1, 0, 0}) : cross(f.dir, {0, 1, 0}));
+    const V3 w = cross(f.dir, u);
+    double tmin = 1e300, tmax = -1e300, rmax = 0;
+    std::vector<double> ang;
+    for (uint32_t v : RegionVerts(m, tris)) {
+      const V3 d = sub(m.vert(v), f.point);
+      const double t = dot(d, f.dir);
+      const V3 radial = sub(d, mul(f.dir, t));
+      tmin = std::min(tmin, t);
+      tmax = std::max(tmax, t);
+      rmax = std::max(rmax, len(radial));
+      ang.push_back(std::atan2(dot(radial, w), dot(radial, u)));
+    }
+    const double slack = tol + 0.01 * rmax;
+    if (apex < tmin - slack || apex > tmax + slack || ang.size() < 3) return false;
+    std::sort(ang.begin(), ang.end());
+    double gap = ang.front() + 2 * M_PI - ang.back();
+    for (size_t i = 1; i < ang.size(); i++) gap = std::max(gap, ang[i] - ang[i - 1]);
+    return gap < M_PI / 2;
+  };
   auto unevenSag = [&](const Fit& f, const std::vector<uint32_t>& tris) {
     if (f.type == "plane" || f.type == "mesh" || tris.empty()) return false;
+    if (aroundApex(f, tris)) return true;
     std::vector<double> sag;
     for (uint32_t t : tris) {
       sag.push_back(Distance(f, centroid[t]));
@@ -607,6 +638,121 @@ double MaxSag(const Recognition& r, const Region& g) {
   return sag;
 }
 
+// What is still triangles, or in regions too small to be well supported, is
+// often a freeform surface fitted piece by piece: a surfboard fin came out as
+// 1,500 local cones, spheres and planes with 9% of it left as triangles.
+// Such facets are gathered across smooth edges into clusters facing within
+// kFreeformCone of their mean (so each is one-valued over its plane), and a
+// cluster becomes one B-spline face when the surface holds every vertex
+// within the tolerance and every facet's middle within `sagLimit`, the most
+// a chord of this mesh sags.  A coarse low-poly mesh -- a fin drawn with
+// 5.6 mm edges, its vertices 0.08 off any local quadric -- is not samples of
+// a smooth surface, and is left as it was.
+constexpr double kFreeformCone = 20;
+constexpr size_t kFreeformMin = 12;
+
+void AddFreeform(Recognition& r, double tol, double creaseDeg, double sagLimit) {
+  const Mesh& m = r.mesh;
+  const size_t T = m.tris();
+  const double cosCrease = std::cos(creaseDeg * M_PI / 180);
+  const double cosCone = std::cos(kFreeformCone * M_PI / 180);
+  std::vector<char> open(T, 0);
+  for (const Region& g : r.regions)
+    if (g.fit.type == "mesh" || g.tris.size() < kWellSupported)
+      for (uint32_t t : g.tris) open[t] = r.area[t] > 0;
+  std::vector<uint32_t> order;
+  for (size_t t = 0; t < T; t++)
+    if (open[t]) order.push_back(uint32_t(t));
+  std::sort(order.begin(), order.end(),
+            [&](uint32_t a, uint32_t b) { return r.area[a] > r.area[b]; });
+  auto middle = [&](uint32_t t) {
+    const uint32_t* v = &m.idx[3 * t];
+    return mul(add(add(m.vert(v[0]), m.vert(v[1])), m.vert(v[2])), 1.0 / 3);
+  };
+  std::vector<std::vector<uint32_t>> taken;
+  std::vector<Fit> fits;
+  std::vector<std::vector<Region>> before;
+  for (uint32_t s0 : order) {
+    if (!open[s0]) continue;
+    std::vector<uint32_t> mem{s0};
+    open[s0] = 0;
+    V3 sum = mul(r.normal[s0], r.area[s0]);
+    for (size_t h = 0; h < mem.size(); h++)
+      for (int k = 0; k < 3; k++) {
+        const int64_t q = r.nbr[mem[h]][k];
+        if (q < 0 || !open[q] || dot(r.normal[q], r.normal[mem[h]]) < cosCrease ||
+            dot(r.normal[q], unit(sum)) < cosCone)
+          continue;
+        open[q] = 0;
+        mem.push_back(uint32_t(q));
+        sum = add(sum, mul(r.normal[q], r.area[q]));
+      }
+    if (mem.size() < kFreeformMin) continue;
+    std::vector<V3> pts;
+    V3 origin{0, 0, 0};
+    for (uint32_t v : RegionVerts(m, mem)) {
+      pts.push_back(m.vert(v));
+      origin = add(origin, pts.back());
+    }
+    origin = mul(origin, 1.0 / double(pts.size()));
+    std::shared_ptr<const Freeform> ff = FitFreeform(pts, unit(sum), origin, tol);
+    if (!ff) continue;
+    bool holds = true;
+    for (uint32_t t : mem)
+      if (FreeformDistance(*ff, middle(t)) > sagLimit) {
+        holds = false;
+        break;
+      }
+    if (!holds) continue;
+    // What these facets were before, piece by piece, in case the face fails.
+    std::map<int64_t, Region> pieces;
+    for (uint32_t t : mem) {
+      Region& piece = pieces[r.regionOf[t]];
+      piece.fit = r.regions[r.regionOf[t]].fit;
+      piece.home = r.regionOf[t];
+      piece.tris.push_back(t);
+    }
+    Fit f;
+    f.type = "bspline";
+    f.freeform = ff;
+    f.point = ff->origin;
+    f.dir = ff->n;
+    for (const V3& p : pts) f.dev = std::max(f.dev, FreeformDistance(*ff, p));
+    taken.push_back(std::move(mem));
+    fits.push_back(f);
+    std::vector<Region> was;
+    for (auto& [k, piece] : pieces) was.push_back(std::move(piece));
+    before.push_back(std::move(was));
+  }
+  if (taken.empty()) return;
+  std::vector<char> gone(T, 0);
+  for (const auto& mem : taken)
+    for (uint32_t t : mem) gone[t] = 1;
+  std::vector<Region> kept;
+  std::vector<int64_t> newIndex(r.regions.size(), -1);
+  for (size_t i = 0; i < r.regions.size(); i++) {
+    Region h;
+    h.fit = r.regions[i].fit;
+    for (uint32_t t : r.regions[i].tris)
+      if (!gone[t]) h.tris.push_back(t);
+    if (h.tris.empty()) continue;
+    newIndex[i] = int64_t(kept.size());
+    kept.push_back(std::move(h));
+  }
+  for (auto& was : before)
+    for (Region& piece : was) piece.home = newIndex[piece.home];
+  for (size_t k = 0; k < taken.size(); k++) {
+    Region h;
+    h.tris = std::move(taken[k]);
+    h.fit = fits[k];
+    h.before = std::move(before[k]);
+    kept.push_back(std::move(h));
+  }
+  r.regions = std::move(kept);
+  for (size_t i = 0; i < r.regions.size(); i++)
+    for (uint32_t t : r.regions[i].tris) r.regionOf[t] = int64_t(i);
+}
+
 }  // namespace
 
 // An exporter meshes every surface to one chord tolerance, which the mesh's
@@ -619,30 +765,24 @@ double MaxSag(const Recognition& r, const Region& g) {
 // tolerance.  With no such region there is nothing to judge by.
 Recognition Recognize(std::vector<double> pos, const std::vector<uint32_t>& idx,
                       double tol, double creaseDeg, double flatDeg) {
-  Recognition first = RecognizePass(pos, idx, tol, creaseDeg, flatDeg, 1e300);
+  Recognition rec = RecognizePass(pos, idx, tol, creaseDeg, flatDeg, 1e300);
   double chord = -1;
-  for (const Region& g : first.regions)
+  for (const Region& g : rec.regions)
     if (g.fit.type != "plane" && g.fit.type != "mesh" && g.tris.size() >= kWellSupported)
-      chord = std::max(chord, MaxSag(first, g));
-  if (chord < 0) return first;
-  const double cap = 3 * chord + tol;
-  bool offender = false;
-  for (const Region& g : first.regions)
-    if (g.fit.type != "plane" && g.fit.type != "mesh" && g.tris.size() < kWellSupported &&
-        MaxSag(first, g) > cap) {
-      offender = true;
-      break;
-    }
-  if (!offender) return first;
-  return RecognizePass(std::move(pos), idx, tol, creaseDeg, flatDeg, cap);
+      chord = std::max(chord, MaxSag(rec, g));
+  if (chord >= 0) {
+    const double cap = 3 * chord + tol;
+    for (const Region& g : rec.regions)
+      if (g.fit.type != "plane" && g.fit.type != "mesh" && g.tris.size() < kWellSupported &&
+          MaxSag(rec, g) > cap) {
+        rec = RecognizePass(std::move(pos), idx, tol, creaseDeg, flatDeg, cap);
+        break;
+      }
+  }
+  AddFreeform(rec, tol, creaseDeg, chord >= 0 ? 3 * chord + tol : 3 * tol);
+  return rec;
 }
 
-
-// recognizeSurfaces(positions, indices | null, tolerance, creaseDeg = 30,
-//                   flatDeg = 0.5)
-//   -> { regions: [{ type, triangles, area, deviation, ... }],
-//        triangleRegion: Uint32Array, counts: { plane, cylinder, ... } }
-// Positions are in the mesh's own units (an STL's mm); so is the tolerance.
 occjs::Val RecognizeSurfaces(occjs::Js& js) {
   if (js.argc() < 3)
     throw std::runtime_error("recognizeSurfaces: expected positions, indices, tolerance");
@@ -681,6 +821,20 @@ occjs::Val RecognizeSurfaces(occjs::Js& js) {
       js.set(o, "minorRadius", js.makeNumber(r.fit.minorRadius));
       if (r.fit.type == "ellipticCylinder")
         js.set(o, "xdir", js.makeFloat64Array(r.fit.xdir.data(), 3));
+      if (r.fit.type == "bspline") {
+        // Height above the plane through `point` (normal `dir`, axes ex, ey):
+        // a uniform cubic B-spline on nx x ny spans of [x0, x1] x [y0, y1].
+        const Freeform& ff = *r.fit.freeform;
+        occjs::Val g = js.makeObject();
+        js.set(g, "ex", js.makeFloat64Array(ff.ex.data(), 3));
+        js.set(g, "ey", js.makeFloat64Array(ff.ey.data(), 3));
+        const double box[4] = {ff.x0, ff.x1, ff.y0, ff.y1};
+        js.set(g, "bounds", js.makeFloat64Array(box, 4));
+        js.set(g, "nx", js.makeNumber(ff.nx));
+        js.set(g, "ny", js.makeNumber(ff.ny));
+        js.set(g, "heights", js.makeFloat64Array(ff.c.data(), ff.c.size()));
+        js.set(o, "freeform", g);
+      }
     }
     js.setAt(list, uint32_t(i), o);
     counts[r.fit.type] += 1;
@@ -692,7 +846,7 @@ occjs::Val RecognizeSurfaces(occjs::Js& js) {
   occjs::Val c = js.makeObject();
   occjs::Val tc = js.makeObject();
   for (const char* type :
-       {"plane", "cylinder", "cone", "sphere", "torus", "ellipticCylinder", "mesh"}) {
+       {"plane", "cylinder", "cone", "sphere", "torus", "ellipticCylinder", "bspline", "mesh"}) {
     js.set(c, type, js.makeNumber(counts[type]));
     js.set(tc, type, js.makeNumber(triCounts[type]));
   }

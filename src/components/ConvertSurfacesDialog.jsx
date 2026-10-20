@@ -11,9 +11,10 @@ import ToolErrorLine from "./ToolErrorLine.jsx";
 import { BAR_STYLE, Field, barInput, barBtn } from "./viewport/overlayBar.js";
 
 // Convert to Surfaces dialog: a mesh body rebuilt as exact faces wherever its
-// triangles lie on a plane, cylinder, cone, sphere, torus or oval wall,
-// within a tolerance.  Opens fresh from the Modify toolbar ({ itemId }) or on
-// a committed step from its timeline Edit ({ itemId, entryId }).
+// triangles lie on a plane, cylinder, cone, sphere, torus, oval wall or
+// smooth freeform surface, within a tolerance.  Opens fresh from the Modify
+// toolbar ({ itemId }) or on a committed step from its timeline Edit
+// ({ itemId, entryId }).
 const DEFAULT_TOLERANCE_MM = 0.01;
 // Finer than a mesh's own float precision would recognise nothing.
 const MIN_TOLERANCE_MM = 0.0001;
@@ -25,6 +26,7 @@ const LABELS = [
   ["sphere", "sphere", "spheres"],
   ["torus", "torus", "tori"],
   ["ellipticCylinder", "oval wall", "oval walls"],
+  ["bspline", "freeform", "freeform"],
 ];
 const count = (n) => Math.round(n).toLocaleString();
 

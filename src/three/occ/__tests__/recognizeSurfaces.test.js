@@ -34,6 +34,43 @@ const found = (r) =>
     .map(([t, n]) => `${n} ${t}`)
     .join(", ");
 
+// A 40 x 40 slab whose top is the smooth z = 10 + 2 sin(x/5) cos(y/7),
+// sampled every `step`, each top vertex moved up or down by up to `jitter`.
+const slab = (step, jitter = 0) => {
+  let seed = 1;
+  const rand = () =>
+    ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2;
+  const n = Math.round(40 / step);
+  const top = (i, j) => i * (n + 1) + j;
+  const bot = (i, j) => (n + 1) * (n + 1) + i * (n + 1) + j;
+  const positions = [];
+  const indices = [];
+  for (let i = 0; i <= n; i++)
+    for (let j = 0; j <= n; j++) {
+      const [x, y] = [j * step, i * step];
+      positions.push(
+        x,
+        y,
+        10 + 2 * Math.sin(x / 5) * Math.cos(y / 7) + jitter * rand(),
+      );
+    }
+  for (let i = 0; i <= n; i++)
+    for (let j = 0; j <= n; j++) positions.push(j * step, i * step, 0);
+  const quad = (a, b, c, d) => indices.push(a, b, c, a, c, d);
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++) {
+      quad(top(i, j), top(i, j + 1), top(i + 1, j + 1), top(i + 1, j));
+      quad(bot(i, j), bot(i + 1, j), bot(i + 1, j + 1), bot(i, j + 1));
+    }
+  for (let k = 0; k < n; k++) {
+    quad(top(0, k), bot(0, k), bot(0, k + 1), top(0, k + 1));
+    quad(top(n, k), top(n, k + 1), bot(n, k + 1), bot(n, k));
+    quad(top(k, 0), top(k + 1, 0), bot(k + 1, 0), bot(k, 0));
+    quad(top(k, n), bot(k, n), bot(k + 1, n), top(k + 1, n));
+  }
+  return { positions, indices };
+};
+
 describe("recognising the surfaces of a mesh", () => {
   for (const res of [0.05, 0.01]) {
     it(`finds a box's six faces and its bore at Resolution ${res}`, () => {
@@ -120,6 +157,70 @@ describe("recognising the surfaces of a mesh", () => {
     const r = ops.recognizeSurfaces({ positions, indices, tolerance: 0.01 });
     expect(found(r), "surfaces found").toBe("1 plane");
   });
+
+  it("leaves noise that only a surface threading every point would hold", () => {
+    // Jitter of 0.008, inside the 0.01 tolerance: a B-spline with a height
+    // for every point or so holds it, but that is the facets again, not a
+    // smooth surface -- as on a low-poly fin, whose freeform faces left
+    // more triangles than before.
+    const r = ops.recognizeSurfaces({ ...slab(1, 0.008), tolerance: 0.01 });
+    expect(r.counts.bspline, `regions ${found(r)}`).toBe(0);
+  });
+
+  it("fits no shallow cone round its own apex", () => {
+    // Each hilltop of the smooth slab holds a cone of 89 degrees within the
+    // tolerance, apex in the middle, which no face can be built on.
+    const mesh = slab(0.5);
+    const r = ops.recognizeSurfaces({ ...mesh, tolerance: 0.01 });
+    const { positions, indices } = mesh;
+    // Round its apex: the apex within the region's span along the axis
+    // (give or take the tolerance and 1% of its radius) and the region's
+    // vertices on more than three quarters of the way round it.
+    const around = r.regions.filter((g, k) => {
+      if (g.type !== "cone" || Math.abs(g.halfAngle) < Math.PI / 3)
+        return false;
+      const apex = -g.radius / Math.tan(g.halfAngle);
+      const axis = [...g.dir];
+      const u =
+        Math.abs(axis[0]) < 0.9
+          ? [0, axis[2], -axis[1]]
+          : [-axis[2], 0, axis[0]];
+      const ul = Math.hypot(...u);
+      const ex = u.map((x) => x / ul);
+      const ey = [
+        axis[1] * ex[2] - axis[2] * ex[1],
+        axis[2] * ex[0] - axis[0] * ex[2],
+        axis[0] * ex[1] - axis[1] * ex[0],
+      ];
+      const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      let lo = Infinity,
+        hi = -Infinity,
+        rmax = 0;
+      const angles = [];
+      r.triangleRegion.forEach((q, t) => {
+        if (q !== k) return;
+        for (let c = 0; c < 3; c++) {
+          const v = indices[3 * t + c];
+          const d = [0, 1, 2].map((a) => positions[3 * v + a] - g.point[a]);
+          const h = dot(d, axis);
+          const radial = d.map((x, a) => x - h * axis[a]);
+          lo = Math.min(lo, h);
+          hi = Math.max(hi, h);
+          rmax = Math.max(rmax, Math.hypot(...radial));
+          angles.push(Math.atan2(dot(radial, ey), dot(radial, ex)));
+        }
+      });
+      const slack = 0.01 + 0.01 * rmax;
+      if (apex < lo - slack || apex > hi + slack) return false;
+      angles.sort((a, b) => a - b);
+      let gap = angles[0] + 2 * Math.PI - angles[angles.length - 1];
+      for (let a = 1; a < angles.length; a++)
+        gap = Math.max(gap, angles[a] - angles[a - 1]);
+      return gap < Math.PI / 2;
+    });
+    expect(around.length, `regions ${found(r)}`).toBe(0);
+  });
+
   it("fits no curved surface through a handful of vertices", () => {
     // Four triangles across a slight bend: six vertices, which a cylinder or
     // a sphere passes through exactly whatever they are.
@@ -372,6 +473,31 @@ describe("recognising the surfaces of a mesh", () => {
           );
         case "torus":
           return Math.abs(Math.hypot(rho - g.radius, t) - g.minorRadius);
+        case "bspline": {
+          // Its height off the plane, from the uniform cubic B-spline the
+          // addon reports: along the normal, no less than the true distance.
+          const f = g.freeform;
+          const [x0, x1, y0, y1] = f.bounds;
+          const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+          const basis = (s) => [
+            (1 - s) ** 3 / 6,
+            (3 * s ** 3 - 6 * s * s + 4) / 6,
+            (-3 * s ** 3 + 3 * s * s + 3 * s + 1) / 6,
+            s ** 3 / 6,
+          ];
+          const span = (w, n) => Math.min(n - 1, Math.max(0, Math.floor(w)));
+          const u = ((dot(d, f.ex) - x0) / (x1 - x0)) * f.nx;
+          const v = ((dot(d, f.ey) - y0) / (y1 - y0)) * f.ny;
+          const iu = span(u, f.nx),
+            iv = span(v, f.ny);
+          const bu = basis(u - iu),
+            bv = basis(v - iv);
+          let h = 0;
+          for (let a = 0; a < 4; a++)
+            for (let b = 0; b < 4; b++)
+              h += bu[a] * bv[b] * f.heights[(iu + a) * (f.ny + 3) + iv + b];
+          return Math.abs(t - h);
+        }
         case "ellipticCylinder": {
           // Nearest point on the ellipse, by sampling finely enough for the test.
           const y = [
@@ -443,7 +569,7 @@ describe("recognising the surfaces of a mesh", () => {
       expect(g.radius, `torus ${g.radius}/${g.minorRadius}`).toBeGreaterThan(
         g.minorRadius,
       );
-  });
+  }, 20000); // recognition alone takes 3.9 s on this 8k-facet sphere
 
   it("labels every triangle with its region", () => {
     const r = recognise(occ.makeCylinder(-1, 1, 2), 0.05);

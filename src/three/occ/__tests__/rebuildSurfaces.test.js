@@ -33,6 +33,43 @@ const faces = (r) =>
     .map(([t, n]) => `${n} ${t}`)
     .join(", ");
 
+// A 40 x 40 slab whose top is the smooth z = 10 + 2 sin(x/5) cos(y/7),
+// sampled every `step`, each top vertex moved up or down by up to `jitter`.
+const slab = (step, jitter = 0) => {
+  let seed = 1;
+  const rand = () =>
+    ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2;
+  const n = Math.round(40 / step);
+  const top = (i, j) => i * (n + 1) + j;
+  const bot = (i, j) => (n + 1) * (n + 1) + i * (n + 1) + j;
+  const positions = [];
+  const indices = [];
+  for (let i = 0; i <= n; i++)
+    for (let j = 0; j <= n; j++) {
+      const [x, y] = [j * step, i * step];
+      positions.push(
+        x,
+        y,
+        10 + 2 * Math.sin(x / 5) * Math.cos(y / 7) + jitter * rand(),
+      );
+    }
+  for (let i = 0; i <= n; i++)
+    for (let j = 0; j <= n; j++) positions.push(j * step, i * step, 0);
+  const quad = (a, b, c, d) => indices.push(a, b, c, a, c, d);
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++) {
+      quad(top(i, j), top(i, j + 1), top(i + 1, j + 1), top(i + 1, j));
+      quad(bot(i, j), bot(i + 1, j), bot(i + 1, j + 1), bot(i, j + 1));
+    }
+  for (let k = 0; k < n; k++) {
+    quad(top(0, k), bot(0, k), bot(0, k + 1), top(0, k + 1));
+    quad(top(n, k), top(n, k + 1), bot(n, k + 1), bot(n, k));
+    quad(top(k, 0), top(k + 1, 0), bot(k + 1, 0), bot(k, 0));
+    quad(top(k, n), bot(k, n), bot(k + 1, n), top(k + 1, n));
+  }
+  return { positions, indices };
+};
+
 describe("rebuilding a mesh as exact faces", () => {
   const exact = [
     {
@@ -272,6 +309,26 @@ describe("rebuilding a mesh as exact faces", () => {
     );
     expect(faces(r), "faces").toBe("12 plane");
     expect(r.volume, "volume").toBeCloseTo(64 - 8, 6);
+  });
+
+  it("rebuilds a smooth freeform top as B-spline faces, close to its true volume", () => {
+    // No plane, cylinder, cone, sphere or torus holds a sin x cos surface;
+    // its pieces used to stay triangles or local fits whose faces failed
+    // (300 triangles at this sampling, a sphere patch taking the rest of its
+    // sphere among them).
+    const r = ops.rebuildSurfaces({
+      ...slab(1),
+      tolerance: 0.01,
+      printPrecision: 0.05,
+    });
+    expect(r.faceTypes.bspline, `faces ${faces(r)}`).toBeGreaterThan(0);
+    expect(r.faceTypes.triangle, `faces ${faces(r)}`).toBeLessThan(100);
+    // 40 x 40 x 10, plus the integral of the bumps.
+    const volume = 16000 + 2 * (5 * (1 - Math.cos(8))) * (7 * Math.sin(40 / 7));
+    expect(
+      Math.abs(r.volume - volume),
+      `volume ${r.volume} against ${volume}`,
+    ).toBeLessThan(2);
   });
 
   it("refuses a mesh with a hole in it", () => {

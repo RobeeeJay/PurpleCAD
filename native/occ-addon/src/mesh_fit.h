@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,8 @@ struct Mesh {
   V3 vert(uint32_t i) const { return {pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]}; }
 };
 
+struct Freeform;  // mesh_freeform.h
+
 // What a region was recognised as.  "mesh" stays triangles.
 struct Fit {
   std::string type = "mesh";
@@ -50,12 +53,19 @@ struct Fit {
   double minorRadius = 0;  // torus: tube radius; `radius` is the centre circle's
                            // ellipticCylinder: semi-minor axis; `radius` the semi-major
   V3 xdir{0, 0, 0};    // ellipticCylinder: the direction of the major axis
+  std::shared_ptr<const Freeform> freeform;  // bspline: its surface
 };
 
 struct Region {
   std::vector<uint32_t> tris;
   Fit fit;
   double area = 0;
+  // A freeform region: the regions its facets were in before, given back if
+  // its face won't hold in the rebuild.
+  std::vector<Region> before;
+  // For one of those: the region the rest of its facets are still in, which
+  // it rejoins (-1 if none is left).
+  int64_t home = -1;
 };
 
 std::vector<uint32_t> RegionVerts(const Mesh& m, const std::vector<uint32_t>& tris);

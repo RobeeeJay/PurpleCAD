@@ -2174,6 +2174,18 @@ function recognizeSurfaces({ positions, indices, tolerance }) {
             halfAngle: g.halfAngle,
             minorRadius: g.minorRadius,
             ...(g.xdir ? { xdir: Array.from(g.xdir) } : {}),
+            ...(g.freeform
+              ? {
+                  freeform: {
+                    ex: Array.from(g.freeform.ex),
+                    ey: Array.from(g.freeform.ey),
+                    bounds: Array.from(g.freeform.bounds),
+                    nx: g.freeform.nx,
+                    ny: g.freeform.ny,
+                    heights: Array.from(g.freeform.heights),
+                  },
+                }
+              : {}),
           }),
     })),
     triangleRegion: Array.from(r.triangleRegion),

@@ -12,6 +12,7 @@
 
 #include "occ_core.h"
 #include "mesh_edges.h"
+#include "mesh_freeform.h"
 
 #include <functional>
 #include <BRepClass3d_SolidClassifier.hxx>
@@ -24,7 +25,11 @@
 #include <GeomAPI_PointsToBSpline.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <Geom_BSplineSurface.hxx>
 #include <Geom_Circle.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColgp_Array2OfPnt.hxx>
 #include <Geom_Ellipse.hxx>
 #include <Geom_SurfaceOfLinearExtrusion.hxx>
 #include <gp_Elips.hxx>
@@ -80,6 +85,34 @@ Handle(Geom_Surface) SurfaceOf(const Fit& f, const recog::Mesh& m,
     Handle(Geom_Ellipse) e = new Geom_Ellipse(
         gp_Elips(gp_Ax2(P(f.point), D(f.dir), D(f.xdir)), f.radius, f.minorRadius));
     return new Geom_SurfaceOfLinearExtrusion(e, gp_Dir(D(f.dir)));
+  }
+  if (f.type == "bspline") {
+    // The height field as an OCC B-spline: uniform unclamped knots in span
+    // units, and the poles over their Greville abscissae (i - 1 spans in), so
+    // the surface's x and y are its parameters scaled and its height is the
+    // fitted one exactly.
+    const recog::Freeform& ff = *f.freeform;
+    const int cx = ff.nx + 3, cy = ff.ny + 3;
+    TColgp_Array2OfPnt poles(1, cx, 1, cy);
+    for (int i = 0; i < cx; i++)
+      for (int j = 0; j < cy; j++) {
+        const double x = ff.x0 + (ff.x1 - ff.x0) * (i - 1) / ff.nx;
+        const double y = ff.y0 + (ff.y1 - ff.y0) * (j - 1) / ff.ny;
+        poles(i + 1, j + 1) = P(recog::add(
+            recog::add(ff.origin, recog::mul(ff.ex, x)),
+            recog::add(recog::mul(ff.ey, y), recog::mul(ff.n, ff.c[size_t(i) * cy + j]))));
+      }
+    TColStd_Array1OfReal uk(1, ff.nx + 7), vk(1, ff.ny + 7);
+    TColStd_Array1OfInteger um(1, ff.nx + 7), vm(1, ff.ny + 7);
+    for (int i = 1; i <= ff.nx + 7; i++) {
+      uk(i) = i - 4;
+      um(i) = 1;
+    }
+    for (int i = 1; i <= ff.ny + 7; i++) {
+      vk(i) = i - 4;
+      vm(i) = 1;
+    }
+    return new Geom_BSplineSurface(poles, uk, vk, um, vm, 3, 3);
   }
   if (f.type == "cone") {
     // gp_Cone wants its radius at the location to be positive, and the fit's
@@ -292,6 +325,33 @@ Val RebuildSurfaces(Js& js) {
   // stray from its surface put back to triangles.
   BRep_Builder B;
   std::vector<char> demoted(rec.regions.size(), 0);
+  // A region back to triangles -- or, for a freeform face, back to the
+  // regions its facets were in before, which held on their own.
+  auto demote = [&](int64_t r) {
+    if (rec.regions[r].before.empty()) {
+      demoted[r] = 1;
+      return;
+    }
+    std::vector<recog::Region> was = std::move(rec.regions[r].before);
+    rec.regions[r].before.clear();
+    rec.regions[r].tris.clear();
+    demoted[r] = 1;
+    for (recog::Region& piece : was) {
+      // Back into the region it was split from, if that still stands: a
+      // piece of a sphere made a face of its own came out as the rest of
+      // the sphere.
+      if (piece.home >= 0 && !demoted[piece.home]) {
+        for (uint32_t t : piece.tris) {
+          rec.regionOf[t] = piece.home;
+          rec.regions[piece.home].tris.push_back(t);
+        }
+        continue;
+      }
+      for (uint32_t t : piece.tris) rec.regionOf[t] = int64_t(rec.regions.size());
+      rec.regions.push_back(std::move(piece));
+      demoted.push_back(0);
+    }
+  };
   std::vector<int64_t> faceOf, regionOfFace, triOfFace;
   size_t F = 0;
   // The surfaces' own sag over their areas: how much more an exact curved
@@ -550,6 +610,14 @@ Val RebuildSurfaces(Js& js) {
       for (auto& [p, c] : perPair)
         if (c != 2) junction[v] = 1;
     }
+    // A triangle face's edges are its three straight sides.  Where two sides
+    // border the same region, the run along them didn't stop at the corner,
+    // and one curve fitted round both left the triangle a two-edge wire bent
+    // out of its plane, which wouldn't mesh -- and the blame went to the
+    // region beside it, a 1,731-facet freeform face on a fin.
+    for (size_t f = 0; f < F; f++)
+      if (triOfFace[f] >= 0)
+        for (int k = 0; k < 3; k++) junction[m.idx[3 * triOfFace[f] + k]] = 1;
     std::vector<TopoDS_Vertex> vtx(V);
     auto vertexAt = [&](uint32_t v) {
       if (vtx[v].IsNull()) B.MakeVertex(vtx[v], P(m.vert(v)), tol);
@@ -694,7 +762,7 @@ Val RebuildSurfaces(Js& js) {
     if (!bad.empty()) {
       if (attempt >= 8)
         throw std::runtime_error("rebuildSurfaces: boundary curves kept straying from their faces");
-      for (int64_t r : bad) demoted[r] = 1;
+      for (int64_t r : bad) demote(r);
       continue;
     }
 
@@ -745,12 +813,45 @@ Val RebuildSurfaces(Js& js) {
     // be fine in the solid, whose check (below) catches the real ones.
     for (size_t f = 0; f < F; f++) {
       if (triOfFace[f] >= 0) continue;
-      const TopoDS_Face& face = faces[f];
+      TopoDS_Face& face = faces[f];
       double meshArea = 0;
       for (size_t t = 0; t < T; t++)
         if (faceOf[t] == int64_t(f)) meshArea += rec.area[t];
       GProp_GProps props;
       BRepGProp::SurfaceProperties(face, props);
+      auto areaHolds = [&](double a) {
+        return std::abs(std::abs(a) - meshArea) <= 0.05 * meshArea + tol * tol;
+      };
+      // On a surface closed in one direction only -- a sphere -- the fix
+      // bounds the face by the surface's own limits and takes the region's
+      // wire as a hole in them: a 102 mm^2 patch came out as 14,351 mm^2, the
+      // rest of the sphere.  Without the wires it added, and with the
+      // region's turned round, the face is the patch.
+      if (!areaHolds(props.Mass())) {
+        TopTools_IndexedMapOfShape ours;
+        for (const TopoDS_Edge& E : faceEdges[f]) TopExp::MapShapes(context->Apply(E), TopAbs_EDGE, ours);
+        TopoDS_Face alt = TopoDS::Face(face.EmptyCopied());
+        int kept = 0, added = 0;
+        for (TopExp_Explorer wx(face, TopAbs_WIRE); wx.More(); wx.Next()) {
+          bool mine = false;
+          for (TopExp_Explorer ex(wx.Current(), TopAbs_EDGE); ex.More() && !mine; ex.Next())
+            mine = ours.Contains(ex.Current());
+          if (mine) {
+            B.Add(alt, wx.Current().Reversed());
+            kept++;
+          } else {
+            added++;
+          }
+        }
+        if (kept > 0 && added > 0) {
+          GProp_GProps altProps;
+          BRepGProp::SurfaceProperties(alt, altProps);
+          if (areaHolds(altProps.Mass())) {
+            face = alt;
+            props = altProps;
+          }
+        }
+      }
       // How far this face is from its own edges -- not the edges' tolerance,
       // which is the worst over both their faces and blamed the fillet's flat
       // top for a cone beside it.
@@ -778,7 +879,7 @@ Val RebuildSurfaces(Js& js) {
           looseEdge = true;
       }
       bool meshes = false;
-      if (std::abs(std::abs(props.Mass()) - meshArea) <= 0.05 * meshArea + tol * tol &&
+      if (areaHolds(props.Mass()) &&
           !looseEdge) {
         BRepMesh_IncrementalMesh(face, std::max(tol, 1e-3));
         TopLoc_Location loc;
@@ -790,7 +891,7 @@ Val RebuildSurfaces(Js& js) {
     }
     if (!bad.empty()) {
       if (attempt >= 8) throw std::runtime_error("rebuildSurfaces: faces kept failing their checks");
-      for (int64_t r : bad) demoted[r] = 1;
+      for (int64_t r : bad) demote(r);
       continue;
     }
 
@@ -867,7 +968,7 @@ Val RebuildSurfaces(Js& js) {
       }
       if (!bad.empty()) {
         if (attempt >= 8) throw std::runtime_error("rebuildSurfaces: faces kept meeting inside out");
-        for (int64_t r : bad) demoted[r] = 1;
+        for (int64_t r : bad) demote(r);
         continue;
       }
     }
@@ -924,7 +1025,7 @@ Val RebuildSurfaces(Js& js) {
       if (culprits.empty() || attempt >= 8)
           throw std::runtime_error("rebuildSurfaces: the rebuilt solid was refused (" + c.why +
                                    "; sewn, " + c2.why + ")");
-        for (int64_t r : culprits) demoted[r] = 1;
+        for (int64_t r : culprits) demote(r);
         continue;
       }
     }
@@ -937,7 +1038,7 @@ Val RebuildSurfaces(Js& js) {
   js.set(out, "faces", js.makeNumber(double(F)));
   Val types = js.makeObject();
   for (const char* t :
-       {"plane", "cylinder", "cone", "sphere", "torus", "ellipticCylinder", "triangle"})
+       {"plane", "cylinder", "cone", "sphere", "torus", "ellipticCylinder", "bspline", "triangle"})
     js.set(types, t, js.makeNumber(faceTypes[t]));
   js.set(out, "faceTypes", types);
   js.set(out, "volume", js.makeNumber(c.volume));

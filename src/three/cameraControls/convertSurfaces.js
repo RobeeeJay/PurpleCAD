@@ -1,9 +1,10 @@
 // Convert to Surfaces: commit and live preview.  A mesh body is rebuilt as
 // exact faces -- each region recognised as a plane, cylinder, cone, sphere,
-// torus or oval wall becomes one face on it, the rest stay triangles
-// (docs/exact-imports-plan.md).  The body keeps its place (the result is in
-// its own frame) and becomes a `csg` with a "meshToSurfaces" recipe, whose
-// BREP later ops build from; a timeline Edit re-runs it on the same source.
+// torus, oval wall or freeform surface becomes one face on it, the rest stay
+// triangles (docs/exact-imports-plan.md).  The body keeps its place (the
+// result is in its own frame) and becomes a `csg` with a "meshToSurfaces"
+// recipe, whose BREP later ops build from; a timeline Edit re-runs it on the
+// same source.
 // The preview only RECOGNISES (fast), colouring each region by what it was
 // found to be; Confirm runs the rebuild, which can refuse, and then the body
 // stays the mesh it was.
@@ -32,6 +33,7 @@ export const SURFACE_COLORS = {
   sphere: 0x3fae7a,
   torus: 0xd94f7a,
   ellipticCylinder: 0xc9b23a,
+  bspline: 0x3fa9c9,
   mesh: 0x9a9a9a,
 };
 

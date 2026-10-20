@@ -6,6 +6,7 @@
 // facets alone say where the axis is.
 
 #include "mesh_fit.h"
+#include "mesh_freeform.h"
 
 #include <algorithm>
 
@@ -665,6 +666,7 @@ Fit FitEllipticCylinder(const Mesh& m, const std::vector<uint32_t>& tris,
 // The surface's tightest radius of curvature near a point (0 for a plane):
 // what a chord's sag on it is measured against.
 double TightestRadius(const Fit& f, const V3& p) {
+  if (f.type == "bspline") return FreeformTightestRadius(*f.freeform, p);
   if (f.type == "cylinder" || f.type == "sphere") return f.radius;
   if (f.type == "torus") return f.minorRadius;
   // An ellipse curves tightest at the ends of its major axis: b^2 / a.
@@ -679,6 +681,7 @@ double TightestRadius(const Fit& f, const V3& p) {
 
 // How far a point is from a fitted surface.
 double Distance(const Fit& f, const V3& p) {
+  if (f.type == "bspline") return FreeformDistance(*f.freeform, p);
   const V3 d = sub(p, f.point);
   if (f.type == "plane") return std::abs(dot(d, f.dir));
   if (f.type == "sphere") return std::abs(len(d) - f.radius);
