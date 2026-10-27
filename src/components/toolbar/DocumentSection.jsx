@@ -140,15 +140,19 @@ const DocumentSection = () => {
     return items.filter((i) => ids.has(i.id));
   };
   const nSelected = selectedItems().length;
-  // The file is named for what it holds: "scene", one object's name, or
-  // "selection" for several.
+  // The file is named for what it holds: the project for the scene, one
+  // object's name, or "selection" for several.
+  const fileSafe = (name, fallback) =>
+    (name || fallback).replace(/[\\/:*?"<>|]+/g, "_");
   const exportScope = (scope) => {
-    if (scope === "scene") return { list: items, name: "scene" };
+    if (scope === "scene") {
+      const { projects, activeProjectId } = useStore.getState();
+      const project = projects.find((p) => p.id === activeProjectId);
+      return { list: items, name: fileSafe(project?.name, "scene") };
+    }
     const list = selectedItems();
     const name =
-      list.length === 1
-        ? (list[0].name || "selection").replace(/[\\/:*?"<>|]+/g, "_")
-        : "selection";
+      list.length === 1 ? fileSafe(list[0].name, "selection") : "selection";
     return { list, name };
   };
 
