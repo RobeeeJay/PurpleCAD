@@ -1007,8 +1007,12 @@ describe("sketch region detection", () => {
       // Root should be the full square (largest area)
       expect(groups).toHaveLength(1);
       const root = groups[0];
-      // Root has 2 direct holes: the two triangles
-      expect(root.holes).toHaveLength(2);
+      // The two triangles are its direct children, but NOT its holes: they
+      // touch its outline, tiling it, and as holes they left the square a
+      // region of no area that OCC built into a broken prism (an extrude
+      // fused from it lost a strip).  Holes are only children strictly inside.
+      expect(root.entries).toHaveLength(2);
+      expect(root.holes).toHaveLength(0);
       // One of those triangle entries has the circle as its child
       const triWithCircle = root.entries.find((e) => e.entries.length > 0);
       expect(triWithCircle).toBeDefined();

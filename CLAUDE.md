@@ -1313,9 +1313,27 @@ sources are picked) that reuses the creation UI.
   instead (`arrangementFaces`: half-edge tracing, linear); below it the output
   is unchanged, because saved extrudes are matched against it, unions
   included. Region finding runs on EVERY sketch change, so anything slow here
-  is paid per nudge. Also: the splitter only divides a line where another
-  CROSSES it (`lineCrossIntersect` rejects endpoint parameters), so a line
-  that merely ENDS on another does not split the region (`loopFaces.test.js`).
+  is paid per nudge. Also: a line is divided where another CROSSES it
+  (`lineCrossIntersect`) AND where another non-parallel line ENDS on it
+  (`lineEndsOnLine`, a T-junction). Crossings alone used to be the rule, so a
+  line drawn from one side of a rectangle to the other, ending on both, made
+  no region: a cabinet panel's 0.2-wide strip couldn't be picked to extrude.
+  A line ending on a circle or arc still doesn't split it. And a loop inside
+  another is its HOLE only when strictly inside: the parts either side of
+  such a line touch the outline they tile, and as holes they left the outer
+  loop a region of no area that OCC built into a broken prism -- fused with
+  the parts, it lost the strip from the extrude. Splitting at T-junctions also
+  makes a construction leg laid ALONG a side (the project box's screw-hole
+  legs) duplicate the piece of side it covers; duplicate straight pieces
+  between the same two nodes are dropped, keeping the earlier shape's, or the
+  outline named the leg and the plate's extrude lost its match. And a loop
+  that runs STRAIGHT past a T-junction joins the two pieces back into one
+  edge (`mergeThroughT`): left split, the lid plate's outline had a vertex
+  where each leg ended on a side, the extrude built each side as three faces,
+  and push/pull could no longer offset the lid's faces together. A probe that
+  compared regions by area and shapes called them identical; count the
+  vertices. Crossing splits are NOT merged -- saved `side{k}` face names count
+  those vertices (`loopFaces.test.js`).
 - **The 3D ground ruler is centred on the RAW camera target — never add a
   screen-space shift to it.** The compact axis indicator shifts right by
   `camRight * halfPanelWidth` to clear the left panel, but `camRight` rotates
