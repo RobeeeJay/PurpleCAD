@@ -1,0 +1,143 @@
+name: Release
+
+# Builds the macOS (Apple Silicon) app for a version tag and publishes it as a
+# pre-release on the PUBLIC releases repository, so testers can download builds
+# and file issues while this source repository stays private.
+#
+# Setup, once:
+#   - repository variable RELEASES_REPO, e.g. RobeeeJay/PurpleCAD-beta
+#   - secret RELEASES_TOKEN: a fine-grained token with Contents read/write on
+#     that repository ONLY (github.token cannot write to another repository)
+#
+# Only mac arm64: it is the one packaging path that bundles OCC (afterPack.cjs
+# returns early on other platforms, so a Linux or Windows build would ship an
+# addon that cannot find its kernel).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# A newer release run cancels an older one still going.  Publishing is the LAST
+# step and the build makes no release until then, so a run cancelled while
+# building leaves nothing behind; one cancelled mid-upload can leave a release
+# missing files, which the next run replaces (see "Publish").
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  mac-arm64:
+    runs-on: macos-14 # arm64 (Apple Silicon) runner
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Same as addon-build.yml: the lockfile is node 24's npm.
+          node-version: "24"
+          cache: "npm"
+
+      # A tag that disagrees with package.json would publish a build whose About
+      # box names another version.
+      - name: Tag matches package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          want="v$(node -p 'require("./package.json").version')"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json ($want)" >&2
+            exit 1
+          fi
+
+      - name: Install cmake + ninja
+        run: brew install cmake ninja
+
+      # Same key as addon-build.yml.  A tag run can only read caches saved on
+      # the default branch or on its own ref, so expect the first release to
+      # build OCC (~12 min) and later ones of the same tag to reuse it.
+      - name: Cache OCC arm64 build
+        id: cache-occ
+        uses: actions/cache@v4
+        with:
+          path: ~/occ-8.0.1-arm64
+          key: occ-8.0.1-arm64-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Clone OCC source
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch V8_0_1 \
+            https://github.com/Open-Cascade-SAS/OCCT.git /tmp/occt
+
+      - name: Build and install OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        run: |
+          cmake -S /tmp/occt -B /tmp/occt-build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_INSTALL_PREFIX=$HOME/occ-8.0.1-arm64 \
+            -DBUILD_MODULE_FoundationClasses=ON \
+            -DBUILD_MODULE_ModelingData=ON \
+            -DBUILD_MODULE_ModelingAlgorithms=ON \
+            -DBUILD_MODULE_DataExchange=ON \
+            -DBUILD_MODULE_Visualization=OFF \
+            -DBUILD_MODULE_Draw=OFF \
+            -DBUILD_MODULE_ApplicationFramework=OFF \
+            -DUSE_FREETYPE=OFF \
+            -DUSE_TK=OFF \
+            -DUSE_OPENGL=OFF
+          cmake --build /tmp/occt-build --parallel $(sysctl -n hw.logicalcpu)
+          cmake --install /tmp/occt-build
+
+      - name: Install npm dependencies
+        run: |
+          npm ci
+          npm ci --prefix native/occ-addon
+
+      - name: Build the app
+        run: npm run dist:mac-arm64
+
+      # The bundle must load its kernel with nothing but what it carries: an
+      # absolute rpath or a missing dylib resolves on the machine that built it
+      # and nowhere else (CLAUDE.md, "Packaging the mac app").  Run from an
+      # unrelated directory so the bundled path is the only one there is.
+      - name: Packaged addon loads from the bundle
+        run: |
+          app=release/mac-arm64/PurpleCAD.app
+          node_file="$PWD/$app/Contents/Resources/app.asar.unpacked/native/occ-addon/build/Release/occ_addon.node"
+          cd "$RUNNER_TEMP"
+          ELECTRON_RUN_AS_NODE=1 "$GITHUB_WORKSPACE/$app/Contents/MacOS/PurpleCAD" \
+            -e "require('$node_file'); console.log('addon loads')"
+
+      - name: Keep the build as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: purplecad-mac-arm64
+          path: |
+            release/*.dmg
+            release/*.zip
+          retention-days: 14
+
+      # Uploads with --clobber onto an existing release of the same tag, so a
+      # re-run (or the run after a cancelled one) completes a partial release
+      # rather than failing on it.  Manual runs build but never publish.
+      - name: Publish
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          REPO: ${{ vars.RELEASES_REPO }}
+        run: |
+          if [ -z "$REPO" ] || [ -z "$GH_TOKEN" ]; then
+            echo "Set the RELEASES_REPO variable and RELEASES_TOKEN secret first" >&2
+            exit 1
+          fi
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --repo "$REPO" --prerelease \
+              --title "PurpleCAD $GITHUB_REF_NAME" \
+              --notes "Beta build for Apple Silicon Macs. Please attach an exported .pcad (zipped) to bug reports."
+          fi
+          gh release upload "$GITHUB_REF_NAME" --repo "$REPO" --clobber \
+            release/*.dmg release/*.zip
