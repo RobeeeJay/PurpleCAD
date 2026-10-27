@@ -248,6 +248,38 @@ test("the About box names the license and opens its full text", async () => {
   );
 });
 
+test("the settings dialog's inputs and buttons share one column", async ({}, testInfo) => {
+  await page.evaluate(() =>
+    window.__store.getState().setSettingsDialogOpen(true),
+  );
+  const dialog = page.locator(".variables-dialog");
+  await expect(dialog.getByText("Snap distance")).toBeVisible();
+  await dialog.screenshot({ path: testInfo.outputPath("settings.png") });
+  // Every number box and every button, not the slider beside the first one.
+  const boxes = await dialog.evaluate((d) =>
+    [
+      ...d.querySelectorAll('input:not([type="range"]), button.variables-btn'),
+    ].map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        what: el.textContent || el.value,
+        left: Math.round(r.left),
+        right: Math.round(r.right),
+        height: Math.round(r.height),
+      };
+    }),
+  );
+  await page.evaluate(() =>
+    window.__store.getState().setSettingsDialogOpen(false),
+  );
+  expect(boxes.length).toBe(11);
+  const one = (k) => new Set(boxes.map((b) => b[k])).size;
+  const at = JSON.stringify(boxes);
+  expect(one("left"), `left edges ${at}`).toBe(1);
+  expect(one("right"), `right edges ${at}`).toBe(1);
+  expect(one("height"), `heights ${at}`).toBe(1);
+});
+
 test("the welcome dialog shows its text and is remembered once dismissed", async () => {
   // An e2e build never opens it by itself: every launch is a fresh profile,
   // and it would sit over the viewport in every other spec.

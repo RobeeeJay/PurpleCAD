@@ -53,8 +53,12 @@ const SettingsDialog = () => {
     fontSize: 12,
     color: "var(--text-secondary)",
   };
+  // Every control is one width and height, and is followed by a unit slot of
+  // one width (empty beside a button), so inputs and buttons share a right
+  // edge down the dialog: a degree sign and "mm" are different widths.
+  const controlSize = { width: 72, height: 26, boxSizing: "border-box" };
   const numStyle = {
-    width: 64,
+    ...controlSize,
     background: "var(--bg-tertiary)",
     border: "1px solid var(--border-color)",
     color: "var(--text-primary)",
@@ -64,6 +68,15 @@ const SettingsDialog = () => {
     fontSize: 13,
     textAlign: "right",
   };
+  const buttonStyle = { ...controlSize, padding: 0 };
+  const control = (el, unit = "") => (
+    <span
+      style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+    >
+      {el}
+      <span style={{ width: 20, fontSize: 10, opacity: 0.7 }}>{unit}</span>
+    </span>
+  );
 
   return (
     <div className="variables-dialog-backdrop" onClick={close}>
@@ -90,32 +103,34 @@ const SettingsDialog = () => {
                 lower = flatter, less perspective
               </span>
             </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input
-                type="range"
-                min="5"
-                max="90"
-                step="1"
-                value={fov}
-                onChange={(e) => setFov(e.target.value)}
-                onKeyDown={stop}
-              />
-              <NumberInput
-                min="5"
-                max="90"
-                step="1"
-                value={fov}
-                onCommit={(n, raw) => setFov(raw)}
-                onKeyDown={stop}
-                style={numStyle}
-              />
-              <span style={{ fontSize: 10, opacity: 0.7 }}>&deg;</span>
-            </span>
+            {control(
+              <>
+                <input
+                  type="range"
+                  min="5"
+                  max="90"
+                  step="1"
+                  value={fov}
+                  onChange={(e) => setFov(e.target.value)}
+                  onKeyDown={stop}
+                />
+                <NumberInput
+                  min="5"
+                  max="90"
+                  step="1"
+                  value={fov}
+                  onCommit={(n, raw) => setFov(raw)}
+                  onKeyDown={stop}
+                  style={numStyle}
+                />
+              </>,
+              "\u00b0",
+            )}
           </div>
 
           <div style={rowStyle}>
             <span style={labelStyle}>Snap distance</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {control(
               <NumberInput
                 min="0.1"
                 step="0.5"
@@ -123,14 +138,14 @@ const SettingsDialog = () => {
                 onCommit={(n, raw) => setSnapDistanceMm(raw)}
                 onKeyDown={stop}
                 style={numStyle}
-              />
-              <span style={{ fontSize: 10, opacity: 0.7 }}>mm</span>
-            </span>
+              />,
+              "mm",
+            )}
           </div>
 
           <div style={rowStyle}>
             <span style={labelStyle}>Snap angle</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {control(
               <NumberInput
                 min="0.1"
                 step="1"
@@ -138,9 +153,9 @@ const SettingsDialog = () => {
                 onCommit={(n, raw) => setSnapAngleDeg(raw)}
                 onKeyDown={stop}
                 style={numStyle}
-              />
-              <span style={{ fontSize: 10, opacity: 0.7 }}>&deg;</span>
-            </span>
+              />,
+              "\u00b0",
+            )}
           </div>
 
           <div style={rowStyle}>
@@ -150,7 +165,7 @@ const SettingsDialog = () => {
                 max bend between connected lines to highlight as one curve
               </span>
             </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {control(
               <NumberInput
                 min="0"
                 step="1"
@@ -158,9 +173,9 @@ const SettingsDialog = () => {
                 onCommit={(n, raw) => setCurveDetectionAngleDeg(raw)}
                 onKeyDown={stop}
                 style={numStyle}
-              />
-              <span style={{ fontSize: 10, opacity: 0.7 }}>&deg;</span>
-            </span>
+              />,
+              "\u00b0",
+            )}
           </div>
 
           <div style={rowStyle}>
@@ -171,7 +186,7 @@ const SettingsDialog = () => {
                 rebuilds the whole timeline
               </span>
             </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {control(
               <NumberInput
                 min="0.001"
                 step="0.05"
@@ -179,42 +194,48 @@ const SettingsDialog = () => {
                 onCommit={(n, raw) => setResolutionMm(raw)}
                 onKeyDown={stop}
                 style={numStyle}
-              />
-              <span style={{ fontSize: 10, opacity: 0.7 }}>mm</span>
-            </span>
+              />,
+              "mm",
+            )}
           </div>
 
           <div style={rowStyle}>
             <span style={labelStyle}>Dark mode</span>
-            <button
-              className="variables-btn"
-              onClick={toggleTheme}
-              style={{ minWidth: 56 }}
-            >
-              {theme === "dark" ? "On" : "Off"}
-            </button>
+            {control(
+              <button
+                className="variables-btn"
+                onClick={toggleTheme}
+                style={buttonStyle}
+              >
+                {theme === "dark" ? "On" : "Off"}
+              </button>,
+            )}
           </div>
 
           <div style={rowStyle}>
             <span style={labelStyle}>Orientation widget</span>
-            <button
-              className="variables-btn"
-              onClick={toggleWidgetVisibility}
-              style={{ minWidth: 56 }}
-            >
-              {widgetVisible ? "On" : "Off"}
-            </button>
+            {control(
+              <button
+                className="variables-btn"
+                onClick={toggleWidgetVisibility}
+                style={buttonStyle}
+              >
+                {widgetVisible ? "On" : "Off"}
+              </button>,
+            )}
           </div>
 
           <div style={rowStyle}>
             <span style={labelStyle}>Combined axis</span>
-            <button
-              className="variables-btn"
-              onClick={toggleAxisVisibility}
-              style={{ minWidth: 56 }}
-            >
-              {axisVisible ? "On" : "Off"}
-            </button>
+            {control(
+              <button
+                className="variables-btn"
+                onClick={toggleAxisVisibility}
+                style={buttonStyle}
+              >
+                {axisVisible ? "On" : "Off"}
+              </button>,
+            )}
           </div>
 
           <div style={rowStyle}>
@@ -224,37 +245,43 @@ const SettingsDialog = () => {
                 combine disjoint profiles (e.g. text glyphs) into one body
               </span>
             </span>
-            <button
-              className="variables-btn"
-              onClick={() =>
-                setAlwaysExtrudeSingleObject(!alwaysExtrudeSingleObject)
-              }
-              style={{ minWidth: 56 }}
-            >
-              {alwaysExtrudeSingleObject ? "On" : "Off"}
-            </button>
+            {control(
+              <button
+                className="variables-btn"
+                onClick={() =>
+                  setAlwaysExtrudeSingleObject(!alwaysExtrudeSingleObject)
+                }
+                style={buttonStyle}
+              >
+                {alwaysExtrudeSingleObject ? "On" : "Off"}
+              </button>,
+            )}
           </div>
 
           <div style={rowStyle}>
             <span style={labelStyle}>Reset all settings</span>
-            <button
-              className="variables-btn"
-              onClick={resetSettings}
-              style={{ minWidth: 56 }}
-            >
-              Reset
-            </button>
+            {control(
+              <button
+                className="variables-btn"
+                onClick={resetSettings}
+                style={buttonStyle}
+              >
+                Reset
+              </button>,
+            )}
           </div>
 
           <div style={rowStyle}>
             <span style={labelStyle}>About PurpleCAD</span>
-            <button
-              className="variables-btn"
-              onClick={() => setAboutDialogOpen(true)}
-              style={{ minWidth: 56 }}
-            >
-              About
-            </button>
+            {control(
+              <button
+                className="variables-btn"
+                onClick={() => setAboutDialogOpen(true)}
+                style={buttonStyle}
+              >
+                About
+              </button>,
+            )}
           </div>
         </div>
       </div>
