@@ -51,7 +51,7 @@ const Runs = ({ runs }) =>
     return <span key={k}>{r.v}</span>;
   });
 
-const Block = ({ block }) => {
+export const Block = ({ block }) => {
   switch (block.type) {
     case "heading": {
       const H = `h${Math.min(block.level + 2, 6)}`;

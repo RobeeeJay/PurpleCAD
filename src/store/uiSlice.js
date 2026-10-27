@@ -3,7 +3,7 @@
 // Nothing here touches history or persistence — these are all
 // runtime-only setters.
 
-import { getSystemTheme, loadSnapSettings } from "./internals.js";
+import { getSystemTheme, loadSnapSettings, welcomeDue } from "./internals.js";
 import { TOOL_RESET_PATCH } from "./uiToolReset.js";
 export { TOOL_RESET_PATCH };
 import { createUiModifyToolsSlice } from "./uiModifyToolsSlice.js";
@@ -290,6 +290,7 @@ export const uiInitial = {
 
   settingsDialogOpen: false,
   aboutDialogOpen: false,
+  welcomeDialogOpen: welcomeDue(),
   projectsDialogOpen: false,
   // Debug browser for every object in the scene (Objects list header).
   sceneInspectorOpen: false,
