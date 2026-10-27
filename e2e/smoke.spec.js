@@ -258,9 +258,7 @@ test("the settings dialog's inputs and buttons share one column", async ({}, tes
   // Every number box and every button, not the slider beside the first one.
   const boxes = await dialog.evaluate((d) =>
     [
-      ...d.querySelectorAll(
-        'input:not([type="range"]), button.variables-btn',
-      ),
+      ...d.querySelectorAll('input:not([type="range"]), button.variables-btn'),
     ].map((el) => {
       const r = el.getBoundingClientRect();
       return {
@@ -280,6 +278,32 @@ test("the settings dialog's inputs and buttons share one column", async ({}, tes
   expect(one("left"), `left edges ${at}`).toBe(1);
   expect(one("right"), `right edges ${at}`).toBe(1);
   expect(one("height"), `heights ${at}`).toBe(1);
+});
+
+test("the welcome dialog shows its text and is remembered once dismissed", async () => {
+  // An e2e build never opens it by itself: every launch is a fresh profile,
+  // and it would sit over the viewport in every other spec.
+  expect(
+    await page.evaluate(() => window.__store.getState().welcomeDialogOpen),
+  ).toBe(false);
+  await page.evaluate(() =>
+    window.__store.getState().setWelcomeDialogOpen(true),
+  );
+  const dialog = page.getByRole("dialog", { name: "Welcome to PurpleCAD" });
+  await expect(dialog).toContainText("This is a BETA version");
+  await expect(dialog).toContainText("Use it at your own risk!");
+  await dialog.getByRole("button", { name: "Got it" }).click();
+  await expect(dialog).toBeHidden();
+  // Read back from the main process: the write goes there asynchronously.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          window.electronAPI.dbCall("db:settingGet", "welcomeSeen"),
+        ),
+      { message: "welcomeSeen in the database" },
+    )
+    .toBe("1");
 });
 
 test("license links open in the system browser, never in the app window", async () => {

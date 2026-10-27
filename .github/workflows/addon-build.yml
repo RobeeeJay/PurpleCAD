@@ -3,6 +3,12 @@ name: OCC Addon
 on:
   pull_request:
 
+# A new push to a PR cancels that PR's run still going: its result is already
+# out of date, and macOS runner minutes are the expensive kind.
+concurrency:
+  group: addon-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-14  # arm64 (Apple Silicon) runner

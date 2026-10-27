@@ -550,6 +550,14 @@ export const loadSnapSettings = () => {
   }
 };
 
+// The welcome dialog shows until it has been dismissed once on this machine.
+// Never in an e2e build: every test launches a fresh profile, and a dialog
+// over the viewport would swallow the clicks of every spec.
+export const welcomeDue = () =>
+  !(typeof __E2E__ !== "undefined" && __E2E__) &&
+  db.settingGet("welcomeSeen") == null;
+export const markWelcomeSeen = () => db.settingSet("welcomeSeen", "1");
+
 export const saveSnapSettings = (snap) => {
   try {
     db.settingSet(

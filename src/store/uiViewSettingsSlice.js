@@ -8,6 +8,7 @@ import {
   getSystemTheme,
   saveSnapSettings,
   dirtyAllEntries,
+  markWelcomeSeen,
   SNAP_DEFAULTS,
 } from "./internals.js";
 
@@ -149,6 +150,12 @@ export const createUiViewSettingsSlice = (set) => ({
     }),
   setSettingsDialogOpen: (open) => set({ settingsDialogOpen: !!open }),
   setAboutDialogOpen: (open) => set({ aboutDialogOpen: !!open }),
+  // Closing it, by any route, is what counts as having seen it.
+  closeWelcomeDialog: () => {
+    markWelcomeSeen();
+    set({ welcomeDialogOpen: false });
+  },
+  setWelcomeDialogOpen: (open) => set({ welcomeDialogOpen: !!open }),
   setProjectsDialogOpen: (open) => set({ projectsDialogOpen: !!open }),
   setSceneInspectorOpen: (open) => set({ sceneInspectorOpen: !!open }),
 });

@@ -11,8 +11,8 @@ import {
   lineCircleIntersect,
   circleCircleIntersect,
   lineCrossIntersect,
+  lineEndsOnLine,
   arcSegsN,
-  sampleShapeForPoly,
 } from "./loopIntersect.js";
 import {
   polyContainsPoint,
@@ -22,6 +22,7 @@ import {
   reverseEdgeCurves,
 } from "./polygonUtil.js";
 import { cogShapeLoops } from "../cogGeometry.js";
+import { appendSamples, arrangementFaces } from "./arrangementFaces.js";
 import { MM_PER_UNIT } from "./dimensions.js";
 
 export {
@@ -43,162 +44,6 @@ export {
 // keep it -- but beyond this many cycles the sketch is an overlapping
 // arrangement, and its regions are the faces below.
 const MAX_ENUMERATED_CYCLES = 128;
-
-// A loop's polygon is sampled from its curves, and OCC can only rebuild a
-// curved face from the curve itself: a polygon makes N flat faces, which every
-// later boolean keeps.  So each loop also records which of its edges lie on
-// which exact curve -- edge k runs from vertex k to vertex k+1 (mod n), and a
-// run covers `count` edges from `start`.  Straight edges carry no run.
-function curveRun(shape, start, count) {
-  if (count === 0) return null;
-  if (shape.type === "arc")
-    return {
-      start,
-      count,
-      type: "arc",
-      cx: shape.cx,
-      cy: shape.cy,
-      r: shape.r,
-    };
-  if (shape.type === "bezier") {
-    const { p0, p1, p2, p3 } = shape;
-    return {
-      start,
-      count,
-      type: "bezier",
-      p0: { x: p0.x, y: p0.y },
-      p1: { x: p1.x, y: p1.y },
-      p2: { x: p2.x, y: p2.y },
-      p3: { x: p3.x, y: p3.y },
-    };
-  }
-  return null;
-}
-
-// Sample `shape` onto the end of `polygon`, recording its curve run.
-function appendSamples(polygon, runs, shape, startIsA, N) {
-  const pts = sampleShapeForPoly(shape, startIsA, N);
-  const run = curveRun(shape, polygon.length, pts.length);
-  if (run) runs.push(run);
-  for (const p of pts) polygon.push(p);
-}
-
-// The bounded faces of a planar arrangement, plus each connected piece's outer
-// outline: the regions you can see, not every union of them.  Linear in the
-// edge count: every directed edge borders exactly one face, and walking "take
-// the sharpest right turn" from it goes round that face.
-function arrangementFaces(
-  shapeNodes,
-  subEntries,
-  nodes,
-  curveSegments,
-  precision,
-) {
-  const live = shapeNodes.map((sn) => !!sn && sn.a !== sn.b);
-  // A dangling edge (a node of degree 1) bounds no region; tracing round it
-  // would put a zero-width spike in a face that OCC's wire builder rejects.
-  const degree = new Map();
-  const bump = (n, d) => degree.set(n, (degree.get(n) || 0) + d);
-  shapeNodes.forEach((sn, si) => {
-    if (live[si]) {
-      bump(sn.a, 1);
-      bump(sn.b, 1);
-    }
-  });
-  for (let pruned = true; pruned;) {
-    pruned = false;
-    shapeNodes.forEach((sn, si) => {
-      if (live[si] && (degree.get(sn.a) === 1 || degree.get(sn.b) === 1)) {
-        live[si] = false;
-        bump(sn.a, -1);
-        bump(sn.b, -1);
-        pruned = true;
-      }
-    });
-  }
-
-  const segsOf = (sh) =>
-    arcSegsN(
-      sh,
-      sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI,
-      curveSegments,
-      precision,
-    );
-  // Half-edge h = 2*si (a -> b) or 2*si + 1 (b -> a).  Its direction as it
-  // leaves its node is taken from the curve's first sample, not the far end,
-  // so two arcs leaving one point (circles crossing there) sort by where
-  // they actually go.
-  const tail = (h) => (h & 1 ? shapeNodes[h >> 1].b : shapeNodes[h >> 1].a);
-  const head = (h) => (h & 1 ? shapeNodes[h >> 1].a : shapeNodes[h >> 1].b);
-  const samples = (h) => {
-    const sh = subEntries[h >> 1].shape;
-    return sampleShapeForPoly(sh, (h & 1) === 0, Math.max(2, segsOf(sh)));
-  };
-  const out = new Map();
-  shapeNodes.forEach((sn, si) => {
-    if (!live[si]) return;
-    for (const h of [si * 2, si * 2 + 1]) {
-      const from = nodes[tail(h)];
-      const pts = samples(h);
-      const to = pts.length > 1 ? pts[1] : nodes[head(h)];
-      const list = out.get(tail(h)) || [];
-      list.push({ h, ang: Math.atan2(to.y - from.y, to.x - from.x) });
-      out.set(tail(h), list);
-    }
-  });
-  const slot = new Map();
-  out.forEach((list) => {
-    list.sort((p, q) => p.ang - q.ang);
-    list.forEach((e, i) => slot.set(e.h, i));
-  });
-  // The face on h's left continues along the edge just clockwise of h's twin.
-  const next = (h) => {
-    const list = out.get(head(h));
-    return list[(slot.get(h ^ 1) - 1 + list.length) % list.length].h;
-  };
-
-  const faces = [];
-  const seen = new Set();
-  out.forEach((list) => {
-    for (const { h: start } of list) {
-      if (seen.has(start)) continue;
-      const walk = [];
-      let h = start;
-      while (!seen.has(h)) {
-        seen.add(h);
-        walk.push(h);
-        h = next(h);
-      }
-      if (h !== start) continue;
-      const polygon = [];
-      const curves = [];
-      for (const e of walk) {
-        const pts = samples(e);
-        const run = curveRun(
-          subEntries[e >> 1].shape,
-          polygon.length,
-          pts.length,
-        );
-        if (run) curves.push(run);
-        for (const p of pts) polygon.push(p);
-      }
-      const area = signedPolyAreaXY(polygon);
-      const shapeIndices = [
-        ...new Set(walk.map((e) => subEntries[e >> 1].origIdx)),
-      ];
-      // Counter-clockwise: a bounded face.  Clockwise: a piece's outline, kept
-      // (reversed) when it is a simple loop, as the cycle search offered it.
-      if (area > 1e-12) faces.push({ polygon, shapeIndices, curves });
-      else if (area < -1e-12 && new Set(walk.map(tail)).size === walk.length)
-        faces.push({
-          polygon: polygon.slice().reverse(),
-          shapeIndices,
-          curves: reverseEdgeCurves(curves, polygon.length),
-        });
-    }
-  });
-  return faces;
-}
 
 export function findClosedLoopsWithShapes(
   shapes,
@@ -300,6 +145,8 @@ export function findClosedLoopsWithShapes(
   // ── Compute pairwise intersection points ─────────────────────────────
   // splitPts[i] = list of split parameters/angles on expandedEntries[i]
   const splitPts = expandedEntries.map(() => []);
+  // Where a line ends on another without crossing it (see mergeThroughT).
+  const tPts = [];
 
   for (let i = 0; i < expandedEntries.length; i++) {
     for (let j = i + 1; j < expandedEntries.length; j++) {
@@ -312,6 +159,15 @@ export function findClosedLoopsWithShapes(
         if (pt) {
           splitPts[i].push({ value: pt.ti, x: pt.x, y: pt.y });
           splitPts[j].push({ value: pt.tj, x: pt.x, y: pt.y });
+        } else {
+          for (const q of lineEndsOnLine(si, sj, EPS)) {
+            splitPts[i].push({ value: q.t, x: q.x, y: q.y });
+            tPts.push(q);
+          }
+          for (const q of lineEndsOnLine(sj, si, EPS)) {
+            splitPts[j].push({ value: q.t, x: q.x, y: q.y });
+            tPts.push(q);
+          }
         }
       } else if (si.type === "line" && sj.type === "circle") {
         for (const pt of lineCircleIntersect(si, sj)) {
@@ -387,6 +243,7 @@ export function findClosedLoopsWithShapes(
             y2: shape.y1 + t2 * (shape.y2 - shape.y1),
           },
           origIdx,
+          line: i,
         });
       }
     } else if (shape.type === "circle") {
@@ -457,6 +314,76 @@ export function findClosedLoopsWithShapes(
       };
     return null;
   });
+
+  // Two straight pieces between the same two nodes are one edge drawn twice:
+  // a construction leg laid along a rectangle's side, once the side is split
+  // where the next leg starts on it.  Kept, they made a cycle of no area and
+  // could stand in for the side, so the outline loop named the leg instead
+  // of the side and a profile matched by its shapes stopped finding it.  The
+  // piece from the earlier shape -- the outline, drawn first -- is kept.
+  const straightAt = new Map();
+  shapeNodes.forEach((sn, si) => {
+    if (!sn || sn.a === sn.b || subEntries[si].shape.type !== "line") return;
+    const key = `${Math.min(sn.a, sn.b)},${Math.max(sn.a, sn.b)}`;
+    const prev = straightAt.get(key);
+    if (prev == null) return straightAt.set(key, si);
+    const drop = subEntries[si].origIdx < subEntries[prev].origIdx ? prev : si;
+    shapeNodes[drop] = null;
+    if (drop === prev) straightAt.set(key, si);
+  });
+
+  // A line split where another line merely ENDS on it is still one edge of a
+  // loop that runs straight past the junction.  Sampled as two pieces it put a
+  // vertex mid-side, and the extrude built that side as two faces: the project
+  // box lid's plate, whose screw-hole legs end on its sides, then had its outer
+  // faces split and push/pull could no longer offset them together.  Only
+  // T-junctions merge -- a crossing split was always kept, and saved face
+  // names (`side{k}`) count those vertices.
+  const tNodes = new Set();
+  for (const q of tPts) {
+    const n = nodes.findIndex((p) => Math.hypot(p.x - q.x, p.y - q.y) < EPS);
+    if (n >= 0) tNodes.add(n);
+  }
+  const startOf = (sh, fwd) =>
+    fwd ? { x: sh.x1, y: sh.y1 } : { x: sh.x2, y: sh.y2 };
+  const endOf = (sh, fwd) => startOf(sh, !fwd);
+  // steps: a loop's edges in order, { si, fwd, from: node it leaves }.
+  const mergeThroughT = (steps) => {
+    const n = steps.length;
+    const joins = (k) => {
+      const a = subEntries[steps[(k - 1 + n) % n].si].line;
+      return (
+        a != null &&
+        a === subEntries[steps[k].si].line &&
+        tNodes.has(steps[k].from)
+      );
+    };
+    const first = steps.findIndex((_, k) => !joins(k));
+    if (first < 0)
+      return steps.map((st) => ({
+        shape: subEntries[st.si].shape,
+        fwd: st.fwd,
+      }));
+    const out = [];
+    for (let m = 0; m < n; m++) {
+      const k = (first + m) % n;
+      const st = steps[k];
+      const sh = subEntries[st.si].shape;
+      if (m > 0 && joins(k)) {
+        const last = out[out.length - 1];
+        const e = endOf(sh, st.fwd);
+        last.shape = { ...last.shape, x2: e.x, y2: e.y };
+      } else if (sh.type === "line" && subEntries[st.si].line != null) {
+        const a = startOf(sh, st.fwd);
+        const b = endOf(sh, st.fwd);
+        out.push({
+          shape: { type: "line", x1: a.x, y1: a.y, x2: b.x, y2: b.y },
+          fwd: true,
+        });
+      } else out.push({ shape: sh, fwd: st.fwd });
+    }
+    return out;
+  };
 
   const adj = {};
   shapeNodes.forEach((sn, si) => {
@@ -595,6 +522,7 @@ export function findClosedLoopsWithShapes(
         nodes,
         curveSegments,
         precision,
+        mergeThroughT,
       ),
     );
   }
@@ -603,20 +531,23 @@ export function findClosedLoopsWithShapes(
     const poly = [];
     const curves = [];
     const idxSet = new Set();
-    for (const edge of path) {
-      const sn = shapeNodes[edge.si];
-      const sh = subEntries[edge.si].shape;
+    const steps = path.map((edge) => ({
+      si: edge.si,
+      fwd: shapeNodes[edge.si].a === edge.fromNode,
+      from: edge.fromNode,
+    }));
+    for (const { shape: sh, fwd } of mergeThroughT(steps)) {
       const arcAngle =
         sh.type === "arc" ? Math.abs(sh.endAngle - sh.startAngle) : Math.PI;
       appendSamples(
         poly,
         curves,
         sh,
-        sn.a === edge.fromNode,
+        fwd,
         arcSegsN(sh, arcAngle, curveSegments, precision),
       );
-      idxSet.add(subEntries[edge.si].origIdx);
     }
+    for (const edge of path) idxSet.add(subEntries[edge.si].origIdx);
     results.push({ polygon: poly, shapeIndices: [...idxSet], curves });
   });
 
@@ -765,9 +696,38 @@ export function groupLoopsWithHoles(loops) {
     if (p !== -1) childIdxs[p].push(i);
   });
 
+  // A child that touches its parent's outline is a neighbour inside it, not a
+  // hole in it: the parts either side of a line across a rectangle (two
+  // triangles under a diagonal, or a panel and a strip) tile the rectangle,
+  // and subtracting them left a region of no area whose holes shared its own
+  // edges.  OCC built that into a broken prism, and fusing it with the parts
+  // lost the strip from the extrude.  Holes are only children strictly inside;
+  // the touching ones stay nested entries, regions of their own.
+  const touchesOutline = (childIdx, parentIdx) => {
+    const parent = loops[parentIdx];
+    const TOUCH = 1e-4;
+    return loops[childIdx].some((pt) =>
+      parent.some((a, k) => {
+        const b = parent[(k + 1) % parent.length];
+        const dx = b.x - a.x,
+          dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy;
+        const t =
+          len2 > 0
+            ? Math.max(
+                0,
+                Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / len2),
+              )
+            : 0;
+        return Math.hypot(pt.x - a.x - t * dx, pt.y - a.y - t * dy) < TOUCH;
+      }),
+    );
+  };
   const buildEntry = (idx) => ({
     polygon: loops[idx],
-    holes: childIdxs[idx].map((j) => loops[j]),
+    holes: childIdxs[idx]
+      .filter((j) => !touchesOutline(j, idx))
+      .map((j) => loops[j]),
     entries: childIdxs[idx].map((j) => buildEntry(j)),
   });
 

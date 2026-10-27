@@ -9,6 +9,7 @@ import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
+import WelcomeDialog from "./components/WelcomeDialog";
 import ProjectDialog from "./components/ProjectDialog";
 import TextDialog from "./components/TextDialog";
 import ShortcutsOverlay from "./components/ShortcutsOverlay";
@@ -170,6 +171,7 @@ function App() {
       <MaterialDialog />
       <SettingsDialog />
       <AboutDialog />
+      <WelcomeDialog />
       <ProjectDialog />
       <TextDialog />
       <ShortcutsOverlay />

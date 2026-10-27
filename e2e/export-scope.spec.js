@@ -86,19 +86,47 @@ async function exportVia(label) {
   });
 }
 
+// The scene export is named after the project: a fixed "scene.stl" said
+// nothing about which project a file came from.
+const projectFile = (ext) =>
+  page.evaluate((e) => {
+    const { projects, activeProjectId } = window.__store.getState();
+    const name = projects.find((p) => p.id === activeProjectId).name;
+    return `${name.replace(/[\\/:*?"<>|]+/g, "_")}.${e}`;
+  }, ext);
+
 test("with nothing selected, only the scene can be exported", async () => {
   const selected = await menuItem("Export selected as STL");
   await expect(selected).toBeDisabled();
   await page.keyboard.press("Escape");
   const scene = await exportVia("Export scene as STL");
   // Two boxes, twelve triangles each.
-  expect(scene).toMatchObject({ name: "scene.stl", triangles: 24 });
+  expect(scene).toMatchObject({
+    name: await projectFile("stl"),
+    triangles: 24,
+  });
 });
 
 test("the scene export takes every body even with one selected", async () => {
   await page.evaluate(() => window.__store.getState().selectItem(831));
   const scene = await exportVia("Export scene as STL");
-  expect(scene).toMatchObject({ name: "scene.stl", triangles: 24 });
+  expect(scene).toMatchObject({
+    name: await projectFile("stl"),
+    triangles: 24,
+  });
+});
+
+test("the scene export is named after a renamed project", async () => {
+  await page.evaluate(() => {
+    const s = window.__store.getState();
+    s.renameProject(s.activeProjectId, "Mini Cabinet: v2");
+  });
+  const step = await exportVia("Export scene as STEP");
+  // A colon can't go in a file name on Windows or in the macOS Finder.
+  expect(step).toMatchObject({
+    name: "Mini Cabinet_ v2.step",
+    text: "ISO-10303-21;",
+  });
 });
 
 test("the selection export takes only the selected body, named after it", async () => {
