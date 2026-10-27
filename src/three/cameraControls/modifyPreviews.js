@@ -16,6 +16,7 @@ import { createHolePreviewHelpers } from "./hole.js";
 import { createEmbossPreviewHelpers } from "./emboss.js";
 import { createTexturePreviewHelpers } from "./texture.js";
 import { createDraftPreviewHelpers } from "./draft.js";
+import { faceDownPose, itemPose } from "../faceToGround.js";
 
 // Returns the component-motion helpers, which the caller disposes.
 export function attachModifyPreviews({
@@ -136,6 +137,50 @@ export function attachModifyPreviews({
         t.b.point.y - t.a.point.y,
         t.b.point.z - t.a.point.z,
       ),
+    );
+  };
+
+  // Drop to ground on a face: preview by posing the real mesh, as Point to
+  // Point does.  The pose is always worked out from the rest pose, so the
+  // preview is undone first.
+  let ftgMoved = null; // { mesh, pos: Vector3, quat: Quaternion }
+  controls.clearFaceToGroundPreview = () => {
+    if (!ftgMoved) return;
+    if (ftgMoved.mesh.parent) {
+      ftgMoved.mesh.position.copy(ftgMoved.pos);
+      ftgMoved.mesh.quaternion.copy(ftgMoved.quat);
+    }
+    ftgMoved = null;
+  };
+  const faceToGroundMeshPose = () => {
+    const face = useStore.getState().faceToGroundTool?.face;
+    const mesh = face && objectsRef.current[face.itemId];
+    if (!mesh) return null;
+    const v = (p) => new THREE.Vector3(p.x, p.y, p.z);
+    return { mesh, ...faceDownPose(mesh, v(face.normal), v(face.point)) };
+  };
+  controls.updateFaceToGroundPreview = () => {
+    controls.clearFaceToGroundPreview();
+    const pose = faceToGroundMeshPose();
+    if (!pose) return;
+    const { mesh } = pose;
+    ftgMoved = {
+      mesh,
+      pos: mesh.position.clone(),
+      quat: mesh.quaternion.clone(),
+    };
+    mesh.position.copy(pose.position);
+    mesh.quaternion.copy(pose.quaternion);
+  };
+  // The item position and rotation that lay the picked face on the ground.
+  controls.faceToGroundItemPose = () => {
+    controls.clearFaceToGroundPreview();
+    const pose = faceToGroundMeshPose();
+    if (!pose) return null;
+    return itemPose(
+      pose.position,
+      pose.quaternion,
+      pose.mesh.userData.extrudeLocalOffset,
     );
   };
 

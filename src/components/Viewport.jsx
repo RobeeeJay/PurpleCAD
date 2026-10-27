@@ -34,6 +34,7 @@ import BoxDialog from "./BoxDialog";
 import ProjectsDialog from "./ProjectsDialog";
 import TransformDialog from "./TransformDialog";
 import PointToPointDialog from "./PointToPointDialog";
+import FaceToGroundDialog from "./FaceToGroundDialog";
 import SelectionWidget from "./SelectionWidget";
 import SketchSelectionWidget from "./SketchSelectionWidget";
 import PlanePickHint from "./viewport/PlanePickHint";
@@ -387,6 +388,7 @@ const Viewport = () => {
       <ProjectsDialog />
       <TransformDialog />
       <PointToPointDialog />
+      <FaceToGroundDialog />
       <SelectionWidget />
       <SketchSelectionWidget />
       <SvgPlacementOverlay />

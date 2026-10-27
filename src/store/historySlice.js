@@ -18,6 +18,7 @@ import { createItemFlagsSlice } from "./itemFlagsSlice.js";
 import { createHistoryEntryEditsSlice } from "./historyEntryEditsSlice.js";
 import { createHistoryExtrudeSlice } from "./historyExtrudeSlice.js";
 import { splitGeometryComponents } from "../three/geometryComponents.js";
+import { LAID_ON_FACE } from "./uiToolReset.js";
 
 // Record a split as ONE "Split" step: the pieces are created in a createGroup
 // entry and the original is hidden from that same step on, so the timeline
@@ -498,6 +499,9 @@ export const createHistorySlice = (set) => ({
       const actionLabel = label || "Moved";
       const isScaleAction = actionLabel === "Scaled";
       const isRotateAction = actionLabel === "Rotated";
+      // Laying a body on a face turns it AND moves it in one step; recording
+      // only the position would replay the move with the old rotation.
+      const isTurnAndMove = actionLabel === LAID_ON_FACE;
       const instruction = {
         type: "transform",
         itemId: id,
@@ -506,7 +510,10 @@ export const createHistorySlice = (set) => ({
             ? Object.assign({}, item.position)
             : undefined,
         scale: isScaleAction ? Object.assign({}, item.scale) : undefined,
-        rotation: isRotateAction ? Object.assign({}, item.rotation) : undefined,
+        rotation:
+          isRotateAction || isTurnAndMove
+            ? Object.assign({}, item.rotation)
+            : undefined,
       };
 
       if (state.activeHistoryId !== null) {

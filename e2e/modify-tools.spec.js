@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
+import * as THREE from "three";
 
 // The remaining modify tools driven end-to-end through their REAL dialogs:
 // Boolean (union via BooleanDialog), Shell, Hole, Draft, and Split.  Picks
@@ -673,5 +674,98 @@ test.describe.serial("modify tools through their dialogs", () => {
       }),
     ).toEqual({ target: 62, selected: 62, note: null });
     await page.getByTitle("Cancel").click();
+  });
+
+  test("drop to ground lays a tilted body on the picked face", async () => {
+    // Where the cube's +Y face looks, and how low the body reaches, read off
+    // the mesh on screen -- which is what the preview moves.
+    const pose = () =>
+      page.evaluate(() => {
+        const d = window.__store.getState()._cameraControls.meshWorldData(70);
+        return { positions: Array.from(d.positions), matrix: d.matrix };
+      });
+    const faceY = ({ matrix }) =>
+      new THREE.Vector3(0, 1, 0)
+        .applyMatrix3(
+          new THREE.Matrix3().getNormalMatrix(
+            new THREE.Matrix4().fromArray(matrix),
+          ),
+        )
+        .normalize().y;
+    const lowest = ({ positions, matrix }) => {
+      const m = new THREE.Matrix4().fromArray(matrix);
+      let min = Infinity;
+      for (let i = 0; i < positions.length; i += 3)
+        min = Math.min(
+          min,
+          new THREE.Vector3(
+            positions[i],
+            positions[i + 1],
+            positions[i + 2],
+          ).applyMatrix4(m).y,
+        );
+      return min;
+    };
+    const seedFace = () =>
+      page.evaluate(() =>
+        window.__store
+          .getState()
+          .setFaceToGroundFace(
+            70,
+            { x: 0, y: 1, z: 0 },
+            { x: 0, y: 0.5, z: 0 },
+          ),
+      );
+
+    await addCube(70, 15);
+    await page.evaluate(() =>
+      window.__store.getState().setItemsTransform([
+        {
+          id: 70,
+          position: { x: 15, y: 3, z: 0 },
+          rotation: { x: 0.4, y: 0.2, z: 0.6 },
+        },
+      ]),
+    );
+    const historyBefore = await page.evaluate(
+      () => window.__store.getState().history.length,
+    );
+
+    await page.getByTitle(/^Drop to ground/).click();
+    await expect(
+      page.getByText("Click the face to lay on the ground"),
+    ).toBeVisible();
+    await seedFace();
+    // The preview turns the real mesh but leaves the model alone.
+    await expect.poll(async () => faceY(await pose())).toBeCloseTo(-1, 6);
+    expect(
+      await page.evaluate(
+        () => window.__store.getState().items.find((i) => i.id === 70).rotation,
+      ),
+    ).toEqual({ x: 0.4, y: 0.2, z: 0.6 });
+
+    // Cancel puts the mesh back where the model says it is.
+    await page.getByTitle("Cancel").click();
+    await expect.poll(async () => faceY(await pose())).not.toBeCloseTo(-1, 2);
+
+    await page.getByTitle(/^Drop to ground/).click();
+    await seedFace();
+    await page.getByTitle("Lay the body on the face").click();
+    await expect(
+      page.getByText("Confirm to lay the body on this face"),
+    ).toHaveCount(0);
+    const after = await pose();
+    expect(faceY(after), "the picked face looks straight down").toBeCloseTo(
+      -1,
+      6,
+    );
+    expect(lowest(after), "the body's lowest point").toBeCloseTo(0, 6);
+    const history = await page.evaluate(() =>
+      window.__store.getState().history.map((h) => h.label),
+    );
+    expect(history.length, `timeline: ${history.join(", ")}`).toBe(
+      historyBefore + 1,
+    );
+    expect(history.at(-1)).toBe("Laid on face");
   });
 });

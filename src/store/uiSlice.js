@@ -224,6 +224,11 @@ export const uiInitial = {
   // coords captured at pick time.  { picking:"A"|"B"|null, a:{itemId,point}, b:{…} }
   pointToPointTool: null,
 
+  // Drop to ground: pick a face (normal and point in the body's local frame)
+  // that is turned to face straight down before the drop.
+  // { picking: bool, face: { itemId, normal, point } | null }
+  faceToGroundTool: null,
+
   // Solo: when set, the viewport shows ONLY this item (even if marked hidden)
   // and hides every other object.  Ephemeral (not history/persisted).  soloView
   // is the camera snapshot captured when solo turned on, restored when it ends.
