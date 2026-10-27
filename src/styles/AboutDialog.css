@@ -188,3 +188,12 @@
   font-size: 0.9em;
   margin: 0;
 }
+
+.welcome-dialog {
+  width: min(480px, 90vw);
+}
+
+.welcome-body {
+  padding: 16px 20px 6px;
+  font-size: var(--font-size-base);
+}
