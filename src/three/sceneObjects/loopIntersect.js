@@ -90,6 +90,41 @@ export function lineCrossIntersect(li, lj) {
   return { ti, tj, x: li.x1 + ti * dx1, y: li.y1 + ti * dy1 };
 }
 
+// Where `other` ENDS on `line`, strictly between line's own ends: a T-junction.
+// lineCrossIntersect wants both lines crossed through their interiors, so a
+// line drawn from one side of a rectangle to the other, ending on both, split
+// neither side -- and the regions either side of it never closed (a 0.2-wide
+// strip down a cabinet panel couldn't be picked to extrude).  Only `line` is
+// split here; `other` already ends at the point.  Parallel lines are left
+// alone: a collinear overlap would split into doubled edges.  `tol` matches
+// the node merge, so the split point joins the touching endpoint.
+// Returns [{ t, x, y }] parameters on `line`.
+export function lineEndsOnLine(line, other, tol) {
+  const dx = line.x2 - line.x1,
+    dy = line.y2 - line.y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-24) return [];
+  const odx = other.x2 - other.x1,
+    ody = other.y2 - other.y1;
+  const olen = Math.hypot(odx, ody);
+  if (olen < 1e-12) return [];
+  const sin = Math.abs(dx * ody - dy * odx) / (Math.sqrt(len2) * olen);
+  if (sin < 1e-6) return [];
+  const len = Math.sqrt(len2);
+  const out = [];
+  for (const [px, py] of [
+    [other.x1, other.y1],
+    [other.x2, other.y2],
+  ]) {
+    const t = ((px - line.x1) * dx + (py - line.y1) * dy) / len2;
+    if (t * len <= tol || (1 - t) * len <= tol) continue;
+    const perp = Math.abs((px - line.x1) * dy - (py - line.y1) * dx) / len;
+    if (perp > tol) continue;
+    out.push({ t, x: line.x1 + t * dx, y: line.y1 + t * dy });
+  }
+  return out;
+}
+
 // Computes the number of polygon samples for a sub-arc edge.  In print
 // mode (precision != null), uses the sagitta formula so the chord
 // deviation from the true curve is ≤ precision mm.  In preview mode
