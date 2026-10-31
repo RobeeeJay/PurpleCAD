@@ -8,6 +8,7 @@ import React from "react";
 import FormulaInput from "../FormulaInput";
 import SketchRulers from "./SketchRulers";
 import SketchLongPressMenu from "./SketchLongPressMenu";
+import SketchAngleOverlay from "./SketchAngleOverlay";
 import SketchDistanceOverlay from "./SketchDistanceOverlay";
 import SketchDrawLengthOverlay from "./SketchDrawLengthOverlay";
 import SketchPatternOverlays from "./SketchPatternOverlays";
@@ -443,6 +444,13 @@ export default function SketchOverlays({
         !sketchDistanceInput &&
         !sketchConstraintMode &&
         !sketchModifyMode && <SketchDrawLengthOverlay variables={variables} />}
+      {sketchMode && (
+        <SketchAngleOverlay
+          selectedId={selectedId}
+          variables={variables}
+          cameraControlsRef={cameraControlsRef}
+        />
+      )}
       <SketchDistanceOverlay
         sketchMode={sketchMode}
         sketchDistanceInput={sketchDistanceInput}

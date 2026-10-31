@@ -11,14 +11,20 @@
 import { constraintResidual } from "./sketchSolver.js";
 import { isFormulaValue } from "../utils/formulas.js";
 
-// Only the measured annotations can conflict this way; angles take no formula.
-const DIMENSION_TYPES = new Set(["distance", "pointLineDistance", "offset"]);
+// Only the measured annotations can conflict this way.  The angles a chamfer
+// keeps are plain numbers; an angle dimension can take a formula.
+const DIMENSION_TYPES = new Set([
+  "distance",
+  "pointLineDistance",
+  "offset",
+  "angleDimension",
+]);
 
 // The solver's own success tolerance: below this a dimension IS satisfied.
 export const DIMENSION_CONFLICT_TOL = 1e-3;
 
 export const isVariableDrivenDimension = (c) =>
-  DIMENSION_TYPES.has(c?.type) && isFormulaValue(c.distance);
+  DIMENSION_TYPES.has(c?.type) && isFormulaValue(c.distance ?? c.angle);
 
 // The variable-driven dimensions of `constraints` that `shapes` does not meet.
 export function conflictingDimensions(

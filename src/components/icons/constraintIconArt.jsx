@@ -21,6 +21,7 @@ export const VerticalArt = art("vertical");
 export const HorizontalVerticalArt = art("horizontal-vertical");
 export const ParallelArt = art("parallel");
 export const ColinearArt = art("colinear");
+export const AngleArt = art("angle");
 export const TangentArt = art("tangent");
 export const EqualArt = art("equal");
 export const CentreArt = art("centre");
@@ -37,6 +38,7 @@ export const CONSTRAINT_ICON_ART = {
   vertical: VerticalArt,
   parallel: ParallelArt,
   colinear: ColinearArt,
+  angleDimension: AngleArt,
   tangent: TangentArt,
   equal: EqualArt,
   centre: CentreArt,

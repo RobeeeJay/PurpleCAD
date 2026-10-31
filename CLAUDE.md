@@ -1291,6 +1291,17 @@ sources are picked) that reuses the creation UI.
   already crossing at rest (a pin in its hole) are ignored for that run. The
   BVH is built `indirect` -- by default it reorders the rendered geometry's
   index in place, which picking reads.
+- **A direction residual can be satisfied by collapsing the line.** Direction
+  holds at any length, and a horizontal, vertical or coincident residual shrinks
+  to nothing with its line. An angle dimension no sketch could make (both lines
+  already pinned to axes) came back `ok` with one line 5e-6 units long, reading
+  exactly 30 degrees. The dimension's residual now carries a hinge on each line's
+  length (`MIN_ANGLED_LINE`). Check the geometry, not just `ok`, when a test
+  expects a refusal.
+- **The draw field holds the focus, so sketch shortcuts wait while it is open.**
+  From the first click of a line or circle, keys go to
+  `SketchDrawLengthOverlay`, and its Escape cancels the shape. An e2e test must
+  not assume a suggestion list is open: there, Escape closes the list instead.
 - **Text and the cog are "contour primitives": one shape, several cached closed
   outlines relative to its `x, y`, locked by a same-named constraint.** Their
   outlines bypass the pairwise-intersect loop finder (`closedLoops.js` feeds

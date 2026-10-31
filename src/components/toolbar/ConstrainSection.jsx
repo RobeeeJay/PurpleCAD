@@ -12,6 +12,7 @@ import {
   HorizontalVerticalArt,
   ParallelArt,
   ColinearArt,
+  AngleArt,
   TangentArt,
   EqualArt,
 } from "../icons/constraintIconArt.jsx";
@@ -236,6 +237,22 @@ const ConstrainSection = ({ isSketchMode }) => {
                   onClick={() => applyPair("colinear")}
                 >
                   <ColinearArt />
+                </button>
+                <button
+                  className="toolbar-btn"
+                  title="Angle — hold an angle between two selected lines"
+                  disabled={!ready}
+                  onClick={() =>
+                    useStore
+                      .getState()
+                      .beginSketchAngle(
+                        selectedId,
+                        multiSelectedIndices[0],
+                        multiSelectedIndices[1],
+                      )
+                  }
+                >
+                  <AngleArt />
                 </button>
                 <button
                   className="toolbar-btn"

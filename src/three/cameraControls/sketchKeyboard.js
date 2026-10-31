@@ -419,6 +419,10 @@ export function createSketchKeyboardHandler(
           clearRectangularPatternPreview();
           return;
         }
+        if (store.sketchAngleInput) {
+          store.setSketchAngleInput(null);
+          return;
+        }
         if (store.sketchConstraintMode || store.sketchDistanceInput) {
           store.setSketchConstraintMode(null);
           store.setSketchConstraintFirstPoint(null);
