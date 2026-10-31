@@ -2,6 +2,7 @@ import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import CentreConstraintButton from "./CentreConstraintButton";
 import { nearestAxis } from "../../three/sketchConstraints.js";
+import { openGapDistanceFromSelection } from "../../three/sketchModifyActions.js";
 import {
   CoincidentArt,
   MidpointArt,
@@ -121,6 +122,7 @@ const ConstrainSection = ({ isSketchMode }) => {
       setSketchConstraintMode("distance");
       setSketchConstraintFirstPoint(null);
       setSketchDistanceInput(null);
+      openGapDistanceFromSelection();
     }
   };
 
@@ -154,7 +156,7 @@ const ConstrainSection = ({ isSketchMode }) => {
           <CentreConstraintButton />
           <button
             className={`toolbar-btn ${sketchConstraintMode === "distance" ? "active" : ""}`}
-            title="Distance — set a fixed distance between two points"
+            title="Distance — set a fixed distance between two points, or the gap between two parallel lines"
             onClick={handleDistanceConstraint}
           >
             <DistanceArt />

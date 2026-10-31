@@ -21,6 +21,7 @@ const CLIPBOARD_CONSTRAINTS = new Set(["coincident", "cog", "text"]);
 import {
   selectedSketchLineIndices,
   offsetSelectedSketchGeometry,
+  openGapDistanceFromSelection,
 } from "../sketchModifyActions.js";
 
 export function createSketchKeyboardHandler(
@@ -490,6 +491,7 @@ export function createSketchKeyboardHandler(
         store.setSketchConstraintFirstPoint(null);
         store.setSketchDistanceInput(null);
         clearCoincidentFirstOverlay();
+        if (!isActive) openGapDistanceFromSelection();
         return;
       }
       // I toggles construction on the selected line(s); O offsets them.  Both are

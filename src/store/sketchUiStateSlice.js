@@ -40,6 +40,30 @@ export const createSketchUiStateSlice = (set) => ({
   sketchDistanceInput: null,
   setSketchDistanceInput: (v) => set({ sketchDistanceInput: v }),
 
+  // The field shown while a line or circle is being drawn: `tool` is the shape
+  // under way (the active tool can change mid-draw, the shape doesn't), `live`
+  // what the cursor measures, `typed` what was entered (empty until edited), and
+  // `segment` counts draws, so each one starts with a fresh, focused field.
+  sketchDrawLength: { tool: null, typed: "", live: "", segment: 0 },
+  setSketchDrawLengthTyped: (typed) =>
+    set((s) => ({ sketchDrawLength: { ...s.sketchDrawLength, typed } })),
+  // Called per mouse move; an unchanged value must not wake every subscriber.
+  setSketchDrawLengthLive: (live) =>
+    set((s) =>
+      s.sketchDrawLength.live === live
+        ? s
+        : { sketchDrawLength: { ...s.sketchDrawLength, live } },
+    ),
+  resetSketchDrawLength: (tool) =>
+    set((s) => ({
+      sketchDrawLength: {
+        tool,
+        typed: "",
+        live: "",
+        segment: s.sketchDrawLength.segment + 1,
+      },
+    })),
+
   sketchModifyMode: null, // 'chamfer' | 'bevel' | null
   setSketchModifyMode: (mode) => set({ sketchModifyMode: mode }),
 

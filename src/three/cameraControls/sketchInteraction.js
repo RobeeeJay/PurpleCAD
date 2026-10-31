@@ -776,7 +776,14 @@ export function createSketchInteraction(
       setSketchDrawPhase,
     },
   );
-  const { updateSketchPreview, handleSketchClick } = sketchDraw;
+  const {
+    updateSketchPreview,
+    handleSketchClick,
+    refreshSketchDraw,
+    commitSketchDraw,
+  } = sketchDraw;
+  controls.refreshSketchDraw = refreshSketchDraw;
+  controls.commitSketchDraw = commitSketchDraw;
 
   // ── Sketch-mode pointer dispatch (return true when handled) ───────────────
   // The element list for a press held still: from a mouse held down, or a
@@ -1438,6 +1445,7 @@ export function createSketchInteraction(
   );
 
   // Clears the lingering sketch overlays when the pointer moves in 3D view.
+  controls.cancelSketchDraw = cancelSketchDraw;
   const clearSketchVisualsFor3D = () => {
     clearAllSketchHover();
     clearSketchSelectionOverlay();

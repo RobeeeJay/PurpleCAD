@@ -9,6 +9,7 @@ import FormulaInput from "../FormulaInput";
 import SketchRulers from "./SketchRulers";
 import SketchLongPressMenu from "./SketchLongPressMenu";
 import SketchDistanceOverlay from "./SketchDistanceOverlay";
+import SketchDrawLengthOverlay from "./SketchDrawLengthOverlay";
 import SketchPatternOverlays from "./SketchPatternOverlays";
 import SketchCentreOverlay from "./SketchCentreOverlay";
 import SketchCogOverlay from "./SketchCogOverlay";
@@ -420,7 +421,7 @@ export default function SketchOverlays({
           <div className="sketch-placement-hint">
             {sketchConstraintFirstPoint
               ? "Select a second point, or a line for a point-to-line distance · Esc to cancel"
-              : "Click a line to set its length, or click two points · Esc to cancel"}
+              : "Click a line to set its length, then a parallel line for the gap, or click two points · Esc to cancel"}
           </div>
         )}
       {/* A line-length dimension is pending — tell the user they can instead
@@ -436,6 +437,12 @@ export default function SketchOverlays({
             Set the length, or click a parallel line for the gap between them
           </div>
         )}
+      {sketchMode &&
+        sketchDrawPhase === "second" &&
+        activeSketchTool &&
+        !sketchDistanceInput &&
+        !sketchConstraintMode &&
+        !sketchModifyMode && <SketchDrawLengthOverlay variables={variables} />}
       <SketchDistanceOverlay
         sketchMode={sketchMode}
         sketchDistanceInput={sketchDistanceInput}

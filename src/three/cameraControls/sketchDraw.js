@@ -12,8 +12,14 @@ import {
   sketchDimText,
   snapUnitToIntervalMm,
   defaultBezierControls,
+  MM_PER_UNIT,
 } from "../sceneObjects.js";
 import { SKETCH_DRAW_PREVIEW_COLOR } from "../theme.js";
+import {
+  diameterToRadiusFormula,
+  evaluateFormula,
+  variablesToMap,
+} from "../../utils/formulas.js";
 
 // Snap a local sketch point to the world-space grid interval when the snap
 // option is on.  Geometry snapping (findSnap) takes precedence and is applied
@@ -73,6 +79,60 @@ export function axisAlignLine(shape, shapeIdx, startSnapped, endSnapped) {
   return null;
 }
 
+// What the draw dialog's field asks for: `reach` is how far the second click
+// lands from the first, in scene units -- a line's length, or a circle's radius
+// (its field takes the diameter).  null while the field is empty, which means
+// "follow the cursor"; a null reach is text that isn't a positive length.
+export function typedDrawLength(tool, typed, variablesMap) {
+  const raw = (typed ?? "").trim();
+  if (!raw) return null;
+  const mm = evaluateFormula(raw, variablesMap);
+  if (!Number.isFinite(mm) || mm <= 0) return { raw, reach: null };
+  return { raw, reach: (tool === "circle" ? mm / 2 : mm) / MM_PER_UNIT };
+}
+
+// The point `reach` from start towards aim.  Typing before moving the mouse
+// leaves no direction to read, so that case runs along +x.
+export function pointAtReach(start, aim, reach) {
+  const dx = aim.x - start.x;
+  const dy = aim.y - start.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return { x: start.x + reach, y: start.y };
+  return { x: start.x + (dx / len) * reach, y: start.y + (dy / len) * reach };
+}
+
+// The dimension a typed value becomes, as the distance tool would store it: a
+// circle's is kept as a radius formula though it is shown as a diameter.
+export function drawLengthConstraint(tool, shapeIdx, raw) {
+  return tool === "circle"
+    ? {
+        type: "distance",
+        shapeAIdx: shapeIdx,
+        pointA: "center",
+        shapeBIdx: shapeIdx,
+        pointB: "edge",
+        distance: diameterToRadiusFormula(raw),
+      }
+    : {
+        type: "distance",
+        shapeAIdx: shapeIdx,
+        pointA: "start",
+        shapeBIdx: shapeIdx,
+        pointB: "end",
+        distance: raw,
+      };
+}
+
+const typedNow = (tool) => {
+  if (tool !== "line" && tool !== "circle") return null;
+  const s = useStore.getState();
+  return typedDrawLength(
+    tool,
+    s.sketchDrawLength.typed,
+    variablesToMap(s.variables),
+  );
+};
+
 export function createSketchDrawHelpers(
   {
     scene,
@@ -95,7 +155,12 @@ export function createSketchDrawHelpers(
     setSketchDrawPhase,
   },
 ) {
+  // Where the mouse last was: Enter in the dialog commits with no mouse event
+  // to read a position from, and typing redraws the preview the same way.
+  let lastCursor = null;
+
   const updateSketchPreview = (screenX, screenY, shiftKey = false) => {
+    lastCursor = { x: screenX, y: screenY, shift: shiftKey };
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
     );
@@ -135,6 +200,29 @@ export function createSketchDrawHelpers(
       effectiveCur = snapAngleTo45(draw.startLocal, cur);
     }
     draw.currentSnap = activeSnap;
+
+    // A typed length holds the far end at that distance, so the cursor only
+    // aims it: landing on a snap point would change the length.
+    const typed = typedNow(draw.tool);
+    if (typed?.reach) {
+      effectiveCur = pointAtReach(
+        draw.startLocal,
+        shiftKey ? effectiveCur : cur,
+        typed.reach,
+      );
+      draw.currentSnap = null;
+      clearSnapIndicator();
+    } else if (draw.tool === "line" || draw.tool === "circle") {
+      const dist = Math.hypot(
+        effectiveCur.x - draw.startLocal.x,
+        effectiveCur.y - draw.startLocal.y,
+      );
+      useStore
+        .getState()
+        .setSketchDrawLengthLive(
+          ((draw.tool === "circle" ? 2 : 1) * dist * MM_PER_UNIT).toFixed(2),
+        );
+    }
 
     clearSketchPreview();
     clearHoverFills();
@@ -217,6 +305,18 @@ export function createSketchDrawHelpers(
   };
 
   const handleSketchClick = (screenX, screenY, shiftKey = false) => {
+    lastCursor = { x: screenX, y: screenY, shift: shiftKey };
+    const typed = sketchDrawRef.current
+      ? typedNow(sketchDrawRef.current.tool)
+      : null;
+    if (typed && !typed.reach) {
+      useStore
+        .getState()
+        .showNotification(
+          "That size isn't a positive number. Fix it, or clear it to use the cursor.",
+        );
+      return;
+    }
     const selItem = itemsRef.current.find(
       (i) => i.id === selectedIdRef.current,
     );
@@ -227,7 +327,14 @@ export function createSketchDrawHelpers(
 
     const shapes = selItem?.shapes || [];
     let clickSnap = null;
-    if (!shiftKey) {
+    if (typed) {
+      const start = sketchDrawRef.current.startLocal;
+      const aim =
+        shiftKey && sketchDrawRef.current.tool === "line"
+          ? snapAngleTo45(start, localPt)
+          : localPt;
+      localPt = pointAtReach(start, aim, typed.reach);
+    } else if (!shiftKey) {
       clickSnap = findSnap(screenX, screenY, shapes, sketchMesh);
       if (clickSnap) localPt = { x: clickSnap.x, y: clickSnap.y };
       else localPt = gridSnapLocal(localPt);
@@ -301,6 +408,7 @@ export function createSketchDrawHelpers(
         previewObjects: [],
       };
       setSketchDrawPhase("second");
+      useStore.getState().resetSketchDrawLength(sketchDrawRef.current.tool);
     } else if (sketchDrawRef.current.tool === "bezier") {
       // Endpoint-only flow: the first click placed p0; this second click places
       // p3.  The control points start at a sensible default (a gentle bow) and
@@ -437,6 +545,18 @@ export function createSketchDrawHelpers(
             constraints.push(hv.constraint);
             endPt = { x: hv.shape.x2, y: hv.shape.y2 };
           }
+          if (typed) {
+            // Squaring the line onto an axis shortened it by up to a hair.
+            endPt = pointAtReach(
+              draw.startLocal,
+              { x: finalShape.x2, y: finalShape.y2 },
+              typed.reach,
+            );
+            finalShape = { ...finalShape, x2: endPt.x, y2: endPt.y };
+            constraints.push(
+              drawLengthConstraint("line", shapes.length, typed.raw),
+            );
+          }
           useStore
             .getState()
             .addSketchShape(selectedIdRef.current, finalShape, constraints);
@@ -472,6 +592,7 @@ export function createSketchDrawHelpers(
             previewObjects: [],
           };
           setSketchDrawPhase("second");
+          useStore.getState().resetSketchDrawLength("line");
         }
       } else {
         // circle, ellipse, arc: complete the shape and deselect the tool
@@ -480,11 +601,34 @@ export function createSketchDrawHelpers(
         if (shape)
           useStore
             .getState()
-            .addSketchShape(selectedIdRef.current, shape, constraints);
+            .addSketchShape(
+              selectedIdRef.current,
+              shape,
+              typed
+                ? [
+                    ...constraints,
+                    drawLengthConstraint(draw.tool, shapes.length, typed.raw),
+                  ]
+                : constraints,
+            );
         useStore.getState().setActiveSketchTool(null);
       }
     }
   };
 
-  return { updateSketchPreview, handleSketchClick };
+  const refreshSketchDraw = () => {
+    if (lastCursor)
+      updateSketchPreview(lastCursor.x, lastCursor.y, lastCursor.shift);
+  };
+  const commitSketchDraw = () => {
+    if (sketchDrawRef.current && lastCursor)
+      handleSketchClick(lastCursor.x, lastCursor.y, lastCursor.shift);
+  };
+
+  return {
+    updateSketchPreview,
+    handleSketchClick,
+    refreshSketchDraw,
+    commitSketchDraw,
+  };
 }
