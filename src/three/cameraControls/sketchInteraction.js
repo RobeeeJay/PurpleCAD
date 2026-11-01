@@ -207,6 +207,7 @@ export function createSketchInteraction(
     getRotationHandle,
     refreshRotationHandle,
     updateSelectionForDrag,
+    selectionHighlights,
   } = createSketchSelectionOverlays({
     scene,
     renderer,
@@ -226,6 +227,14 @@ export function createSketchInteraction(
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     updateSelectionForDrag(selItem.shapes || [], sketchMesh, true);
+  };
+
+  controls.clearConstraintPicks = clearCoincidentFirstOverlay;
+  controls.selectionHighlights = () => {
+    const sketchMesh = objectsRef.current[selectedIdRef.current];
+    if (!sketchMesh) return [];
+    sketchMesh.updateMatrixWorld();
+    return selectionHighlights(sketchMesh);
   };
 
   // Exposed on cameraControlsRef so SketchOverlays can drive hover/select for

@@ -47,6 +47,13 @@ export default function SketchOverlays({
   propagateConstraintsRef,
   selectItem,
 }) {
+  // Pending pick highlights belong to the tool that drew them.  Escape in its
+  // field or a toolbar button can end the tool without going near them, and they
+  // would otherwise stay on the sketch.
+  React.useEffect(() => {
+    cameraControlsRef.current?.clearConstraintPicks?.();
+  }, [sketchConstraintMode, cameraControlsRef]);
+
   // Tracks which pattern-overlay fields currently hold an invalid / blank
   // value, so Confirm can be disabled until every field parses again.  Keyed
 

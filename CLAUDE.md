@@ -1298,6 +1298,16 @@ sources are picked) that reuses the creation UI.
   exactly 30 degrees. The dimension's residual now carries a hinge on each line's
   length (`MIN_ANGLED_LINE`). Check the geometry, not just `ok`, when a test
   expects a refusal.
+- **Selection highlights are scene objects, not part of the sketch group, and
+  each kind has to be moved by name.** A click draws a single highlight; a
+  shift-click then starts a multi-selection and clears the selected ELEMENT, and
+  it used to leave that drawn highlight behind. With no element to say where it
+  belonged, nothing moved it again: applying Parallel, Angle or Midpoint left the
+  first line's highlight at the old place until deselection. Rings were skipped
+  too, since only `Line2` has `setPositions`. `selectionHighlights()` reports
+  where each is drawn; `sketch-selection-highlight.spec.js` compares that with
+  the geometry. Pending pick highlights belong to their tool and clear when the
+  constraint mode changes.
 - **The draw field holds the focus, so sketch shortcuts wait while it is open.**
   From the first click of a line or circle, keys go to
   `SketchDrawLengthOverlay`, and its Escape cancels the shape. An e2e test must

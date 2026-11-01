@@ -141,6 +141,26 @@ export function createSketchSelectionOverlays({
     constraintPickOverlays = [];
   };
 
+  const ringPoints = (localPt, sketchMesh, R = 0.25, zOff = 0.009) => {
+    const toW = (x, y) => {
+      const v = new THREE.Vector3(x, y, zOff);
+      v.applyQuaternion(sketchMesh.quaternion);
+      v.add(sketchMesh.position);
+      return v;
+    };
+    return Array.from({ length: 17 }, (_, i) => {
+      const a = (i / 16) * Math.PI * 2;
+      return toW(localPt.x + Math.cos(a) * R, localPt.y + Math.sin(a) * R);
+    });
+  };
+
+  const moveRing = (ring, localPt, sketchMesh) => {
+    ring.geometry.dispose();
+    ring.geometry = new THREE.BufferGeometry().setFromPoints(
+      ringPoints(localPt, sketchMesh),
+    );
+  };
+
   const makeRingOverlay = (
     localPt,
     sketchMesh,
@@ -148,18 +168,10 @@ export function createSketchSelectionOverlays({
     R = 0.25,
     zOff = 0.009,
   ) => {
-    const toW = (x, y) => {
-      const v = new THREE.Vector3(x, y, zOff);
-      v.applyQuaternion(sketchMesh.quaternion);
-      v.add(sketchMesh.position);
-      return v;
-    };
-    const pts = Array.from({ length: 17 }, (_, i) => {
-      const a = (i / 16) * Math.PI * 2;
-      return toW(localPt.x + Math.cos(a) * R, localPt.y + Math.sin(a) * R);
-    });
     const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.BufferGeometry().setFromPoints(
+        ringPoints(localPt, sketchMesh, R, zOff),
+      ),
       new THREE.LineBasicMaterial({ color, depthTest: false }),
     );
     line.renderOrder = 1007;
@@ -226,6 +238,10 @@ export function createSketchSelectionOverlays({
   };
 
   const showMultiSelectOverlays = (indices) => {
+    // The click that seeded this selection may have drawn a single highlight.
+    // With no selected element left to say where it belongs, nothing would ever
+    // move it again, and it stayed behind when a constraint moved the line.
+    if (indices.length > 0) clearSketchSelectionOverlay();
     clearMultiSelectOverlays();
     useStore.getState().setSketchMultiSelectedIndices([...indices]);
     // Read items from the store, not itemsRef, as refreshSketchSelectionOverlay
@@ -250,6 +266,7 @@ export function createSketchSelectionOverlays({
           sketchMesh,
           SKETCH_SELECTION_BLUE,
         );
+        ring.userData.shapeIdx = idx;
         scene.add(ring);
         multiSelectOverlays.push(ring);
         return;
@@ -446,7 +463,11 @@ export function createSketchSelectionOverlays({
     };
     multiSelectOverlays.forEach((o) => {
       const s = shapes[o.userData.shapeIdx];
-      if (!s || !o.geometry?.setPositions) return;
+      if (!s) return;
+      if (s.type === "point") {
+        moveRing(o, s, sketchMesh);
+        return;
+      }
       const pos = toPos(s);
       if (pos) {
         o.geometry.setPositions(pos);
@@ -464,6 +485,10 @@ export function createSketchSelectionOverlays({
         sketchSelectionOverlay.geometry.setPositions(pos);
         sketchSelectionOverlay.computeLineDistances?.();
       }
+    }
+    if (sketchSelectionOverlay && sel?.type === "point") {
+      const p = getShapePoint(shapes[sel.shapeIdx], sel.pointKey);
+      if (p) moveRing(sketchSelectionOverlay, p, sketchMesh);
     }
     // Keep a selected bezier's tangent handles glued to the live curve.
     if (sel?.type === "line" && shapes[sel.shapeIdx]?.type === "bezier")
@@ -574,6 +599,45 @@ export function createSketchSelectionOverlays({
     showMultiSelectOverlays,
     clearDragIndicator,
     showDragIndicator,
+    // Where each highlight actually sits, in sketch-local coordinates: e2e can
+    // only compare them with the geometry by reading the drawn objects.
+    selectionHighlights: (sketchMesh) => {
+      const report = (o, kind, shapeIdx) => {
+        const box = new THREE.Box3().setFromObject(o);
+        if (o.geometry?.setPositions) {
+          const a = o.geometry.attributes.instanceStart.array;
+          const b = o.geometry.attributes.instanceEnd.array;
+          box.makeEmpty();
+          for (const arr of [a, b])
+            for (let i = 0; i + 2 < arr.length; i += 3)
+              box.expandByPoint(
+                new THREE.Vector3(arr[i], arr[i + 1], arr[i + 2]),
+              );
+        }
+        const lo = sketchMesh.worldToLocal(box.min.clone());
+        const hi = sketchMesh.worldToLocal(box.max.clone());
+        return {
+          kind,
+          shapeIdx,
+          minX: Math.min(lo.x, hi.x),
+          maxX: Math.max(lo.x, hi.x),
+          minY: Math.min(lo.y, hi.y),
+          maxY: Math.max(lo.y, hi.y),
+        };
+      };
+      return [
+        ...(sketchSelectionOverlay
+          ? [report(sketchSelectionOverlay, "single", null)]
+          : []),
+        ...multiSelectOverlays.map((o) =>
+          report(o, "multi", o.userData.shapeIdx ?? null),
+        ),
+        ...constraintPickOverlays.map((o) => report(o, "pick", null)),
+        ...(coincidentFirstOverlay
+          ? [report(coincidentFirstOverlay, "pick", null)]
+          : []),
+      ];
+    },
     hasSketchSelectionOverlay: () => sketchSelectionOverlay !== null,
     hasMultiSelectOverlays: () => multiSelectOverlays.length > 0,
   };
