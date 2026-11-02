@@ -74,3 +74,56 @@ stealing it. Not yet available on Windows.
 - **A tool returns an error**: the app refused the command. The message says
   why and the `code` says which kind (see `src/api/README.md`); the model is
   unchanged.
+
+## What an Agent Can't Do Yet
+
+There are nine tools, and between them an agent can build a part out of sketches, extrudes and booleans, look at it, and drive it with variables. That's a real part, and the e2e suite builds one. But it can't save that part, can't undo a mistake, and can't put a chamfer on it, so right now you can have a lovely conversation about a model that never leaves the app.
+
+If you're adding a tool, this is the list to work from. If you're using one, it saves you asking for something that isn't there. I got all of this by reading the commands in `src/api/commands/` rather than by trying every tool from a client, apart from the one marked as measured.
+
+### The Four That Matter
+
+**Nothing leaves the app.** There's no save, open, or STL or STEP export, and no import either. An agent can't deliver a part or work on a file you already have. You have to go and press Save yourself.
+
+**There's no way back.** No undo, no delete and no edit: the only reset is `document_new`, which throws away the whole document. Changing a variable is the one way to alter a part after it's built, so a wrong sketch means starting again.
+
+**The agent can't read what it built.** `body_list` leaves out sketches, so a sketch can't be read back. Nor can the timeline. `sketch_create` returns how many closed regions it found but not which is which, so the `region` argument of `feature_extrude` is an informed guess.
+
+**There's no way to name a face or an edge.** This is what keeps chamfer, fillet, push/pull, shell, draft, hole and sketching on a face out of the list, and it's a design question before it's a coding job. An agent can't click, and coordinates go stale as soon as a variable moves the part. The app's persistent face names (`side{k}`) are the obvious place to start, but nobody has tried exposing them yet.
+
+### What's Missing, by Area
+
+| Area | Not available |
+| ---- | ------------- |
+| Sketch shapes | Arc, ellipse, rectangle, text and cog. `sketch_create` takes line, circle, point and bezier. |
+| Sketch editing | Adding to an existing sketch, trim, offset, mirror, patterns, project, and chamfered or filleted corners. |
+| Sketch placement | Anything but XY, XZ and YZ with an offset, so no custom planes and no faces. |
+| Solids | Primitives, revolve, sweep, pipe, loft, and the intersection boolean. A cut is a separate extrude and `feature_boolean`. |
+| Modify | Chamfer, fillet, push/pull, shell, draft, hole, emboss, texture, and convert to surfaces. |
+| Arrange | Move, rotate, scale, drop to ground, point to point, 3D mirror and patterns, and split. |
+| Analysis | Measure, stress analysis, generative design, component motion and collision detection. |
+| Document | Materials, components, resolution and switching project. |
+
+### Problems in the Tools We Have
+
+- **A misspelt constraint type succeeds and does nothing.** `sketch_create` only checks that `type` is a string, and the solver has no case for one it doesn't know. I measured this one: a constraint of type `"paralel"` comes back from `solveConstraints` with `ok: true` and a residual of 0. Your sketch is built, unconstrained, and nothing tells you.
+- **The description undersells the constraints.** It lists coincident, horizontal, vertical, distance and point-to-line distance. Parallel, tangent, equal and `angleDimension` also get through, but an agent has no way to find that out, and nothing it can read explains the angle's `sense` field.
+- **Shape coordinates are plain numbers.** Only constraints can use a formula, so a shape can't be placed by a variable directly.
+- **A long operation is a long silence.** A command can wait up to 300 seconds before returning `TIMEOUT`, with no progress and no way to cancel.
+- **`view_render` only has named views.** You get `iso`, `front`, `back`, `left`, `right`, `top` and `bottom` of everything visible. There's no custom angle, no section and no single body.
+- **The tool list is read when the client connects.** Start PurpleCAD after your client and you have to reconnect the server, as the section above says.
+- **It's Unix sockets only.** There's nothing for Windows yet, and a second running PurpleCAD gets no socket at all.
+
+## Future Work
+
+These are in the order I'd do them, which puts the things that make the interface useful ahead of the things that make it long. None of them is done because the first version aimed to prove that an agent could build and check a part at all, and it can.
+
+1. **Reject unknown constraint types, and describe the ones we accept.** It's the smallest job here and the only one that fails silently.
+2. **Save, open and export.** Until this exists every other tool produces something you can't keep.
+3. **Undo, delete, and reading back sketches and the timeline.** An agent that can see its mistakes and reverse them doesn't need a new document for each one.
+4. **`sketch_edit`, arcs and the remaining shapes.** Most real profiles have an arc in them somewhere.
+5. **Move, rotate and primitives.** None of these needs face naming, so there's no reason for them to wait for it.
+6. **Decide how to name faces and edges, then add the modify tools.** This is the big one. It gets a design note of its own before any code, because a poor naming scheme would be baked into every modify tool that uses it.
+7. **Revolve, sweep, loft and the rest of the table.**
+
+Every new command goes in `src/api/commands/` and the shim picks it up without changing, so most of this list is work in the app rather than here. `src/api/README.md` explains how to add one, and it's covered in `e2e/agent-api.spec.js`, which currently has 8 tests against the 4 in `e2e/mcp.spec.js`. Don't forget those tests: vitest can't reach the scene or the OCC bridge, so a green unit run says nothing about a command.
