@@ -18,6 +18,7 @@ import { nearestConstraintMarker } from "../sceneObjects/constraintIconSprites.j
 // Constraints whose marker re-opens an editor on double-click.
 const EDITABLE_CONSTRAINTS = new Set([
   "distance",
+  "angleDimension",
   "pointLineDistance",
   "offset",
   "rectangularPattern",
@@ -130,6 +131,13 @@ export function createSketchClickHandler(
               constraintIdx: cObj.userData.constraintIdx,
             });
             useStore.getState().setSketchConstraintMode("distance");
+          } else if (c && c.type === "angleDimension") {
+            useStore.getState().setSketchAngleInput({
+              shapeAIdx: c.shapeAIdx,
+              shapeBIdx: c.shapeBIdx,
+              defaultAngle: c.angle,
+              constraintIdx: cObj.userData.constraintIdx,
+            });
           } else if (c && c.type === "offset") {
             useStore.getState().setSketchDistanceInput({
               offsetConstraintIdx: cObj.userData.constraintIdx,

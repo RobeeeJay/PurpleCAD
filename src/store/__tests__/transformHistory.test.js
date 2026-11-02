@@ -10,6 +10,8 @@ vi.mock("../../store.js", () => ({
 }));
 
 import { createHistorySlice } from "../historySlice.js";
+import { LAID_ON_FACE } from "../uiToolReset.js";
+import { applyInstruction } from "../internals.js";
 
 const makeStore = () =>
   create((set, get) => ({
@@ -83,6 +85,22 @@ describe("setItemTransform + recordTransformHistory", () => {
     // same label → no new entry, value updated in place
     expect(g().history.length).toBe(afterFirst);
     expect(transforms()[0].instruction.position.x).toBe(7);
+  });
+
+  it("records the rotation with the position when a body is laid on a face", () => {
+    // The step turns the body and moves it at once: a position-only record
+    // replays the move under the old rotation and leaves the body tilted.
+    const pose = {
+      position: { x: 1, y: 0.5, z: -2 },
+      rotation: { x: 0.3, y: -0.2, z: 1.1 },
+    };
+    g().setItemsTransform([{ id: 1, ...pose }]);
+    g().recordTransformHistory(1, LAID_ON_FACE);
+    const step = transforms().find((t) => t.label === LAID_ON_FACE);
+    expect(step, "no Laid on face step was recorded").toBeTruthy();
+    const replayed = applyInstruction([{ ...cube }], step.instruction)[0];
+    expect(replayed.position).toEqual(pose.position);
+    expect(replayed.rotation).toEqual(pose.rotation);
   });
 
   it("does not merge across different transform kinds", () => {

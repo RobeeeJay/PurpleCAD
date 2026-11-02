@@ -2,10 +2,11 @@
 // the toolbar's own icon beside a constrained point or line (coincident,
 // horizontal, vertical, distance, midpoint, parallel, ... see
 // constraintIconSprites.js), distance dimension lines + labels, on-line ticks,
-// angle arcs + degree labels -- plus the drag-time rebuild.  Split out of sketchOverlays.js to keep that file focused
+// plus the drag-time rebuild (angle arcs + degree labels are in angleIcons.js).  Split out of sketchOverlays.js to keep that file focused
 // on the shape/region geometry.
 
 import * as THREE from "three";
+import { addAngleDimensionIcon, addCornerAngleIcon } from "./angleIcons.js";
 import { addCentreConstraintIcon } from "./centreConstraintIcon.js";
 import {
   addCogConstraintIcon,
@@ -48,8 +49,6 @@ import { useStore } from "../../store";
 import { isFormulaValue, variablesToMap } from "../../utils/formulas.js";
 import { conflictingDimensions } from "../sketchDimensionConflicts.js";
 import {
-  ANGLE_LABEL_TEXT,
-  CONSTRAINT_ANGLE_COLOR,
   CONSTRAINT_COINCIDENT_COLOR,
   CONSTRAINT_HORIZONTAL_COLOR,
   CONSTRAINT_ON_LINE_COLOR,
@@ -168,8 +167,15 @@ export function addConstraintIconsToGroup(
     const isDimensionType =
       c.type === "distance" ||
       c.type === "pointLineDistance" ||
-      c.type === "offset";
-    if (isDimensionType && !showDimensions && c.type !== "distance") return;
+      c.type === "offset" ||
+      c.type === "angleDimension";
+    if (
+      isDimensionType &&
+      !showDimensions &&
+      c.type !== "distance" &&
+      !(c.type === "angleDimension" && showConstraints)
+    )
+      return;
     // Every annotation of a conflicting dimension turns red together -- label,
     // dimension line and its ticks -- so the whole measurement reads as wrong
     // rather than just its number.
@@ -622,60 +628,34 @@ export function addConstraintIconsToGroup(
     } else if (c.type === "cog") {
       addCogConstraintIcon({ c, shapes, placeIcon });
     } else if (c.type === "angle") {
-      const sA = shapes[c.shapeAIdx],
-        sB = shapes[c.shapeBIdx];
-      if (!sA || sA.type !== "line" || !sB || sB.type !== "line") return;
-      const P = getShapePoint(sA, c.pointA);
-      const oA = getShapePoint(sA, c.pointA === "start" ? "end" : "start");
-      const oB = getShapePoint(sB, c.pointB === "start" ? "end" : "start");
-      if (!P || !oA || !oB) return;
-      const aF = Math.atan2(oA.y - P.y, oA.x - P.x);
-      let delta = Math.atan2(oB.y - P.y, oB.x - P.x) - aF;
-      while (delta > Math.PI) delta -= 2 * Math.PI;
-      while (delta < -Math.PI) delta += 2 * Math.PI;
-      const AR = 0.45;
-      const arcPts = [];
-      for (let s = 0; s <= 16; s++) {
-        const ang = aF + delta * (s / 16);
-        arcPts.push(
-          toWorld(P.x + Math.cos(ang) * AR, P.y + Math.sin(ang) * AR, 0.005),
-        );
-      }
-      const arc = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(arcPts),
-        new THREE.LineBasicMaterial({
-          color: CONSTRAINT_ANGLE_COLOR,
-          depthTest: false,
-        }),
-      );
-      arc.renderOrder = 1004;
-      tag(
-        arc,
-        { x: P.x, y: P.y },
-        [c.shapeAIdx, c.shapeBIdx],
-        CONSTRAINT_ANGLE_COLOR,
-      );
-      group.add(arc);
-      markFixedSize(arc, toWorld(P.x, P.y, 0.005));
-      if (showDimensions) {
-        const deg = typeof c.angle === "number" ? c.angle : parseFloat(c.angle);
-        // Same builder as every other dimension label so the font size matches;
-        // angle keeps its own colour and carries no formula prefix.
-        const sprite = makeDimLabelSprite(`${Math.round(deg)}°`, {
-          theme,
-          color: ANGLE_LABEL_TEXT,
-        });
-        const midAng = aF + delta / 2;
-        sprite.position.copy(
-          toWorld(
-            P.x + Math.cos(midAng) * (AR + 0.3),
-            P.y + Math.sin(midAng) * (AR + 0.3),
-            0.006,
-          ),
-        );
-        sprite.renderOrder = 1009;
-        addTagged(sprite);
-      }
+      addCornerAngleIcon({
+        c,
+        shapes,
+        toWorld,
+        tag,
+        addTagged,
+        markFixedSize,
+        group,
+        makeDimLabelSprite,
+        theme,
+        showDimensions,
+      });
+    } else if (c.type === "angleDimension") {
+      addAngleDimensionIcon({
+        c,
+        shapes,
+        toWorld,
+        tag,
+        addTagged,
+        placeIcon,
+        markFixedSize,
+        group,
+        makeDimLabelSprite,
+        theme,
+        dimColor,
+        showDimensions,
+        showConstraints,
+      });
     } else if (c.type === "offset") {
       if (c.offsetGroup != null) {
         if (seenOffsetGroups.has(c.offsetGroup)) return;

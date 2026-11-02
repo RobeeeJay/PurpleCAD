@@ -59,6 +59,12 @@ export function resolveConstraintDistance(constraint, variables = null) {
   return resolveValue(constraint?.distance, 0, variables);
 }
 
+// An angle dimension's value in degrees.  It is typed like every other value but
+// isn't a length, so the scene-unit scaling resolveValue applies comes back off.
+export function resolveConstraintAngle(constraint, variables = null) {
+  return resolveValue(String(constraint?.angle), 0, variables) * MM_PER_UNIT;
+}
+
 // Reverse direction: turn a scene-unit number into a mm-space formula
 // string suitable for storage.  Used when the user commits an interactive
 // value (drag/finalise) and we want subsequent edits to see a sensible

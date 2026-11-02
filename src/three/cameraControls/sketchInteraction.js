@@ -207,6 +207,7 @@ export function createSketchInteraction(
     getRotationHandle,
     refreshRotationHandle,
     updateSelectionForDrag,
+    selectionHighlights,
   } = createSketchSelectionOverlays({
     scene,
     renderer,
@@ -226,6 +227,14 @@ export function createSketchInteraction(
     const sketchMesh = selItem ? objectsRef.current[selItem.id] : null;
     if (!selItem || !sketchMesh) return;
     updateSelectionForDrag(selItem.shapes || [], sketchMesh, true);
+  };
+
+  controls.clearConstraintPicks = clearCoincidentFirstOverlay;
+  controls.selectionHighlights = () => {
+    const sketchMesh = objectsRef.current[selectedIdRef.current];
+    if (!sketchMesh) return [];
+    sketchMesh.updateMatrixWorld();
+    return selectionHighlights(sketchMesh);
   };
 
   // Exposed on cameraControlsRef so SketchOverlays can drive hover/select for
@@ -776,7 +785,14 @@ export function createSketchInteraction(
       setSketchDrawPhase,
     },
   );
-  const { updateSketchPreview, handleSketchClick } = sketchDraw;
+  const {
+    updateSketchPreview,
+    handleSketchClick,
+    refreshSketchDraw,
+    commitSketchDraw,
+  } = sketchDraw;
+  controls.refreshSketchDraw = refreshSketchDraw;
+  controls.commitSketchDraw = commitSketchDraw;
 
   // ── Sketch-mode pointer dispatch (return true when handled) ───────────────
   // The element list for a press held still: from a mouse held down, or a
@@ -1438,6 +1454,7 @@ export function createSketchInteraction(
   );
 
   // Clears the lingering sketch overlays when the pointer moves in 3D view.
+  controls.cancelSketchDraw = cancelSketchDraw;
   const clearSketchVisualsFor3D = () => {
     clearAllSketchHover();
     clearSketchSelectionOverlay();

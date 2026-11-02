@@ -16,6 +16,7 @@ function toolSelectionLock(s) {
   if (s.embossTool) return s.embossTool.picking === "faces" ? ["face"] : [];
   // Point-to-Point: pick vertices while a point is armed.
   if (s.pointToPointTool && s.pointToPointTool.picking) return ["point"];
+  if (s.faceToGroundTool && s.faceToGroundTool.picking) return ["face"];
   // Draft: pick faces (the neutral plane, then the faces to taper).
   if (s.draftTool && s.draftTool.picking) return ["face"];
   return null;
@@ -58,7 +59,8 @@ export function anyToolActive(s) {
     s.originToolActive ||
     s.originDialogItemId ||
     s.originVertexPick ||
-    s.pointToPointTool
+    s.pointToPointTool ||
+    s.faceToGroundTool
   );
 }
 

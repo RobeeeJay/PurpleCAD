@@ -8,7 +8,11 @@
 // rigid-motion gauge freedom so the result is the valid configuration nearest
 // the current one (and fixed points stay put).
 
-import { resolveConstraintDistance, resolveValue } from "./geometryParams.js";
+import {
+  resolveConstraintAngle,
+  resolveConstraintDistance,
+  resolveValue,
+} from "./geometryParams.js";
 import { getShapePoint, moveShapePoint } from "./sceneObjects.js";
 import {
   shapeMidpoint,
@@ -96,6 +100,9 @@ function pointOf(s, key) {
   }
   return null;
 }
+
+// Shortest line an angle dimension accepts, in scene units: 0.1 mm.
+const MIN_ANGLED_LINE = 0.01;
 
 // Residual vector for the constraint set (each entry is 0 when satisfied).
 function residuals(shapes, constraints, variables) {
@@ -260,6 +267,28 @@ function residuals(shapes, constraints, variables) {
         );
         out.push(Number.isFinite(target) ? actual - target : 0);
       } else out.push(0);
+    } else if (c.type === "angleDimension") {
+      const a = shapes[c.shapeAIdx],
+        b = shapes[c.shapeBIdx];
+      if (a?.type === "line" && b?.type === "line") {
+        const target = (resolveConstraintAngle(c, variables) * Math.PI) / 180;
+        const ax = a.x2 - a.x1,
+          ay = a.y2 - a.y1,
+          bx = b.x2 - b.x1,
+          by = b.y2 - b.y1;
+        const actual = Math.atan2(
+          Math.abs(ax * by - ay * bx),
+          (ax * bx + ay * by) * (c.sense ?? 1),
+        );
+        out.push(Number.isFinite(target) ? actual - target : 0);
+        // A direction holds at any length, and a horizontal or a coincident
+        // shrinks to nothing with its line, so collapsing a line would satisfy
+        // an angle nothing can make.  It has to stay a line.
+        out.push(
+          Math.max(0, MIN_ANGLED_LINE - Math.hypot(ax, ay)),
+          Math.max(0, MIN_ANGLED_LINE - Math.hypot(bx, by)),
+        );
+      } else out.push(0, 0, 0);
     } else if (c.type === "parallel" || c.type === "colinear") {
       // Two lines parallel: the direction cross-product → 0.  Colinear adds a
       // second residual — line B's start point lies on line A (perp dist 0).
@@ -337,7 +366,8 @@ export function shapeHopDistance(numShapes, constraints, fixedShapeIdxs) {
       c.type === "colinear" ||
       c.type === "tangent" ||
       c.type === "equal" ||
-      c.type === "lineAngle"
+      c.type === "lineAngle" ||
+      c.type === "angleDimension"
     )
       link(c.shapeAIdx, c.shapeBIdx);
     else if (c.type === "onLine") link(c.lineShapeIdx, c.pointShapeIdx);

@@ -172,7 +172,6 @@ test.describe.serial("constraint-drifted sketch drags", () => {
           "DRAG FAILED",
           JSON.stringify({
             viewport: size,
-            calib: { a, b, c, d },
             from,
             to,
             before: { x1: before.x1, y1: before.y1 },

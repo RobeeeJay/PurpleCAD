@@ -140,6 +140,29 @@ export const createUiConstructToolsSlice = (set) => ({
       t.picking = which === "A" && !t.b ? "B" : null;
       return { pointToPointTool: t };
     }),
+  startFaceToGroundTool: () =>
+    set({
+      ...TOOL_RESET_PATCH,
+      faceToGroundTool: { picking: true, face: null },
+    }),
+  cancelFaceToGroundTool: () => set({ faceToGroundTool: null }),
+  setFaceToGroundPicking: (on) =>
+    set((s) =>
+      s.faceToGroundTool
+        ? { faceToGroundTool: { ...s.faceToGroundTool, picking: !!on } }
+        : {},
+    ),
+  setFaceToGroundFace: (itemId, normal, point) =>
+    set((s) =>
+      s.faceToGroundTool
+        ? {
+            faceToGroundTool: {
+              picking: false,
+              face: { itemId, normal, point },
+            },
+          }
+        : {},
+    ),
   setSweepSelectMode: (v) =>
     set({
       sweepSelectMode: v,

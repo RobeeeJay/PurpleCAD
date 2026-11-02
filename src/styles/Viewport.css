@@ -172,7 +172,8 @@
   pointer-events: none;
 }
 
-.sketch-distance-input-overlay {
+.sketch-distance-input-overlay,
+.sketch-draw-length-overlay {
   position: absolute;
   bottom: 52px;
   left: 50%;
@@ -190,7 +191,8 @@
   z-index: 20;
 }
 
-.sketch-distance-input-overlay input {
+.sketch-distance-input-overlay input,
+.sketch-draw-length-overlay input {
   background: rgba(var(--white-rgb), 0.1);
   border: 1px solid rgba(var(--color-warning-rgb), 0.6);
   color: var(--color-warning-light);
@@ -201,7 +203,8 @@
   outline: none;
 }
 
-.sketch-distance-input-overlay input:focus {
+.sketch-distance-input-overlay input:focus,
+.sketch-draw-length-overlay input:focus {
   border-color: rgba(var(--color-warning-rgb), 0.9);
   background: rgba(var(--white-rgb), 0.15);
 }

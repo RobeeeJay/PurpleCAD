@@ -127,4 +127,110 @@ test.describe.serial("parallel-line distance", () => {
     expect(Math.abs(it.shapes[0].y1 - it.shapes[1].y1)).toBeCloseTo(3, 1);
     expect(it.shapes[0].y1).toBeCloseTo(it.shapes[0].y2, 3);
   });
+
+  // Perpendicular distance from a line's start to another line.
+  const gap = (it, a, b) => {
+    const p = it.shapes[a];
+    const l = it.shapes[b];
+    const dx = l.x2 - l.x1;
+    const dy = l.y2 - l.y1;
+    return (
+      Math.abs((p.x1 - l.x1) * dy - (p.y1 - l.y1) * dx) / Math.hypot(dx, dy)
+    );
+  };
+  const direction = (s) => (s.y2 - s.y1) / (s.x2 - s.x1);
+
+  test("two lines each parallel to a third get a gap dimension", async () => {
+    // Neither has a constraint naming the other: the link runs through line 4.
+    await page.evaluate(() => {
+      window.__store.getState().addSketchShapes(
+        700,
+        [
+          { type: "line", x1: 6, y1: -6, x2: 10, y2: -2 },
+          { type: "line", x1: 9, y1: -6, x2: 13, y2: -2 },
+          { type: "line", x1: 14, y1: -6, x2: 18, y2: -2 },
+        ],
+        [
+          { type: "parallel", shapeAIdx: 2, shapeBIdx: 4 },
+          { type: "parallel", shapeAIdx: 3, shapeBIdx: 4 },
+        ],
+      );
+    });
+    await page.waitForTimeout(400);
+
+    await page.keyboard.press("d");
+    await page.mouse.click(toScreen(8, -4).x, toScreen(8, -4).y);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => window.__store.getState().sketchDistanceInput?.shapeAIdx,
+        ),
+      )
+      .toBe(2);
+    await page.mouse.click(toScreen(11, -4).x, toScreen(11, -4).y);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.__store.getState().sketchDistanceInput?.pointLine ?? null,
+        ),
+      )
+      .toMatchObject({ pointShapeIdx: 2, lineShapeIdx: 3 });
+
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await overlay.locator("input").first().fill("30");
+    await overlay.locator("input").first().press("Enter");
+
+    await expect
+      .poll(async () => gap(await line(), 2, 3), { timeout: 5000 })
+      .toBeCloseTo(3, 3);
+    const it = await line();
+    expect(direction(it.shapes[2])).toBeCloseTo(direction(it.shapes[4]), 4);
+    expect(direction(it.shapes[3])).toBeCloseTo(direction(it.shapes[4]), 4);
+  });
+
+  test("the distance tool goes straight to the gap of two selected parallel lines", async () => {
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      s.addSketchShapes(
+        700,
+        [
+          { type: "line", x1: 22, y1: -6, x2: 22, y2: -2 },
+          { type: "line", x1: 26, y1: -6, x2: 26, y2: -2 },
+        ],
+        [
+          { type: "vertical", shapeIdx: 5 },
+          { type: "vertical", shapeIdx: 6 },
+        ],
+      );
+      s.setSketchMultiSelectedIndices([5, 6]);
+    });
+    await page.getByTitle(/^Distance/).click();
+
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await expect(overlay.locator("input").first()).toBeFocused();
+    await expect(overlay.locator("input").first()).toHaveValue("40.00");
+    await overlay.locator("input").first().fill("20");
+    await overlay.locator("input").first().press("Enter");
+
+    await expect
+      .poll(async () => gap(await line(), 5, 6), { timeout: 5000 })
+      .toBeCloseTo(2, 3);
+  });
+
+  test("two selected lines that aren't held parallel leave the tool picking", async () => {
+    await page.evaluate(() =>
+      window.__store.getState().setSketchMultiSelectedIndices([0, 2]),
+    );
+    await page.getByTitle(/^Distance/).click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.__store.getState().sketchConstraintMode),
+      )
+      .toBe("distance");
+    expect(
+      await page.evaluate(() => window.__store.getState().sketchDistanceInput),
+    ).toBeNull();
+    await page.keyboard.press("Escape");
+  });
 });

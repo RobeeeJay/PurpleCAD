@@ -10,6 +10,11 @@ import { START_FACE_HIGHLIGHT, FACE_HOVER_COLOR } from "../theme.js";
 import { nearestVertexOf } from "../objectOrigin.js";
 import { growConnectedFaceSet } from "../embossFaceSet.js";
 import { effectiveSelectionTypes } from "../../store/selectionMode.js";
+import { flatFaceNormal } from "../faceToGround.js";
+
+// Primitives drawn by a shader inside a box hull.
+const RAYMARCHED = new Set(["sphere", "cylinder", "torus", "cone"]);
+const plain = (v) => ({ x: v.x, y: v.y, z: v.z });
 
 // Turn a 3D click into a measure entity (world coords): snap to the nearest
 // vertex when close, else the clicked planar face (its triangles + normal); for a
@@ -511,6 +516,37 @@ export function createViewInteraction(
                 });
               }
             }
+          }
+        }
+        save();
+        return;
+      }
+
+      // Drop to ground: the face to lay the body on.  Kept in the body's local
+      // frame so the preview and the commit both work from its rest pose.
+      const ftg = useStore.getState().faceToGroundTool;
+      if (ftg && ftg.picking) {
+        const hit = intersects[0];
+        const mesh = hit?.object;
+        const it =
+          mesh && itemsRef.current.find((i) => i.id === mesh.userData.itemId);
+        if (it && it.type !== "sketch" && hit.faceIndex != null) {
+          if (RAYMARCHED.has(it.type)) {
+            // Their mesh is the box they are drawn in, so the drop would rest
+            // on the box's corner rather than on the shape.
+            useStore
+              .getState()
+              .showNotification?.(
+                "Drop to ground can't lay a sphere, cylinder, cone or torus on a face.",
+              );
+          } else {
+            useStore
+              .getState()
+              .setFaceToGroundFace(
+                it.id,
+                plain(flatFaceNormal(mesh.geometry, hit.faceIndex)),
+                plain(mesh.worldToLocal(hit.point.clone())),
+              );
           }
         }
         save();

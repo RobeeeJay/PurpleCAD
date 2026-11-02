@@ -1291,6 +1291,27 @@ sources are picked) that reuses the creation UI.
   already crossing at rest (a pin in its hole) are ignored for that run. The
   BVH is built `indirect` -- by default it reorders the rendered geometry's
   index in place, which picking reads.
+- **A direction residual can be satisfied by collapsing the line.** Direction
+  holds at any length, and a horizontal, vertical or coincident residual shrinks
+  to nothing with its line. An angle dimension no sketch could make (both lines
+  already pinned to axes) came back `ok` with one line 5e-6 units long, reading
+  exactly 30 degrees. The dimension's residual now carries a hinge on each line's
+  length (`MIN_ANGLED_LINE`). Check the geometry, not just `ok`, when a test
+  expects a refusal.
+- **Selection highlights are scene objects, not part of the sketch group, and
+  each kind has to be moved by name.** A click draws a single highlight; a
+  shift-click then starts a multi-selection and clears the selected ELEMENT, and
+  it used to leave that drawn highlight behind. With no element to say where it
+  belonged, nothing moved it again: applying Parallel, Angle or Midpoint left the
+  first line's highlight at the old place until deselection. Rings were skipped
+  too, since only `Line2` has `setPositions`. `selectionHighlights()` reports
+  where each is drawn; `sketch-selection-highlight.spec.js` compares that with
+  the geometry. Pending pick highlights belong to their tool and clear when the
+  constraint mode changes.
+- **The draw field holds the focus, so sketch shortcuts wait while it is open.**
+  From the first click of a line or circle, keys go to
+  `SketchDrawLengthOverlay`, and its Escape cancels the shape. An e2e test must
+  not assume a suggestion list is open: there, Escape closes the list instead.
 - **Text and the cog are "contour primitives": one shape, several cached closed
   outlines relative to its `x, y`, locked by a same-named constraint.** Their
   outlines bypass the pairwise-intersect loop finder (`closedLoops.js` feeds

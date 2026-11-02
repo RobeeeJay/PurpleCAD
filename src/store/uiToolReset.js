@@ -4,6 +4,9 @@
 // its own module so the tool slices and uiSlice can all import it without a
 // cycle.
 
+// The timeline label of a face-to-ground step, which records rotation too.
+export const LAID_ON_FACE = "Laid on face";
+
 export const TOOL_RESET_PATCH = {
   sketchPlacementMode: false,
   extrudeSelectMode: null,
@@ -43,6 +46,7 @@ export const TOOL_RESET_PATCH = {
   originDialogItemId: null,
   originVertexPick: null,
   pointToPointTool: null,
+  faceToGroundTool: null,
   motionTool: null,
   selectionOverride: null,
   toolError: null,

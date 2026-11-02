@@ -14,7 +14,13 @@ vi.mock("../sceneObjects.js", () => ({
 }));
 vi.mock("../theme.js", () => ({ SKETCH_DRAW_PREVIEW_COLOR: 0 }));
 
-import { axisAlignLine, snapAngleTo45 } from "../sketchDraw.js";
+import {
+  axisAlignLine,
+  drawLengthConstraint,
+  pointAtReach,
+  snapAngleTo45,
+  typedDrawLength,
+} from "../sketchDraw.js";
 
 const line = (x1, y1, x2, y2) => ({ type: "line", x1, y1, x2, y2 });
 
@@ -78,5 +84,64 @@ describe("snapAngleTo45 (shift-lock)", () => {
   it("a shift-locked 45° line gets NO axis constraint", () => {
     const p = snapAngleTo45(S, { x: 6, y: 6.5 });
     expect(axisAlignLine(line(S.x, S.y, p.x, p.y), 0, false, false)).toBeNull();
+  });
+});
+
+describe("typing a size while drawing", () => {
+  it("treats an empty field as following the cursor", () => {
+    expect(typedDrawLength("line", "  ", {})).toBeNull();
+  });
+
+  it("reads a line's length in mm and a circle's diameter as its radius", () => {
+    // 10 mm is one scene unit; getting either conversion wrong draws a shape
+    // that contradicts the dimension stored on it.
+    expect(typedDrawLength("line", "40", {}).reach).toBeCloseTo(4, 9);
+    expect(typedDrawLength("circle", "30", {}).reach).toBeCloseTo(1.5, 9);
+  });
+
+  it("evaluates a formula against the variables", () => {
+    const got = typedDrawLength("line", "Wid * 2", { Wid: 15 });
+    expect(got.raw).toBe("Wid * 2");
+    expect(got.reach, `reach ${got.reach}`).toBeCloseTo(3, 9);
+  });
+
+  it("marks text that is not a positive length as having no reach", () => {
+    for (const text of ["0", "-5", "Nope"])
+      expect(typedDrawLength("line", text, {}).reach, text).toBeNull();
+  });
+
+  it("lands at the typed distance in the cursor's direction", () => {
+    const p = pointAtReach({ x: 1, y: 1 }, { x: 4, y: 5 }, 10);
+    expect(p.x, `x ${p.x}`).toBeCloseTo(7, 9);
+    expect(p.y, `y ${p.y}`).toBeCloseTo(9, 9);
+  });
+
+  it("runs along +x when the cursor has not left the start point", () => {
+    expect(pointAtReach({ x: 2, y: 3 }, { x: 2, y: 3 }, 4)).toEqual({
+      x: 6,
+      y: 3,
+    });
+  });
+
+  it("stores the dimension the distance tool would: start to end on a line", () => {
+    expect(drawLengthConstraint("line", 7, "Wid")).toEqual({
+      type: "distance",
+      shapeAIdx: 7,
+      pointA: "start",
+      shapeBIdx: 7,
+      pointB: "end",
+      distance: "Wid",
+    });
+  });
+
+  it("stores a circle's typed diameter as the radius every file format keeps", () => {
+    expect(drawLengthConstraint("circle", 2, "30")).toEqual({
+      type: "distance",
+      shapeAIdx: 2,
+      pointA: "center",
+      shapeBIdx: 2,
+      pointB: "edge",
+      distance: "15",
+    });
   });
 });

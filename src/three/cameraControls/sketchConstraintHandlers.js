@@ -15,6 +15,7 @@ import {
   moveShapePoint,
 } from "../sceneObjects.js";
 import { SKETCH_SELECTION_GREEN } from "../theme.js";
+import { lineGapInput, linesShareDirection } from "../sketchModifyActions.js";
 
 export function createSketchConstraintHandlers(
   {
@@ -73,9 +74,8 @@ export function createSketchConstraintHandlers(
       if (!shape || isOffsetCopy(lineIdx)) return;
 
       // Two parallel lines → perpendicular distance between them.  The first
-      // line click opened a line-length input; clicking a SECOND line that
-      // shares a horizontal/vertical/parallel constraint with it switches to a
-      // line-to-line gap (measured from the first line, which moves first).
+      // line click opened a line-length input; clicking a SECOND line held
+      // parallel to it switches to a line-to-line gap.
       const pending = store.sketchDistanceInput;
       const isPendingLen =
         pending &&
@@ -85,39 +85,14 @@ export function createSketchConstraintHandlers(
         pending.pointA === "start" &&
         pending.pointB === "end" &&
         shapes[pending.shapeAIdx]?.type === "line";
-      const parallelConstrained = (a, b) => {
-        const hasHV = (idx, t) =>
-          constraints.some((c) => c.type === t && c.shapeIdx === idx);
-        if (hasHV(a, "horizontal") && hasHV(b, "horizontal")) return true;
-        if (hasHV(a, "vertical") && hasHV(b, "vertical")) return true;
-        return constraints.some(
-          (c) =>
-            (c.type === "parallel" || c.type === "colinear") &&
-            ((c.shapeAIdx === a && c.shapeBIdx === b) ||
-              (c.shapeAIdx === b && c.shapeBIdx === a)),
-        );
-      };
       if (
         isPendingLen &&
         shape.type === "line" &&
         lineIdx !== pending.shapeAIdx &&
-        parallelConstrained(pending.shapeAIdx, lineIdx)
+        linesShareDirection(constraints, pending.shapeAIdx, lineIdx)
       ) {
-        const A = pending.shapeAIdx; // first-picked line — moves first
-        const p = getShapePoint(shapes[A], "start");
-        const dx = shape.x2 - shape.x1,
-          dy = shape.y2 - shape.y1;
-        const len = Math.hypot(dx, dy) || 1e-9;
-        store.setSketchDistanceInput({
-          pointLine: {
-            pointShapeIdx: A,
-            pointKey: "start",
-            lineShapeIdx: lineIdx,
-          },
-          defaultDistance: Math.abs(
-            ((p.x - shape.x1) * dy - (p.y - shape.y1) * dx) / len,
-          ),
-        });
+        const A = pending.shapeAIdx;
+        store.setSketchDistanceInput(lineGapInput(shapes, A, lineIdx));
         store.setSketchConstraintFirstPoint(null);
         // Highlight BOTH picked lines as selected.
         clearCoincidentFirstOverlay();

@@ -14,6 +14,7 @@ import {
 import { createSketchUndoSlice } from "./sketchUndoSlice.js";
 import { createSketchPatternToolSlice } from "./sketchPatternToolSlice.js";
 import { createSketchCentreSlice } from "./sketchCentreSlice.js";
+import { createSketchAngleSlice } from "./sketchAngleSlice.js";
 import { createSketchCogSlice } from "./sketchCogSlice.js";
 import { createSketchOffsetSlice } from "./sketchOffsetSlice.js";
 import { createSketchUiStateSlice } from "./sketchUiStateSlice.js";
@@ -287,6 +288,7 @@ export const createSketchSlice = (set) => ({
 
   ...createSketchPatternToolSlice(set),
   ...createSketchCentreSlice(set),
+  ...createSketchAngleSlice(set),
   ...createSketchCogSlice(set),
 
   // --- Shape + constraint mutations ---

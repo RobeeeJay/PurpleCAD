@@ -2,6 +2,7 @@ import { useStore } from "../../store";
 import ToolbarSection from "./ToolbarSection";
 import CentreConstraintButton from "./CentreConstraintButton";
 import { nearestAxis } from "../../three/sketchConstraints.js";
+import { openGapDistanceFromSelection } from "../../three/sketchModifyActions.js";
 import {
   CoincidentArt,
   MidpointArt,
@@ -11,6 +12,7 @@ import {
   HorizontalVerticalArt,
   ParallelArt,
   ColinearArt,
+  AngleArt,
   TangentArt,
   EqualArt,
 } from "../icons/constraintIconArt.jsx";
@@ -20,7 +22,6 @@ import SvgIcon from "../icons/SvgIcon.jsx";
 // in 3D it's the "Move" group (drop-to-ground, point-to-point).  Snap is shared.
 const ConstrainSection = ({ isSketchMode }) => {
   const selectedId = useStore((s) => s.selectedId);
-  const selectedIds = useStore((s) => s.selectedIds);
   const items = useStore((s) => s.items);
   const sketchConstraintMode = useStore((s) => s.sketchConstraintMode);
   const setSketchConstraintMode = useStore((s) => s.setSketchConstraintMode);
@@ -122,17 +123,17 @@ const ConstrainSection = ({ isSketchMode }) => {
       setSketchConstraintMode("distance");
       setSketchConstraintFirstPoint(null);
       setSketchDistanceInput(null);
+      openGapDistanceFromSelection();
     }
   };
 
-  // Drop-to-ground (3D "Move" group): enabled when a non-sketch body is selected.
-  const dropEligible = (selectedIds.length > 0 ? selectedIds : [selectedId])
-    .map((id) => items.find((i) => i.id === id))
-    .filter((it) => it && it.type !== "sketch");
-  const canDrop = dropEligible.length > 0;
+  // Drop-to-ground (3D "Move" group) opens its dialog: pick a face to lay the
+  // body on, or confirm to drop the selection as it stands.
+  const faceToGroundTool = useStore((s) => s.faceToGroundTool);
   const handleDrop = () => {
-    if (!canDrop) return;
-    useStore.getState()._cameraControls?.dropSelectedToGround?.();
+    const s = useStore.getState();
+    if (s.faceToGroundTool) s.cancelFaceToGroundTool();
+    else s.startFaceToGroundTool();
   };
 
   return (
@@ -156,7 +157,7 @@ const ConstrainSection = ({ isSketchMode }) => {
           <CentreConstraintButton />
           <button
             className={`toolbar-btn ${sketchConstraintMode === "distance" ? "active" : ""}`}
-            title="Distance — set a fixed distance between two points"
+            title="Distance — set a fixed distance between two points, or the gap between two parallel lines"
             onClick={handleDistanceConstraint}
           >
             <DistanceArt />
@@ -239,6 +240,22 @@ const ConstrainSection = ({ isSketchMode }) => {
                 </button>
                 <button
                   className="toolbar-btn"
+                  title="Angle — hold an angle between two selected lines"
+                  disabled={!ready}
+                  onClick={() =>
+                    useStore
+                      .getState()
+                      .beginSketchAngle(
+                        selectedId,
+                        multiSelectedIndices[0],
+                        multiSelectedIndices[1],
+                      )
+                  }
+                >
+                  <AngleArt />
+                </button>
+                <button
+                  className="toolbar-btn"
                   title="Tangent — make a line tangent to an arc/circle, or two arcs/circles tangent"
                   disabled={!ready}
                   onClick={() => applyPair("tangent")}
@@ -259,9 +276,8 @@ const ConstrainSection = ({ isSketchMode }) => {
         </>
       ) : (
         <button
-          className="toolbar-btn"
-          title="Drop to ground — moves the selection so its lowest point sits on Z=0"
-          disabled={!canDrop}
+          className={`toolbar-btn ${faceToGroundTool ? "active" : ""}`}
+          title="Drop to ground — pick a face to lay the body on, or drop the selection so its lowest point sits on Z=0"
           onClick={handleDrop}
         >
           <SvgIcon name="move-to-ground" size={20} />
