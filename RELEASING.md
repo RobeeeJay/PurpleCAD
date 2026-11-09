@@ -212,7 +212,28 @@ Third, open the app from Finder (not from a VS Code terminal: see
 `ELECTRON_RUN_AS_NODE` in `CLAUDE.md`). Make a box, sketch on it, extrude a
 circle, chamfer an edge, and save the document.
 
-Finally, write down the checksums of what you're handing back:
+electron-builder notarizes the app but leaves the `.dmg` around it unsigned.
+A downloaded image still opens, since Gatekeeper judges the notarized app inside,
+but Gatekeeper rejects the image as a file, and some browsers and download
+managers warn about it. So sign the image, notarize it and staple the ticket to
+it as well:
+
+```bash
+dmg=release/PurpleCAD-<version>-x64.dmg    # -arm64.dmg on Apple Silicon
+codesign --sign "Developer ID Application: ROBEENA JESSICA SHEPHERD (7K4FM2CS29)" \
+  --timestamp "$dmg"
+xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY" \
+  --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait --timeout 30m
+xcrun stapler staple "$dmg"
+spctl --assess --type open --context context:primary-signature -v "$dmg"
+```
+
+The last command should say `accepted` and `source=Notarized Developer ID`. This
+changes the image, so the `.dmg.blockmap` beside it no longer matches it. Nothing
+uses the blockmaps yet: they're for auto-update, which PurpleCAD doesn't do.
+
+Finally, write down the checksums of what you're handing back, after signing the
+image:
 
 ```bash
 shasum -a 256 release/*.dmg release/*.zip
