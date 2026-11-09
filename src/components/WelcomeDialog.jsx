@@ -18,23 +18,19 @@ const WelcomeDialog = () => {
   const close = useStore((s) => s.closeWelcomeDialog);
   if (!open) return null;
 
+  // Only the button dismisses it: the warning has to be read and accepted, not
+  // brushed aside by a stray click outside or the close box, and dismissing it
+  // is what records it as seen for good.
   return (
-    <div className="variables-dialog-backdrop" onClick={close}>
+    <div className="variables-dialog-backdrop">
       <div
         className="variables-dialog welcome-dialog"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
+        role="alertdialog"
+        aria-modal="true"
         aria-label={TITLE}
       >
         <div className="variables-dialog-header">
           <h2>{TITLE}</h2>
-          <button
-            className="variables-dialog-close"
-            onClick={close}
-            title="Close"
-          >
-            ×
-          </button>
         </div>
         <div className="license-body welcome-body">
           {BODY.map((b, k) => (
@@ -44,7 +40,7 @@ const WelcomeDialog = () => {
         <div className="variables-dialog-footer">
           <div />
           <button className="variables-btn primary" onClick={close} autoFocus>
-            Got it
+            I understand
           </button>
         </div>
       </div>

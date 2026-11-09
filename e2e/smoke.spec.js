@@ -289,10 +289,23 @@ test("the welcome dialog shows its text and is remembered once dismissed", async
   await page.evaluate(() =>
     window.__store.getState().setWelcomeDialogOpen(true),
   );
-  const dialog = page.getByRole("dialog", { name: "Welcome to PurpleCAD" });
+  const dialog = page.getByRole("alertdialog", {
+    name: "Welcome to PurpleCAD",
+  });
   await expect(dialog).toContainText("This is a BETA version");
   await expect(dialog).toContainText("Use it at your own risk!");
-  await dialog.getByRole("button", { name: "Got it" }).click();
+  // The warning has to be accepted: a click beside it, Escape, and the lack of
+  // a close box all leave it up, and none of them records it as seen.
+  await expect(dialog.getByTitle("Close")).toHaveCount(0);
+  await page.mouse.click(5, 5);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      window.electronAPI.dbCall("db:settingGet", "welcomeSeen"),
+    ),
+  ).toBeNull();
+  await dialog.getByRole("button", { name: "I understand" }).click();
   await expect(dialog).toBeHidden();
   // Read back from the main process: the write goes there asynchronously.
   await expect
