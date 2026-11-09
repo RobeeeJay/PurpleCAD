@@ -16,13 +16,15 @@ execute_process(
 # node -p wraps the path in quotes on some platforms; strip them.
 string(REPLACE "\"" "" NODE_ADDON_API_DIR "${NODE_ADDON_API_DIR}")
 
-# OpenCASCADE — look for the homebrew installation on macOS first, then fall
-# back to whatever find_package would find on a system-wide install.
+# OpenCASCADE -- our own builds in the home directory first, newest first (the
+# x64 one is an Intel Mac's; RELEASING.md), then a Homebrew or system install.
+# scripts/afterPack.cjs bundles from the same list, so keep the two in order.
 find_package(OpenCASCADE REQUIRED
   HINTS
     "$ENV{HOME}/occ-8.0.1-arm64/lib/cmake/opencascade"
     "$ENV{HOME}/occ-8.0-arm64/lib/cmake/opencascade"
     "$ENV{HOME}/occ-arm64/lib/cmake/opencascade"
+    "$ENV{HOME}/occ-8.0.1-x64/lib/cmake/opencascade"
     /opt/homebrew/opt/opencascade/lib/cmake/opencascade
     /usr/local/opt/opencascade/lib/cmake/opencascade
 )
