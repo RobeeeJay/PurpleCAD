@@ -1,4 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
+# The oldest macOS Electron runs on.  Left unset, clang targets the macOS doing
+# the build, and the packaged app opened on an older Mac without its kernel.
+# Must come before project().  OCC is built the same way (RELEASING.md).
+# An existing build directory caches it as empty, hence a plain variable.
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0")
+endif()
 project(occ_addon CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -81,6 +88,15 @@ set_target_properties(occ_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(UNIX)
   target_compile_definitions(occ_core PRIVATE OCC_CONVERT_SIGNALS)
 endif()
+# MSVC: OCC turns a hardware fault into a Standard_Failure on Windows through a
+# structured-exception translator, and a C++ catch only sees one under /EHa --
+# without it, a fault that merely fails an op on a Mac or Linux would take the
+# whole app down here.  /bigobj for the larger translation units, /utf-8 because
+# the sources are UTF-8, and NOMINMAX so windows.h leaves std::min/max alone.
+if(MSVC)
+  target_compile_options(occ_core PRIVATE /EHa /bigobj /utf-8)
+  target_compile_definitions(occ_core PRIVATE NOMINMAX _USE_MATH_DEFINES)
+endif()
 target_include_directories(occ_core PRIVATE
   ${MESHOPT_DIR}
   ${OpenCASCADE_INCLUDE_DIR}
@@ -135,3 +151,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   NAPI_CPP_EXCEPTIONS
   NAPI_VERSION=9
 )
+if(MSVC)
+  target_compile_options(${PROJECT_NAME} PRIVATE /EHa /utf-8)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
+endif()
