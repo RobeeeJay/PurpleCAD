@@ -120,7 +120,7 @@ jobs:
       # directory, so it is installed there.
       - name: Cache OCC
         id: cache-occ
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/occ-8.0.1-${{ matrix.arch }}
           key: occ-8.0.1-${{ matrix.arch }}-${{ runner.os }}-macos12
@@ -139,6 +139,15 @@ jobs:
             $OCC_FLAGS
           cmake --build "$RUNNER_TEMP/occt-build" --parallel "$(sysctl -n hw.logicalcpu)"
           cmake --install "$RUNNER_TEMP/occt-build"
+
+      # Saved as soon as it is built: a plain actions/cache saves only when the
+      # whole job succeeds, so a test failure later threw away a 40-minute build.
+      - name: Save OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/occ-8.0.1-${{ matrix.arch }}
+          key: ${{ steps.cache-occ.outputs.cache-primary-key }}
 
       - name: Install npm dependencies
         run: |
@@ -285,7 +294,7 @@ jobs:
 
       - name: Cache OCC
         id: cache-occ
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/occ-8.0.1-x64
           key: occ-8.0.1-x64-${{ runner.os }}-gcc14
@@ -299,6 +308,15 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$HOME/occ-8.0.1-x64" $OCC_FLAGS
           cmake --build "$RUNNER_TEMP/occt-build" --parallel "$(nproc)"
           cmake --install "$RUNNER_TEMP/occt-build"
+
+      # Saved as soon as it is built: a plain actions/cache saves only when the
+      # whole job succeeds, so a test failure later threw away a 40-minute build.
+      - name: Save OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/occ-8.0.1-x64
+          key: ${{ steps.cache-occ.outputs.cache-primary-key }}
 
       - name: Install npm dependencies
         run: |
@@ -365,7 +383,7 @@ jobs:
 
       - name: Cache OCC
         id: cache-occ
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: C:/occ-8.0.1-x64
           key: occ-8.0.1-x64-${{ runner.os }}-msvc
@@ -383,6 +401,15 @@ jobs:
           cmake --install "$RUNNER_TEMP/occt-build"
           ls "$OCC_BIN_DIR"/TKernel.dll
           ls "$OCC_HOME"/lib/cmake/opencascade/OpenCASCADEConfig.cmake
+
+      # Saved as soon as it is built: a plain actions/cache saves only when the
+      # whole job succeeds, so a test failure later threw away a 40-minute build.
+      - name: Save OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:/occ-8.0.1-x64
+          key: ${{ steps.cache-occ.outputs.cache-primary-key }}
 
       - name: Install npm dependencies
         run: |
