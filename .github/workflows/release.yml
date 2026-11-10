@@ -169,8 +169,11 @@ jobs:
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
           printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          # A secret pasted from the clipboard can carry a line break the
+          # password never had ("MAC verification failed ... wrong password?").
+          cert_password="$(printf '%s' "$MACOS_CERTIFICATE_PASSWORD" | tr -d '\r\n')"
           security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
-            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            -P "$cert_password" -T /usr/bin/codesign
           rm -f "$RUNNER_TEMP/certificate.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
