@@ -181,6 +181,15 @@ jobs:
             echo "APPLE_API_KEY=$RUNNER_TEMP/notary.p8"
           } >> "$GITHUB_ENV"
 
+      # The unit suite drives the real addon, so it shows each build behaving
+      # like the others.  The timeout is raised for slower runners; tests that
+      # set their own keep it.
+      - name: Build and test the addon
+        run: |
+          npm run addon:build
+          npm run addon:test
+          npx vitest run --testTimeout=60000
+
       # With APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER set,
       # electron-builder signs the app with the hardened runtime and notarizes it.
       - name: Build the app
@@ -270,7 +279,9 @@ jobs:
           cache: "npm"
 
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf gcc-14 g++-14
+        # OCC 8's DataExchange still builds TKService, which includes Xlib.h,
+        # even with the Visualization module off.
+        run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf gcc-14 g++-14 libx11-dev
 
       - name: Cache OCC
         id: cache-occ
@@ -294,11 +305,16 @@ jobs:
           npm ci
           npm ci --prefix native/occ-addon
 
-      # OCC is off the loader's path here, so the addon test needs it named.
+      # OCC is off the loader's path here, so the tests need it named.  The
+      # unit suite drives the real addon, so it shows this build behaving like
+      # the others.  The timeout is raised for slower runners; tests that set
+      # their own keep it.
       - name: Build and test the addon
         run: |
           npm run addon:build
-          LD_LIBRARY_PATH="$HOME/occ-8.0.1-x64/lib" npm run addon:test
+          export LD_LIBRARY_PATH="$HOME/occ-8.0.1-x64/lib"
+          npm run addon:test
+          npx vitest run --testTimeout=60000
 
       - name: Build the app
         run: npm run dist:linux
@@ -385,7 +401,7 @@ jobs:
       # The whole unit suite runs the real addon, so it is what shows the MSVC
       # build behaving like the clang and gcc ones.
       - name: Unit tests
-        run: PATH="$(cygpath -u "$OCC_BIN_DIR"):$PATH" npx vitest run
+        run: PATH="$(cygpath -u "$OCC_BIN_DIR"):$PATH" npx vitest run --testTimeout=60000
 
       - name: Build the app
         run: |
