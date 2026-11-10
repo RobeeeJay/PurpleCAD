@@ -74,7 +74,7 @@ jobs:
           # Each architecture builds on its own kind of Mac, so OCC, the addon
           # and the load check all run natively rather than cross-compiled.
           - arch: arm64
-            runner: macos-14
+            runner: macos-15
             occ_arch: arm64
           - arch: x64
             runner: macos-15-intel
