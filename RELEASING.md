@@ -2,23 +2,88 @@
 
 PurpleCAD has a native addon, and the addon links OpenCASCADE (OCC), so every
 release has to be built on the operating system and processor it's for. There's
-no cross-compiling here: a Windows build needs a Windows machine with OCC built
-on it, an Intel Mac build needs an Intel Mac, and so on. The release workflow on
-GitHub only builds for Apple Silicon Macs, which leaves the other two to be done
-by hand.
+no cross-compiling here: a Windows build needs Windows with OCC built on it, an
+Intel Mac build needs an Intel Mac, and so on.
 
-This page is written for whoever does that, Claude included. Each platform
-section is a sequence of steps, with a check after each step that says whether
-it worked. If a check fails, stop and fix it before going on: a release that
-builds but can't load its kernel looks perfectly healthy until someone opens a
-part.
+GitHub has all of those, so the normal way to make a release is to let the
+release workflow build every platform, as the first section below describes. The
+rest of this page is the same work done by hand, for when the workflow fails and
+you need to see why on a real machine, or when GitHub isn't an option. It's
+written for whoever does that, Claude included. Each platform section is a
+sequence of steps, with a check after each step that says whether it worked. If
+a check fails, stop and fix it before going on: a release that builds but can't
+load its kernel looks perfectly healthy until someone opens a part.
 
 | Platform | Status | Section |
 | -------- | ------ | ------- |
-| macOS, Apple Silicon | Built and signed on the main development Mac. The release workflow builds it too. | [macOS](#macos-apple-silicon-and-intel) |
-| macOS, Intel | Never built. The steps follow the Apple Silicon path, which works. | [macOS](#macos-apple-silicon-and-intel) |
-| Windows x64 | Never built, and **needs code changes first**. The steps say which. | [Windows](#windows-x64) |
-| Linux x64 | Not covered here yet. It needs the same change to `scripts/afterPack.cjs` as Windows. | |
+| macOS, Apple Silicon | Built, signed and notarized by hand on the main development Mac, and by the release workflow. | [macOS](#macos-apple-silicon-and-intel) |
+| macOS, Intel | Built, signed and notarized by the release workflow. Not yet tried on an Intel Mac. | [macOS](#macos-apple-silicon-and-intel) |
+| Windows x64 | Built by the release workflow, unsigned. Not yet tried on a Windows PC. | [Windows](#windows-x64) |
+| Linux x64 | Built by the release workflow. Nobody here runs Linux, so it's untested until someone outside does. | [Linux](#linux-x64) |
+
+## Releasing From GitHub
+
+`.github/workflows/release.yml` builds all four platforms. Push a version tag
+and it builds them, checks each one, and gathers them into a **draft** release
+on this repository with a `SHA256SUMS.txt` beside them. Nothing goes public
+until you publish the draft yourself, after trying the builds on real machines.
+Start it by hand from the Actions tab (or `gh workflow run release.yml --ref
+<branch>`) and it builds and checks everything but makes no release, which is
+the way to try a change to the workflow.
+
+Each build runs the same checks the by-hand sections below do. The packed app
+has to load its kernel with the OCC it was built against moved out of the way,
+and the Mac builds have to pass Gatekeeper as `Notarized Developer ID`, the app
+and the disk image both. A Mac build **never comes out unsigned**: without the
+signing secrets the job stops in its first minute.
+
+### Setting Up the Signing Secrets, Once
+
+The workflow needs five repository secrets. They have the same names as in the
+ZX-Rustrum project, but GitHub never lets a secret be read back, so they have to
+be set again here. Do this on the Mac that has the Developer ID certificate in
+its keychain.
+
+First, export the certificate. In Keychain Access, under **My Certificates**,
+right-click **Developer ID Application: ROBEENA JESSICA SHEPHERD (7K4FM2CS29)**,
+choose **Export**, save it as a `.p12` outside the repository, and give it a
+password. Then hand the certificate, its password and the notary key to GitHub:
+
+```bash
+repo=RobeeeJay/PurpleCAD
+base64 -i ~/Keys/DeveloperID.p12 | gh secret set MACOS_CERTIFICATE --repo $repo
+gh secret set MACOS_CERTIFICATE_PASSWORD --repo $repo
+gh secret set MACOS_NOTARY_KEY --repo $repo < ~/Keys/AuthKey_<key id>.p8
+gh secret set MACOS_NOTARY_KEY_ID --repo $repo --body <key id>
+gh secret set MACOS_NOTARY_ISSUER --repo $repo
+```
+
+The two commands without a value ask for it, so the password and the issuer ID
+never land in your shell history. The key ID is the part of the `.p8` file name
+after `AuthKey_`; [Getting the Notarization Key](#getting-the-notarization-key)
+says where the issuer ID is. Delete the `.p12` afterwards, since the keychain
+still has the certificate. `gh secret list --repo $repo` should then show all
+five.
+
+Anyone who can push a workflow to this repository can sign with these. That's
+fine while it's one person; with collaborators, put them in a protected GitHub
+environment that only the release workflow may use.
+
+### Making a Release
+
+1. Bump the version: `npm version <x.y.z> --no-git-tag-version`, commit, and
+   merge to `main`.
+2. Tag that commit `v<x.y.z>` and push the tag. The workflow refuses a tag that
+   doesn't match `package.json`.
+3. Wait. The first run of each OCC version builds OCC on every platform (about
+   15 minutes on a Mac, longer on Windows), and later runs take it from the
+   cache. Notarization waits on Apple, which can add half an hour.
+4. Download the draft's files, check the checksums, and try each build on a real
+   machine: open it, make a box, sketch on it, extrude a circle, chamfer an edge,
+   and save. Then publish the draft.
+
+If a job fails, the matching by-hand section below is where to look: its steps
+are the workflow's steps, with an explanation of each.
 
 ## Before You Start, on Every Platform
 
@@ -79,6 +144,7 @@ git clone --depth 1 --branch V8_0_1 \
 cmake -S /tmp/occt -B /tmp/occt-build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
   -DCMAKE_INSTALL_PREFIX=$HOME/occ-8.0.1-x64 \
   -DBUILD_MODULE_FoundationClasses=ON \
   -DBUILD_MODULE_ModelingData=ON \
@@ -101,13 +167,23 @@ the directory name.
 Apple Silicon Mac, and the result fails quietly: the addon still links, and only
 falls over when the app loads it.
 
-Check you got the architecture you asked for:
+**Pin `CMAKE_OSX_DEPLOYMENT_TARGET` too.** Left out, OCC is built to run only on
+the macOS version doing the building or newer, and nothing complains: the app
+claims macOS 12, opens on an older Mac, and then can't load its kernel. The
+first 1.0.0 build for Apple Silicon was made like that, with an addon needing
+macOS 27 and OCC needing macOS 26, and it passed signing, notarization and
+every check this page had at the time. 12.0 is the oldest macOS Electron runs
+on. The addon's `CMakeLists.txt` now sets it for the addon, and `afterPack.cjs`
+refuses to package anything that needs newer than the app does.
+
+Check you got the architecture and the macOS version you asked for:
 
 ```bash
 lipo -archs ~/occ-8.0.1-x64/lib/libTKernel.8.0.1.dylib
+otool -l ~/occ-8.0.1-x64/lib/libTKernel.8.0.1.dylib | grep minos
 ```
 
-You should see `x86_64`, or `arm64` on Apple Silicon.
+You should see `x86_64` (or `arm64` on Apple Silicon), then `minos 12.0`.
 
 ### Step Three: Build and Test the Addon
 
@@ -241,10 +317,10 @@ shasum -a 256 release/*.dmg release/*.zip
 
 ## Windows x64
 
-Nobody has built PurpleCAD for Windows yet, so this section is a plan more than a
-recipe. Steps One to Three ought to work as written, but I haven't run them.
-Step Four is code that doesn't exist yet. Work through it in order, and commit
-the code changes on a branch as you go, so they come back with the build.
+The release workflow builds Windows with these steps, so they work on a GitHub
+runner. Nobody has tried them on a Windows PC yet. Work through them in order,
+and commit any code changes on a branch as you go, so they come back with the
+build.
 
 Run the build steps in an **x64 Native Tools Command Prompt for VS 2022**, which
 is a `cmd` window with the compiler on the PATH: those blocks are `cmd` syntax.
@@ -320,33 +396,28 @@ There's one known risk to look at while you're in there. On Unix, the addon
 defines `OCC_CONVERT_SIGNALS` so that a crash inside OCC becomes an exception
 instead of taking the whole app down (see "OCC kernel faults" in `CLAUDE.md`).
 Windows does this with structured exceptions instead, which MSVC only turns into
-C++ exceptions when the code is compiled with `/EHa`. Check how the OCC build was
-compiled, and compile the addon the same way. Without it, a geometry error that
-merely fails an operation on a Mac could close the app on Windows.
+C++ exceptions when the code is compiled with `/EHa`, so the addon's
+`CMakeLists.txt` compiles it that way under MSVC. Nobody has yet seen a kernel
+fault on Windows to prove it works. If a geometry error closes the app on Windows
+where the same model merely fails an operation on a Mac, this is the place to
+start.
 
-### Step Four: Bundle OCC With the App (Code Change)
+### Step Four: Bundle OCC With the App
 
-`scripts/afterPack.cjs` bundles OCC into a Mac app and returns early on every
-other platform. As it stands, a Windows build would ship an addon that can't find
-`TKernel.dll`. Add a Windows branch that:
+`scripts/afterPack.cjs` does this when electron-builder packs a Windows app. It
+copies every `TK*.dll` from the OCC `bin` directory into the folder that holds
+`occ_addon.node`, under
+`resources\app.asar.unpacked\native\occ-addon\build\Release`. Node loads an
+addon with a search path that starts in the addon's own folder, so that's where
+Windows looks for the DLLs it imports. It finds the OCC directory in
+`OCC_BIN_DIR`, falling back to `%USERPROFILE%\occ-8.0.1-x64\bin`.
 
-1. Finds the OCC `bin` directory from an `OCC_BIN_DIR` environment variable,
-   falling back to `%USERPROFILE%\occ-8.0.1-x64\bin`.
-2. Copies every `TK*.dll` from there into the directory that holds
-   `occ_addon.node`, under
-   `resources\app.asar.unpacked\native\occ-addon\build\Release` in the packed
-   app.
-3. Lists the DLLs the addon imports (`dumpbin /dependents occ_addon.node`), and
-   throws if any `TK*.dll` among them is missing from that directory, just as the
-   Mac branch does for dylibs. A missing DLL has to fail the build, not the user.
-
-DLLs placed beside the `.node` file should be found when the addon loads, because
-Node loads native addons with a search path that includes the addon's own
-directory. That's what I'd expect from how Node does it, not something I've seen
-work, which is why the check in Step Six exists.
-
-Make sure the change leaves the Mac branch alone. The Mac build has to come out
-the same as before.
+It also copies Microsoft's C++ runtime (`msvcp140.dll`, `vcruntime140.dll` and
+friends) into the same folder, because Windows doesn't come with it and Electron
+links its own copy into itself. It takes them from `VCToolsRedistDir`, which the
+x64 Native Tools prompt sets. Then it asks `dumpbin` what the addon and every
+DLL beside it import, and fails the build if an OCC DLL or a runtime DLL among
+them is missing. A missing DLL has to fail the build, not the user.
 
 ### Step Five: Build the App
 
@@ -405,9 +476,9 @@ Get-FileHash release\*.exe, release\*.zip -Algorithm SHA256
 
 You need three things from App Store Connect, and you probably already have them.
 The ZX-Rustrum project notarizes with an App Store Connect API key the same way,
-and PurpleCAD uses the same key: `AuthKey_R7WU32263A.p8`, kept in `~/Keys/` on
-the main development Mac. Its key ID is `R7WU32263A`. `notarytool history` with
-it lists ZX-Rustrum's own submissions, which is how I know it's the right one.
+and PurpleCAD uses the same key: the `AuthKey_*.p8` file kept in `~/Keys/` on the main development Mac.
+`notarytool history` with it lists ZX-Rustrum's own submissions, which is how I
+know it's the right one.
 Copy the file to the build machine by hand, never through the repository.
 
 To use one, or make a new one:
@@ -433,15 +504,30 @@ xcrun notarytool history --key "$APPLE_API_KEY" \
 A list of past submissions, or an empty list, means it works. An authentication
 error means the key ID and issuer don't belong together.
 
+## Linux x64
+
+The release workflow is the only Linux build so far. It builds on Ubuntu 24.04
+with gcc 14, because gcc 12 can't compile against Electron 43's headers (the e2e
+`Containerfile.e2e` says what goes wrong). Building there ties the result to
+Ubuntu 24.04, Debian 13, or anything else with a C library and C++ runtime at
+least that new. An older distribution will refuse to load the addon.
+
+`scripts/afterPack.cjs` copies OCC's `libTK*.so` files into `resources/occ-libs`
+under the names the loader asks for, and uses `patchelf` to give the addon a
+runpath to that folder and each library an `$ORIGIN` runpath of its own. Every
+library needs its own: a Linux runpath, unlike the older rpath, isn't passed on
+to the libraries it loads, so the addon would find `libTKBool` and `libTKBool`
+wouldn't find what it needs. That was checked in the e2e container (Linux on
+arm64): with OCC's install moved away and the loader's configuration for it
+removed, the packed app loads its addon.
+
+To build by hand on Linux, follow the Mac steps with `nproc` for the core count,
+no `CMAKE_OSX_*` options, and `patchelf` installed, then `npm run dist:linux`.
+That makes an AppImage and a `.deb` in `release/`.
+
 ## Known Gaps
 
-- **Linux** needs the same kind of `afterPack.cjs` branch as Windows, copying the
-  `libTK*.so` files and setting an `$ORIGIN` rpath with `patchelf`. The e2e
-  container already builds OCC and the addon on Linux, so it's the natural place
-  to build that release, but nobody has tried it.
+- **Linux** is untested by anyone running it. Its build passes the load check,
+  but nobody here has opened it on a Linux desktop.
 - **Windows builds aren't code-signed**, so SmartScreen warns about them until
   there's a certificate to sign with.
-- **The release workflow** only builds Apple Silicon, and it signs nothing. Adding
-  the Mac signing secrets to it is how the ZX-Rustrum project does it
-  (`docs/build.md` there), and that's the obvious next step once a hand-built
-  release has proved the path.
