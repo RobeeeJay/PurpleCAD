@@ -52,7 +52,11 @@ const raw = (socketPath, line) =>
     s.on("error", reject);
   });
 
-describe("the API socket", () => {
+// The app does not start its agent API on Windows (electron/main.cjs): a path
+// like this is a Unix socket, and Windows wants a named pipe instead.
+const unixSocketsOnly = describe.skipIf(process.platform === "win32");
+
+unixSocketsOnly("the API socket", () => {
   it("answers list and call, with the app's reply inside result", async () => {
     const server = await serve(async (method, params) =>
       method === "list"
@@ -147,7 +151,7 @@ describe("the API socket", () => {
   });
 });
 
-describe("the shim's connection", () => {
+unixSocketsOnly("the shim's connection", () => {
   it("says PurpleCAD is not running, and where it looked", async () => {
     const missing = tempSocket();
     await expect(connect(missing).request("list")).rejects.toMatchObject({

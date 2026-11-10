@@ -1,0 +1,5 @@
+# LF everywhere, on every platform. A Windows checkout converted text files to
+# CRLF, which put a carriage return into every licence line the About box reads
+# (licenseMarkdown.test.js) and would have shipped CRLF licence files with the
+# Windows build.
+* text=auto eol=lf
