@@ -5,6 +5,8 @@
 // closely than the mesh does.
 import { describe, it, expect, beforeAll } from "vitest";
 import { createRequire } from "module";
+import fs from "fs";
+import path from "path";
 import { ensureOcc } from "../init.js";
 import { ops } from "../../occOps.js";
 
@@ -139,7 +141,20 @@ describe("rebuilding a mesh as exact faces", () => {
       0.3,
     );
     occ.releaseShape(cyl);
-    const r = rebuild(meshOf(filleted));
+    const mesh = meshOf(filleted);
+    // The mesh differs between ARM and x86-64; CI saves it from each
+    // architecture so one can be rebuilt on the other.
+    if (process.env.MESH_DUMP_DIR) {
+      fs.mkdirSync(process.env.MESH_DUMP_DIR, { recursive: true });
+      fs.writeFileSync(
+        path.join(
+          process.env.MESH_DUMP_DIR,
+          `fillet-rim-${process.platform}-${process.arch}.json`,
+        ),
+        JSON.stringify(mesh),
+      );
+    }
+    const r = rebuild(mesh);
     expect(r.faceTypes.torus, `faces ${faces(r)}`).toBe(1);
     expect(r.faceTypes.cylinder, `faces ${faces(r)}`).toBe(1);
     // A known gap on x86-64, not the result wanted: OCC tessellates this fillet
