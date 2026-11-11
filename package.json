@@ -1,6 +1,6 @@
 {
   "name": "PurpleCAD",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A parametric CAD application with an OpenCASCADE kernel",
   "homepage": "https://github.com/RobeeeJay/PurpleCAD",
   "author": {
@@ -80,6 +80,9 @@
         "zip"
       ],
       "category": "public.app-category.productivity"
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "win": {
       "icon": "app-icons/windows/icon.ico",

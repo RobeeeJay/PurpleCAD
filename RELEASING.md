@@ -435,8 +435,11 @@ npx vite build
 npx electron-builder --win --x64 --publish never
 ```
 
-You should end up with an installer (`PurpleCAD Setup <version>.exe`) and a
-`.zip` in `release\`. The build isn't code-signed, so Windows SmartScreen will
+You should end up with an installer (`PurpleCAD-Setup-<version>.exe`) and a
+`.zip` in `release\`. The installer's name has no spaces (`nsis.artifactName`
+in `package.json`): GitHub turns a space in an uploaded file's name into a
+dot, and 1.0.0's `SHA256SUMS.txt` named a file the release didn't have until
+it was corrected by hand. The build isn't code-signed, so Windows SmartScreen will
 warn whoever runs the installer. Signing for Windows needs a code-signing
 certificate, which there isn't one of yet.
 
