@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { createRequire } from "module";
 import { ensureOcc } from "../init.js";
 import { ops } from "../../occOps.js";
+import { budget } from "../../../testBudget.js";
 
 const occ = createRequire(import.meta.url)(
   "../../../../native/occ-addon/build/Release/occ_addon.node",
@@ -429,147 +430,152 @@ describe("recognising the surfaces of a mesh", () => {
     expect(both.counts.sphere, `regions ${found(both)}`).toBe(0);
   });
 
-  it("keeps every vertex of a region on its surface, freeform included", () => {
-    // The promise everything later relies on: a region's surface is never
-    // more than the tolerance from any of its vertices.  A bumpy sphere is
-    // no canonical surface, so what is found there is many small local fits,
-    // and each must still hold.
-    const positions = [];
-    const seg = 64;
-    const rad = (u, v) => 1 + 0.05 * Math.sin(5 * u) * Math.sin(4 * v);
-    for (let i = 0; i <= seg; i++)
-      for (let j = 0; j < seg; j++) {
-        const v = (i / seg) * Math.PI;
-        const u = (j / seg) * 2 * Math.PI;
-        const r = rad(u, v);
-        positions.push(
-          r * Math.sin(v) * Math.cos(u),
-          r * Math.cos(v),
-          r * Math.sin(v) * Math.sin(u),
-        );
-      }
-    const indices = [];
-    const at = (i, j) => i * seg + (j % seg);
-    for (let i = 0; i < seg; i++)
-      for (let j = 0; j < seg; j++)
-        (indices.push(at(i, j), at(i + 1, j), at(i, j + 1)),
-          indices.push(at(i, j + 1), at(i + 1, j), at(i + 1, j + 1)));
-    const r = ops.recognizeSurfaces({ positions, indices, tolerance: TOL });
-    const dist = (g, p) => {
-      const d = p.map((x, k) => x - g.point[k]);
-      const t = d[0] * g.dir[0] + d[1] * g.dir[1] + d[2] * g.dir[2];
-      const rho = Math.hypot(...d.map((x, k) => x - g.dir[k] * t));
-      switch (g.type) {
-        case "plane":
-          return Math.abs(t);
-        case "sphere":
-          return Math.abs(Math.hypot(...d) - g.radius);
-        case "cylinder":
-          return Math.abs(rho - g.radius);
-        case "cone":
-          return (
-            Math.abs(rho - (g.radius + Math.tan(g.halfAngle) * t)) *
-            Math.cos(g.halfAngle)
+  it(
+    "keeps every vertex of a region on its surface, freeform included",
+    () => {
+      // The promise everything later relies on: a region's surface is never
+      // more than the tolerance from any of its vertices.  A bumpy sphere is
+      // no canonical surface, so what is found there is many small local fits,
+      // and each must still hold.
+      const positions = [];
+      const seg = 64;
+      const rad = (u, v) => 1 + 0.05 * Math.sin(5 * u) * Math.sin(4 * v);
+      for (let i = 0; i <= seg; i++)
+        for (let j = 0; j < seg; j++) {
+          const v = (i / seg) * Math.PI;
+          const u = (j / seg) * 2 * Math.PI;
+          const r = rad(u, v);
+          positions.push(
+            r * Math.sin(v) * Math.cos(u),
+            r * Math.cos(v),
+            r * Math.sin(v) * Math.sin(u),
           );
-        case "torus":
-          return Math.abs(Math.hypot(rho - g.radius, t) - g.minorRadius);
-        case "bspline": {
-          // Its height off the plane, from the uniform cubic B-spline the
-          // addon reports: along the normal, no less than the true distance.
-          const f = g.freeform;
-          const [x0, x1, y0, y1] = f.bounds;
-          const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-          const basis = (s) => [
-            (1 - s) ** 3 / 6,
-            (3 * s ** 3 - 6 * s * s + 4) / 6,
-            (-3 * s ** 3 + 3 * s * s + 3 * s + 1) / 6,
-            s ** 3 / 6,
-          ];
-          const span = (w, n) => Math.min(n - 1, Math.max(0, Math.floor(w)));
-          const u = ((dot(d, f.ex) - x0) / (x1 - x0)) * f.nx;
-          const v = ((dot(d, f.ey) - y0) / (y1 - y0)) * f.ny;
-          const iu = span(u, f.nx),
-            iv = span(v, f.ny);
-          const bu = basis(u - iu),
-            bv = basis(v - iv);
-          let h = 0;
-          for (let a = 0; a < 4; a++)
-            for (let b = 0; b < 4; b++)
-              h += bu[a] * bv[b] * f.heights[(iu + a) * (f.ny + 3) + iv + b];
-          return Math.abs(t - h);
         }
-        case "ellipticCylinder": {
-          // Nearest point on the ellipse, by sampling finely enough for the test.
-          const y = [
-            g.dir[1] * g.xdir[2] - g.dir[2] * g.xdir[1],
-            g.dir[2] * g.xdir[0] - g.dir[0] * g.xdir[2],
-            g.dir[0] * g.xdir[1] - g.dir[1] * g.xdir[0],
-          ];
-          const px = d[0] * g.xdir[0] + d[1] * g.xdir[1] + d[2] * g.xdir[2];
-          const py = d[0] * y[0] + d[1] * y[1] + d[2] * y[2];
-          let best = Infinity;
-          for (let i = 0; i < 20000; i++) {
-            const a = (i / 20000) * 2 * Math.PI;
-            best = Math.min(
-              best,
-              Math.hypot(
-                px - g.radius * Math.cos(a),
-                py - g.minorRadius * Math.sin(a),
-              ),
+      const indices = [];
+      const at = (i, j) => i * seg + (j % seg);
+      for (let i = 0; i < seg; i++)
+        for (let j = 0; j < seg; j++)
+          (indices.push(at(i, j), at(i + 1, j), at(i, j + 1)),
+            indices.push(at(i, j + 1), at(i + 1, j), at(i + 1, j + 1)));
+      const r = ops.recognizeSurfaces({ positions, indices, tolerance: TOL });
+      const dist = (g, p) => {
+        const d = p.map((x, k) => x - g.point[k]);
+        const t = d[0] * g.dir[0] + d[1] * g.dir[1] + d[2] * g.dir[2];
+        const rho = Math.hypot(...d.map((x, k) => x - g.dir[k] * t));
+        switch (g.type) {
+          case "plane":
+            return Math.abs(t);
+          case "sphere":
+            return Math.abs(Math.hypot(...d) - g.radius);
+          case "cylinder":
+            return Math.abs(rho - g.radius);
+          case "cone":
+            return (
+              Math.abs(rho - (g.radius + Math.tan(g.halfAngle) * t)) *
+              Math.cos(g.halfAngle)
             );
+          case "torus":
+            return Math.abs(Math.hypot(rho - g.radius, t) - g.minorRadius);
+          case "bspline": {
+            // Its height off the plane, from the uniform cubic B-spline the
+            // addon reports: along the normal, no less than the true distance.
+            const f = g.freeform;
+            const [x0, x1, y0, y1] = f.bounds;
+            const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+            const basis = (s) => [
+              (1 - s) ** 3 / 6,
+              (3 * s ** 3 - 6 * s * s + 4) / 6,
+              (-3 * s ** 3 + 3 * s * s + 3 * s + 1) / 6,
+              s ** 3 / 6,
+            ];
+            const span = (w, n) => Math.min(n - 1, Math.max(0, Math.floor(w)));
+            const u = ((dot(d, f.ex) - x0) / (x1 - x0)) * f.nx;
+            const v = ((dot(d, f.ey) - y0) / (y1 - y0)) * f.ny;
+            const iu = span(u, f.nx),
+              iv = span(v, f.ny);
+            const bu = basis(u - iu),
+              bv = basis(v - iv);
+            let h = 0;
+            for (let a = 0; a < 4; a++)
+              for (let b = 0; b < 4; b++)
+                h += bu[a] * bv[b] * f.heights[(iu + a) * (f.ny + 3) + iv + b];
+            return Math.abs(t - h);
           }
-          return best;
+          case "ellipticCylinder": {
+            // Nearest point on the ellipse, by sampling finely enough for the test.
+            const y = [
+              g.dir[1] * g.xdir[2] - g.dir[2] * g.xdir[1],
+              g.dir[2] * g.xdir[0] - g.dir[0] * g.xdir[2],
+              g.dir[0] * g.xdir[1] - g.dir[1] * g.xdir[0],
+            ];
+            const px = d[0] * g.xdir[0] + d[1] * g.xdir[1] + d[2] * g.xdir[2];
+            const py = d[0] * y[0] + d[1] * y[1] + d[2] * y[2];
+            let best = Infinity;
+            for (let i = 0; i < 20000; i++) {
+              const a = (i / 20000) * 2 * Math.PI;
+              best = Math.min(
+                best,
+                Math.hypot(
+                  px - g.radius * Math.cos(a),
+                  py - g.minorRadius * Math.sin(a),
+                ),
+              );
+            }
+            return best;
+          }
         }
-      }
-      return 0;
-    };
-    // Indices refer to the WELDED mesh, whose triangles are the input's in
-    // order, so the input's corners can be read directly.
-    let worst = 0;
-    r.triangleRegion.forEach((g, t) => {
-      const reg = r.regions[g];
-      if (reg.type === "mesh") return;
-      for (let k = 0; k < 3; k++) {
-        const v = indices[3 * t + k];
-        worst = Math.max(worst, dist(reg, positions.slice(3 * v, 3 * v + 3)));
-      }
-    });
-    expect(worst, `worst vertex off its surface (${found(r)})`).toBeLessThan(
-      TOL * 1.0001,
-    );
-    // Near a line, a thin facet is within the tolerance of a plane at almost
-    // any tilt, so a flat region also needs its facets facing its way; and a
-    // torus has to be the ring kind, the only one a face can be built on.
-    const cosFlat = Math.cos((0.5 * Math.PI) / 180);
-    let worstTilt = 1;
-    r.triangleRegion.forEach((g, t) => {
-      const reg = r.regions[g];
-      if (reg.type !== "plane") return;
-      const p = [0, 1, 2].map((k) =>
-        positions.slice(3 * indices[3 * t + k], 3 * indices[3 * t + k] + 3),
+        return 0;
+      };
+      // Indices refer to the WELDED mesh, whose triangles are the input's in
+      // order, so the input's corners can be read directly.
+      let worst = 0;
+      r.triangleRegion.forEach((g, t) => {
+        const reg = r.regions[g];
+        if (reg.type === "mesh") return;
+        for (let k = 0; k < 3; k++) {
+          const v = indices[3 * t + k];
+          worst = Math.max(worst, dist(reg, positions.slice(3 * v, 3 * v + 3)));
+        }
+      });
+      expect(worst, `worst vertex off its surface (${found(r)})`).toBeLessThan(
+        TOL * 1.0001,
       );
-      const u = p[1].map((x, i) => x - p[0][i]);
-      const w = p[2].map((x, i) => x - p[0][i]);
-      const n = [
-        u[1] * w[2] - u[2] * w[1],
-        u[2] * w[0] - u[0] * w[2],
-        u[0] * w[1] - u[1] * w[0],
-      ];
-      const l = Math.hypot(...n);
-      if (l < 1e-12) return;
-      const c =
-        Math.abs(n[0] * reg.dir[0] + n[1] * reg.dir[1] + n[2] * reg.dir[2]) / l;
-      worstTilt = Math.min(worstTilt, c);
-    });
-    expect(
-      worstTilt,
-      "least-aligned facet of a flat region (cos)",
-    ).toBeGreaterThanOrEqual(cosFlat);
-    for (const g of r.regions.filter((g) => g.type === "torus"))
-      expect(g.radius, `torus ${g.radius}/${g.minorRadius}`).toBeGreaterThan(
-        g.minorRadius,
-      );
-  }, 20000); // recognition alone takes 3.9 s on this 8k-facet sphere
+      // Near a line, a thin facet is within the tolerance of a plane at almost
+      // any tilt, so a flat region also needs its facets facing its way; and a
+      // torus has to be the ring kind, the only one a face can be built on.
+      const cosFlat = Math.cos((0.5 * Math.PI) / 180);
+      let worstTilt = 1;
+      r.triangleRegion.forEach((g, t) => {
+        const reg = r.regions[g];
+        if (reg.type !== "plane") return;
+        const p = [0, 1, 2].map((k) =>
+          positions.slice(3 * indices[3 * t + k], 3 * indices[3 * t + k] + 3),
+        );
+        const u = p[1].map((x, i) => x - p[0][i]);
+        const w = p[2].map((x, i) => x - p[0][i]);
+        const n = [
+          u[1] * w[2] - u[2] * w[1],
+          u[2] * w[0] - u[0] * w[2],
+          u[0] * w[1] - u[1] * w[0],
+        ];
+        const l = Math.hypot(...n);
+        if (l < 1e-12) return;
+        const c =
+          Math.abs(n[0] * reg.dir[0] + n[1] * reg.dir[1] + n[2] * reg.dir[2]) /
+          l;
+        worstTilt = Math.min(worstTilt, c);
+      });
+      expect(
+        worstTilt,
+        "least-aligned facet of a flat region (cos)",
+      ).toBeGreaterThanOrEqual(cosFlat);
+      for (const g of r.regions.filter((g) => g.type === "torus"))
+        expect(g.radius, `torus ${g.radius}/${g.minorRadius}`).toBeGreaterThan(
+          g.minorRadius,
+        );
+    },
+    budget(20000),
+  ); // recognition alone takes 3.9 s on this 8k-facet sphere
 
   it("labels every triangle with its region", () => {
     const r = recognise(occ.makeCylinder(-1, 1, 2), 0.05);

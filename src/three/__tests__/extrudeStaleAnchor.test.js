@@ -17,6 +17,7 @@ import { polyCentroid, profileAnchor } from "../sceneObjects/polygonUtil.js";
 import { ensureOcc } from "../occ/init.js";
 import { useStore } from "../../store";
 import { recalculateTimeline } from "../regenerateOrchestrator.js";
+import { budget } from "../../testBudget.js";
 
 // A square of side `s` centred on (cx, cy), as four sketch lines.
 const square = (cx, cy, s) => {
@@ -195,39 +196,43 @@ describe("the reported document, recalculated", () => {
     await ensureOcc();
   }, 60000);
 
-  it("settles with the gear on the cog it was extruded from", async () => {
-    useStore
-      .getState()
-      .loadDocument(
-        JSON.parse(fs.readFileSync("test-files/extrude-jump.pcad", "utf8")),
+  it(
+    "settles with the gear on the cog it was extruded from",
+    async () => {
+      useStore
+        .getState()
+        .loadDocument(
+          JSON.parse(fs.readFileSync("test-files/extrude-jump.pcad", "utf8")),
+        );
+      await recalculateTimeline();
+      const items = useStore.getState().items;
+      const sketch = items.find((i) => i.type === "sketch");
+      const [cog1, cog2] = sketch.shapes;
+      const body = items.find((i) => i.type === "csg");
+
+      // Tip diameter = pitch + 2 modules: cog 1 is 4.4 across, cog 2 is 5.36.
+      const P = body.geometryData.positions;
+      let lo = Infinity,
+        hi = -Infinity;
+      for (let i = 0; i < P.length; i += 3) {
+        lo = Math.min(lo, P[i]);
+        hi = Math.max(hi, P[i]);
+      }
+      const tip = (c) => c.pitchDiameter + (2 * c.pitchDiameter) / c.teeth;
+      expect(hi - lo, "built from cog 1, not cog 2").toBeCloseTo(tip(cog1), 1);
+      expect(Math.abs(hi - lo - tip(cog2))).toBeGreaterThan(0.5);
+
+      // And it sits ON that cog.  The sketch lies on the ground, so sketch-local
+      // (x, y) is world (x, 0, -y).
+      expect(body.position.x, "over cog 1 in x").toBeCloseTo(
+        sketch.position.x + cog1.x,
+        2,
       );
-    await recalculateTimeline();
-    const items = useStore.getState().items;
-    const sketch = items.find((i) => i.type === "sketch");
-    const [cog1, cog2] = sketch.shapes;
-    const body = items.find((i) => i.type === "csg");
-
-    // Tip diameter = pitch + 2 modules: cog 1 is 4.4 across, cog 2 is 5.36.
-    const P = body.geometryData.positions;
-    let lo = Infinity,
-      hi = -Infinity;
-    for (let i = 0; i < P.length; i += 3) {
-      lo = Math.min(lo, P[i]);
-      hi = Math.max(hi, P[i]);
-    }
-    const tip = (c) => c.pitchDiameter + (2 * c.pitchDiameter) / c.teeth;
-    expect(hi - lo, "built from cog 1, not cog 2").toBeCloseTo(tip(cog1), 1);
-    expect(Math.abs(hi - lo - tip(cog2))).toBeGreaterThan(0.5);
-
-    // And it sits ON that cog.  The sketch lies on the ground, so sketch-local
-    // (x, y) is world (x, 0, -y).
-    expect(body.position.x, "over cog 1 in x").toBeCloseTo(
-      sketch.position.x + cog1.x,
-      2,
-    );
-    expect(body.position.z, "over cog 1 in z").toBeCloseTo(
-      sketch.position.z - cog1.y,
-      2,
-    );
-  }, 240000);
+      expect(body.position.z, "over cog 1 in z").toBeCloseTo(
+        sketch.position.z - cog1.y,
+        2,
+      );
+    },
+    budget(240000),
+  );
 });

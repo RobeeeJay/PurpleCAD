@@ -11,6 +11,7 @@ import { ensureOcc } from "../init.js";
 import { ops, embossVolumeHolds } from "../../occOps.js";
 import { useStore } from "../../../store";
 import { recalculateTimeline } from "../../regenerateOrchestrator.js";
+import { budget } from "../../../testBudget.js";
 
 const require_ = createRequire(import.meta.url);
 const bridge = require_("../../../../electron/occ-bridge.cjs");
@@ -55,41 +56,48 @@ describe("an embossed ring recalculated with exact curves", () => {
   // hid that; on the exact one the chamfer failed (782 lettering edges
   // matched one rim segment), and the recalculation pinned the whole ring
   // back to facets after 272 s.
-  it("stays exact, with both chamfers on their rims", async () => {
-    useStore
-      .getState()
-      .loadDocument(
-        JSON.parse(
-          fs.readFileSync("test-files/failing-recalculate-scene.pcad", "utf8"),
-        ),
-      );
-    await recalculateTimeline(true);
-    const history = useStore.getState().history;
-    let upgraded = 0,
-      pinned = 0;
-    const walk = (v) => {
-      if (Array.isArray(v)) return v.forEach(walk);
-      if (!v || typeof v !== "object") return;
-      if (v.sketchId != null && Array.isArray(v.polygon2D)) {
-        if (v.curvesUpgraded) upgraded++;
-        if (v.curves2D === null) pinned++;
-      }
-      for (const [k, x] of Object.entries(v))
-        if (!["geometryData", "polygon2D", "holes", "shapes"].includes(k))
-          walk(x);
-    };
-    walk(history);
-    expect(pinned, "profiles pinned back to facets").toBe(0);
-    expect(upgraded).toBeGreaterThan(0);
-    const failed = history.filter((e) => {
-      const g =
-        e.instruction?.type === "create"
-          ? e.instruction.item
-          : e.instruction?.patches;
-      return g?.regenerator?.regenFailed;
-    });
-    expect(failed.map((e) => e.id)).toEqual([]);
-  }, 180000);
+  it(
+    "stays exact, with both chamfers on their rims",
+    async () => {
+      useStore
+        .getState()
+        .loadDocument(
+          JSON.parse(
+            fs.readFileSync(
+              "test-files/failing-recalculate-scene.pcad",
+              "utf8",
+            ),
+          ),
+        );
+      await recalculateTimeline(true);
+      const history = useStore.getState().history;
+      let upgraded = 0,
+        pinned = 0;
+      const walk = (v) => {
+        if (Array.isArray(v)) return v.forEach(walk);
+        if (!v || typeof v !== "object") return;
+        if (v.sketchId != null && Array.isArray(v.polygon2D)) {
+          if (v.curvesUpgraded) upgraded++;
+          if (v.curves2D === null) pinned++;
+        }
+        for (const [k, x] of Object.entries(v))
+          if (!["geometryData", "polygon2D", "holes", "shapes"].includes(k))
+            walk(x);
+      };
+      walk(history);
+      expect(pinned, "profiles pinned back to facets").toBe(0);
+      expect(upgraded).toBeGreaterThan(0);
+      const failed = history.filter((e) => {
+        const g =
+          e.instruction?.type === "create"
+            ? e.instruction.item
+            : e.instruction?.patches;
+        return g?.regenerator?.regenFailed;
+      });
+      expect(failed.map((e) => e.id)).toEqual([]);
+    },
+    budget(180000),
+  );
 });
 
 describe("a stored edge's normal fallback", () => {

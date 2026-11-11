@@ -36,6 +36,9 @@ permissions:
 
 env:
   OCC_TAG: V8_0_1
+  # The runners are 3-7x slower than an Apple Silicon Mac on the heavy OCC
+  # tests; src/testBudget.js stretches the long ones by this much.
+  TEST_TIME_SCALE: "3"
   # The modules the addon links, and nothing that needs a display or Tcl.  The
   # same flags as addon-build.yml and Containerfile.e2e.
   OCC_FLAGS: >-
@@ -495,6 +498,6 @@ jobs:
           if ! gh release view "$GITHUB_REF_NAME" --repo "$REPO" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" --repo "$REPO" --draft \
               --title "PurpleCAD $GITHUB_REF_NAME" \
-              --notes "Builds for macOS (Apple Silicon and Intel, signed and notarized), Windows x64 and Linux x64. The Windows build is not code-signed, so SmartScreen will warn before it runs. Please attach an exported .pcad (zipped) to bug reports."
+              --notes "Builds for macOS (Apple Silicon and Intel, signed and notarized), Windows x64 and Linux x64. The Windows build is not code-signed, so SmartScreen will warn before it runs. Known difference: on Windows, Linux and Intel Macs, Convert to Surfaces can leave a flat face as triangles where Apple Silicon makes it one exact face; the body is still correct. Please attach an exported .pcad (zipped) to bug reports."
           fi
           gh release upload "$GITHUB_REF_NAME" --repo "$REPO" --clobber artifacts/*

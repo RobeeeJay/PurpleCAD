@@ -15,6 +15,7 @@ import { createRequire } from "module";
 import { ensureOcc } from "../init.js";
 import { ops } from "../../occOps.js";
 import { buildEmbossStamp } from "../../embossGeometry.js";
+import { budget } from "../../../testBudget.js";
 
 const bridge = createRequire(import.meta.url)(
   "../../../../electron/occ-bridge.cjs",
@@ -142,25 +143,29 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     });
   }, 30000);
 
-  it("hole (plain and threaded)", async () => {
-    const c = cube(7);
-    for (const threaded of [false, true]) {
-      await parity("holeItem", {
-        source: c,
-        hole: {
-          point: { x: 0, y: 1, z: 0 },
-          dir: { x: 0, y: -1, z: 0 },
-          length: 12,
-          diameter: 6,
-          pitch: 1,
-          tolerance: 0,
-          threaded,
-        },
-        allItems: [c],
-        printPrecision: 0.1,
-      });
-    }
-  }, 60000);
+  it(
+    "hole (plain and threaded)",
+    async () => {
+      const c = cube(7);
+      for (const threaded of [false, true]) {
+        await parity("holeItem", {
+          source: c,
+          hole: {
+            point: { x: 0, y: 1, z: 0 },
+            dir: { x: 0, y: -1, z: 0 },
+            length: 12,
+            diameter: 6,
+            pitch: 1,
+            tolerance: 0,
+            threaded,
+          },
+          allItems: [c],
+          printPrecision: 0.1,
+        });
+      }
+    },
+    budget(60000),
+  );
 
   it("emboss (raised pad on the top face)", async () => {
     const c = cube(8);

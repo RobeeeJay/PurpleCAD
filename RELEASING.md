@@ -527,6 +527,21 @@ That makes an AppImage and a `.deb` in `release/`.
 
 ## Known Gaps
 
+- **Convert to Surfaces is less exact on x86-64** (Windows, Linux, Intel Macs)
+  in at least one case: a cylinder with a filleted rim rebuilds with one of its
+  two flat faces left as triangles, where Apple Silicon fits both. The body is
+  still a closed, correct solid; that face just isn't exact. The input is OCC's
+  own tessellation, which differs slightly between ARM and x86-64, and every
+  x86-64 build behaves the same whatever the compiler, so it is the mesh, not
+  our code generation. Rebuilding the addon on ARM without fused multiply-adds,
+  and on Linux ARM with gcc, both still found two planes. Whether other shapes
+  are affected is not yet known: the next step is to save the x86-64 mesh from
+  CI and see why that plane won't fit. `rebuildSurfaces.test.js` pins the
+  current x86-64 result, and fails when it improves.
+- **CI runners are three to seven times slower** than an Apple Silicon Mac on
+  the heavy OCC tests, so the release workflow sets `TEST_TIME_SCALE=3`, which
+  `src/testBudget.js` applies to the tests that came within reach of their limit.
+
 - **Linux** is untested by anyone running it. Its build passes the load check,
   but nobody here has opened it on a Linux desktop.
 - **Windows builds aren't code-signed**, so SmartScreen warns about them until
