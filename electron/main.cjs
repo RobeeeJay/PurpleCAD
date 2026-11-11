@@ -208,6 +208,95 @@ ipcMain.on("api:reply", (_e, { id, reply }) => {
   else pending.resolve(reply?.result);
 });
 
+// ── Agent API on/off ────────────────────────────────────────────────────────
+// Off unless the user turns it on: while it runs, any process of this user can
+// drive the model through the socket.  The choice is a setting the main
+// process owns -- it must be read before the window exists -- so the renderer
+// changes it through "api:setEnabled" rather than the settings table.
+//
+// --api-socket=<path> moves the socket.  The e2e suite gives every launch its
+// own, so a test never collides with a PurpleCAD the user has open -- which,
+// sharing userData, would otherwise own the default one.
+const AGENT_API_SETTING = "agent_api_enabled";
+const apiSocketPath = () =>
+  app.commandLine.getSwitchValue("api-socket") ||
+  path.join(app.getPath("userData"), "purplecad-api.sock");
+const agentApiForced = () => app.commandLine.hasSwitch("agent-api");
+const agentApiWanted = () =>
+  agentApiForced() || kvStore.settingGet(AGENT_API_SETTING) === "1";
+let apiProblem = null;
+
+// The MCP shim the user registers with their client: bundled into the app's
+// resources when packaged (scripts/build-mcp.mjs), the checkout's own file
+// otherwise.  Either runs under this executable as plain Node.
+const mcpShimPath = () =>
+  app.isPackaged
+    ? path.join(process.resourcesPath, "mcp", "purplecad-mcp.mjs")
+    : path.join(__dirname, "..", "mcp", "purplecad-mcp.mjs");
+
+function agentApiStatus() {
+  return {
+    supported: process.platform !== "win32",
+    enabled: agentApiWanted(),
+    forced: agentApiForced(),
+    listening: apiServer != null,
+    problem: apiProblem,
+    socketPath: apiSocketPath(),
+    command: process.execPath,
+    shimPath: mcpShimPath(),
+  };
+}
+
+// Starts or stops the socket to match `enabled`; resolves to the new status.
+let apiChange = Promise.resolve();
+function setAgentApi(enabled) {
+  // One change at a time: a quick off/on must not start a second server
+  // while the first is still closing.
+  apiChange = apiChange.then(async () => {
+    apiProblem = null;
+    if (!enabled) {
+      const server = apiServer;
+      apiServer = null;
+      await server?.close();
+      return;
+    }
+    if (apiServer) return;
+    if (process.platform === "win32") {
+      apiProblem = "The agent API is not available on Windows yet.";
+      return;
+    }
+    try {
+      const server = await startApiServer({
+        socketPath: apiSocketPath(),
+        invoke: invokeRenderer,
+      });
+      if (server) {
+        apiServer = server;
+        console.log(`[api] listening on ${server.socketPath}`);
+      } else {
+        apiProblem =
+          "Another PurpleCAD that is already running has the agent API.";
+        console.warn(`[api] ${apiSocketPath()} belongs to another PurpleCAD`);
+      }
+    } catch (err) {
+      apiProblem = `The agent API could not start: ${err.message}`;
+      console.warn("[api] could not start:", err.message);
+    }
+  });
+  return apiChange.then(agentApiStatus);
+}
+
+ipcMain.handle("api:status", () => agentApiStatus());
+// The page's own clipboard API needs focus and permission and fails without
+// either; the main process's does not.
+ipcMain.handle("clipboard:writeText", (_e, text) =>
+  electron.clipboard.writeText(String(text)),
+);
+ipcMain.handle("api:setEnabled", (_e, enabled) => {
+  kvStore.settingSet(AGENT_API_SETTING, enabled ? "1" : "0");
+  return setAgentApi(agentApiWanted());
+});
+
 // Links in the app (the license dialog's) open in the system browser.  Only
 // http(s): the renderer must not be able to hand shell.openExternal a file://
 // path or an application scheme.  Called through `electron.shell` each time,
@@ -427,26 +516,10 @@ app.whenReady().then(() => {
 
   createWindow();
 
-  // --api-socket=<path> moves the agent API socket.  The e2e suite gives every
-  // launch its own, so a test never collides with a PurpleCAD the user has
-  // open -- which, sharing userData, would otherwise own the default one.
-  const apiSocket =
-    app.commandLine.getSwitchValue("api-socket") ||
-    path.join(app.getPath("userData"), "purplecad-api.sock");
-  if (process.platform === "win32") {
-    console.warn("[api] the agent API socket is not available on Windows yet");
-  } else {
-    startApiServer({ socketPath: apiSocket, invoke: invokeRenderer })
-      .then((server) => {
-        apiServer = server;
-        if (server) console.log(`[api] listening on ${server.socketPath}`);
-        else
-          console.warn(
-            `[api] ${apiSocket} belongs to another running PurpleCAD`,
-          );
-      })
-      .catch((err) => console.warn("[api] could not start:", err.message));
-  }
+  // The agent API runs only when the user has turned it on in Settings, or
+  // when --agent-api forces it (the e2e suite, which never touches the
+  // user's settings).
+  if (agentApiWanted()) void setAgentApi(true);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

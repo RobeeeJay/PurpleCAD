@@ -31,6 +31,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     });
     ipcRenderer.send("api:ready");
   },
+  // Settings' agent API switch: main owns the setting and the socket.
+  agentApiStatus: () => ipcRenderer.invoke("api:status"),
+  setAgentApi: (enabled) => ipcRenderer.invoke("api:setEnabled", enabled),
+  copyText: (text) => ipcRenderer.invoke("clipboard:writeText", text),
   // Open a web link in the system browser; resolves false for anything that
   // isn't http(s), which main refuses.
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),

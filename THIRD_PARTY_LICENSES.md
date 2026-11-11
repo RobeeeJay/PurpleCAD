@@ -10,7 +10,6 @@ is the source of truth).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
-| @modelcontextprotocol/sdk | 1.30.0 | MIT | https://modelcontextprotocol.io |
 | better-sqlite3 | 12.11.1 | MIT | https://github.com/WiseLibs/better-sqlite3 |
 | decimal.js | 10.6.0 | MIT | https://github.com/MikeMcl/decimal.js |
 | opentype.js | 1.3.4 | MIT | https://github.com/opentypejs/opentype.js |
@@ -61,6 +60,24 @@ its MIT notice is `native/occ-addon/third_party/meshoptimizer/LICENSE.md`.
 Each font's full licence text is embedded in its JSON
 (`original_font_information.license_description`).
 
+## Bundled into the MCP shim
+
+The MCP shim ships inside the app as one bundled file
+(`resources/mcp/purplecad-mcp.mjs`, built by `scripts/build-mcp.mjs`), so
+these packages are development dependencies of the repository but their code
+is distributed in every release. List what the bundle holds after an update
+with `grep -o "node_modules/[^/]*" build/mcp/purplecad-mcp.mjs | sort -u`.
+
+| Package | Version | License | Source |
+| --- | --- | --- | --- |
+| @modelcontextprotocol/sdk | 1.30.0 | MIT | https://modelcontextprotocol.io |
+| ajv | 8.20.0 | MIT | https://ajv.js.org |
+| ajv-formats | 3.0.1 | MIT | https://github.com/ajv-validator/ajv-formats |
+| fast-deep-equal | 3.1.3 | MIT | https://github.com/epoberezkin/fast-deep-equal |
+| fast-uri | 3.1.3 | BSD-3-Clause | https://github.com/fastify/fast-uri |
+| json-schema-traverse | 1.0.0 | MIT | https://github.com/epoberezkin/json-schema-traverse |
+| zod | 4.6.5 | MIT | https://zod.dev |
+
 ## Development dependencies
 
 | Package | Version | License | Source |
@@ -82,9 +99,10 @@ Electron itself bundles Chromium and Node.js; their licenses ship inside the
 packaged app (`LICENSES.chromium.html` et al. in the Electron distribution).
 
 Transitive npm dependencies carry their own licenses. Checked against the
-installed production tree (`npm ls --omit=dev --all`): 83 packages, all
-permissive — MIT (66), ISC (6), BlueOak-1.0.0 (2), Apache-2.0 (2),
-BSD-2-Clause, BSD-3-Clause, and dual MIT/WTFPL and BSD/MIT/Apache choices. No
+installed production tree (`npm ls --omit=dev --all`): 50 packages, all
+permissive — MIT (39), ISC (6), Apache-2.0 (2), BSD-3-Clause, and dual
+MIT/WTFPL and BSD/MIT/Apache choices. (It was 83 while the MCP SDK was a
+runtime dependency; its code now ships in the bundle listed above instead.) No
 GPL, LGPL or other copyleft package is among them; OCCT (above) is the only
 copyleft component. Re-run the check after a dependency update; for a packaged
 release, `npx license-checker --production --summary` gives the same view.

@@ -448,6 +448,7 @@ jobs:
 
       - name: Build the app
         run: |
+          node scripts/build-mcp.mjs
           npx vite build
           npx electron-builder --win --x64 --publish never
 

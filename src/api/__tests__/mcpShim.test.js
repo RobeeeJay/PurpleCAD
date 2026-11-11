@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { execFileSync } from "node:child_process";
 import { contentFrom, toolName, toolsFrom } from "../../../mcp/tools.mjs";
 
 const require = createRequire(import.meta.url);
@@ -56,11 +57,14 @@ async function fakeApp(onCall) {
   return socketPath;
 }
 
-async function shimClient(socketPath) {
+async function shimClient(
+  socketPath,
+  { command = process.execPath, args = [SHIM], env = {} } = {},
+) {
   const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [SHIM],
-    env: { ...process.env, PURPLECAD_API_SOCKET: socketPath },
+    command,
+    args,
+    env: { ...process.env, ...env, PURPLECAD_API_SOCKET: socketPath },
     stderr: "pipe",
   });
   const client = new Client({ name: "shim-test", version: "0" });
@@ -166,6 +170,44 @@ unixSocketsOnly("the shim, as an MCP client sees it", () => {
       const out = await client.callTool({ name: "body_list", arguments: {} });
       expect(out.isError).toBe(true);
       expect(out.content[0].text).toMatch(/APP_NOT_RUNNING/);
+    },
+    SPAWN_TIMEOUT,
+  );
+
+  // What Settings tells a user to register: the bundle from the app's
+  // resources, run by the app's executable as Node.  Copied away from the
+  // checkout first, so a missed dependency fails here instead of resolving
+  // from node_modules.
+  it(
+    "runs as the app bundles it, under Electron as Node with nothing beside it",
+    async () => {
+      const root = fileURLToPath(new URL("../../../", import.meta.url));
+      execFileSync(process.execPath, ["scripts/build-mcp.mjs"], { cwd: root });
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pcad-mcp-bundle-"));
+      cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+      const bundle = path.join(dir, "purplecad-mcp.mjs");
+      fs.copyFileSync(path.join(root, "build/mcp/purplecad-mcp.mjs"), bundle);
+
+      const client = await shimClient(
+        await fakeApp(async () => ({ ok: true })),
+        {
+          command: require("electron"),
+          args: [bundle],
+          env: { ELECTRON_RUN_AS_NODE: "1" },
+        },
+      );
+      const { tools } = await client.listTools();
+      expect(tools.map((t) => t.name)).toEqual([
+        "feature_extrude",
+        "view_render",
+      ]);
+      const pkg = JSON.parse(
+        fs.readFileSync(path.join(root, "package.json"), "utf8"),
+      );
+      expect(client.getServerVersion()).toMatchObject({
+        name: "purplecad",
+        version: pkg.version,
+      });
     },
     SPAWN_TIMEOUT,
   );

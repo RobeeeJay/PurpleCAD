@@ -101,7 +101,9 @@ export const liveApps = new Set();
 // test never collides with a PurpleCAD the user has open.
 export const apiSocketFor = (dataDir) => path.join(dataDir, "api.sock");
 
-export async function launchApp(dataDir) {
+// `agentApi: false` leaves the agent API to the user's setting, as a real
+// launch does; every other test has it forced on with its own socket.
+export async function launchApp(dataDir, { agentApi = true } = {}) {
   const tmpDir = dataDir || makeDataDir();
   // Strip ELECTRON_RUN_AS_NODE (the test runner's node sets it, which would
   // make Electron run as a plain node process instead of opening a window);
@@ -121,6 +123,7 @@ export async function launchApp(dataDir) {
     `--db-path=${path.join(tmpDir, "cad.sqlite")}`,
     `--api-socket=${apiSocketFor(tmpDir)}`,
   ];
+  if (agentApi) args.push("--agent-api");
   if (process.env.E2E_CONTAINER)
     args.unshift(
       "--no-sandbox",

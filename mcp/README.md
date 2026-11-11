@@ -16,30 +16,44 @@ only accept `[a-zA-Z0-9_-]`.
 
 ## Setup
 
-Start PurpleCAD first -- the shim relays to a running app and has no tools of
-its own. Then register the shim with your client, from a checkout of this repo
-(`npm install` done):
+The agent API is off until you turn it on. While it runs, any program running
+as you can drive the model through its socket, so it is a choice rather than
+a default.
 
-**Claude Code**
+1. Open **Settings** and set **AI agent access (MCP)** to **On**. The row then
+   says where it is listening.
+2. Click **Copy Claude Code command** and paste it into a terminal, or
+   **Copy Claude Desktop config** and merge it into
+   `claude_desktop_config.json`.
+3. Keep PurpleCAD open while the agent works -- the shim relays to a running
+   app and has no tools of its own.
+
+The copied setup runs the shim with PurpleCAD's own executable acting as Node
+(`ELECTRON_RUN_AS_NODE=1`), so you need neither Node nor a checkout. In a
+packaged app the shim is a single bundled file in the app's resources
+(`npm run mcp:build`, `scripts/build-mcp.mjs`); started from a checkout,
+Settings points at `mcp/purplecad-mcp.mjs` instead. The Claude Code command
+for a Mac install comes out like this:
+
+```sh
+claude mcp add purplecad -e 'ELECTRON_RUN_AS_NODE=1' \
+  -e 'PURPLECAD_API_SOCKET=/Users/you/Library/Application Support/PurpleCAD/purplecad-api.sock' \
+  -- '/Applications/PurpleCAD.app/Contents/MacOS/PurpleCAD' \
+  '/Applications/PurpleCAD.app/Contents/Resources/mcp/purplecad-mcp.mjs'
+```
+
+Every path is single-quoted because the data directory has a space in it.
+
+From a checkout you can still register the shim with Node 18 or newer
+directly, as before:
 
 ```sh
 claude mcp add purplecad -- node /absolute/path/to/purple-cad/mcp/purplecad-mcp.mjs
 ```
 
-**Claude Desktop** (`claude_desktop_config.json`)
-
-```json
-{
-  "mcpServers": {
-    "purplecad": {
-      "command": "node",
-      "args": ["/absolute/path/to/purple-cad/mcp/purplecad-mcp.mjs"]
-    }
-  }
-}
-```
-
-Node 18 or newer.
+PurpleCAD's `--agent-api` switch turns the API on for one launch whatever the
+setting says; the e2e suite uses it, and Settings then shows the switch as
+fixed for that launch.
 
 ## The socket
 
@@ -54,9 +68,9 @@ stealing it. Not yet available on Windows.
 
 ## When something is wrong
 
-- **No tools, and "PurpleCAD is not running"**: the app is not open, or was
-  started after the client listed tools. Start it and reconnect the server in
-  your client.
+- **No tools, and "PurpleCAD is not running"**: the app is not open, its
+  agent API is off in Settings, or it was started after the client listed
+  tools. Start it, check the setting, and reconnect the server in your client.
 - **A tool returns an error**: the app refused the command. The message says
   why and the `code` says which kind (see `src/api/README.md`); the model is
   unchanged.

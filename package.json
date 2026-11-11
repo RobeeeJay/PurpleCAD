@@ -16,6 +16,7 @@
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c blue,magenta \"vite --port 3000\" \"npm run addon:build && npm run sqlite:rebuild && ./scripts/dev-bundle-name.sh && wait-on tcp:127.0.0.1:3000 && unset ELECTRON_RUN_AS_NODE; ELECTRON_START_URL=http://localhost:3000 electron .\"",
     "mcp": "node mcp/purplecad-mcp.mjs",
+    "mcp:build": "node scripts/build-mcp.mjs",
     "build": "vite build",
     "format": "prettier --write \"src/**/*.{js,jsx}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx}\"",
@@ -31,13 +32,13 @@
     "sqlite:rebuild": "electron-rebuild -w better-sqlite3",
     "electron:build": "npm run sqlite:rebuild && vite build && electron-builder --config.mac.target=dmg",
     "app": "./scripts/open-app.sh",
-    "dist": "npm run addon:build && vite build && electron-builder --publish never",
-    "dist:mac": "npm run addon:build && vite build && electron-builder --mac --publish never",
-    "dist:mac-arm64": "npm run addon:build && vite build && electron-builder --mac --arm64 --publish never",
-    "dist:mac-x64": "npm run addon:build && vite build && electron-builder --mac --x64 --publish never",
-    "dist:win": "npm run addon:build && vite build && electron-builder --win --publish never",
-    "dist:linux": "npm run addon:build && vite build && electron-builder --linux --publish never",
-    "dist:all": "npm run addon:build && vite build && electron-builder --mac --win --linux --publish never",
+    "dist": "npm run addon:build && npm run mcp:build && vite build && electron-builder --publish never",
+    "dist:mac": "npm run addon:build && npm run mcp:build && vite build && electron-builder --mac --publish never",
+    "dist:mac-arm64": "npm run addon:build && npm run mcp:build && vite build && electron-builder --mac --arm64 --publish never",
+    "dist:mac-x64": "npm run addon:build && npm run mcp:build && vite build && electron-builder --mac --x64 --publish never",
+    "dist:win": "npm run addon:build && npm run mcp:build && vite build && electron-builder --win --publish never",
+    "dist:linux": "npm run addon:build && npm run mcp:build && vite build && electron-builder --linux --publish never",
+    "dist:all": "npm run addon:build && npm run mcp:build && vite build && electron-builder --mac --win --linux --publish never",
     "test:coverage": "./scripts/with-display.sh vitest run --coverage",
     "icons": "python3 scripts/make-app-icons.py && iconutil -c icns app-icons/mac.iconset -o app-icons/icon.icns",
     "e2e:image": "podman build -f Containerfile.e2e -t purple-cad-e2e .",
@@ -133,11 +134,14 @@
       {
         "from": "licenses",
         "to": "licenses"
+      },
+      {
+        "from": "build/mcp",
+        "to": "mcp"
       }
     ]
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
     "better-sqlite3": "^12.11.1",
     "decimal.js": "^10.6.0",
     "opentype.js": "^1.3.4",
@@ -149,6 +153,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@electron/rebuild": "^4.2.0",
     "@playwright/test": "^1.61.1",
     "@vitejs/plugin-react": "^6.0.3",
