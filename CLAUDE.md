@@ -489,6 +489,18 @@ flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
   half of it. `simplifyMesh.test.js` checks the bound against brute force; keep
   that check. The bound runs on `std::thread`s: pure geometry on read-only
   arrays, no OCC state, so safe in the OCC worker (gcc links `Threads`).
+- **OCC meshes the same shape differently on ARM and x86-64** -- same vertices,
+  other diagonals (402 of 1,580 triangles on a filleted cylinder). A test that
+  builds its input with `tessellate` can pass on a Mac and fail on every x86-64
+  build, which looks like a compiler or floating-point difference and isn't:
+  disabling FMA, and gcc on Linux ARM, both behaved like the Mac. When a mesh
+  test differs by architecture, save both meshes and run each on one machine
+  (`test-files/fillet-rim-*-mesh.json` and its test in
+  `rebuildSurfaces.test.js`). The one it exposed: a triangle that fits two
+  surfaces went to whichever region grew first, so a fillet took flat rim
+  triangles from the plane beside it; `RecognizePass` (mesh_recognize.cpp) now moves a triangle
+  onto a neighbour's surface it LIES on (within 1% of the tolerance) -- only
+  "nearer" fragmented a freeform top from 36 leftover triangles to 122.
 - OCC 8.0.0 removed `TopTools_ListIteratorOfListOfShape.hxx`. Iterate
   `TopTools_ListOfShape` (an `NCollection_List`) with a range-based `for` loop
   instead of that iterator. If a future OCC bump reintroduces a similar

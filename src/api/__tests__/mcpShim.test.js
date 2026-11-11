@@ -109,7 +109,11 @@ describe("commands as MCP tools", () => {
   });
 });
 
-describe("the shim, as an MCP client sees it", () => {
+// The app does not start its agent API on Windows (electron/main.cjs): a path
+// like this is a Unix socket, and Windows wants a named pipe instead.
+const unixSocketsOnly = describe.skipIf(process.platform === "win32");
+
+unixSocketsOnly("the shim, as an MCP client sees it", () => {
   it(
     "lists the app's commands as tools, and tells the agent how to use them",
     async () => {

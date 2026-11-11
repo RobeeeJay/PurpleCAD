@@ -5,6 +5,7 @@
 // closely than the mesh does.
 import { describe, it, expect, beforeAll } from "vitest";
 import { createRequire } from "module";
+import fs from "fs";
 import { ensureOcc } from "../init.js";
 import { ops } from "../../occOps.js";
 
@@ -144,6 +145,31 @@ describe("rebuilding a mesh as exact faces", () => {
     expect(r.faceTypes.cylinder, `faces ${faces(r)}`).toBe(1);
     expect(r.faceTypes.plane, `faces ${faces(r)}`).toBe(2);
     expect(r.maxEdgeTolerance, "loosest edge").toBeLessThan(2 * TOL);
+  });
+
+  it("rebuilds the same fillet rim whichever diagonals OCC chose", () => {
+    // The same filleted cylinder as above, meshed by OCC on an ARM Mac and on
+    // x86-64 Linux: identical vertices, but 402 of the 1,580 triangles take the
+    // other diagonal.  Thin flat triangles along the rim, lying in the top
+    // plane, fit the torus too, and the torus used to take them -- leaving the
+    // plane's region 4.6% short of its disc on one mesh and 5.3% on the other,
+    // past the 5% the rebuild allows, so x86-64 got its top back as 22
+    // triangles sewn 0.0079 apart.  Saved meshes, so this checks the same
+    // input on every machine.
+    for (const name of ["arm64", "x64"]) {
+      const mesh = JSON.parse(
+        fs.readFileSync(`test-files/fillet-rim-${name}-mesh.json`, "utf8"),
+      );
+      const r = rebuild(mesh);
+      const what = `${name} mesh: faces ${faces(r)}`;
+      expect(r.faceTypes.plane, what).toBe(2);
+      expect(r.faceTypes.torus, what).toBe(1);
+      expect(r.faceTypes.cylinder, what).toBe(1);
+      expect(r.faceTypes.triangle, what).toBe(0);
+      expect(r.maxEdgeTolerance, `${name} mesh: loosest edge`).toBeLessThan(
+        2 * TOL,
+      );
+    }
   });
 
   it("joins a flat top to a curved front along their real curve, not a chord", () => {

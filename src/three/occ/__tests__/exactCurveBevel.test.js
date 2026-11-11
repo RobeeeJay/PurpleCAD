@@ -12,6 +12,7 @@ import {
   withWinding,
 } from "../../sceneObjects/closedLoops.js";
 import { upgradeProfileCurves } from "../../profileBackfill.js";
+import { budget } from "../../../testBudget.js";
 
 beforeAll(async () => {
   await ensureOcc();
@@ -135,25 +136,33 @@ describe("bevelling an exact cog's rim", () => {
     expect(bevel.source.profile.curves2D.outer.length).toBeGreaterThan(50);
   });
 
-  it("takes the chamfers and fillet its facets took, as closed solids", async () => {
-    for (const [segments, amount] of [
-      [1, 0.01],
-      [1, 0.02],
-      [3, 0.02],
-      [1, 0.03],
-    ]) {
-      const res = await run(segments, amount);
-      const what = `segments ${segments}, ${amount * 10} mm`;
-      expect(unsharedEdges(res.geometryData), what).toBe(0);
-    }
-  }, 120000);
+  it(
+    "takes the chamfers and fillet its facets took, as closed solids",
+    async () => {
+      for (const [segments, amount] of [
+        [1, 0.01],
+        [1, 0.02],
+        [3, 0.02],
+        [1, 0.03],
+      ]) {
+        const res = await run(segments, amount);
+        const what = `segments ${segments}, ${amount * 10} mm`;
+        expect(unsharedEdges(res.geometryData), what).toBe(0);
+      }
+    },
+    budget(120000),
+  );
 
-  it("refuses the ones too wide for the teeth", async () => {
-    for (const [segments, amount] of [
-      [1, 0.04],
-      [1, 0.1],
-      [3, 0.1],
-    ])
-      await expect(run(segments, amount)).rejects.toThrow(/doesn't fit/);
-  }, 120000);
+  it(
+    "refuses the ones too wide for the teeth",
+    async () => {
+      for (const [segments, amount] of [
+        [1, 0.04],
+        [1, 0.1],
+        [3, 0.1],
+      ])
+        await expect(run(segments, amount)).rejects.toThrow(/doesn't fit/);
+    },
+    budget(120000),
+  );
 });

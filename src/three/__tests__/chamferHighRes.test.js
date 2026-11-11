@@ -12,6 +12,7 @@ import fs from "fs";
 import { ensureOcc } from "../occ/init.js";
 import { useStore } from "../../store";
 import { recalculateTimeline } from "../regenerateOrchestrator.js";
+import { budget } from "../../testBudget.js";
 
 beforeAll(async () => {
   await ensureOcc();
@@ -36,47 +37,55 @@ function topRadii(item) {
 }
 
 describe("high-res chamfer selection", () => {
-  it("stays on the outer rim after switching to print resolution", async () => {
-    const doc = JSON.parse(
-      fs.readFileSync("test-files/high-quality-chamfer-fail.pcad", "utf8"),
-    );
-    useStore.getState().loadDocument(doc);
-    await recalculateTimeline();
-    let item = useStore.getState().items.find((i) => i.regenerator);
-    const before = topRadii(item);
-    console.log("preview 0.1:", JSON.stringify(before));
+  it(
+    "stays on the outer rim after switching to print resolution",
+    async () => {
+      const doc = JSON.parse(
+        fs.readFileSync("test-files/high-quality-chamfer-fail.pcad", "utf8"),
+      );
+      useStore.getState().loadDocument(doc);
+      await recalculateTimeline();
+      let item = useStore.getState().items.find((i) => i.regenerator);
+      const before = topRadii(item);
+      console.log("preview 0.1:", JSON.stringify(before));
 
-    // Switch to high-quality print resolution (0.01) — dirties every entry.
-    useStore.getState().setResolutionMm(0.01);
-    await recalculateTimeline();
-    item = useStore.getState().items.find((i) => i.regenerator);
-    const after = topRadii(item);
-    console.log("print 0.01:", JSON.stringify(after));
+      // Switch to high-quality print resolution (0.01) — dirties every entry.
+      useStore.getState().setResolutionMm(0.01);
+      await recalculateTimeline();
+      item = useStore.getState().items.find((i) => i.regenerator);
+      const after = topRadii(item);
+      console.log("print 0.01:", JSON.stringify(after));
 
-    // The inner rim must stay UNchamfered: its top radius unchanged (within
-    // tessellation noise).  The bug pushes it outward by ~the chamfer amount.
-    expect(Math.abs(after.minR - before.minR)).toBeLessThan(0.03);
-  }, 240000);
+      // The inner rim must stay UNchamfered: its top radius unchanged (within
+      // tessellation noise).  The bug pushes it outward by ~the chamfer amount.
+      expect(Math.abs(after.minR - before.minR)).toBeLessThan(0.03);
+    },
+    budget(240000),
+  );
 
-  it("moving a chamfer before the emboss keeps the later chamfers off the inner rim", async () => {
-    const doc = JSON.parse(
-      fs.readFileSync("test-files/high-quality-chamfer-fail.pcad", "utf8"),
-    );
-    useStore.getState().loadDocument(doc);
-    await recalculateTimeline();
-    let item = useStore.getState().items.find((i) => i.regenerator);
-    const before = topRadii(item);
-    console.log("pre-reorder:", JSON.stringify(before));
+  it(
+    "moving a chamfer before the emboss keeps the later chamfers off the inner rim",
+    async () => {
+      const doc = JSON.parse(
+        fs.readFileSync("test-files/high-quality-chamfer-fail.pcad", "utf8"),
+      );
+      useStore.getState().loadDocument(doc);
+      await recalculateTimeline();
+      let item = useStore.getState().items.find((i) => i.regenerator);
+      const before = topRadii(item);
+      console.log("pre-reorder:", JSON.stringify(before));
 
-    // Move the first chamfer (23) before the emboss (22): the later appended
-    // chamfers' stored rim segments become stale (the rim is beveled earlier
-    // now) — they must SKIP gracefully, not grab the inner rim via the
-    // normal-set fallback's diametric ambiguity.
-    useStore.getState().reorderHistory(23, 22);
-    await recalculateTimeline();
-    item = useStore.getState().items.find((i) => i.regenerator);
-    const after = topRadii(item);
-    console.log("post-reorder:", JSON.stringify(after));
-    expect(Math.abs(after.minR - before.minR)).toBeLessThan(0.03);
-  }, 240000);
+      // Move the first chamfer (23) before the emboss (22): the later appended
+      // chamfers' stored rim segments become stale (the rim is beveled earlier
+      // now) — they must SKIP gracefully, not grab the inner rim via the
+      // normal-set fallback's diametric ambiguity.
+      useStore.getState().reorderHistory(23, 22);
+      await recalculateTimeline();
+      item = useStore.getState().items.find((i) => i.regenerator);
+      const after = topRadii(item);
+      console.log("post-reorder:", JSON.stringify(after));
+      expect(Math.abs(after.minR - before.minR)).toBeLessThan(0.03);
+    },
+    budget(240000),
+  );
 });

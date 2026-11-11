@@ -1,6 +1,12 @@
 {
   "name": "PurpleCAD",
-  "version": "0.3.0",
+  "version": "1.0.0",
+  "description": "A parametric CAD application with an OpenCASCADE kernel",
+  "homepage": "https://github.com/RobeeeJay/PurpleCAD",
+  "author": {
+    "name": "Robeena Shepherd",
+    "url": "https://github.com/RobeeeJay"
+  },
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -69,20 +75,8 @@
     "mac": {
       "icon": "app-icons/icon.icns",
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "category": "public.app-category.productivity"
     },
@@ -119,7 +113,8 @@
           ]
         }
       ],
-      "category": "Graphics"
+      "category": "Graphics",
+      "maintainer": "Robeena Shepherd <https://github.com/RobeeeJay/PurpleCAD>"
     },
     "afterPack": "scripts/afterPack.cjs",
     "extraResources": [

@@ -1,48 +1,64 @@
 name: Release
 
-# Builds the macOS (Apple Silicon) app for a version tag and publishes it as a
-# pre-release on the PUBLIC releases repository, so testers can download builds
-# and file issues while this source repository stays private.
+# Builds PurpleCAD for macOS (Apple Silicon and Intel, signed and notarized),
+# Linux x64 and Windows x64.  A version tag (v1.2.3) also gathers the builds
+# into a DRAFT release on this repository, to be checked and published by hand;
+# a manual run (workflow_dispatch) builds everything and publishes nothing, which
+# is the way to try a change to this file.
 #
-# Setup, once:
-#   - repository variable RELEASES_REPO, e.g. RobeeeJay/PurpleCAD-beta
-#   - secret RELEASES_TOKEN: a fine-grained token with Contents read/write on
-#     that repository ONLY (github.token cannot write to another repository)
+# The Mac builds REFUSE to come out unsigned: an unsigned or un-notarized app
+# opens on no Mac but the one that built it.  They need five repository secrets,
+# the same names as the ZX-Rustrum project uses (RELEASING.md, "Releasing From
+# GitHub", says how to make each):
+#   MACOS_CERTIFICATE           base64 of the Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD  the password the .p12 was exported with
+#   MACOS_NOTARY_KEY            the text of the App Store Connect .p8 key
+#   MACOS_NOTARY_KEY_ID         its key ID
+#   MACOS_NOTARY_ISSUER         its issuer ID
 #
-# Only mac arm64: it is the one packaging path that bundles OCC (afterPack.cjs
-# returns early on other platforms, so a Linux or Windows build would ship an
-# addon that cannot find its kernel).
+# Every platform builds OCC 8.0.1 itself (about 12 minutes on a Mac, longer on
+# Windows) and caches it under a key naming the version and the architecture.
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
-# A newer release run cancels an older one still going.  Publishing is the LAST
-# step and the build makes no release until then, so a run cancelled while
-# building leaves nothing behind; one cancelled mid-upload can leave a release
-# missing files, which the next run replaces (see "Publish").
+# A newer release run cancels an older one still going.  The release is made in
+# the last job, after every build has passed, so a cancelled run leaves nothing
+# behind.
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  mac-arm64:
-    runs-on: macos-14 # arm64 (Apple Silicon) runner
-    permissions:
-      contents: read
+permissions:
+  contents: read
 
+env:
+  OCC_TAG: V8_0_1
+  # The runners are 3-7x slower than an Apple Silicon Mac on the heavy OCC
+  # tests; src/testBudget.js stretches the long ones by this much.
+  TEST_TIME_SCALE: "3"
+  # The modules the addon links, and nothing that needs a display or Tcl.  The
+  # same flags as addon-build.yml and Containerfile.e2e.
+  OCC_FLAGS: >-
+    -DCMAKE_BUILD_TYPE=Release
+    -DBUILD_MODULE_FoundationClasses=ON
+    -DBUILD_MODULE_ModelingData=ON
+    -DBUILD_MODULE_ModelingAlgorithms=ON
+    -DBUILD_MODULE_DataExchange=ON
+    -DBUILD_MODULE_Visualization=OFF
+    -DBUILD_MODULE_Draw=OFF
+    -DBUILD_MODULE_ApplicationFramework=OFF
+    -DUSE_FREETYPE=OFF -DUSE_TK=OFF -DUSE_OPENGL=OFF
+
+jobs:
+  # A tag that disagrees with package.json would publish a build whose About box
+  # names another version.
+  version:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          # Same as addon-build.yml: the lockfile is node 24's npm.
-          node-version: "24"
-          cache: "npm"
-
-      # A tag that disagrees with package.json would publish a build whose About
-      # box names another version.
       - name: Tag matches package.json version
         if: github.ref_type == 'tag'
         run: |
@@ -52,92 +68,446 @@ jobs:
             exit 1
           fi
 
+  mac:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each architecture builds on its own kind of Mac, so OCC, the addon
+          # and the load check all run natively rather than cross-compiled.
+          - arch: arm64
+            runner: macos-15
+            occ_arch: arm64
+          - arch: x64
+            runner: macos-15-intel
+            occ_arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      # The oldest macOS Electron runs on.  OCC and the addon default to the
+      # runner's own, and afterPack.cjs refuses a bundle that needs newer.
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The lockfile is node 24's npm (addon-build.yml says why).
+          node-version: "24"
+          cache: "npm"
+
+      # Checked first, so a missing secret costs a minute rather than a whole
+      # OCC build.
+      - name: Signing secrets are present
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          missing=""
+          for name in MACOS_CERTIFICATE MACOS_CERTIFICATE_PASSWORD \
+              MACOS_NOTARY_KEY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "Missing secrets:$missing. A Mac build is never made unsigned." >&2
+            exit 1
+          fi
+
       - name: Install cmake + ninja
         run: brew install cmake ninja
 
-      # Same key as addon-build.yml.  A tag run can only read caches saved on
-      # the default branch or on its own ref, so expect the first release to
-      # build OCC (~12 min) and later ones of the same tag to reuse it.
-      - name: Cache OCC arm64 build
+      # The addon's CMakeLists and afterPack.cjs both look for OCC in the home
+      # directory, so it is installed there.
+      - name: Cache OCC
         id: cache-occ
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: ~/occ-8.0.1-arm64
-          key: occ-8.0.1-arm64-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Clone OCC source
-        if: steps.cache-occ.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch V8_0_1 \
-            https://github.com/Open-Cascade-SAS/OCCT.git /tmp/occt
+          path: ~/occ-8.0.1-${{ matrix.arch }}
+          key: occ-8.0.1-${{ matrix.arch }}-${{ runner.os }}-macos12
 
       - name: Build and install OCC
         if: steps.cache-occ.outputs.cache-hit != 'true'
         run: |
-          cmake -S /tmp/occt -B /tmp/occt-build \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_INSTALL_PREFIX=$HOME/occ-8.0.1-arm64 \
-            -DBUILD_MODULE_FoundationClasses=ON \
-            -DBUILD_MODULE_ModelingData=ON \
-            -DBUILD_MODULE_ModelingAlgorithms=ON \
-            -DBUILD_MODULE_DataExchange=ON \
-            -DBUILD_MODULE_Visualization=OFF \
-            -DBUILD_MODULE_Draw=OFF \
-            -DBUILD_MODULE_ApplicationFramework=OFF \
-            -DUSE_FREETYPE=OFF \
-            -DUSE_TK=OFF \
-            -DUSE_OPENGL=OFF
-          cmake --build /tmp/occt-build --parallel $(sysctl -n hw.logicalcpu)
-          cmake --install /tmp/occt-build
+          git clone --depth 1 --branch "$OCC_TAG" \
+            https://github.com/Open-Cascade-SAS/OCCT.git "$RUNNER_TEMP/occt"
+          # The architecture is pinned: 8.0.1's CMake picks x86_64 on an arm64
+          # Mac unless told (CLAUDE.md, "Native OCC addon").
+          cmake -S "$RUNNER_TEMP/occt" -B "$RUNNER_TEMP/occt-build" -G Ninja \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.occ_arch }} \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
+            -DCMAKE_INSTALL_PREFIX="$HOME/occ-8.0.1-${{ matrix.arch }}" \
+            $OCC_FLAGS
+          cmake --build "$RUNNER_TEMP/occt-build" --parallel "$(sysctl -n hw.logicalcpu)"
+          cmake --install "$RUNNER_TEMP/occt-build"
+
+      # Saved as soon as it is built: a plain actions/cache saves only when the
+      # whole job succeeds, so a test failure later threw away a 40-minute build.
+      - name: Save OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/occ-8.0.1-${{ matrix.arch }}
+          key: ${{ steps.cache-occ.outputs.cache-primary-key }}
 
       - name: Install npm dependencies
         run: |
           npm ci
           npm ci --prefix native/occ-addon
 
+      # The certificate goes into a keychain of its own for the run and the
+      # notary key into a file, and both are removed at the end of the job.
+      - name: Put the signing certificate and notary key in place
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          # A secret pasted from the clipboard can carry a line break the
+          # password never had ("MAC verification failed ... wrong password?").
+          cert_password="$(printf '%s' "$MACOS_CERTIFICATE_PASSWORD" | tr -d '\r\n')"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$cert_password" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
+          if [ -z "$identity" ]; then
+            echo "MACOS_CERTIFICATE holds no Developer ID Application identity" >&2
+            exit 1
+          fi
+          echo "signing as $identity"
+          printf '%s\n' "$MACOS_NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+          {
+            echo "SIGN_IDENTITY=$identity"
+            # electron-builder wants the name without the certificate type.
+            echo "CSC_NAME=${identity#Developer ID Application: }"
+            echo "CSC_KEYCHAIN=$keychain"
+            echo "APPLE_API_KEY=$RUNNER_TEMP/notary.p8"
+          } >> "$GITHUB_ENV"
+
+      # The unit suite drives the real addon, so it shows each build behaving
+      # like the others.  The timeout is raised for slower runners; tests that
+      # set their own keep it.
+      - name: Build and test the addon
+        run: |
+          npm run addon:build
+          npm run addon:test
+          npx vitest run --testTimeout=60000
+
+      # With APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER set,
+      # electron-builder signs the app with the hardened runtime and notarizes it.
       - name: Build the app
-        run: npm run dist:mac-arm64
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: npm run dist:mac-${{ matrix.arch }}
+
+      # electron-builder names the folder mac-arm64 for Apple Silicon and plain
+      # mac for Intel.
+      - name: Find the app
+        run: |
+          app="$(ls -d release/mac*/PurpleCAD.app | head -1)"
+          dmg="$(ls release/*.dmg | head -1)"
+          [ -d "$app" ] && [ -f "$dmg" ]
+          echo "APP=$PWD/$app" >> "$GITHUB_ENV"
+          echo "DMG=$PWD/$dmg" >> "$GITHUB_ENV"
 
       # The bundle must load its kernel with nothing but what it carries: an
       # absolute rpath or a missing dylib resolves on the machine that built it
-      # and nowhere else (CLAUDE.md, "Packaging the mac app").  Run from an
-      # unrelated directory so the bundled path is the only one there is.
+      # and nowhere else.  OCC is moved out of the way so the bundled copy is
+      # the only one there is.
       - name: Packaged addon loads from the bundle
         run: |
-          app=release/mac-arm64/PurpleCAD.app
-          node_file="$PWD/$app/Contents/Resources/app.asar.unpacked/native/occ-addon/build/Release/occ_addon.node"
+          mv "$HOME/occ-8.0.1-${{ matrix.arch }}" "$RUNNER_TEMP/occ-hidden"
+          trap 'mv "$RUNNER_TEMP/occ-hidden" "$HOME/occ-8.0.1-${{ matrix.arch }}"' EXIT
           cd "$RUNNER_TEMP"
-          ELECTRON_RUN_AS_NODE=1 "$GITHUB_WORKSPACE/$app/Contents/MacOS/PurpleCAD" \
-            -e "require('$node_file'); console.log('addon loads')"
+          ELECTRON_RUN_AS_NODE=1 "$APP/Contents/MacOS/PurpleCAD" \
+            -e "require('$APP/Contents/Resources/app.asar.unpacked/native/occ-addon/build/Release/occ_addon.node'); console.log('addon loads')"
+          lipo -archs "$APP/Contents/MacOS/PurpleCAD"
+
+      # The app is checked as Gatekeeper sees it: signed is not enough, it has
+      # to say Notarized Developer ID.
+      - name: App is signed and notarized
+        run: |
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          out="$(spctl --assess --type execute --verbose "$APP" 2>&1)"
+          echo "$out"
+          echo "$out" | grep -q "source=Notarized Developer ID"
+          # Validating fetches the ticket from Apple, and one run failed on "The
+          # network connection was lost" after everything else had passed.
+          for try in 1 2 3; do
+            xcrun stapler validate "$APP" && break
+            [ "$try" = 3 ] && exit 1
+            sleep 30
+          done
+
+      # electron-builder leaves the disk image around the app unsigned, and
+      # Gatekeeper rejects the image itself, so it is signed, notarized and
+      # stapled here.  This changes the image, so its .blockmap is not shipped.
+      - name: Sign, notarize and staple the disk image
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          codesign --sign "$SIGN_IDENTITY" --keychain "$CSC_KEYCHAIN" --timestamp "$DMG"
+          xcrun notarytool submit "$DMG" --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait --timeout 30m
+          for try in 1 2 3; do
+            xcrun stapler staple "$DMG" && break
+            [ "$try" = 3 ] && exit 1
+            sleep 30
+          done
+          out="$(spctl --assess --type open --context context:primary-signature -v "$DMG" 2>&1)"
+          echo "$out"
+          echo "$out" | grep -q "source=Notarized Developer ID"
+
+      - name: Take the signing certificate and notary key away
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8"
 
       - name: Keep the build as a workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: purplecad-mac-arm64
+          name: purplecad-mac-${{ matrix.arch }}
           path: |
             release/*.dmg
             release/*.zip
           retention-days: 14
 
-      # Uploads with --clobber onto an existing release of the same tag, so a
-      # re-run (or the run after a cancelled one) completes a partial release
-      # rather than failing on it.  Manual runs build but never publish.
-      - name: Publish
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          REPO: ${{ vars.RELEASES_REPO }}
+  linux:
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      # Electron 43's V8 headers need a newer gcc than 12 (Containerfile.e2e
+      # says what goes wrong); 14 is the one the e2e container builds with.
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install build tools
+        # OCC 8's DataExchange still builds TKService, which includes Xlib.h,
+        # even with the Visualization module off.
+        run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf gcc-14 g++-14 libx11-dev
+
+      - name: Cache OCC
+        id: cache-occ
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/occ-8.0.1-x64
+          key: occ-8.0.1-x64-${{ runner.os }}-gcc14
+
+      - name: Build and install OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
         run: |
-          if [ -z "$REPO" ] || [ -z "$GH_TOKEN" ]; then
-            echo "Set the RELEASES_REPO variable and RELEASES_TOKEN secret first" >&2
-            exit 1
-          fi
+          git clone --depth 1 --branch "$OCC_TAG" \
+            https://github.com/Open-Cascade-SAS/OCCT.git "$RUNNER_TEMP/occt"
+          cmake -S "$RUNNER_TEMP/occt" -B "$RUNNER_TEMP/occt-build" -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="$HOME/occ-8.0.1-x64" $OCC_FLAGS
+          cmake --build "$RUNNER_TEMP/occt-build" --parallel "$(nproc)"
+          cmake --install "$RUNNER_TEMP/occt-build"
+
+      # Saved as soon as it is built: a plain actions/cache saves only when the
+      # whole job succeeds, so a test failure later threw away a 40-minute build.
+      - name: Save OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/occ-8.0.1-x64
+          key: ${{ steps.cache-occ.outputs.cache-primary-key }}
+
+      - name: Install npm dependencies
+        run: |
+          npm ci
+          npm ci --prefix native/occ-addon
+
+      # OCC is off the loader's path here, so the tests need it named.  The
+      # unit suite drives the real addon, so it shows this build behaving like
+      # the others.  The timeout is raised for slower runners; tests that set
+      # their own keep it.
+      - name: Build and test the addon
+        run: |
+          npm run addon:build
+          export LD_LIBRARY_PATH="$HOME/occ-8.0.1-x64/lib"
+          npm run addon:test
+          npx vitest run --testTimeout=60000
+
+      - name: Build the app
+        run: npm run dist:linux
+
+      # The same check as the Mac's: with OCC gone, the bundle's own copy is the
+      # only one the addon can load.
+      - name: Packaged addon loads from the bundle
+        run: |
+          mv "$HOME/occ-8.0.1-x64" "$RUNNER_TEMP/occ-hidden"
+          trap 'mv "$RUNNER_TEMP/occ-hidden" "$HOME/occ-8.0.1-x64"' EXIT
+          app="$PWD/release/linux-unpacked"
+          cd "$RUNNER_TEMP"
+          ELECTRON_RUN_AS_NODE=1 "$app/purplecad" \
+            -e "require('$app/resources/app.asar.unpacked/native/occ-addon/build/Release/occ_addon.node'); console.log('addon loads')"
+
+      - name: Keep the build as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: purplecad-linux-x64
+          path: |
+            release/*.AppImage
+            release/*.deb
+          retention-days: 14
+
+  windows:
+    needs: version
+    runs-on: windows-2022
+    env:
+      # Forward slashes: CMake reads a backslash in a -D value as an escape.
+      OCC_HOME: C:/occ-8.0.1-x64
+      OCC_BIN_DIR: C:/occ-8.0.1-x64/bin
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      # MSVC, the Windows SDK, dumpbin and VCToolsRedistDir (the C++ runtime
+      # afterPack.cjs bundles) on the PATH and in the environment.
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Cache OCC
+        id: cache-occ
+        uses: actions/cache/restore@v4
+        with:
+          path: C:/occ-8.0.1-x64
+          key: occ-8.0.1-x64-${{ runner.os }}-msvc
+
+      # INSTALL_DIR_LAYOUT=Unix gives bin/, lib/ and lib/cmake/opencascade
+      # rather than OCC's usual win64/vc14/ tree.
+      - name: Build and install OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$OCC_TAG" \
+            https://github.com/Open-Cascade-SAS/OCCT.git "$RUNNER_TEMP/occt"
+          cmake -S "$RUNNER_TEMP/occt" -B "$RUNNER_TEMP/occt-build" -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="$OCC_HOME" -DINSTALL_DIR_LAYOUT=Unix $OCC_FLAGS
+          cmake --build "$RUNNER_TEMP/occt-build" --parallel
+          cmake --install "$RUNNER_TEMP/occt-build"
+          ls "$OCC_BIN_DIR"/TKernel.dll
+          ls "$OCC_HOME"/lib/cmake/opencascade/OpenCASCADEConfig.cmake
+
+      # Saved as soon as it is built: a plain actions/cache saves only when the
+      # whole job succeeds, so a test failure later threw away a 40-minute build.
+      - name: Save OCC
+        if: steps.cache-occ.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:/occ-8.0.1-x64
+          key: ${{ steps.cache-occ.outputs.cache-primary-key }}
+
+      - name: Install npm dependencies
+        run: |
+          npm ci
+          npm ci --prefix native/occ-addon
+
+      # build.sh hunts for a runnable cmake on a Mac; here cmake-js is called
+      # directly, told where OCC is.
+      - name: Build and test the addon
+        run: |
+          cd native/occ-addon
+          npx cmake-js compile --CDCMAKE_BUILD_TYPE=Release \
+            --CDOpenCASCADE_DIR="$OCC_HOME/lib/cmake/opencascade"
+          PATH="$(cygpath -u "$OCC_BIN_DIR"):$PATH" node test/ping.mjs
+
+      # The whole unit suite runs the real addon, so it is what shows the MSVC
+      # build behaving like the clang and gcc ones.
+      - name: Unit tests
+        run: PATH="$(cygpath -u "$OCC_BIN_DIR"):$PATH" npx vitest run --testTimeout=60000
+
+      - name: Build the app
+        run: |
+          npx vite build
+          npx electron-builder --win --x64 --publish never
+
+      # OCC is taken off the PATH, so a DLL missing from the bundle fails here
+      # ("The specified module could not be found") rather than on a user's PC.
+      - name: Packaged addon loads from the bundle
+        shell: pwsh
+        run: |
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike 'C:\occ-8.0.1-x64*' }) -join ';'
+          Rename-Item C:\occ-8.0.1-x64 occ-hidden
+          try {
+            $exe = (Resolve-Path release\win-unpacked\PurpleCAD.exe).Path
+            $addon = (Resolve-Path release\win-unpacked\resources\app.asar.unpacked\native\occ-addon\build\Release\occ_addon.node).Path
+            Push-Location $env:RUNNER_TEMP
+            $env:ELECTRON_RUN_AS_NODE = "1"
+            & $exe -e "require(process.argv[1]); console.log('addon loads')" $addon
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Pop-Location
+          } finally {
+            Rename-Item C:\occ-hidden occ-8.0.1-x64
+          }
+
+      - name: Keep the build as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: purplecad-windows-x64
+          path: |
+            release/*.exe
+            release/*.zip
+          retention-days: 14
+
+  # Only a tag makes a release, and only as a DRAFT: it is published by hand
+  # after the builds have been tried on real machines.
+  release:
+    if: github.ref_type == 'tag'
+    needs: [mac, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd artifacts
+          sha256sum * | tee SHA256SUMS.txt
+
+      # --clobber onto an existing draft of the same tag, so a re-run completes
+      # a release rather than failing on it.
+      - name: Make the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
           if ! gh release view "$GITHUB_REF_NAME" --repo "$REPO" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --repo "$REPO" --prerelease \
+            gh release create "$GITHUB_REF_NAME" --repo "$REPO" --draft \
               --title "PurpleCAD $GITHUB_REF_NAME" \
-              --notes "Beta build for Apple Silicon Macs. Please attach an exported .pcad (zipped) to bug reports."
+              --notes "Builds for macOS (Apple Silicon and Intel, signed and notarized), Windows x64 and Linux x64. The Windows build is not code-signed, so SmartScreen will warn before it runs. Please attach an exported .pcad (zipped) to bug reports."
           fi
-          gh release upload "$GITHUB_REF_NAME" --repo "$REPO" --clobber \
-            release/*.dmg release/*.zip
+          gh release upload "$GITHUB_REF_NAME" --repo "$REPO" --clobber artifacts/*

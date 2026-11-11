@@ -66,6 +66,9 @@ npm run electron:build
 Produces a packaged Electron app (`.dmg` on macOS). `npm run build` alone
 just produces the Vite bundle in `dist/`.
 
+Building, signing and notarizing a release for each platform is in
+[RELEASING.md](RELEASING.md).
+
 ### Testing
 
 ```bash
