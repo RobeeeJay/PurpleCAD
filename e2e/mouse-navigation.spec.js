@@ -147,6 +147,29 @@ test("the Scroll wheel setting cycles Auto, Mouse and Trackpad into the store", 
   );
 });
 
+// Home animates for 300 ms, and its end used to set the orbit angles back to
+// its own pose -- undoing any navigation made meanwhile.  On a slow machine
+// that landed in the middle of touch-input's one-finger orbit.
+test("an orbit made while Home is animating is kept", async () => {
+  await home();
+  const atHome = await view();
+  await rightDrag(150, 0, "Shift"); // somewhere else, for Home to return from
+  await page.evaluate(() => window.__store.getState()._cameraControls.home());
+  expect(
+    await page.evaluate(() =>
+      window.__store.getState()._cameraControls.isCameraAnimating(),
+    ),
+    "Home should still be animating when the drag starts",
+  ).toBe(true);
+  await rightDrag(150, 0, "Shift");
+  await page.waitForTimeout(600);
+  const after = await view();
+  expect(
+    moved(after.dir, atHome.dir),
+    JSON.stringify({ atHome, after }),
+  ).toBeGreaterThan(0.1);
+});
+
 test("a right click without a drag does not move the view", async () => {
   await home();
   const before = await view();

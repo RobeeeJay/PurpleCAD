@@ -751,6 +751,7 @@ export function attachCameraControls(ctx) {
       itemsRef,
       cameraControlsRef,
       orbitIndicator,
+      cameraAnimRef,
     },
     { save, setRotationState, getOrbitAnchor, setOrbitAnchor, isMac },
   );
@@ -758,8 +759,7 @@ export function attachCameraControls(ctx) {
   // on release, so a right drag never re-anchors mid-gesture.
   const mouseNav = createMouseNavigation({
     onMouseWheel,
-    // The ease runs on past the wheel's activity window, so each step asks
-    // for its own frame.
+    // The ease outlasts the wheel's activity window: each step asks a frame.
     zoomBy: (scale) => {
       zoomBy(scale);
       requestRender();
