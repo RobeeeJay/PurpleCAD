@@ -9,6 +9,13 @@ concurrency:
   group: addon-build-${{ github.ref }}
   cancel-in-progress: true
 
+# The runners are 3-7x slower than an Apple Silicon Mac on the heavy OCC tests:
+# src/testBudget.js stretches the long ones by this much, and the timeout below
+# covers the rest (the threaded-hole tests took 5.7 s here against vitest's 5 s
+# default). The same settings as release.yml.
+env:
+  TEST_TIME_SCALE: "3"
+
 jobs:
   build:
     runs-on: macos-15  # arm64 (Apple Silicon) runner; macos-14 is retired
@@ -90,7 +97,7 @@ jobs:
         run: npm run addon:test
 
       - name: Unit tests (vitest)
-        run: ./scripts/with-display.sh npx vitest run
+        run: ./scripts/with-display.sh npx vitest run --testTimeout=60000
 
       - name: Renderer build (vite)
         run: npx vite build
