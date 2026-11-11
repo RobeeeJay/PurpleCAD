@@ -797,6 +797,18 @@ calls that shim provides -- `prepare().run/get/all`, `exec`, `pragma`,
 `transaction` -- or the shim grows with it. Check a
 change there with the smoke run (`--smoke`), in the simulator at least.
 
+**A mouse is a trackpad with other hands** (`mouseNavigation.js`): a right
+drag is fed to `onMouseWheel` as the scroll a trackpad would send, and only a
+bare MOUSE wheel zooms (eased, through `zoomBy`). Which device sent a wheel
+event is a per-gesture guess -- a notch is `wheelDeltaY` 120 with no sideways
+movement -- that Settings can override (`wheelDevice`). Two traps, both
+measured in Electron: Playwright's `page.mouse.wheel` reports a notched MOUSE
+wheel (`wheelDeltaY` +/-120 whatever deltaY it was given), so a spec meaning a
+trackpad pan must set `wheelDevice` to "trackpad"
+(`orbit-anchor-session.spec.js`); and a `new WheelEvent(...)` copies deltaY's
+sign into `wheelDeltaY`, the opposite of a real event, so the direction comes
+from deltaY and only the size from `wheelDeltaY`.
+
 **Touch and the Pencil are the mouse and the wheel, not a second input
 path.** `touchInput.js` turns pointer events of type `touch` / `pen` into
 calls to the viewport's own `onMouseDown/Move/Up` and `onMouseWheel`, by the

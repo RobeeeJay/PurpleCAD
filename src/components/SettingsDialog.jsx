@@ -117,6 +117,8 @@ const SettingsDialog = () => {
   const setAlwaysExtrudeSingleObject = useStore(
     (s) => s.setAlwaysExtrudeSingleObject,
   );
+  const wheelDevice = useStore((s) => s.wheelDevice);
+  const setWheelDevice = useStore((s) => s.setWheelDevice);
   const resetSettings = useStore((s) => s.resetSettings);
   const setAboutDialogOpen = useStore((s) => s.setAboutDialogOpen);
 
@@ -319,6 +321,38 @@ const SettingsDialog = () => {
                 style={buttonStyle}
               >
                 {axisVisible ? "On" : "Off"}
+              </button>,
+            )}
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
+              <span>Scroll wheel</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                {wheelDevice === "mouse"
+                  ? "always zooms"
+                  : wheelDevice === "trackpad"
+                    ? "always scrolls the view, as a trackpad does"
+                    : "a mouse wheel zooms, a trackpad scrolls the view"}
+              </span>
+            </span>
+            {control(
+              <button
+                className="variables-btn wheel-device"
+                onClick={() =>
+                  setWheelDevice(
+                    { auto: "mouse", mouse: "trackpad", trackpad: "auto" }[
+                      wheelDevice
+                    ],
+                  )
+                }
+                style={buttonStyle}
+              >
+                {
+                  { auto: "Auto", mouse: "Mouse", trackpad: "Trackpad" }[
+                    wheelDevice
+                  ]
+                }
               </button>,
             )}
           </div>

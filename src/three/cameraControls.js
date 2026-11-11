@@ -22,6 +22,7 @@ import { createViewInteraction } from "./cameraControls/viewInteraction.js";
 import { createEmbossInteraction } from "./cameraControls/embossPick.js";
 import { createSketchInteraction } from "./cameraControls/sketchInteraction.js";
 import { attachTouchInput } from "./cameraControls/touchInput.js";
+import { createMouseNavigation } from "./cameraControls/mouseNavigation.js";
 import { createToolPreviews } from "./cameraControls/toolPreviews.js";
 import { createMeasureAndPrimitivePreviews } from "./cameraControls/measurePrimitivePreviews.js";
 import { createMaterialAndFitHelpers } from "./cameraControls/materialFitHelpers.js";
@@ -602,30 +603,13 @@ export function attachCameraControls(ctx) {
       if (tryBeginHandleDrag(e)) return;
       controls.mouseDownX = e.clientX;
       controls.mouseDownY = e.clientY;
-    } else if (e.button === 2) {
-      if (!sketchModeRef.current) {
-        setOrbitAnchor(
-          getOrbitAnchor(
-            cameraRef,
-            targetRef,
-            raycasterRef,
-            sceneRef,
-            objectsRef,
-            itemsRef,
-            renderer,
-          ),
-          cameraRef,
-          targetRef,
-          cameraControlsRef,
-          orbitIndicator,
-        );
-      }
-    }
+    } else mouseNav.onDown(e);
   };
 
   const onMouseMove = (e) => {
     const currentCamera = cameraRef.current;
     if (!currentCamera) return;
+    if (mouseNav.onMove(e)) return;
 
     if (extrudeSelectModeRef && extrudeSelectModeRef.current) {
       // "start" and "to" both pick a face (extrudeFacePick.js).
@@ -683,6 +667,7 @@ export function attachCameraControls(ctx) {
   };
 
   const onMouseUp = (e) => {
+    if (mouseNav.onUp(e)) return;
     if (
       extrudeSelectModeRef &&
       extrudeSelectModeRef.current &&
@@ -769,6 +754,36 @@ export function attachCameraControls(ctx) {
     },
     { save, setRotationState, getOrbitAnchor, setOrbitAnchor, isMac },
   );
+  // The mouse (mouseNavigation.js).  A right CLICK re-anchors the orbit pivot,
+  // on release, so a right drag never re-anchors mid-gesture.
+  const mouseNav = createMouseNavigation({
+    onMouseWheel,
+    // The ease runs on past the wheel's activity window, so each step asks
+    // for its own frame.
+    zoomBy: (scale) => {
+      zoomBy(scale);
+      requestRender();
+    },
+    preference: () => useStore.getState().wheelDevice,
+    rightClick: () => {
+      if (sketchModeRef.current) return;
+      setOrbitAnchor(
+        getOrbitAnchor(
+          cameraRef,
+          targetRef,
+          raycasterRef,
+          sceneRef,
+          objectsRef,
+          itemsRef,
+          renderer,
+        ),
+        cameraRef,
+        targetRef,
+        cameraControlsRef,
+        orbitIndicator,
+      );
+    },
+  });
 
   // ── Keyboard ───────────────────────────────────────────────────────────────
 
@@ -829,7 +844,7 @@ export function attachCameraControls(ctx) {
   el.addEventListener("mousedown", onMouseDown);
   el.addEventListener("mousemove", onMouseMove);
   el.addEventListener("mouseup", onMouseUp);
-  el.addEventListener("wheel", onMouseWheel, { passive: false });
+  el.addEventListener("wheel", mouseNav.onWheel, { passive: false });
   const onContextMenu = (e) => e.preventDefault();
   el.addEventListener("contextmenu", onContextMenu);
   // Fingers and the Pencil, as clicks, drags and wheel gestures.
@@ -868,7 +883,8 @@ export function attachCameraControls(ctx) {
     el.removeEventListener("mousedown", onMouseDown);
     el.removeEventListener("mousemove", onMouseMove);
     el.removeEventListener("mouseup", onMouseUp);
-    el.removeEventListener("wheel", onMouseWheel);
+    el.removeEventListener("wheel", mouseNav.onWheel);
+    mouseNav.dispose();
     el.removeEventListener("contextmenu", onContextMenu);
     detachTouch();
     document.removeEventListener("keyup", onModifierUp);

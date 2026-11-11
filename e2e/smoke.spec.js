@@ -276,7 +276,7 @@ test("the settings dialog's inputs and buttons share one column", async ({}, tes
   await page.evaluate(() =>
     window.__store.getState().setSettingsDialogOpen(false),
   );
-  expect(boxes.length).toBe(12);
+  expect(boxes.length).toBe(13);
   const one = (k) => new Set(boxes.map((b) => b[k])).size;
   const at = JSON.stringify(boxes);
   expect(one("left"), `left edges ${at}`).toBe(1);

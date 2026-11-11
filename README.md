@@ -105,10 +105,20 @@ curve resolution — each with a `1`-`8` keyboard shortcut in the 3D view.
 
 ### Camera Controls
 
-- **Left-drag**: orbit the view
-- **Right-drag**: pan
-- **Scroll**: zoom
-- **Rotation Widget**: click a face/axis for a precise view snap
+A trackpad and a mouse do the same things with different hands.
+
+| | Trackpad | Mouse |
+| --- | --- | --- |
+| Pan across the ground | two-finger scroll | right-drag |
+| Orbit | Shift + scroll | Shift + right-drag |
+| Pan up and down the screen | Cmd + scroll (Ctrl off a Mac) | Cmd + right-drag (Ctrl off a Mac) |
+| Zoom | pinch | scroll wheel |
+
+A right click without a drag moves the orbit pivot to whatever is under the
+centre of the view. PurpleCAD guesses whether a scroll came from a mouse wheel
+or a trackpad; if it guesses wrong for your hardware, set **Scroll wheel** in
+Settings to Mouse or Trackpad. The rotation widget snaps to a face or axis
+view.
 
 ## Technologies
 
