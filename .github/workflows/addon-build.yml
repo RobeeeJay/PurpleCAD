@@ -114,7 +114,7 @@ jobs:
       - name: E2E (Playwright + Electron)
         run: |
           npm run sqlite:rebuild
-          VITE_E2E=1 vite build
+          VITE_E2E=1 npx vite build
           ./scripts/with-display.sh npx playwright test
 
       - name: Upload Playwright report on failure
