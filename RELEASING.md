@@ -527,17 +527,6 @@ That makes an AppImage and a `.deb` in `release/`.
 
 ## Known Gaps
 
-- **Convert to Surfaces is less exact on x86-64** (Windows, Linux, Intel Macs)
-  in at least one case: a cylinder with a filleted rim rebuilds with one of its
-  two flat faces left as triangles, where Apple Silicon fits both. The body is
-  still a closed, correct solid; that face just isn't exact. The input is OCC's
-  own tessellation, which differs slightly between ARM and x86-64, and every
-  x86-64 build behaves the same whatever the compiler, so it is the mesh, not
-  our code generation. Rebuilding the addon on ARM without fused multiply-adds,
-  and on Linux ARM with gcc, both still found two planes. Whether other shapes
-  are affected is not yet known: the next step is to save the x86-64 mesh from
-  CI and see why that plane won't fit. `rebuildSurfaces.test.js` pins the
-  current x86-64 result, and fails when it improves.
 - **CI runners are three to seven times slower** than an Apple Silicon Mac on
   the heavy OCC tests, so the release workflow sets `TEST_TIME_SCALE=3`, which
   `src/testBudget.js` applies to the tests that came within reach of their limit.
@@ -546,3 +535,14 @@ That makes an AppImage and a `.deb` in `release/`.
   but nobody here has opened it on a Linux desktop.
 - **Windows builds aren't code-signed**, so SmartScreen warns about them until
   there's a certificate to sign with.
+
+An earlier version of this page listed Convert to Surfaces as less exact on
+x86-64, and put it down to OCC computing slightly different points there. Both
+halves were wrong. OCC's mesh of the test part had identical vertices on ARM and
+x86-64 and differed only in which diagonal 402 of its triangles took, and the
+fault was in the rebuild, on every platform: thin triangles along a fillet's
+rim, lying in the flat top, went to the fillet instead of the top, so the top's
+region fell short of the disc it builds. On ARM that came to 4.6% and on x86-64
+to 5.3%, either side of the 5% the rebuild allows. ARM passing was luck. It's
+fixed, and both meshes are kept in `test-files/` so the test checks the same
+input on every machine.

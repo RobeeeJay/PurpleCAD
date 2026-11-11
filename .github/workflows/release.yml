@@ -39,9 +39,6 @@ env:
   # The runners are 3-7x slower than an Apple Silicon Mac on the heavy OCC
   # tests; src/testBudget.js stretches the long ones by this much.
   TEST_TIME_SCALE: "3"
-  # Test inputs saved for comparing architectures (rebuildSurfaces.test.js),
-  # uploaded by every job whatever happens.
-  MESH_DUMP_DIR: ${{ github.workspace }}/mesh-dumps
   # The modules the addon links, and nothing that needs a display or Tcl.  The
   # same flags as addon-build.yml and Containerfile.e2e.
   OCC_FLAGS: >-
@@ -271,15 +268,6 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/notary.p8"
 
-      - name: Keep the test meshes
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-meshes-mac-${{ matrix.arch }}
-          path: mesh-dumps/
-          if-no-files-found: ignore
-          retention-days: 14
-
       - name: Keep the build as a workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -365,15 +353,6 @@ jobs:
           cd "$RUNNER_TEMP"
           ELECTRON_RUN_AS_NODE=1 "$app/purplecad" \
             -e "require('$app/resources/app.asar.unpacked/native/occ-addon/build/Release/occ_addon.node'); console.log('addon loads')"
-
-      - name: Keep the test meshes
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-meshes-linux-x64
-          path: mesh-dumps/
-          if-no-files-found: ignore
-          retention-days: 14
 
       - name: Keep the build as a workflow artifact
         uses: actions/upload-artifact@v4
@@ -481,15 +460,6 @@ jobs:
             Rename-Item C:\occ-hidden occ-8.0.1-x64
           }
 
-      - name: Keep the test meshes
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-meshes-windows-x64
-          path: mesh-dumps/
-          if-no-files-found: ignore
-          retention-days: 14
-
       - name: Keep the build as a workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -528,6 +498,6 @@ jobs:
           if ! gh release view "$GITHUB_REF_NAME" --repo "$REPO" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" --repo "$REPO" --draft \
               --title "PurpleCAD $GITHUB_REF_NAME" \
-              --notes "Builds for macOS (Apple Silicon and Intel, signed and notarized), Windows x64 and Linux x64. The Windows build is not code-signed, so SmartScreen will warn before it runs. Known difference: on Windows, Linux and Intel Macs, Convert to Surfaces can leave a flat face as triangles where Apple Silicon makes it one exact face; the body is still correct. Please attach an exported .pcad (zipped) to bug reports."
+              --notes "Builds for macOS (Apple Silicon and Intel, signed and notarized), Windows x64 and Linux x64. The Windows build is not code-signed, so SmartScreen will warn before it runs. Please attach an exported .pcad (zipped) to bug reports."
           fi
           gh release upload "$GITHUB_REF_NAME" --repo "$REPO" --clobber artifacts/*

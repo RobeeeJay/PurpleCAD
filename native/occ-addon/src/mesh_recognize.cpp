@@ -579,6 +579,58 @@ Recognition RecognizePass(std::vector<double> pos, const std::vector<uint32_t>& 
       for (uint32_t t : regions[i].tris) regionOf[t] = int64_t(i);
   }
 
+  // A triangle on the seam between two surfaces can fit both, and the one that
+  // grew first took it.  Along a fillet's tangent rim the torus took thin flat
+  // triangles lying exactly in the top plane, so the plane's region came out
+  // short of the disc its face covers -- 4.6% on one meshing of a filleted
+  // cylinder, 5.3% on another that differed only in which diagonal OCC chose
+  // (it chooses differently on ARM and x86-64) -- and past 5% the rebuild's
+  // area check sent the whole top back to triangles.  So each triangle goes to
+  // a neighbouring region whose surface holds all its corners and passes
+  // through its middle, to within a hundredth of the tolerance, nearer than
+  // its own does: a triangle that LIES on the surface, as those flat ones lie
+  // in the plane.  Only nearer was not enough -- on a bumpy freeform top the
+  // local fits trade triangles that merely sit a little closer, and the
+  // fragmented regions left 122 triangles where there had been 36.  A tie
+  // never moves, so nothing changes hands back and forth.  Repeated, since a
+  // rim can be more than one row deep.
+  for (int pass = 0; pass < 4; pass++) {
+    std::vector<std::pair<uint32_t, int64_t>> moves;
+    for (size_t t = 0; t < T; t++) {
+      const int64_t own = regionOf[t];
+      if (own < 0 || regions[own].fit.type == "mesh") continue;
+      double nearest = Distance(regions[own].fit, centroid[t]);
+      int64_t to = -1;
+      for (int k = 0; k < 3; k++) {
+        const int64_t q = nbr[t][k];
+        if (q < 0) continue;
+        const int64_t c = regionOf[q];
+        if (c < 0 || c == own || regions[c].fit.type == "mesh") continue;
+        const Fit& f = regions[c].fit;
+        const double d = Distance(f, centroid[t]);
+        if (d >= nearest || d > 0.01 * tol) continue;
+        bool holds = f.type != "plane" || facesPlane(f, {uint32_t(t)});
+        for (int j = 0; j < 3 && holds; j++) holds = Distance(f, m.vert(m.idx[3 * t + j])) <= tol;
+        if (holds) {
+          nearest = d;
+          to = c;
+        }
+      }
+      if (to >= 0) moves.push_back({uint32_t(t), to});
+    }
+    if (moves.empty()) break;
+    std::vector<char> leaving(T, 0);
+    for (auto [t, to] : moves) leaving[t] = 1;
+    for (Region& g : regions)
+      g.tris.erase(std::remove_if(g.tris.begin(), g.tris.end(),
+                                  [&](uint32_t t) { return leaving[t] != 0; }),
+                   g.tris.end());
+    for (auto [t, to] : moves) {
+      regions[to].tris.push_back(t);
+      regionOf[t] = to;
+    }
+  }
+
   // Each collapsed sliver goes to a region round it whose surface holds all
   // its vertices -- the first one found need not: at a pole the sliver's far
   // vertex can lie in a different region, 0.036 off the first's surface on a
