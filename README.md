@@ -38,7 +38,7 @@ OpenCASCADE (OCC) kernel, packaged as an Electron desktop app.
 
 ### Prerequisites
 
-- Node.js 16+ and npm
+- Node.js 22 or newer and npm (CI builds with 24)
 - Xcode command line tools / a C++ toolchain and CMake (to build the native
   OCC addon — see `native/occ-addon/` and `CLAUDE.md` for details)
 
@@ -122,7 +122,7 @@ view.
 
 ## Technologies
 
-- **React 18**: UI framework
+- **React 19**: UI framework
 - **Three.js**: 3D graphics and WebGL rendering (+ `three-mesh-bvh`,
   `three-gpu-pathtracer` for the path-traced render mode)
 - **Zustand**: state management (sliced store: history, sketch, materials,

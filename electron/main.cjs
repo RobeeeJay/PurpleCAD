@@ -15,10 +15,18 @@ if (process.env.ELECTRON_RUN_AS_NODE) {
 
 // In dev mode, watch electron/*.cjs for changes and relaunch automatically.
 // watchRenderer: false because Vite HMR already handles renderer hot-reload.
+// electron-reloader 2 is an ES module that wants `import.meta`, of which it
+// reads only `url`. A failure is reported: swallowed, it would leave dev
+// reloading off with no sign of why (the v1 call shape fails that way on v2).
 if (process.env.ELECTRON_START_URL) {
   try {
-    require("electron-reloader")(module, { watchRenderer: false });
-  } catch (_) {}
+    require("electron-reloader").default(
+      { url: require("node:url").pathToFileURL(__filename).href },
+      { watchRenderer: false },
+    );
+  } catch (err) {
+    console.warn("[main] electron-reloader is off:", err.message);
+  }
 }
 
 const electron = require("electron");

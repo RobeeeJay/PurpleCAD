@@ -98,6 +98,13 @@ container run's part `.pcad` files. `E2E_NO_SANDBOX=1` (set in the image)
 makes `e2e/launch.js` pass `--no-sandbox`, which rootless containers require;
 the macOS run keeps the sandbox on.
 
+**vitest runs in forked processes (`pool: "forks"` in `vite.config.js`), not
+worker threads.** vitest 5 made threads the default, and with the Mac busy
+(Spotlight and Photos indexing) the OCC addon ran 17-45x slower in a worker
+thread: the heavy chamfer tests timed out at 900 s that take 14 s forked.
+Node 24.15 vs 24.22 and machine load were both ruled out by A/B runs first;
+vitest 4 vs 5 on the same test (20 s vs 336 s) found it.
+
 Run tests through the npm scripts, not `npx vitest`/`playwright` directly:
 they route through `scripts/with-display.sh`, which runs the command under
 `xvfb-run` when it's available (headless Linux/CI) and directly otherwise
@@ -1269,6 +1276,15 @@ sources are picked) that reuses the creation UI.
   objects shared an id (a doubled object-list entry; the extrude Edit opened
   on the piece). `itemIdAfterSplit.test.js` fails if that counting pattern
   reappears anywhere in `src`.
+- **User navigation finishes a running camera tween first.** Home, a
+  view-cube face and sketch entry/exit animate through `cameraAnimRef`, and
+  each tween's `onComplete` sets the orbit angles to its end pose -- so an
+  orbit, pan or zoom made while one ran was silently undone when it ended.
+  `navigation.js#finishCameraTween` jumps the tween to its end (running its
+  `onComplete`, which also saves the view or leaves a sketch) before applying
+  the input. Cancelling instead would skip those side effects. On a slow
+  machine the tween's end landed mid-drag in `touch-input.spec.js`, losing 4
+  to 6 of 8 orbit steps; `mouse-navigation.spec.js` pins it.
 - **A body's outline is its REAL edges, not a crease detector.** The default
   `EdgesGeometry` (1 degree) drew every seam between the triangles of a curved
   face, so an exact cylinder showed 45 lines down its side and looked faceted

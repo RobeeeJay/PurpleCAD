@@ -1,4 +1,4 @@
-// Vendored from three@0.185 examples/jsm/loaders/TTFLoader.js with ONE change:
+// Vendored from three@0.187 examples/jsm/loaders/TTFLoader.js with ONE change:
 // the upstream file imports opentype.js from a jsdelivr CDN URL, which node's
 // ESM loader (vitest) rejects — import the locally-installed package instead.
 import { FileLoader, Loader } from "three";
@@ -50,6 +50,8 @@ class TTFLoader extends Loader {
     const scope = this;
 
     const loader = new FileLoader(this.manager);
+    loader.setPriority(this.priority);
+    loader.setCache(this.cache);
     loader.setPath(this.path);
     loader.setResponseType("arraybuffer");
     loader.setRequestHeader(this.requestHeader);
