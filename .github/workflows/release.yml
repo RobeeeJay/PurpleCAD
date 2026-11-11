@@ -244,7 +244,13 @@ jobs:
           out="$(spctl --assess --type execute --verbose "$APP" 2>&1)"
           echo "$out"
           echo "$out" | grep -q "source=Notarized Developer ID"
-          xcrun stapler validate "$APP"
+          # Validating fetches the ticket from Apple, and one run failed on "The
+          # network connection was lost" after everything else had passed.
+          for try in 1 2 3; do
+            xcrun stapler validate "$APP" && break
+            [ "$try" = 3 ] && exit 1
+            sleep 30
+          done
 
       # electron-builder leaves the disk image around the app unsigned, and
       # Gatekeeper rejects the image itself, so it is signed, notarized and
@@ -257,7 +263,11 @@ jobs:
           codesign --sign "$SIGN_IDENTITY" --keychain "$CSC_KEYCHAIN" --timestamp "$DMG"
           xcrun notarytool submit "$DMG" --key "$APPLE_API_KEY" \
             --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait --timeout 30m
-          xcrun stapler staple "$DMG"
+          for try in 1 2 3; do
+            xcrun stapler staple "$DMG" && break
+            [ "$try" = 3 ] && exit 1
+            sleep 30
+          done
           out="$(spctl --assess --type open --context context:primary-signature -v "$DMG" 2>&1)"
           echo "$out"
           echo "$out" | grep -q "source=Notarized Developer ID"
