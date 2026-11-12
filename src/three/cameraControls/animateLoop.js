@@ -221,6 +221,10 @@ export function createAnimateLoop({
       // position is quantized to a grid step and doesn't visibly move for
       // a one-frame swap).
       cam.updateMatrixWorld();
+      // A sketch is framed by plain lookAt, at the raw canvas centre: drop the
+      // orthographic panel shift (sceneSetup.js#applyPanelViewOffset) that a
+      // 3D view left on the camera.
+      if (sketchModeRef.current && cam.view?.enabled) cam.clearViewOffset();
       const REFERENCE_HEIGHT = 10; // arbitrary baseline; tuned visually
       const gizmoScale = (worldPos) => {
         if (cam.isOrthographicCamera) {

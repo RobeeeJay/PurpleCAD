@@ -8,7 +8,11 @@ import * as THREE from "three";
 import { useStore } from "../../store";
 import { saveCameraState } from "../../three/cameraControls.js";
 import { analyticLocalPoints, fitPointsToView } from "../../three/cameraFit.js";
-import { panelAwareLookAt } from "../../three/sceneSetup.js";
+import {
+  orthoHeightMatching,
+  panelAwareLookAt,
+  perspectiveDistanceMatching,
+} from "../../three/sceneSetup.js";
 
 export function useViewportCamera({
   containerRef,
@@ -172,7 +176,16 @@ export function useViewportCamera({
     const currentRotY = cameraControlsRef.current.targetRotationY;
     const currentPosition = currentCamera.position.clone();
     const aspect = container.clientWidth / container.clientHeight;
-    const frustumSize = 20;
+    const toPivot = currentPosition.distanceTo(targetRef.current);
+    // The world height visible at the pivot now, which the new camera must
+    // show too: a fixed 20-unit orthographic view made objects jump in size
+    // on every switch made at any other distance.
+    const visibleHeight = currentCamera.isOrthographicCamera
+      ? (currentCamera.top - currentCamera.bottom) / currentCamera.zoom
+      : orthoHeightMatching(toPivot, currentCamera.fov);
+    // Entering a sketch forces orthographic through this same switch, and a
+    // sketch opens on its fixed 20-unit frame, whatever the 3D zoom was.
+    const frustumSize = isInSketchMode ? 20 : visibleHeight;
     let newCamera;
     if (projectionMode === "orthographic") {
       newCamera = new THREE.OrthographicCamera(
@@ -196,7 +209,12 @@ export function useViewportCamera({
       );
     } else {
       newCamera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 1000);
-      newCamera.position.copy(currentPosition);
+      // Back off (or close in) along the same line of sight until the pivot
+      // shows what the orthographic view did.
+      const dir = currentPosition.clone().sub(targetRef.current).normalize();
+      newCamera.position
+        .copy(targetRef.current)
+        .addScaledVector(dir, perspectiveDistanceMatching(visibleHeight, fov));
     }
     if (isInSketchMode) {
       newCamera.lookAt(targetRef.current);

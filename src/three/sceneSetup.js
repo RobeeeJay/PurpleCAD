@@ -332,9 +332,27 @@ const _panelYawAxis = new THREE.Vector3(0, 1, 0);
 // custom frame parameter) rather than its own asymmetric composition, relying
 // on this same yaw (applied to its tween's lookAt) to land the result in the
 // right place — doing both at once would double-compensate.
+// Orthographic: the same shift as a moved view window rather than a turn.
+// Turning a parallel camera tilts the whole view (Front would no longer be
+// face-on), while an offset window slides the picture and leaves the camera
+// pointing straight at the pivot.  setViewOffset works in pixels of a "full"
+// view; any width will do, so the window is the full one moved left by half
+// the panel, which renders the pivot at NDC +frac.  Its fullWidth is kept so
+// a resize (sceneSetup.js#setupResize) can reapply it.
+export function applyPanelViewOffset(camera, canvasWidthPx) {
+  const canvasW = canvasWidthPx || 1;
+  const frac = Math.min(LEFT_PANEL_PX, canvasW * 0.8) / canvasW;
+  camera.setViewOffset(canvasW, 1, (-frac * canvasW) / 2, 0, canvasW, 1);
+}
+
 export function panelAwareLookAt(camera, target, canvasWidthPx) {
   camera.lookAt(target);
-  if (!camera.isPerspectiveCamera) return; // orthographic: no compensation yet
+  if (camera.isOrthographicCamera) {
+    applyPanelViewOffset(camera, canvasWidthPx);
+    return;
+  }
+  // A camera that was orthographic keeps no window shift as perspective.
+  if (camera.view?.enabled) camera.clearViewOffset();
   const canvasW = canvasWidthPx || 1;
   const panel = Math.min(LEFT_PANEL_PX, canvasW * 0.8);
   const frac = panel / canvasW;
@@ -588,6 +606,15 @@ export function createAxisGroup(scene) {
   return axisGroup;
 }
 
+// Switching projection must keep things the same size on screen at the pivot.
+// A perspective camera at distance d shows 2 d tan(fov/2) of world height
+// there; an orthographic one shows (top - bottom) / zoom everywhere.
+const halfFovTan = (fovDeg) => Math.tan((fovDeg * Math.PI) / 360);
+export const orthoHeightMatching = (distance, fovDeg) =>
+  2 * distance * halfFovTan(fovDeg);
+export const perspectiveDistanceMatching = (visibleHeight, fovDeg) =>
+  visibleHeight / (2 * halfFovTan(fovDeg));
+
 export function createOrbitIndicator(scene) {
   const geo = new THREE.SphereGeometry(0.07, 16, 12);
   const mat = new THREE.MeshBasicMaterial({
@@ -622,6 +649,9 @@ export function setupResize(containerRef, cameraRef, renderer, composerRef) {
       cam.aspect = aspect;
     }
     cam.updateProjectionMatrix();
+    // The panel shift is a fraction of the canvas width: refit it.
+    if (cam.isOrthographicCamera && cam.view?.enabled)
+      applyPanelViewOffset(cam, width);
     renderer.setSize(width, height);
     if (composerRef.current) composerRef.current.setSize(width, height);
   };
