@@ -69,6 +69,7 @@ export function createAnimateLoop({
   objectsRef,
   selectedIdRef,
   axisGroupRef,
+  orbitIndicator,
   handlesRef,
   boundingBoxRef,
   gridMaterial,
@@ -250,6 +251,12 @@ export function createAnimateLoop({
         // 0.5: render the XYZ indicator at half the authored on-screen size.
         const s = gizmoScale(axisGroupRef.current.position) * 0.5;
         axisGroupRef.current.scale.setScalar(s);
+      }
+      // The orbit pivot's spot: a constant size on screen (about 12 px across
+      // on an 870 px tall view) rather than a fixed-size ball in the world,
+      // which filled the view zoomed in and vanished zoomed out.
+      if (orbitIndicator?.visible) {
+        orbitIndicator.scale.setScalar(gizmoScale(orbitIndicator.position));
       }
       // Sketch-placement plane previews: keep them a constant on-screen size so
       // they're equally easy to click whatever the zoom (they're authored as
