@@ -7,9 +7,10 @@ Needs Pillow (`pip install pillow`); run it after replacing that master image:
 
 Each platform gets the shape it expects, which is NOT the same shape:
 
-  macOS   the system draws no mask, so the icon must BE the rounded squircle,
-          inset in a transparent canvas to Apple's proportions (824 of 1024).
-          A full-bleed square here looks oversized beside every other Dock icon.
+  macOS   up to 15 the system draws no mask, so the icon must BE the rounded
+          squircle, inset in a transparent canvas to Apple's proportions (824
+          of 1024); a full-bleed square there looks oversized.  macOS 26 is
+          the opposite and reads PurpleCAD.icon instead (see main()).
   Windows square and full-bleed -- the taskbar and Start menu round nothing,
           so an inset icon just renders small.
   Linux   square and full-bleed; the desktop environment applies its own
@@ -18,6 +19,7 @@ Each platform gets the shape it expects, which is NOT the same shape:
           Store requires; the system applies its own mask.
 """
 
+import json
 import os
 from PIL import Image, ImageDraw
 
@@ -124,6 +126,37 @@ def main():
                 f"icon_{s}x{s}@2x.png",
             )
         )
+
+    # macOS 26 draws an .icns as a "legacy" icon: anything already rounded is
+    # shrunk onto a grey tile in the Apps view and Finder, while a full-bleed
+    # square is rounded by the system.  It wants an Icon Composer `.icon` --
+    # one full-bleed layer, no glass -- which electron-builder compiles with
+    # Xcode's actool (mac.icon).  The rounded icon.icns above stays for macOS
+    # 13-15, which round nothing: afterPack puts it back over actool's own
+    # legacy .icns, which stops at 256 px.  Tested side by side in the Apps
+    # view on macOS 26: rounded .icns tiled, square .icns and this .icon right.
+    icon_dir = os.path.join(ROOT, "app-icons", "PurpleCAD.icon")
+    written.append(
+        write(opaque(square(master, 1024)), "app-icons", "PurpleCAD.icon", "Assets", "art.png")
+    )
+    icon_json = os.path.join(icon_dir, "icon.json")
+    with open(icon_json, "w") as f:
+        json.dump(
+            {
+                "groups": [
+                    {
+                        "layers": [{"image-name": "art.png", "name": "art", "glass": False}],
+                        "shadow": {"kind": "none", "opacity": 0},
+                        "translucency": {"enabled": False, "value": 0},
+                    }
+                ],
+                "supported-platforms": {"squares": ["macOS"]},
+            },
+            f,
+            indent=2,
+        )
+        f.write("\n")
+    written.append(icon_json)
 
     # ── Windows ──────────────────────────────────────────────────────────────
     for s in (16, 24, 32, 48, 64, 96, 128, 256, 512, 1024):
