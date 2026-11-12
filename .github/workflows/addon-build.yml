@@ -111,19 +111,11 @@ jobs:
             exit 1
           fi
 
-      - name: E2E (Playwright + Electron)
-        run: |
-          npm run sqlite:rebuild
-          VITE_E2E=1 npx vite build
-          ./scripts/with-display.sh npx playwright test
-
-      - name: Upload Playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-results
-          path: test-results/
-          retention-days: 7
+      # No e2e here (owner's decision): the full suite runs locally in the
+      # Linux container and the GPU specs on a Mac, before a PR is made. On a
+      # hosted Mac runner the suite failed a dozen tests that pass locally --
+      # a slower machine with a virtual GPU and another screen -- and the
+      # visual snapshot can never match a reference taken on a real Mac.
 
       - name: Upload addon artifact
         uses: actions/upload-artifact@v4

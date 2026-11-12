@@ -81,6 +81,14 @@ build is its own layer and is reused by every later app-code rebuild; app
 edits rebuild only the COPY layers, ~1 min). The podman VM needs more than
 its 2 GiB default: `podman machine set --memory 8192 --cpus 8`.
 
+**Run the GPU specs (`npm run test:e2e:gpu`) locally after finishing a piece
+of work and before making its PR -- always, and never on GitHub (owner's
+decision).** They are `pathtrace.spec.js` (the path tracer starts and draws)
+and `visual.spec.js` (a screenshot of a cube against a saved reference). The
+PR check (`addon-build.yml`) runs no e2e at all: on a hosted Mac runner the
+full suite failed a dozen tests that pass locally, and the snapshot can never
+match a reference taken on a real Mac.
+
 **On macOS, run only the two GPU specs (`npm run test:e2e:gpu`) -- the
 owner's decision, to stop duplicating the container.** The container runs the
 whole suite; the path-tracer and `visual` specs skip there for want of a GPU,
