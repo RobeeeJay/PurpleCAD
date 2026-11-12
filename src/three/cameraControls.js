@@ -755,8 +755,7 @@ export function attachCameraControls(ctx) {
     },
     { save, setRotationState, getOrbitAnchor, setOrbitAnchor, isMac },
   );
-  // The mouse (mouseNavigation.js).  A right CLICK re-anchors the orbit pivot,
-  // on release, so a right drag never re-anchors mid-gesture.
+  // The mouse (mouseNavigation.js); a right CLICK re-anchors on release.
   const mouseNav = createMouseNavigation({
     onMouseWheel,
     // The ease outlasts the wheel's activity window: each step asks a frame.
@@ -823,6 +822,7 @@ export function attachCameraControls(ctx) {
     objectsRef,
     selectedIdRef,
     axisGroupRef,
+    orbitIndicator,
     handlesRef,
     boundingBoxRef,
     gridMaterial,

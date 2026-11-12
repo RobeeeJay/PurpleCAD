@@ -69,6 +69,7 @@ export function createAnimateLoop({
   objectsRef,
   selectedIdRef,
   axisGroupRef,
+  orbitIndicator,
   handlesRef,
   boundingBoxRef,
   gridMaterial,
@@ -220,6 +221,10 @@ export function createAnimateLoop({
       // position is quantized to a grid step and doesn't visibly move for
       // a one-frame swap).
       cam.updateMatrixWorld();
+      // A sketch is framed by plain lookAt, at the raw canvas centre: drop the
+      // orthographic panel shift (sceneSetup.js#applyPanelViewOffset) that a
+      // 3D view left on the camera.
+      if (sketchModeRef.current && cam.view?.enabled) cam.clearViewOffset();
       const REFERENCE_HEIGHT = 10; // arbitrary baseline; tuned visually
       const gizmoScale = (worldPos) => {
         if (cam.isOrthographicCamera) {
@@ -250,6 +255,12 @@ export function createAnimateLoop({
         // 0.5: render the XYZ indicator at half the authored on-screen size.
         const s = gizmoScale(axisGroupRef.current.position) * 0.5;
         axisGroupRef.current.scale.setScalar(s);
+      }
+      // The orbit pivot's spot: a constant size on screen (about 12 px across
+      // on an 870 px tall view) rather than a fixed-size ball in the world,
+      // which filled the view zoomed in and vanished zoomed out.
+      if (orbitIndicator?.visible) {
+        orbitIndicator.scale.setScalar(gizmoScale(orbitIndicator.position));
       }
       // Sketch-placement plane previews: keep them a constant on-screen size so
       // they're equally easy to click whatever the zoom (they're authored as

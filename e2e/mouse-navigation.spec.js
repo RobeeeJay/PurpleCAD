@@ -101,16 +101,22 @@ test("the mouse wheel zooms in by easing, not in one jump", async () => {
   // notch: Playwright's wheel is a notched mouse wheel (wheelDeltaY 120).
   await page.evaluate(() => {
     const c = window.__store.getState()._cameraControls;
+    // For a second, not a frame count: 40 frames were 667 ms at the
+    // container's 60 Hz but only 333 ms on a 120 Hz Mac display, which ended
+    // the sampling with the ease still 0.15% short.
     window.__dists = [];
+    window.__distsDone = false;
+    const start = performance.now();
     const frame = () => {
       window.__dists.push(c.getCameraPosition().distanceTo(c.getViewTarget()));
-      if (window.__dists.length < 40) requestAnimationFrame(frame);
+      if (performance.now() - start < 1000) requestAnimationFrame(frame);
+      else window.__distsDone = true;
     };
     requestAnimationFrame(frame);
   });
   await page.mouse.move(700, 400);
   await page.mouse.wheel(0, -100);
-  await expect.poll(() => page.evaluate(() => window.__dists.length)).toBe(40);
+  await expect.poll(() => page.evaluate(() => window.__distsDone)).toBe(true);
   const dists = await page.evaluate(() => window.__dists);
   const detail = JSON.stringify({ before: before.dist, dists });
   // Lands one notch closer (ZOOM_PER_NOTCH, 1.15), about the same pivot...
@@ -168,6 +174,40 @@ test("an orbit made while Home is animating is kept", async () => {
     moved(after.dir, atHome.dir),
     JSON.stringify({ atHome, after }),
   ).toBeGreaterThan(0.1);
+});
+
+// The orbit pivot's spot is a screen-space marker, like the handles: it used
+// to be a fixed-size ball in the world, filling the view zoomed in.
+test("the orbit spot stays the same size on screen at any zoom", async () => {
+  const spotPx = () =>
+    page.evaluate(() => {
+      const c = window.__store.getState()._cameraControls;
+      const { spot, cam } = c.getOrbitIndicator();
+      const h = document.querySelector(".viewport canvas").clientHeight;
+      const r = spot.geometry.parameters.radius * spot.scale.x;
+      const up = cam.up.clone().normalize().multiplyScalar(r);
+      const a = spot.position.clone().project(cam);
+      const b = spot.position.clone().add(up).project(cam);
+      return { visible: spot.visible, px: Math.abs(b.y - a.y) * h };
+    });
+  // A Shift+right-drag starts an orbit session, which shows the spot.
+  const orbitAndMeasure = async () => {
+    await rightDrag(20, 0, "Shift");
+    await page.waitForTimeout(50);
+    return spotPx();
+  };
+  await page.evaluate(() => window.__store.getState().setWheelDevice("mouse"));
+  await home();
+  const far = await orbitAndMeasure();
+  await page.mouse.move(700, 400);
+  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -100);
+  await page.waitForTimeout(600);
+  const near = await orbitAndMeasure();
+  await page.evaluate(() => window.__store.getState().setWheelDevice("auto"));
+  const detail = JSON.stringify({ far, near });
+  expect(far.visible && near.visible, detail).toBe(true);
+  expect(far.px, detail).toBeGreaterThan(2);
+  expect(Math.abs(near.px - far.px) / far.px, detail).toBeLessThan(0.1);
 });
 
 test("a right click without a drag does not move the view", async () => {

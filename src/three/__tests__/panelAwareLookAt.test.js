@@ -41,4 +41,32 @@ describe("panelAwareLookAt", () => {
     // frac = panel/canvasW = 250/1400
     expect(x).toBeCloseTo(250 / CANVAS_W, 6);
   });
+
+  // Orthographic used to get no compensation at all, so its pivot sat at the
+  // raw canvas centre -- half the panel's width left of where perspective
+  // put it -- and the model jumped sideways on every projection switch.
+  it("puts an orthographic camera's pivot at the same NDC-x, without turning it", () => {
+    const camera = new THREE.OrthographicCamera(-15, 15, 9, -9, 0.1, 1000);
+    camera.zoom = 2.5;
+    camera.updateProjectionMatrix();
+    const target = new THREE.Vector3(3, 1, -2);
+    camera.position.set(13, 9, 8);
+    panelAwareLookAt(camera, target, CANVAS_W);
+    camera.updateMatrixWorld(true);
+    expect(target.clone().project(camera).x).toBeCloseTo(250 / CANVAS_W, 6);
+    // A parallel view must look straight at the pivot: turning the camera
+    // instead would tilt Front, Top and the rest off true.
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const toTarget = target.clone().sub(camera.position).normalize();
+    expect(forward.distanceTo(toTarget)).toBeLessThan(1e-9);
+  });
+
+  it("clears the orthographic shift from a camera used as perspective", () => {
+    const camera = new THREE.PerspectiveCamera(35, CANVAS_W / 900, 0.1, 1000);
+    camera.setViewOffset(CANVAS_W, 900, -100, 0, CANVAS_W, 900);
+    camera.position.set(10, 5, 10);
+    panelAwareLookAt(camera, new THREE.Vector3(), CANVAS_W);
+    expect(camera.view?.enabled ?? false).toBe(false);
+  });
 });

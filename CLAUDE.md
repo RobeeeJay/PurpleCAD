@@ -1309,7 +1309,8 @@ sources are picked) that reuses the creation UI.
   handle for toolbar buttons that need access to viewport helpers (eg
   `dropSelectedToGround`). Don't `useStore.subscribe` to it.
 - Per-frame constant-on-screen-size scaling for the axis indicator,
-  transform handles, and bounding-box dimension labels happens in
+  transform handles, the orbit pivot's spot, and bounding-box dimension labels
+  happens in
   `cameraControls/animateLoop.js` — don't scale them elsewhere or the
   per-frame pass will fight you. Each entry caches its authored scale
   on userData.baseScale on first sight.
@@ -1519,6 +1520,17 @@ angle)` — `rotateOnAxis` treats its axis as LOCAL (object-space), i.e. the
   pivot's projected NDC-x stayed ~0.1456 (`= panel/canvasW`, exactly the
   expected visible-centre value) across Home, a pan, and every subsequent
   rotate tick — where before the fix it would read ~0 (raw canvas centre).
+- **Orthographic views get the panel compensation as a VIEW OFFSET, not a
+  turn.** `panelAwareLookAt` used to return early for an orthographic camera,
+  so its pivot sat at the raw canvas centre, 125 px left of where perspective
+  put it, and every projection switch slid the model sideways. A yaw would tilt
+  a parallel view off true (Front no longer face-on), so orthographic uses
+  `camera.setViewOffset` (`applyPanelViewOffset`), refitted on resize and
+  cleared each frame in sketch mode, which frames by plain `lookAt` at the raw
+  centre. The same switch keeps the pivot's on-screen SIZE
+  (`orthoHeightMatching` / `perspectiveDistanceMatching`) -- except on entering
+  a sketch, which opens on its fixed 20-unit frame; matching there broke five
+  sketch specs that rely on it.
 - **Re-anchoring the orbit pivot on every NEW Shift+scroll session — even
   when nothing panned in between — drifts the pivot on a mere PAUSE.**
   `getOrbitAnchor`'s panel-shifted crosshair ray is not the rotation axis

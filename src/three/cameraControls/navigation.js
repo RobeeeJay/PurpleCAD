@@ -22,6 +22,12 @@ export function createNavigationHandlers(
   { save, setRotationState, getOrbitAnchor, setOrbitAnchor, isMac },
 ) {
   const controls = cameraControlsRef.current;
+  // Read-only, for e2e: the orbit pivot's spot and the camera it is seen
+  // through (mouse-navigation.spec.js).
+  controls.getOrbitIndicator = () => ({
+    spot: orbitIndicator,
+    cam: cameraRef.current,
+  });
 
   let shiftScrollSessionTimer = null;
   // Fraction of the current view distance the fresh anchor raycast must
