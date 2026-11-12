@@ -172,9 +172,15 @@ the macOS version doing the building or newer, and nothing complains: the app
 claims macOS 12, opens on an older Mac, and then can't load its kernel. The
 first 1.0.0 build for Apple Silicon was made like that, with an addon needing
 macOS 27 and OCC needing macOS 26, and it passed signing, notarization and
-every check this page had at the time. 12.0 is the oldest macOS Electron runs
-on. The addon's `CMakeLists.txt` now sets it for the addon, and `afterPack.cjs`
-refuses to package anything that needs newer than the app does.
+every check this page had at the time. The addon's `CMakeLists.txt` now sets
+12.0 for the addon, and `afterPack.cjs` refuses to package anything that needs
+newer than the app does.
+
+12.0 was the oldest macOS Electron 43 ran on, which PurpleCAD 1.0.0 used.
+Electron 44 dropped macOS 12, so from 1.0.1 (Electron 45) the app itself needs
+macOS 13 -- `LSMinimumSystemVersion` comes from Electron's own `Info.plist`.
+OCC and the addon stay at 12.0: that runs on 13, and moving the target would
+throw away every cached OCC build in CI for nothing.
 
 Check you got the architecture and the macOS version you asked for:
 
@@ -429,8 +435,11 @@ npx vite build
 npx electron-builder --win --x64 --publish never
 ```
 
-You should end up with an installer (`PurpleCAD Setup <version>.exe`) and a
-`.zip` in `release\`. The build isn't code-signed, so Windows SmartScreen will
+You should end up with an installer (`PurpleCAD-Setup-<version>.exe`) and a
+`.zip` in `release\`. The installer's name has no spaces (`nsis.artifactName`
+in `package.json`): GitHub turns a space in an uploaded file's name into a
+dot, and 1.0.0's `SHA256SUMS.txt` named a file the release didn't have until
+it was corrected by hand. The build isn't code-signed, so Windows SmartScreen will
 warn whoever runs the installer. Signing for Windows needs a code-signing
 certificate, which there isn't one of yet.
 

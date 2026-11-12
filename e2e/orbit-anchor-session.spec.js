@@ -18,6 +18,12 @@ test.beforeAll(async () => {
   app = await launchApp();
   page = await app.firstWindow();
   await expect(page.locator(".toolbar")).toBeVisible();
+  // These are trackpad gestures.  Playwright's wheel reports a mouse's
+  // notches (wheelDeltaY 120), which would zoom rather than pan
+  // (mouseNavigation.js), so say which device this is.
+  await page.evaluate(() =>
+    window.__store.getState().setWheelDevice("trackpad"),
+  );
 });
 
 test.afterAll(async () => {

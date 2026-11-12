@@ -1,6 +1,91 @@
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { NumberInput } from "./inputs.jsx";
+import { claudeCodeCommand, claudeDesktopConfig } from "../api/mcpConfig.js";
 import "../styles/VariablesDialog.css";
+
+// The agent API (MCP) switch.  Its own component so its hooks run only while
+// the dialog is open -- below the dialog's early return they would blank the
+// app.  Hidden where the host has no agent API (the iPad, a plain browser).
+const AgentApiRow = ({ rowStyle, labelStyle, control, buttonStyle }) => {
+  const api = window.electronAPI;
+  const [status, setStatus] = useState(null);
+  const [copied, setCopied] = useState(null);
+  useEffect(() => {
+    api?.agentApiStatus?.().then(setStatus);
+  }, [api]);
+  if (!status) return null;
+
+  const toggle = async () => setStatus(await api.setAgentApi(!status.enabled));
+  const copy = async (what, text) => {
+    await api.copyText(text);
+    setCopied(what);
+  };
+  const note = !status.supported
+    ? "not available on Windows yet"
+    : status.forced
+      ? "on for this launch (--agent-api)"
+      : "lets Claude and other MCP clients build models in this window";
+  const state = status.problem
+    ? status.problem
+    : status.listening
+      ? `Listening on ${status.socketPath}`
+      : null;
+
+  return (
+    <>
+      <div style={rowStyle}>
+        <span style={labelStyle}>
+          <span>AI agent access (MCP)</span>
+          <span style={{ fontSize: 10, opacity: 0.7 }}>{note}</span>
+        </span>
+        {control(
+          <button
+            className="variables-btn agent-api-toggle"
+            onClick={toggle}
+            disabled={!status.supported || status.forced}
+            style={buttonStyle}
+          >
+            {status.enabled ? "On" : "Off"}
+          </button>,
+        )}
+      </div>
+      {status.enabled && status.supported && (
+        <div
+          className="agent-api-details"
+          style={{ ...labelStyle, gap: 6, paddingBottom: 8 }}
+        >
+          {state && (
+            <span
+              className="agent-api-state"
+              style={{ fontSize: 10, wordBreak: "break-all" }}
+            >
+              {state}
+            </span>
+          )}
+          <span style={{ fontSize: 10, opacity: 0.7 }}>
+            Add PurpleCAD to your MCP client, then keep this window open while
+            the agent works.
+          </span>
+          <span style={{ display: "flex", gap: 8 }}>
+            <button
+              className="variables-btn agent-api-copy"
+              onClick={() => copy("code", claudeCodeCommand(status))}
+            >
+              {copied === "code" ? "Copied" : "Copy Claude Code command"}
+            </button>
+            <button
+              className="variables-btn agent-api-copy"
+              onClick={() => copy("desktop", claudeDesktopConfig(status))}
+            >
+              {copied === "desktop" ? "Copied" : "Copy Claude Desktop config"}
+            </button>
+          </span>
+        </div>
+      )}
+    </>
+  );
+};
 
 // App settings: perspective field of view + snap-to-grid interval / angle.
 // Values are live (no Save button) and persist via the store.
@@ -32,6 +117,8 @@ const SettingsDialog = () => {
   const setAlwaysExtrudeSingleObject = useStore(
     (s) => s.setAlwaysExtrudeSingleObject,
   );
+  const wheelDevice = useStore((s) => s.wheelDevice);
+  const setWheelDevice = useStore((s) => s.setWheelDevice);
   const resetSettings = useStore((s) => s.resetSettings);
   const setAboutDialogOpen = useStore((s) => s.setAboutDialogOpen);
 
@@ -240,6 +327,38 @@ const SettingsDialog = () => {
 
           <div style={rowStyle}>
             <span style={labelStyle}>
+              <span>Scroll wheel</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>
+                {wheelDevice === "mouse"
+                  ? "always zooms"
+                  : wheelDevice === "trackpad"
+                    ? "always scrolls the view, as a trackpad does"
+                    : "a mouse wheel zooms, a trackpad scrolls the view"}
+              </span>
+            </span>
+            {control(
+              <button
+                className="variables-btn wheel-device"
+                onClick={() =>
+                  setWheelDevice(
+                    { auto: "mouse", mouse: "trackpad", trackpad: "auto" }[
+                      wheelDevice
+                    ],
+                  )
+                }
+                style={buttonStyle}
+              >
+                {
+                  { auto: "Auto", mouse: "Mouse", trackpad: "Trackpad" }[
+                    wheelDevice
+                  ]
+                }
+              </button>,
+            )}
+          </div>
+
+          <div style={rowStyle}>
+            <span style={labelStyle}>
               <span>Always extrude as single object</span>
               <span style={{ fontSize: 10, opacity: 0.7 }}>
                 combine disjoint profiles (e.g. text glyphs) into one body
@@ -257,6 +376,13 @@ const SettingsDialog = () => {
               </button>,
             )}
           </div>
+
+          <AgentApiRow
+            rowStyle={rowStyle}
+            labelStyle={labelStyle}
+            control={control}
+            buttonStyle={buttonStyle}
+          />
 
           <div style={rowStyle}>
             <span style={labelStyle}>Reset all settings</span>

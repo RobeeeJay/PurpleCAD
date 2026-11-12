@@ -81,6 +81,14 @@ build is its own layer and is reused by every later app-code rebuild; app
 edits rebuild only the COPY layers, ~1 min). The podman VM needs more than
 its 2 GiB default: `podman machine set --memory 8192 --cpus 8`.
 
+**Run the GPU specs (`npm run test:e2e:gpu`) locally after finishing a piece
+of work and before making its PR -- always, and never on GitHub (owner's
+decision).** They are `pathtrace.spec.js` (the path tracer starts and draws)
+and `visual.spec.js` (a screenshot of a cube against a saved reference). The
+PR check (`addon-build.yml`) runs no e2e at all: on a hosted Mac runner the
+full suite failed a dozen tests that pass locally, and the snapshot can never
+match a reference taken on a real Mac.
+
 **On macOS, run only the two GPU specs (`npm run test:e2e:gpu`) -- the
 owner's decision, to stop duplicating the container.** The container runs the
 whole suite; the path-tracer and `visual` specs skip there for want of a GPU,
@@ -97,6 +105,13 @@ running (see Environment setup), and it wipes `test-results/`, including the
 container run's part `.pcad` files. `E2E_NO_SANDBOX=1` (set in the image)
 makes `e2e/launch.js` pass `--no-sandbox`, which rootless containers require;
 the macOS run keeps the sandbox on.
+
+**vitest runs in forked processes (`pool: "forks"` in `vite.config.js`), not
+worker threads.** vitest 5 made threads the default, and with the Mac busy
+(Spotlight and Photos indexing) the OCC addon ran 17-45x slower in a worker
+thread: the heavy chamfer tests timed out at 900 s that take 14 s forked.
+Node 24.15 vs 24.22 and machine load were both ruled out by A/B runs first;
+vitest 4 vs 5 on the same test (20 s vs 336 s) found it.
 
 Run tests through the npm scripts, not `npx vitest`/`playwright` directly:
 they route through `scripts/with-display.sh`, which runs the command under
@@ -797,6 +812,18 @@ calls that shim provides -- `prepare().run/get/all`, `exec`, `pragma`,
 `transaction` -- or the shim grows with it. Check a
 change there with the smoke run (`--smoke`), in the simulator at least.
 
+**A mouse is a trackpad with other hands** (`mouseNavigation.js`): a right
+drag is fed to `onMouseWheel` as the scroll a trackpad would send, and only a
+bare MOUSE wheel zooms (eased, through `zoomBy`). Which device sent a wheel
+event is a per-gesture guess -- a notch is `wheelDeltaY` 120 with no sideways
+movement -- that Settings can override (`wheelDevice`). Two traps, both
+measured in Electron: Playwright's `page.mouse.wheel` reports a notched MOUSE
+wheel (`wheelDeltaY` +/-120 whatever deltaY it was given), so a spec meaning a
+trackpad pan must set `wheelDevice` to "trackpad"
+(`orbit-anchor-session.spec.js`); and a `new WheelEvent(...)` copies deltaY's
+sign into `wheelDeltaY`, the opposite of a real event, so the direction comes
+from deltaY and only the size from `wheelDeltaY`.
+
 **Touch and the Pencil are the mouse and the wheel, not a second input
 path.** `touchInput.js` turns pointer events of type `touch` / `pen` into
 calls to the viewport's own `onMouseDown/Move/Up` and `onMouseWheel`, by the
@@ -1257,6 +1284,15 @@ sources are picked) that reuses the creation UI.
   objects shared an id (a doubled object-list entry; the extrude Edit opened
   on the piece). `itemIdAfterSplit.test.js` fails if that counting pattern
   reappears anywhere in `src`.
+- **User navigation finishes a running camera tween first.** Home, a
+  view-cube face and sketch entry/exit animate through `cameraAnimRef`, and
+  each tween's `onComplete` sets the orbit angles to its end pose -- so an
+  orbit, pan or zoom made while one ran was silently undone when it ended.
+  `navigation.js#finishCameraTween` jumps the tween to its end (running its
+  `onComplete`, which also saves the view or leaves a sketch) before applying
+  the input. Cancelling instead would skip those side effects. On a slow
+  machine the tween's end landed mid-drag in `touch-input.spec.js`, losing 4
+  to 6 of 8 orbit steps; `mouse-navigation.spec.js` pins it.
 - **A body's outline is its REAL edges, not a crease detector.** The default
   `EdgesGeometry` (1 degree) drew every seam between the triangles of a curved
   face, so an exact cylinder showed 45 lines down its side and looked faceted

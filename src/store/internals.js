@@ -520,6 +520,9 @@ export const SNAP_DEFAULTS = {
   resolutionMm: 0.05,
   alwaysExtrudeSingleObject: true,
   axisVisible: false,
+  // What the scroll wheel is: "auto" guesses per gesture (mouseNavigation.js),
+  // "mouse" always zooms, "trackpad" always scrolls the view.
+  wheelDevice: "auto",
 };
 
 export const loadSnapSettings = () => {
@@ -544,6 +547,9 @@ export const loadSnapSettings = () => {
       alwaysExtrudeSingleObject: parsed.alwaysExtrudeSingleObject !== false,
       // Combined-axis indicator defaults off — only an explicit true shows it.
       axisVisible: parsed.axisVisible === true,
+      wheelDevice: ["mouse", "trackpad"].includes(parsed.wheelDevice)
+        ? parsed.wheelDevice
+        : "auto",
     };
   } catch {
     return { ...SNAP_DEFAULTS };
@@ -571,6 +577,7 @@ export const saveSnapSettings = (snap) => {
         resolutionMm: snap.resolutionMm,
         alwaysExtrudeSingleObject: snap.alwaysExtrudeSingleObject,
         axisVisible: snap.axisVisible,
+        wheelDevice: snap.wheelDevice,
       }),
     );
   } catch (e) {

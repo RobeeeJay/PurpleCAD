@@ -17,6 +17,7 @@ export function createNavigationHandlers(
     itemsRef,
     cameraControlsRef,
     orbitIndicator,
+    cameraAnimRef,
   },
   { save, setRotationState, getOrbitAnchor, setOrbitAnchor, isMac },
 ) {
@@ -48,10 +49,33 @@ export function createNavigationHandlers(
     else panelAwareLookAt(cam, tgt, renderer.domElement.clientWidth);
   };
 
+  // The user's own navigation beats a camera tween (Home, a view-cube face,
+  // entering a sketch).  Left running, the tween's onComplete set the orbit
+  // angles back to its end pose and threw away every orbit, pan and zoom made
+  // while it ran.  Jump to its end instead -- its onComplete still runs, so
+  // what it does besides the angles (saving the view, leaving a sketch) is
+  // kept -- and apply the input from there.
+  const finishCameraTween = () => {
+    const anim = cameraAnimRef.current;
+    if (!anim) return;
+    cameraAnimRef.current = null;
+    const cam = cameraRef.current;
+    cam.position.copy(anim.endPos);
+    targetRef.current.copy(anim.endTarget);
+    cam.up.copy(anim.endUp).normalize();
+    if (anim.endZoom != null) {
+      cam.zoom = anim.endZoom;
+      cam.updateProjectionMatrix();
+    }
+    lookAtView(cam, targetRef.current);
+    anim.onComplete?.();
+  };
+
   const onMouseWheel = (e) => {
     e.preventDefault();
     const currentCamera = cameraRef.current;
     if (!currentCamera) return;
+    finishCameraTween();
 
     if (sketchModeRef.current && !(e.ctrlKey && isMac)) {
       const forward = new THREE.Vector3();
@@ -238,6 +262,7 @@ export function createNavigationHandlers(
     const cam = cameraRef.current;
     const tgt = targetRef.current;
     if (!cam) return;
+    finishCameraTween();
     if (cam instanceof THREE.OrthographicCamera) {
       cam.zoom = Math.max(0.05, Math.min(50, cam.zoom * scale));
       cam.updateProjectionMatrix();

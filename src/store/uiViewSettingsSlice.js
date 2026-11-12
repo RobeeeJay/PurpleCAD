@@ -93,6 +93,12 @@ export const createUiViewSettingsSlice = (set) => ({
       saveSnapSettings({ ...state, alwaysExtrudeSingleObject });
       return { alwaysExtrudeSingleObject };
     }),
+  setWheelDevice: (v) =>
+    set((state) => {
+      const wheelDevice = ["mouse", "trackpad"].includes(v) ? v : "auto";
+      saveSnapSettings({ ...state, wheelDevice });
+      return { wheelDevice };
+    }),
   // Restore every configurable setting to its default (the snap/precision group
   // plus the session-only theme + orientation widget).
   resetSettings: () =>

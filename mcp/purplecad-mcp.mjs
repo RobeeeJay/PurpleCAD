@@ -22,9 +22,14 @@ import {
 import { AppConnection, defaultSocketPath } from "./socketClient.mjs";
 import { contentFrom, toolsFrom } from "./tools.mjs";
 
-const { version } = JSON.parse(
-  fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-);
+// The bundle shipped inside the app (scripts/build-mcp.mjs) has no
+// package.json beside it, so the build writes the version in.
+const version =
+  typeof __PURPLECAD_VERSION__ === "string"
+    ? __PURPLECAD_VERSION__
+    : JSON.parse(
+        fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+      ).version;
 const socketPath = process.env.PURPLECAD_API_SOCKET || defaultSocketPath();
 const app = new AppConnection(socketPath);
 

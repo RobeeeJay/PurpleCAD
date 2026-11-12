@@ -192,7 +192,27 @@ const packWindows = (appOutDir) => {
   );
 };
 
+// Settings tells users to register this file with their MCP client; a build
+// that forgot `npm run mcp:build` would ship a setting pointing at nothing.
+function requireMcpShim(resourcesDir) {
+  const shim = path.join(resourcesDir, "mcp", "purplecad-mcp.mjs");
+  if (!fs.existsSync(shim))
+    throw new Error(
+      `[afterPack] ${shim} is missing: run npm run mcp:build before packaging`,
+    );
+}
+
 module.exports = async function afterPack({ appOutDir, packager, arch }) {
+  requireMcpShim(
+    packager.platform.name === "mac"
+      ? path.join(
+          appOutDir,
+          `${packager.appInfo.productFilename}.app`,
+          "Contents",
+          "Resources",
+        )
+      : path.join(appOutDir, "resources"),
+  );
   if (packager.platform.name === "linux") return packLinux(appOutDir, arch);
   if (packager.platform.name === "windows") return packWindows(appOutDir);
   if (packager.platform.name !== "mac") return;

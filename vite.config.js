@@ -99,6 +99,12 @@ export default defineConfig({
     // Only the in-repo unit tests under src/.  The Playwright E2E specs live in
     // e2e/ and use their own runner — vitest must not try to collect them.
     include: ["src/**/*.test.{js,jsx}"],
+    // Separate processes, not worker threads (vitest 5's default; forks were
+    // vitest 4's).  With the Mac busy, OCC in a worker thread ran 17-45x
+    // slower: a cogBevel refusal took 14 s forked and 336-913 s threaded,
+    // timing out the heavy chamfer tests.  Unloaded, threads were fast, so
+    // the cause is probably how macOS schedules worker threads -- not proven.
+    pool: "forks",
     coverage: {
       provider: "v8",
       include: ["src/**/*.{js,jsx}", "electron/**/*.cjs"],

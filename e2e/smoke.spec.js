@@ -255,10 +255,14 @@ test("the settings dialog's inputs and buttons share one column", async ({}, tes
   const dialog = page.locator(".variables-dialog");
   await expect(dialog.getByText("Snap distance")).toBeVisible();
   await dialog.screenshot({ path: testInfo.outputPath("settings.png") });
-  // Every number box and every button, not the slider beside the first one.
+  // Every number box and every button, not the slider beside the first one,
+  // nor the agent API's copy buttons: those are a block of their own under
+  // their row, shown only while it is on (as here: e2e forces it on).
   const boxes = await dialog.evaluate((d) =>
     [
-      ...d.querySelectorAll('input:not([type="range"]), button.variables-btn'),
+      ...d.querySelectorAll(
+        'input:not([type="range"]), button.variables-btn:not(.agent-api-copy)',
+      ),
     ].map((el) => {
       const r = el.getBoundingClientRect();
       return {
@@ -272,7 +276,7 @@ test("the settings dialog's inputs and buttons share one column", async ({}, tes
   await page.evaluate(() =>
     window.__store.getState().setSettingsDialogOpen(false),
   );
-  expect(boxes.length).toBe(11);
+  expect(boxes.length).toBe(13);
   const one = (k) => new Set(boxes.map((b) => b[k])).size;
   const at = JSON.stringify(boxes);
   expect(one("left"), `left edges ${at}`).toBe(1);
