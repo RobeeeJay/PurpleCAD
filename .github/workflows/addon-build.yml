@@ -21,7 +21,7 @@ jobs:
     runs-on: macos-15  # arm64 (Apple Silicon) runner; macos-14 is retired
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v4
         with:
