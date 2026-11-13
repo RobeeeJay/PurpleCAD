@@ -523,6 +523,8 @@ export const SNAP_DEFAULTS = {
   // What the scroll wheel is: "auto" guesses per gesture (mouseNavigation.js),
   // "mouse" always zooms, "trackpad" always scrolls the view.
   wheelDevice: "auto",
+  // Ask GitHub for a newer release at launch (UpdateNotice.jsx).
+  checkForUpdates: true,
 };
 
 export const loadSnapSettings = () => {
@@ -550,6 +552,8 @@ export const loadSnapSettings = () => {
       wheelDevice: ["mouse", "trackpad"].includes(parsed.wheelDevice)
         ? parsed.wheelDevice
         : "auto",
+      // Default on -- only an explicit false turns it off.
+      checkForUpdates: parsed.checkForUpdates !== false,
     };
   } catch {
     return { ...SNAP_DEFAULTS };
@@ -563,6 +567,11 @@ export const welcomeDue = () =>
   !(typeof __E2E__ !== "undefined" && __E2E__) &&
   db.settingGet("welcomeSeen") == null;
 export const markWelcomeSeen = () => db.settingSet("welcomeSeen", "1");
+
+// The release the user chose "Skip this version" for; a later one still shows.
+export const skippedUpdateVersion = () => db.settingGet("skippedUpdate");
+export const skipUpdateVersion = (version) =>
+  db.settingSet("skippedUpdate", version);
 
 export const saveSnapSettings = (snap) => {
   try {
@@ -578,6 +587,7 @@ export const saveSnapSettings = (snap) => {
         alwaysExtrudeSingleObject: snap.alwaysExtrudeSingleObject,
         axisVisible: snap.axisVisible,
         wheelDevice: snap.wheelDevice,
+        checkForUpdates: snap.checkForUpdates,
       }),
     );
   } catch (e) {

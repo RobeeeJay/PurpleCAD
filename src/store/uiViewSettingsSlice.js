@@ -9,6 +9,7 @@ import {
   saveSnapSettings,
   dirtyAllEntries,
   markWelcomeSeen,
+  skipUpdateVersion,
   SNAP_DEFAULTS,
 } from "./internals.js";
 
@@ -92,6 +93,21 @@ export const createUiViewSettingsSlice = (set) => ({
       const alwaysExtrudeSingleObject = !!v;
       saveSnapSettings({ ...state, alwaysExtrudeSingleObject });
       return { alwaysExtrudeSingleObject };
+    }),
+  setCheckForUpdates: (v) =>
+    set((state) => {
+      const checkForUpdates = !!v;
+      saveSnapSettings({ ...state, checkForUpdates });
+      return { checkForUpdates };
+    }),
+  // A newer release found at launch, { version, url }; null hides the notice.
+  availableUpdate: null,
+  setAvailableUpdate: (update) => set({ availableUpdate: update ?? null }),
+  skipAvailableUpdate: () =>
+    set((state) => {
+      if (state.availableUpdate)
+        skipUpdateVersion(state.availableUpdate.version);
+      return { availableUpdate: null };
     }),
   setWheelDevice: (v) =>
     set((state) => {
