@@ -257,11 +257,12 @@ test("the settings dialog's inputs and buttons share one column", async ({}, tes
   await dialog.screenshot({ path: testInfo.outputPath("settings.png") });
   // Every number box and every button, not the slider beside the first one,
   // nor the agent API's copy buttons: those are a block of their own under
-  // their row, shown only while it is on (as here: e2e forces it on).
+  // their row, shown only while it is on (as here: e2e forces it on).  Nor the
+  // update checkbox, which sits at the column's right edge, not its width.
   const boxes = await dialog.evaluate((d) =>
     [
       ...d.querySelectorAll(
-        'input:not([type="range"]), button.variables-btn:not(.agent-api-copy)',
+        'input:not([type="range"]):not([type="checkbox"]), button.variables-btn:not(.agent-api-copy)',
       ),
     ].map((el) => {
       const r = el.getBoundingClientRect();

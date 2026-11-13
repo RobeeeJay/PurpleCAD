@@ -119,6 +119,8 @@ const SettingsDialog = () => {
   );
   const wheelDevice = useStore((s) => s.wheelDevice);
   const setWheelDevice = useStore((s) => s.setWheelDevice);
+  const checkForUpdates = useStore((s) => s.checkForUpdates);
+  const setCheckForUpdates = useStore((s) => s.setCheckForUpdates);
   const resetSettings = useStore((s) => s.resetSettings);
   const setAboutDialogOpen = useStore((s) => s.setAboutDialogOpen);
 
@@ -383,6 +385,30 @@ const SettingsDialog = () => {
             control={control}
             buttonStyle={buttonStyle}
           />
+
+          {/* Only where the host can check: the iPad updates through the App
+              Store. */}
+          {window.electronAPI?.checkForUpdate && (
+            <div style={rowStyle}>
+              <label htmlFor="settings-check-updates" style={labelStyle}>
+                <span>Check for updates</span>
+                <span style={{ fontSize: 10, opacity: 0.7 }}>
+                  asks GitHub for a newer release at launch
+                </span>
+              </label>
+              {control(
+                <span style={{ ...controlSize, display: "flex" }}>
+                  <input
+                    id="settings-check-updates"
+                    type="checkbox"
+                    checked={checkForUpdates}
+                    onChange={(e) => setCheckForUpdates(e.target.checked)}
+                    style={{ margin: "auto 0 auto auto" }}
+                  />
+                </span>,
+              )}
+            </div>
+          )}
 
           <div style={rowStyle}>
             <span style={labelStyle}>Reset all settings</span>

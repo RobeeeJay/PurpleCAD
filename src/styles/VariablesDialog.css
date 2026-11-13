@@ -277,3 +277,35 @@
   font-size: 11px;
   color: var(--text-secondary);
 }
+
+/* The launch-time "new version" offer (UpdateNotice.jsx): bottom right,
+   above the version tag.  Top right sat over the view cube. */
+.update-notice {
+  position: fixed;
+  bottom: 36px;
+  right: 16px;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(var(--black-rgb), 0.35);
+  font-size: var(--font-size-base);
+}
+
+.update-notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.update-notice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

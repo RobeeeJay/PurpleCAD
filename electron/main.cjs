@@ -126,11 +126,28 @@ function callOcc(op, args) {
 try {
   startOccWorker();
   const OCC_OPS = [
-    "performCsg", "chamferOrFilletItem", "pushPullFaces", "shellItem",
-    "holeItem", "embossItem", "draftItem", "revolveItem", "pipeItem",
-    "loftItem", "exportSTL", "exportSTEP", "importStep", "splitItem", "tessellateItem",
-    "pattern3dItem", "releaseShape", "solidFromMesh", "weldMesh", "simplifyMesh",
-    "recognizeSurfaces", "rebuildSurfaces",
+    "performCsg",
+    "chamferOrFilletItem",
+    "pushPullFaces",
+    "shellItem",
+    "holeItem",
+    "embossItem",
+    "draftItem",
+    "revolveItem",
+    "pipeItem",
+    "loftItem",
+    "exportSTL",
+    "exportSTEP",
+    "importStep",
+    "splitItem",
+    "tessellateItem",
+    "pattern3dItem",
+    "releaseShape",
+    "solidFromMesh",
+    "weldMesh",
+    "simplifyMesh",
+    "recognizeSurfaces",
+    "rebuildSurfaces",
   ];
   for (const op of OCC_OPS)
     ipcMain.handle(`occ:${op}`, (_e, args) => callOcc(op, args));
@@ -321,6 +338,15 @@ ipcMain.handle("shell:openExternal", async (_e, url) => {
   await electron.shell.openExternal(url);
   return true;
 });
+
+// The launch-time update check.  Asked from main, not the renderer, so the
+// page's CSP can keep refusing every outside connection.
+const { checkForUpdate } = require("./updateCheck.cjs");
+ipcMain.handle("update:check", () =>
+  checkForUpdate(app.getVersion(), (url, init) =>
+    electron.net.fetch(url, init),
+  ),
+);
 
 // 512px source covers window/taskbar icon use across platforms; packaged
 // builds get their app icon from `build.icon` in package.json instead.

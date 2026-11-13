@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Open a web link in the system browser; resolves false for anything that
   // isn't http(s), which main refuses.
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
+  // The newest GitHub release when it is newer than this app, else null.
+  checkForUpdate: () => ipcRenderer.invoke("update:check"),
   // Menu → renderer: the native "About PurpleCAD" item opens the in-app dialog.
   // Replaces any prior listener so a re-register can't stack duplicates.
   onMenuAbout: (cb) => {

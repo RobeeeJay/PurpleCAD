@@ -9,6 +9,7 @@ import RevolveEditDialog from "./components/RevolveEditDialog";
 import MaterialDialog from "./components/MaterialDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
+import UpdateNotice from "./components/UpdateNotice";
 import WelcomeDialog from "./components/WelcomeDialog";
 import ProjectDialog from "./components/ProjectDialog";
 import TextDialog from "./components/TextDialog";
@@ -171,6 +172,7 @@ function App() {
       <MaterialDialog />
       <SettingsDialog />
       <AboutDialog />
+      <UpdateNotice />
       <WelcomeDialog />
       <ProjectDialog />
       <TextDialog />
