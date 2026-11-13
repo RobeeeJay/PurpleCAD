@@ -74,7 +74,7 @@
       "native/occ-addon/build/Release/occ_addon.node"
     ],
     "mac": {
-      "icon": "app-icons/icon.icns",
+      "icon": "app-icons/PurpleCAD.icon",
       "target": [
         "dmg",
         "zip"

@@ -127,6 +127,13 @@ xcode-select --install
 brew install cmake ninja
 ```
 
+**The packaging step also needs full Xcode 26 or newer**, not just the command
+line tools: the app icon for macOS 26 is an Icon Composer file
+(`app-icons/PurpleCAD.icon`) that electron-builder compiles with Xcode's
+`actool`, and `afterPack.cjs` refuses an app without it. Check with
+`xcrun actool --version` (look for `short-bundle-version` 26 or higher). The
+release workflow picks such an Xcode for that step alone.
+
 On an Intel Mac, Homebrew lives in `/usr/local`, which is correct there. (On
 Apple Silicon it's `/opt/homebrew`. `native/occ-addon/build.sh` skips any
 `cmake` it can't run, because this development machine has an old Intel Homebrew
@@ -248,6 +255,14 @@ npm run dist:mac-x64
 On Apple Silicon, that's `npm run dist:mac-arm64`. You should see electron-builder
 sign the app, then report that notarization succeeded, and end up with a `.dmg` and a
 `.zip` in `release/` with the version and architecture in their names.
+
+`afterPack` logs `Assets.car for macOS 26+, rounded icon.icns for 13-15`: the
+app carries two icons. macOS 26 shows any `.icns` as a "legacy" icon, and an
+already-rounded one comes out shrunk on a grey tile in the Apps view and
+Finder, so it gets the compiled `.icon` (a full-bleed square it rounds
+itself). macOS 13-15 round nothing, so they keep the rounded `.icns` -- ours,
+put back over the one electron-builder derives from the `.icon`, which stops
+at 256 px. Both shapes come from `scripts/make-app-icons.py`.
 
 If it says `skipped macOS notarization`, one of the three variables is missing.
 Notarization can take anything from a minute to half an hour, because it waits

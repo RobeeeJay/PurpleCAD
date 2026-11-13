@@ -202,6 +202,41 @@ function requireMcpShim(resourcesDir) {
     );
 }
 
+// macOS 26 takes the icon from Assets.car (CFBundleIconName), which
+// electron-builder compiles from app-icons/PurpleCAD.icon (mac.icon); macOS
+// 13-15 take the .icns named by CFBundleIconFile.  electron-builder fills that
+// .icns from the same .icon through actool, which stops at 256 px, so it is
+// replaced with the rounded 1024 px one the icon script makes for those
+// systems (scripts/make-app-icons.py says why each shape).
+const ROUNDED_ICNS = path.join(__dirname, "..", "app-icons", "icon.icns");
+
+function placeMacIcons(resourcesDir) {
+  const plist = path.join(resourcesDir, "..", "Info.plist");
+  const key = (k) => {
+    try {
+      return execSync(`plutil -extract ${k} raw "${plist}"`).toString().trim();
+    } catch {
+      return "";
+    }
+  };
+  if (
+    !fs.existsSync(path.join(resourcesDir, "Assets.car")) ||
+    !key("CFBundleIconName")
+  )
+    throw new Error(
+      "[afterPack] no compiled .icon (Assets.car / CFBundleIconName): macOS 26 " +
+        "would show the icon shrunk on a grey tile. mac.icon must be " +
+        "app-icons/PurpleCAD.icon, built with Xcode 26 or newer's actool.",
+    );
+  const icns = key("CFBundleIconFile");
+  if (!icns)
+    throw new Error("[afterPack] Info.plist names no CFBundleIconFile");
+  fs.copyFileSync(ROUNDED_ICNS, path.join(resourcesDir, icns));
+  console.log(
+    `[afterPack] Assets.car for macOS 26+, rounded ${icns} for 13-15`,
+  );
+}
+
 module.exports = async function afterPack({ appOutDir, packager, arch }) {
   requireMcpShim(
     packager.platform.name === "mac"
@@ -225,6 +260,7 @@ module.exports = async function afterPack({ appOutDir, packager, arch }) {
     "Contents",
     "Resources",
   );
+  placeMacIcons(resourcesDir);
   const occLibsDir = path.join(resourcesDir, "occ-libs");
   const nodeFile = path.join(
     resourcesDir,
