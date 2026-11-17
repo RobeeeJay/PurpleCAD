@@ -148,7 +148,8 @@ export const createHistoryEntryEditsSlice = (set) => ({
   // regenerateItemsForResolution misses and re-tessellates.
   updatePushPullParams: (entryId, params) =>
     set((state) => withEditedParams(state, entryId, "pushpull", params)),
-  // Edit a committed shell's wall thickness from its timeline step.
+  // Edit a committed shell's wall thickness and open faces from its timeline
+  // step.
   updateShellParams: (entryId, params) =>
     set((state) => withEditedParams(state, entryId, "shell", params)),
   // Edit a committed simplify's deviation / triangle count from its timeline

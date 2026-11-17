@@ -1,5 +1,5 @@
-// Shell (hollow) commit.  Unlike chamfer/push-pull there's no face-pick phase:
-// the whole selected body is hollowed to a wall of the dialog's thickness.
+// Shell (hollow) commit.  The whole selected body is hollowed to a wall of the
+// dialog's thickness, closed, or left open at the faces picked in the dialog.
 // Mirrors commitPushPull's structure — snapshot the live source, run the
 // shellItem op, and modify the body into a `csg` item with a "shell" recipe so
 // it rebuilds from its source on regen and chains into further ops.
@@ -17,6 +17,7 @@ export async function commitShell({
   item,
   items,
   thicknessMm,
+  openFaces = [],
   printPrecision,
 }) {
   const { shellItem, withCommitGuard } = await import("../occClient.js");
@@ -32,6 +33,7 @@ export async function commitShell({
     shellItem({
       source,
       thickness,
+      openFaces,
       allItems: items,
       printPrecision,
     }),
@@ -46,6 +48,7 @@ export async function commitShell({
     regenerator: {
       kind: "shell",
       thickness,
+      openFaces,
       source,
       centerOffset,
       basePosition: basePos,
@@ -82,12 +85,14 @@ export function createShellPreviewHelpers({ scene, itemsRef, objectsRef }) {
     requestId++; // invalidate any in-flight request
     removePreview();
     unghostSource();
+    useStore.getState().setToolError(null);
   };
 
   const runAndShow = async ({
     myRequest,
     source,
     thickness,
+    openFaces,
     items,
     printPrecision,
     ghostItemId,
@@ -98,10 +103,16 @@ export function createShellPreviewHelpers({ scene, itemsRef, objectsRef }) {
       result = await shellItem({
         source,
         thickness,
+        openFaces,
         allItems: items,
         printPrecision,
       });
-    } catch {
+      useStore.getState().setToolError(null);
+    } catch (e) {
+      // Say why, on the tool's error line: a face that can't be opened at
+      // this thickness otherwise just leaves the last preview standing.
+      if (myRequest === requestId)
+        useStore.getState().setToolError(e?.message || "Shell failed.");
       result = null;
     }
     // A newer request superseded this one, or the thickness was unworkable —
@@ -166,7 +177,12 @@ export function createShellPreviewHelpers({ scene, itemsRef, objectsRef }) {
   // Recompute and swap in the preview for the typed thickness.  `regenerator`
   // (edit mode) supplies the frozen source; otherwise the live selected body is
   // snapshotted.  Safe to call per keystroke — stale async results are dropped.
-  const updateShellPreview = async ({ itemId, regenerator, thicknessMm }) => {
+  const updateShellPreview = async ({
+    itemId,
+    regenerator,
+    thicknessMm,
+    openFaces,
+  }) => {
     const myRequest = ++requestId;
     const thickness = thicknessMm / MM_PER_UNIT;
     if (!(thickness > 0)) {
@@ -190,6 +206,7 @@ export function createShellPreviewHelpers({ scene, itemsRef, objectsRef }) {
       myRequest,
       source,
       thickness,
+      openFaces,
       items,
       printPrecision,
       ghostItemId: itemId,

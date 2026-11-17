@@ -562,7 +562,7 @@ const Timeline = () => {
               {shellInfo(entry) && (
                 <button
                   className="timeline-action-btn"
-                  title="Edit shell thickness"
+                  title="Edit shell"
                   onClick={(e) => {
                     e.stopPropagation();
                     setShellTarget({ itemId: entry.itemId, entryId: entry.id });

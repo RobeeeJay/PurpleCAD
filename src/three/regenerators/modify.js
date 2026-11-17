@@ -269,8 +269,8 @@ export async function regeneratePushPull(
   };
 }
 
-// Rebuild a shell from its live source.  Mirrors regeneratePushPull without a
-// face selection: re-derive the source, hollow it, and (if the source tracks a
+// Rebuild a shell from its live source.  Mirrors regeneratePushPull: re-derive
+// the source, hollow it (open at any faces it names), and (if the source tracks a
 // sketch and the position was dropped) recompute the bbox-centred position.
 export async function regenerateShell(
   regenerator,
@@ -292,6 +292,7 @@ export async function regenerateShell(
     result = await shellItem({
       source,
       thickness: regenerator.thickness ?? 0,
+      openFaces: regenerator.openFaces,
       allItems: liveItems,
       printPrecision,
       ...(solidOpts || {}),

@@ -143,6 +143,17 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     });
   }, 30000);
 
+  it("shell open at a picked face", async () => {
+    const c = cube(6);
+    await parity("shellItem", {
+      source: c,
+      thickness: 0.2,
+      openFaces: topFaceSel.faces,
+      allItems: [c],
+      printPrecision: 0.1,
+    });
+  }, 30000);
+
   it(
     "hole (plain and threaded)",
     async () => {

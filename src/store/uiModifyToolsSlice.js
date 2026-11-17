@@ -39,11 +39,45 @@ export const createUiModifyToolsSlice = (set, get) => ({
   setPushPullRetargetTarget: (target) =>
     set({ pushPullRetargetTarget: target }),
   setPushPullEditTarget: (target) => set({ pushPullEditTarget: target }),
+  // { itemId, entryId?, openFaces, picking }.  Editing a committed shell
+  // starts from the faces its recipe left open.
   setShellTarget: (target) =>
+    set((s) => {
+      if (!target) return { shellTarget: null };
+      const r = s.history.find((h) => h.id === target.entryId)?.instruction
+        ?.patches?.regenerator;
+      const shellTarget = {
+        openFaces: r?.kind === "shell" ? r.openFaces || [] : [],
+        picking: false,
+        ...target,
+      };
+      return s.shellTarget
+        ? { shellTarget }
+        : { ...TOOL_RESET_PATCH, shellTarget };
+    }),
+  setShellPicking: (picking) =>
     set((s) =>
-      target && !s.shellTarget
-        ? { ...TOOL_RESET_PATCH, shellTarget: target }
-        : { shellTarget: target },
+      s.shellTarget ? { shellTarget: { ...s.shellTarget, picking } } : {},
+    ),
+  // Toggle a face to leave open (matched by normal + nearby point, as the
+  // draft tool's faces are).
+  toggleShellOpenFace: (face) =>
+    set((s) => {
+      if (!s.shellTarget) return {};
+      const same = (a, b) =>
+        Math.abs(a.nx - b.nx) < 0.02 &&
+        Math.abs(a.ny - b.ny) < 0.02 &&
+        Math.abs(a.nz - b.nz) < 0.02 &&
+        Math.hypot(a.cx - b.cx, a.cy - b.cy, a.cz - b.cz) < 0.1;
+      const faces = s.shellTarget.openFaces;
+      const openFaces = faces.some((f) => same(f, face))
+        ? faces.filter((f) => !same(f, face))
+        : [...faces, face];
+      return { shellTarget: { ...s.shellTarget, openFaces } };
+    }),
+  clearShellOpenFaces: () =>
+    set((s) =>
+      s.shellTarget ? { shellTarget: { ...s.shellTarget, openFaces: [] } } : {},
     ),
   setConvertTarget: (target) =>
     set((s) =>

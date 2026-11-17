@@ -761,7 +761,7 @@ function buildItemShapeLocal(item, allItems, precision) {
       if (sourceId == null) return null;
       let resultId;
       try {
-        resultId = occ.makeShell(sourceId, regen.thickness ?? 0);
+        resultId = occ.makeShell(sourceId, regen.thickness ?? 0, { faces: regen.openFaces || [] });
       } finally {
         occ.releaseShape(sourceId);
       }
@@ -1161,7 +1161,7 @@ function pushPullFaces({ source, sourceShapeId, retainResult, subGeo, distance, 
 
 // Mirrors occOps.js#shellItem — hollow the source solid into a shell of
 // `thickness` (scene units), then bbox-centre the result.
-function shellItem({ source, sourceShapeId, retainResult, thickness, allItems, printPrecision }) {
+function shellItem({ source, sourceShapeId, retainResult, thickness, openFaces, allItems, printPrecision }) {
   const { id: sourceId, owns } = resolveSourceSolid(sourceShapeId, source, allItems, printPrecision);
   if (sourceId == null) {
     throw new Error(
@@ -1171,14 +1171,16 @@ function shellItem({ source, sourceShapeId, retainResult, thickness, allItems, p
 
   let resultId;
   try {
-    resultId = occ.makeShell(sourceId, thickness);
+    resultId = occ.makeShell(sourceId, thickness, { faces: openFaces || [] });
   } finally {
     if (owns) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
     throw new Error(
-      "Shell failed — the wall thickness is too large for this body. Try a smaller value."
+      openFaces?.length
+        ? "Shell failed — try a thinner wall, or a different face to leave open."
+        : "Shell failed — the wall thickness is too large for this body. Try a smaller value."
     );
   }
 
