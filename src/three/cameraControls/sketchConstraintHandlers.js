@@ -15,7 +15,7 @@ import {
   moveShapePoint,
 } from "../sceneObjects.js";
 import { SKETCH_SELECTION_GREEN } from "../theme.js";
-import { lineGapInput, linesShareDirection } from "../sketchModifyActions.js";
+import { lineGapInput, parallelGap } from "../sketchModifyActions.js";
 
 export function createSketchConstraintHandlers(
   {
@@ -75,7 +75,7 @@ export function createSketchConstraintHandlers(
 
       // Two parallel lines → perpendicular distance between them.  The first
       // line click opened a line-length input; clicking a SECOND line held
-      // parallel to it switches to a line-to-line gap.
+      // or drawn parallel to it switches to a line-to-line gap.
       const pending = store.sketchDistanceInput;
       const isPendingLen =
         pending &&
@@ -85,14 +85,16 @@ export function createSketchConstraintHandlers(
         pending.pointA === "start" &&
         pending.pointB === "end" &&
         shapes[pending.shapeAIdx]?.type === "line";
-      if (
+      const gap =
         isPendingLen &&
         shape.type === "line" &&
         lineIdx !== pending.shapeAIdx &&
-        linesShareDirection(constraints, pending.shapeAIdx, lineIdx)
-      ) {
+        parallelGap(shapes, constraints, pending.shapeAIdx, lineIdx);
+      if (gap) {
         const A = pending.shapeAIdx;
-        store.setSketchDistanceInput(lineGapInput(shapes, A, lineIdx));
+        store.setSketchDistanceInput(
+          lineGapInput(shapes, A, lineIdx, gap.holdParallel),
+        );
         store.setSketchConstraintFirstPoint(null);
         // Highlight BOTH picked lines as selected.
         clearCoincidentFirstOverlay();

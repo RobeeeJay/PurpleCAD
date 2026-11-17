@@ -226,6 +226,19 @@ export default function SketchDistanceOverlay({
                     lineShapeIdx,
                     distance: formula,
                   };
+                  // Lines only drawn parallel are held so from now on, or the
+                  // gap would turn into a distance to one end.
+                  const added =
+                    sketchDistanceInput.holdParallel && constraintIdx == null
+                      ? [
+                          {
+                            type: "parallel",
+                            shapeAIdx: pointShapeIdx,
+                            shapeBIdx: lineShapeIdx,
+                          },
+                          newC,
+                        ]
+                      : [newC];
                   const proposed =
                     constraintIdx != null
                       ? (freshItem.constraints || []).map((c, i) =>
@@ -233,7 +246,7 @@ export default function SketchDistanceOverlay({
                             ? { ...c, distance: formula }
                             : c,
                         )
-                      : [...(freshItem.constraints || []), newC];
+                      : [...(freshItem.constraints || []), ...added];
                   const stagedFixed = (freeIdxs) => {
                     const freeSet = new Set(freeIdxs);
                     const fixed = new Set();
@@ -265,7 +278,7 @@ export default function SketchDistanceOverlay({
                         constraintIdx,
                         formula,
                       );
-                    else store.addSketchConstraints(selectedId, [newC]);
+                    else store.addSketchConstraints(selectedId, added);
                     const map = new Map();
                     solved.forEach((sh, i) => map.set(i, sh));
                     store.updateSketchShapes(selectedId, map);

@@ -44,9 +44,39 @@ export function linesShareDirection(constraints, a, b) {
   return reached.has(b);
 }
 
+// Whether the distance tool takes two lines as a gap: null when not, else
+// whether a parallel constraint must come with it.  Lines constraints hold
+// parallel need none; lines drawn parallel within a degree (by eye, or snapped
+// to the same angle) get one, so the dimension stays a gap rather than a
+// point-to-line distance the other line can swing about.  A pair held at an
+// angle or square is never made parallel.
+const GAP_PARALLEL_SIN = Math.sin((1 * Math.PI) / 180);
+export function parallelGap(shapes, constraints, a, b) {
+  if (linesShareDirection(constraints, a, b)) return { holdParallel: false };
+  const held = constraints.some(
+    (c) =>
+      (c.type === "angleDimension" || c.type === "perpendicular") &&
+      ((c.shapeAIdx === a && c.shapeBIdx === b) ||
+        (c.shapeAIdx === b && c.shapeBIdx === a)),
+  );
+  if (held) return null;
+  const s = shapes[a];
+  const t = shapes[b];
+  const ux = s.x2 - s.x1,
+    uy = s.y2 - s.y1;
+  const vx = t.x2 - t.x1,
+    vy = t.y2 - t.y1;
+  const n = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+  if (!(n > 0)) return null;
+  return Math.abs(ux * vy - uy * vx) / n <= GAP_PARALLEL_SIN
+    ? { holdParallel: true }
+    : null;
+}
+
 // The distance input for the gap between two parallel lines.  It is measured
-// from the first, which is the one that moves first.
-export function lineGapInput(shapes, firstIdx, otherIdx) {
+// from the first, which is the one that moves first.  `holdParallel` asks the
+// commit to add a parallel constraint with it (see parallelGap).
+export function lineGapInput(shapes, firstIdx, otherIdx, holdParallel = false) {
   const from = shapes[firstIdx];
   const to = shapes[otherIdx];
   const dx = to.x2 - to.x1;
@@ -61,6 +91,7 @@ export function lineGapInput(shapes, firstIdx, otherIdx) {
     defaultDistance: Math.abs(
       ((from.x1 - to.x1) * dy - (from.y1 - to.y1) * dx) / len,
     ),
+    ...(holdParallel ? { holdParallel: true } : {}),
   };
 }
 
@@ -79,9 +110,11 @@ export function openGapDistanceFromSelection() {
   // A dimension on an offset copy would fight the offset that places it.
   const isCopy = (i) =>
     constraints.some((c) => c.type === "offset" && c.shapeIdx === i);
-  if (isCopy(a) || isCopy(b) || !linesShareDirection(constraints, a, b))
-    return false;
-  store.setSketchDistanceInput(lineGapInput(item.shapes, a, b));
+  const gap = parallelGap(item.shapes, constraints, a, b);
+  if (isCopy(a) || isCopy(b) || !gap) return false;
+  store.setSketchDistanceInput(
+    lineGapInput(item.shapes, a, b, gap.holdParallel),
+  );
   return true;
 }
 
