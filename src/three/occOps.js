@@ -776,7 +776,9 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       if (sourceId == null) return null;
       let resultId;
       try {
-        resultId = occ.makeShell(sourceId, r.thickness ?? 0);
+        resultId = occ.makeShell(sourceId, r.thickness ?? 0, {
+          faces: r.openFaces || [],
+        });
       } finally {
         occ.releaseShape(sourceId);
       }
@@ -1363,6 +1365,7 @@ async function shellItem({
   sourceShapeId,
   retainResult,
   thickness,
+  openFaces,
   allItems,
   printPrecision,
 }) {
@@ -1380,14 +1383,18 @@ async function shellItem({
 
   let resultId;
   try {
-    resultId = occ.makeShell(sourceId, thickness);
+    resultId = occ.makeShell(sourceId, thickness, {
+      faces: openFaces || [],
+    });
   } finally {
     if (owns) occ.releaseShape(sourceId);
   }
 
   if (!resultId) {
     throw new Error(
-      "Shell failed — the wall thickness is too large for this body. Try a smaller value.",
+      openFaces?.length
+        ? "Shell failed — try a thinner wall, or a different face to leave open."
+        : "Shell failed — the wall thickness is too large for this body. Try a smaller value.",
     );
   }
 

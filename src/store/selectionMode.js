@@ -19,6 +19,8 @@ function toolSelectionLock(s) {
   if (s.faceToGroundTool && s.faceToGroundTool.picking) return ["face"];
   // Draft: pick faces (the neutral plane, then the faces to taper).
   if (s.draftTool && s.draftTool.picking) return ["face"];
+  // Shell: pick the faces to leave open.
+  if (s.shellTarget?.picking) return ["face"];
   return null;
 }
 

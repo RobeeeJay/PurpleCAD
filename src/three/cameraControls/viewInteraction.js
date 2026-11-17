@@ -183,6 +183,15 @@ export function createViewInteraction(
   // so the click commits the same entity the priority highlighted.
   let lastHoverType = null;
 
+  // While the Shell tool picks faces to leave open, only the shelled body can
+  // be hovered or clicked: a body in front no longer blocks its faces.
+  const onlyPickable = (meshes) => {
+    const shell = useStore.getState().shellTarget;
+    return shell?.picking
+      ? meshes.filter((m) => m.userData.itemId === shell.itemId)
+      : meshes;
+  };
+
   const onViewHover = (e) => {
     const currentCamera = cameraRef.current;
     if (!currentCamera) return;
@@ -190,10 +199,12 @@ export function createViewInteraction(
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycasterRef.current.setFromCamera(mouseRef.current, currentCamera);
-    const meshArray = Object.values(objectsRef.current).filter((m) => {
-      const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
-      return it?.type !== "sketch" && m.visible !== false;
-    });
+    const meshArray = onlyPickable(
+      Object.values(objectsRef.current).filter((m) => {
+        const it = itemsRef.current.find((i) => i.id === m.userData.itemId);
+        return it?.type !== "sketch" && m.visible !== false;
+      }),
+    );
     const intersects = raycasterRef.current.intersectObjects(meshArray, false);
 
     // Hole tool, point phase: snap-highlight the hole centre to the nearest
@@ -450,7 +461,7 @@ export function createViewInteraction(
         return it?.type !== "sketch";
       });
       const intersects = raycasterRef.current.intersectObjects(
-        selectableMeshes,
+        onlyPickable(selectableMeshes),
         false,
       );
 
@@ -548,6 +559,34 @@ export function createViewInteraction(
                 plain(mesh.worldToLocal(hit.point.clone())),
               );
           }
+        }
+        save();
+        return;
+      }
+
+      // Shell tool: each click on the body toggles a face to leave open, as a
+      // {normal, point} in the body's local frame, the same as draft's picks.
+      const shell = useStore.getState().shellTarget;
+      if (shell?.picking) {
+        const hit = intersects[0];
+        const mesh = hit?.object;
+        if (hit?.face && mesh.userData.itemId === shell.itemId) {
+          const lN = hit.face.normal
+            .clone()
+            .applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld))
+            .applyQuaternion(
+              mesh.getWorldQuaternion(new THREE.Quaternion()).invert(),
+            )
+            .normalize();
+          const lP = mesh.worldToLocal(hit.point.clone());
+          useStore.getState().toggleShellOpenFace({
+            nx: lN.x,
+            ny: lN.y,
+            nz: lN.z,
+            cx: lP.x,
+            cy: lP.y,
+            cz: lP.z,
+          });
         }
         save();
         return;

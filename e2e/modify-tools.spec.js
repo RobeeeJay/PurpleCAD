@@ -103,6 +103,119 @@ test.describe.serial("modify tools through their dialogs", () => {
     expect((await item(11)).tris).toBeGreaterThan(12);
   });
 
+  test("shell leaves a clicked face open, and its Edit reopens with it", async () => {
+    await addCube(15, 0);
+    await page.evaluate(() =>
+      window.__store.setState({
+        items: window.__store
+          .getState()
+          .items.map((i) =>
+            i.id === 15 ? { ...i, position: { x: 0, y: 1, z: -4 } } : i,
+          ),
+      }),
+    );
+    await page.locator(".home-button").click();
+    await page.waitForTimeout(600);
+    await page.evaluate(() =>
+      window.__store.getState().setShellTarget({ itemId: 15 }),
+    );
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await overlay.locator("input").first().fill("2");
+    await overlay.locator(".shell-pick-faces").click();
+    // The top face's centre, (0, 2, -4) in the world, on screen.
+    const at = await page.evaluate(() => {
+      const { cam } = window.__store
+        .getState()
+        ._cameraControls.getOrbitIndicator();
+      cam.updateMatrixWorld();
+      const p = new cam.position.constructor(0, 2, -4).project(cam);
+      const r = document
+        .querySelector(".viewport canvas")
+        .getBoundingClientRect();
+      return {
+        x: r.left + ((p.x + 1) / 2) * r.width,
+        y: r.top + ((1 - p.y) / 2) * r.height,
+      };
+    });
+    // While picking, the selection widget is locked to faces.
+    const faceBtn = page.locator(
+      '.selection-widget-btn[title^="Select faces"]',
+    );
+    await expect(faceBtn).toHaveClass(/active/);
+    await expect(faceBtn).toBeDisabled();
+    await expect(
+      page.locator('.selection-widget-btn[title^="Select objects"]'),
+    ).not.toHaveClass(/active/);
+
+    // Another body's face can't be picked: cube 11's top, at (0, 2, 0).
+    const onScreen = (x, y, z) =>
+      page.evaluate(
+        ([x, y, z]) => {
+          const { cam } = window.__store
+            .getState()
+            ._cameraControls.getOrbitIndicator();
+          cam.updateMatrixWorld();
+          const p = new cam.position.constructor(x, y, z).project(cam);
+          const r = document
+            .querySelector(".viewport canvas")
+            .getBoundingClientRect();
+          return {
+            x: r.left + ((p.x + 1) / 2) * r.width,
+            y: r.top + ((1 - p.y) / 2) * r.height,
+          };
+        },
+        [x, y, z],
+      );
+    const other = await onScreen(0, 2, 0);
+    await page.mouse.click(other.x, other.y);
+    expect(
+      await page.evaluate(
+        () => window.__store.getState().shellTarget.openFaces.length,
+      ),
+      "a click on another body picked one of its faces",
+    ).toBe(0);
+
+    await page.mouse.click(at.x, at.y);
+    const picked = await page.evaluate(
+      () => window.__store.getState().shellTarget.openFaces,
+    );
+    expect(picked.length, JSON.stringify(picked)).toBe(1);
+    expect(picked[0].ny, "the picked face faces up").toBeGreaterThan(0.99);
+    await expect(overlay.locator(".shell-pick-faces")).toHaveText(
+      "Open faces (1)",
+    );
+
+    // Turning the pick off gives the user's own selection kinds back.
+    await overlay.locator(".shell-pick-faces").click();
+    await expect(faceBtn).toBeEnabled();
+
+    await page.getByTitle("Apply the shell").click();
+    await expect.poll(() => item(15).then((i) => i.kind)).toBe("shell");
+    const committed = await page.evaluate(() => {
+      const s = window.__store.getState();
+      const it = s.items.find((i) => i.id === 15);
+      const entry = s.history.findLast((h) => h.itemId === 15);
+      return {
+        open: it.regenerator.openFaces.length,
+        entryId: entry.id,
+        open2: entry.instruction.patches.regenerator.openFaces.length,
+      };
+    });
+    expect(committed.open).toBe(1);
+    expect(committed.open2).toBe(1);
+
+    // Edit from the timeline: the face is still listed as open.
+    await page.evaluate(
+      (entryId) =>
+        window.__store.getState().setShellTarget({ itemId: 15, entryId }),
+      committed.entryId,
+    );
+    await expect(overlay.locator(".shell-pick-faces")).toHaveText(
+      "Open faces (1)",
+    );
+    await page.getByTitle("Cancel").click();
+  });
+
   test("hole cuts a plain bore via the dialog", async () => {
     await addCube(12, 5);
     await page.evaluate(() => {

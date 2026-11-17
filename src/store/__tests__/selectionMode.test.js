@@ -99,6 +99,29 @@ describe("effectiveSelectionTypes", () => {
     });
   });
 
+  // Picking a face to leave open while the widget says "objects" would light
+  // whole bodies on hover; the lock lasts only while picking, and the user's
+  // own choice comes back when the pick is turned off.
+  it("the Shell tool locks to faces while picking open faces, and only then", () => {
+    const user = { selObject: true, selFace: false, selEdge: true };
+    const picking = effectiveSelectionTypes({
+      ...user,
+      shellTarget: { itemId: 3, openFaces: [], picking: true },
+    });
+    expect(picking).toMatchObject({
+      object: false,
+      face: true,
+      edge: false,
+      point: false,
+      overridden: true,
+    });
+    const notPicking = effectiveSelectionTypes({
+      ...user,
+      shellTarget: { itemId: 3, openFaces: [], picking: false },
+    });
+    expect(notPicking).toMatchObject({ object: true, overridden: false });
+  });
+
   it("an object override (mirror/pattern/origin) locks to object mode", () => {
     const s = {
       ...base,

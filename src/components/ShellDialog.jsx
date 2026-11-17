@@ -5,12 +5,20 @@ import { activePrecision } from "../three/resolution.js";
 import { commitShell } from "../three/cameraControls/shell.js";
 import FormulaInput from "./FormulaInput";
 import { evalValue, useDebouncedPreview, useEscapeKey } from "./inputs.jsx";
-import { BAR_STYLE, Field, barInput, barBtn } from "./viewport/overlayBar.js";
+import {
+  BAR_STYLE,
+  Field,
+  barInput,
+  barBtn,
+  pickBtn,
+} from "./viewport/overlayBar.js";
+import ToolErrorLine from "./ToolErrorLine.jsx";
 
-// Shell tool dialog: hollow the selected body to a wall of `thickness`.  Opens
-// fresh from the Modify toolbar ({ itemId }) or to edit a committed shell's
-// thickness from its timeline step ({ itemId, entryId }).  The field accepts
-// variable formulas and may be cleared while typing.
+// Shell tool dialog: hollow the selected body to a wall of `thickness`, closed
+// or open at the faces picked here.  Opens fresh from the Modify toolbar
+// ({ itemId }) or to edit a committed shell from its timeline step
+// ({ itemId, entryId }).  The field accepts variable formulas and may be
+// cleared while typing.
 const DEFAULT_THICKNESS_MM = 2;
 
 const ShellDialog = () => {
@@ -21,6 +29,9 @@ const ShellDialog = () => {
   const variables = useStore((s) => s.variables);
   const printPrecision = useStore(activePrecision);
   const updateShellParams = useStore((s) => s.updateShellParams);
+  const setPicking = useStore((s) => s.setShellPicking);
+  const clearOpenFaces = useStore((s) => s.clearShellOpenFaces);
+  const openFaces = target?.openFaces ?? [];
 
   const isEdit = target?.entryId != null;
   const entry = isEdit ? history.find((h) => h.id === target.entryId) : null;
@@ -47,9 +58,10 @@ const ShellDialog = () => {
         itemId: target?.itemId,
         regenerator,
         thicknessMm: thickVal,
+        openFaces,
       }),
     () => useStore.getState()._cameraControls?.clearShellPreview?.(),
-    [thickVal, target?.itemId, regenerator],
+    [thickVal, target?.itemId, regenerator, openFaces],
   );
   useEffect(() => {
     return () => useStore.getState()._cameraControls?.clearShellPreview?.();
@@ -67,7 +79,10 @@ const ShellDialog = () => {
   const confirm = async () => {
     if (!valid || busy) return;
     if (isEdit) {
-      updateShellParams(entry.id, { thickness: thickVal / MM_PER_UNIT });
+      updateShellParams(entry.id, {
+        thickness: thickVal / MM_PER_UNIT,
+        openFaces,
+      });
       close();
       return;
     }
@@ -78,6 +93,7 @@ const ShellDialog = () => {
       item,
       items,
       thicknessMm: thickVal,
+      openFaces,
       printPrecision,
     });
     setBusy(false);
@@ -87,7 +103,9 @@ const ShellDialog = () => {
         useStore
           .getState()
           .showNotification?.(
-            "Shell failed — the wall thickness is too large for this body.",
+            openFaces.length
+              ? "Shell failed — try a thinner wall, or a different face to leave open."
+              : "Shell failed — the wall thickness is too large for this body.",
           );
       return;
     }
@@ -97,8 +115,9 @@ const ShellDialog = () => {
   return (
     <>
       <div className="sketch-placement-hint">
-        {isEdit ? "Edit the shell thickness" : "Set the wall thickness"}, then
-        Confirm · Esc to cancel
+        {target.picking
+          ? "Click faces of the body to leave open (click again to close one) · Esc to cancel"
+          : `${isEdit ? "Edit the shell" : "Set the wall thickness"}, pick any faces to leave open, then Confirm · Esc to cancel`}
       </div>
       <div className="sketch-distance-input-overlay" style={BAR_STYLE}>
         <Field
@@ -118,6 +137,25 @@ const ShellDialog = () => {
             style={barInput(valid)}
           />
         </Field>
+        <button
+          type="button"
+          className="shell-pick-faces"
+          style={{ ...pickBtn(target.picking), marginLeft: 10 }}
+          onClick={() => setPicking(!target.picking)}
+          title="Pick faces to remove, leaving the shell open there"
+        >
+          {`Open faces (${openFaces.length})`}
+        </button>
+        {openFaces.length > 0 && (
+          <button
+            type="button"
+            onClick={clearOpenFaces}
+            title="Close every face again"
+            style={barBtn()}
+          >
+            Clear
+          </button>
+        )}
         <button type="button" onClick={close} title="Cancel" style={barBtn()}>
           Cancel
         </button>
@@ -131,6 +169,7 @@ const ShellDialog = () => {
           {busy ? "Working…" : isEdit ? "Save" : "Shell"}
         </button>
       </div>
+      <ToolErrorLine />
     </>
   );
 };

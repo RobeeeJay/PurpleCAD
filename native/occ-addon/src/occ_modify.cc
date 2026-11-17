@@ -518,10 +518,12 @@ Val DraftFaces(Js& js) {
   }
 }
 
-// MakeShell(shapeId, thickness) → hollow the solid inward by |thickness|,
-// leaving a closed shell of that wall thickness (no faces removed).  Uses the
-// "simple" thick-solid path so it works on any solid without a face selection.
-// 0 = sentinel "operation rejected" — the JS bridge turns it into an error.
+// MakeShell(shapeId, thickness, subGeo?) → hollow the solid inward by
+// |thickness|.  With no faces in subGeo the result is a closed hollow; the
+// faces it names (picked like draft's: normal + point, or a persistent name)
+// are removed instead, leaving the shell open there -- a tray, a box with no
+// lid.  0 = sentinel "operation rejected" — the JS bridge turns it into an
+// error.
 //
 // Each SOLID is hollowed on its own.  A union comes back from OCC as a
 // COMPOUND (even with one solid in it), and the offset of a compound is a bare
@@ -531,9 +533,41 @@ Val MakeShell(Js& js) {
   int id           = js.int32(js[0]);
   double thickness = js.num(js[1], 0.0);
 
-  TopoDS_Shape shape = FetchShape(id);
+  ShapeRecord rec = FetchRecord(id);
+  const TopoDS_Shape& shape = rec.shape;
   if (std::abs(thickness) < 1e-9)
     return js.makeNumber(StoreShape(shape));
+
+  std::vector<TopoDS_Face> open;
+  if (js.argc() > 2 && !js.isUndefined(js[2]) && !js.isNull(js[2])) {
+    EdgeFaceSpec spec = ParseSubGeo(js, js[2]);
+    if (!spec.faces.empty()) {
+      open = SelectSubGeoFaces(shape, spec, &rec.faces);
+      // Faces were asked for and none matched: a closed hollow instead would
+      // look like success while ignoring the pick.
+      if (open.empty()) return js.makeNumber(0);
+    }
+  }
+
+  // Removing faces: MakeThickSolid offsets the remaining faces inward and
+  // leaves the removed ones open.  Faces are given per solid, since a union
+  // arrives as a compound (see below).
+  auto openShell = [&](const TopoDS_Shape& solid,
+                       const NCollection_List<TopoDS_Shape>& closing)
+      -> TopoDS_Shape {
+    try {
+      BRepOffsetAPI_MakeThickSolid thick;
+      thick.MakeThickSolidByJoin(solid, closing, -std::abs(thickness), 1e-3,
+                                 BRepOffset_Skin, false, false, GeomAbs_Arc,
+                                 false, CancelRange());
+      if (!thick.IsDone()) return TopoDS_Shape();
+      return thick.Shape();
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+          std::string("Shell failed — try a thinner wall or another face (") +
+          e.what() + ")");
+    }
+  };
 
   // Closed hollow with a wall of |thickness|: offset every face inward to get
   // the inner void solid, then cut it from the original.  (MakeThickSolid's
@@ -562,8 +596,23 @@ Val MakeShell(Js& js) {
 
   std::vector<TopoDS_Shape> pieces;
   for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next()) {
-    TopoDS_Shape piece = hollow(ex.Current());
+    NCollection_List<TopoDS_Shape> closing;
+    TopTools_IndexedMapOfShape own;
+    TopExp::MapShapes(ex.Current(), TopAbs_FACE, own);
+    for (const auto& f : open)
+      if (own.Contains(f)) closing.Append(f);
+    TopoDS_Shape piece =
+        closing.IsEmpty() ? hollow(ex.Current()) : openShell(ex.Current(), closing);
     if (piece.IsNull()) return js.makeNumber(0);
+    // A shell always removes material.  MakeThickSolid can report IsDone and
+    // return the solid untouched (opening a small ledge face of a cut body),
+    // which would be committed as a "shell" that did nothing.
+    GProp_GProps was, now;
+    BRepGProp::VolumeProperties(ex.Current(), was);
+    BRepGProp::VolumeProperties(piece, now);
+    if (std::abs(was.Mass()) - std::abs(now.Mass()) <
+        1e-6 * std::abs(was.Mass()))
+      return js.makeNumber(0);
     pieces.push_back(piece);
   }
   if (pieces.empty()) return js.makeNumber(0);
