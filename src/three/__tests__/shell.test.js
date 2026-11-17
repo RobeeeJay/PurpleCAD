@@ -5,6 +5,11 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { ensureOcc } from "../occ/init.js";
 import { shellItem } from "../occClient.js";
 import { regenerateItemsForResolution } from "../regenerateItems.js";
+import { createRequire } from "module";
+
+const occ = createRequire(import.meta.url)(
+  "../../../native/occ-addon/build/Release/occ_addon.node",
+);
 
 beforeAll(async () => {
   await ensureOcc();
@@ -66,5 +71,38 @@ describe("shell op", () => {
         printPrecision: 0.1,
       }),
     ).rejects.toThrow();
+  });
+
+  // A union comes back from OCC as a COMPOUND, even when it holds one solid --
+  // every extrudeUnion body (the "Lid" of a Pi case) is one.  The inward offset
+  // of a compound came back as a bare shell with no solid, so the cut failed
+  // and every thickness was refused as "too large", even 0.2 mm on a 10 mm
+  // slab.  Each solid is now hollowed on its own.
+  const box = (x1, y1, z1, x2, y2, z2) => occ.makeBox(x1, y1, z1, x2, y2, z2);
+  const volume = (id) => occ.shapeVolume(id);
+
+  it("hollows a union body, which OCC hands back as a compound", () => {
+    // Two overlapping boxes fuse to one 4 x 1 x 2 solid inside a compound.
+    const u = occ.booleanOp(
+      [box(0, 0, 0, 3, 1, 2), box(1, 0, 0, 4, 1, 2)],
+      "union",
+    );
+    const t = 0.1;
+    const shelled = occ.makeShell(u, t);
+    expect(shelled, "makeShell refused a one-solid union").not.toBe(0);
+    const wall = 4 * 1 * 2 - (4 - 2 * t) * (1 - 2 * t) * (2 - 2 * t);
+    expect(volume(shelled)).toBeCloseTo(wall, 4);
+  });
+
+  it("hollows every solid of a union that stays in separate pieces", () => {
+    const u = occ.booleanOp(
+      [box(0, 0, 0, 1, 1, 1), box(3, 0, 0, 4, 1, 1)],
+      "union",
+    );
+    const t = 0.1;
+    const shelled = occ.makeShell(u, t);
+    expect(shelled, "makeShell refused a two-solid union").not.toBe(0);
+    const wall = 2 * (1 - (1 - 2 * t) ** 3);
+    expect(volume(shelled)).toBeCloseTo(wall, 4);
   });
 });
