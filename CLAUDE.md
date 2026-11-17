@@ -652,6 +652,13 @@ Range` into `sew.Perform(range)` does NOT make sewing abortable. It was the
   the two-argument way returns just the body — "missing letters", no error.
   `BooleanOp` explodes compound args/tools into a `TopTools_ListOfShape` and uses
   `SetArguments`/`SetTools` for all three ops. Don't revert to the two-shape ctor.
+- **A union is a COMPOUND, and an offset of a compound is not a solid.**
+  `BooleanOp`'s union returns a compound even when it holds one solid (every
+  extrudeUnion body). `BRepOffsetAPI_MakeOffsetShape` on that compound returns
+  a bare SHELL, so `MakeShell`'s cut of the inner void failed and every wall
+  thickness was refused as "too large" -- 0.2 mm on a 10 mm lid. `MakeShell`
+  now hollows each solid on its own (`shell.test.js`). Any new op that hands a
+  body to an OCC algorithm expecting a solid should unwrap it the same way.
 - **`MakeChamfer` / `MakeFillet` can say `IsDone()` and hand back a broken
   solid.** A bevel wider than the material it runs along -- 1 mm off both
   sides of a cog's 1.4 mm tooth tips, 0.6 mm off both rims of a 1.0 mm wall --

@@ -522,6 +522,11 @@ Val DraftFaces(Js& js) {
 // leaving a closed shell of that wall thickness (no faces removed).  Uses the
 // "simple" thick-solid path so it works on any solid without a face selection.
 // 0 = sentinel "operation rejected" — the JS bridge turns it into an error.
+//
+// Each SOLID is hollowed on its own.  A union comes back from OCC as a
+// COMPOUND (even with one solid in it), and the offset of a compound is a bare
+// shell with no solid, so cutting it out failed and every thickness was
+// refused -- every extrudeUnion body hit this.
 Val MakeShell(Js& js) {
   int id           = js.int32(js[0]);
   double thickness = js.num(js[1], 0.0);
@@ -534,23 +539,41 @@ Val MakeShell(Js& js) {
   // the inner void solid, then cut it from the original.  (MakeThickSolid's
   // join/simple paths need a face to remove or an open shell; this works on
   // any closed solid with no face selection.)
-  TopoDS_Shape inner;
-  try {
-    BRepOffsetAPI_MakeOffsetShape off;
-    off.PerformByJoin(shape, -std::abs(thickness), 1e-3);
-    if (!off.IsDone()) return js.makeNumber(0);
-    inner = off.Shape();
-  } catch (const std::exception& e) {
-    throw std::runtime_error(
-      std::string("Shell failed — try a smaller thickness (") + e.what() + ")");
-  }
-  if (inner.IsNull()) return js.makeNumber(0);
+  auto hollow = [&](const TopoDS_Shape& solid) -> TopoDS_Shape {
+    TopoDS_Shape inner;
+    try {
+      BRepOffsetAPI_MakeOffsetShape off;
+      off.PerformByJoin(solid, -std::abs(thickness), 1e-3);
+      if (!off.IsDone()) return TopoDS_Shape();
+      inner = off.Shape();
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+          std::string("Shell failed — try a smaller thickness (") + e.what() +
+          ")");
+    }
+    if (inner.IsNull()) return TopoDS_Shape();
 
-  BRepAlgoAPI_Cut cut(shape, inner);
-  cut.SetFuzzyValue(1.0e-5);
-  cut.Build(CancelRange());
-  if (!cut.IsDone()) return js.makeNumber(0);
-  return js.makeNumber(StoreShape(cut.Shape()));
+    BRepAlgoAPI_Cut cut(solid, inner);
+    cut.SetFuzzyValue(1.0e-5);
+    cut.Build(CancelRange());
+    if (!cut.IsDone()) return TopoDS_Shape();
+    return cut.Shape();
+  };
+
+  std::vector<TopoDS_Shape> pieces;
+  for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next()) {
+    TopoDS_Shape piece = hollow(ex.Current());
+    if (piece.IsNull()) return js.makeNumber(0);
+    pieces.push_back(piece);
+  }
+  if (pieces.empty()) return js.makeNumber(0);
+  if (pieces.size() == 1) return js.makeNumber(StoreShape(pieces[0]));
+
+  TopoDS_Compound all;
+  BRep_Builder builder;
+  builder.MakeCompound(all);
+  for (const auto& piece : pieces) builder.Add(all, piece);
+  return js.makeNumber(StoreShape(all));
 }
 
 // Build the helical thread groove solid for an internal (tapped) hole: an ISO
