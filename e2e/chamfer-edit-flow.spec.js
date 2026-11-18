@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
+import fs from "node:fs";
 
 // Chamfer edit lifecycle against the real app: create via the overlay, then
 // the Timeline Edit button must reopen the SAME creation overlay — selection
@@ -262,5 +263,66 @@ test.describe.serial("chamfer edit lifecycle", () => {
     await page.evaluate(() =>
       window.__store.getState().setChamferSelectMode(null),
     );
+  });
+});
+
+// A body built by a union is rebuilt from its inputs as they were at its own
+// step.  In the Pi 3 case "Filleted Cut 14" comes AFTER "Base" (the union that
+// consumed Cut 14), so Base is drawn with sharp corners -- yet every op on
+// Base rebuilt it with Cut 14's 2 mm fillet, and a 1 mm fillet on Base's
+// corner ran 1 mm on the skirt and 2 mm above it.  Recalculated in the app, the
+// last step's fillet must be the same 1 mm the whole height of the corner.
+test.describe("a fillet on a union after a later step changed one of its inputs", () => {
+  test("runs the whole corner at the size asked for", async () => {
+    test.setTimeout(300000);
+    const app = await launchApp();
+    try {
+      const page = await app.firstWindow();
+      await expect(page.locator(".toolbar")).toBeVisible();
+      const doc = JSON.parse(
+        fs.readFileSync("test-files/pi3-base-fillet.pcad", "utf8"),
+      );
+      await page.evaluate(
+        (d) => window.__store.getState().loadDocument(d),
+        doc,
+      );
+      const idle = () =>
+        page.evaluate(() => {
+          const s = window.__store.getState();
+          return s.pendingOperations === 0 && s.regenProgress == null;
+        });
+      await expect.poll(idle, { timeout: 120000 }).toBe(true);
+      await page
+        .getByTitle("Recalculate every step from the beginning")
+        .click();
+      await page.waitForTimeout(500);
+      await expect.poll(idle, { timeout: 240000 }).toBe(true);
+      // How far the rounding reaches in from Base's +x +z corner, per height.
+      const r = await page.evaluate(() => {
+        const it = window.__store.getState().items.find((i) => i.id === 15);
+        const P = it.geometryData.positions;
+        const hi = [-1e9, -1e9, -1e9];
+        for (let i = 0; i < P.length; i += 3)
+          for (let k = 0; k < 3; k++) hi[k] = Math.max(hi[k], P[i + k]);
+        const reach = {};
+        for (let i = 0; i < P.length; i += 3) {
+          const dx = hi[0] - P[i];
+          const dz = hi[2] - P[i + 2];
+          if (dx < 0.25 && dz < 0.25) {
+            const y = P[i + 1].toFixed(3);
+            reach[y] = Math.max(reach[y] ?? 0, dx, dz);
+          }
+        }
+        return { failed: !!it.regenerator.regenFailed, reach };
+      });
+      expect(r.failed, "Base's fillet step rebuilt").toBe(false);
+      for (const [y, d] of Object.entries(r.reach))
+        expect(
+          d,
+          `rounding at height ${y}: ${JSON.stringify(r.reach)} (1 mm = 0.1)`,
+        ).toBeCloseTo(0.1, 3);
+    } finally {
+      await app.close();
+    }
   });
 });

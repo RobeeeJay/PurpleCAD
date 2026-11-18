@@ -425,6 +425,57 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     occ.releaseShape(b.shapeId);
   }, 30000);
 
+  // A union is rebuilt from its inputs as they were when it was made: a later
+  // step that changed an input (here cube 1 scaled to 3) must not reach it.
+  // occClient attaches those earlier states as `inputsAt`.
+  it("a union and an extrude's host rebuild from inputsAt, not the changed input", async () => {
+    const grown = cube(1, { scale: { x: 3, y: 3, z: 3 } });
+    const before = cube(1);
+    const other = cube(2, { position: { x: 1.5, y: 0, z: 0 } });
+    const union = {
+      id: 3,
+      type: "csg",
+      position: O,
+      rotation: O,
+      scale: S,
+      regenerator: {
+        kind: "boolean",
+        op: "union",
+        inputIds: [1, 2],
+        originalCenter: O,
+        inputsAt: { 1: before },
+      },
+    };
+    const a = await parity("tessellateItem", {
+      source: union,
+      allItems: [grown, other, union],
+      printPrecision: 0.1,
+    });
+    expect(
+      summarize(a.geometryData).bbox,
+      "union of the 2-unit cubes, not the grown one",
+    ).toEqual([-1, -1, -1, 2.5, 1, 1]);
+
+    const host = {
+      ...union,
+      regenerator: {
+        kind: "extrudeUnion",
+        extrudeDefs: [],
+        inputIds: [1],
+        originalCenter: O,
+        inputsAt: { 1: before },
+      },
+    };
+    const b = await parity("tessellateItem", {
+      source: host,
+      allItems: [grown, host],
+      printPrecision: 0.1,
+    });
+    expect(summarize(b.geometryData).bbox, "the host as it was").toEqual([
+      -1, -1, -1, 1, 1, 1,
+    ]);
+  }, 30000);
+
   it("tessellateItem", async () => {
     const c = cube(11, {
       position: { x: 1, y: 0.5, z: 0 },

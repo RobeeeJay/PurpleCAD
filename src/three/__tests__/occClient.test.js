@@ -226,3 +226,57 @@ describe("occClient (in-process fallback)", () => {
     expect(endCount - startEnd).toBe(2);
   });
 });
+
+// A union is rebuilt from its inputs as they were at its own step.  In the Pi
+// 3 case a fillet on Cut 14 after "Base" leaked into every rebuild of Base, so
+// a chamfer on Base's sharp corner bevelled only the strip the fillet missed.
+describe("attachInputsAt", () => {
+  const cut = {
+    id: 14,
+    type: "csg",
+    regenerator: { kind: "extrudeCut", inputIds: [12] },
+  };
+  const skirt = {
+    id: 3,
+    type: "csg",
+    regenerator: { kind: "extrudeUnion", inputIds: [] },
+  };
+  const base = {
+    id: 15,
+    type: "csg",
+    regenerator: { kind: "boolean", op: "union", inputIds: [14, 3] },
+  };
+  const fillet = { kind: "chamfer", amount: 0.2, source: cut };
+  const history = [
+    { id: 0, instruction: { type: "scene_created" } },
+    { id: 1, instruction: { type: "create", item: skirt } },
+    { id: 2, instruction: { type: "create", item: cut } },
+    { id: 3, instruction: { type: "create", item: base } },
+    {
+      id: 4,
+      instruction: {
+        type: "modify",
+        itemId: 14,
+        patches: { regenerator: fillet },
+      },
+    },
+  ];
+
+  it("gives a union the inputs a later step changed, as they were before it", async () => {
+    const { attachInputsAt } = await import("../occClient.js");
+    const out = attachInputsAt({ source: base }, history);
+    const at = out.source.regenerator.inputsAt;
+    expect(Object.keys(at), "items changed after Base").toEqual(["14"]);
+    expect(at[14], "Cut 14 before its fillet").toBe(cut);
+    expect(
+      base.regenerator.inputsAt,
+      "the store's copy is untouched",
+    ).toBeUndefined();
+  });
+
+  it("leaves a union alone when nothing after it changed an input", async () => {
+    const { attachInputsAt } = await import("../occClient.js");
+    const args = { source: base, allItems: [skirt, cut, base] };
+    expect(attachInputsAt(args, history.slice(0, 4))).toBe(args);
+  });
+});

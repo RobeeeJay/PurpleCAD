@@ -509,6 +509,18 @@ function scaleLocal(localId, scale) {
 //
 // Returns a shape ID (integer >= 1) on success, or null on failure.
 // Caller MUST release the returned ID via occ.releaseShape().
+// The items a union or cut rebuilds its inputs from: allItems, with the
+// inputs a LATER step changed put back as they were when it was built
+// (occClient.js#attachInputsAt).  Deleted ones come back too.
+function inputPool(r, allItems) {
+  const at = r.inputsAt;
+  if (!at) return allItems;
+  const pool = allItems.map((i) => at[i.id] ?? i);
+  for (const it of Object.values(at))
+    if (!pool.some((i) => i.id === it.id)) pool.push(it);
+  return pool;
+}
+
 export function buildItemShapeLocal(item, allItems = [], precision = null) {
   if (item.type === "cube") {
     const d = item.dimensions || {};
@@ -1030,11 +1042,12 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
     }
 
     if (r.kind === "boolean") {
+      const pool = inputPool(r, allItems);
       const inputShapeIds = (r.inputIds || [])
-        .map((id) => allItems.find((i) => i.id === id))
+        .map((id) => pool.find((i) => i.id === id))
         .filter(Boolean)
         .map((inp) => {
-          const localId = buildItemShapeLocal(inp, allItems, precision);
+          const localId = buildItemShapeLocal(inp, pool, precision);
           if (localId == null) return null;
           const t = buildBrushTransform(inp);
           const scaledId = scaleLocal(localId, t.scale);
@@ -1089,8 +1102,9 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       // each embedded prism recipe and any host solid in world space, then
       // boolean them.  A cut puts the hosts FIRST — booleanOp takes the first
       // shape as the argument and the rest as tools.
+      const pool = inputPool(r, allItems);
       const buildWorld = (inp) => {
-        const localId = buildItemShapeLocal(inp, allItems, precision);
+        const localId = buildItemShapeLocal(inp, pool, precision);
         if (localId == null) return null;
         const t = buildBrushTransform(inp);
         const scaledId = scaleLocal(localId, t.scale);
@@ -1110,7 +1124,7 @@ export function buildItemShapeLocal(item, allItems = [], precision = null) {
       const isCut = r.kind === "extrudeCut";
       const prisms = r.extrudeDefs || [];
       const hosts = (r.inputIds || [])
-        .map((id) => allItems.find((i) => i.id === id))
+        .map((id) => pool.find((i) => i.id === id))
         .filter(Boolean);
       const ids = (isCut ? [...hosts, ...prisms] : [...prisms, ...hosts])
         .map(buildWorld)
