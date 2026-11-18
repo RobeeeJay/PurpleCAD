@@ -61,6 +61,17 @@ function geomTargetId(inst) {
   return null;
 }
 
+// Whether entry `idx`'s body is deleted at or before `bound` with no geometry
+// step in between -- the only kind of step that could read it.
+export function unseenBeforeDelete(history, idx, targetId, bound) {
+  for (let j = idx + 1; j <= bound; j++) {
+    const inst = history[j].instruction;
+    if (inst?.type === "delete" && inst.itemId === targetId) return true;
+    if (geomTargetId(inst) != null || isSplitGroup(inst)) return false;
+  }
+  return false;
+}
+
 // RE-ENTRANCY GUARD: recalcs must never overlap.  A pass reads the history at
 // its start and stamps results at its end; a second trigger firing while the
 // first is awaiting OCC (a store update, a resolution change racing the items
@@ -321,6 +332,20 @@ async function runRecalcPass(force = false) {
       // this session — if not, the consumer simply rebuilds (correct fallback).
       lastEntryForItem.set(targetId, entry.id);
       if (cached?.position) lastPositionForItem.set(targetId, cached.position);
+      continue;
+    }
+    // A body deleted before the viewed step, with no geometry step between to
+    // read it, is never seen: skip its rebuild and leave the step dirty, so
+    // viewing it later still rebuilds it.  In "Pi 3 TV Case" an extrude fused
+    // onto an imported board and then deleted cost 48 s of every recalc.
+    if (unseenBeforeDelete(history, idx, targetId, jitBound)) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[OCC] recalc: skipping entry ${entry.id} ("${entry.label}") — its body is deleted before anything uses it`,
+      );
+      done += 1;
+      useStore.getState().setRegenProgress({ current: done, total });
+      newHistory.push({ ...entry, dirty: true });
       continue;
     }
     // Why this step recomputes — greppable next to the "[OCC] <op> start" logs
