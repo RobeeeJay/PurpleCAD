@@ -1,3 +1,5 @@
+import { SNAP_DEFAULTS } from "../internals.js";
+import { computeSegmentChain } from "../../three/segmentChain.js";
 import { describe, it, expect } from "vitest";
 import {
   effectiveSelectionTypes,
@@ -324,7 +326,37 @@ describe("selectionChainAngle", () => {
   });
 
   it("defaults to the standard angle when no store is provided (unit tests)", () => {
-    expect(selectionChainAngle(undefined)).toBe(5);
+    expect(selectionChainAngle(undefined)).toBe(
+      SNAP_DEFAULTS.curveDetectionAngleDeg,
+    );
+  });
+
+  // The default was 5 degrees, under the 8.6 a 42-segment boss rim turns per
+  // segment (the Pi 3 case at the default resolution), so a rim click picked
+  // one segment instead of the circle.
+  it("chains a small rim into one curve at the default angle", () => {
+    const n = 42;
+    const segs = Array.from({ length: n }, (_, k) => {
+      const a = (2 * Math.PI * k) / n;
+      const b = (2 * Math.PI * (k + 1)) / n;
+      return {
+        ax: Math.cos(a),
+        ay: Math.sin(a),
+        az: 0,
+        bx: Math.cos(b),
+        by: Math.sin(b),
+        bz: 0,
+      };
+    });
+    const angle = selectionChainAngle({
+      ...SNAP_DEFAULTS,
+      selChain: true,
+      selEdge: true,
+    });
+    expect(
+      computeSegmentChain(segs, 0, angle).length,
+      `at ${angle} degrees`,
+    ).toBe(n);
   });
 });
 

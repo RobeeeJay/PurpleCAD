@@ -538,7 +538,9 @@ export const SNAP_DEFAULTS = {
   snapDistanceMm: 5,
   snapAngleDeg: 9,
   fov: 35,
-  curveDetectionAngleDeg: 5,
+  // 30, not 5: a small rim turns more than 5 degrees per segment at the
+  // default resolution, so a click on it picked one segment, not the circle.
+  curveDetectionAngleDeg: 30,
   resolutionMm: 0.05,
   alwaysExtrudeSingleObject: true,
   axisVisible: false,
@@ -560,7 +562,9 @@ export const loadSnapSettings = () => {
       snapAngleDeg: parsed.snapAngleDeg > 0 ? parsed.snapAngleDeg : 9,
       fov: parsed.fov > 0 ? parsed.fov : 35,
       curveDetectionAngleDeg:
-        parsed.curveDetectionAngleDeg >= 0 ? parsed.curveDetectionAngleDeg : 5,
+        parsed.curveDetectionAngleDeg >= 0
+          ? parsed.curveDetectionAngleDeg
+          : SNAP_DEFAULTS.curveDetectionAngleDeg,
       resolutionMm:
         parsed.resolutionMm > 0
           ? parsed.resolutionMm
