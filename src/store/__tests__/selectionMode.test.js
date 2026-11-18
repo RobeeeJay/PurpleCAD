@@ -188,6 +188,100 @@ describe("effectiveSelectionTypes", () => {
   });
 });
 
+// Every pick step locks the 3D widget to what its click takes.  These steps
+// used to leave it on the user's own kinds -- or, for the circular pattern's
+// axis and the origin's vertex snap, on Object, greying out the very thing
+// being picked.
+describe("pick steps that lock the 3D widget", () => {
+  const user = { selObject: true };
+  const on = (s) => {
+    const e = effectiveSelectionTypes({ ...user, ...s });
+    return ["object", "face", "edge", "point"].filter((k) => e[k]);
+  };
+
+  it("the circular pattern's axis pick takes edges, inside the pattern's object lock", () => {
+    const pattern = { pattern3dTool: {}, selectionOverride: ["object"] };
+    expect(on(pattern)).toEqual(["object"]);
+    expect(on({ ...pattern, circularAxisPick: true })).toEqual(["edge"]);
+  });
+
+  it("the origin's vertex snap takes vertices, choosing the object stays Object", () => {
+    const origin = { originToolActive: true, selectionOverride: ["object"] };
+    expect(on(origin)).toEqual(["object"]);
+    expect(on({ ...origin, originVertexPick: 4 })).toEqual(["point"]);
+  });
+
+  it("texture, stress and generative design take faces while picking them", () => {
+    expect(on({ textureTool: { picking: "faces" } })).toEqual(["face"]);
+    for (const key of ["stressTool", "optimiseTool"]) {
+      expect(on({ [key]: { phase: "fixtures" } }), key).toEqual(["face"]);
+      expect(on({ [key]: { phase: "loads" } }), key).toEqual(["face"]);
+      // Setting the load's size and direction picks nothing.
+      expect(on({ [key]: { phase: "params" } }), key).toEqual(["object"]);
+    }
+  });
+
+  it("revolve / pipe / loft lock to nothing: they pick sketch geometry", () => {
+    const e = effectiveSelectionTypes({
+      ...user,
+      sweepSelectMode: { kind: "revolve" },
+    });
+    expect(e.overridden).toBe(true);
+    expect(on({ sweepSelectMode: { kind: "loft" } })).toEqual([]);
+  });
+});
+
+describe("pick steps that lock the sketch widget", () => {
+  const allowedFor = (s) =>
+    effectiveSketchSelTypes({
+      sketchSelTypes: {
+        line: true,
+        point: true,
+        shape: true,
+        constraint: false,
+        object: false,
+      },
+      ...s,
+    }).allowed;
+
+  it("the cog's centre pick takes a point", () => {
+    expect(allowedFor({ sketchCogState: { picking: true } })).toEqual({
+      point: true,
+    });
+  });
+
+  it("the centre constraint's two picks take shapes", () => {
+    for (const picking of ["A", "B"])
+      expect(allowedFor({ sketchCentreState: { picking } })).toEqual({
+        shape: true,
+      });
+  });
+
+  it("the sketch mirror takes its line first, then the shapes to mirror", () => {
+    expect(allowedFor({ sketchMirrorState: { lineIdx: null } })).toEqual({
+      line: true,
+    });
+    expect(allowedFor({ sketchMirrorState: { lineIdx: 2 } }).shape).toBe(true);
+  });
+
+  it("the sketch circular pattern takes its centre point first", () => {
+    expect(
+      allowedFor({ sketchCircularPatternState: { centerShapeIdx: null } }),
+    ).toEqual({ point: true });
+    expect(
+      allowedFor({ sketchCircularPatternState: { centerShapeIdx: 1 } }).shape,
+    ).toBe(true);
+  });
+
+  it("distance and midpoint take lines as well as points", () => {
+    for (const mode of ["distance", "midpoint"])
+      expect(allowedFor({ sketchConstraintMode: mode }), mode).toEqual({
+        point: true,
+        line: true,
+      });
+  });
+});
+
 describe("selectionChainAngle", () => {
   const NO_CHAIN = 0.5;
   it("follows the curve angle when chain is on and a face/edge type is on", () => {

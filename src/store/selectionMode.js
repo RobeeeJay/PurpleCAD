@@ -21,6 +21,20 @@ function toolSelectionLock(s) {
   if (s.draftTool && s.draftTool.picking) return ["face"];
   // Shell: pick the faces to leave open.
   if (s.shellTarget?.picking) return ["face"];
+  // Circular pattern axis: a face's edge (or a sketch line).  The pattern
+  // itself locks to objects, which greyed out the very thing being picked.
+  if (s.circularAxisPick) return ["edge"];
+  // Origin: snapping it to a vertex of the object; choosing the object is
+  // the tool's own Object lock.
+  if (s.originVertexPick != null) return ["point"];
+  if (s.textureTool?.picking === "faces") return ["face"];
+  // Stress / generative design: the faces held fixed, then the loaded ones.
+  for (const t of [s.stressTool, s.optimiseTool])
+    if (t && t.phase !== "params") return ["face"];
+  // Revolve / pipe / loft pick sketch regions and lines, which are none of
+  // the widget's kinds: lock to nothing, as emboss's geometry pick does,
+  // rather than show selectable kinds a click ignores.
+  if (s.sweepSelectMode) return [];
   return null;
 }
 
@@ -80,7 +94,22 @@ export function effectiveSketchSelTypes(s) {
     object: false,
   };
   let allowed;
+  const mirror = s.sketchMirrorState;
+  const circular = s.sketchCircularPatternState;
   if (s.projectTool) allowed = { object: true };
+  // Each pick step says what it takes, as the 3D view's tools do.
+  else if (s.sketchCogState?.picking) allowed = { point: true };
+  else if (s.sketchCentreState?.picking) allowed = { shape: true };
+  else if (mirror && mirror.lineIdx == null) allowed = { line: true };
+  else if (circular && circular.centerShapeIdx == null)
+    allowed = { point: true };
+  // Distance takes a point or a line (a length, or the gap between two);
+  // midpoint a point and then the line or arc it sits on.
+  else if (
+    s.sketchConstraintMode === "distance" ||
+    s.sketchConstraintMode === "midpoint"
+  )
+    allowed = { point: true, line: true };
   else if (s.sketchConstraintMode) allowed = { point: true };
   // `object` is only ever usable while projecting, so it's omitted by default.
   else allowed = { line: true, point: true, shape: true, constraint: true };
@@ -123,7 +152,9 @@ export function selectionChainAngle(s) {
 // object off the face/edge/point toggles decide.  `overridden` lets the widget
 // show the buttons as tool-locked.
 export function effectiveSelectionTypes(s) {
-  const override = s.selectionOverride || toolSelectionLock(s);
+  // A pick step's lock wins over the lock its tool set when it started: the
+  // circular pattern's axis pick runs inside a tool locked to objects.
+  const override = toolSelectionLock(s) || s.selectionOverride;
   if (override) {
     const set = new Set(override);
     return {

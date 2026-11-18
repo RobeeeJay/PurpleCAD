@@ -39,6 +39,14 @@ const SketchSelectionWidget = () => {
   const sketchSelTypes = useStore((s) => s.sketchSelTypes);
   const projectTool = useStore((s) => s.projectTool);
   const sketchConstraintMode = useStore((s) => s.sketchConstraintMode);
+  // Every field effectiveSketchSelTypes reads: one missing here never shows
+  // its lock in the widget (selectionMode.js says which a tool's pick takes).
+  const sketchCogState = useStore((s) => s.sketchCogState);
+  const sketchCentreState = useStore((s) => s.sketchCentreState);
+  const sketchMirrorState = useStore((s) => s.sketchMirrorState);
+  const sketchCircularPatternState = useStore(
+    (s) => s.sketchCircularPatternState,
+  );
   const toggleSketchSelType = useStore((s) => s.toggleSketchSelType);
   const soloSketchSelType = useStore((s) => s.soloSketchSelType);
   const shiftHeld = useShiftHeld();
@@ -52,6 +60,10 @@ const SketchSelectionWidget = () => {
     sketchSelTypes,
     projectTool,
     sketchConstraintMode,
+    sketchCogState,
+    sketchCentreState,
+    sketchMirrorState,
+    sketchCircularPatternState,
   });
   const keys = ["object", "shape", "line", "point", "constraint"];
 

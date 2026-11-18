@@ -49,6 +49,10 @@ const SelectionWidget = () => {
   if (shiftHeld) return <VisibilityToggles className="selection-widget" />;
 
   const locked = eff.overridden; // a tool controls the set
+  // Locked to nothing: the tool picks sketch regions / lines (emboss, revolve,
+  // pipe, loft), none of which this widget selects.
+  const nothingPickable =
+    locked && !eff.object && !eff.face && !eff.edge && !eff.point;
   const btns = [
     {
       key: "object",
@@ -98,7 +102,9 @@ const SelectionWidget = () => {
             className={`selection-widget-btn${on ? " active" : ""}${greyed ? " greyed" : ""}`}
             title={
               locked
-                ? `${title} — locked by the active tool`
+                ? nothingPickable
+                  ? `${title} — the active tool picks sketch geometry instead`
+                  : `${title} — locked by the active tool`
                 : `${title} (⌘/Ctrl-click to isolate)`
             }
             disabled={locked}
