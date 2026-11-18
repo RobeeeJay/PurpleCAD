@@ -43,6 +43,7 @@ export function lengthDimensionSides(constraints, shapes) {
 }
 import { shapeMidpoint, cornerSetback } from "../sketchGeometry.js";
 import { MM_PER_UNIT } from "./dimensions.js";
+import { DIM_OFFSET, dimensionOffsets } from "./dimensionLayout.js";
 import { resolveConstraintDistance } from "../geometryParams.js";
 import { getShapePoint } from "./sketchShapes.js";
 import { useStore } from "../../store";
@@ -147,6 +148,9 @@ export function addConstraintIconsToGroup(
   // keep off it.  Only when dimensions are drawn at all.
   const dimensionSides = showDimensions
     ? lengthDimensionSides(constraints, shapes)
+    : new Map();
+  const dimOffsets = showDimensions
+    ? dimensionOffsets(constraints, shapes)
     : new Map();
   // Offset constraints created together share an offsetGroup; render only one
   // editable dimension label per group (they all carry the same distance).
@@ -357,7 +361,8 @@ export function addConstraintIconsToGroup(
         // Linear: a dimension line offset from the geometry, bounded by two
         // extension (witness) lines, with a tick mark at each end — the value
         // breaks the line at the middle.
-        const OFF = 0.55,
+        // Pushed further out where it would overlap a dimension before it.
+        const OFF = dimOffsets.get(ci) ?? DIM_OFFSET,
           GAP = 0.06,
           OVER = 0.14;
         const A2 = wA.clone().addScaledVector(perpU, OFF);
@@ -443,7 +448,8 @@ export function addConstraintIconsToGroup(
         // with a tick at each end.
         const dimU = new THREE.Vector3().subVectors(wF, wP).normalize();
         const perpU = sketchNormal.clone().cross(dimU).normalize();
-        const OFF = 0.55,
+        // Pushed further out where it would overlap a dimension before it.
+        const OFF = dimOffsets.get(ci) ?? DIM_OFFSET,
           GAP = 0.06,
           OVER = 0.14;
         const A2 = wP.clone().addScaledVector(perpU, OFF);
