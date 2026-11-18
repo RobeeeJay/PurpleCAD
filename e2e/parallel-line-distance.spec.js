@@ -2,7 +2,8 @@ import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
 
 // Distance constraint between two PARALLEL lines (sharing a horizontal /
-// vertical / parallel constraint): the distance tool's first line click opens
+// vertical / parallel constraint, or just drawn parallel, which adds a parallel
+// constraint): the distance tool's first line click opens
 // a length dimension; clicking a second parallel line switches it to the
 // perpendicular gap.  Its own clean sketch — deterministic screen picks.
 
@@ -232,5 +233,77 @@ test.describe.serial("parallel-line distance", () => {
       await page.evaluate(() => window.__store.getState().sketchDistanceInput),
     ).toBeNull();
     await page.keyboard.press("Escape");
+  });
+
+  // Lines drawn parallel but held so by no constraint: the second click used
+  // to open a length on the second line instead of the gap between them.
+  test("two lines only drawn parallel get a gap and a parallel constraint", async () => {
+    const tilt = Math.tan((0.5 * Math.PI) / 180) * 6; // half a degree over 6
+    await page.evaluate((tilt) => {
+      window.__store.getState().addSketchShapes(
+        700,
+        [
+          { type: "line", x1: 6, y1: 1, x2: 12, y2: 1 },
+          { type: "line", x1: 6, y1: 3, x2: 12, y2: 3 + tilt },
+        ],
+        [],
+      );
+    }, tilt);
+    await page.waitForTimeout(400);
+    // Beside the earlier tests' lines, clear of all of them.
+    const first = toScreen(9, 1);
+    const second = toScreen(7.5, 3 + tilt / 4);
+    // viewportSize() is null under Electron; ask the window itself.
+    const size = await page.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    for (const p of [first, second])
+      expect(
+        p.x > 0 && p.y > 0 && p.x < size.width && p.y < size.height,
+        `pick ${JSON.stringify(p)} is on screen`,
+      ).toBe(true);
+
+    // Set, not toggled with "d": the test before may have left the tool on.
+    await page.evaluate(() => {
+      const st = window.__store.getState();
+      st.setSketchDistanceInput(null);
+      st.setSketchConstraintMode("distance");
+    });
+    await page.mouse.click(first.x, first.y);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => window.__store.getState().sketchDistanceInput?.shapeAIdx,
+        ),
+      )
+      .toBe(7);
+    await page.mouse.click(second.x, second.y);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const di = window.__store.getState().sketchDistanceInput;
+          return di?.pointLine
+            ? { ...di.pointLine, hold: di.holdParallel }
+            : di;
+        }),
+      )
+      .toMatchObject({ pointShapeIdx: 7, lineShapeIdx: 8, hold: true });
+
+    const overlay = page.locator(".sketch-distance-input-overlay");
+    await overlay.locator("input").first().fill("20");
+    await overlay.locator("input").first().press("Enter");
+
+    await expect
+      .poll(async () => gap(await line(), 7, 8), { timeout: 5000 })
+      .toBeCloseTo(2, 3);
+    const it = await line();
+    expect(
+      it.constraints.some(
+        (c) => c.type === "parallel" && c.shapeAIdx === 7 && c.shapeBIdx === 8,
+      ),
+      JSON.stringify(it.constraints.slice(-3)),
+    ).toBe(true);
+    expect(direction(it.shapes[7])).toBeCloseTo(direction(it.shapes[8]), 4);
   });
 });

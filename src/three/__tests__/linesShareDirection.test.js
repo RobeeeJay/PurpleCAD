@@ -4,7 +4,11 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("../../store", () => ({ useStore: { getState: () => ({}) } }));
 
-import { lineGapInput, linesShareDirection } from "../sketchModifyActions.js";
+import {
+  lineGapInput,
+  linesShareDirection,
+  parallelGap,
+} from "../sketchModifyActions.js";
 
 const parallel = (a, b) => ({ type: "parallel", shapeAIdx: a, shapeBIdx: b });
 const h = (i) => ({ type: "horizontal", shapeIdx: i });
@@ -71,5 +75,54 @@ describe("the gap input for two parallel lines", () => {
       3 / Math.SQRT2,
       9,
     );
+  });
+});
+
+// Lines that are parallel on screen but not held so by any constraint are
+// what users draw (two sides placed by eye, a pair snapped at the same angle):
+// the distance tool used to ignore them and open a length on the second line.
+// They get the gap too, with a parallel constraint added, so it stays a gap.
+describe("which pairs the distance tool takes as a gap", () => {
+  const line = (x1, y1, x2, y2) => ({ type: "line", x1, y1, x2, y2 });
+  const deg = (d) => (d * Math.PI) / 180;
+  const at = (angle, y) =>
+    line(0, y, 10 * Math.cos(deg(angle)), y + 10 * Math.sin(deg(angle)));
+
+  it("takes a pair held parallel, adding nothing", () => {
+    const shapes = [line(0, 0, 4, 0), line(0, 3, 4, 3)];
+    expect(parallelGap(shapes, [h(0), h(1)], 0, 1)).toEqual({
+      holdParallel: false,
+    });
+  });
+
+  it("takes a pair that only looks parallel, and asks for a parallel constraint", () => {
+    expect(parallelGap([at(30, 0), at(30, 3)], [], 0, 1)).toEqual({
+      holdParallel: true,
+    });
+    expect(parallelGap([at(30, 0), at(30.9, 3)], [], 0, 1)).toEqual({
+      holdParallel: true,
+    });
+  });
+
+  it("leaves a pair more than a degree apart to the length of each line", () => {
+    expect(parallelGap([at(30, 0), at(31.5, 3)], [], 0, 1)).toBe(null);
+    expect(parallelGap([at(0, 0), at(90, 3)], [], 0, 1)).toBe(null);
+  });
+
+  it("takes lines drawn in opposite directions", () => {
+    const shapes = [line(0, 0, 4, 0), line(4, 3, 0, 3)];
+    expect(parallelGap(shapes, [], 0, 1)).toEqual({ holdParallel: true });
+  });
+
+  it("refuses a pair held at an angle, however close it is drawn", () => {
+    const shapes = [line(0, 0, 4, 0), line(0, 3, 4, 3)];
+    const held = [{ type: "angleDimension", shapeAIdx: 0, shapeBIdx: 1 }];
+    expect(parallelGap(shapes, held, 0, 1)).toBe(null);
+  });
+
+  it("carries the flag on the gap input", () => {
+    const shapes = [line(0, 0, 4, 0), line(0, 3, 4, 3)];
+    expect(lineGapInput(shapes, 0, 1, true).holdParallel).toBe(true);
+    expect(lineGapInput(shapes, 0, 1).holdParallel).toBeUndefined();
   });
 });
