@@ -101,6 +101,30 @@ describe("the hover caches", () => {
     );
   });
 
+  // A curved wall's facet seams are creases too; given the body's drawn
+  // outline, the pick offers only its real edges -- here the two rims.
+  it("are the body's drawn outline when it has one, not every crease", () => {
+    const g = new THREE.CylinderGeometry(1, 1, 2, 48, 1, true);
+    const creases = featureEdges(g).segs.length / 6;
+    const rims = [];
+    for (const y of [-1, 1])
+      for (let k = 0; k < 48; k++) {
+        const a = (2 * Math.PI * k) / 48;
+        const b = (2 * Math.PI * (k + 1)) / 48;
+        rims.push(Math.sin(a), y, Math.cos(a), Math.sin(b), y, Math.cos(b));
+      }
+    const outline = new THREE.BufferGeometry();
+    outline.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(rims), 3),
+    );
+    const { segs } = featureEdges(g, outline);
+    expect(creases, "seams the crease detector finds").toBeGreaterThan(96);
+    expect(segs.length / 6, "segments picked from the outline").toBe(96);
+    for (let i = 1; i < segs.length; i += 3)
+      expect(Math.abs(segs[i]), `segment end at y ${segs[i]}`).toBe(1);
+  });
+
   it("are built once per geometry, and again after it changes", () => {
     const g = new THREE.BoxGeometry(1, 1, 1);
     expect(meshTopology(g)).toBe(meshTopology(g));
