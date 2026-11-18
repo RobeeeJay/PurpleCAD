@@ -5,6 +5,47 @@
 import * as THREE from "three";
 import { panelAwareLookAt } from "../sceneSetup.js";
 
+// World units per screen pixel at the pivot's distance.
+export function worldPerPixel(camera, target, rectHeight) {
+  return camera.isPerspectiveCamera
+    ? (2 *
+        camera.position.distanceTo(target) *
+        Math.tan((camera.fov * Math.PI) / 360)) /
+        rectHeight
+    : // Orthographic: the visible world height is (top - bottom) / zoom, so
+      // the world-per-pixel must divide by zoom -- otherwise panning moves
+      // too far zoomed in and too little zoomed out.
+      (camera.top - camera.bottom) / camera.zoom / rectHeight;
+}
+
+// The plain scroll pan never leaves the ground plane: sideways scroll moves
+// along the view's right, flattened onto the ground, and vertical scroll
+// along its forward direction.  It used to raycast the screen onto the
+// ground, which a level view (Right, Front) never meets: the pan fell back to
+// moving the camera straight up, and sideways scroll did nothing.
+// Vertical scroll is scaled the way a ground point under the cursor moves --
+// by 1 / sin(tilt) -- clamped so a level view doesn't race off.
+const MIN_PAN_TILT_SIN = 0.35;
+export function groundPanOffset(camera, target, dx, dy, rectHeight) {
+  const wpp = worldPerPixel(camera, target, rectHeight);
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  right.y = 0;
+  right.normalize();
+  // Forward and screen-up flatten to the same ground direction, and their
+  // sum never vanishes: forward is level in a side view, screen-up in a top
+  // one.
+  const ahead = forward.clone().add(up);
+  ahead.y = 0;
+  ahead.normalize();
+  const tilt = Math.max(Math.abs(forward.y), MIN_PAN_TILT_SIN);
+  return new THREE.Vector3()
+    .addScaledVector(right, dx * wpp)
+    .addScaledVector(ahead, (-dy * wpp) / tilt);
+}
+
 export function createNavigationHandlers(
   {
     cameraRef,
@@ -90,17 +131,11 @@ export function createNavigationHandlers(
         .crossVectors(forward, currentCamera.up)
         .normalize();
       const rect = renderer.domElement.getBoundingClientRect();
-      const worldPerPx = currentCamera.isPerspectiveCamera
-        ? (2 *
-            currentCamera.position.distanceTo(targetRef.current) *
-            Math.tan((currentCamera.fov * Math.PI) / 360)) /
-          rect.height
-        : // Orthographic: the visible world height is (top - bottom) / zoom, so
-          // the world-per-pixel must divide by zoom — otherwise panning moves
-          // too far zoomed in and too little zoomed out.
-          (currentCamera.top - currentCamera.bottom) /
-          currentCamera.zoom /
-          rect.height;
+      const worldPerPx = worldPerPixel(
+        currentCamera,
+        targetRef.current,
+        rect.height,
+      );
       const panSpeed = worldPerPx * 1.2;
       const offset = new THREE.Vector3()
         .addScaledVector(right, e.deltaX * panSpeed)
@@ -136,17 +171,11 @@ export function createNavigationHandlers(
 
     if (e.metaKey || (e.ctrlKey && !isMac)) {
       const rect = renderer.domElement.getBoundingClientRect();
-      const worldPerPx = currentCamera.isPerspectiveCamera
-        ? (2 *
-            currentCamera.position.distanceTo(targetRef.current) *
-            Math.tan((currentCamera.fov * Math.PI) / 360)) /
-          rect.height
-        : // Orthographic: the visible world height is (top - bottom) / zoom, so
-          // the world-per-pixel must divide by zoom — otherwise panning moves
-          // too far zoomed in and too little zoomed out.
-          (currentCamera.top - currentCamera.bottom) /
-          currentCamera.zoom /
-          rect.height;
+      const worldPerPx = worldPerPixel(
+        currentCamera,
+        targetRef.current,
+        rect.height,
+      );
       const forward = new THREE.Vector3();
       currentCamera.getWorldDirection(forward);
       const right = new THREE.Vector3()
@@ -223,41 +252,15 @@ export function createNavigationHandlers(
       setRotationState(currentCamera.quaternion.clone());
     } else {
       const rect = renderer.domElement.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const groundPlane = new THREE.Plane(
-        new THREE.Vector3(0, 1, 0),
-        -targetRef.current.y,
+      const offset = groundPanOffset(
+        currentCamera,
+        targetRef.current,
+        e.deltaX,
+        e.deltaY,
+        rect.height,
       );
-      const hitAt = (sx, sy) => {
-        const nx = ((sx - rect.left) / rect.width) * 2 - 1;
-        const ny = -((sy - rect.top) / rect.height) * 2 + 1;
-        const r = new THREE.Raycaster();
-        r.setFromCamera({ x: nx, y: ny }, currentCamera);
-        const h = new THREE.Vector3();
-        return r.ray.intersectPlane(groundPlane, h) ? h.clone() : null;
-      };
-      const h0 = hitAt(cx, cy),
-        h1 = hitAt(cx + 100, cy),
-        h2 = hitAt(cx, cy + 100);
-      if (h0 && h1 && h2) {
-        const panDxWorld = new THREE.Vector3()
-          .subVectors(h1, h0)
-          .divideScalar(100);
-        const panDyWorld = new THREE.Vector3()
-          .subVectors(h2, h0)
-          .divideScalar(100);
-        const worldOffset = new THREE.Vector3()
-          .addScaledVector(panDxWorld, e.deltaX)
-          .addScaledVector(panDyWorld, e.deltaY);
-        currentCamera.position.x += worldOffset.x;
-        currentCamera.position.z += worldOffset.z;
-        targetRef.current.x += worldOffset.x;
-        targetRef.current.z += worldOffset.z;
-      } else {
-        currentCamera.position.y -= e.deltaY * 0.05;
-        targetRef.current.y -= e.deltaY * 0.05;
-      }
+      currentCamera.position.add(offset);
+      targetRef.current.add(offset);
       lookAtView(currentCamera, targetRef.current);
     }
     save();
