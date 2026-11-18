@@ -66,6 +66,38 @@ test("a right drag pans the view across the ground", async () => {
   expect(after.target.y).toBeCloseTo(before.target.y, 6);
 });
 
+// From a level view the pan used to raycast the screen onto the ground,
+// which a level view never meets, and fall back to moving the camera
+// straight up; sideways drags did nothing.
+test("from the Right view a right drag still pans across the ground", async () => {
+  await home();
+  const cube = await page.locator(".orientation-cube-mount").boundingBox();
+  // After Home the Right face is the lower right of the cube.
+  await page.mouse.click(
+    cube.x + cube.width * 0.72,
+    cube.y + cube.height * 0.62,
+  );
+  await expect
+    .poll(async () => (await view()).dir.x, { timeout: 5000 })
+    .toBeGreaterThan(0.999);
+  for (const [dx, dy] of [
+    [150, 0],
+    [0, 120],
+  ]) {
+    const before = await view();
+    await rightDrag(dx, dy);
+    const after = await view();
+    expect(
+      moved(after.target, before.target),
+      JSON.stringify({ dx, dy, before, after }),
+    ).toBeGreaterThan(0.1);
+    expect(after.target.y, JSON.stringify({ dx, dy, before, after })).toBeCloseTo(
+      before.target.y,
+      6,
+    );
+  }
+});
+
 test("Shift with a right drag orbits about the pivot", async () => {
   await home();
   // Orbit sessions anchor the pivot first; read it after that has happened.
