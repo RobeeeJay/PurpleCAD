@@ -269,8 +269,7 @@ export const createVariablesSlice = (set) => ({
       // otherwise skip every step as clean and keep the stale geometry.  A step
       // is reached when it names a changed variable (or one computed from it),
       // or when re-solving rewrote it (a sketch).  Nothing earlier can see the
-      // change.  (dirty is a transient flag; saveTimeline strips it --
-      // persistence only sees the rewritten sketch shapes.)
+      // change.
       const reached = [
         firstEntryNaming(
           rewritten,

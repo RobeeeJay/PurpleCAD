@@ -144,3 +144,48 @@ describe("timeline forward invalidation", () => {
     expect(dirty(s)).toEqual([true, true, true]);
   });
 });
+
+// Replay turns a step still flagged dirty (an edit saved before its recalc
+// ran) into a stale body, so the viewport rebuilds it on load.  A recalc
+// clears the flag only on steps that carry geometry: anything else reading
+// as stale would ask for a recalc that never ends.
+describe("replaying a dirty step", () => {
+  const stamp = (h) =>
+    replayUpTo(h, h.length - 1).find((i) => i.id === 5).regenerator
+      .regeneratedAt;
+  const embossed = {
+    id: "h2",
+    instruction: {
+      type: "modify",
+      itemId: 5,
+      patches: csgPatches("emboss"),
+    },
+  };
+
+  it("marks the body built by a dirty geometry step stale", () => {
+    const h = [
+      { id: "h1", instruction: { type: "create", item: box } },
+      { ...embossed, dirty: true },
+    ];
+    expect(stamp(h)).toBe("dirty");
+  });
+
+  it("leaves a body alone when only a step without geometry is dirty", () => {
+    // The box's own create and a move after the emboss keep their flags
+    // through a recalc; the emboss that made the box a csg body is rebuilt.
+    const h = [
+      { id: "h1", dirty: true, instruction: { type: "create", item: box } },
+      embossed,
+      {
+        id: "h3",
+        dirty: true,
+        instruction: {
+          type: "modify",
+          itemId: 5,
+          patches: { position: { x: 1, y: 0, z: 0 } },
+        },
+      },
+    ];
+    expect(stamp(h)).toBe(0.5);
+  });
+});

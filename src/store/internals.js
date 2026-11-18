@@ -104,6 +104,30 @@ export const replayUpTo = (history, upToIndex) => {
   for (let i = 0; i <= end; i++) {
     items = applyInstruction(items, history[i].instruction);
   }
+  // A step still flagged dirty (an edit saved before its recalc ran) stores
+  // the geometry it had before the edit, stamped as current: replay its
+  // bodies as stale, or nothing tells the viewport to rebuild them.  Only
+  // steps that build geometry count: a recalc leaves a sketch's or a move's
+  // flag set, and marking from those would ask for a recalc forever.
+  const stale = new Set();
+  for (let i = 0; i <= end; i++) {
+    const inst = history[i].instruction;
+    if (!history[i].dirty) continue;
+    // A plain extrude's create keeps its flag too, and a later emboss or
+    // chamfer can make that same item a csg body.
+    if (inst?.type === "create" && inst.item?.type === "csg")
+      stale.add(inst.item.id);
+    else if (inst?.type === "createGroup") {
+      for (const it of inst.items || [])
+        if (it.regenerator?.kind === "split") stale.add(it.id);
+    } else if (
+      inst?.type === "modify" &&
+      (inst.patches?.geometryData !== undefined ||
+        inst.patches?.regenerator !== undefined)
+    )
+      stale.add(inst.itemId);
+  }
+  if (stale.size > 0) items = markCsgDirty(items, stale);
   // Per-step visibility snapshot: hiddenIds can hide an item but never
   // un-hides one whose own snapshot already says visible:false (consumed
   // items recorded before this model existed).
@@ -281,13 +305,11 @@ export const makeEntry = (label, itemId, instruction) => ({
 
 export const saveTimeline = (history, activeHistoryId) => {
   try {
-    // `dirty` is transient runtime cache state (JIT timeline model) — never
-    // persist it; a reload trusts the stored per-entry geometry until something
-    // invalidates it.
-    const persisted = packHistory(
-      history.map((e) => (e.dirty ? (({ dirty, ...rest }) => rest)(e) : e)),
-    );
-    db.saveTimeline({ history: persisted, activeHistoryId });
+    // `dirty` is saved with the entry: it is the only record of an edit whose
+    // recalc hasn't run yet (one is deferred while a sketch is open), since
+    // the entry still says it was built at this resolution.  Stripping it let
+    // a reload trust the old geometry for good.
+    db.saveTimeline({ history: packHistory(history), activeHistoryId });
   } catch (e) {
     console.warn("Failed to save timeline to storage:", e);
   }
