@@ -360,7 +360,12 @@ export function createHighlightHelpers({
     // Feature edges and their endpoint lookup are cached per geometry
     // (meshPickCache.js), where this used to rebuild EdgesGeometry -- 2.3 s on
     // a 1M-triangle import -- on every mouse move.
-    const { segs, near } = featureEdges(srcGeo);
+    // A body's drawn outline is its real edges; pick from those, so a seam
+    // between a curved face's triangles is not offered as an edge.
+    const outline = primitiveType
+      ? null
+      : hitMesh.children.find((ch) => ch.isLineSegments)?.geometry;
+    const { segs, near } = featureEdges(srcGeo, outline);
     if (primitiveType) srcGeo.dispose();
     const seg = (i) => ({
       ax: segs[6 * i],

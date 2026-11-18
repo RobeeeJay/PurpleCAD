@@ -141,10 +141,10 @@ const NO_CHAIN_ANGLE_DEG = 0.5;
 export function selectionChainAngle(s) {
   // No store handed in (unit tests exercising the pure highlight builders) —
   // fall back to the default chain angle, matching the prior always-chaining.
-  if (!s) return 5;
+  if (!s) return 30;
   const eff = effectiveSelectionTypes(s);
   const on = !!(s.selChain && (eff.face || eff.edge));
-  return on ? (s.curveDetectionAngleDeg ?? 5) : NO_CHAIN_ANGLE_DEG;
+  return on ? (s.curveDetectionAngleDeg ?? 30) : NO_CHAIN_ANGLE_DEG;
 }
 
 // What the 3D view's selection widget currently allows.  A tool override (e.g.

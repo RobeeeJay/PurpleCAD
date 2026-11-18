@@ -151,12 +151,30 @@ const cellKey = (x, y, z) =>
 
 // The mesh's feature edges as a flat array (six numbers per segment), with a
 // lookup of the segments that end at a point, for computeSegmentChain.
-export function featureEdges(g) {
+// With `outline` -- the line geometry drawn over the body -- the segments are
+// those lines: a body's REAL edges (sceneBuilder.js#bodyOutline).  The crease
+// detector alone counts every seam between a curved face's triangles as an
+// edge, so a click beside a boss rim picked a facet seam down its side.
+export function featureEdges(g, outline = null) {
   const c = cacheFor(g);
-  if (c.edges) return c.edges;
-  const eg = new THREE.EdgesGeometry(g);
-  const segs = Float32Array.from(eg.getAttribute("position").array);
-  eg.dispose();
+  if (c.edges && c.edgesFrom === outline) return c.edges;
+  let segs;
+  if (outline) {
+    const p = outline.getAttribute("position");
+    const ix = outline.index;
+    const n = ix ? ix.count : p.count;
+    segs = new Float32Array(n * 3);
+    for (let k = 0; k < n; k++) {
+      const v = ix ? ix.getX(k) : k;
+      segs[3 * k] = p.getX(v);
+      segs[3 * k + 1] = p.getY(v);
+      segs[3 * k + 2] = p.getZ(v);
+    }
+  } else {
+    const eg = new THREE.EdgesGeometry(g);
+    segs = Float32Array.from(eg.getAttribute("position").array);
+    eg.dispose();
+  }
   const ends = new Map();
   const add = (key, i) => {
     const list = ends.get(key);
@@ -183,6 +201,7 @@ export function featureEdges(g) {
     return out;
   };
   c.edges = { segs, near };
+  c.edgesFrom = outline;
   return c.edges;
 }
 
