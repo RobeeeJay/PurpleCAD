@@ -14,6 +14,7 @@ import { useStore } from "../store";
 import { resolveValue } from "./geometryParams.js";
 import { variablesToMap } from "../utils/formulas.js";
 import { withLivePolygons } from "./csgUtils.js";
+import { applyInstruction } from "../store/internals.js";
 
 const isElectron = typeof window !== "undefined" && window.electronAPI != null;
 
@@ -85,6 +86,109 @@ export function bakeArgPolygons(args) {
   return out;
 }
 
+// A union or cut is rebuilt from its inputs, looked up in allItems -- the
+// items as they are NOW.  A step after the union that changes an input (a
+// fillet on the consumed Cut 14 after "Base" in the Pi 3 case) then reaches
+// every rebuild of the union, though the union on screen never had it: a
+// chamfer on Base's sharp corner found the corner rounded and bevelled only
+// the strip the fillet missed.  Each such recipe carries `inputsAt`: the items
+// a later step changed or deleted, as they were just before the step that
+// built it.  Both OCC implementations build the inputs from allItems with
+// these substituted (inputPool).
+const INPUT_KINDS = new Set(["boolean", "extrudeUnion", "extrudeCut"]);
+const SKIP_KEYS = new Set([
+  "geometryData",
+  "polygon2D",
+  "holes",
+  "curves2D",
+  "shapes",
+  "constraints",
+  "contours",
+  "contourCurves",
+  "brep",
+  "inputsAt",
+]);
+
+// The step that built recipe `r` on item `id`: the last create or modify of
+// that item carrying a recipe of the same kind and inputs.
+function producingIndex(history, id, r) {
+  const same = (reg) =>
+    reg?.kind === r.kind &&
+    JSON.stringify(reg.inputIds) === JSON.stringify(r.inputIds);
+  for (let k = history.length - 1; k >= 0; k--) {
+    const inst = history[k].instruction;
+    if (
+      inst?.type === "create" &&
+      inst.item?.id === id &&
+      same(inst.item.regenerator)
+    )
+      return k;
+    if (
+      inst?.type === "modify" &&
+      inst.itemId === id &&
+      same(inst.patches?.regenerator)
+    )
+      return k;
+  }
+  return -1;
+}
+
+// Items a step after `k` replaced or removed, as they stood before step k.
+function itemsChangedAfter(history, k) {
+  let items = [];
+  for (let j = 0; j < k; j++)
+    items = applyInstruction(items, history[j].instruction);
+  const before = new Map(items.map((i) => [i.id, i]));
+  for (let j = k; j < history.length; j++)
+    items = applyInstruction(items, history[j].instruction);
+  const after = new Map(items.map((i) => [i.id, i]));
+  const out = {};
+  for (const [id, item] of before) if (after.get(id) !== item) out[id] = item;
+  return out;
+}
+
+export function attachInputsAt(args, history = useStore.getState().history) {
+  // No timeline (a test's stand-in store): no step to place a recipe at.
+  if (!history?.length) return args;
+  const cache = new Map();
+  const visit = (v, depth) => {
+    if (depth > 40 || !v || typeof v !== "object" || ArrayBuffer.isView(v))
+      return v;
+    if (Array.isArray(v)) {
+      let out = null;
+      v.forEach((x, i) => {
+        const y = visit(x, depth + 1);
+        if (y !== x) (out ??= v.slice())[i] = y;
+      });
+      return out ?? v;
+    }
+    let out = null;
+    for (const [key, x] of Object.entries(v)) {
+      if (SKIP_KEYS.has(key)) continue;
+      const y = visit(x, depth + 1);
+      if (y !== x) (out ??= { ...v })[key] = y;
+    }
+    const r = (out ?? v).regenerator;
+    if (v.id != null && INPUT_KINDS.has(r?.kind) && r.inputIds?.length) {
+      const k = producingIndex(history, v.id, r);
+      if (k >= 0) {
+        if (!cache.has(k)) {
+          const changed = itemsChangedAfter(history, k);
+          cache.set(k, changed);
+          // An input can itself be a union whose own inputs changed later.
+          for (const id of Object.keys(changed))
+            changed[id] = visit(changed[id], depth + 1);
+        }
+        const inputsAt = cache.get(k);
+        if (Object.keys(inputsAt).length)
+          out = { ...(out ?? v), regenerator: { ...r, inputsAt } };
+      }
+    }
+    return out ?? v;
+  };
+  return visit(args, 0);
+}
+
 let inProcessOps = null;
 async function getInProcessOps() {
   if (!inProcessOps) {
@@ -153,13 +257,13 @@ async function invokeOp(op, args) {
     const result = isElectron
       ? await window.electronAPI.invokeOcc(
           op,
-          resolveArgDepths(bakeArgPolygons(args)),
+          resolveArgDepths(bakeArgPolygons(attachInputsAt(args))),
         )
       : await (async () => {
           const ops = await getInProcessOps();
           const fn = ops[op];
           if (typeof fn !== "function") throw new Error(`Unknown op "${op}"`);
-          return fn(args);
+          return fn(attachInputsAt(args));
         })();
     console.log(`[OCC] ${op} end ${clock()} (${(now() - t0).toFixed(1)}ms)`);
     return result;
