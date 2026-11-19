@@ -100,3 +100,25 @@ describe("extrude cut tracks the host face across a Height change", () => {
     expect(interiorPts(it4.geometryData)).toBeGreaterThan(300);
   }, 120000);
 });
+
+// A sketch remembers the body it was placed on; a later cut or union hides
+// that body and makes a new one from it.  Further cuts from the sketch go into
+// the body that took its place -- Sketch 16's counterbore into Cut 19 in the
+// Pi 3 case, which used to be folded away as having no target.
+describe("liveHostId", () => {
+  it("follows a consumed host to the body that consumed it, down a chain", async () => {
+    const { liveHostId } = await import("../cameraControls/extrudeBoolean.js");
+    const items = [
+      { id: 8, type: "csg", visible: false },
+      { id: 19, type: "csg", visible: false, regenerator: { inputIds: [8] } },
+      { id: 20, type: "csg", regenerator: { inputIds: [19, 30] } },
+    ];
+    expect(liveHostId(items, 8)).toBe(20);
+    expect(liveHostId(items, 20)).toBe(20);
+  });
+
+  it("does not revive a body the user hid", async () => {
+    const { liveHostId } = await import("../cameraControls/extrudeBoolean.js");
+    expect(liveHostId([{ id: 8, type: "csg", visible: false }], 8)).toBeNull();
+  });
+});

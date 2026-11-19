@@ -26,6 +26,7 @@ import {
   runCutExtrudes,
   runUnionExtrudes,
   runExtrudeUnion,
+  liveHostId,
 } from "./extrudeBoolean.js";
 import { EXTRUDE_FACE_HIGHLIGHT } from "../theme.js";
 import { createExtrudeFacePick } from "./extrudeFacePick.js";
@@ -130,7 +131,11 @@ export function createExtrudeHelpers(
       profile?.sketchId != null
         ? items.find((i) => i.id === profile.sketchId)
         : null;
-    return sketch?.hostSolidId ?? null;
+    // The solid it was placed on may since have been consumed by a cut or
+    // union; join the body that took its place.
+    return sketch?.hostSolidId != null
+      ? liveHostId(items, sketch.hostSolidId)
+      : null;
   };
 
   // Collect the existing solids a fresh batch of prisms should fuse with: the

@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
+import fs from "node:fs";
 
 // "To…" in the extrude dialog: click a face and the distance is set so the
 // extrusion reaches it.  Driven with real clicks, alongside "Start from…",
@@ -145,4 +146,101 @@ test("To… sets the distance so the extrusion reaches the clicked face", async 
       window.__store.getState().items.find((i) => i.type === "extrude").depth,
   );
   expect(Number(depth)).toBe(25);
+});
+
+// A sketch placed on a body keeps cutting into it after a cut has consumed
+// that body.  Sketch 16 sits on the Pi 3 case's Lid; Cut 19 drilled two holes
+// from it, which hid the Lid and made Cut 19 in its place.  A second cut from
+// the sketch -- the counterbore ring round a hole, 1 mm deep -- found its host
+// hidden and was folded away without a word.  It must cut into Cut 19.
+test("a second cut from a sketch goes into the body the first cut made", async () => {
+  test.setTimeout(240000);
+  const doc = JSON.parse(
+    fs.readFileSync("test-files/pi3-lid-counterbore.pcad", "utf8"),
+  );
+  await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
+  const idle = () =>
+    page.evaluate(() => {
+      const s = window.__store.getState();
+      return s.pendingOperations === 0 && s.regenProgress == null;
+    });
+  await expect.poll(idle, { timeout: 120000 }).toBe(true);
+  const volume = (id) =>
+    page.evaluate((id) => {
+      const g = window.__store
+        .getState()
+        .items.find((i) => i.id === id).geometryData;
+      const Q = g.positions;
+      const I = g.indices;
+      let v = 0;
+      for (let t = 0; t < I.length; t += 3) {
+        const [a, b, c] = [I[t] * 3, I[t + 1] * 3, I[t + 2] * 3];
+        v +=
+          Q[a] * (Q[b + 1] * Q[c + 2] - Q[b + 2] * Q[c + 1]) -
+          Q[a + 1] * (Q[b] * Q[c + 2] - Q[b + 2] * Q[c]) +
+          Q[a + 2] * (Q[b] * Q[c + 1] - Q[b + 1] * Q[c]);
+      }
+      return (v / 6) * 1000;
+    }, id);
+  const before = await volume(19);
+  await page.getByTitle("Reset view").click();
+  await page.evaluate(() =>
+    window.__store.getState().setExtrudeSelectMode("profile"),
+  );
+  await page.waitForTimeout(600);
+  // The ring between the 1.5 and 3.3 mm circles round the first hole, on
+  // Sketch 16: sketch (x, y) is world (pos.x + x, pos.y, pos.z - y).
+  const ring = await page.evaluate(() => {
+    const s = window.__store.getState().items.find((i) => i.id === 16);
+    const c = s.shapes[10];
+    return {
+      x: s.position.x + c.cx + 0.24,
+      y: s.position.y,
+      z: s.position.z - c.cy,
+    };
+  });
+  await clickView(await screen(ring.x, ring.y, ring.z), "the counterbore ring");
+  await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible({
+    timeout: 5000,
+  });
+  if (
+    !(await page.evaluate(
+      () => window.__store.getState().extrudeDepthInput?.cut,
+    ))
+  )
+    await page
+      .getByTitle(
+        "Cut — subtract this solid from the target instead of adding it",
+      )
+      .click();
+  await page.locator("#extrude-distance").fill("-1");
+  await page
+    .getByTitle("Confirm — create the extrude at this distance")
+    .click();
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const s = window.__store.getState();
+          const i = s.history[s.history.length - 1].instruction;
+          // The prism is the cut's other input.
+          return i.type === "create"
+            ? !!i.item.regenerator?.inputIds?.includes(19)
+            : false;
+        }),
+      { timeout: 60000 },
+    )
+    .toBe(true);
+  await expect.poll(idle, { timeout: 60000 }).toBe(true);
+  const cut = await page.evaluate(() => {
+    const s = window.__store.getState();
+    return s.history[s.history.length - 1].instruction.item.id;
+  });
+  const after = await volume(cut);
+  // One 1 mm deep ring: pi * (3.3^2 - 1.5^2) mm2 * 1 mm = 27 mm3.
+  expect(
+    before - after,
+    `Cut 19 ${before.toFixed(1)} mm3 -> ${after.toFixed(1)} mm3`,
+  ).toBeGreaterThan(20);
+  expect(before - after).toBeLessThan(35);
 });
