@@ -313,7 +313,32 @@ test.describe("a fillet on a union after a later step changed one of its inputs"
             reach[y] = Math.max(reach[y] ?? 0, dx, dz);
           }
         }
-        return { failed: !!it.regenerator.regenFailed, reach };
+        // Volumes in mm3 of Base at its own step and after the fillet.
+        const vol = (g) => {
+          const Q = g.positions;
+          const I = g.indices;
+          let v = 0;
+          for (let t = 0; t < I.length; t += 3) {
+            const [a, b, c] = [I[t] * 3, I[t + 1] * 3, I[t + 2] * 3];
+            v +=
+              Q[a] * (Q[b + 1] * Q[c + 2] - Q[b + 2] * Q[c + 1]) -
+              Q[a + 1] * (Q[b] * Q[c + 2] - Q[b + 2] * Q[c]) +
+              Q[a + 2] * (Q[b] * Q[c + 1] - Q[b + 1] * Q[c]);
+          }
+          return (v / 6) * 1000;
+        };
+        const made = window.__store
+          .getState()
+          .history.find(
+            (e) =>
+              e.instruction.type === "create" && e.instruction.item.id === 15,
+          ).instruction.item;
+        return {
+          failed: !!it.regenerator.regenFailed,
+          reach,
+          before: vol(made.geometryData),
+          after: vol(it.geometryData),
+        };
       });
       expect(r.failed, "Base's fillet step rebuilt").toBe(false);
       for (const [y, d] of Object.entries(r.reach))
@@ -321,6 +346,113 @@ test.describe("a fillet on a union after a later step changed one of its inputs"
           d,
           `rounding at height ${y}: ${JSON.stringify(r.reach)} (1 mm = 0.1)`,
         ).toBeCloseTo(0.1, 3);
+      // A fillet on an outside corner only removes material -- about 4 mm3
+      // here.  Cut 14's port once came back filled in (the rebuilt input took
+      // a stale profile in the Electron bridge), and Base GREW by 90 mm3.
+      const removed = r.before - r.after;
+      expect(
+        removed,
+        `Base ${r.before.toFixed(1)} mm3 -> ${r.after.toFixed(1)} mm3 after the fillet`,
+      ).toBeGreaterThan(0);
+      expect(removed, "removed by a 1 mm fillet up one corner").toBeLessThan(
+        10,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  // OCC fillets Base's last vertical corner into a closed, sound solid whose
+  // new faces fail BRepCheck as unorientable -- at every radius, while a
+  // chamfer there and a fillet on any other corner pass.  ShapeFix repairs
+  // the flags; without the repair the fillet was refused as "doesn't fit".
+  test("a fillet on the corner OCC leaves misflagged is repaired, not refused", async () => {
+    test.setTimeout(300000);
+    const app = await launchApp();
+    try {
+      const page = await app.firstWindow();
+      await expect(page.locator(".toolbar")).toBeVisible();
+      const doc = JSON.parse(
+        fs.readFileSync("test-files/pi3-base-fillet.pcad", "utf8"),
+      );
+      await page.evaluate(
+        (d) => window.__store.getState().loadDocument(d),
+        doc,
+      );
+      const idle = () =>
+        page.evaluate(() => {
+          const s = window.__store.getState();
+          return s.pendingOperations === 0 && s.regenProgress == null;
+        });
+      await expect.poll(idle, { timeout: 120000 }).toBe(true);
+      // The fixture's stored meshes predate the union fix: rebuild them first.
+      await page
+        .getByTitle("Recalculate every step from the beginning")
+        .click();
+      await page.waitForTimeout(500);
+      await expect.poll(idle, { timeout: 240000 }).toBe(true);
+      const volume = () =>
+        page.evaluate(() => {
+          const g = window.__store
+            .getState()
+            .items.find((i) => i.id === 15).geometryData;
+          const Q = g.positions;
+          const I = g.indices;
+          let v = 0;
+          for (let t = 0; t < I.length; t += 3) {
+            const [a, b, c] = [I[t] * 3, I[t + 1] * 3, I[t + 2] * 3];
+            v +=
+              Q[a] * (Q[b + 1] * Q[c + 2] - Q[b + 2] * Q[c + 1]) -
+              Q[a + 1] * (Q[b] * Q[c + 2] - Q[b + 2] * Q[c]) +
+              Q[a + 2] * (Q[b] * Q[c + 1] - Q[b + 1] * Q[c]);
+          }
+          return (v / 6) * 1000;
+        });
+      const before = await volume();
+      const steps = await page.evaluate(
+        () => window.__store.getState().history.length,
+      );
+      // Base's +x -z corner, in the frame of Base as drawn after its first
+      // fillet (bbox-centred: 1.95 tall), as a click on it records it.
+      await page.evaluate(() => {
+        const s = window.__store.getState();
+        s.setSelectedSubGeometry({
+          itemId: 15,
+          edges: [
+            { ax: 5.4, ay: -0.975, az: -5.536, bx: 5.4, by: 0.975, bz: -5.536 },
+          ],
+          faces: [],
+        });
+        s.setChamferSelectMode("fillet");
+      });
+      await page
+        .getByTitle(/Size of the chamfer or fillet/)
+        .last()
+        .fill("1");
+      await expect
+        .poll(() => page.evaluate(() => window.__store.getState().toolError), {
+          timeout: 60000,
+        })
+        .toBeNull();
+      await expect(page.getByTitle("Confirm — apply the fillet")).toBeEnabled({
+        timeout: 60000,
+      });
+      await page.getByTitle("Confirm — apply the fillet").click();
+      await expect
+        .poll(
+          () => page.evaluate(() => window.__store.getState().history.length),
+          { timeout: 60000 },
+        )
+        .toBe(steps + 1);
+      await expect.poll(idle, { timeout: 120000 }).toBe(true);
+      const after = await volume();
+      expect(
+        before - after,
+        `Base ${before.toFixed(1)} mm3 -> ${after.toFixed(1)} mm3`,
+      ).toBeGreaterThan(0);
+      expect(before - after, "a 1 mm fillet up one more corner").toBeLessThan(
+        10,
+      );
     } finally {
       await app.close();
     }

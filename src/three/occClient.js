@@ -150,6 +150,8 @@ function itemsChangedAfter(history, k) {
 export function attachInputsAt(args, history = useStore.getState().history) {
   // No timeline (a test's stand-in store): no step to place a recipe at.
   if (!history?.length) return args;
+  const liveItems = Array.isArray(args?.allItems) ? args.allItems : [];
+  const precision = args?.printPrecision ?? null;
   const cache = new Map();
   const visit = (v, depth) => {
     if (depth > 40 || !v || typeof v !== "object" || ArrayBuffer.isView(v))
@@ -176,8 +178,16 @@ export function attachInputsAt(args, history = useStore.getState().history) {
           const changed = itemsChangedAfter(history, k);
           cache.set(k, changed);
           // An input can itself be a union whose own inputs changed later.
+          // Each takes its sketch's live profile, as bakeArgPolygons gives the
+          // op's own items: the bridge builds from the stored polygon, and Cut
+          // 14's was stale -- its port rebuilt off the wall, so filleting Base
+          // filled the port in.
           for (const id of Object.keys(changed))
-            changed[id] = visit(changed[id], depth + 1);
+            changed[id] = withLivePolygons(
+              visit(changed[id], depth + 1),
+              liveItems,
+              precision,
+            );
         }
         const inputsAt = cache.get(k);
         if (Object.keys(inputsAt).length)
