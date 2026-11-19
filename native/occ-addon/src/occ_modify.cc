@@ -1,4 +1,5 @@
 #include "occ_core.h"
+#include <ShapeFix_Shape.hxx>
 
 namespace occ {
 
@@ -37,11 +38,40 @@ static bool BevelBrokeBody(const TopoDS_Shape& result,
   const long sourceOpen = OpenEdgeCount(source, 0.01);
   return sourceOpen < 0 || open > sourceOpen;
 }
-static const TopoDS_Shape& RequireValidBevel(const TopoDS_Shape& result,
-                                             const char* what,
-                                             const TopoDS_Shape& source) {
+// OCC's fillet can come back closed and geometrically sound yet failing
+// BRepCheck, its new faces flagged unorientable: the last vertical corner of
+// "Base" in the Pi 3 case, at every radius, while a fillet on any other corner
+// passed and a chamfer on that one did too.  ShapeFix_Shape repairs the flags
+// (36 faces in, 37 out, valid and closed).  Only such a result is repaired:
+// already closed, valid after the repair, and the same volume -- the broken
+// bevels this check exists for open hundreds of mesh edges and stay refused.
+static TopoDS_Shape RepairedBevel(const TopoDS_Shape& result,
+                                  const TopoDS_Shape& source) {
+  if (OpenEdgeCount(result, 0.01) != 0) return TopoDS_Shape();
+  ShapeFix_Shape fix(result);
+  fix.Perform();
+  const TopoDS_Shape fixed = fix.Shape();
+  if (fixed.IsNull() || BevelBrokeBody(fixed, source)) return TopoDS_Shape();
+  GProp_GProps was, now;
+  BRepGProp::VolumeProperties(result, was);
+  BRepGProp::VolumeProperties(fixed, now);
+  const double v = std::abs(was.Mass());
+  if (!(v > 0) || std::abs(now.Mass() - was.Mass()) > 1e-6 * v)
+    return TopoDS_Shape();
+  return fixed;
+}
+
+// `repair` only where the caller uses the shape returned: the chamfer carries
+// face names through its builder's history, which a repaired copy loses.
+static TopoDS_Shape RequireValidBevel(const TopoDS_Shape& result,
+                                      const char* what,
+                                      const TopoDS_Shape& source,
+                                      bool repair = false) {
   if (BevelBrokeBody(result, source))
   {
+    const TopoDS_Shape repaired =
+        repair ? RepairedBevel(result, source) : TopoDS_Shape();
+    if (!repaired.IsNull()) return repaired;
     const std::string size =
         std::string(what) == "fillet" ? "radius" : "distance";
     throw InvalidBevel("The " + std::string(what) + " doesn't fit here — try "
@@ -311,7 +341,7 @@ Val FilletShape(Js& js) {
     if (!mk.IsDone())
       throw std::runtime_error(
         "fillet computation failed (geometry rejected the operation)");
-    return RequireValidBevel(mk.Shape(), "fillet", shape);
+    return RequireValidBevel(mk.Shape(), "fillet", shape, true);
   };
 
   try {
