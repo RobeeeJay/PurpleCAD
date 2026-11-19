@@ -313,7 +313,32 @@ test.describe("a fillet on a union after a later step changed one of its inputs"
             reach[y] = Math.max(reach[y] ?? 0, dx, dz);
           }
         }
-        return { failed: !!it.regenerator.regenFailed, reach };
+        // Volumes in mm3 of Base at its own step and after the fillet.
+        const vol = (g) => {
+          const Q = g.positions;
+          const I = g.indices;
+          let v = 0;
+          for (let t = 0; t < I.length; t += 3) {
+            const [a, b, c] = [I[t] * 3, I[t + 1] * 3, I[t + 2] * 3];
+            v +=
+              Q[a] * (Q[b + 1] * Q[c + 2] - Q[b + 2] * Q[c + 1]) -
+              Q[a + 1] * (Q[b] * Q[c + 2] - Q[b + 2] * Q[c]) +
+              Q[a + 2] * (Q[b] * Q[c + 1] - Q[b + 1] * Q[c]);
+          }
+          return (v / 6) * 1000;
+        };
+        const made = window.__store
+          .getState()
+          .history.find(
+            (e) =>
+              e.instruction.type === "create" && e.instruction.item.id === 15,
+          ).instruction.item;
+        return {
+          failed: !!it.regenerator.regenFailed,
+          reach,
+          before: vol(made.geometryData),
+          after: vol(it.geometryData),
+        };
       });
       expect(r.failed, "Base's fillet step rebuilt").toBe(false);
       for (const [y, d] of Object.entries(r.reach))
@@ -321,6 +346,17 @@ test.describe("a fillet on a union after a later step changed one of its inputs"
           d,
           `rounding at height ${y}: ${JSON.stringify(r.reach)} (1 mm = 0.1)`,
         ).toBeCloseTo(0.1, 3);
+      // A fillet on an outside corner only removes material -- about 4 mm3
+      // here.  Cut 14's port once came back filled in (the rebuilt input took
+      // a stale profile in the Electron bridge), and Base GREW by 90 mm3.
+      const removed = r.before - r.after;
+      expect(
+        removed,
+        `Base ${r.before.toFixed(1)} mm3 -> ${r.after.toFixed(1)} mm3 after the fillet`,
+      ).toBeGreaterThan(0);
+      expect(removed, "removed by a 1 mm fillet up one corner").toBeLessThan(
+        10,
+      );
     } finally {
       await app.close();
     }
