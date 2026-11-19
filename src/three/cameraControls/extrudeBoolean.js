@@ -28,6 +28,28 @@ async function warnIfOpen(bodies) {
 // A HIDDEN solid is never a cut target — the user hid it deliberately, so it
 // must not silently turn into a CSG result and reappear.  This applies to the
 // explicit source/host too, not just the scan.
+// The body that now stands for solid `id`.  A sketch remembers the solid it
+// was placed on, but a later cut or union CONSUMES that solid -- hides it and
+// makes a new body from it.  Sketch 16 in the Pi 3 case sat on the Lid; once
+// Cut 19 had drilled the Lid, a second cut from the sketch found its host
+// hidden, cut nothing and was folded away without a word.  Follow consumers
+// (a visible body listing it among its inputs) to the one now on screen.  A
+// solid hidden by the user has no consumer and stays unavailable.
+export function liveHostId(items, id) {
+  const seen = new Set();
+  let cur = id;
+  while (cur != null && !seen.has(cur)) {
+    seen.add(cur);
+    const it = items.find((i) => i.id === cur);
+    if (it && it.type !== "sketch" && it.visible !== false) return cur;
+    const next = items.find(
+      (i) => i.id !== cur && i.regenerator?.inputIds?.includes(cur),
+    );
+    cur = next?.id ?? null;
+  }
+  return null;
+}
+
 function resolveCutTargets(items, profile, sourceItemId, excludeIds = []) {
   const cuttable = (i) => i && i.type !== "sketch" && i.visible !== false;
   if (sourceItemId != null) {
@@ -36,9 +58,10 @@ function resolveCutTargets(items, profile, sourceItemId, excludeIds = []) {
   }
   const sketchId = profile?.sketchId ?? null;
   const sketch = sketchId != null ? items.find((i) => i.id === sketchId) : null;
-  const hostId = sketch?.hostSolidId ?? null;
-  if (hostId != null) {
-    const host = items.find((i) => i.id === hostId);
+  if (sketch?.hostSolidId != null) {
+    const host = items.find(
+      (i) => i.id === liveHostId(items, sketch.hostSolidId),
+    );
     return cuttable(host) ? [host] : [];
   }
   return items.filter(
@@ -62,8 +85,13 @@ export async function runCutExtrusion(extrudeItemId, sourceItemId) {
     if (targets.length === 0) {
       // Nothing to cut from — fold the standalone extrude away.  consumeItems
       // bakes `visible: false` into its CREATE entry so a replay won't
-      // resurrect it.
+      // resurrect it.  Say so: a cut that silently vanishes looks like a bug.
       useStore.getState().consumeItems([extrudeItemId]);
+      useStore
+        .getState()
+        .showNotification(
+          "The cut has no body to cut: the one its sketch is on is hidden.",
+        );
       return;
     }
     // Run one difference per target.  Each call produces a single CSG item that
@@ -129,7 +157,14 @@ export async function runCutExtrudes(extrudeDefs, sourceItemId, cutId) {
       extrudeDefs[0]?.profile,
       sourceItemId,
     );
-    if (targets.length === 0) return;
+    if (targets.length === 0) {
+      useStore
+        .getState()
+        .showNotification(
+          "The cut has no body to cut: the one its sketch is on is hidden.",
+        );
+      return;
+    }
     const precision = activePrecision(store);
     // Record how far the cut's start sits BELOW the host's face along the cut
     // normal (0 when it starts exactly at that face).  regenerateExtrudeUnion
