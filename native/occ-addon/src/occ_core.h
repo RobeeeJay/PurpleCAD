@@ -294,6 +294,7 @@ Val FaceNames(Js& js);
 Val NamedFacePoint(Js& js);
 Val ReleaseShape(Js& js);
 Val ShapeVolume(Js& js);
+Val ShapeDistance(Js& js);
 Val ShapeToBrep(Js& js);
 Val ShapeFromBrep(Js& js);
 Val ClearAll(Js& js);

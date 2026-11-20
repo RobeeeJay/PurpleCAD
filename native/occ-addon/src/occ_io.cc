@@ -102,6 +102,20 @@ Val ShapeVolume(Js& js) {
   return js.makeNumber(props.Mass());
 }
 
+// shapeDistance(idA, idB) → the least distance between two stored shapes, 0
+// when they touch or overlap.  Combine uses it to find the bodies a new
+// extrusion actually meets, where bounding boxes also match bodies merely
+// close by (inside a hollow box, say).  For solids a point of one inside the
+// other also counts as meeting, so a body wholly within another reads 0.
+Val ShapeDistance(Js& js) {
+  const TopoDS_Shape& a = FetchShape(js.int32(js[0]));
+  const TopoDS_Shape& b = FetchShape(js.int32(js[1]));
+  BRepExtrema_DistShapeShape dist(a, b, Extrema_ExtFlag_MIN);
+  if (!dist.IsDone() || dist.NbSolution() == 0) return js.makeNumber(-1);
+  if (dist.InnerSolution()) return js.makeNumber(0);
+  return js.makeNumber(dist.Value());
+}
+
 // Register the shared cancel flag: an Int32Array over a SharedArrayBuffer whose
 // element 0 the caller flips to non-zero (from another thread) to abort the
 // current long build.  We stash the backing pointer; a SAB never detaches, so
@@ -592,6 +606,7 @@ const std::vector<occjs::Op>& occjs::Ops() {
       // Shape store management
       {"releaseShape", Guarded<ReleaseShape>},
       {"shapeVolume", Guarded<ShapeVolume>},
+      {"shapeDistance", Guarded<ShapeDistance>},
       {"shapeToBrep", Guarded<ShapeToBrep>},
       {"shapeFromBrep", Guarded<ShapeFromBrep>},
       {"clearAll", Guarded<ClearAll>},

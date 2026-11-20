@@ -3,11 +3,41 @@
 // the same performCsg flow as the Combine toolbar (occClient → OCC worker) and
 // replace their inputs with a single CSG item.
 
+import * as THREE from "three";
 import { useStore } from "../../store";
 import { maxItemId } from "../../store/internals.js";
 import { activePrecision } from "../resolution.js";
+import { resolveItemDepth } from "../geometryParams.js";
 import { cutStartInsetFor } from "../csgUtils.js";
 import { openMeshNotice } from "../importWeld.js";
+
+// The extrude item a profile commits to.  Exported because the agent API
+// commits extrudes too, and has to write exactly the item this
+// tool writes -- two hand-kept copies of this shape would drift.
+export const buildExtrudeDef = (
+  profile,
+  depthStored,
+  isCut,
+  startOffset,
+  id,
+) => ({
+  id,
+  name: `${isCut ? "Extrude Cut" : "Extrude"} ${id}`,
+  type: "extrude",
+  children: [],
+  profile,
+  depth: depthStored,
+  // Slides the prism's base along the profile normal so the extrude can begin
+  // from a picked face/plane instead of the sketch plane.  Omit when zero to
+  // keep item diffs clean.
+  ...(startOffset ? { startOffset } : null),
+  // `isCut` flips the prism direction in resolveItemDepth so the OCC shape +
+  // rendered mesh extend INTO the source regardless of the sign on `depth`.
+  ...(isCut ? { isCut: true } : null),
+  position: profile.position,
+  rotation: profile.rotation,
+  scale: { x: 1, y: 1, z: 1 },
+});
 
 // Once a cut or fuse is committed, warn if a body it went into was an open
 // mesh: the result may have holes where that surface was open.
@@ -67,6 +97,105 @@ function resolveCutTargets(items, profile, sourceItemId, excludeIds = []) {
   return items.filter(
     (i) => cuttable(i) && i.type !== "extrude" && !excludeIds.includes(i.id),
   );
+}
+
+// World-space bounding box of a body as drawn (mesh x T*R*S), or of an extrude
+// prism from its profile and depth.  Null when neither is known -- the caller
+// then leaves the body to the exact test.
+function worldBox(item) {
+  const box = new THREE.Box3();
+  const m = new THREE.Matrix4().compose(
+    new THREE.Vector3(
+      item.position?.x ?? 0,
+      item.position?.y ?? 0,
+      item.position?.z ?? 0,
+    ),
+    new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        item.rotation?.x || 0,
+        item.rotation?.y || 0,
+        item.rotation?.z || 0,
+      ),
+    ),
+    new THREE.Vector3(
+      item.scale?.x ?? 1,
+      item.scale?.y ?? 1,
+      item.scale?.z ?? 1,
+    ),
+  );
+  const v = new THREE.Vector3();
+  const P = item.geometryData?.positions;
+  if (P?.length) {
+    for (let i = 0; i < P.length; i += 3)
+      box.expandByPoint(v.set(P[i], P[i + 1], P[i + 2]).applyMatrix4(m));
+    return box;
+  }
+  const poly = item.type === "extrude" ? item.profile?.polygon2D : null;
+  if (!poly?.length) return null;
+  const pr = item.profile;
+  const pm = new THREE.Matrix4().compose(
+    new THREE.Vector3(
+      pr.position?.x ?? 0,
+      pr.position?.y ?? 0,
+      pr.position?.z ?? 0,
+    ),
+    new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        pr.rotation?.x || 0,
+        pr.rotation?.y || 0,
+        pr.rotation?.z || 0,
+      ),
+    ),
+    new THREE.Vector3(1, 1, 1),
+  );
+  const z0 = item.startOffset || 0;
+  const z1 = z0 + resolveItemDepth(item);
+  for (const q of poly)
+    for (const z of [z0, z1])
+      box.expandByPoint(v.set(q.x, q.y, z).applyMatrix4(pm));
+  return box;
+}
+
+// The bodies a new extrusion fuses into when Combine is on: the ones it is
+// explicitly attached to (`explicitIds` -- a face's source, the Start-from
+// solid, the sketch's host) and every visible body the prisms touch or
+// overlap.  It used to be the explicit ones only, so an extrusion from a
+// sketch whose host was the hidden imported board stood alone even where it
+// sat inside Base (Extrude 22 in the Pi 3 case).  A bounding-box test narrows
+// the candidates; OCC decides contact exactly, so a body merely near -- the
+// inside of a hollow box -- is not joined.
+export async function withTouchingBodies(explicitIds, defs, excludeIds = []) {
+  const store = useStore.getState();
+  const items = store.items;
+  const reach = new THREE.Box3();
+  for (const d of defs) {
+    const b = worldBox(d);
+    if (b) reach.union(b);
+  }
+  reach.expandByScalar(1e-3);
+  const candidates = items.filter((i) => {
+    if (i.type === "sketch" || i.visible === false) return false;
+    if (explicitIds.includes(i.id) || excludeIds.includes(i.id)) return false;
+    const b = worldBox(i);
+    return !b || b.intersectsBox(reach);
+  });
+  if (!candidates.length) return explicitIds;
+  try {
+    const { touchingItems } = await import("../occClient.js");
+    const ids = await touchingItems({
+      items: defs,
+      candidates,
+      allItems: items,
+      printPrecision: activePrecision(store),
+      tolerance: 1e-4,
+    });
+    return [...explicitIds, ...ids];
+  } catch (err) {
+    console.warn(
+      `Couldn't test which bodies the extrusion meets: ${err.message}`,
+    );
+    return explicitIds;
+  }
 }
 
 // Run a cut-extrusion: subtract the new extrude shape from the target solid

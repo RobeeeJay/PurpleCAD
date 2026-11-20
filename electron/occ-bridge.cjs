@@ -1850,6 +1850,36 @@ function splitItem({ target, plane, allItems, printPrecision }) {
   return { partA, partB };
 }
 
+// The candidates that touch or overlap any of `items` (new extrude prisms),
+// within `tolerance` scene units: what Combine fuses a new extrusion into.
+// Each shape is built in world space as performCsg would place it.
+// Mirrors occOps.js#touchingItems.
+function touchingItems({ items, candidates, allItems, printPrecision, tolerance }) {
+  const pool = allItems || [];
+  const built = (items || [])
+    .map(it => buildWorldSolid(it, pool, printPrecision))
+    .filter(id => id != null);
+  const out = [];
+  try {
+    for (const c of candidates || []) {
+      const cid = buildWorldSolid(c, pool, printPrecision);
+      if (cid == null) continue;
+      try {
+        const meets = built.some(id => {
+          const d = occ.shapeDistance(id, cid);
+          return d >= 0 && d <= (tolerance ?? 1e-4);
+        });
+        if (meets) out.push(c.id);
+      } finally {
+        occ.releaseShape(cid);
+      }
+    }
+  } finally {
+    built.forEach(id => occ.releaseShape(id));
+  }
+  return out;
+}
+
 // ── 3D pattern (mirror / circular / rectangular) — mirrors occOps.js ────────
 function buildWorldSolid(item, allItems, precision) {
   const localId = buildItemShapeLocal(item, allItems, precision);
@@ -2226,6 +2256,6 @@ function setCancelBuffer(view) {
 }
 
 module.exports = {
-  performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, recognizeSurfaces, rebuildSurfaces, setCancelBuffer };
+  touchingItems, performCsg, chamferOrFilletItem, pushPullFaces, shellItem, holeItem, embossItem, draftItem, revolveItem, pipeItem, loftItem, splitItem, pattern3dItem, exportSTL, exportSTEP, importStep, releaseShape, solidFromMesh, tessellateItem, weldMesh, simplifyMesh, recognizeSurfaces, rebuildSurfaces, setCancelBuffer };
 // Internals the unit tests check against occOps.js's copies.
 module.exports.__test = { embossVolumeHolds };

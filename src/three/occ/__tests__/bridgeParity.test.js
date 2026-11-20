@@ -476,6 +476,25 @@ describe("occOps.js ↔ occ-bridge.cjs parity", () => {
     ]);
   }, 30000);
 
+  // Combine fuses a new extrusion into the bodies it actually meets: a body
+  // sharing a face, or one it overlaps or sits inside -- not one merely near.
+  it("touchingItems finds the bodies a shape touches, in both implementations", async () => {
+    const prism = cube(1);
+    const sharesFace = cube(2, { position: { x: 2, y: 0, z: 0 } });
+    const apart = cube(3, { position: { x: 5, y: 0, z: 0 } });
+    const around = cube(4, { scale: { x: 3, y: 3, z: 3 } });
+    const args = {
+      items: [prism],
+      candidates: [sharesFace, apart, around],
+      allItems: [prism, sharesFace, apart, around],
+      printPrecision: 0.1,
+    };
+    const a = await ops.touchingItems(JSON.parse(JSON.stringify(args)));
+    const b = await bridge.touchingItems(JSON.parse(JSON.stringify(args)));
+    expect(a, "occOps").toEqual([2, 4]);
+    expect(b, "bridge").toEqual(a);
+  }, 30000);
+
   it("tessellateItem", async () => {
     const c = cube(11, {
       position: { x: 1, y: 0.5, z: 0 },
