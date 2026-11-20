@@ -188,6 +188,15 @@ export async function regenerateItemsForResolution(
     if (!result && solidOpts?.sourceShapeId != null) {
       result = await dispatch({ ...solidOpts, sourceShapeId: null });
     }
+    // An exact input was rebuilt from its recipe rather than sewn from its
+    // mesh (regenerateOrchestrator.js); if that rebuild failed, the sewn mesh
+    // is the last resort, as it used to be the first.
+    const fallback = solidCtx?.fallbacks?.get(item.id);
+    if (!result && fallback) {
+      const sewn = await fallback();
+      if (sewn != null)
+        result = await dispatch({ ...solidOpts, sourceShapeId: sewn });
+    }
     progressed += 1;
     if (onProgress) onProgress({ current: progressed, total });
     if (!result) {

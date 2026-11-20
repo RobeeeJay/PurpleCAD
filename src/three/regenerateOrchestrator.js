@@ -72,6 +72,19 @@ export function unseenBeforeDelete(history, idx, targetId, bound) {
   return false;
 }
 
+// Ops whose result is an exact OCC solid, so their baked mesh is only a
+// faceted picture of it.
+const EXACT_KINDS = new Set([
+  "chamfer",
+  "shell",
+  "hole",
+  "draft",
+  "pushpull",
+  "revolve",
+  "pipe",
+  "loft",
+]);
+
 // RE-ENTRANCY GUARD: recalcs must never overlap.  A pass reads the history at
 // its start and stamps results at its end; a second trigger firing while the
 // first is awaiting OCC (a store update, a resolution change racing the items
@@ -462,6 +475,7 @@ async function runRecalcPass(force = false) {
       : undefined;
     let inputSolid =
       inputEntryId != null ? getSolid(inputEntryId, printPrecision) : null;
+    let fallback = null;
     if (inputSolid == null && inputEntryId != null) {
       const prev = newHistory.find((h) => h.id === inputEntryId);
       const pinst = prev?.instruction;
@@ -476,28 +490,40 @@ async function runRecalcPass(force = false) {
         pkind !== "boolean" &&
         pkind !== "extrudeUnion" &&
         pkind !== "extrudeCut";
-      if (sewSafe && gd?.positions?.length >= 9) {
-        // A failed sew must not abort the whole recalculation (it left the
-        // regen dialog stuck) — the recipe rebuild below is the correct
-        // fallback for anything the sew can't handle.
+      // Sew the baked mesh into a solid; null when it can't be sewn.  A
+      // failed sew must not abort the whole recalculation (it left the regen
+      // dialog stuck) -- the recipe rebuild is the fallback for anything the
+      // sew can't handle.
+      const sew = async () => {
         try {
           const sewn = await solidFromMesh(gd);
-          if (sewn?.shapeId != null) {
-            inputSolid = sewn.shapeId;
-            setSolid(inputEntryId, inputSolid, printPrecision);
-          }
+          if (sewn?.shapeId == null) return null;
+          setSolid(inputEntryId, sewn.shapeId, printPrecision);
+          return sewn.shapeId;
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn(
             `[OCC] recalc: sew of entry ${inputEntryId}'s baked mesh failed ` +
               `(${err?.message}); rebuilding input from its recipe`,
           );
+          return null;
         }
+      };
+      if (sewSafe && gd?.positions?.length >= 9) {
+        // An exact OCC result's mesh is a faceted copy of it: sewn, a fillet's
+        // curve became flat strips, and the shell on the Pi 3 case's lid --
+        // rebuilt after a reload, when the fillet's solid was not cached --
+        // came out stepped (248 edges against 136).  Rebuild such an input
+        // from its recipe and keep the sewn mesh as the fallback.  A mesh
+        // result (emboss, texture, simplify...) IS its mesh: sew it first.
+        if (EXACT_KINDS.has(pkind)) fallback = sew;
+        else inputSolid = await sew();
       }
     }
     const solidCtx = {
       inputs: new Map([[targetId, inputSolid]]),
       results: new Map(),
+      fallbacks: new Map(fallback ? [[targetId, fallback]] : []),
     };
     accItems = await regenerateItemsForResolution(
       accItems,

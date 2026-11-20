@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures.js";
 import { launchApp } from "./launch.js";
+import fs from "node:fs";
 import * as THREE from "three";
 
 // The remaining modify tools driven end-to-end through their REAL dialogs:
@@ -880,5 +881,53 @@ test.describe.serial("modify tools through their dialogs", () => {
       historyBefore + 1,
     );
     expect(history.at(-1)).toBe("Laid on face");
+  });
+
+  // A step rebuilt when its input step is clean (after a reload, say, so that
+  // step's solid isn't cached) used to build on the input's SEWN mesh.  For an
+  // exact result that is a faceted copy: the Pi 3 case's lid shell offset the
+  // fillet's flat strips and came out stepped -- 248 drawn edges against 136
+  // from the fillet's exact solid.  An exact input is now rebuilt from its
+  // recipe, the sewn mesh kept as the fallback.
+  test("a shell rebuilt after a reload offsets the exact fillet, not facets", async () => {
+    test.setTimeout(240000);
+    const doc = JSON.parse(
+      fs.readFileSync("test-files/pi3-lid-shell.pcad", "utf8"),
+    );
+    await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
+    const idle = () =>
+      page.evaluate(() => {
+        const s = window.__store.getState();
+        return s.pendingOperations === 0 && s.regenProgress == null;
+      });
+    await expect.poll(idle, { timeout: 120000 }).toBe(true);
+    // Rebuild the shell alone, as an edit to it after a reload does.
+    await page.evaluate(() => {
+      const s = window.__store.getState();
+      const k = s.history.findIndex((e) => e.label === "Shelled");
+      window.__store.setState({
+        history: s.history.map((e, i) => (i === k ? { ...e, dirty: true } : e)),
+        items: s.items.map((it) =>
+          it.id === 8
+            ? {
+                ...it,
+                regenerator: { ...it.regenerator, regeneratedAt: "dirty" },
+              }
+            : it,
+        ),
+      });
+    });
+    await page.waitForTimeout(500);
+    await expect.poll(idle, { timeout: 120000 }).toBe(true);
+    const edges = await page.evaluate(() => {
+      const e = window.__store
+        .getState()
+        .history.find((h) => h.label === "Shelled");
+      return e.dirty
+        ? null
+        : e.instruction.patches.geometryData.edges.length / 2;
+    });
+    expect(edges, `drawn edges on the shelled lid: ${edges}`).not.toBeNull();
+    expect(edges, `drawn edges on the shelled lid: ${edges}`).toBeLessThan(180);
   });
 });
