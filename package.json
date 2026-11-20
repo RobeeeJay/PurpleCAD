@@ -1,6 +1,6 @@
 {
   "name": "PurpleCAD",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "A parametric CAD application with an OpenCASCADE kernel",
   "homepage": "https://github.com/RobeeeJay/PurpleCAD",
   "author": {
