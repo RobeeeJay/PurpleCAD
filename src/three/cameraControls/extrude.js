@@ -27,37 +27,13 @@ import {
   runUnionExtrudes,
   runExtrudeUnion,
   liveHostId,
+  withTouchingBodies,
+  buildExtrudeDef,
 } from "./extrudeBoolean.js";
+// Re-exported: the agent API builds its extrudes with it.
+export { buildExtrudeDef };
 import { EXTRUDE_FACE_HIGHLIGHT } from "../theme.js";
 import { createExtrudeFacePick } from "./extrudeFacePick.js";
-
-// The extrude item a profile commits to.  Module-level and exported because
-// the agent API commits extrudes too, and has to write exactly the item this
-// tool writes -- two hand-kept copies of this shape would drift.
-export const buildExtrudeDef = (
-  profile,
-  depthStored,
-  isCut,
-  startOffset,
-  id,
-) => ({
-  id,
-  name: `${isCut ? "Extrude Cut" : "Extrude"} ${id}`,
-  type: "extrude",
-  children: [],
-  profile,
-  depth: depthStored,
-  // Slides the prism's base along the profile normal so the extrude can begin
-  // from a picked face/plane instead of the sketch plane.  Omit when zero to
-  // keep item diffs clean.
-  ...(startOffset ? { startOffset } : null),
-  // `isCut` flips the prism direction in resolveItemDepth so the OCC shape +
-  // rendered mesh extend INTO the source regardless of the sign on `depth`.
-  ...(isCut ? { isCut: true } : null),
-  position: profile.position,
-  rotation: profile.rotation,
-  scale: { x: 1, y: 1, z: 1 },
-});
 
 export function createExtrudeHelpers(
   { scene, renderer, objectsRef, itemsRef, extrudeSelectGroupRef },
@@ -650,12 +626,14 @@ export function createExtrudeHelpers(
         const items = useStore.getState().items;
         const current =
           items.find((i) => i.id === fusedId)?.regenerator?.inputIds ?? [];
-        const hosts = !combine
-          ? []
-          : current.length
-            ? current
-            : hostsFor(items).filter((id) => id !== fusedId);
-        store.setExtrudeUnionHosts(fusedId, hosts);
+        if (!combine || current.length)
+          store.setExtrudeUnionHosts(fusedId, combine ? current : []);
+        else
+          void withTouchingBodies(
+            hostsFor(items).filter((id) => id !== fusedId),
+            items.find((i) => i.id === fusedId)?.regenerator?.extrudeDefs ?? [],
+            [fusedId],
+          ).then((hosts) => store.setExtrudeUnionHosts(fusedId, hosts));
       }
     } else if (retargetGroup) {
       // Retarget a whole multi-area group: rebuild its prisms from the new
@@ -676,10 +654,14 @@ export function createExtrudeHelpers(
         profiles.length === 1 &&
         !store.extrudeDepthInput?.combineLocked
       ) {
-        const hosts = hostsFor(useStore.getState().items).filter(
-          (id) => id !== retargetId,
-        );
-        if (hosts.length) store.fuseExtrudeIntoHosts(retargetId, hosts);
+        const items = useStore.getState().items;
+        void withTouchingBodies(
+          hostsFor(items).filter((id) => id !== retargetId),
+          [items.find((i) => i.id === retargetId)],
+          [retargetId],
+        ).then((hosts) => {
+          if (hosts.length) store.fuseExtrudeIntoHosts(retargetId, hosts);
+        });
       }
       // Extra regions picked during retarget aren't dropped: each becomes a new
       // extrude, and (non-cut) the whole set — the retargeted original, the new
@@ -705,13 +687,18 @@ export function createExtrudeHelpers(
           if (defs.length > 1) store.addItems(defs, "Extruded");
           else store.addItem(defs[0]);
           store.selectItem(null);
-          const unionTargets = hostsFor(useStore.getState().items);
+          const items = useStore.getState().items;
+          const ids = [retargetId, ...defs.map((d) => d.id)];
           store.setCutExtrudeInProgress(true);
-          void runUnionExtrudes(
-            [retargetId, ...defs.map((d) => d.id)],
-            unionTargets,
-            maxId + defs.length + 1,
-          ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
+          void withTouchingBodies(
+            hostsFor(items),
+            ids.map((id) => items.find((i) => i.id === id)),
+            ids,
+          )
+            .then((unionTargets) =>
+              runUnionExtrudes(ids, unionTargets, maxId + defs.length + 1),
+            )
+            .finally(() => useStore.getState().setCutExtrudeInProgress(false));
         } else {
           // Cut differences each extra region against its target; with the
           // single-object setting off, non-cut extras become separate solids.
@@ -738,75 +725,85 @@ export function createExtrudeHelpers(
       // Union when there's more than one prism OR a host to merge with;
       // otherwise the lone prism stands alone.  Cut keeps its per-target
       // difference (unioning subtractions makes no sense).
-      const unionTargets = isCut ? [] : hostsFor(store.items);
-      const willUnion =
-        !isCut &&
-        (unionTargets.length > 0 || (profiles.length > 1 && combineSingle));
-      if (willUnion) {
-        // Fuse into ONE self-contained object in ONE timeline entry: the prism
-        // recipes are embedded in the result's regenerator (no separate prism
-        // items + Union step), and any host solids are merged in.
-        const defs = profiles.map((profile, i) =>
-          buildExtrudeDef(
-            profile,
-            depthStored,
-            false,
-            startOffset,
-            maxId + 2 + i,
-          ),
-        );
-        store.setCutExtrudeInProgress(true);
-        void runExtrudeUnion(defs, unionTargets, maxId + 1).finally(() =>
-          useStore.getState().setCutExtrudeInProgress(false),
-        );
-      } else if (!isCut && profiles.length > 1) {
-        // "Single object" off: N separate prisms, but committed as ONE timeline
-        // entry (a createGroup), not N.
-        const defs = profiles.map((profile, i) =>
-          buildExtrudeDef(
-            profile,
-            depthStored,
-            false,
-            startOffset,
-            maxId + 1 + i,
-          ),
-        );
-        store.addItems(defs, "Extruded");
-        store.selectItem(null);
-      } else if (isCut && profiles.length > 1) {
-        // A multi-area cut (e.g. several holes) is ONE difference in ONE
-        // timeline entry: the prism recipes ride in the result's regenerator.
-        // Creating a prism + cut per profile instead raced N concurrent
-        // differences against the same original target, so only one hole
-        // survived.
-        const defs = profiles.map((profile, i) =>
-          buildExtrudeDef(
-            profile,
-            depthStored,
-            true,
-            startOffset,
-            maxId + 2 + i,
-          ),
-        );
-        store.setCutExtrudeInProgress(true);
-        void runCutExtrudes(
-          defs,
-          profiles[0]?.sourceItemId ?? null,
-          maxId + 1,
-        ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
-      } else {
-        // Cut prisms each difference their target; a lone non-cut prism is a
-        // standalone extrude.
-        profiles.forEach((profile, i) => {
-          createOneExtrude(
-            store,
-            profile,
-            depthStored,
-            isCut,
-            startOffset,
-            maxId + 1 + i,
+      // Combine also takes every visible body the prisms meet -- an OCC test,
+      // so the rest of the commit waits for it (withTouchingBodies).
+      const finish = (unionTargets) => {
+        const willUnion =
+          !isCut &&
+          (unionTargets.length > 0 || (profiles.length > 1 && combineSingle));
+        if (willUnion) {
+          // Fuse into ONE self-contained object in ONE timeline entry: the prism
+          // recipes are embedded in the result's regenerator (no separate prism
+          // items + Union step), and any host solids are merged in.
+          const defs = profiles.map((profile, i) =>
+            buildExtrudeDef(
+              profile,
+              depthStored,
+              false,
+              startOffset,
+              maxId + 2 + i,
+            ),
           );
-        });
+          store.setCutExtrudeInProgress(true);
+          void runExtrudeUnion(defs, unionTargets, maxId + 1).finally(() =>
+            useStore.getState().setCutExtrudeInProgress(false),
+          );
+        } else if (!isCut && profiles.length > 1) {
+          // "Single object" off: N separate prisms, but committed as ONE timeline
+          // entry (a createGroup), not N.
+          const defs = profiles.map((profile, i) =>
+            buildExtrudeDef(
+              profile,
+              depthStored,
+              false,
+              startOffset,
+              maxId + 1 + i,
+            ),
+          );
+          store.addItems(defs, "Extruded");
+          store.selectItem(null);
+        } else if (isCut && profiles.length > 1) {
+          // A multi-area cut (e.g. several holes) is ONE difference in ONE
+          // timeline entry: the prism recipes ride in the result's regenerator.
+          // Creating a prism + cut per profile instead raced N concurrent
+          // differences against the same original target, so only one hole
+          // survived.
+          const defs = profiles.map((profile, i) =>
+            buildExtrudeDef(
+              profile,
+              depthStored,
+              true,
+              startOffset,
+              maxId + 2 + i,
+            ),
+          );
+          store.setCutExtrudeInProgress(true);
+          void runCutExtrudes(
+            defs,
+            profiles[0]?.sourceItemId ?? null,
+            maxId + 1,
+          ).finally(() => useStore.getState().setCutExtrudeInProgress(false));
+        } else {
+          // Cut prisms each difference their target; a lone non-cut prism is a
+          // standalone extrude.
+          profiles.forEach((profile, i) => {
+            createOneExtrude(
+              store,
+              profile,
+              depthStored,
+              isCut,
+              startOffset,
+              maxId + 1 + i,
+            );
+          });
+        }
+      };
+      if (isCut || !combine) finish([]);
+      else {
+        const prisms = profiles.map((profile, i) =>
+          buildExtrudeDef(profile, depthStored, false, startOffset, -1 - i),
+        );
+        void withTouchingBodies(hostsFor(store.items), prisms).then(finish);
       }
     }
     extrudeProfileList = [];

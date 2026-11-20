@@ -127,6 +127,7 @@ try {
   startOccWorker();
   const OCC_OPS = [
     "performCsg",
+    "touchingItems",
     "chamferOrFilletItem",
     "pushPullFaces",
     "shellItem",

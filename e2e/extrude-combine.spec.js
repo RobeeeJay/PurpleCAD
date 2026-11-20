@@ -58,15 +58,18 @@ test.describe.serial("Combine in the extrude dialog", () => {
   let sketchPos;
   const overlay = () => page.locator(".sketch-distance-input-overlay");
 
-  // Open the extrude dialog on the circle.
-  const pickCircle = async () => {
+  // Open the extrude dialog on a circle: the first, or with `dx` the one
+  // beside it.  Combine joins every visible body an extrusion meets, so the
+  // standalone extrusion comes from the second circle: from the first it would
+  // overlap the merged one and be joined into it too.
+  const pickCircle = async (dx = 0) => {
     await page.getByTitle("Reset view").click();
     await page.evaluate(() =>
       window.__store.getState().setExtrudeSelectMode("profile"),
     );
     await page.waitForTimeout(600); // region fills materialise
     await clickView(
-      await screen(sketchPos.x, sketchPos.y, sketchPos.z),
+      await screen(sketchPos.x + dx, sketchPos.y, sketchPos.z),
       "the circle",
     );
     await expect(overlay()).toBeVisible({ timeout: 5000 });
@@ -111,7 +114,10 @@ test.describe.serial("Combine in the extrude dialog", () => {
     sketchPos = await page.evaluate(() => {
       const s = window.__store.getState();
       const sk = s.items.find((i) => i.type === "sketch");
-      s.addSketchShapes(sk.id, [{ type: "circle", cx: 0, cy: 0, r: 0.3 }]);
+      s.addSketchShapes(sk.id, [
+        { type: "circle", cx: 0, cy: 0, r: 0.3 },
+        { type: "circle", cx: 0.6, cy: 0, r: 0.2 },
+      ]);
       s.selectItem(null);
       return sk.position;
     });
@@ -119,7 +125,7 @@ test.describe.serial("Combine in the extrude dialog", () => {
   });
 
   test("unchecked, the extrusion is a new object and the cube is left alone", async () => {
-    await pickCircle();
+    await pickCircle(0.6);
     const combine = page.locator("#extrude-combine");
     await expect(combine).toBeChecked();
     await combine.uncheck();

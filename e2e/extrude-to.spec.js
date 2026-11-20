@@ -244,3 +244,66 @@ test("a second cut from a sketch goes into the body the first cut made", async (
   ).toBeGreaterThan(20);
   expect(before - after).toBeLessThan(35);
 });
+
+// Combine joins every visible body the new extrusion meets, wherever its
+// sketch was placed.  It used to join only the body the sketch was ON: Sketch
+// 2 sits on the imported Pi board (hidden, and not in this fixture), so a
+// frame extruded from it 20 mm up into Base stood alone (Extrude 22 in the
+// Pi 3 case).
+test("an extrusion combines with the visible body it runs into", async () => {
+  test.setTimeout(240000);
+  const doc = JSON.parse(
+    fs.readFileSync("test-files/pi3-lid-counterbore.pcad", "utf8"),
+  );
+  await page.evaluate((d) => window.__store.getState().loadDocument(d), doc);
+  const idle = () =>
+    page.evaluate(() => {
+      const s = window.__store.getState();
+      return s.pendingOperations === 0 && s.regenProgress == null;
+    });
+  await expect.poll(idle, { timeout: 120000 }).toBe(true);
+  const steps = await page.evaluate(
+    () => window.__store.getState().history.length,
+  );
+  await page.getByTitle("Reset view").click();
+  await page.evaluate(() =>
+    window.__store.getState().setExtrudeSelectMode("profile"),
+  );
+  await page.waitForTimeout(600);
+  // Inside the frame between Sketch 2's outer rectangle and its inner one,
+  // on the -y side: sketch (x, y) is world (pos.x + x, pos.y, pos.z + y).
+  const at = await page.evaluate(() => {
+    const s = window.__store.getState().items.find((i) => i.id === 2);
+    return { x: s.position.x - 1.88, y: s.position.y, z: s.position.z - 7.7 };
+  });
+  await clickView(await screen(at.x, at.y, at.z), "Sketch 2's frame");
+  await expect(page.locator(".sketch-distance-input-overlay")).toBeVisible({
+    timeout: 5000,
+  });
+  expect(
+    await page.evaluate(() => window.__store.getState().extrudeDepthInput?.cut),
+    "an add, not a cut",
+  ).toBeFalsy();
+  await page.locator("#extrude-distance").fill("-20");
+  await page
+    .getByTitle("Confirm — create the extrude at this distance")
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => window.__store.getState().history.length), {
+      timeout: 60000,
+    })
+    .toBe(steps + 1);
+  await expect.poll(idle, { timeout: 60000 }).toBe(true);
+  const made = await page.evaluate(() => {
+    const s = window.__store.getState();
+    const i = s.history[s.history.length - 1].instruction;
+    return {
+      kind: i.item?.regenerator?.kind ?? i.item?.type,
+      inputs: i.item?.regenerator?.inputIds ?? [],
+      lidVisible: s.items.find((x) => x.id === 19)?.visible !== false,
+    };
+  });
+  expect(made, "fused into Base").toMatchObject({ kind: "extrudeUnion" });
+  expect(made.inputs, "fused into Base").toContain(15);
+  expect(made.inputs, "not into the lid it doesn't touch").not.toContain(19);
+});

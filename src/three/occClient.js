@@ -333,6 +333,11 @@ export function tessellateItem(args) {
   return runOp("tessellateItem", args);
 }
 
+// The candidate bodies a set of new extrude prisms touches or overlaps.
+export function touchingItems(args) {
+  return runOp("touchingItems", args);
+}
+
 export function solidFromMesh(geometryData) {
   return callOp("solidFromMesh", geometryData);
 }
