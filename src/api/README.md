@@ -12,8 +12,8 @@ window.__api.list(); // every command, with its description and JSON schema
 ```
 
 `window.__api` exists in every build, not only E2E: it is the app's real
-surface, and the MCP transport (phase 2 of the plan) reaches it the same way the
-e2e suite does. `e2e/agent-api.spec.js` drives it exactly as an agent will.
+surface, and the MCP server (`mcp/`) reaches it the same way the e2e suite does.
+What it can't do yet is listed in `mcp/README.md`. `e2e/agent-api.spec.js` drives it exactly as an agent will.
 
 ## The contract
 

@@ -800,7 +800,7 @@ frozen into every downstream op's `regenerator.source`.
 
 Named commands that build, inspect and render a model, called as
 `window.__api.call(name, args)` and documented in **`src/api/README.md`**. It is
-the surface the planned MCP server exposes, so its contract is deliberately
+the surface the MCP server (`mcp/`) exposes, so its contract is deliberately
 stricter than the store's: mm in the user's Z-up frame only, a command returns
 only once the model has settled, and nothing throws. New commands are covered in
 `e2e/agent-api.spec.js` -- vitest cannot reach the scene or the OCC bridge.
