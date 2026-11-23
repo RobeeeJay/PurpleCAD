@@ -16,7 +16,7 @@ name: Release
 #   MACOS_NOTARY_KEY_ID         its key ID
 #   MACOS_NOTARY_ISSUER         its issuer ID
 #
-# Every platform builds OCC 8.0.1 itself (about 12 minutes on a Mac, longer on
+# Every platform builds OCC 8.0.2 itself (about 12 minutes on a Mac, longer on
 # Windows) and caches it under a key naming the version and the architecture.
 
 on:
@@ -35,7 +35,7 @@ permissions:
   contents: read
 
 env:
-  OCC_TAG: V8_0_1
+  OCC_TAG: V8_0_2
   # The runners are 3-7x slower than an Apple Silicon Mac on the heavy OCC
   # tests; src/testBudget.js stretches the long ones by this much.
   TEST_TIME_SCALE: "3"
@@ -125,8 +125,8 @@ jobs:
         id: cache-occ
         uses: actions/cache/restore@v4
         with:
-          path: ~/occ-8.0.1-${{ matrix.arch }}
-          key: occ-8.0.1-${{ matrix.arch }}-${{ runner.os }}-macos12
+          path: ~/occ-8.0.2-${{ matrix.arch }}
+          key: occ-8.0.2-${{ matrix.arch }}-${{ runner.os }}-macos12
 
       - name: Build and install OCC
         if: steps.cache-occ.outputs.cache-hit != 'true'
@@ -138,7 +138,7 @@ jobs:
           cmake -S "$RUNNER_TEMP/occt" -B "$RUNNER_TEMP/occt-build" -G Ninja \
             -DCMAKE_OSX_ARCHITECTURES=${{ matrix.occ_arch }} \
             -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
-            -DCMAKE_INSTALL_PREFIX="$HOME/occ-8.0.1-${{ matrix.arch }}" \
+            -DCMAKE_INSTALL_PREFIX="$HOME/occ-8.0.2-${{ matrix.arch }}" \
             $OCC_FLAGS
           cmake --build "$RUNNER_TEMP/occt-build" --parallel "$(sysctl -n hw.logicalcpu)"
           cmake --install "$RUNNER_TEMP/occt-build"
@@ -149,7 +149,7 @@ jobs:
         if: steps.cache-occ.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ~/occ-8.0.1-${{ matrix.arch }}
+          path: ~/occ-8.0.2-${{ matrix.arch }}
           key: ${{ steps.cache-occ.outputs.cache-primary-key }}
 
       - name: Install npm dependencies
@@ -252,8 +252,8 @@ jobs:
       # the only one there is.
       - name: Packaged addon loads from the bundle
         run: |
-          mv "$HOME/occ-8.0.1-${{ matrix.arch }}" "$RUNNER_TEMP/occ-hidden"
-          trap 'mv "$RUNNER_TEMP/occ-hidden" "$HOME/occ-8.0.1-${{ matrix.arch }}"' EXIT
+          mv "$HOME/occ-8.0.2-${{ matrix.arch }}" "$RUNNER_TEMP/occ-hidden"
+          trap 'mv "$RUNNER_TEMP/occ-hidden" "$HOME/occ-8.0.2-${{ matrix.arch }}"' EXIT
           cd "$RUNNER_TEMP"
           ELECTRON_RUN_AS_NODE=1 "$APP/Contents/MacOS/PurpleCAD" \
             -e "require('$APP/Contents/Resources/app.asar.unpacked/native/occ-addon/build/Release/occ_addon.node'); console.log('addon loads')"
@@ -335,8 +335,8 @@ jobs:
         id: cache-occ
         uses: actions/cache/restore@v4
         with:
-          path: ~/occ-8.0.1-x64
-          key: occ-8.0.1-x64-${{ runner.os }}-gcc14
+          path: ~/occ-8.0.2-x64
+          key: occ-8.0.2-x64-${{ runner.os }}-gcc14
 
       - name: Build and install OCC
         if: steps.cache-occ.outputs.cache-hit != 'true'
@@ -344,7 +344,7 @@ jobs:
           git clone --depth 1 --branch "$OCC_TAG" \
             https://github.com/Open-Cascade-SAS/OCCT.git "$RUNNER_TEMP/occt"
           cmake -S "$RUNNER_TEMP/occt" -B "$RUNNER_TEMP/occt-build" -G Ninja \
-            -DCMAKE_INSTALL_PREFIX="$HOME/occ-8.0.1-x64" $OCC_FLAGS
+            -DCMAKE_INSTALL_PREFIX="$HOME/occ-8.0.2-x64" $OCC_FLAGS
           cmake --build "$RUNNER_TEMP/occt-build" --parallel "$(nproc)"
           cmake --install "$RUNNER_TEMP/occt-build"
 
@@ -354,7 +354,7 @@ jobs:
         if: steps.cache-occ.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ~/occ-8.0.1-x64
+          path: ~/occ-8.0.2-x64
           key: ${{ steps.cache-occ.outputs.cache-primary-key }}
 
       - name: Install npm dependencies
@@ -369,7 +369,7 @@ jobs:
       - name: Build and test the addon
         run: |
           npm run addon:build
-          export LD_LIBRARY_PATH="$HOME/occ-8.0.1-x64/lib"
+          export LD_LIBRARY_PATH="$HOME/occ-8.0.2-x64/lib"
           npm run addon:test
           npx vitest run --testTimeout=60000
 
@@ -380,8 +380,8 @@ jobs:
       # only one the addon can load.
       - name: Packaged addon loads from the bundle
         run: |
-          mv "$HOME/occ-8.0.1-x64" "$RUNNER_TEMP/occ-hidden"
-          trap 'mv "$RUNNER_TEMP/occ-hidden" "$HOME/occ-8.0.1-x64"' EXIT
+          mv "$HOME/occ-8.0.2-x64" "$RUNNER_TEMP/occ-hidden"
+          trap 'mv "$RUNNER_TEMP/occ-hidden" "$HOME/occ-8.0.2-x64"' EXIT
           app="$PWD/release/linux-unpacked"
           cd "$RUNNER_TEMP"
           ELECTRON_RUN_AS_NODE=1 "$app/purplecad" \
@@ -401,8 +401,8 @@ jobs:
     runs-on: windows-2022
     env:
       # Forward slashes: CMake reads a backslash in a -D value as an escape.
-      OCC_HOME: C:/occ-8.0.1-x64
-      OCC_BIN_DIR: C:/occ-8.0.1-x64/bin
+      OCC_HOME: C:/occ-8.0.2-x64
+      OCC_BIN_DIR: C:/occ-8.0.2-x64/bin
     defaults:
       run:
         shell: bash
@@ -424,8 +424,8 @@ jobs:
         id: cache-occ
         uses: actions/cache/restore@v4
         with:
-          path: C:/occ-8.0.1-x64
-          key: occ-8.0.1-x64-${{ runner.os }}-msvc
+          path: C:/occ-8.0.2-x64
+          key: occ-8.0.2-x64-${{ runner.os }}-msvc
 
       # INSTALL_DIR_LAYOUT=Unix gives bin/, lib/ and lib/cmake/opencascade
       # rather than OCC's usual win64/vc14/ tree.
@@ -447,7 +447,7 @@ jobs:
         if: steps.cache-occ.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: C:/occ-8.0.1-x64
+          path: C:/occ-8.0.2-x64
           key: ${{ steps.cache-occ.outputs.cache-primary-key }}
 
       - name: Install npm dependencies
@@ -480,8 +480,8 @@ jobs:
       - name: Packaged addon loads from the bundle
         shell: pwsh
         run: |
-          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike 'C:\occ-8.0.1-x64*' }) -join ';'
-          Rename-Item C:\occ-8.0.1-x64 occ-hidden
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike 'C:\occ-8.0.2-x64*' }) -join ';'
+          Rename-Item C:\occ-8.0.2-x64 occ-hidden
           try {
             $exe = (Resolve-Path release\win-unpacked\PurpleCAD.exe).Path
             $addon = (Resolve-Path release\win-unpacked\resources\app.asar.unpacked\native\occ-addon\build\Release\occ_addon.node).Path
@@ -491,7 +491,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             Pop-Location
           } finally {
-            Rename-Item C:\occ-hidden occ-8.0.1-x64
+            Rename-Item C:\occ-hidden occ-8.0.2-x64
           }
 
       - name: Keep the build as a workflow artifact

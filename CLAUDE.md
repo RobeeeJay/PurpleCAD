@@ -76,7 +76,7 @@ noise.
 It builds the addon, rebuilds better-sqlite3, builds the VITE_E2E renderer and
 runs Playwright under xvfb inside the container, so a run doesn't depend on the
 state of the host toolchain or steal the desktop's focus. Build the image
-once with `npm run e2e:image` (~15 min the first time -- the OCC 8.0.1 source
+once with `npm run e2e:image` (~15 min the first time -- the OCC 8.0.2 source
 build is its own layer and is reused by every later app-code rebuild; app
 edits rebuild only the COPY layers, ~1 min). The podman VM needs more than
 its 2 GiB default: `podman machine set --memory 8192 --cpus 8`.
@@ -363,7 +363,8 @@ it.
   dependency update (the file says how).
 - **The packaged app ships the terms.** `build.extraResources` copies
   `LICENSE.md`, `THIRD_PARTY_LICENSES.md`, `TRADEMARKS.md` and `licenses/`
-  (OCCT's LGPL 2.1 and exception texts, from tag `V8_0_1`) into the app's
+  (OCCT's LGPL 2.1 and exception texts, from tag `V8_0_2` -- unchanged since
+  `V8_0_1`) into the app's
   resources: the license requires every copy to carry its terms and notices.
   Bump `licenses/occt/` with the OCCT tag.
 
@@ -442,9 +443,10 @@ args)`.
 
 ## Native OCC addon (native/occ-addon)
 
-- Built against OpenCASCADE 8.0.1 at `~/occ-8.0.1-arm64`. CMakeLists'
-  `find_package` HINTS list that path first, falling back to `~/occ-8.0-arm64`
-  (8.0.0) then `~/occ-arm64` (7.9.0) and finally system Homebrew paths — the
+- Built against OpenCASCADE 8.0.2 at `~/occ-8.0.2-arm64`. CMakeLists'
+  `find_package` HINTS list that path first, falling back to `~/occ-8.0.1-arm64`,
+  `~/occ-8.0-arm64` (8.0.0), then `~/occ-arm64` (7.9.0) and finally system
+  Homebrew paths — the
   same source builds against any of them, so an un-upgraded machine keeps
   working. Bump the CI cache key and the Containerfile's clone tag together
   with this path or they silently keep building the old version.
@@ -454,7 +456,13 @@ args)`.
   warns "ignoring file ... found architecture 'x86_64', required architecture
   'arm64'" -- and only blows up at require() time with `symbol not found in
 flat namespace`. 8.0.0 defaulted to arm64, so an upgrade inherits the trap.
-  Check with `lipo -archs ~/occ-8.0.1-arm64/lib/libTKernel.8.0.1.dylib`.
+  Still pinned for 8.0.2 (its default was not re-measured).  Check with
+  `lipo -archs ~/occ-8.0.2-arm64/lib/libTKernel.8.0.2.dylib`.
+- **8.0.2's CMake prints an "OCCT license notice"**: for shared OCCT on Apple
+  platforms, code signing and library validation may stop a user swapping in a
+  modified OCCT, and "shared linking alone does not establish LGPL 2.1 section
+  6 compliance".  It applies to the signed Mac app and the iPad app; how
+  PurpleCAD meets section 6 there is the owner's call, not settled by a build.
 - **Each op is written ONCE, against `src/occ_js.h`; N-API and JavaScriptCore
   are adapters.** The iPad has no Node, so the ops cannot take
   `Napi::CallbackInfo`: each is `Val Op(Js& js)` over a small engine interface
@@ -762,7 +770,7 @@ The addon links OpenCASCADE by `@rpath`, so the hook copies the dylibs into
 break:
 
 - **Bundle the OCC the addon was COMPILED against.** The candidate list mirrors
-  CMakeLists' HINTS (8.0.1, then 8.0, then `occ-<arch>`). It used to take
+  CMakeLists' HINTS (8.0.2, 8.0.1, then 8.0, then `occ-<arch>`). It used to take
   `~/occ-<arch>` unconditionally, which shipped 7.9 dylibs beside an addon
   linked to 8.0.1.
 - **Leave no absolute rpath in the .node, and give each copied dylib

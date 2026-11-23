@@ -28,9 +28,11 @@ string(REPLACE "\"" "" NODE_ADDON_API_DIR "${NODE_ADDON_API_DIR}")
 # scripts/afterPack.cjs bundles from the same list, so keep the two in order.
 find_package(OpenCASCADE REQUIRED
   HINTS
+    "$ENV{HOME}/occ-8.0.2-arm64/lib/cmake/opencascade"
     "$ENV{HOME}/occ-8.0.1-arm64/lib/cmake/opencascade"
     "$ENV{HOME}/occ-8.0-arm64/lib/cmake/opencascade"
     "$ENV{HOME}/occ-arm64/lib/cmake/opencascade"
+    "$ENV{HOME}/occ-8.0.2-x64/lib/cmake/opencascade"
     "$ENV{HOME}/occ-8.0.1-x64/lib/cmake/opencascade"
     /opt/homebrew/opt/opencascade/lib/cmake/opencascade
     /usr/local/opt/opencascade/lib/cmake/opencascade

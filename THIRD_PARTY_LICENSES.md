@@ -24,7 +24,7 @@ is the source of truth).
 
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
-| Open CASCADE Technology (OCCT) | 8.0.1 (8.0.0 / 7.9.0 supported) | LGPL-2.1-only, with the OCCT LGPL exception | https://github.com/Open-Cascade-SAS/OCCT |
+| Open CASCADE Technology (OCCT) | 8.0.2 (8.0.1 / 8.0.0 / 7.9.0 supported) | LGPL-2.1-only, with the OCCT LGPL exception | https://github.com/Open-Cascade-SAS/OCCT |
 | meshoptimizer (vendored, `native/occ-addon/third_party/meshoptimizer`) | 1.3 (`9e1f07b`) | MIT | https://github.com/zeux/meshoptimizer |
 | node-addon-api | 8.9.2 | MIT | https://github.com/nodejs/node-addon-api |
 | cmake-js (build only) | 8.0.0 | MIT | https://github.com/cmake-js/cmake-js |
@@ -38,7 +38,7 @@ The packaged macOS app bundles the OCCT shared libraries
 (`Contents/Resources/occ-libs`, see `scripts/afterPack.cjs`). Distributing
 them carries the LGPL-2.1's conditions: ship this notice and the LGPL text
 with the release, and make the exact OCCT source used available alongside
-it (upstream tag `V8_0_1`, the one `Containerfile.e2e` and the addon CI build
+it (upstream tag `V8_0_2`, the one `Containerfile.e2e` and the addon CI build
 clone). The LGPL 2.1 text and the Open CASCADE exception, taken from that tag,
 are in `licenses/occt/`; the packaged app carries them, with this file,
 `LICENSE.md` and `TRADEMARKS.md`, in its resources. The exception asks for
