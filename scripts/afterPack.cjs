@@ -19,6 +19,7 @@ const occLibDirForArch = (arch) => {
   if (process.env.OCC_LIB_DIR) return process.env.OCC_LIB_DIR;
   const name = { 1: "x64", 3: "arm64" }[arch] ?? "arm64";
   const candidates = [
+    `occ-8.0.2-${name}`,
     `occ-8.0.1-${name}`,
     `occ-8.0-${name}`,
     `occ-${name}`,
@@ -149,7 +150,7 @@ const isCrt = (dll) => /^(msvcp140|vcruntime140|concrt140)/.test(dll);
 const packWindows = (appOutDir) => {
   const occBin =
     process.env.OCC_BIN_DIR ??
-    path.join(process.env.USERPROFILE ?? "", "occ-8.0.1-x64", "bin");
+    path.join(process.env.USERPROFILE ?? "", "occ-8.0.2-x64", "bin");
   const nodeFile = addonPathIn(path.join(appOutDir, "resources"));
   const releaseDir = path.dirname(nodeFile);
   if (!fs.existsSync(occBin))

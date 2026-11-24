@@ -139,20 +139,20 @@ Apple Silicon it's `/opt/homebrew`. `native/occ-addon/build.sh` skips any
 `cmake` it can't run, because this development machine has an old Intel Homebrew
 that it can't run.)
 
-### Step Two: Build OpenCASCADE 8.0.1
+### Step Two: Build OpenCASCADE 8.0.2
 
 This takes 15 minutes or so on a fast machine, and longer on an older Intel one.
 The install directory name matters: the addon's `CMakeLists.txt` and
-`scripts/afterPack.cjs` both look for `~/occ-8.0.1-<arch>`.
+`scripts/afterPack.cjs` both look for `~/occ-8.0.2-<arch>`.
 
 ```bash
-git clone --depth 1 --branch V8_0_1 \
+git clone --depth 1 --branch V8_0_2 \
   https://github.com/Open-Cascade-SAS/OCCT.git /tmp/occt
 cmake -S /tmp/occt -B /tmp/occt-build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=x86_64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-  -DCMAKE_INSTALL_PREFIX=$HOME/occ-8.0.1-x64 \
+  -DCMAKE_INSTALL_PREFIX=$HOME/occ-8.0.2-x64 \
   -DBUILD_MODULE_FoundationClasses=ON \
   -DBUILD_MODULE_ModelingData=ON \
   -DBUILD_MODULE_ModelingAlgorithms=ON \
@@ -170,7 +170,7 @@ modules switched off are the ones PurpleCAD doesn't use, which saves about half
 the build. On Apple Silicon, use `arm64` for both `CMAKE_OSX_ARCHITECTURES` and
 the directory name.
 
-**Pin `CMAKE_OSX_ARCHITECTURES` ALWAYS.** OCC 8.0.1 picks x86_64 by itself on an
+**Pin `CMAKE_OSX_ARCHITECTURES` ALWAYS.** OCC 8.0.1 picked x86_64 by itself on an
 Apple Silicon Mac, and the result fails quietly: the addon still links, and only
 falls over when the app loads it.
 
@@ -192,8 +192,8 @@ throw away every cached OCC build in CI for nothing.
 Check you got the architecture and the macOS version you asked for:
 
 ```bash
-lipo -archs ~/occ-8.0.1-x64/lib/libTKernel.8.0.1.dylib
-otool -l ~/occ-8.0.1-x64/lib/libTKernel.8.0.1.dylib | grep minos
+lipo -archs ~/occ-8.0.2-x64/lib/libTKernel.8.0.2.dylib
+otool -l ~/occ-8.0.2-x64/lib/libTKernel.8.0.2.dylib | grep minos
 ```
 
 You should see `x86_64` (or `arm64` on Apple Silicon), then `minos 12.0`.
@@ -355,15 +355,15 @@ The checks in Step Six are PowerShell.
 - **Node.js 24**, **git** and **Python 3**. node-gyp needs Python when it rebuilds
   `better-sqlite3`.
 
-### Step Two: Build OpenCASCADE 8.0.1
+### Step Two: Build OpenCASCADE 8.0.2
 
 From the x64 Native Tools prompt:
 
 ```bat
-git clone --depth 1 --branch V8_0_1 https://github.com/Open-Cascade-SAS/OCCT.git C:\src\occt
+git clone --depth 1 --branch V8_0_2 https://github.com/Open-Cascade-SAS/OCCT.git C:\src\occt
 cmake -S C:\src\occt -B C:\src\occt-build -G Ninja ^
   -DCMAKE_BUILD_TYPE=Release ^
-  -DCMAKE_INSTALL_PREFIX=%USERPROFILE%\occ-8.0.1-x64 ^
+  -DCMAKE_INSTALL_PREFIX=%USERPROFILE%\occ-8.0.2-x64 ^
   -DINSTALL_DIR_LAYOUT=Unix ^
   -DBUILD_MODULE_FoundationClasses=ON ^
   -DBUILD_MODULE_ModelingData=ON ^
@@ -380,7 +380,7 @@ cmake --install C:\src\occt-build
 `INSTALL_DIR_LAYOUT=Unix` asks for `lib\`, `bin\` and `lib\cmake\opencascade\`
 in the install, rather than OCC's usual Windows layout, which buries them under
 `win64\vc14\`. I haven't seen the result, so check it: there should be
-`TKernel.dll` in `%USERPROFILE%\occ-8.0.1-x64\bin` and
+`TKernel.dll` in `%USERPROFILE%\occ-8.0.2-x64\bin` and
 `OpenCASCADEConfig.cmake` under `lib\cmake\opencascade`. If they're somewhere
 else, use wherever they actually are in the steps below.
 
@@ -392,7 +392,7 @@ cmake-js directly instead, and tell it where OCC is:
 ```bat
 cd native\occ-addon
 npx cmake-js compile --CDCMAKE_BUILD_TYPE=Release ^
-  --CDOpenCASCADE_DIR=%USERPROFILE%\occ-8.0.1-x64\lib\cmake\opencascade
+  --CDOpenCASCADE_DIR=%USERPROFILE%\occ-8.0.2-x64\lib\cmake\opencascade
 cd ..\..
 ```
 
@@ -405,7 +405,7 @@ Then run the unit tests, with OCC's DLLs on the PATH so the tests can load the
 addon:
 
 ```bat
-set PATH=%USERPROFILE%\occ-8.0.1-x64\bin;%PATH%
+set PATH=%USERPROFILE%\occ-8.0.2-x64\bin;%PATH%
 npx vitest run --maxWorkers=3
 ```
 
@@ -431,7 +431,7 @@ copies every `TK*.dll` from the OCC `bin` directory into the folder that holds
 `resources\app.asar.unpacked\native\occ-addon\build\Release`. Node loads an
 addon with a search path that starts in the addon's own folder, so that's where
 Windows looks for the DLLs it imports. It finds the OCC directory in
-`OCC_BIN_DIR`, falling back to `%USERPROFILE%\occ-8.0.1-x64\bin`.
+`OCC_BIN_DIR`, falling back to `%USERPROFILE%\occ-8.0.2-x64\bin`.
 
 It also copies Microsoft's C++ runtime (`msvcp140.dll`, `vcruntime140.dll` and
 friends) into the same folder, because Windows doesn't come with it and Electron
@@ -466,7 +466,7 @@ passes for the wrong reason, and run the app's own binary from another
 directory:
 
 ```powershell
-$occBin = "$env:USERPROFILE\occ-8.0.1-x64\bin"
+$occBin = "$env:USERPROFILE\occ-8.0.2-x64\bin"
 $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -ne $occBin }) -join ';'
 $exe = (Resolve-Path release\win-unpacked\PurpleCAD.exe).Path
 $addon = (Resolve-Path release\win-unpacked\resources\app.asar.unpacked\native\occ-addon\build\Release\occ_addon.node).Path

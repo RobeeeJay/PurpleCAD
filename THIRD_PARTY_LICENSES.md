@@ -24,26 +24,87 @@ is the source of truth).
 
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
-| Open CASCADE Technology (OCCT) | 8.0.1 (8.0.0 / 7.9.0 supported) | LGPL-2.1-only, with the OCCT LGPL exception | https://github.com/Open-Cascade-SAS/OCCT |
+| Open CASCADE Technology (OCCT) | 8.0.2 (8.0.1 / 8.0.0 / 7.9.0 supported) | LGPL-2.1-only, with the OCCT LGPL exception | https://github.com/Open-Cascade-SAS/OCCT |
 | meshoptimizer (vendored, `native/occ-addon/third_party/meshoptimizer`) | 1.3 (`9e1f07b`) | MIT | https://github.com/zeux/meshoptimizer |
 | node-addon-api | 8.9.2 | MIT | https://github.com/nodejs/node-addon-api |
 | cmake-js (build only) | 8.0.0 | MIT | https://github.com/cmake-js/cmake-js |
 
-OCCT is dynamically linked by the native addon (`native/occ-addon`), which
-satisfies the LGPL's relinking requirement; the OCCT exception additionally
-permits use in proprietary applications. See
+OCCT is dynamically linked by the native addon (`native/occ-addon`), and
+PurpleCAD's complete source is public, so you can rebuild it against a
+modified OCCT -- see Using a Modified OCCT below. The OCCT exception
+additionally permits use in proprietary applications. See
 https://dev.opencascade.org/resources/licensing for the exception text.
+
+Earlier versions of this file said that dynamic linking on its own satisfies
+the LGPL's relinking requirement. On the signed macOS app it doesn't: the
+libraries sit inside a signed bundle, and macOS refuses to let you swap them
+in place (tried on the 1.2.2 build: "Operation not permitted", even on a
+private copy). OCCT 8.0.2's own build now warns about exactly this for
+Apple platforms. Rebuilding from source is the route that works.
 
 The packaged macOS app bundles the OCCT shared libraries
 (`Contents/Resources/occ-libs`, see `scripts/afterPack.cjs`). Distributing
 them carries the LGPL-2.1's conditions: ship this notice and the LGPL text
 with the release, and make the exact OCCT source used available alongside
-it (upstream tag `V8_0_1`, the one `Containerfile.e2e` and the addon CI build
+it (upstream tag `V8_0_2`, the one `Containerfile.e2e` and the addon CI build
 clone). The LGPL 2.1 text and the Open CASCADE exception, taken from that tag,
 are in `licenses/occt/`; the packaged app carries them, with this file,
 `LICENSE.md` and `TRADEMARKS.md`, in its resources. The exception asks for
 "prominent notice in supporting documentation" that the software uses OCCT --
 the README's License section gives it.
+
+### Using a Modified OCCT
+
+So you've changed OCCT -- fixed a fillet, say -- and want PurpleCAD to use
+it. You can't drop new libraries into the packaged Mac app, so build
+PurpleCAD yourself instead. Everything it needs is public, and it takes about
+half an hour, most of it waiting for OCCT to compile.
+
+1. **Get the PurpleCAD source** at the release you're replacing OCCT in, for
+   example 1.2.2:
+
+   ```bash
+   git clone --branch v1.2.2 https://github.com/RobeeeJay/PurpleCAD.git
+   cd PurpleCAD
+   npm ci
+   ```
+
+2. **Build your OCCT into the directory the addon looks in first.** The
+   addon's `native/occ-addon/CMakeLists.txt` searches `~/occ-8.0.2-<arch>`
+   before anything else, so install your build there (`arm64` on Apple
+   Silicon, `x64` on Intel). RELEASING.md's "Step Two: Build OpenCASCADE"
+   has the exact clone and CMake commands for each platform; start from
+   your modified source instead of the fresh clone, and keep the same
+   install prefix.
+
+3. **Either run PurpleCAD straight from the source:**
+
+   ```bash
+   npm run electron:start
+   ```
+
+   That rebuilds the addon against your OCCT and opens the app. Nothing is
+   packaged or signed, so nothing gets in the way.
+
+4. **Or package your own copy:**
+
+   ```bash
+   npm run dist:mac-arm64
+   ```
+
+   (`dist:mac-x64` on an Intel Mac, `dist:win` or `dist:linux` elsewhere.)
+   `scripts/afterPack.cjs` bundles the OCCT the addon was compiled against,
+   so your libraries go into the app. Without a Developer ID certificate the
+   app comes out ad-hoc signed, which runs on your own Mac but won't pass
+   Gatekeeper on anyone else's.
+
+Steps 3 and 4 were checked against our own builds, not against a modified
+OCCT. On Windows and Linux you don't need any of this: the Windows build's
+OCCT DLLs sit beside `occ_addon.node` and can be replaced in place, and
+on Linux they're in the app's `resources/occ-libs`, which the
+`.deb` installs as ordinary files (an AppImage needs `--appimage-extract`
+first). That much is from how the packages are laid
+out; neither has been tried with a modified OCCT.
 
 meshoptimizer is compiled into the addon from its unmodified release sources;
 its MIT notice is `native/occ-addon/third_party/meshoptimizer/LICENSE.md`.
