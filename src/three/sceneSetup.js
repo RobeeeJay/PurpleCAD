@@ -52,10 +52,13 @@ export function createRenderer(container) {
   // stencil: true so the cross-section view can cap cut faces (stencil mask).
   // preserveDrawingBuffer: true so "Save image" can read the canvas after the
   // frame has been composited (otherwise the buffer may already be cleared).
+  // powerPreference: on a dual-GPU Mac, Chromium leaves WebGL on the
+  // integrated GPU unless a context asks for the discrete one.
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     stencil: true,
     preserveDrawingBuffer: true,
+    powerPreference: "high-performance",
   });
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
