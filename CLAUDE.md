@@ -1320,6 +1320,16 @@ sources are picked) that reuses the creation UI.
   reorders or welds vertices must drop `edges` (the mesh then falls back to
   the crease detector), and `geometryPack.js` must keep carrying them (`e`).
   Primitives use a 20-degree crease threshold. `bodyOutline.test.js`.
+- **Dispose a replaced material only after its replacement is drawn**
+  (`renderRequest.js#disposeAfterNextDraw`). three.js deletes a shader
+  program when its last material is disposed, so swapping a material for an
+  identical new one and disposing the old FIRST recompiles the program. The
+  gizmo rebuild and `applyRenderMode` did this on every drag release and
+  selection: 5 programs, 0.35 s on a Radeon Pro 5500M and over 1 s on an Intel
+  UHD 630, measured, and the whole of the "hitch at the end of a move"; after
+  the fix, 13-59 ms. Triangle count was NOT the cost: a drag over a 2M-triangle
+  body ran within 1-4 ms of a 10k one on both GPUs. `shader-reuse.spec.js`
+  counts `linkProgram` calls across a release and a selection switch.
 - The `_cameraControls` slot on the store is a deliberate non-reactive
   handle for toolbar buttons that need access to viewport helpers (eg
   `dropSelectedToGround`). Don't `useStore.subscribe` to it.

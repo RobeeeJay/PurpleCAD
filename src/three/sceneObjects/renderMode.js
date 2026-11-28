@@ -22,6 +22,7 @@ import {
   sceneBackgroundFor,
 } from "../theme.js";
 import { shadedMaterial } from "../objectMaterials.js";
+import { disposeAfterNextDraw } from "../renderRequest.js";
 
 export function applyRenderMode(renderMode, ctx) {
   const {
@@ -329,7 +330,9 @@ export function applyRenderMode(renderMode, ctx) {
         ? orig.color.clone()
         : new THREE.Color(DEFAULT_MESH_COLOR);
       const opacity = isTransparent ? sketchOpacity : (orig?.opacity ?? 1);
-      if (mesh.material) mesh.material.dispose();
+      // Reapplied on every item change, so a commit replaces this material;
+      // disposing it first recompiled the body's shader each time.
+      if (mesh.material) disposeAfterNextDraw(renderer, [mesh.material]);
       // Colour and opacity only -- see shadedMaterial.
       mesh.material = shadedMaterial(col, opacity);
       mesh.material.wireframe = renderMode === "wireframe";

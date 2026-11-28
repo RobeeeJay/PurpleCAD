@@ -38,6 +38,7 @@ import {
   setCapsEnabled,
 } from "../../three/crossSectionCaps.js";
 import { useSketchModeEffect } from "./useSketchModeEffect";
+import { disposeAfterNextDraw } from "../../three/renderRequest.js";
 
 export function useSceneSync({
   sceneRef,
@@ -428,34 +429,32 @@ export function useSceneSync({
 
   // ── Transform handles + bounding box ─────────────────────────────────────
 
+  // Removed now, disposed after the replacements are drawn: every release and
+  // selection rebuilds the gizmo, and disposing first recompiled its shaders.
+  const clearHandles = () => {
+    const scene = sceneRef.current;
+    const old = [];
+    handlesRef.current.forEach(({ mesh }) => {
+      scene?.remove(mesh);
+      old.push(mesh.geometry, mesh.material);
+    });
+    handlesRef.current = [];
+    if (boundingBoxRef.current) {
+      const { boxMesh, labelX, labelY, labelZ } = boundingBoxRef.current;
+      scene?.remove(boxMesh, labelX.sprite, labelY.sprite, labelZ.sprite);
+      old.push(boxMesh.geometry, boxMesh.material);
+      for (const l of [labelX, labelY, labelZ]) old.push(l.mat.map, l.mat);
+      boundingBoxRef.current = null;
+    }
+    disposeAfterNextDraw(rendererRef.current, old);
+  };
+
   useEffect(() => {
     if (!sceneRef.current) return;
     const scene = sceneRef.current;
 
-    handlesRef.current.forEach(({ mesh }) => {
-      scene.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
-    });
-    handlesRef.current = [];
+    clearHandles();
     handleDragRef.current = null;
-
-    if (boundingBoxRef.current) {
-      const { boxMesh, labelX, labelY, labelZ } = boundingBoxRef.current;
-      scene.remove(boxMesh);
-      scene.remove(labelX.sprite);
-      scene.remove(labelY.sprite);
-      scene.remove(labelZ.sprite);
-      boxMesh.geometry.dispose();
-      boxMesh.material.dispose();
-      labelX.mat.map.dispose();
-      labelX.mat.dispose();
-      labelY.mat.map.dispose();
-      labelY.mat.dispose();
-      labelZ.mat.map.dispose();
-      labelZ.mat.dispose();
-      boundingBoxRef.current = null;
-    }
 
     // Object-picking tools (boolean, 3D pattern, mirror) gather whole objects
     // as their source; the transform gizmo has no meaning there (and its
@@ -479,37 +478,7 @@ export function useSceneSync({
     handlesRef.current = visibleHandles;
     boundingBoxRef.current = boundingBox;
 
-    return () => {
-      handlesRef.current.forEach(({ mesh: hm }) => {
-        if (sceneRef.current) sceneRef.current.remove(hm);
-        hm.geometry.dispose();
-        hm.material.dispose();
-      });
-      handlesRef.current = [];
-      if (boundingBoxRef.current) {
-        const {
-          boxMesh,
-          labelX: lx,
-          labelY: ly,
-          labelZ: lz,
-        } = boundingBoxRef.current;
-        if (sceneRef.current) {
-          sceneRef.current.remove(boxMesh);
-          sceneRef.current.remove(lx.sprite);
-          sceneRef.current.remove(ly.sprite);
-          sceneRef.current.remove(lz.sprite);
-        }
-        boxMesh.geometry.dispose();
-        boxMesh.material.dispose();
-        lx.mat.map.dispose();
-        lx.mat.dispose();
-        ly.mat.map.dispose();
-        ly.mat.dispose();
-        lz.mat.map.dispose();
-        lz.mat.dispose();
-        boundingBoxRef.current = null;
-      }
-    };
+    return clearHandles;
   }, [
     selectedId,
     selectedIds,
